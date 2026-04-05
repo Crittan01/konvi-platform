@@ -1,16 +1,39 @@
 # Tenant Isolation
 
 ## Objetivo
-Documentar cómo se garantiza el aislamiento entre clientes.
+Garantizar aislamiento entre clientes.
 
-## Mecanismos
-- tenant_id
-- RLS
-- claims/JWT
-- RBAC por tenant
-- storage segregado
-- integraciones segregadas
-- auditoría
+## Niveles de aislamiento
 
-## Regla
-Todo acceso cruzado entre tenants debe estar explícitamente prohibido salvo mecanismos de soporte controlados y auditados.
+### 1. Aislamiento de datos
+Todas las entidades sensibles deben asociarse a tenant_id cuando corresponda.
+
+### 2. Aislamiento de permisos
+Los permisos deben resolverse por membresía de tenant y rol.
+
+### 3. Aislamiento de storage
+Los archivos deben segregarse por tenant en buckets o paths controlados por políticas.
+
+### 4. Aislamiento de integraciones
+Cada cuenta de canal o marketplace debe pertenecer explícitamente a un tenant.
+
+### 5. Aislamiento administrativo
+Los administradores de plataforma no deben acceder por defecto a datos sensibles de tenant sin justificación y auditoría.
+
+## Estados del tenant
+El tenant debe poder tener estados operativos y comerciales, por ejemplo:
+- active
+- suspended
+- pending_setup
+- restricted
+- disabled
+
+## Casos especiales
+- suspensión por no pago
+- suspensión por incumplimiento
+- tenant en onboarding
+- tenant con integraciones desactivadas
+
+## Regla crítica
+Subdominio no es seguridad.
+La seguridad real vive en Auth + claims + RBAC + RLS + storage policies + auditoría.

@@ -11,6 +11,11 @@
 8. ¿Se necesitará staging antes de integrar WhatsApp real?
 9. ¿Qué métricas comerciales son obligatorias desde la primera fase?
 10. ¿Se requerirá importación masiva de catálogo desde CSV/API al inicio?
+11. ¿La administración de plataforma vivirá dentro de la misma app o requerirá separación futura?
+12. ¿Qué operaciones de soporte podrán ver datos sensibles y bajo qué auditoría?
+13. ¿Qué estados comerciales del tenant existirán y cómo impactan el acceso?
+14. ¿Se bloquearán módulos completos por plan o solo por tenant status?
+15. ¿Se requerirá multi-WABA por tenant en el futuro?
 
 ## Regla
 No asumir estas decisiones sin validación explícita o documentación del proyecto.

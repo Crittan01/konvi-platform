@@ -33,5 +33,17 @@
 - sync_runs
 - sync_errors
 
+## Tablas adicionales importantes
+- platform_users_view (si se requiere una vista administrativa)
+- tenant_status_history
+- billing_status_events
+- feature_flags
+- tenant_feature_flags
+- support_access_logs
+
 ## Regla
 Toda tabla sensible debe evaluar si requiere tenant_id y RLS.
+
+## Nota sobre administración de plataforma
+El sistema debe distinguir entre datos del tenant y metadatos de plataforma.
+Las operaciones de suspensión, reactivación, facturación y soporte deben modelarse explícitamente.

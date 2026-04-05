@@ -1,21 +1,39 @@
 # Web App
 
-## Rol
+## Objetivo
 Aplicación principal del producto.
 
-## Alcance
-Debe alojar la experiencia principal de:
-- backoffice
-- inbox
+## Contendrá
+- Tenant Space
+- Platform Space
+
+## Tenant Space
+Vistas y flujos para operación del cliente:
+- dashboard
 - catálogo
 - variantes
-- media
 - stock
 - pedidos
+- inbox
 - logística
 - knowledge base
-- configuración
-- usuarios y permisos
+- integraciones del tenant
 
-## Nota
-No asumir por ahora una segunda app separada salvo que la arquitectura final lo confirme.
+## Platform Space
+Vistas y flujos para administración de la plataforma:
+- tenants
+- estados comerciales
+- suspensión/reactivación
+- feature flags
+- soporte
+- salud global
+- métricas globales
+
+## Regla
+La separación inicial entre tenant y plataforma se hará por:
+- auth
+- roles
+- rutas
+- layouts
+- permisos
+no por apps distintas.
