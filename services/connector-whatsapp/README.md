@@ -1,10 +1,15 @@
-# services/connector-whatsapp
+# WhatsApp Connector
 
-Conector oficial del canal WhatsApp.
+## Objetivo
+Integrar el sistema con WhatsApp Cloud API oficial.
 
-## Responsabilidades
-- webhook handling
-- envío de mensajes
+## Alcance
+- webhooks
+- mensajes
+- templates
 - media
-- mapping conversación/canal
-- errores y retries del canal
+- handoff
+- mapeo conversación-canal
+
+## Regla
+No usar herramientas no oficiales.

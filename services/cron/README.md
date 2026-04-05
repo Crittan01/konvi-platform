@@ -1,10 +1,10 @@
-# services/cron
+# Cron Service
 
-Tareas programadas.
+## Objetivo
+Ejecutar tareas programadas.
 
-## Responsabilidades
-- reconciliaciones
-- limpiezas
-- chequeos de SLA
-- revisiones periódicas
-- jobs de mantenimiento
+## Ejemplos
+- reconciliaciones periódicas
+- limpieza
+- verificaciones de estado
+- procesos de mantenimiento

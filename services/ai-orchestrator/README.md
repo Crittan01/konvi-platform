@@ -1,10 +1,10 @@
-# services/ai-orchestrator
+# AI Orchestrator Service
 
-Módulo o servicio lógico del orquestador IA.
+## Objetivo
+Coordinar el uso del LLM y las tools del sistema.
 
-## Responsabilidades
-- interpretación
-- tool routing
-- validación
-- handoff
-- uso seguro de RAG
+## Reglas
+- no decide verdad transaccional
+- trabaja con contexto de tenant
+- usa tools controladas
+- debe escalar a humano cuando aplique

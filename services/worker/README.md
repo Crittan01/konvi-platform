@@ -1,11 +1,12 @@
-# services/worker
+# Worker Service
 
-Procesos asincrónicos del sistema.
+## Objetivo
+Procesar tareas asincrónicas.
 
-## Responsabilidades
-- consumo de colas
+## Responsabilidades previstas
 - embeddings
+- reindexación
 - procesamiento de media
 - syncs
-- reindexación
-- retries controlados
+- reconciliaciones
+- tareas largas o reintentables

@@ -1,16 +1,21 @@
-# apps/web
+# Web App
 
-Aplicación frontend principal del producto.
+## Rol
+Aplicación principal del producto.
 
-## Responsabilidad
-- dashboard
-- catálogo
+## Alcance
+Debe alojar la experiencia principal de:
+- backoffice
 - inbox
+- catálogo
+- variantes
+- media
 - stock
 - pedidos
-- integraciones
-- configuración del tenant
-- métricas y auditoría visibles
+- logística
+- knowledge base
+- configuración
+- usuarios y permisos
 
-## Notas
-La app debe ser multi-tenant aware y respetar roles/permisos desde el diseño.
+## Nota
+No asumir por ahora una segunda app separada salvo que la arquitectura final lo confirme.
