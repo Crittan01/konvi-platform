@@ -1,33 +1,24 @@
 # Platform Admin
 
 ## Objetivo
-Definir el rol y límites del superadmin o administración de plataforma.
+Definir el rol, límites y mecanismos seguros de administración para los usuarios Staff o super-administradores (Platform Admin) respetando RLS.
 
-## Principio central
-El superadmin de plataforma no debe tener acceso libre e indiscriminado a la información sensible de los tenants.
+## Inyección y Bypass Controlado RLS
+La seguridad de filas no se ignorará mediante keys privilegiadas persistentes. Para resolver el desafío de soporte:
+1. No se utilizará de modo generalizado y abierto la **Service Role Key** o Master keys en interfaces operativas ligadas a Dashboards Frontend.
+2. Las asignaciones de administradores de plataforma usarán inyección nativa de **Custom JWT Claims**. Un token emitido tendrá el claim validado: `{"user_role": "platform_admin"}` firmado por Supabase.
+3. Las reglas Row-Level Security interceptan este nodo en tiempo relacional `(auth.jwt()->>'user_role' = 'platform_admin')`, lo que provee selectividad de control con huella de acceso rastreable.
 
 ## Responsabilidades válidas
-- onboarding técnico de tenants
-- soporte operativo de la plataforma
-- activación/desactivación de features
-- monitoreo global de salud del sistema
-- revisión de errores de integraciones
-- administración de planes y configuración general
+- onboarding o rectificación técnica de tenants atascados
+- suspensión forzosa en tablas subyacentes.
+- acceso a logs transaccionales anómalos.
+- monitoreo general y troubleshooting de colas (`pgmq`).
 
 ## Accesos que deben restringirse
-- ver conversaciones completas de tenants sin razón justificada
-- consultar inventario o precios de tenants por comodidad
-- acceder a documentos internos de un tenant sin necesidad de soporte justificada
-- ejecutar acciones destructivas sin trazabilidad
+- Interfaz no controlada al contenido confidencial del tenant (Lectura íntegra indiscriminada explícita de `messages`).
+- Ejecutar bypass no justificado sin una huella insertada preventivamente en `support_access_logs`.
 
-## Reglas
-- todo acceso excepcional debe quedar auditado
-- preferir soporte con contexto mínimo necesario
-- separar claramente admin de tenant y admin de plataforma
-- no usar el rol de plataforma como bypass informal de RLS sin justificación y auditoría
-
-## Recomendación operativa
-Diseñar flujos de soporte donde:
-- el tenant autoriza o solicita soporte
-- el acceso excepcional queda registrado
-- el alcance del acceso sea temporal o limitado
+## Reglas Operativas Seguras
+- Una query orientada al modo `Platform Admin` obligatoriamente incluirá wrappers de la API FastAPI y enviará una invocación HTTP context.
+- Todo soporte proactivo que implique modificar metadata ajena debe acompañarse de request trace.
