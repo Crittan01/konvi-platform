@@ -1,15 +1,17 @@
 # tests
 
-Pruebas del proyecto.
+Estrategia de pruebas del proyecto.
 
-## Tipos esperados
+## Estructura prevista
 - integration
 - e2e
 - security
 
-## Prioridades iniciales
-- aislamiento multi-tenant
-- auth y permisos
-- conectores críticos
-- webhooks
-- tools del orquestador
+## Principios
+- no escribir pruebas antes del blueprint técnico del módulo
+- cubrir seguridad multi-tenant
+- cubrir conectores críticos
+- cubrir permisos y RLS en la medida correspondiente
+
+## Estado actual
+Placeholder.

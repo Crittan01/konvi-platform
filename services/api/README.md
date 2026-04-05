@@ -1,16 +1,14 @@
-# API Service
+# services/api
 
-## Objetivo
-Servicio backend principal de la plataforma.
+Backend principal del sistema.
 
 ## Responsabilidades previstas
-- exponer APIs del producto
-- validar auth y permisos
-- aplicar reglas multi-tenant
-- coordinar módulos de negocio
-- publicar trabajo asincrónico cuando corresponda
+- APIs del backoffice
+- autenticación/autorización del lado servidor
+- acceso a servicios de dominio
+- persistencia coordinada
+- entrada principal para webhooks
+- coordinación con workers
 
-## No debe hacer
-- procesamiento pesado en request path
-- lógica de sync larga
-- depender del LLM como fuente de verdad
+## Estado actual
+Placeholder hasta definir blueprint y scaffold técnico.

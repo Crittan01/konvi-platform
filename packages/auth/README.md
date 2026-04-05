@@ -1,11 +1,12 @@
 # packages/auth
 
-Reservado para lógica compartida de autenticación y autorización entre servicios o apps.
+Paquete compartido para utilidades de autenticación y autorización.
 
-Ejemplos futuros:
+## Posible contenido futuro
 - helpers de sesión
-- helpers de claims/JWT
-- validaciones de permisos
-- utilidades comunes de auth
+- helpers de roles
+- validadores de tenant context
+- utilidades de claims
 
-No implementar aquí hasta que exista una necesidad real compartida.
+## Estado actual
+Placeholder.

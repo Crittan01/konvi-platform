@@ -1,14 +1,15 @@
-# Mercado Libre Connector
+# services/connector-mercadolibre
 
-## Objetivo
-Gestionar sincronización con Mercado Libre.
+Conector desacoplado para Mercado Libre.
 
-## Alcance
-- auth
-- mapeo tenant-cuenta
-- productos
-- variantes
-- stock
-- estado de publicaciones
+## Responsabilidades previstas
+- auth/autorización
+- sync de productos
+- sync de variantes
+- sync de stock
 - notificaciones
 - reconciliación
+- auditoría de sync
+
+## Estado actual
+Placeholder hasta definición final del connector framework y del modelo de sync.

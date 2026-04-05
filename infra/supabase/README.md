@@ -2,16 +2,12 @@
 
 Documentación y artefactos relacionados con Supabase.
 
-## Objetivo
-Definir:
-- proyectos por entorno
-- auth
-- RLS
-- storage
-- realtime
-- queues
+## Posible contenido futuro
+- esquema inicial
 - migraciones
-- secretos
+- políticas RLS
+- seeds
+- configuración local si aplica
 
-## Nota
-Toda política sensible debe diseñarse con foco en aislamiento multi-tenant.
+## Estado actual
+Placeholder.

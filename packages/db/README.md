@@ -1,11 +1,12 @@
 # packages/db
 
-Reservado para elementos compartidos de acceso a datos.
+Paquete compartido para acceso a base de datos, tipos y utilidades relacionadas.
 
-Ejemplos futuros:
-- tipos generados
-- clientes DB comunes
-- helpers de consultas
-- utilidades de migración o seeds
+## Posible contenido futuro
+- clientes DB
+- tipos compartidos
+- helpers
+- contratos base
 
-No centralizar aquí toda la lógica de negocio.
+## Estado actual
+Placeholder.

@@ -1,9 +1,13 @@
 # scripts
 
-Scripts utilitarios del proyecto.
+Scripts auxiliares del repo.
 
-## Uso esperado
-- bootstrap de desarrollo
-- validaciones locales
-- checks de estructura
-- tareas repetitivas no acopladas al código de aplicación
+## Uso previsto
+- bootstrap local
+- validaciones
+- chequeos de estructura
+- generación de tipos
+- tareas repetitivas de desarrollo
+
+## Estado actual
+Placeholder con algunos scripts base.

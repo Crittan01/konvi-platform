@@ -7,28 +7,29 @@
 ## Ambiente futuro
 - staging
 
-## Local
-La VM dedicada del proyecto.
+## Definición
+
+### Local
+Entorno de desarrollo dentro de una VM dedicada al proyecto.
 Incluye:
 - repo
 - tooling
-- reglas del agente
-- ejecución local
-- pruebas
-- documentación del proyecto
+- variables locales
+- ejecución de desarrollo y pruebas
+- reglas específicas del agente para este proyecto
 
-## Production
+### Production
 Infra desplegada en:
 - Render
 - Supabase
-- canales e integraciones externas
+- canales e integraciones externas activas
 
-## Staging
-Se habilitará cuando:
-- existan integraciones reales sensibles
-- se requieran pruebas previas de despliegue
-- se necesite validar webhooks, RLS o sync sin tocar producción
+### Staging
+No es obligatorio desde el primer día.
+Se incorporará cuando el proyecto entre en:
+- pruebas seguras de integraciones reales
+- endurecimiento previo a clientes
+- pruebas de despliegue antes de producción
 
 ## Regla
-No introducir staging antes de que aporte valor real.
-Pero sí dejar la arquitectura preparada para agregarlo sin rehacer entornos.
+No asumir que local reemplaza staging o production.

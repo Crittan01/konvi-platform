@@ -1,15 +1,14 @@
-# WhatsApp Connector
+# services/connector-whatsapp
 
-## Objetivo
-Integrar el sistema con WhatsApp Cloud API oficial.
+Conector desacoplado para WhatsApp Cloud API oficial.
 
-## Alcance
-- webhooks
-- mensajes
-- templates
+## Responsabilidades previstas
+- webhooks inbound
+- envío de mensajes
+- manejo de templates
+- mensajes interactivos
 - media
-- handoff
-- mapeo conversación-canal
+- mapeo con conversaciones internas
 
-## Regla
-No usar herramientas no oficiales.
+## Estado actual
+Placeholder hasta definición final del connector framework.

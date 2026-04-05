@@ -1,12 +1,13 @@
-# Worker Service
+# services/worker
 
-## Objetivo
-Procesar tareas asincrónicas.
+Procesamiento asíncrono del sistema.
 
 ## Responsabilidades previstas
-- embeddings
-- reindexación
-- procesamiento de media
-- syncs
-- reconciliaciones
-- tareas largas o reintentables
+- jobs de media
+- jobs de embeddings
+- jobs de sync
+- jobs de reconciliación
+- jobs de notificaciones
+
+## Estado actual
+Placeholder hasta blueprint y definición de colas.

@@ -1,21 +1,16 @@
 # Pending Validations
 
-## Objetivo
-Registrar temas que el agente debe validar con documentación oficial antes de cerrar decisiones de arquitectura o implementación.
-
-## Pendientes de validación
-1. Capacidades exactas vigentes de WhatsApp Cloud API requeridas para el flujo del producto.
-2. Requisitos de onboarding y configuración manual de Meta Business / WABA.
-3. Modelo exacto de autenticación y notificaciones de Mercado Libre para el conector.
-4. Manejo de variaciones y User Products de Mercado Libre para mapping interno.
-5. Estrategia exacta de Shopify usando Admin GraphQL, inventory y webhooks.
-6. Límites y patrones recomendados de Supabase Realtime para vistas de inbox.
-7. Uso exacto de Supabase Queues / pgmq en el diseño final de workers.
-8. Estructura final de secrets, domains y despliegue en Render.
-9. Estrategia de subdominios y futura opción de custom domains.
-10. Necesidad o no de staging al momento de pasar de arquitectura a implementación productiva.
-11. Detalle del enfoque de long context / prompting / structured outputs para Gemini Pro High en Antigravity.
-12. Modelo de soporte de superadmin y restricciones operativas de acceso.
+## Validaciones documentales pendientes o continuas
+1. Confirmar detalles exactos de onboarding y restricciones vigentes de WhatsApp Cloud API.
+2. Confirmar enfoque final de media download y tratamiento de archivos en WhatsApp.
+3. Confirmar estrategia exacta de multi-partner / recursos compartidos si aplica en Meta.
+4. Confirmar auth, notificaciones y modelo vigente de User Products en Mercado Libre.
+5. Confirmar patrón más conveniente para Shopify Admin GraphQL e inventario.
+6. Confirmar límites y recomendaciones precisas de Supabase Realtime para vistas críticas.
+7. Confirmar patrones recomendados de Supabase Queues / pgmq para workers.
+8. Confirmar límites/costos y forma final de despliegue de Render para web, workers y cron.
+9. Confirmar best practices de long context / prompt structuring en Gemini dentro de Antigravity.
+10. Confirmar si se requerirá staging antes de activar integraciones reales.
 
 ## Regla
-Nada de esta lista debe cerrarse solo por intuición.
+Nada de esto debe darse por resuelto sin consulta documental actualizada en su fase correspondiente.

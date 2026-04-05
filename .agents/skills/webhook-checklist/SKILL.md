@@ -1,24 +1,37 @@
 ---
 name: webhook-checklist
-description: Usa esta skill cuando una tarea implique diseñar, implementar o revisar webhooks e integraciones event-driven.
+description: Use this skill when designing, reviewing or implementing webhook-based integrations to ensure verification, idempotency, retries, security and operational handling are not missed.
 ---
 
 # Webhook Checklist Skill
 
-## Objetivo
-Asegurar que cualquier webhook se diseñe con validación, seguridad, idempotencia y observabilidad.
+## Purpose
+Standardize webhook design and review for production integrations.
+
+## Apply to
+- WhatsApp webhooks
+- Mercado Libre notifications
+- Shopify webhooks in future
+- any inbound event endpoint from third parties
 
 ## Checklist
-1. Confirmar documentación oficial del proveedor.
-2. Definir método de validación/autenticación del webhook.
-3. Confirmar endpoint y ownership del tenant.
-4. Definir idempotencia.
-5. Confirmar manejo de retries y duplicados.
-6. Separar request path de procesamiento pesado.
-7. Registrar logs y auditoría.
-8. Manejar errores recuperables y no recuperables.
-9. Confirmar intervención humana requerida si aplica.
-10. Definir runbook básico ante falla.
+1. Verify official provider documentation for webhook model.
+2. Define signature validation or equivalent verification if supported.
+3. Ensure the handler responds quickly.
+4. Persist the minimum event envelope if needed.
+5. Move heavy work to async processing.
+6. Design idempotency.
+7. Design retry handling.
+8. Design duplicate-event tolerance.
+9. Log tenant context where applicable.
+10. Record operational failures and reconciliation strategy.
 
-## Regla
-Nunca asumir que el proveedor enviará el evento una sola vez o en orden perfecto.
+## Output format
+Always summarize:
+- verification method
+- retry model
+- idempotency strategy
+- async handoff
+- audit/logging needs
+- security risks
+- human setup needed

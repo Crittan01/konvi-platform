@@ -1,32 +1,44 @@
 ---
 name: docs-research
-description: Usa esta skill cuando una tarea dependa de validar documentación oficial antes de diseñar o implementar.
+description: Use this skill when a task depends on vendor documentation, API capabilities, auth flows, policies, limits, scopes, pricing or operational constraints that must be verified before deciding or implementing.
 ---
 
 # Docs Research Skill
 
-## Objetivo
-Forzar disciplina de investigación documental antes de diseñar o implementar una pieza técnica.
+## Purpose
+Force disciplined vendor-documentation-first reasoning before architecture or implementation.
 
-## Cuándo usarla
-- integraciones externas
-- auth
-- RLS
-- despliegue
+## When to use
+Use this skill when the task depends on:
+- official APIs
+- policies
+- limits
+- pricing
+- auth/scopes
 - webhooks
-- límites o políticas de proveedores
-- pricing/planes que afecten arquitectura
+- deployment platform behavior
+- cloud/storage/realtime/queue capabilities
 
-## Procedimiento
-1. Identifica qué proveedor o tecnología está involucrado.
-2. Enumera la documentación oficial que debe revisarse.
-3. Resume qué decisiones dependen de esa documentación.
-4. Registra:
-   - capacidades confirmadas
-   - limitaciones
-   - intervención humana requerida
-   - riesgos
-5. Solo después propone diseño o implementación.
+## Procedure
+1. Identify the exact provider and feature involved.
+2. Identify the official documentation that must be reviewed.
+3. Summarize:
+   - confirmed capabilities
+   - confirmed constraints
+   - unresolved points
+   - human steps required
+4. Do not invent implementation details not confirmed by the docs.
+5. Before proposing architecture or code, state:
+   - DECISION FINAL
+   - VALIDAR EN DOCUMENTACION OFICIAL
+   - RIESGO
+   - INTERVENCION HUMANA REQUERIDA
 
-## Regla
-No inventes endpoints, scopes, límites ni políticas.
+## Providers of interest in this project
+- Supabase
+- Render
+- Meta / WhatsApp
+- Telegram
+- Mercado Libre
+- Shopify
+- Gemini API / Antigravity

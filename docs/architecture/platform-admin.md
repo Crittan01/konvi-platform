@@ -1,60 +1,33 @@
 # Platform Admin
 
 ## Objetivo
-Definir el plano administrativo de la plataforma, separado lógicamente del plano del tenant.
+Definir el rol y límites del superadmin o administración de plataforma.
 
-## Principio
-No se implementará inicialmente como una app separada.
-Se implementará dentro de la misma app web, usando rutas, layouts y permisos distintos.
+## Principio central
+El superadmin de plataforma no debe tener acceso libre e indiscriminado a la información sensible de los tenants.
 
-## Espacios lógicos de la aplicación
+## Responsabilidades válidas
+- onboarding técnico de tenants
+- soporte operativo de la plataforma
+- activación/desactivación de features
+- monitoreo global de salud del sistema
+- revisión de errores de integraciones
+- administración de planes y configuración general
 
-### Tenant Space
-Rutas y vistas para operación del cliente:
-- catálogo
-- stock
-- pedidos
-- inbox
-- conocimiento
-- logística
-- integraciones del tenant
+## Accesos que deben restringirse
+- ver conversaciones completas de tenants sin razón justificada
+- consultar inventario o precios de tenants por comodidad
+- acceder a documentos internos de un tenant sin necesidad de soporte justificada
+- ejecutar acciones destructivas sin trazabilidad
 
-### Platform Space
-Rutas y vistas para administración de la plataforma:
-- tenants
-- estados comerciales
-- suspensión/reactivación
-- feature flags
-- salud de integraciones
-- métricas globales
-- auditoría de soporte
-- operaciones internas
+## Reglas
+- todo acceso excepcional debe quedar auditado
+- preferir soporte con contexto mínimo necesario
+- separar claramente admin de tenant y admin de plataforma
+- no usar el rol de plataforma como bypass informal de RLS sin justificación y auditoría
 
-## Roles de plataforma
-- platform_owner
-- platform_admin
-- platform_support
-- platform_billing
-
-## Capacidades de plataforma
-- ver tenants
-- suspender tenants
-- reactivar tenants
-- bloquear acceso por estado comercial
-- ver consumo y estado general
-- ver estado de conectores
-- ver errores globales
-- administrar banderas de funcionalidad
-- realizar soporte auditado
-
-## Restricción crítica
-Los roles de plataforma no deben acceder por defecto al detalle sensible de datos de tenant sin trazabilidad y justificación.
-
-## Consecuencia arquitectónica
-No se necesita apps/admin-portal desde el día 1.
-La separación se hace por:
-- auth
-- roles
-- rutas
-- layout
-- auditoría
+## Recomendación operativa
+Diseñar flujos de soporte donde:
+- el tenant autoriza o solicita soporte
+- el acceso excepcional queda registrado
+- el alcance del acceso sea temporal o limitado
