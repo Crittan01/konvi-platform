@@ -1,0 +1,11 @@
+{
+  "name": "commerce-ops-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Commerce Ops Platform Monorepo",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ]
+}
