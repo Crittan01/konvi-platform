@@ -1,19 +1,7 @@
 ---
-description: Investiga una integración externa usando documentación oficial vigente y resume capacidades, limitaciones, riesgos y pasos manuales necesarios antes de diseñar o implementar.
+description: Proceso de validación de integraciones de 3eros
 ---
+# Validación de Integraciones
 
-# integration-research
-
-Usa Planning mode.
-
-1. Identifica la integración objetivo.
-2. Consulta documentación oficial vigente.
-3. Resume:
-   - capacidades confirmadas
-   - limitaciones
-   - auth/scopes
-   - webhooks
-   - rate limits si aplica
-   - intervención humana
-   - riesgos
-4. No diseñes implementación final hasta terminar esa validación.
+1. Leer la Documentación oficial sobre Rate limits y Auth type.
+2. Comprobar Webhooks expuestos y garantías de entrega.\n
