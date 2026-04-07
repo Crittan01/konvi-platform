@@ -74,8 +74,8 @@ def process_active_conversations():
         history = [{"direction": m["direction"], "content": m["content"]} for m in msgs[:-1]]
 
         # LLAMADA A LA INTELIGENCIA ARTIFICIAL !
-        logger.info("Pensando la respuesta (Gemini Flash)...")
-        ai_reply = generate_ai_response(tenant_name, history, new_inbound_text)
+        logger.info("Pensando la respuesta (Gemini Flash con Tool Calling)...")
+        ai_reply = generate_ai_response(supabase, t_id, tenant_name, history, new_inbound_text)
         
         # Enviar Mensaje a Meta
         logger.info("Enviando SMS Fisico por Meta Graph API...")
