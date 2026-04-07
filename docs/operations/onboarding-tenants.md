@@ -1,2 +1,2 @@
 # Onboarding 
-Self-serve con invitación.\n
+Self-serve con invitación.

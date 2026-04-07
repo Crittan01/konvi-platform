@@ -19,4 +19,4 @@ export function createSSRClient(cookies: any) {
       },
     }
   )
-}\n
+}

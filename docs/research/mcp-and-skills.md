@@ -5,4 +5,4 @@
 
 **Gemini Docs MCP**: Proveedor MCP que permite buscar y añadir contexto oficial en tiempo de conversación, reduciendo alucinaciones al preguntar "¿Cómo implemento X en Supabase?". 
 
-Debes comprobar en el chat y el entorno si están configurados antes de utilizarlos activamente. Un fallback es buscar en la web vía \`search_web\`.\n
+Debes comprobar en el chat y el entorno si están configurados antes de utilizarlos activamente. Un fallback es buscar en la web vía \`search_web\`.

@@ -8,4 +8,4 @@ Este repositorio es la matriz de producto SaaS Conversacional Multi Tenant.
 3. **No Mágia LLM**: No uses IA como base de datos.
 4. **Verificar MCP/Skills**: No asumas que están habilitados.
 
-Leer `.agents/rules/` antes de tocar código.\n
+Leer `.agents/rules/` antes de tocar código.

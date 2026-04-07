@@ -1,2 +1,2 @@
 # Real-time
-Supabase Real-time websockets (inbox).\n
+Supabase Real-time websockets (inbox).

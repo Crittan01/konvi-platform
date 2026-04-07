@@ -1,2 +1,2 @@
 # Secrets
-1Password / Doppler / Supabase Vault.\n
+1Password / Doppler / Supabase Vault.

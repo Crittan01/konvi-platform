@@ -1,2 +1,2 @@
 # Validados
-Ninguna hasta verificar hoy.\n
+Ninguna hasta verificar hoy.

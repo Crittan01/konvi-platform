@@ -1,2 +1,2 @@
 # Auditoría
-Postgres Trigger logic para history de cambios críticos.\n
+Postgres Trigger logic para history de cambios críticos.
