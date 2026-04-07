@@ -1,1 +1,41 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
 .venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.pyo
+
+# ─── Node / pnpm ──────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.npm/
+
+# ─── Next.js Build Artifacts ──────────────────────────────────────────────────
+apps/web/.next/
+apps/web/out/
+.next/
+out/
+
+# ─── Environment (NUNCA al repositorio) ───────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Supabase Local ───────────────────────────────────────────────────────────
+supabase/.temp/
+
+# ─── OS / IDEs ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
