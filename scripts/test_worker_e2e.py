@@ -24,6 +24,22 @@ print("1. Inyectando cebo en BD...")
 t_req = supabase.table("tenants").select("id").limit(1).execute()
 tenant_id = t_req.data[0]['id']
 
+# Semilla rapida de catalogo para que el Agent LLM lo encuentre
+prod_res = supabase.table("products").insert({
+    "tenant_id": tenant_id,
+    "title": "Zapatillas Velocidad Maxima 42",
+    "description": "Zapatillas para correr hiper raudas"
+}).execute()
+p_id = prod_res.data[0]['id']
+
+supabase.table("product_variations").insert({
+    "product_id": p_id,
+    "tenant_id": tenant_id,
+    "attributes": {"color": "Rojo", "talla": "42"},
+    "stock_quantity": 5,
+    "price": 129.99
+}).execute()
+
 conv_res = supabase.table("conversations").insert({
     "tenant_id": tenant_id,
     "customer_phone": "1234567890",
@@ -36,9 +52,9 @@ supabase.table("messages").insert({
     "tenant_id": tenant_id,
     "direction": "inbound",
     "content_type": "text",
-    "content": "¿Tienen zapatillas deportivas de talla 42?"
+    "content": "¡Hola! Estoy buscando zapatillas. ¿Tienen las Velocidad Maxima o zapatillas deportivas talla 42 en stock y cuánto cuestan?"
 }).execute()
-print("✓ Cebo plantado.")
+print("✓ Cebo plantado e inventario falso creado.")
 
 # Test Execution (Mockeando el envio fisico a Meta que crashearía sin auth real)
 print("\n2. Encendiendo Worker Step (1 Ciclo)...")
@@ -58,6 +74,7 @@ with patch('worker.send_whatsapp_message', return_value=True) as mock_send:
             print(f"LA IA DIJO MOCK: '{msgs[1]['content']}'")
             # Cleanup
             supabase.table("conversations").delete().eq("id", conv_id).execute()
+            supabase.table("products").delete().eq("id", p_id).execute()
             print("\n=== SISTEMA COMPROBADO Y LIMPIO ===")
         else:
             print("✖ Falló en persistir el outbound de IA al final de la traza.")
