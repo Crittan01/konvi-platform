@@ -9,23 +9,39 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
-## Estado Actual del Sistema (Abril 2026)
+## Estado Actual del Sistema — 2026-04-07T21:30 CDT
 
-| Módulo | Estado |
-|---|---|
-| Supabase Cloud | ✅ Provisionado — proyecto `xmelwnhhphksbpdjmbbp` |
-| Migraciones SQL (5) | ✅ Aplicadas — tenants, catálogo, conversaciones, RLS, JWT claims |
-| Frontend Backoffice | ✅ Funcional — Auth, Dashboard, Catálogo CRUD |
-| WhatsApp Webhook | 🟡 Parcial — **tenant resolver hardcodeado, pendiente fix** |
-| AI Orchestrator | ❌ En implementación activa |
-| Inbox AI Dashboard | ❌ En implementación activa |
-| Deploy Render | ❌ Pendiente |
+| Módulo | Estado | Notas |
+|---|---|---|
+| Supabase Cloud | ✅ Activo | proyecto `xmelwnhhphksbpdjmbbp` |
+| Migraciones SQL (6) | ✅ Todas aplicadas | +`messages.processed` con índice parcial |
+| Tenant activo | ✅ Configurado | `Matriz Commerce Dev`, `meta_waba_id=2159052118202272` |
+| Frontend Backoffice | ✅ Funcional | Auth, Dashboard, Catálogo CRUD, **Inbox AI** |
+| WhatsApp Connector | ✅ Fix aplicado | tenant resolver por `meta_waba_id` real |
+| AI Orchestrator | ✅ Código completo | `worker`, `orchestrator`, `guardrails`, `sender` |
+| Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
+| Deploy Render | ❌ Pendiente | Fase 7 |
+| API Gateway real | 🟡 Pendiente | Fase 6 — mocks en `services/api` |
+| Integración MeLi | ❌ Pendiente | Fase 8 |
 
-## Próximo Módulo a Implementar
+**Credenciales activas (`.env` — nunca al repo):**
+- `META_ACCESS_TOKEN`: renovado 2026-04-07 (~24h, renovar periódicamente — ver [IH-003])
+- `GEMINI_API_KEY`: **pendiente configurar** para activar el Orchestrator
+- `meta_waba_id`: `2159052118202272` ✅
 
-**AI Orchestrator** — ciclo completo: mensaje entrante → contexto del tenant → Gemini → guardrail → respuesta WhatsApp.
+**Herramientas instaladas en VM (sin venv — máquina dedicada):**
+- `supabase` CLI v2.84.2 → migraciones via `supabase db query --linked -f archivo.sql`
+- `psql` 15.17 → disponible pero Supavisor bloquea TCP desde esta IP (usar CLI)
+- `pip3` sistema: `supabase`, `google-generativeai`, `httpx`, `pydantic`, `python-dotenv`
 
-Ver detalles del plan en: `docs/architecture/modules.md` y `docs/roadmap/implementation-phases.md`.
+## Próximo a Implementar
+
+**Fase 6 — API Gateway real** (`services/api`): reemplazar mocks con lógica real + RLS.
+**Fase 7 — Deploy en Render**: `render.yaml` y vars de entorno en Render Dashboard.
+
+> Para activar el AI Orchestrator hoy: agregar `GEMINI_API_KEY` al `.env` y ejecutar `python3 services/ai-orchestrator/main.py`
+
+Ver detalles completos en: `docs/architecture/modules.md` y `docs/roadmap/implementation-phases.md`.
 
 ## Reglas Obligatorias para AI Agents
 

@@ -1,18 +1,33 @@
 # Módulos del Monorepo — Responsabilidades y Estado
 
-## Estado Global (Abril 2026)
+
+## Estado Global — Actualizado 2026-04-07T21:30 CDT
 
 ```
-apps/web              ✅ Funcional (Auth, Dashboard, Catálogo)
+apps/web              ✅ Funcional (Auth, Dashboard, Catálogo, Inbox AI)
 services/
-  connector-whatsapp  🟡 Parcial (tenant resolver hardcodeado)
-  ai-orchestrator     ❌ En implementación — PRIORIDAD #1
-  api                 🟡 Esqueleto con mocks
+  connector-whatsapp  ✅ Fix aplicado (tenant resolver por meta_waba_id real)
+  ai-orchestrator     ✅ Implementado (worker + orchestrator + guardrails + sender)
+  api                 🟡 Esqueleto con mocks (Fase D pendiente)
   connector-meli      ❌ Pendiente (Fase 4)
   connector-shopify   ❌ Pendiente (futuro)
 packages/auth         🟡 Parcial
 packages/db           🟡 Parcial
 ```
+
+**Supabase (proyecto `xmelwnhhphksbpdjmbbp`):**
+- Tenant `Matriz Commerce Dev`: `status=active`, `meta_waba_id=2159052118202272` ✅
+- Migración `messages.processed` (BOOLEAN + índice parcial): ✅ Aplicada
+
+**Sistema VM (entorno dev, sin venv):**
+- `supabase` CLI v2.84.2 — `/usr/local/bin/supabase` ✅
+- `psql` 15.17 — via DNF ✅
+- Python packages (pip3 sistema): `supabase==2.28.3`, `google-generativeai==0.8.6`, `httpx==0.28.1`, `pydantic==2.12.5` ✅
+
+**Credenciales activas:**
+- `META_ACCESS_TOKEN`: renovado 2026-04-07 (token temporal ~24h, ver [IH-003])
+- `meta_waba_id`: `2159052118202272` ✅
+
 
 ---
 
@@ -27,7 +42,7 @@ packages/db           🟡 Parcial
   - `/login` — Formulario de autenticación con Supabase
   - `/dashboard` — Resumen de tenant y usuario autenticado
   - `/dashboard/catalog` — CRUD de productos (Server Actions)
-  - `/dashboard/inbox` — [EN IMPL.] Bandeja de conversaciones con Realtime
+  - `/dashboard/inbox` — ✅ Bandeja de conversaciones con Realtime, Human Takeover, hilo visual
 - **Relaciones:** Consume Supabase directamente en Server Components. En el futuro, consumirá `services/api` para operaciones transaccionales complejas.
 
 ---
@@ -39,8 +54,8 @@ packages/db           🟡 Parcial
 - **Responsabilidad:** Boundary gateway para Meta. Recibe webhooks de WhatsApp, valida firma HMAC-SHA256, y delega el procesamiento a un Background Task.
 - **Pila:** FastAPI (Python 3.11+), `python-supabase`.
 - **Patrón:** Fire-and-forget — retorna HTTP 200 en milisegundos (política Meta).
-- **Estado:** Funcional para recibir y persistir mensajes.
-- **BLOQUEANTE #1:** `db_persistence.py` línea 37 usa `limit(1)` para resolver tenant. Debe buscar por `meta_waba_id`.
+- **Estado**: ✅ Fix aplicado 2026-04-07 — tenant resolver por `meta_waba_id` real.
+- ~~**BLOQUEANTE #1:**~~ `db_persistence.py` — RESUELTO: filtra por `meta_waba_id` + `status=active`, singleton lazy de cliente, manejo de errores robusto.
 
 ### `services/ai-orchestrator` ← **PRIORIDAD #1**
 
@@ -58,7 +73,14 @@ packages/db           🟡 Parcial
     → Enviar respuesta vía Meta API
     → INSERT message(outbound) + UPDATE processed=True
   ```
-- **Estado:** Solo README. A implementar completamente.
+- **Estado**: ✅ Implementado 2026-04-07. Archivos:
+  - `main.py` — Entry point con graceful shutdown (SIGTERM para Render)
+  - `worker.py` — Loop polling configurable (`POLL_INTERVAL_SECONDS`, default 3s), batch de 10 msgs
+  - `orchestrator.py` — Context builder (catálogo + historial) + Gemini JSON mode + `OrchestratorOutput` Pydantic
+  - `guardrails.py` — 4 reglas: confidence mínima (0.65), texto vacío, longitud máx (1000 chars), escalación humana
+  - `whatsapp_sender.py` — POST Meta Graph API v21.0 con httpx async
+  - `tools/catalog_tool.py` — Lee productos activos del tenant para inyectar en el prompt
+- **Pendiente para activar**: `GEMINI_API_KEY` en `.env` + deploy en Render
 
 ### `services/api`
 
