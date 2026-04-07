@@ -2,18 +2,18 @@
 
 ## Estado Global (Abril 2026)
 
-| Fase | Nombre | Estado |
-|---|---|---|
-| 1 | Base Monorepo | ✅ Completa |
-| 2 | Auth y RLS | ✅ Completa |
-| 3a | Backoffice Web (Dashboard + Catálogo) | ✅ Completa |
-| 3b | Ciclo Conversacional Basic (Webhook → DB) | 🟡 Parcial |
-| **4** | **AI Orchestrator (Gemini → WhatsApp)** | **❌ En curso — PRIORIDAD** |
-| 5 | Inbox AI en Dashboard (Realtime) | ❌ Pendiente |
-| 6 | API Gateway real (`services/api`) | ❌ Pendiente |
-| 7 | Deploy en Render | ❌ Pendiente |
-| 8 | Integración Mercado Libre | ❌ Pendiente |
-| 9 | Shopify / Tienda custom | ❌ Futuro |
+| Fase | Nombre | Estado | Actualizado |
+|---|---|---|---|
+| 1 | Base Monorepo | ✅ Completa | 2026-04-05 |
+| 2 | Auth y RLS | ✅ Completa | 2026-04-06 |
+| 3a | Backoffice Web (Dashboard + Catálogo) | ✅ Completa | 2026-04-06 |
+| 3b | Ciclo Conversacional Basic (Webhook → DB) | ✅ Completa | **2026-04-07** |
+| **4** | **AI Orchestrator (Gemini → WhatsApp)** | **✅ Código completo** | **2026-04-07** |
+| 5 | Inbox AI en Dashboard (Realtime) | ✅ Completa | **2026-04-07** |
+| 6 | API Gateway real (`services/api`) | 🟡 Pendiente | — |
+| 7 | Deploy en Render | ❌ Pendiente | — |
+| 8 | Integración Mercado Libre | ❌ Pendiente | — |
+| 9 | Shopify / Tienda custom | ❌ Futuro | — |
 
 ---
 
@@ -48,30 +48,35 @@
 - Firma HMAC-SHA256 validada ✅
 - Parser de payload WhatsApp ✅
 - Persistencia en `conversations` y `messages` ✅
-- **BLOQUEANTE**: Tenant resolver usa `limit(1)` — hardcode inadmisible para multi-tenant
+- ~~BLOQUEANTE: Tenant resolver usa `limit(1)`~~ → **RESUELTO 2026-04-07**: `db_persistence.py` refactorizado, resuelve por `meta_waba_id` + `status=active`
+- `meta_waba_id = 2159052118202272` configurado en tenant ✅
+- Migración `messages.processed` + índice parcial aplicada en Supabase ✅
 
-## Fase 4 — AI Orchestrator ❌ (EN CURSO)
+## Fase 4 — AI Orchestrator ✅ (Código completo, pendiente deploy)
 
 **Objetivo**: Ciclo completo mensaje → Gemini → respuesta WhatsApp
 
 ### Sub-tareas
 
-- [ ] **Fix Bloqueante**: `db_persistence.py` — resolver tenant por `meta_waba_id`
-- [ ] **Nueva migración SQL**: columna `processed` y `processed_at` en `messages`
-- [ ] **`services/ai-orchestrator/worker.py`**: Loop de polling sobre mensajes no procesados
-- [ ] **`services/ai-orchestrator/orchestrator.py`**: Context builder + llamada a Gemini
-- [ ] **`services/ai-orchestrator/guardrails.py`**: Validación de output antes de enviar
-- [ ] **`services/ai-orchestrator/whatsapp_sender.py`**: POST a Meta Graph API `/messages`
-- [ ] **`services/ai-orchestrator/tools/catalog_tool.py`**: Query de productos del tenant
+- [x] **Fix Bloqueante**: `db_persistence.py` — resolver tenant por `meta_waba_id` (2026-04-07)
+- [x] **Migración SQL**: columna `processed` + índice parcial en `messages` (2026-04-07)
+- [x] **`worker.py`**: Loop polling (batch 10 msgs, `POLL_INTERVAL_SECONDS` configurable)
+- [x] **`orchestrator.py`**: Context builder (catálogo + historial) + Gemini JSON mode + Pydantic
+- [x] **`guardrails.py`**: confidence ≥ 0.65, texto no-nulo, longitud ≤ 1000 chars, human escalation
+- [x] **`whatsapp_sender.py`**: POST Meta Graph API v21.0 via httpx async
+- [x] **`tools/catalog_tool.py`**: Query productos activos del tenant (contexto LLM)
+- [ ] **`GEMINI_API_KEY`**: Configurar en `.env` para activar el worker
+- [ ] **Deploy en Render**: Como Background Worker (Fase 7)
 
-**Pregunta abierta**: ¿Polling activo o Supabase Realtime para detectar mensajes nuevos?
+**Decisión tomada**: Polling activo sobre `messages` (procesados=False), no Realtime.
 
-## Fase 5 — Inbox AI Dashboard ❌
+## Fase 5 — Inbox AI Dashboard ✅ (Completa 2026-04-07)
 
-- Página `/dashboard/inbox/page.tsx` — listar conversaciones del tenant
-- Hilo de mensajes por conversación (inbound/outbound visual)
-- Suscripción Realtime para mensajes nuevos
-- Botón "Tomar control humano" (cambia `status` de la conversación)
+- `apps/web/app/dashboard/inbox/page.tsx` — lista de conversaciones del tenant ✅
+- Hilo de mensajes inbound/outbound con bubble UI ✅
+- Suscripción Realtime para mensajes nuevos en la conversación activa ✅
+- Suscripción Realtime para cambios en lista de conversaciones ✅
+- Botón "Tomar control humano" / "Volver al bot" (cambia `status`) ✅
 
 ## Fase 6 — API Gateway Real ❌
 

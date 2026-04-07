@@ -7,8 +7,6 @@ Debe actualizarse cada vez que se identifique una nueva intervención.
 
 ## [IH-001] Aplicar Migración SQL: `messages.processed`
 
-## [IH-001] Aplicar Migración SQL: `messages.processed`
-
 **Estado**: ✅ COMPLETADO — 2026-04-07  
 **Resuelto por**: `supabase db query --linked` (Management API — no TCP directo)
 
@@ -117,34 +115,35 @@ La columna `meta_waba_id` debe tener el valor del WABA ID de Meta (no NULL ni va
 
 ---
 
-## [IH-003] Verificar Token de Producción de Meta (WhatsApp)
+## [IH-003] META_ACCESS_TOKEN — Renovación Periódica
 
-**Estado**: ⚠️ IMPORTANTE — El token actual en `.env` es temporal (expira cada 24h)  
-**Responsable**: Operador con cuenta de Meta Developers  
-**Fecha identificada**: 2026-04-07
+**Estado**: ⚠️ RENOVACIÓN PENDIENTE PERIÓDICAMENTE  
+**Última renovación**: 2026-04-07 (token de ~297 chars)
 
 ### Contexto
 
-El `META_ACCESS_TOKEN` en el `.env` actual es un **User Access Token temporal** que Meta Developers genera para pruebas. Expira en ~24 horas.
+El `META_ACCESS_TOKEN` es un **User Access Token temporal** de Meta Developers. Expira cada ~24 horas.
+Para desarrollo es aceptable renovarlo manualmente. Para producción, usar un **System User Token permanente**.
 
-Para producción se necesita un **System User Access Token permanente** (no expira).
+### Cómo renovar el token temporal (entorno dev)
 
-### Pasos para Token de Producción
+1. Ir a [Meta Developers](https://developers.facebook.com/) → Tu App → **WhatsApp** → **API Setup**
+2. En la sección **"Temporary access token"**, hacer clic en **"Generate access token"**
+3. Copiar el token generado
+4. Actualizar en `.env`: `META_ACCESS_TOKEN="<nuevo_token>"`
+5. Reiniciar el conector: `uvicorn main:app --reload --port 8000`
 
-1. Ve a [Meta Business Suite](https://business.facebook.com/) → **Configuración del negocio**.
-2. En el menú izquierdo: **Usuarios** → **Usuarios del sistema**.
-3. Haz clic en **"Agregar"** → Nombre: `commerce-ops-bot` → Rol: **Admin**.
-4. Haz clic en el usuario creado → **"Generar nuevo token"**.
-5. Selecciona tu App de WhatsApp.
-6. Permisos MÍNIMOS requeridos (según [docs Meta](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started)):
-   - `whatsapp_business_messaging`
-   - `whatsapp_business_management`
-7. Establece **"Nunca"** como fecha de expiración.
-8. Copia el token generado y actualiza en Render Environment Variables (nunca en `.env` del repo).
+### Cómo crear un Token Permanente (producción)
 
-### Para Entorno de Pruebas
+Según la [documentación oficial de Meta](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started#get-access-token):
 
-El token actual es suficiente para desarrollo. Solo recuerda que debes regenerarlo desde Meta Developers cada 24h o cuando expire.
+1. Ve a [Meta Business Suite](https://business.facebook.com/) → **Configuración del negocio**
+2. Menú izquierdo: **Usuarios** → **Usuarios del sistema** → **+ Agregar**
+3. Nombre: `commerce-ops-bot`, Rol: **Admin**
+4. Clic en el usuario → **"Generar nuevo token"** → Seleccionar App
+5. Permisos mínimos: `whatsapp_business_messaging`, `whatsapp_business_management`
+6. Expiración: **Nunca**
+7. En Render: configurar como env var `META_ACCESS_TOKEN` (nunca en el repo)
 
 ---
 
