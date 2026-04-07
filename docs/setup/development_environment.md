@@ -163,13 +163,26 @@ Ver procedimiento completo en: `docs/operations/HUMAN_INTERVENTIONS.md` → [IH-
 
 ---
 
-## Notas de Arquitectura de Red
+## Notas de Conectividad con Supabase (Verificado)
 
-| Conexión | Estado | Alternativa |
+| Conexión | Estado | Notas |
 |---|---|---|
-| VM → Supabase API REST (`https://...supabase.co`) | ✅ Funciona | — |
-| VM → Supabase DB TCP puerto 5432 | ❌ Bloqueado | SQL Editor Dashboard |
-| VM → Supabase DB TCP puerto 6543 (pooler) | ❌ Bloqueado | SQL Editor Dashboard |
-| VM → Meta Graph API | ✅ Funciona | — |
+| VM → Supabase REST API (`https://...supabase.co/rest/v1`) | ✅ Funciona | Usado por todos los servicios |
+| VM → Meta Graph API | ✅ Funciona | WhatsApp sender OK |
+| VM → Google Gemini API | ✅ Funciona | Orchestrator OK |
+| VM → Supabase DB TCP (Supavisor puerto 5432/6543) | ❌ Rechazado | Error: `Tenant or user not found` — el Supavisor rechaza psql desde esta IP |
+| VM → Supabase DB TCP directo (port 5432, IPv6) | ❌ Bloqueado | Esta VM no tiene IPv6 habilitado |
 | Meta → VM (webhook) | ❌ Sin IP pública | Usar Pinggy SSH tunnel |
-| VM → Google Gemini API | ✅ Funciona | — |
+
+### Por qué el Supavisor rechaza psql
+
+Según la [documentación oficial de Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres#direct-connection):
+- La conexión directa a Postgres usa **IPv6** por defecto
+- El pooler Supavisor sí acepta IPv4, pero **requiere que el proyecto esté accesible desde esa IP**
+- El error `"Tenant or user not found"` en el Supavisor indica que el proyecto no es enrutable desde esta IP via TCP
+
+### Solución para migraciones DDL
+
+La **REST API funciona perfectamente** para DML (INSERT, SELECT, UPDATE). Para DDL (ALTER TABLE, CREATE INDEX), usar el **SQL Editor del Dashboard de Supabase**.
+
+Ver procedimiento completo en: `docs/operations/HUMAN_INTERVENTIONS.md` → [IH-001]
