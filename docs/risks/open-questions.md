@@ -1,2 +1,2 @@
 # Open Questions
-¿Costo por token IA por mes?\n
+¿Costo por token IA por mes?

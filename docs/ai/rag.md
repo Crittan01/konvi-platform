@@ -1,2 +1,2 @@
 # RAG
-Archivos PDF incrustados vía pgvector.\n
+Archivos PDF incrustados vía pgvector.

@@ -1,2 +1,2 @@
 # ML Integration
-Auth global, sync de publicaciones.\n
+Auth global, sync de publicaciones.

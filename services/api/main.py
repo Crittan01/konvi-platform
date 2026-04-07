@@ -17,4 +17,4 @@ app.include_router(conversations.router, prefix="/api/v1/conversations")
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}\n
+    return {"status": "ok"}

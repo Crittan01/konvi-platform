@@ -1,2 +1,2 @@
 # Riesgos
-Baneo WA por policies Meta.\n
+Baneo WA por policies Meta.

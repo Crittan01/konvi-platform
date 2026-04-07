@@ -7,4 +7,4 @@ app.include_router(webhook.router, prefix="/api/v1/whatsapp")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "connector-whatsapp"}\n
+    return {"status": "ok", "service": "connector-whatsapp"}

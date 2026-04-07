@@ -1,2 +1,2 @@
 # Entornos
-Staging (Render PRs) & Production.\n
+Staging (Render PRs) & Production.

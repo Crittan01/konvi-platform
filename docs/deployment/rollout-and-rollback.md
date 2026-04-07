@@ -1,2 +1,2 @@
 # Rollback
-Postgres migrations down-steps.\n
+Postgres migrations down-steps.

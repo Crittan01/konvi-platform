@@ -1,2 +1,2 @@
 # Custom Store
-APIs abiertas para e-commerce propios.\n
+APIs abiertas para e-commerce propios.

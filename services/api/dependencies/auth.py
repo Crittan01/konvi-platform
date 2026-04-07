@@ -23,4 +23,4 @@ async def get_current_tenant(request: Request) -> str:
     if not tenant_id:
         raise HTTPException(status_code=403, detail="Tenant context missing")
         
-    return tenant_id\n
+    return tenant_id
