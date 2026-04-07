@@ -7,86 +7,74 @@ Debe actualizarse cada vez que se identifique una nueva intervención.
 
 ## [IH-001] Aplicar Migración SQL: `messages.processed`
 
-**Estado**: ⏳ PENDIENTE  
-**Responsable**: Operador con acceso a Supabase Dashboard  
-**Fecha identificada**: 2026-04-07
+## [IH-001] Aplicar Migración SQL: `messages.processed`
 
-### Contexto
+**Estado**: ✅ COMPLETADO — 2026-04-07  
+**Resuelto por**: `supabase db query --linked` (Management API — no TCP directo)
 
-La VM de desarrollo no puede conectar directamente a la base de datos Supabase Cloud via TCP/5432 (bloqueado por firewall de red). La migración `20260407200700_messages_processed_flag.sql` debe aplicarse manualmente desde el SQL Editor de Supabase Dashboard.
+### Cómo se aplicó (para futuras migraciones)
 
-Esta migración agrega el campo `processed` a la tabla `messages`, que es la señal que el AI Orchestrator usa para saber qué mensajes procesar.
+La VM no puede conectar a Postgres via TCP (el Supavisor rechaza conexiones de esta IP).
+Pero el **Supabase CLI con `--linked`** usa la **Management API REST** que sí funciona.
 
-### Pasos (dummy-friendly)
+Instalación única del CLI:
 
-**PASO 1 — Abrir el SQL Editor de Supabase**
-
-1. Abre tu navegador y ve a: `https://supabase.com/dashboard`
-2. Inicia sesión con tu cuenta.
-3. En la lista de proyectos, haz clic en el proyecto **`commerce-ops-dev`** (ref: `xmelwnhhphksbpdjmbbp`).
-4. En el menú lateral izquierdo busca el ícono que parece un terminal o código: **"SQL Editor"**. Haz clic en él.
-5. Se abrirá una pantalla con un editor de texto. Haz clic en **"+ New query"** (botón arriba a la izquierda).
-
-**PASO 2 — Pegar el SQL**
-
-Copia y pega **exactamente** el siguiente bloque en el editor:
-
-```sql
--- Migración: campo 'processed' para el AI Orchestrator
-ALTER TABLE public.messages
-  ADD COLUMN IF NOT EXISTS processed BOOLEAN NOT NULL DEFAULT FALSE,
-  ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;
-
--- Índice de performance para el poller del Orchestrator
-CREATE INDEX IF NOT EXISTS idx_messages_inbound_unprocessed
-  ON public.messages (tenant_id, created_at ASC)
-  WHERE processed = FALSE AND direction = 'inbound';
-
-COMMENT ON COLUMN public.messages.processed IS
-  'Flag que el AI Orchestrator setea a TRUE tras enviar la respuesta de WhatsApp';
-
-COMMENT ON COLUMN public.messages.processed_at IS
-  'Timestamp UTC en que el Orchestrator procesó este mensaje';
+```bash
+# Descargar binario oficial desde GitHub Releases
+curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz \
+  -o /tmp/supabase.tar.gz
+tar -xzf /tmp/supabase.tar.gz -C /tmp/
+sudo mv /tmp/supabase /usr/local/bin/supabase
+supabase --version  # Debe mostrar versión
 ```
 
-**PASO 3 — Ejecutar**
+Vincular el proyecto (una sola vez):
 
-1. Haz clic en el botón verde **"Run"** (o presiona `Ctrl + Enter`).
-2. En la sección inferior verás el resultado. Debe decir algo como: `Success. No rows returned.`
-3. Si aparece un error que dice `column "processed" of relation "messages" already exists` → la migración ya fue aplicada antes, esto es OK.
-
-**PASO 4 — Verificar**
-
-Pega esta query para confirmar:
-
-```sql
-SELECT column_name, data_type, column_default
-FROM information_schema.columns
-WHERE table_name = 'messages'
-  AND column_name IN ('processed', 'processed_at')
-ORDER BY column_name;
+```bash
+cd /home/ansible/workspaces/commerce-ops-platform
+supabase link --project-ref xmelwnhhphksbpdjmbbp
+# No pide login si el proyecto es público o está en modo anon
 ```
 
-Debes ver 2 filas: una para `processed` (tipo `boolean`) y otra para `processed_at` (tipo `timestamp with time zone`).
+Ejecutar SQL / migraciones:
 
-### Criterio de Éxito
+```bash
+# Ejecutar un archivo .sql completo
+supabase db query --linked -f supabase/migrations/20260407200700_messages_processed_flag.sql
 
-- ✅ La query de verificación retorna 2 filas
-- ✅ El campo `processed` existe con tipo `boolean` y default `false`
-- ✅ El índice `idx_messages_inbound_unprocessed` fue creado
+# Ejecutar SQL inline
+supabase db query --linked "SELECT * FROM tenants;"
+```
 
-### Referencia Oficial
+Verificación realizada:
+```
+column_name    | data_type                   | column_default
+processed      | boolean                     | false
+processed_at   | timestamp with time zone    | null
+```
 
-- [Supabase SQL Editor Docs](https://supabase.com/docs/guides/database/overview)
-- [Supabase Table Editor — Columns](https://supabase.com/docs/guides/database/tables)
+### Por qué psql directo no funciona (investigado)
+
+El Supabase Supavisor (pooler) responde **"Tenant or user not found"** a conexiones TCP desde esta IP.
+Esto NO es un bug — el Supavisor usa IPv6 para routing interno y esta VM usa IPv4. El CLI `--linked` sortea este problema usando HTTPS a `api.supabase.com`.
 
 ---
 
 ## [IH-002] Configurar `meta_waba_id` en el tenant de Supabase
 
-**Estado**: ⏳ PENDIENTE  
-**Responsable**: Operador con acceso a Supabase Dashboard  
-**Fecha identificada**: 2026-04-07
+**Estado**: ✅ COMPLETADO — 2026-04-07  
+**meta_waba_id configurado**: `2159052118202272`  
+**Tenant**: `Matriz Commerce Dev` (id: `0fb0777e-f3e4-48c7-89bf-a25aa201c0c9`)
+
+Verificado vía REST API:
+```json
+[{"id":"0fb0777e-...","name":"Matriz Commerce Dev","meta_waba_id":"2159052118202272"}]
+```
+
+Para futuras consultas:
+```bash
+supabase db query --linked "SELECT id, name, meta_waba_id FROM tenants;"
+```
 
 ### Contexto
 
