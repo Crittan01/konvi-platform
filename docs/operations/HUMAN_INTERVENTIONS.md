@@ -118,7 +118,7 @@ La columna `meta_waba_id` debe tener el valor del WABA ID de Meta (no NULL ni va
 ## [IH-003] META_ACCESS_TOKEN — Renovación Periódica
 
 **Estado**: ⚠️ RENOVACIÓN PENDIENTE PERIÓDICAMENTE  
-**Última renovación**: 2026-04-07 (token de ~297 chars)
+**Última renovación**: 2026-04-07 ~16:41 CDT (segunda renovación del día, token de ~297 chars)
 
 ### Contexto
 
@@ -149,10 +149,9 @@ Según la [documentación oficial de Meta](https://developers.facebook.com/docs/
 
 ## [IH-004] Primer Deploy en Render
 
-**Estado**: ❌ Pendiente (Fase E del roadmap)  
-**Responsable**: Operador con cuenta de Render  
-
-Ver guía completa en: `docs/deployment/DEPLOYMENT_GUIDE.md`
+**Estado**: 🟡 EN PROGRESO — `docs/deployment/DEPLOYMENT_GUIDE.md` se está construyendo  
+**Pasos completados**: Hasta Paso 2 (meta credentials + GCP AI key)  
+**Pasos restantes**: Paso 3 (Pinggy tunnel) → Paso 4 (webhook callback) → Paso 5 (test E2E) → **Paso 6 (render.yaml + deploy Render)**
 
 ---
 

@@ -49,7 +49,7 @@ class OrchestratorOutput(BaseModel):
 
 # ─── Context Builder ──────────────────────────────────────────────────────────
 
-async def _get_conversation_history(supabase: Client, conversation_id: str) -> list[dict]:
+async def _get_conversation_history(supabase: Client, conversation_id: str) -> list:
     """Retorna los últimos N mensajes de la conversación (contexto del chat)."""
     result = (
         supabase.table("messages")

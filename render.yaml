@@ -1,0 +1,113 @@
+# render.yaml — Commerce Ops Platform
+# Infraestructura como código para Render.com
+# Referencia oficial: https://render.com/docs/blueprint-spec
+#
+# USO:
+#   1. Conectar repositorio en Render Dashboard → New + → Blueprint
+#   2. Render detecta este archivo automáticamente
+#   3. Configurar las env vars secretas en Render Dashboard → cada servicio → Environment
+#
+# NUNCA poner valores de secrets aquí directamente.
+# Las variables marcadas con `sync: false` deben configurarse manualmente en Render.
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. FRONTEND — Next.js Backoffice
+  # ─────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: commerce-ops-web
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: apps/web
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false  # Configurar en Render Dashboard → Environment
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+    healthCheckPath: /
+    autoDeploy: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. WHATSAPP CONNECTOR — FastAPI Webhook Gateway
+  # ─────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: commerce-ops-connector
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: services/connector-whatsapp
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # SECRET — nunca en código
+      - key: META_APP_SECRET
+        sync: false  # SECRET
+      - key: META_VERIFY_TOKEN
+        sync: false  # SECRET
+      - key: ALLOWED_ORIGINS
+        sync: false  # ej: https://commerce-ops-web.onrender.com
+    healthCheckPath: /health
+    autoDeploy: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. AI ORCHESTRATOR — Python Background Worker
+  # Referencia: https://render.com/docs/background-workers
+  # NO tiene URL pública — es un worker de polling.
+  # ─────────────────────────────────────────────────────────────────────────
+  - type: worker
+    name: commerce-ops-orchestrator
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: services/ai-orchestrator
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 main.py
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # SECRET
+      - key: META_ACCESS_TOKEN
+        sync: false  # SECRET — renovar periódicamente o usar System User Token
+      - key: WHATSAPP_PHONE_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false  # SECRET — desde Google AI Studio
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: POLL_INTERVAL_SECONDS
+        value: "3"
+      - key: CONVERSATION_HISTORY_LIMIT
+        value: "10"
+    autoDeploy: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. CORE API — FastAPI REST Gateway (Fase 6 — actualmente con mocks)
+  # Descomentar cuando la Fase 6 esté completa
+  # ─────────────────────────────────────────────────────────────────────────
+  # - type: web
+  #   name: commerce-ops-api
+  #   runtime: python
+  #   region: oregon
+  #   plan: free
+  #   rootDir: services/api
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+  #   envVars:
+  #     - key: NEXT_PUBLIC_SUPABASE_URL
+  #       sync: false
+  #     - key: SUPABASE_SERVICE_ROLE_KEY
+  #       sync: false
+  #     - key: ALLOWED_ORIGINS
+  #       sync: false
+  #   healthCheckPath: /health
+  #   autoDeploy: true
