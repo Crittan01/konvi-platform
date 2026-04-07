@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
-_supabase: Client | None = None
+_supabase: Optional[Client] = None
 
 def get_supabase() -> Client:
     """Singleton lazy para el cliente de Supabase."""
@@ -21,7 +21,7 @@ def get_supabase() -> Client:
     return _supabase
 
 
-def _resolve_tenant_by_waba(supabase: Client, meta_waba_id: str) -> str | None:
+def _resolve_tenant_by_waba(supabase: Client, meta_waba_id: str) -> Optional[str]:
     """
     Resuelve el tenant_id interno a partir del WABA ID de Meta.
     Retorna el UUID del tenant o None si no existe.
