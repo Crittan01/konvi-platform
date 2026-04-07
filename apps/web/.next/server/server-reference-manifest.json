@@ -1,1 +1,1 @@
-{"node":{"f8476b4a7d43a4205b69b02427b353b1747e5a5b":{"workers":{"app/login/page":3270},"layer":{"app/login/page":"rsc"}}},"edge":{},"encryptionKey":"wd1Vr7xScXvuBKIBKZQ2CuCa8R2E5hKhgGMB7LbKE6E="}
+{"node":{"f8476b4a7d43a4205b69b02427b353b1747e5a5b":{"workers":{"app/login/page":3270},"layer":{"app/login/page":"rsc"}},"0b6f165b07415bcc7c0cb2d9fa7fcb7fbb52399f":{"workers":{"app/dashboard/catalog/page":3563},"layer":{"app/dashboard/catalog/page":"rsc"}}},"edge":{},"encryptionKey":"uq5Q15Aw2awUOzJRdTdVPOqx+cKqcR2YDdITuhkf67M="}
