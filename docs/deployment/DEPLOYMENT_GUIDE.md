@@ -7,7 +7,7 @@ Cada paso indica si requiere acción manual o si puede ejecutarse desde la VM.
 
 ## Paso 1 — GEMINI_API_KEY (Cerebro de IA)
 
-> estado: ⏳ Pendiente
+> estado: ✅ Completado — 2026-04-08 (GEMINI_API_KEY configurada en .env)
 
 **ACCIÓN HUMANA — 3 minutos**
 
@@ -122,7 +122,7 @@ pnpm --filter web dev
 
 ## Paso 6 — Deploy en Render (Producción)
 
-> estado: ⏳ Pendiente — requiere cuenta de Render y `render.yaml` creado
+> estado: 🟡 EN PROGRESO — `render.yaml` actualizado (4 servicios). Ver guía detallada: `docs/deployment/FASE7_RENDER_DEPLOY.md`
 
 ### 6.1 — Cuenta y Proyecto en Render
 

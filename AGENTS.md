@@ -9,7 +9,7 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
-## Estado Actual del Sistema — 2026-04-08T01:15 CDT
+## Estado Actual del Sistema — 2026-04-08T20:30 CDT
 
 | Módulo | Estado | Notas |
 |---|---|---|
@@ -21,13 +21,14 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 | AI Orchestrator | ✅ Código completo | nuevo SDK `google-genai==1.47.0` |
 | Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
 | API Gateway (Fase 6) | ✅ Completa | JWT real, productos CRUD, conversaciones |
-| render.yaml | ✅ Creado | 3 servicios: web + connector + orchestrator |
-| Deploy Render (Fase 7) | ⏳ Pendiente humano | IH-004 — requiere cuenta Render |
+| render.yaml | ✅ Actualizado | 4 servicios: web + connector + api + orchestrator |
+| Deploy Render (Fase 7) | 🟡 En progreso | IH-004 — ver `docs/deployment/FASE7_RENDER_DEPLOY.md` |
 | Integración MeLi | ❌ Pendiente | Fase 8 |
 
 **Credenciales activas (`.env` — nunca al repo):**
-- `META_ACCESS_TOKEN`: renovado 2026-04-07 ~16:41 CDT (~24h, ver [IH-003])
-- `GEMINI_API_KEY`: **pendiente configurar** para activar el Orchestrator
+- `META_ACCESS_TOKEN`: renovado 2026-04-07 ∼16:41 CDT (∼24h, ver [IH-003]) — **⚠️ renovar si expirado**
+- `GEMINI_API_KEY`: ✅ configurada en `.env`
+- `SUPABASE_JWT_SECRET`: ⚠️ **PENDIENTE** — obtener de Supabase Dashboard → Project Settings → Data API
 - `meta_waba_id`: `2159052118202272` ✅
 
 **Herramientas instaladas en VM (sin venv — máquina dedicada):**
@@ -38,11 +39,15 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 
 ## Próximo a Implementar
 
-**Fase 7 — Deploy en Render** (siguiente prioridad):
-1. Crear cuenta/conectar repo en [render.com](https://render.com) (IH-004)
-2. Aplicar `render.yaml` → Blueprint
-3. Configurar env vars secretas en Render Dashboard
-4. Actualizar Callback URL del webhook en Meta Developers
+**Fase 7 — Deploy en Render** (próxima prioridad):
+> Ver guía detallada: `docs/deployment/FASE7_RENDER_DEPLOY.md`
+
+1. PRE-REQ: Obtener `SUPABASE_JWT_SECRET` de Supabase Dashboard → Project Settings → Data API
+2. **Humano** → crear cuenta Render + Blueprint con repo `Crittan01/commerce-ops-platform` (IH-004)
+3. **Humano** → configurar env vars secretas en Render Dashboard para cada servicio
+4. **Agente** → smoke tests y verificación de health checks
+5. **Humano** → actualizar Callback URL del webhook en Meta Developers
+6. Test E2E — mensaje WhatsApp → Gemini → respuesta automática
 
 **Para activar el Orchestrator hoy (local):**
 ```bash
