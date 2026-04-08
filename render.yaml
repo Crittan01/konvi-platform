@@ -1,19 +1,27 @@
 # render.yaml — Commerce Ops Platform
 # Infraestructura como código para Render.com
 # Referencia oficial: https://render.com/docs/blueprint-spec
+# Última actualización: 2026-04-08
 #
 # USO:
 #   1. Conectar repositorio en Render Dashboard → New + → Blueprint
 #   2. Render detecta este archivo automáticamente
-#   3. Configurar las env vars secretas en Render Dashboard → cada servicio → Environment
+#   3. Configurar las env vars secretas (sync: false) en Render Dashboard → cada servicio → Environment
 #
 # NUNCA poner valores de secrets aquí directamente.
-# Las variables marcadas con `sync: false` deben configurarse manualmente en Render.
+# Las variables marcadas con `sync: false` DEBEN configurarse manualmente en el Render Dashboard.
+#
+# SERVICIOS DESPLEGADOS:
+#   - commerce-ops-web          → Frontend Next.js           (https://commerce-ops-web.onrender.com)
+#   - commerce-ops-connector    → WhatsApp Webhook FastAPI   (https://commerce-ops-connector.onrender.com)
+#   - commerce-ops-api          → Core API REST FastAPI      (https://commerce-ops-api.onrender.com)
+#   - commerce-ops-orchestrator → AI Worker Python           (Background Worker — sin URL pública)
 
 services:
 
   # ─────────────────────────────────────────────────────────────────────────
   # 1. FRONTEND — Next.js Backoffice
+  #    URL: https://commerce-ops-web.onrender.com
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
     name: commerce-ops-web
@@ -27,14 +35,16 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false  # Configurar en Render Dashboard → Environment
+        sync: false  # https://xmelwnhhphksbpdjmbbp.supabase.co
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
+        sync: false  # JWT anon key desde Supabase Dashboard → Project Settings → API
     healthCheckPath: /
     autoDeploy: true
 
   # ─────────────────────────────────────────────────────────────────────────
   # 2. WHATSAPP CONNECTOR — FastAPI Webhook Gateway
+  #    URL: https://commerce-ops-connector.onrender.com
+  #    Recibe webhooks de Meta y persiste mensajes en Supabase.
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
     name: commerce-ops-connector
@@ -46,22 +56,52 @@ services:
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
+        sync: false  # https://xmelwnhhphksbpdjmbbp.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false  # SECRET — nunca en código
+        sync: false  # SECRET — JWT service_role desde Supabase Dashboard
       - key: META_APP_SECRET
-        sync: false  # SECRET
+        sync: false  # SECRET — desde Meta Developers → tu App → Settings → Basic
       - key: META_VERIFY_TOKEN
-        sync: false  # SECRET
+        sync: false  # SECRET — valor libre acordado en Meta Webhook config
+      - key: META_ACCESS_TOKEN
+        sync: false  # SECRET — System User Token permanente (ver IH-003)
+      - key: WHATSAPP_PHONE_ID
+        sync: false  # Phone Number ID desde Meta Developers → WhatsApp → API Setup
       - key: ALLOWED_ORIGINS
-        sync: false  # ej: https://commerce-ops-web.onrender.com
+        sync: false  # https://commerce-ops-web.onrender.com,https://commerce-ops-api.onrender.com
     healthCheckPath: /health
     autoDeploy: true
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 3. AI ORCHESTRATOR — Python Background Worker
-  # Referencia: https://render.com/docs/background-workers
-  # NO tiene URL pública — es un worker de polling.
+  # 3. CORE API — FastAPI REST Gateway (Fase 6 ✅ completa)
+  #    URL: https://commerce-ops-api.onrender.com
+  #    JWT real, productos CRUD, conversaciones — multi-tenant con RLS.
+  # ─────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: commerce-ops-api
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: services/api
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false  # https://xmelwnhhphksbpdjmbbp.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # SECRET
+      - key: SUPABASE_JWT_SECRET
+        sync: false  # SECRET — desde Supabase Dashboard → Project Settings → API → JWT Secret
+      - key: ALLOWED_ORIGINS
+        sync: false  # https://commerce-ops-web.onrender.com
+    healthCheckPath: /health
+    autoDeploy: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. AI ORCHESTRATOR — Python Background Worker
+  #    Referencia: https://render.com/docs/background-workers
+  #    NO tiene URL pública — es un worker de polling de Supabase.
+  #    Procesa mensajes no leídos → llama Gemini → responde por WhatsApp.
   # ─────────────────────────────────────────────────────────────────────────
   - type: worker
     name: commerce-ops-orchestrator
@@ -73,41 +113,19 @@ services:
     startCommand: python3 main.py
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
+        sync: false  # https://xmelwnhhphksbpdjmbbp.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false  # SECRET
       - key: META_ACCESS_TOKEN
-        sync: false  # SECRET — renovar periódicamente o usar System User Token
+        sync: false  # SECRET — System User Token permanente (ver IH-003)
       - key: WHATSAPP_PHONE_ID
-        sync: false
+        sync: false  # Phone Number ID desde Meta Developers
       - key: GEMINI_API_KEY
-        sync: false  # SECRET — desde Google AI Studio
+        sync: false  # SECRET — desde Google AI Studio (aistudio.google.com)
       - key: GEMINI_MODEL
-        value: gemini-1.5-flash
+        value: gemini-1.5-flash  # Modelo de producción recomendado
       - key: POLL_INTERVAL_SECONDS
         value: "3"
       - key: CONVERSATION_HISTORY_LIMIT
         value: "10"
     autoDeploy: true
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # 4. CORE API — FastAPI REST Gateway (Fase 6 — actualmente con mocks)
-  # Descomentar cuando la Fase 6 esté completa
-  # ─────────────────────────────────────────────────────────────────────────
-  # - type: web
-  #   name: commerce-ops-api
-  #   runtime: python
-  #   region: oregon
-  #   plan: free
-  #   rootDir: services/api
-  #   buildCommand: pip install -r requirements.txt
-  #   startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-  #   envVars:
-  #     - key: NEXT_PUBLIC_SUPABASE_URL
-  #       sync: false
-  #     - key: SUPABASE_SERVICE_ROLE_KEY
-  #       sync: false
-  #     - key: ALLOWED_ORIGINS
-  #       sync: false
-  #   healthCheckPath: /health
-  #   autoDeploy: true

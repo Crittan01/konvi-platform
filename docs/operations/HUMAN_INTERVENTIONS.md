@@ -149,9 +149,52 @@ Según la [documentación oficial de Meta](https://developers.facebook.com/docs/
 
 ## [IH-004] Primer Deploy en Render
 
-**Estado**: 🟡 EN PROGRESO — `docs/deployment/DEPLOYMENT_GUIDE.md` se está construyendo  
-**Pasos completados**: Hasta Paso 2 (meta credentials + GCP AI key)  
-**Pasos restantes**: Paso 3 (Pinggy tunnel) → Paso 4 (webhook callback) → Paso 5 (test E2E) → **Paso 6 (render.yaml + deploy Render)**
+**Estado**: 🟡 EN PROGRESO — Guía completa en `docs/deployment/FASE7_RENDER_DEPLOY.md`  
+**Pasos completados**:
+- ✅ `GEMINI_API_KEY` configurada en `.env`
+- ✅ `render.yaml` actualizado con 4 servicios (web + connector + api + orchestrator)
+- ✅ Guía paso a paso `FASE7_RENDER_DEPLOY.md` creada
+
+**Pasos pendientes** (en orden):
+1. ⚠️ PRE-REQ: Obtener `SUPABASE_JWT_SECRET` (ver IH-005 abajo)
+2. Crear cuenta Render + Blueprint con repo `Crittan01/commerce-ops-platform`
+3. Configurar env vars secretas en Render Dashboard (ver tabla en `FASE7_RENDER_DEPLOY.md` → PASO 3)
+4. Deploy manual exitoso → smoke tests
+5. Actualizar Callback URL del webhook en Meta Developers → `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
+6. Test E2E — mensaje WhatsApp → Gemini → respuesta automática
+
+---
+
+## [IH-005] Obtener SUPABASE_JWT_SECRET
+
+**Estado**: ⏳ PENDIENTE  
+**Bloqueante para**: `commerce-ops-api` (Core API Gateway JWT validation)  
+**Responsable**: Operador humano
+
+### Pasos
+
+1. Ir a [https://supabase.com/dashboard](https://supabase.com/dashboard) → Proyecto `xmelwnhhphksbpdjmbbp`
+2. Menú lateral → **Project Settings** → **Data API**
+3. Sección **JWT Settings** → copiar el valor de **JWT Secret**
+4. En la VM, editar `.env`:
+```bash
+nano /home/ansible/workspaces/commerce-ops-platform/.env
+# Rellenar: SUPABASE_JWT_SECRET="tu_jwt_secret_aqui"
+```
+5. En Render Dashboard → servicio `commerce-ops-api` → Environment → agregar `SUPABASE_JWT_SECRET`
+
+**Criterio de éxito**: El endpoint `GET https://commerce-ops-api.onrender.com/health` responde `{"status":"ok"}` y el JWT de Supabase es validado correctamente.
+
+---
+
+## [IH-006] META_ACCESS_TOKEN — Upgrade a System User Token Permanente
+
+**Estado**: ⏳ PENDIENTE (para producción)  
+**Contexto**: El token actual es temporal (~24h). Para deploy en Render, se necesita un token permanente.
+
+Ver instrucciones detalladas en `[IH-003]` sección "Cómo crear un Token Permanente".
+
+**Críico**: Sin este upgrade, el Orchestrator en Render fallará a las ~24h de haber configurado el token.
 
 ---
 
