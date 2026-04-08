@@ -3,7 +3,8 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
 from guardrails import validate_orchestrator_output
@@ -15,8 +16,17 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+# Cliente global del nuevo SDK
+_genai_client: Optional[genai.Client] = None
+
+def _get_genai_client() -> genai.Client:
+    """Singleton lazy del cliente Gemini (nuevo SDK google-genai)."""
+    global _genai_client
+    if _genai_client is None:
+        if not GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY no configurada")
+        _genai_client = genai.Client(api_key=GEMINI_API_KEY)
+    return _genai_client
 
 
 # ─── Schema de Output Estructurado ────────────────────────────────────────────
@@ -63,7 +73,7 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
     return list(reversed(result.data or []))
 
 
-def _build_system_prompt(catalog: list[dict], tenant_name: str) -> str:
+def _build_system_prompt(catalog: list, tenant_name: str) -> str:
     """Construye el system prompt con el catálogo real del tenant."""
     catalog_text = "\n".join([
         f"- {p['title']}: ${p['price']} (stock: {p['stock']})"
@@ -146,17 +156,18 @@ async def build_and_run_orchestration(
         system_prompt = _build_system_prompt(catalog, tenant_name)
         user_context = _build_user_context(history, content)
 
-        # ── 4. Llamar a Gemini ────────────────────────────────────────────────
-        model = genai.GenerativeModel(
-            model_name=GEMINI_MODEL,
-            system_instruction=system_prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.3,  # Respuestas consistentes para ventas
+        # ── 4. Llamar a Gemini (nuevo SDK google-genai) ───────────────────────
+        # Ref: https://googleapis.github.io/python-genai/
+        client = _get_genai_client()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_context,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.3,
                 response_mime_type="application/json",
             ),
         )
-
-        response = model.generate_content(user_context)
         raw_json = response.text
         logger.debug(f"[GEMINI] Raw response: {raw_json}")
 
