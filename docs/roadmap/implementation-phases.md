@@ -78,17 +78,21 @@
 - Suscripción Realtime para cambios en lista de conversaciones ✅
 - Botón "Tomar control humano" / "Volver al bot" (cambia `status`) ✅
 
-## Fase 6 — API Gateway Real ❌
+## Fase 6 — API Gateway Real ✅ (Completa 2026-04-08)
 
-- `services/api` con lógica real (reemplaza mocks)
-- Autorización por tenant en cada endpoint
-- CORS restringido a dominios permitidos (env var `ALLOWED_ORIGINS`)
+- `services/api` con JWT real (PyJWT), CRUD productos y conversaciones
+- Autorización por tenant_id extraído del JWT de Supabase
+- CORS restringido via env var `ALLOWED_ORIGINS`
 
-## Fase 7 — Deploy en Render ❌
+## Fase 7 — Deploy en Render 🟡 (En progreso — IH-004)
 
-- `render.yaml` en la raíz del monorepo
-- 3 servicios: `connector-whatsapp` (Web), `ai-orchestrator` (Worker), `commerce-web` (Web)
-- Variables de entorno en Render Dashboard (nunca en `.env` del repo)
+- `render.yaml` en la raíz del monorepo — 4 servicios:
+  - `commerce-ops-web` (Web, Node — Next.js Backoffice)
+  - `commerce-ops-connector` (Web, Python — WhatsApp Webhook)
+  - `commerce-ops-api` (Web, Python — Core API REST)
+  - `commerce-ops-orchestrator` (Web, Python — AI Worker via server.py wrapper)
+- Variables de entorno configuradas en Render Dashboard (sync: false)
+- **Bloqueantes humanos**: IH-004 (cuenta Render), IH-005 (JWT Secret), IH-006 (Meta Token permanente)
 
 ## Fase 8 — Integración Mercado Libre ❌
 

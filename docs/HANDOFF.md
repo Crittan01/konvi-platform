@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-08
+# Handoff — Estado del Proyecto al 2026-04-08 (rev. 2)
 
 Este documento existe para que el próximo chat de IA retome trabajo exactamente desde donde se dejó.
 **Leer este archivo antes de cualquier otra acción.**
@@ -23,9 +23,13 @@ SaaS Conversacional Multi-Tenant para e-commerce vía WhatsApp.
 | 2 | Auth + RLS Supabase | `supabase/migrations/` (6 migraciones) |
 | 3a | Backoffice Next.js | `apps/web/app/dashboard/` |
 | 3b | WhatsApp Connector | `services/connector-whatsapp/` |
-| 4 | AI Orchestrator | `services/ai-orchestrator/` |
+| 4 | AI Orchestrator | `services/ai-orchestrator/` (server.py + worker + orchestrator + guardrails) |
 | 5 | Inbox AI (Realtime) | `apps/web/app/dashboard/inbox/page.tsx` |
 | 6 | API Gateway real | `services/api/` (JWT real, CRUD completo) |
+
+> ⚠️ **`services/orchestrator/` fue eliminado el 2026-04-08** — era un prototipo obsoleto con bugs
+> (async/sync mismatch, Meta API v18.0, sin graceful shutdown, sin requirements.txt).
+> El directorio canónico del orchestrator es `services/ai-orchestrator/`.
 
 ---
 
@@ -80,9 +84,9 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 | Token | Estado | Acción |
 |---|---|---|
-| `META_ACCESS_TOKEN` | Renovado 2026-04-07 ~16:41 CDT (~24h) | Renovar mañana en Meta Developers → tu App → WhatsApp → API Setup |
-| `GEMINI_API_KEY` | **NO configurada aún** | Obtener en [aistudio.google.com](https://aistudio.google.com/app/apikey) y agregar al `.env` |
-| `SUPABASE_JWT_SECRET` | Puede faltar en `.env` | Obtener en Supabase Dashboard → Project Settings → API → JWT Secret |
+| `META_ACCESS_TOKEN` | Renovado 2026-04-07 ~16:41 CDT (~24h) — **⚠️ verificar si expiró** | Renovar en Meta Developers → App → WhatsApp → API Setup. Para Render: migrar a System User Token (IH-006) |
+| `GEMINI_API_KEY` | ✅ Configurada en `.env` | Verificar antes de deploy en Render |
+| `SUPABASE_JWT_SECRET` | ⚠️ Pendiente obtener (IH-005) | Supabase Dashboard → Project Settings → Data API → JWT Secret |
 
 ---
 
@@ -95,8 +99,8 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 Paquetes Python instalados a nivel sistema:
 ```
-google-genai==1.47.0    ← nuevo SDK (reemplazó google-generativeai deprecado)
-supabase==2.10.0
+google-genai==1.47.0    ← SDK NUEVO (no usar google-generativeai — deprecado)
+supabase==2.10.0        ← ⚠️ VM tiene 2.10.0, requirements.txt usa 2.28.3
 httpx==0.28.1
 pydantic==2.12.5
 PyJWT==2.10.1
@@ -105,6 +109,8 @@ uvicorn[standard]==0.34.0
 python-dotenv==1.0.1
 git-filter-repo (pip)
 ```
+
+> Para alinear supabase en la VM: `pip3 install supabase==2.28.3`
 
 ---
 

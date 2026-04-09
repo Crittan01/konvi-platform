@@ -39,31 +39,32 @@ Plataforma SaaS Multi-Tenant conversacional que automatiza ventas e-commerce ví
 - **Endpoints**:
   - `GET /api/v1/whatsapp/webhook` — Verificación del challenge de Meta
   - `POST /api/v1/whatsapp/webhook` — Recepción de mensajes (con validación HMAC-SHA256)
-- **Estado**: Funcional. **BLOQUEANTE: tenant resolver usa `limit(1)` hardcodeado**
-- **Fix requerido**: Resolver tenant por `meta_waba_id` del payload
+- **Estado**: ✅ Funcional. Tenant resolver por `meta_waba_id` real (fix aplicado 2026-04-07).
 
 ### `services/ai-orchestrator` — Worker AI Asíncrono
 
 - **Responsabilidad**: Ciclo completo de procesamiento de mensajes entrantes
-- **Patrón**: Background Worker en Render (sin HTTP entry point publico)
+- **Patrón**: Web Service en Render (Free plan) — `server.py` lanza FastAPI + worker asyncio en thread de fondo
+- **Entry point Render**: `uvicorn server:app` → expone `/health` y `/status`
 - **Flujo**:
   ```
   Poll messages(processed=False, direction=inbound)
     → Build context (tenant products + conversation history)
-    → Call Gemini API → OrchestratorOutput(Pydantic)
-    → Guardrail validation (confidence ≥ 0.7)
-    → IF valid → send via Meta API + persist outbound message
-    → Mark message processed=True
+    → Call Gemini API → OrchestratorOutput(Pydantic) [JSON mode]
+    → Guardrail validation (confidence ≥ 0.65, longitud, escalación)
+    → IF valid → send via Meta API v21.0 + persist outbound message
+    → Mark message processed=True + processed_at (UTC)
   ```
-- **Estado**: ❌ Solo README. Es el módulo prioritario a implementar.
+- **Estado**: ✅ Implementado completo (2026-04-07). Pendiente deploy en Render (Fase 7).
 
 ### `services/api` — REST API Interna
 
 - **Responsabilidad**: Capa de API Gateway para el frontend (reemplazar llamadas directas a Supabase)
-- **Endpoints planificados**:
-  - `GET /api/v1/products` — Catálogo del tenant (con RLS via service role)
-  - `GET /api/v1/conversations` — Inbox paginado
-- **Estado**: Esqueleto con mocks. Implementar después del Orchestrator.
+- **Endpoints activos**:
+  - `GET /health` — Health check (Render)
+  - `GET /api/v1/products` — Catálogo del tenant (JWT validado, RLS via service role)
+  - `GET /api/v1/conversations` — Inbox paginado del tenant
+- **Estado**: ✅ Implementado (Fase 6) con JWT real (PyJWT), CORS restringido, CRUD básico. Pendiente RBAC completo.
 
 ### `packages/auth` — Wrappers Supabase Auth SSR
 
