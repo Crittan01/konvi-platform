@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-08 (rev. 2)
+# Handoff — Estado del Proyecto al 2026-04-09 (rev. 3)
 
 Este documento existe para que el próximo chat de IA retome trabajo exactamente desde donde se dejó.
 **Leer este archivo antes de cualquier otra acción.**
@@ -26,6 +26,7 @@ SaaS Conversacional Multi-Tenant para e-commerce vía WhatsApp.
 | 4 | AI Orchestrator | `services/ai-orchestrator/` (server.py + worker + orchestrator + guardrails) |
 | 5 | Inbox AI (Realtime) | `apps/web/app/dashboard/inbox/page.tsx` |
 | 6 | API Gateway real | `services/api/` (JWT real, CRUD completo) |
+| 7 | Deploy Render | 4 servicios live — ver estado abajo |
 
 > ⚠️ **`services/orchestrator/` fue eliminado el 2026-04-08** — era un prototipo obsoleto con bugs
 > (async/sync mismatch, Meta API v18.0, sin graceful shutdown, sin requirements.txt).
@@ -33,38 +34,42 @@ SaaS Conversacional Multi-Tenant para e-commerce vía WhatsApp.
 
 ---
 
-## ⏳ Siguiente tarea — Fase 7: Deploy en Render
+## ✅ Fase 7 completada (PASOS 1-5) — Estado al 2026-04-09
 
-**Pre-requisitos de credenciales: ✅ TODOS RESUELTOS**
-- `META_ACCESS_TOKEN` ✅ | `GEMINI_API_KEY` ✅ | `SUPABASE_JWT_SECRET` ✅
+### 4 servicios en producción (Render Free)
 
-**Bloqueante humano principal [IH-004]:** Requiere cuenta Render.com con el repositorio conectado.
-**Bloqueante antes de producción [IH-006]:** Migrar META_ACCESS_TOKEN a System User Token permanente.
+| Servicio | URL | Estado |
+|---|---|---|
+| `commerce-ops-web` | `https://commerce-ops-web.onrender.com` | ✅ Live, UI con TailwindCSS |
+| `commerce-ops-connector` | `https://commerce-ops-connector.onrender.com` | ✅ Live |
+| `commerce-ops-api` | `https://commerce-ops-api.onrender.com` | ✅ Live |
+| `commerce-ops-orchestrator` | (background, sin URL pública) | ✅ Live, polling cada 3s |
 
-### Pasos exactos
+### Lecciones aprendidas — críticas para futuras sesiones
 
-1. **Humano** → ir a [render.com](https://render.com) → "New +" → "Blueprint" → conectar el repo `Crittan01/commerce-ops-platform`
-2. Render detectará `render.yaml` en la raíz → 3 servicios aparecerán:
-   - `commerce-ops-web` (Next.js — web service)
-   - `commerce-ops-connector` (FastAPI — web service)
-   - `commerce-ops-orchestrator` (Python — background worker)
-3. **Humano** → configurar env vars secretas en Render Dashboard para cada servicio (ver tabla en `docs/deployment/DEPLOYMENT_GUIDE.md` → Paso 6.2)
-4. **Agente** → verificar que los servicios levantan y hacer smoke test
+1. **Modelo Gemini**: `gemini-2.0-flash` NO disponible para cuentas nuevas con billing.
+   Usar `gemini-2.5-flash`. Billing habilitado en Google AI Studio (free tier tenía quota=0).
 
-### Variables críticas que el humano debe poner en Render
+2. **CSS en Render**: `NODE_ENV=production` + `npm install` omite devDependencies.
+   Fix aplicado: `npm install --include=dev` en `render.yaml` buildCommand.
+   Requiere: `apps/web/postcss.config.js` + `autoprefixer` en devDependencies.
+   Si la UI se ve plana: **"Clear build cache & deploy"** (Next.js cachea transforms CSS — el nuevo
+   `postcss.config.js` no aplica hasta rebuild limpio).
 
-```
-NEXT_PUBLIC_SUPABASE_URL       = (del .env local)
-NEXT_PUBLIC_SUPABASE_ANON_KEY  = (del .env local)
-SUPABASE_SERVICE_ROLE_KEY      = (del .env local) ← SECRET
-SUPABASE_JWT_SECRET            = (del .env local) ← SECRET
-META_ACCESS_TOKEN              = (del .env local) ← SECRET, renovar a System User Token
-META_APP_SECRET                = (del .env local) ← SECRET
-META_VERIFY_TOKEN              = (del .env local) ← SECRET
-WHATSAPP_PHONE_ID              = (del .env local)
-GEMINI_API_KEY                 = (Google AI Studio) ← SECRET, PENDIENTE
-ALLOWED_ORIGINS                = https://commerce-ops-web.onrender.com
-```
+3. **badge.tsx**: `apps/web/components/ui/badge.tsx` debe estar committed. Si falta, webpack
+   reporta otros módulos como no encontrados (error en cascada).
+
+4. **OOM en Render Free (512MB)**: `NODE_OPTIONS='--max-old-space-size=460'` en buildCommand.
+
+### Pendiente para completar Fase 7
+
+- **PASO 6 [HUMANO]**: Meta Developers → App → WhatsApp → Configuration → Webhook
+  - Callback URL: `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
+  - Verify Token: `***META_VERIFY_TOKEN_LEGACY_REDACTED***`
+  - Suscribir campo: `messages`
+- **PASO 7 [HUMANO + AGENTE]**: Test E2E — enviar WhatsApp al número de prueba Meta → verificar
+  respuesta automática de Gemini + hilo en Inbox AI
+- **[IH-006]**: Crear System User Token permanente en Meta Business Suite (actual es ~24h)
 
 ---
 

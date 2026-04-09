@@ -9,28 +9,33 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
-## Estado Actual del Sistema — 2026-04-08T20:30 CDT
+## Estado Actual del Sistema — 2026-04-09T03:30 CDT
 
 | Módulo | Estado | Notas |
 |---|---|---|
 | Supabase Cloud | ✅ Activo | proyecto `***SUPABASE_PROJECT_REF_REDACTED***` |
 | Migraciones SQL (6) | ✅ Todas aplicadas | +`messages.processed` con índice parcial |
 | Tenant activo | ✅ Configurado | `Matriz Commerce Dev`, `meta_waba_id=2159052118202272` |
-| Frontend Backoffice | ✅ Funcional | Auth, Dashboard, Catálogo CRUD, Inbox AI |
-| WhatsApp Connector | ✅ Fix aplicado | tenant resolver por `meta_waba_id` real |
-| AI Orchestrator | ✅ Código completo | `google-genai==1.47.0`, server.py wrapper para Render Free |
+| Frontend Backoffice | ✅ Live en Render | UI con TailwindCSS ✅ — ver nota CSS abajo |
+| WhatsApp Connector | ✅ Live en Render | health `/health` OK |
+| AI Orchestrator | ✅ Live + polling activo | `gemini-2.5-flash`, billing Google habilitado |
 | Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
-| API Gateway (Fase 6) | ✅ Completa | JWT real, productos CRUD, conversaciones |
-| render.yaml | ✅ Actualizado | 4 servicios: web + connector + api + orchestrator |
-| Deploy Render (Fase 7) | 🟡 4/4 Live, orchestrator fix pendiente | Smoke tests ✅ — falta GEMINI_MODEL en Dashboard + PASO 6 Meta Webhook |
+| API Gateway (Fase 6) | ✅ Live en Render | JWT real, productos CRUD, conversaciones |
+| render.yaml | ✅ v5 | `npm install --include=dev` + `NODE_OPTIONS=460MB` |
+| Deploy Render (Fase 7) | 🟡 PASO 5 ✅ | Pendiente: PASO 6 (Meta Webhook) + PASO 7 (E2E) |
 | `services/orchestrator/` | ✅ ELIMINADO | Prototipo obsoleto — canónico: `services/ai-orchestrator/` |
 | Integración MeLi | ❌ Pendiente | Fase 8 |
 
-**Credenciales activas (`.env` — nunca al repo) — estado 2026-04-08:**
-- `META_ACCESS_TOKEN`: ✅ Renovado 2026-04-08 — **⚠️ token temporal ~24h, renovar periódicamente. Para Render: migrar a System User Token (IH-006)**
-- `GEMINI_API_KEY`: ✅ Configurada en `.env`
-- `SUPABASE_JWT_SECRET`: ✅ Presente en `.env`
+**Credenciales activas (`.env` — nunca al repo) — estado 2026-04-09:**
+- `META_ACCESS_TOKEN`: ✅ En Render Dashboard — **⚠️ token temporal ~24h, migrar a System User Token (IH-006)**
+- `GEMINI_API_KEY`: ✅ Configurada — billing habilitado en Google AI Studio (paid tier)
+- `SUPABASE_JWT_SECRET`: ✅ Presente
 - `meta_waba_id`: `2159052118202272` ✅
+- `GEMINI_MODEL`: `gemini-2.5-flash` — único modelo activo en cuentas nuevas con billing
+
+> **Nota CSS (lección aprendida)**: `apps/web` requiere `postcss.config.js` + `autoprefixer` en devDeps.
+> `NODE_ENV=production` hace que `npm install` omita devDeps → solución: `--include=dev` en buildCommand.
+> Si el CSS se ve plano: **"Clear build cache & deploy"** en Render Dashboard (Next.js cachea transformaciones CSS).
 
 **Herramientas instaladas en VM (sin venv — máquina dedicada) — verificado 2026-04-08:**
 - `supabase` CLI v2.84.2 → `supabase db query --linked -f archivo.sql`
@@ -54,22 +59,21 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 
 ## Próximo a Implementar
 
-**Fase 7 — Deploy en Render** (próxima prioridad):
+**Fase 7 — Deploy en Render** — PASOS 1-5 completados ✅
 > Ver guía detallada: `docs/deployment/FASE7_RENDER_DEPLOY.md`
 
-Pre-requisitos **ya resueltos** ✅:
-- `SUPABASE_JWT_SECRET` ✅ presente en `.env`
-- `META_ACCESS_TOKEN` ✅ renovado en `.env`
-- `GEMINI_API_KEY` ✅ configurada en `.env`
-- requirements.txt ✅ alineados con versiones reales de VM
+Completado ✅:
+- 4 servicios live en Render (web + connector + api + orchestrator)
+- Smoke tests PASO 5 pasados desde VM
+- Gemini billing habilitado + modelo `gemini-2.5-flash`
+- TailwindCSS fix: `postcss.config.js` + `--include=dev` + clear build cache
 
-Pasos pendientes:
-1. **Humano [IH-006]** → crear System User Token permanente en Meta Business Suite (el actual token es temporal ~24h)
-2. **Humano [IH-004]** → crear cuenta Render + Blueprint con repo `Crittan01/commerce-ops-platform`
-3. **Humano** → configurar env vars secretas en Render Dashboard para cada servicio (ver `FASE7_RENDER_DEPLOY.md` → PASO 3)
-4. **Agente** → smoke tests y verificación de health checks (PASO 5)
-5. **Humano** → actualizar Callback URL del webhook en Meta Developers (PASO 6)
-6. Test E2E — mensaje WhatsApp → Gemini → respuesta automática (PASO 7)
+**Pendiente (requiere acción humana):**
+1. **[IH-006]** → crear System User Token permanente en Meta Business Suite
+2. **PASO 6** → actualizar Callback URL en Meta Developers → `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook` + Verify Token `***META_VERIFY_TOKEN_LEGACY_REDACTED***`
+3. **PASO 7** → Test E2E — enviar WhatsApp desde celular → verificar respuesta automática de Gemini
+
+**Siguiente fase: Fase 8 — Integración Mercado Libre**
 
 **Para activar el Orchestrator hoy (local):**
 ```bash
