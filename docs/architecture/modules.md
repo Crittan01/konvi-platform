@@ -1,6 +1,6 @@
 # Módulos del Monorepo — Responsabilidades y Estado
 
-## Estado Global — Actualizado 2026-04-08
+## Estado Global — Actualizado 2026-04-09
 
 ```
 apps/web              ✅ Funcional (Auth, Dashboard, Catálogo, Inbox AI)
@@ -29,14 +29,15 @@ packages/ui           ❌ Vacío (componentes en apps/web/components/)
 
 **Paquetes Python en requirements.txt (versiones de producción):**
 ```
-google-genai==1.47.0       ← SDK NUEVO (no usar google-generativeai que está deprecado)
+google-genai==1.47.0       ← SDK oficial Gemini (no usar google-generativeai — deprecado)
 supabase==2.28.3
 httpx==0.28.1
 pydantic==2.12.5
 PyJWT==2.10.1              ← solo en services/api
-fastapi==0.115.12
-uvicorn[standard]==0.34.0
-python-dotenv==1.0.1
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+python-dotenv==1.2.1
+python-multipart==0.0.20
 ```
 
 > ⚠️ La VM tiene instalado `supabase==2.10.0` vía pip3 de sistema (sin venv).
@@ -44,10 +45,10 @@ python-dotenv==1.0.1
 > Para alinear el entorno local, ejecutar: `pip3 install supabase==2.28.3`
 
 **Credenciales activas:**
-- `META_ACCESS_TOKEN`: token temporal ~24h (ver IH-003). **Renovar si expirado.**
+- `META_ACCESS_TOKEN`: ⚠️ Token temporal ~24h (ver IH-003 e IH-006). **Renovar periódicamente. Crear System User Token permanente antes de producción.**
 - `meta_waba_id`: `2159052118202272` ✅
-- `GEMINI_API_KEY`: ✅ configurada en `.env`
-- `SUPABASE_JWT_SECRET`: ⚠️ Pendiente obtener (IH-005)
+- `GEMINI_API_KEY`: ✅ configurada en `.env` y en Render
+- `SUPABASE_JWT_SECRET`: ✅ Presente (IH-005 resuelto)
 
 ---
 
@@ -56,7 +57,7 @@ python-dotenv==1.0.1
 ### `apps/web`
 
 - **Responsabilidad:** Panel Backoffice para operadores de e-commerce. Permite gestionar catálogo, ver conversaciones y auditar respuestas de la IA.
-- **Pila Técnica:** Next.js 15 (App Router), React, TailwindCSS, shadcn/ui, TypeScript.
+- **Pila Técnica:** Next.js **14.1.0** (App Router), React ^18, TailwindCSS ^3.3.0, shadcn/ui (5 componentes), TypeScript ^5.
 - **Auth SSR:** `@supabase/ssr` via `middleware.ts` — protege todas las rutas `/dashboard`.
 - **Rutas activas:**
   - `/login` — Formulario de autenticación con Supabase
