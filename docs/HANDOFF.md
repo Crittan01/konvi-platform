@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-09 (rev. 3)
+# Handoff — Estado del Proyecto al 2026-04-09 (rev. 8)
 
 Este documento existe para que el próximo chat de IA retome trabajo exactamente desde donde se dejó.
 **Leer este archivo antes de cualquier otra acción.**
@@ -7,168 +7,268 @@ Este documento existe para que el próximo chat de IA retome trabajo exactamente
 
 ## Resumen del sistema
 
-SaaS Conversacional Multi-Tenant para e-commerce vía WhatsApp.
+**Commerce Ops Platform** — SaaS multi-tenant de operaciones e-commerce conversacionales.
+
+- Canal principal: WhatsApp Cloud API (Meta oficial v21.0)
 - Tenants aislados con RLS en PostgreSQL (Supabase)
-- Canal: WhatsApp Cloud API (Meta) — sin librerías no oficiales
-- IA: Google Gemini via `google-genai==1.47.0` (nuevo SDK oficial)
-- Hosting destino: Render.com
+- IA: Google Gemini via `google-genai==1.47.0` (modelo: `gemini-2.5-flash`)
+- Hosting: Render.com (4 servicios live en Free plan)
+- El producto NO es un bot — es una plataforma de operaciones donde el LLM es una capa de asistencia
+
+### Stack real en repo (verificado en package.json / requirements.txt)
+- Frontend: **Next.js 14.1.0** (no 15), React ^18, TailwindCSS ^3.3.0
+- 5 componentes shadcn/ui en `apps/web/components/ui/` — `packages/ui` está vacío
+- Python **3.9.25** en VM (EOL) — requirements.txt especifica FastAPI 0.128.8, google-genai 1.47.0
 
 ---
 
-## ✅ Fases completadas (no tocar)
+## Fases completadas (no tocar)
 
 | Fase | Descripción | Archivos clave |
-|---|---|---|
+|------|-------------|----------------|
 | 1 | Base monorepo pnpm | `pnpm-workspace.yaml`, `.gitignore` |
 | 2 | Auth + RLS Supabase | `supabase/migrations/` (6 migraciones) |
 | 3a | Backoffice Next.js | `apps/web/app/dashboard/` |
 | 3b | WhatsApp Connector | `services/connector-whatsapp/` |
-| 4 | AI Orchestrator | `services/ai-orchestrator/` (server.py + worker + orchestrator + guardrails) |
+| 4 | AI Orchestrator | `services/ai-orchestrator/` |
 | 5 | Inbox AI (Realtime) | `apps/web/app/dashboard/inbox/page.tsx` |
 | 6 | API Gateway real | `services/api/` (JWT real, CRUD completo) |
-| 7 | Deploy Render | 4 servicios live — ver estado abajo |
-
-> ⚠️ **`services/orchestrator/` fue eliminado el 2026-04-08** — era un prototipo obsoleto con bugs
-> (async/sync mismatch, Meta API v18.0, sin graceful shutdown, sin requirements.txt).
-> El directorio canónico del orchestrator es `services/ai-orchestrator/`.
+| 7 | Deploy Render + E2E confirmado | 4 servicios live, WhatsApp ↔ Gemini ↔ Inbox ✅ |
 
 ---
 
-## ✅ Fase 7 completada (PASOS 1-5) — Estado al 2026-04-09
+## Estado de Fase 7 — Deploy Render ✅ COMPLETADA
 
-### 4 servicios en producción (Render Free)
+### 4 servicios en producción
 
 | Servicio | URL | Estado |
-|---|---|---|
+|----------|-----|--------|
 | `commerce-ops-web` | `https://commerce-ops-web.onrender.com` | ✅ Live, UI con TailwindCSS |
 | `commerce-ops-connector` | `https://commerce-ops-connector.onrender.com` | ✅ Live |
 | `commerce-ops-api` | `https://commerce-ops-api.onrender.com` | ✅ Live |
 | `commerce-ops-orchestrator` | (background, sin URL pública) | ✅ Live, polling cada 3s |
 
-### Lecciones aprendidas — críticas para futuras sesiones
+### Completado (2026-04-09)
 
-1. **Modelo Gemini**: `gemini-2.0-flash` NO disponible para cuentas nuevas con billing.
-   Usar `gemini-2.5-flash`. Billing habilitado en Google AI Studio (free tier tenía quota=0).
+- ✅ PASO 6: Meta webhook configurado — Callback URL + Verify Token activos
+- ✅ IH-006: System User Token permanente (`commerce-ops`) — sin expiración
+- ✅ PASO 7: E2E confirmado — WhatsApp → Connector → Supabase → Orchestrator → Gemini → respuesta enviada
+- ✅ Inbox AI: conversaciones visibles en `/dashboard/inbox` tras fix del trigger JWT
+- ✅ Botón de logout añadido al sidebar (faltaba pese a que LogOut estaba importado)
+- ✅ Mensaje de error en login al fallar autenticación
 
-2. **CSS en Render**: `NODE_ENV=production` + `npm install` omite devDependencies.
-   Fix aplicado: `npm install --include=dev` en `render.yaml` buildCommand.
-   Requiere: `apps/web/postcss.config.js` + `autoprefixer` en devDependencies.
-   Si la UI se ve plana: **"Clear build cache & deploy"** (Next.js cachea transforms CSS — el nuevo
-   `postcss.config.js` no aplica hasta rebuild limpio).
+### Bug crítico resuelto — Trigger JWT (rev. 8)
 
-3. **badge.tsx**: `apps/web/components/ui/badge.tsx` debe estar committed. Si falta, webpack
-   reporta otros módulos como no encontrados (error en cascada).
+**Síntoma**: Inbox mostraba 0 conversaciones aunque sí existían en Supabase.
 
-4. **OOM en Render Free (512MB)**: `NODE_OPTIONS='--max-old-space-size=460'` en buildCommand.
+**Causa**: `handle_new_user_claims()` usaba `NEW.id` (PK de `tenant_users`) en vez de `NEW.user_id` (ID del usuario en `auth.users`). Resultado: `app_metadata.tenant_id` nunca se seteaba → RLS filtraba todo.
 
-### Pendiente para completar Fase 7
+**Fix 1 — inmediato**: `UPDATE auth.users SET raw_app_meta_data = jsonb_set(...)` para el usuario existente `87da7bb6-...`.
 
-- **PASO 6 [HUMANO]**: Meta Developers → App → WhatsApp → Configuration → Webhook
-  - Callback URL: `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
-  - Verify Token: `***META_VERIFY_TOKEN_LEGACY_REDACTED***`
-  - Suscribir campo: `messages`
-- **PASO 7 [HUMANO + AGENTE]**: Test E2E — enviar WhatsApp al número de prueba Meta → verificar
-  respuesta automática de Gemini + hilo en Inbox AI
-- **[IH-006]**: Crear System User Token permanente en Meta Business Suite (actual es ~24h)
+**Fix 2 — permanente**: `CREATE OR REPLACE FUNCTION handle_new_user_claims()` con `NEW.user_id` y `NEW.tenant_id` correctos. Aplicado vía `supabase db query --linked`.
+
+> Para futuros nuevos usuarios: el trigger ahora funciona correctamente. No se requiere acción manual.
+
+---
+
+## Trabajo completado en esta sesión (rev. 7 — 2026-04-09) — RE-BASELINE COMPLETO
+
+Sesión de re-sincronización completa del proyecto desde Fase 1/Paso 1.
+
+### Problema crítico resuelto (rev. 7)
+
+**Dependencia invertida en el roadmap anterior:**
+- El roadmap decía: Fase 8 = MeLi, Fase 9 = Tenant Console modules
+- MeLi requiere: `orders`, `order_items`, `tenant_integrations` (tablas de Fase 9)
+- Era imposible hacer Fase 8 antes que Fase 9
+- Consecuencia: el roadmap era incoherente y no se podía seguir linealmente
+
+### Nueva estructura de fases (rev. 7)
+
+| Fase anterior | Fase nueva | Cambio |
+|---------------|------------|--------|
+| Fase 8: MeLi | → Fase 10: Integraciones (MeLi + Envia juntos) | MeLi ahora después del schema core |
+| Fase 9: Todos los módulos TC | → Fase 8: Catálogo + RBAC base | Catálogo primero, sin migraciones |
+| — | → Fase 9: Schema core + Pedidos + Config | Schema core que habilita Fase 10 |
+| Fase 10: Shipping solo | → Parte de Fase 10: Integraciones | Shipping con MeLi, comparten prerequisitos |
+| Fase 11: Platform Console | → Fase 11: Módulos restantes TC | Platform Console espera más |
+| Fase 12: Shopify | → Fase 12: Platform Console | Subió un lugar |
+| — | → Fase 13: Shopify | Nuevo número |
+
+### Archivos actualizados (rev. 7)
+
+| Archivo | Cambio |
+|---------|--------|
+| `docs/roadmap/implementation-phases.md` | Re-baseline completo — Fases 1-13 con nueva estructura + nota de re-baseline |
+| `docs/roadmap/milestones.md` | Actualizado: Alpha Interno (bloqueante correcto), Beta Controlada (ajuste de timeline), RC ajustado |
+| `docs/product/current-scope.md` | Módulos actualizados con nueva asignación de Fases; endpoints faltantes por Fase |
+| `docs/architecture/front-back-separation.md` | BLOQUEs alineados con nueva estructura de Fases; tablas y endpoints por Fase |
+| `docs/risks/open-questions.md` | OQ-06 añadido; columna "Bloquea" añadida; OQ-P03 con contexto de re-baseline |
+| `docs/research/pending-validations.md` | Columna "Bloquea" añadida; PV-03 y PV-06 marcados como críticos para Fase 10 |
+| `AGENTS.md` | Rev. 7 — nueva tabla de Fases en sección de contexto documental |
+
+### Contradicciones/errores corregidos (rev. 6 — sesión anterior)
+
+| Archivo | Error | Corrección |
+|---------|-------|-----------|
+| `README.md` | Completamente desactualizado — Next.js 15, Python 3.11+, 5 migraciones, estados obsoletos | Reescritura completa |
+| `docs/architecture/overview.md` | Diagrama incorrecto: orchestrator → connector-whatsapp → Meta API | Corregido: orchestrator → Meta API directo |
+| `docs/roadmap/implementation-phases.md` | Shipping en Fase 9 Y Fase 10 (contradicción) | Resuelta (luego re-baselined en rev. 7) |
+| `docs/research/official-doc-checklist.md` | "Next.js 15 Docs" — stack real es 14.1.0 | Corregido |
+| `docs/architecture/modules.md` | Fecha desfasada 2026-04-08 | Actualizado |
+
+---
+
+## Trabajo completado en sesión anterior (rev. 5 — 2026-04-09)
+
+Se auditó la completitud documental del repositorio y se corrigieron contradicciones encontradas.
+
+### Contradicciones corregidas (rev. 5)
+
+| Archivo | Error | Corrección |
+|---------|-------|-----------|
+| `docs/architecture/overview.md` | Diagrama decía "Next.js 15" | Corregido a "Next.js 14.1.0" |
+| `docs/architecture/modules.md` | Decía "Next.js 15" | Corregido a "Next.js 14.1.0" |
+| `docs/architecture/modules.md` | Versiones Python stale: `fastapi==0.115.12`, `uvicorn==0.34.0`, `python-dotenv==1.0.1` | Corregido a versiones reales en requirements.txt |
+| `docs/architecture/modules.md` | `SUPABASE_JWT_SECRET` marcado como pendiente | Corregido a ✅ resuelto |
+| `docs/operations/HUMAN_INTERVENTIONS.md` | IH-004 marcado EN PROGRESO | Actualizado: PASOS 1-5 ✅, PASOS 6-7 pendientes humano |
+| `docs/operations/HUMAN_INTERVENTIONS.md` | IH-005 marcado PENDIENTE | Actualizado a ✅ COMPLETADO |
+
+---
+
+## Trabajo completado en sesión anterior (rev. 4)
+
+Se completó una actualización documental completa del repositorio.
+
+### Archivos CREADOS
+
+| Archivo | Propósito |
+|---------|-----------|
+| `docs/product/current-scope.md` | Estado real de implementación hoy |
+| `docs/product/personas-and-consoles.md` | Definición de Tenant Console y Platform Console |
+| `docs/product/admin-ui-modules.md` | Módulos detallados de ambas consolas con estado |
+| `docs/product/navigation-map.md` | Mapa de navegación objetivo de ambas consolas |
+| `docs/architecture/front-back-separation.md` | Mapeo Frontend ↔ Backend por módulo |
+| `docs/integrations/courier-envia.md` | Diseño completo del módulo Shipping/Courier (Envia) |
+
+### Archivos ACTUALIZADOS (reescritos)
+
+| Archivo | Qué cambió |
+|---------|-----------|
+| `docs/product/overview.md` | De 1 línea a doc completo del producto |
+| `docs/product/scope.md` | De 1 línea a alcance funcional completo |
+| `docs/architecture/overview.md` | Actualizado modelo Gemini, estado servicios, diagrama |
+| `docs/architecture/connector-framework.md` | Actualizado WA status, añadido Envia diseñado |
+| `docs/integrations/whatsapp.md` | Actualizado (HMAC ok, PASO 6 pendiente, IH-006) |
+| `docs/integrations/mercadolibre.md` | De 1 línea a doc completo (Fase 8) |
+| `docs/integrations/telegram.md` | De 1 línea a doc completo (canal interno) |
+| `docs/data/schema.md` | Expandido con tablas vigentes y pendientes |
+| `docs/data/tenant-isolation.md` | De 1 línea a doc completo |
+| `docs/data/audit-model.md` | De 1 línea a doc completo |
+| `docs/roadmap/implementation-phases.md` | Corregido: Fases 6 y 7 con estado real, Fases 8-12 añadidas |
+| `docs/risks/risk-register.md` | Añadidos R-15, R-16, R-17, R-18, R-E01, R-E02, R-E05 |
+| `docs/risks/open-questions.md` | De 1 línea a lista completa de preguntas abiertas |
+| `docs/risks/assumptions-to-avoid.md` | De 1 línea a lista completa |
+| `docs/research/official-doc-checklist.md` | Expandido con todas las APIs del proyecto |
+| `docs/research/validated-decisions.md` | De stub a lista completa de decisiones validadas |
+| `docs/research/pending-validations.md` | Expandido con validaciones prioritizadas |
+| `docs/operations/runbooks.md` | De 1 línea a runbooks operacionales completos |
+| `docs/operations/support-model.md` | De 1 línea a modelo de soporte completo |
+| `docs/operations/onboarding-tenants.md` | De 1 línea a proceso completo |
+| `docs/operations/human-interventions.md` | Consolidado → redirige a HUMAN_INTERVENTIONS.md |
 
 ---
 
 ## Infraestructura activa (Supabase)
 
 - **Proyecto**: `***SUPABASE_PROJECT_REF_REDACTED***` (us-east-1)
-- **Tenant**: `Matriz Commerce Dev` — id `0fb0777e-f3e4-48c7-89bf-a25aa201c0c9`
+- **Tenant dev**: `Matriz Commerce Dev` — `0fb0777e-f3e4-48c7-89bf-a25aa201c0c9`
 - **meta_waba_id**: `2159052118202272` ✅
-- **6 migraciones aplicadas** incluyendo `messages.processed BOOLEAN DEFAULT false`
+- **6 migraciones aplicadas**
 
 Para ejecutar SQL desde la VM:
 ```bash
 supabase db query --linked "SELECT * FROM tenants;"
 supabase db query --linked -f supabase/migrations/archivo.sql
 ```
-> `psql` directo NO funciona (Supavisor bloquea TCP desde esta IP)
+> `psql` directo NO funciona (Supavisor bloquea TCP)
 
 ---
 
-## Credenciales y estado de tokens
+## Estado de credenciales
 
 | Token | Estado | Acción |
-|---|---|---|
-| `META_ACCESS_TOKEN` | ✅ Renovado 2026-04-08 | **⚠️ Temporal ~24h**. Para Render producción: crear System User Token permanente (IH-006) |
-| `GEMINI_API_KEY` | ✅ Configurada en `.env` | Lista para deploy |
-| `SUPABASE_JWT_SECRET` | ✅ Presente en `.env` | Lista para deploy |
+|-------|--------|--------|
+| `META_ACCESS_TOKEN` | ✅ Permanente | System User `commerce-ops` — sin expiración (IH-006 ✅) |
+| `GEMINI_API_KEY` | ✅ Configurada | Lista |
+| `SUPABASE_JWT_SECRET` | ✅ Presente | Lista |
 
 ---
 
-## Entorno de la VM (Oracle Linux 9)
+## Entorno VM (Oracle Linux 9)
 
-- **Sin venv** — todo con `pip3` de sistema (máquina dedicada)
-- **Python**: 3.9.25 — usar `Optional[X]` no `X | None`
+- **Sin venv** — pip3 sistema (máquina dedicada)
+- **Python**: 3.9.25 — usar `Optional[X]`, no `X | None` ⚠️ EOL
 - **Node**: v20.20.2 via nvm, pnpm 10.33.0
-- **Binarios instalados**: `supabase` CLI v2.84.2 en `/usr/local/bin/`
-
-Paquetes Python instalados a nivel sistema — verificados 2026-04-08:
-```
-google-genai==1.47.0       ← SDK oficial (google-generativeai DESINSTALADO)
-supabase==2.28.3           ← alineado con requirements.txt ✅
-httpx==0.28.1
-pydantic==2.12.5
-PyJWT==2.10.1
-fastapi==0.128.8           ← alineado con requirements.txt ✅
-uvicorn==0.39.0            ← alineado con requirements.txt ✅
-python-dotenv==1.2.1       ← alineado con requirements.txt ✅
-python-multipart==0.0.20
-starlette==0.49.3          ← dep transitiva de fastapi
-anyio==4.12.1
-git-filter-repo (pip)
-```
+- **Supabase CLI**: v2.84.2 en `/usr/local/bin/`
 
 ---
 
-## Cómo probar localmente antes del deploy
+## Lecciones aprendidas críticas
 
-```bash
-# Terminal 1 — WhatsApp Connector
-cd /home/ansible/workspaces/commerce-ops-platform/services/connector-whatsapp
-export $(grep -v '^#' ../../.env | sed 's/="\(.*\)"/=\1/' | xargs)
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-# Health check: curl http://localhost:8000/health
-
-# Terminal 2 — AI Orchestrator (requiere GEMINI_API_KEY en .env)
-cd /home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator
-export $(grep -v '^#' ../../.env | sed 's/="\(.*\)"/=\1/' | xargs)
-python3 main.py
-
-# Terminal 3 — Frontend
-cd /home/ansible/workspaces/commerce-ops-platform
-pnpm --filter web dev
-# Acceso: http://localhost:3000
-```
+1. `gemini-2.0-flash` NO disponible en cuentas nuevas. Usar `gemini-2.5-flash`.
+2. `NODE_ENV=production` + `npm install` omite devDeps. Fix: `--include=dev`.
+3. `apps/web` requiere `postcss.config.js` + autoprefixer en devDeps para TailwindCSS en prod.
+4. `psql` TCP bloqueado por Supavisor. Usar `supabase db query --linked`.
+5. `google-generativeai` está deprecated. Usar `google-genai==1.47.0`.
+6. En triggers Supabase: `NEW.id` en tabla `tenant_users` es la PK de la fila, **no** el user_id. Siempre usar `NEW.user_id` para referenciar `auth.users.id`.
+7. Después de cambiar `app_metadata` en Supabase Auth, el usuario debe hacer logout + login para obtener un JWT nuevo con los claims actualizados.
 
 ---
 
-## Documentos de referencia en el repo
+## Contexto documental ahora vigente
 
-| Archivo | Contenido |
-|---|---|
-| `AGENTS.md` | **Estado del sistema vigente** — leer primero siempre |
-| `docs/architecture/modules.md` | Estado de cada módulo |
-| `docs/roadmap/implementation-phases.md` | Avance por fases |
-| `docs/operations/HUMAN_INTERVENTIONS.md` | IH-001 a IH-004 con estado |
-| `docs/deployment/DEPLOYMENT_GUIDE.md` | Guía paso a paso para deploy |
-| `docs/setup/development_environment.md` | Setup de la VM |
-| `render.yaml` | Infraestructura como código para Render |
+Luego de la actualización de esta sesión, el repositorio tiene documentación completa de:
+
+- **Producto**: qué se construye, alcance, consolas, personas
+- **Interfaz**: todos los módulos de Tenant Console y Platform Console con estados
+- **Arquitectura**: mapeo frontend ↔ backend por módulo, conectores, async
+- **Shipping/Courier**: diseño completo del módulo con Envia
+- **Datos**: schema completo vigente y pendiente, RLS, auditoría
+- **Roadmap**: fases 1-12 con estado real
+- **Riesgos**: registro actualizado con Envia y producto
+- **Operaciones**: runbooks, soporte, onboarding, intervenciones humanas
 
 ---
 
-## Decisiones de diseño importantes (no revertir)
+## Próximos pasos (en orden) — baseline rev. 7
 
-1. **Sin `.venv`** en esta VM — todo pip3 sistema (máquina dedicada al proyecto)
-2. **Supabase CLI `--linked`** para DDL — psql TCP bloqueado por Supavisor
-3. **Polling activo** en el Orchestrator (no Realtime) — más simple para Render worker
-4. **Soft delete** en productos (`is_active=False`) — para mantener historial de pedidos
-5. **SDK Gemini**: `google-genai==1.47.0` (nuevo) — no usar `google-generativeai` (deprecado)
-6. **Python 3.9 compatible** — usar `Optional[X]` en type hints, no `X | None`
-7. **`git-filter-repo`** ya instalado en VM para limpiar archivos pesados del historial
+### Fase 8 — Catálogo completo + RBAC base (BLOQUE 1)
+
+> **Sin migraciones nuevas.** Solo usa tablas existentes.
+
+4. Agregar edición de producto desde UI (formulario + endpoint PUT en `services/api`)
+5. Agregar soft delete desde UI (UPDATE `is_active=false`)
+6. Agregar gestión de variantes múltiples
+7. Migrar lectura de catálogo a `services/api` (en vez de Supabase directo)
+8. Implementar RBAC básico por endpoint (`owner`/`manager` editan, `agent` solo lee)
+
+### Fase 9 — Schema core + Pedidos + Configuración (BLOQUES 2+3)
+
+> **Prerequisito de Fase 10.** Sin estas tablas, ni MeLi ni Envia pueden implementarse.
+
+9. Crear migraciones: `orders`, `order_items`, `tenant_integrations`, `contacts`, `notification_settings`
+10. Implementar endpoints CRUD en `services/api` para orders, settings, team, contacts
+11. Implementar UI: `/dashboard/orders`, `/dashboard/settings`, `/dashboard/contacts`
+
+### Fase 10 — Integraciones: MeLi + Envia juntos (BLOQUE 4)
+
+> **Prerequisitos antes de empezar**: PV-03 y PV-06 validados; tablas de Fase 9 creadas.
+
+12. Validar PV-03 (modelo auth Envia) y PV-06 (OAuth scopes MeLi)
+13. Implementar `services/connector-mercadolibre` (OAuth + catalog + orders)
+14. Implementar `services/connector-envia` + migración `shipments`
+15. Implementar UI: `/dashboard/integrations`, `/dashboard/shipping`
 
 ---
 
@@ -176,4 +276,19 @@ pnpm --filter web dev
 
 `develop` → `origin/develop` en `https://github.com/Crittan01/commerce-ops-platform`
 
-Last commit: `c6d644f` — "fix: remove node_modules from git tracking"
+---
+
+## Documentos de referencia
+
+| Archivo | Contenido |
+|---------|-----------|
+| `AGENTS.md` | **Estado del sistema vigente** — leer primero siempre |
+| `docs/product/current-scope.md` | Estado de implementación real hoy |
+| `docs/product/personas-and-consoles.md` | Las dos consolas del producto |
+| `docs/product/admin-ui-modules.md` | Módulos con estado por consola |
+| `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend |
+| `docs/integrations/courier-envia.md` | Diseño Shipping/Courier |
+| `docs/operations/HUMAN_INTERVENTIONS.md` | IH-001 a IH-006 con pasos |
+| `docs/roadmap/implementation-phases.md` | Fases 1-12 con estado |
+| `docs/risks/risk-register.md` | Riesgos activos |
+| `docs/deployment/FASE7_RENDER_DEPLOY.md` | Guía de deploy en Render |

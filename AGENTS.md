@@ -9,6 +9,41 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
+## Contexto documental vigente (actualizado 2026-04-09, rev. 7 — re-baseline completo)
+
+La documentación del repositorio fue completamente gobernada, auditada y re-baselined.
+Archivos clave del producto y arquitectura existen y están alineados:
+- `docs/product/` — product overview, scope, current-scope, personas-and-consoles, admin-ui-modules, navigation-map
+- `docs/architecture/front-back-separation.md` — mapeo Frontend ↔ Backend + BLOQUEs alineados con nueva estructura de Fases
+- `docs/integrations/courier-envia.md` — diseño completo del módulo Shipping/Courier (Envia)
+- `docs/roadmap/implementation-phases.md` — re-baselined: Fases 1-13 con nueva estructura
+- `docs/roadmap/milestones.md` — actualizado con ajustes de timeline por re-baseline
+- Todos los stubs de docs/risks/, docs/research/, docs/operations/ fueron expandidos
+- rev. 5: Contradicciones de versiones y estados corregidas
+- rev. 6: README reescrito, diagrama de arquitectura corregido, contradicción Fase 9/10 Shipping resuelta
+- rev. 7: Re-baseline completo — dependencia invertida MeLi/Orders corregida; roadmap reestructurado
+  Fases 8-13; BLOQUEs alineados con Fases; milestones actualizados
+
+### NUEVA ESTRUCTURA DE FASES (rev. 7)
+
+| Fase | Nombre | Estado |
+|------|--------|--------|
+| 1-6 | Base, Auth, UI, WhatsApp, AI, API Gateway | ✅ COMPLETADAS |
+| 7 | Deploy Render + E2E | ✅ COMPLETADA — WhatsApp↔Gemini↔Inbox confirmado |
+| 8 | Catálogo completo + RBAC base | ❌ PENDIENTE |
+| 9 | Schema core + Pedidos + Configuración + Equipo | ❌ PENDIENTE |
+| 10 | Integraciones: MeLi + Envia/Shipping (juntos) | 📋 DISEÑADO |
+| 11 | Módulos restantes Tenant Console | ❌ PENDIENTE |
+| 12 | Platform Console | ❌ PENDIENTE — OQ-P01 bloqueante |
+| 13 | Shopify / Tienda custom | ❌ FUTURO |
+
+> **Cambio clave**: MeLi era Fase 8 antes; ahora es Fase 10 junto con Envia.
+> Razón: MeLi necesita `orders` y `tenant_integrations` que no existen — deben crearse en Fase 9 primero.
+
+Ver `docs/HANDOFF.md` para estado completo y próximos pasos.
+
+---
+
 ## Estado Actual del Sistema — 2026-04-09T03:30 CDT
 
 | Módulo | Estado | Notas |
@@ -22,12 +57,12 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 | Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
 | API Gateway (Fase 6) | ✅ Live en Render | JWT real, productos CRUD, conversaciones |
 | render.yaml | ✅ v5 | `npm install --include=dev` + `NODE_OPTIONS=460MB` |
-| Deploy Render (Fase 7) | 🟡 PASO 5 ✅ | Pendiente: PASO 6 (Meta Webhook) + PASO 7 (E2E) |
+| Deploy Render (Fase 7) | ✅ COMPLETADA | E2E confirmado 2026-04-09 — WhatsApp ↔ Gemini ↔ Inbox OK |
 | `services/orchestrator/` | ✅ ELIMINADO | Prototipo obsoleto — canónico: `services/ai-orchestrator/` |
 | Integración MeLi | ❌ Pendiente | Fase 8 |
 
 **Credenciales activas (`.env` — nunca al repo) — estado 2026-04-09:**
-- `META_ACCESS_TOKEN`: ✅ En Render Dashboard — **⚠️ token temporal ~24h, migrar a System User Token (IH-006)**
+- `META_ACCESS_TOKEN`: ✅ **Token permanente** — System User `commerce-ops` creado en Meta Business Suite (IH-006 ✅ 2026-04-09)
 - `GEMINI_API_KEY`: ✅ Configurada — billing habilitado en Google AI Studio (paid tier)
 - `SUPABASE_JWT_SECRET`: ✅ Presente
 - `meta_waba_id`: `2159052118202272` ✅
@@ -68,12 +103,9 @@ Completado ✅:
 - Gemini billing habilitado + modelo `gemini-2.5-flash`
 - TailwindCSS fix: `postcss.config.js` + `--include=dev` + clear build cache
 
-**Pendiente (requiere acción humana):**
-1. **[IH-006]** → crear System User Token permanente en Meta Business Suite
-2. **PASO 6** → actualizar Callback URL en Meta Developers → `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook` + Verify Token `***META_VERIFY_TOKEN_LEGACY_REDACTED***`
-3. **PASO 7** → Test E2E — enviar WhatsApp desde celular → verificar respuesta automática de Gemini
+**Fase 7 completada al 100% ✅ — 2026-04-09**
 
-**Siguiente fase: Fase 8 — Integración Mercado Libre**
+**Siguiente fase: Fase 8 — Catálogo completo + RBAC base**
 
 **Para activar el Orchestrator hoy (local):**
 ```bash
@@ -102,19 +134,30 @@ Ver intervenciones humanas: `docs/operations/HUMAN_INTERVENTIONS.md`
 
 - `.agents/rules/` — Reglas técnicas expandidas
 - `.agents/workflows/` — Workflows de implementación, feature, seguridad
-- `docs/architecture/modules.md` — Responsabilidades de cada módulo
+- `docs/product/current-scope.md` — Estado real de implementación hoy
+- `docs/product/admin-ui-modules.md` — Módulos de ambas consolas con estado
+- `docs/architecture/modules.md` — Responsabilidades de cada módulo backend
+- `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend
 - `docs/architecture/multi-tenant-security.md` — Contratos de RLS
+- `docs/integrations/courier-envia.md` — Diseño de Shipping/Courier
 
-## Stack Obligatorio
+## Stack — Versiones Reales en Repo
 
-| Capa | Tecnología |
-|---|---|
-| Frontend | Next.js 15 + React + TypeScript + TailwindCSS + shadcn/ui |
-| Backend | Python 3.11+ + FastAPI |
-| DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) |
-| IA | Google Gemini API |
-| Mensajería | WhatsApp Cloud API (Meta oficial) |
-| Hosting | Render (Web Services + Background Workers) |
+> Verificado en `apps/web/package.json` y `services/*/requirements.txt`.
+
+| Capa | Versión real | Objetivo futuro |
+|---|---|---|
+| Frontend | Next.js **14.1.0** + React ^18 + TypeScript ^5 | Next.js 15.x |
+| UI | TailwindCSS ^3.3.0 + shadcn/ui (5 componentes en `apps/web/components/ui/`) | Componentes en `packages/ui` |
+| Backend | Python **3.9.25** (VM, EOL) + FastAPI 0.128.8 | Python 3.11+ |
+| DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) | — |
+| IA | Google Gemini API (`google-genai==1.47.0`, modelo `gemini-2.5-flash`) | — |
+| Mensajería | WhatsApp Cloud API (Meta oficial v21.0) | — |
+| Shipping | Envia (📋 diseñado — no implementado) | — |
+| Hosting | Render (Web Services + Background Workers) — Free plan | Starter antes de producción |
+
+> `packages/ui` está vacío. Los componentes UI viven en `apps/web/components/ui/`.
+> No asumir versiones de las docs — verificar siempre en `package.json` y `requirements.txt`.
 
 ## Crítico — Seguridad Git
 
