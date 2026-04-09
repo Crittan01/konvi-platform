@@ -31,7 +31,7 @@ services:
     region: oregon
     plan: free
     rootDir: apps/web
-    buildCommand: npm install && NODE_OPTIONS='--max-old-space-size=460' npm run build
+    buildCommand: npm install --include=dev && NODE_OPTIONS='--max-old-space-size=460' npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
