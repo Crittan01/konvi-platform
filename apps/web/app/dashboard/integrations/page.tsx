@@ -1,13 +1,14 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 
-const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
+const MELI_CLIENT_ID  = process.env.MELI_CLIENT_ID ?? ''
+const MELI_REDIRECT_URI = process.env.MELI_REDIRECT_URI ?? 'https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback'
+const MELI_AUTH_URL   = process.env.MELI_AUTH_URL ?? 'https://auth.mercadolibre.com.co/authorization'
 
 type Integration = {
   provider: string
@@ -51,6 +52,12 @@ export default async function IntegrationsPage({
 
   const enviaConnected = fullList.find(i => i.provider === 'envia')?.status === 'connected'
 
+  // Construir URL de auth MeLi directamente (evita fetch al API)
+  const meliState = tenantId ? Buffer.from(tenantId).toString('base64url') : ''
+  const meliAuthUrl = MELI_CLIENT_ID && meliState
+    ? `${MELI_AUTH_URL}?response_type=code&client_id=${MELI_CLIENT_ID}&redirect_uri=${encodeURIComponent(MELI_REDIRECT_URI)}&state=${meliState}`
+    : null
+
   // ── Server Actions ────────────────────────────────────────────────────────
 
   async function saveEnviaKey(formData: FormData) {
@@ -75,20 +82,6 @@ export default async function IntegrationsPage({
     }, { onConflict: 'tenant_id,provider' })
 
     revalidatePath('/dashboard/integrations')
-  }
-
-  async function connectMeli() {
-    'use server'
-    const sb = createClient()
-    const { data: { session: s } } = await sb.auth.getSession()
-    if (!s?.access_token) return
-
-    const res = await fetch(`${API_URL}/api/v1/integrations/meli/auth-url`, {
-      headers: { Authorization: `Bearer ${s.access_token}` },
-    })
-    if (!res.ok) return
-    const { auth_url } = await res.json()
-    redirect(auth_url)
   }
 
   async function disconnectEnvia(formData: FormData) {
@@ -217,11 +210,18 @@ export default async function IntegrationsPage({
                 <p className="text-sm text-muted-foreground">
                   Conecta tu cuenta de vendedor via OAuth. Serás redirigido a MeLi para autorizar.
                 </p>
-                <form action={connectMeli}>
-                  <Button type="submit" size="sm" className="w-full">
+                {meliAuthUrl ? (
+                  <a href={meliAuthUrl} className="block w-full">
+                    <Button size="sm" className="w-full">
+                      Conectar con Mercado Libre
+                    </Button>
+                  </a>
+                ) : (
+                  <Button size="sm" className="w-full" disabled>
                     Conectar con Mercado Libre
+                    <span className="ml-2 text-xs">(configuración pendiente)</span>
                   </Button>
-                </form>
+                )}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Solo el owner puede configurar integraciones.</p>

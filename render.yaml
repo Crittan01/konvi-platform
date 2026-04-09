@@ -44,6 +44,12 @@ services:
         sync: false
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
+      - key: MELI_CLIENT_ID
+        sync: false
+      - key: MELI_REDIRECT_URI
+        sync: false
+      - key: MELI_AUTH_URL
+        sync: false
     healthCheckPath: /
     autoDeploy: true
 
