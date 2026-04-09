@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-09 (rev. 8)
+# Handoff — Estado del Proyecto al 2026-04-09 (rev. 9)
 
 Este documento existe para que el próximo chat de IA retome trabajo exactamente desde donde se dejó.
 **Leer este archivo antes de cualquier otra acción.**
@@ -34,6 +34,9 @@ Este documento existe para que el próximo chat de IA retome trabajo exactamente
 | 5 | Inbox AI (Realtime) | `apps/web/app/dashboard/inbox/page.tsx` |
 | 6 | API Gateway real | `services/api/` (JWT real, CRUD completo) |
 | 7 | Deploy Render + E2E confirmado | 4 servicios live, WhatsApp ↔ Gemini ↔ Inbox ✅ |
+| 8 | Catálogo completo + RBAC base | `services/api/routers/products.py`, `apps/web/app/dashboard/catalog/` |
+| 9 | Schema core + Pedidos + Config + Equipo | `supabase/migrations/20260409220000_fase9_schema_core.sql`, routers orders/contacts/settings |
+| 10 | Integraciones MeLi + Envia | `services/api/integrations/`, `apps/web/app/dashboard/integrations/`, `apps/web/app/dashboard/shipping/` |
 
 ---
 
@@ -241,43 +244,73 @@ Luego de la actualización de esta sesión, el repositorio tiene documentación 
 
 ---
 
-## Próximos pasos (en orden) — baseline rev. 7
+## Trabajo completado rev. 9 — Fases 8, 9 y 10 (2026-04-09)
 
-### Fase 8 — Catálogo completo + RBAC base (BLOQUE 1) 🟡 EN PROGRESO
+### Fase 8 — Catálogo completo + RBAC base ✅
 
-> **Sin migraciones nuevas.** Solo usa tablas existentes.
+- ✅ `services/api/routers/products.py` reescrito para alinear con schema real (`title`/`status`/`product_variations`)
+- ✅ RBAC en API: `get_current_role()` + `require_write_role()` en `services/api/dependencies/auth.py`
+- ✅ Edición de producto + soft delete desde UI
+- ✅ Sidebar ampliado: Pedidos, Contactos, Integraciones, Envíos, Configuración
+- ✅ Botón logout + mensaje de error en login
 
-**⚠️ Deuda técnica crítica detectada**: `services/api/routers/products.py` tiene modelos Pydantic desalineados con el schema real (usa `name`, `is_active`, `price` en products — el schema tiene `title`, `status`, y `price` en `product_variations`). Corregir como primer paso de Fase 8. Ver R-19.
+### Fase 9 — Schema core + Pedidos + Config + Equipo ✅
 
-**En scope (Fase 8):**
-- [ ] Corregir `services/api/routers/products.py` — alinear con schema real
-- [ ] RBAC en API: `get_current_role` en `auth.py`, proteger endpoints escritura
-- [ ] Edición de producto desde UI
-- [ ] Soft delete desde UI (`status = 'inactive'`)
-- [ ] Mostrar/ocultar acciones según role
+- ✅ Migración `20260409220000_fase9_schema_core.sql` aplicada — 5 tablas nuevas: `contacts`, `orders`, `order_items`, `tenant_integrations`, `notification_settings`
+- ✅ Migración `20260409230000_shipments.sql` aplicada — tabla `shipments`
+- ✅ Routers nuevos: `orders.py`, `contacts.py`, `settings.py`
+- ✅ UI nueva: `/dashboard/orders`, `/dashboard/contacts`, `/dashboard/settings`
+- ✅ `get_tenant_team()` función SECURITY DEFINER para exponer emails de auth.users sin service_role
 
-**Deferred (documentado, no bloqueante para Fase 8):**
-- Migrar lecturas catálogo a `services/api` → Fase 11
-- UI de variantes múltiples → Fase 9/11
-- SKU en productos → requiere migración ALTER TABLE, Fase 9
-- Paginación catálogo → Fase 11
+**Nota de tipo crítica**: Supabase retorna FK join de `contacts` como array (`Contact[]`), no objeto. El tipo en `orders/page.tsx` es `Contact | Contact[] | null` con guard `Array.isArray()`.
 
-### Fase 9 — Schema core + Pedidos + Configuración (BLOQUES 2+3)
+### Fase 10 — Integraciones MeLi + Envia ✅
 
-> **Prerequisito de Fase 10.** Sin estas tablas, ni MeLi ni Envia pueden implementarse.
+- ✅ `services/api/integrations/meli_client.py` — OAuth 2.0 por tenant, URL country-specific via `MELI_AUTH_URL` env var
+- ✅ `services/api/integrations/envia_client.py` — Bearer per-tenant, sandbox/prod configurable
+- ✅ `services/api/routers/integrations.py` — endpoints connect/disconnect Envia y MeLi + callback OAuth
+- ✅ `services/api/routers/shipping.py` — cotización + historial
+- ✅ UI `/dashboard/integrations` — estado, connect/disconnect ambas integraciones
+- ✅ UI `/dashboard/shipping` — banner si Envia no conectado, historial de cotizaciones
+- ✅ MeLi OAuth URL construida en Server Component directamente (sin fetch al API intermediario)
+- ✅ MeLi conectado: user_id `603780765` · Envia Sandbox conectado: Empresa #5017
+- ✅ IH-007 (app MeLi) e IH-008 (API key Envia) completados
 
-9. Crear migraciones: `orders`, `order_items`, `tenant_integrations`, `contacts`, `notification_settings`
-10. Implementar endpoints CRUD en `services/api` para orders, settings, team, contacts
-11. Implementar UI: `/dashboard/orders`, `/dashboard/settings`, `/dashboard/contacts`
+**Env vars requeridas en Render:**
 
-### Fase 10 — Integraciones: MeLi + Envia juntos (BLOQUE 4)
+| Var | Servicio |
+|-----|----------|
+| `MELI_CLIENT_ID` | web + api |
+| `MELI_CLIENT_SECRET` | api |
+| `MELI_REDIRECT_URI` | web + api |
+| `MELI_AUTH_URL` | web + api |
+| `API_URL` | web |
 
-> **Prerequisitos antes de empezar**: PV-03 y PV-06 validados; tablas de Fase 9 creadas.
+---
 
-12. Validar PV-03 (modelo auth Envia) y PV-06 (OAuth scopes MeLi)
-13. Implementar `services/connector-mercadolibre` (OAuth + catalog + orders)
-14. Implementar `services/connector-envia` + migración `shipments`
-15. Implementar UI: `/dashboard/integrations`, `/dashboard/shipping`
+## Próximos pasos — Fase 11 (BLOQUE 5)
+
+### Fase 11 — Módulos restantes Tenant Console 🟡 EN PROGRESO
+
+**Módulos pendientes:**
+
+| Módulo | Ruta | Estado |
+|--------|------|--------|
+| Inventario | `/dashboard/inventory` | ❌ Pendiente |
+| Métricas | `/dashboard/metrics` | ❌ Pendiente |
+| Auditoría | `/dashboard/audit` | ❌ Pendiente |
+| Media | `/dashboard/media` | ❌ Pendiente |
+| Knowledge Base | `/dashboard/knowledge-base` | ❌ Pendiente |
+| Webhook MeLi | `GET /api/v1/meli/webhook` | ❌ Pendiente (Fase 11) |
+
+**Migraciones necesarias:**
+- `audit_log` — log de acciones por usuario
+- `stock_movements` — historial de movimientos de inventario
+- `kb_documents` — documentos de base de conocimiento para RAG
+
+**AI pendiente:**
+- `tools/kb_tool.py` — integración Knowledge Base en Orchestrator
+- Pipeline RAG / pgvector (validar PV-04: disponibilidad en plan actual)
 
 ---
 
@@ -297,7 +330,7 @@ Luego de la actualización de esta sesión, el repositorio tiene documentación 
 | `docs/product/admin-ui-modules.md` | Módulos con estado por consola |
 | `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend |
 | `docs/integrations/courier-envia.md` | Diseño Shipping/Courier |
-| `docs/operations/HUMAN_INTERVENTIONS.md` | IH-001 a IH-006 con pasos |
+| `docs/operations/HUMAN_INTERVENTIONS.md` | IH-001 a IH-008 — todos completados excepto renovación periódica META_ACCESS_TOKEN |
 | `docs/roadmap/implementation-phases.md` | Fases 1-12 con estado |
 | `docs/risks/risk-register.md` | Riesgos activos |
 | `docs/deployment/FASE7_RENDER_DEPLOY.md` | Guía de deploy en Render |
