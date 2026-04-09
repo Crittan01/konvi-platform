@@ -199,8 +199,8 @@ curl https://commerce-ops-api.onrender.com/health        → {"status":"ok"}
 
 ## [IH-007] Registrar App en MeLi Developers — Fase 10
 
-**Estado**: ⏳ PENDIENTE — bloquea la conexión OAuth de MeLi  
-**Bloquea**: Botón "Conectar con Mercado Libre" en `/dashboard/integrations`
+**Estado**: ✅ COMPLETADO — 2026-04-09 (app creada, credenciales en Render pendiente de confirmar deploy)  
+**Bloquea**: ~~Botón "Conectar con Mercado Libre" en `/dashboard/integrations`~~
 
 ### Por qué es necesario
 
