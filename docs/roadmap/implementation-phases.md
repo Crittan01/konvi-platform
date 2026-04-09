@@ -1,6 +1,6 @@
 # Fases de Implementación — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 8 — Fase 7 cerrada, Fase 8 en progreso)
+Última actualización: 2026-04-09 (rev. 9 — Fases 8-10 cerradas, Fase 11 en progreso)
 
 ---
 
@@ -47,8 +47,8 @@ Adicionalmente:
 | 7 | Deploy Render + E2E | ✅ Completa | COMPLETADO 2026-04-09 |
 | 8 | Catálogo completo + RBAC base | ✅ Completa | COMPLETADO 2026-04-09 |
 | 9 | Schema core + Pedidos + Configuración + Equipo | ✅ Completa | COMPLETADO 2026-04-09 |
-| 10 | Integraciones — MeLi + Envia/Shipping | 🟡 Parcial | IMPLEMENTADO — pendiente IH-007 (MeLi app) + IH-008 (Envia key) |
-| 11 | Módulos restantes Tenant Console | ❌ Pendiente | PENDIENTE (prerequisitos en Fases 8-9) |
+| 10 | Integraciones — MeLi + Envia/Shipping | ✅ Completa | COMPLETADO 2026-04-09 — MeLi OAuth + Envia Sandbox conectados |
+| 11 | Módulos restantes Tenant Console | 🟡 En progreso | EN PROGRESO |
 | 12 | Platform Console | ❌ Pendiente | PENDIENTE (prerequisito: OQ-P01 + Fase 9+ completa) |
 | 13 | Shopify / Tienda custom | ❌ Futuro | FUTURO |
 
@@ -184,7 +184,7 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 8 — Catálogo completo + RBAC base 🟡 EN PROGRESO
+### Fase 8 — Catálogo completo + RBAC base ✅ COMPLETADO — 2026-04-09
 
 **BLOQUE 1 — usando solo tablas existentes (sin migraciones nuevas)**
 
@@ -224,7 +224,7 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 9 — Schema core + Pedidos + Configuración + Equipo ❌ PENDIENTE
+### Fase 9 — Schema core + Pedidos + Configuración + Equipo ✅ COMPLETADO — 2026-04-09
 
 **BLOQUES 2 + 3 — requiere migraciones nuevas**
 
@@ -256,9 +256,18 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 10 — Integraciones: MeLi + Envia/Shipping 📋 DISEÑADO / PENDIENTE
+### Fase 10 — Integraciones: MeLi + Envia/Shipping ✅ COMPLETADO — 2026-04-09
 
 **BLOQUE 4 — prerequisito: Fase 9 completada + PV-03 validado**
+
+**Completado:**
+- ✅ OAuth 2.0 MeLi por tenant — user_id `603780765` conectado, tokens en `tenant_integrations`
+- ✅ Envia Sandbox conectado — token guardado en `tenant_integrations`, entorno sandbox
+- ✅ UI `/dashboard/integrations` — estado de ambas integraciones, connect/disconnect
+- ✅ UI `/dashboard/shipping` — historial de cotizaciones (cotización requiere probar endpoint)
+- ✅ IH-007 y IH-008 completados
+- ✅ Botón OAuth MeLi construye URL en Server Component (sin intermediario API)
+
 
 **Objetivo**: Conectar marketplaces y shipping. MeLi y Envia van juntos porque comparten prerequisitos.
 
@@ -291,7 +300,7 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 11 — Módulos restantes de Tenant Console ❌ PENDIENTE
+### Fase 11 — Módulos restantes de Tenant Console 🟡 EN PROGRESO
 
 **BLOQUE 5 — prerequisito: Fases 8-9 completadas**
 
