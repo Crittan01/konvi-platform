@@ -1,7 +1,7 @@
 # Fase 7 — Deploy en Render.com
 
-**Estado**: 🟡 EN PROGRESO  
-**Fecha**: 2026-04-08  
+**Estado**: 🟡 PASOS 1-5 COMPLETADOS — Pendiente PASO 6 + 7  
+**Fecha**: 2026-04-09  
 **Responsable técnico**: Ver IH-004 en `HUMAN_INTERVENTIONS.md`
 
 ---
@@ -224,41 +224,62 @@ supabase db query --linked "SELECT id, from_number, body, processed, created_at 
 
 ---
 
-## Estado de completitud — 2026-04-08
+## Estado de completitud — 2026-04-09
 
 - [x] PRE-REQ: `SUPABASE_JWT_SECRET` ✅ en .env
-- [x] PRE-REQ: `META_ACCESS_TOKEN` ✅ renovado en .env
-- [x] PRE-REQ: `GEMINI_API_KEY` ✅ configurada en .env
+- [x] PRE-REQ: `META_ACCESS_TOKEN` ✅ en Render Dashboard
+- [x] PRE-REQ: `GEMINI_API_KEY` ✅ configurada — billing habilitado (paid tier)
 - [x] PASO 1: Cuenta Render creada/conectada ✅
 - [x] PASO 2: Blueprint aplicado — 4 servicios creados ✅
 - [x] PASO 3: Variables de entorno ✅ — todos los servicios configurados
   - `commerce-ops-connector` ✅ live
   - `commerce-ops-api` ✅ live
-  - `commerce-ops-orchestrator` ✅ live (env vars configuradas manualmente en Dashboard)
-  - `commerce-ops-web` ✅ live (NEXT_PUBLIC_* configuradas antes del build)
+  - `commerce-ops-orchestrator` ✅ live — `GEMINI_MODEL=gemini-2.5-flash`
+  - `commerce-ops-web` ✅ live — TailwindCSS OK tras "Clear build cache & deploy"
 - [x] PASO 4: Deploy exitoso en los 4 servicios ✅
-- [x] PASO 5: Smoke tests pasados desde VM ✅ — 2026-04-08
+- [x] PASO 5: Smoke tests pasados desde VM ✅ — 2026-04-09
   - `commerce-ops-web` → HTTP 200 ✅
   - `commerce-ops-connector /health` → `{"status":"ok","service":"connector-whatsapp"}` ✅
   - `commerce-ops-api /health` → `{"status":"ok"}` ✅
   - Webhook verification echo → `test123` ✅
-- [ ] PASO 5b: `commerce-ops-orchestrator` — **ACCIÓN HUMANA PENDIENTE**: actualizar `GEMINI_MODEL=gemini-2.0-flash` en Render Dashboard (actualmente falla con 404 por modelo gemini-1.5-flash inexistente en v1beta)
-- [ ] PASO 6: Webhook Meta → `commerce-ops-connector.onrender.com` actualizado
-- [ ] PASO 7: Test E2E — mensaje WhatsApp procesado y respondido correctamente
+  - `commerce-ops-orchestrator` → worker running, polling Supabase cada 3s ✅
+- [ ] PASO 6: **ACCIÓN HUMANA** → Meta Developers → Webhook Callback URL actualizar
+  - URL: `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
+  - Verify Token: `commercesuperclave2025`
+  - Suscribir campo `messages`
+- [ ] PASO 7: Test E2E — mensaje WhatsApp → Gemini → respuesta automática + Inbox AI
 
-## Acción humana bloqueante — Orchestrator Gemini fix
+## Lecciones aprendidas — Problemas resueltos en Fase 7
 
-### `commerce-ops-orchestrator` — ACCIÓN INMEDIATA
+### 1. Gemini quota/modelo
+- **Síntoma**: `429 RESOURCE_EXHAUSTED` (free tier con quota=0) o `404 gemini-1.5-flash not found`
+- **Causa**: La GEMINI_API_KEY estaba en free tier de Google AI Studio (quota agotada).
+  El SDK `google-genai==1.47.0` usa endpoint v1beta → solo soporta `gemini-2.0-flash` / `gemini-2.5-flash`.
+  `gemini-2.0-flash` fue deprecado para cuentas nuevas con billing.
+- **Fix aplicado**: Habilitar billing en Google AI Studio + cambiar a `gemini-2.5-flash` en `render.yaml`
+  y `orchestrator.py`. Actualizar valor en Render Dashboard (`GEMINI_MODEL=gemini-2.5-flash`).
 
-El Orchestrator falla con `404 models/gemini-1.5-flash is not found for API version v1beta`.
+### 2. UI plana — TailwindCSS no procesado
+- **Síntoma**: UI sin estilos (texto plano, sin colores, sin layout)
+- **Causa**: `NODE_ENV=production` hace que `npm install` omita devDependencies. Sin `postcss.config.js`,
+  Next.js no procesaba los `@tailwind` directives. Además, el `.next/cache` de Render guardaba el CSS
+  roto, por lo que builds posteriores no regeneraban el CSS aunque se añadiera `postcss.config.js`.
+- **Fix aplicado**:
+  1. `render.yaml` buildCommand: `npm install --include=dev`
+  2. `apps/web/postcss.config.js` creado con tailwindcss + autoprefixer
+  3. `autoprefixer` añadido a devDependencies en `apps/web/package.json`
+  4. Render Dashboard → `commerce-ops-web` → **"Clear build cache & deploy"**
 
-**Causa**: Render Dashboard tiene `GEMINI_MODEL=gemini-1.5-flash` (valor antiguo que sobreescribe render.yaml).
-El SDK `google-genai==1.47.0` usa el endpoint v1beta donde solo existe `gemini-2.0-flash`.
+### 3. TypeScript missing en build
+- **Síntoma**: `Please install typescript by running: yarn add --dev typescript`
+- **Causa**: `NODE_ENV=production` → npm omitía devDependencies (TypeScript está en devDeps)
+- **Fix**: `npm install --include=dev` en buildCommand
 
-**Fix**:
-1. Render Dashboard → `commerce-ops-orchestrator` → **Environment**
-2. Cambiar `GEMINI_MODEL` de `gemini-1.5-flash` a `gemini-2.0-flash`
-3. **Save Changes** → **Manual Deploy** → **Deploy latest commit**
+### 4. badge.tsx no committed (módulos en cascada)
+- **Síntoma**: webpack reporta `@/utils/supabase/client` y `@/components/ui/button` como no encontrados
+- **Causa real**: `apps/web/components/ui/badge.tsx` no estaba committed. webpack corrompe el grafo de
+  módulos cuando un import falla, reportando otros módulos existentes como no encontrados.
+- **Fix**: `git add apps/web/components/ui/badge.tsx && git commit`
 
 ### `commerce-ops-web` — REQUERIDAS EN BUILD TIME
 
