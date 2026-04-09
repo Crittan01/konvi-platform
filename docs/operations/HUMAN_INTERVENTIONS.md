@@ -149,52 +149,108 @@ Según la [documentación oficial de Meta](https://developers.facebook.com/docs/
 
 ## [IH-004] Primer Deploy en Render
 
-**Estado**: 🟡 EN PROGRESO — Guía completa en `docs/deployment/FASE7_RENDER_DEPLOY.md`  
-**Pasos completados**:
-- ✅ `GEMINI_API_KEY` configurada en `.env`
-- ✅ `render.yaml` actualizado con 4 servicios (web + connector + api + orchestrator)
+**Estado**: 🟡 PASOS 1-5 COMPLETADOS — PASOS 6-7 pendientes (ver abajo)  
+**Completado**:
+- ✅ `GEMINI_API_KEY` configurada en `.env` y en Render
+- ✅ `render.yaml` v5 con 4 servicios (web + connector + api + orchestrator)
 - ✅ Guía paso a paso `FASE7_RENDER_DEPLOY.md` creada
+- ✅ 4 servicios desplegados y vivos en Render
+- ✅ Smoke tests pasados (PASO 5)
+- ✅ TailwindCSS fix: `postcss.config.js` + `--include=dev` + clear build cache
 
-**Pasos pendientes** (en orden):
-1. ⚠️ PRE-REQ: Obtener `SUPABASE_JWT_SECRET` (ver IH-005 abajo)
-2. Crear cuenta Render + Blueprint con repo `Crittan01/commerce-ops-platform`
-3. Configurar env vars secretas en Render Dashboard (ver tabla en `FASE7_RENDER_DEPLOY.md` → PASO 3)
-4. Deploy manual exitoso → smoke tests
-5. Actualizar Callback URL del webhook en Meta Developers → `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
-6. Test E2E — mensaje WhatsApp → Gemini → respuesta automática
+**Pendiente (requiere acción humana)**:
+- ⚠️ PASO 6: Actualizar Callback URL del webhook en Meta Developers:
+  - Callback URL: `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
+  - Verify Token: `commercesuperclave2025`
+  - Campo: `messages`
+- ⚠️ PASO 7: Test E2E — enviar WhatsApp al número Meta → verificar respuesta Gemini
 
 ---
 
 ## [IH-005] Obtener SUPABASE_JWT_SECRET
 
-**Estado**: ⏳ PENDIENTE  
-**Bloqueante para**: `commerce-ops-api` (Core API Gateway JWT validation)  
-**Responsable**: Operador humano
+**Estado**: ✅ COMPLETADO — 2026-04-08  
+**`SUPABASE_JWT_SECRET` presente** en `.env` y configurado en Render Dashboard.  
+`GET https://commerce-ops-api.onrender.com/health` responde `{"status":"ok"}` ✅
 
-### Pasos
+### Cómo se obtuvo (referencia para futuros proyectos)
 
 1. Ir a [https://supabase.com/dashboard](https://supabase.com/dashboard) → Proyecto `xmelwnhhphksbpdjmbbp`
 2. Menú lateral → **Project Settings** → **Data API**
 3. Sección **JWT Settings** → copiar el valor de **JWT Secret**
-4. En la VM, editar `.env`:
-```bash
-nano /home/ansible/workspaces/commerce-ops-platform/.env
-# Rellenar: SUPABASE_JWT_SECRET="tu_jwt_secret_aqui"
-```
-5. En Render Dashboard → servicio `commerce-ops-api` → Environment → agregar `SUPABASE_JWT_SECRET`
-
-**Criterio de éxito**: El endpoint `GET https://commerce-ops-api.onrender.com/health` responde `{"status":"ok"}` y el JWT de Supabase es validado correctamente.
+4. Configurar en `.env` y en Render Dashboard → servicio `commerce-ops-api` → Environment
 
 ---
 
 ## [IH-006] META_ACCESS_TOKEN — Upgrade a System User Token Permanente
 
-**Estado**: ⏳ PENDIENTE (para producción)  
-**Contexto**: El token actual es temporal (~24h). Para deploy en Render, se necesita un token permanente.
+**Estado**: ✅ COMPLETADO — 2026-04-09  
+**Usuario del sistema creado**: `commerce-ops` (nombre ajustado por política de Meta — sin guiones múltiples)  
+**Token**: Permanente (sin expiración), configurado en Render (connector + orchestrator) y en `.env` local  
+**Verificación**:
+```
+curl https://commerce-ops-connector.onrender.com/health  → {"status":"ok","service":"connector-whatsapp"}
+curl https://commerce-ops-api.onrender.com/health        → {"status":"ok"}
+```
 
-Ver instrucciones detalladas en `[IH-003]` sección "Cómo crear un Token Permanente".
+---
 
-**Críico**: Sin este upgrade, el Orchestrator en Render fallará a las ~24h de haber configurado el token.
+---
+
+## [IH-007] Registrar App en MeLi Developers — Fase 10
+
+**Estado**: ⏳ PENDIENTE — bloquea la conexión OAuth de MeLi  
+**Bloquea**: Botón "Conectar con Mercado Libre" en `/dashboard/integrations`
+
+### Por qué es necesario
+
+MeLi requiere una app registrada para obtener `client_id` y `client_secret` del OAuth 2.0.
+Sin esto, la plataforma no puede iniciar el flujo de autorización por tenant.
+
+### Pasos
+
+1. Ve a [developers.mercadolibre.com.mx](https://developers.mercadolibre.com.mx) → **Crear aplicación**
+2. Nombre: `Commerce Ops Platform`
+3. Redirect URI: `https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback`
+   - Debe ser HTTPS exacto — no agregar trailing slash
+4. Scopes a habilitar: `read`, `write`, `offline_access`
+5. Copiar `App ID` (= CLIENT_ID) y `Secret key` (= CLIENT_SECRET)
+6. En Render Dashboard → servicio `commerce-ops-api` → Environment:
+   - `MELI_CLIENT_ID` = App ID
+   - `MELI_CLIENT_SECRET` = Secret key
+   - `MELI_REDIRECT_URI` = `https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback`
+7. Redeploy `commerce-ops-api`
+8. Probar flujo desde `/dashboard/integrations` → botón "Conectar con Mercado Libre"
+
+### Criterio de Éxito
+
+El botón de MeLi en `/dashboard/integrations` ya no muestra "(requiere IH-007)" y permite iniciar el flujo OAuth.
+
+---
+
+## [IH-008] Obtener API Key de Envia
+
+**Estado**: ⏳ PENDIENTE — bloquea cotizaciones de envío  
+**Bloquea**: Formulario de cotización en `/dashboard/shipping` + `/dashboard/integrations`
+
+### Por qué es necesario
+
+Envia usa Bearer token per-tenant. El tenant (owner) debe obtener su token desde su cuenta Envia y configurarlo desde la UI.
+
+### Pasos
+
+1. Ve a [app.envia.com](https://app.envia.com) → inicia sesión con tu cuenta Envia
+2. Menú → **Configuración** → **API** → **Generar token** (o copiar el existente)
+3. En la plataforma: `/dashboard/integrations` → sección **Envia** → pegar el token → **Conectar Envia**
+4. Si no tienes cuenta Envia: regístrala en [envia.com](https://envia.com) (acepta cuentas de prueba/sandbox)
+
+> Esta acción la realiza el owner del tenant directamente desde la UI.
+> No requiere configuración en Render — el token se almacena en `tenant_integrations`.
+
+### Criterio de Éxito
+
+Estado de Envia en `/dashboard/integrations` cambia a "Conectado".
+La página `/dashboard/shipping` muestra el formulario de cotización en lugar del banner de advertencia.
 
 ---
 

@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import products, conversations, orders, contacts, settings
+from routers import products, conversations, orders, contacts, settings, integrations, shipping
 from dependencies.auth import get_current_tenant
 
 app = FastAPI(title="Commerce Ops Core API", description="Síncrona REST")
@@ -25,6 +25,8 @@ app.include_router(conversations.router, prefix="/api/v1/conversations")
 app.include_router(orders.router, prefix="/api/v1/orders")
 app.include_router(contacts.router, prefix="/api/v1/contacts")
 app.include_router(settings.router, prefix="/api/v1/settings")
+app.include_router(integrations.router, prefix="/api/v1/integrations")
+app.include_router(shipping.router, prefix="/api/v1/shipping")
 
 @app.get("/health")
 def health_check():

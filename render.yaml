@@ -98,6 +98,14 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      # ── MeLi OAuth (Fase 10) — requiere IH-007: registrar app en MeLi Developers ──
+      - key: MELI_CLIENT_ID
+        sync: false
+      - key: MELI_CLIENT_SECRET
+        sync: false
+      - key: MELI_REDIRECT_URI
+        sync: false
+        # Valor: https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback
     healthCheckPath: /health
     autoDeploy: true
 
