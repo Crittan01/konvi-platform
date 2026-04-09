@@ -243,15 +243,24 @@ Luego de la actualización de esta sesión, el repositorio tiene documentación 
 
 ## Próximos pasos (en orden) — baseline rev. 7
 
-### Fase 8 — Catálogo completo + RBAC base (BLOQUE 1)
+### Fase 8 — Catálogo completo + RBAC base (BLOQUE 1) 🟡 EN PROGRESO
 
 > **Sin migraciones nuevas.** Solo usa tablas existentes.
 
-4. Agregar edición de producto desde UI (formulario + endpoint PUT en `services/api`)
-5. Agregar soft delete desde UI (UPDATE `is_active=false`)
-6. Agregar gestión de variantes múltiples
-7. Migrar lectura de catálogo a `services/api` (en vez de Supabase directo)
-8. Implementar RBAC básico por endpoint (`owner`/`manager` editan, `agent` solo lee)
+**⚠️ Deuda técnica crítica detectada**: `services/api/routers/products.py` tiene modelos Pydantic desalineados con el schema real (usa `name`, `is_active`, `price` en products — el schema tiene `title`, `status`, y `price` en `product_variations`). Corregir como primer paso de Fase 8. Ver R-19.
+
+**En scope (Fase 8):**
+- [ ] Corregir `services/api/routers/products.py` — alinear con schema real
+- [ ] RBAC en API: `get_current_role` en `auth.py`, proteger endpoints escritura
+- [ ] Edición de producto desde UI
+- [ ] Soft delete desde UI (`status = 'inactive'`)
+- [ ] Mostrar/ocultar acciones según role
+
+**Deferred (documentado, no bloqueante para Fase 8):**
+- Migrar lecturas catálogo a `services/api` → Fase 11
+- UI de variantes múltiples → Fase 9/11
+- SKU en productos → requiere migración ALTER TABLE, Fase 9
+- Paginación catálogo → Fase 11
 
 ### Fase 9 — Schema core + Pedidos + Configuración (BLOQUES 2+3)
 

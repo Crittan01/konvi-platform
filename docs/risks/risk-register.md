@@ -1,42 +1,64 @@
 # Registro de Riesgos — Commerce Ops Platform
 
-Última actualización: 2026-04-08 (rev. 2)
+Última actualización: 2026-04-09
+
+---
+
+## Riesgos activos
 
 | ID | Categoría | Riesgo | Severidad | Estado | Mitigación |
 |----|-----------|--------|-----------|--------|------------|
-| R-03 | Disponibilidad | Plan Free de Render — cold start de 30-60s tras 15min inactividad | 🟠 ALTO | Aceptado (dev) | Upgrade a plan Starter ($7/srv) antes de producción real |
-| R-04 | Disponibilidad | connector-whatsapp con cold start pierde webhooks de Meta | 🟠 ALTO | Aceptado (dev) | Plan Starter o keep-alive externo en producción |
-| R-05 | Escalabilidad | Polling cada 3s sobre Supabase — no escala bien con volumen alto | 🟡 MEDIO | Aceptado | Migrar a pgmq/Realtime en Beta Controlada |
-| R-06 | Calidad | Paquetes `packages/auth` y `packages/db` incompletos | 🟡 MEDIO | Deuda técnica | Consolidar en Fase post-deploy |
-| R-07 | Meta/WhatsApp | Baneo por políticas anti-spam de Meta | 🟡 MEDIO | Mitigado parcialmente | Guardrails activos, canal oficial, no envíos masivos |
-| R-08 | Operacional | Sin canal de alertas Telegram implementado | 🟡 MEDIO | Pendiente | Implementar en Fase 8 |
-| R-09 | Seguridad | RBAC (owner/manager/agent) no enforceado en API Gateway | 🟡 MEDIO | Pendiente | Implementar validación de rol en cada endpoint de `services/api` |
-| R-10 | Auditoría | Mutaciones sin log de auditoría (tenant_id, user_id, timestamp, acción) | 🟡 MEDIO | Pendiente | Implementar junto con RBAC en `services/api` |
-| R-12 | IA | `GEMINI_API_KEY` configurada pero no probada en ciclo E2E real | 🟡 MEDIO | Pendiente | Test E2E post-deploy (Fase 7 → PASO 7) |
-| R-13 | Multi-tenant | `service_role` bypasea RLS — bug en tenant_id resolver expone datos cross-tenant | 🟠 ALTO | Mitigado | Validación explícita en cada worker, tests de aislamiento pendientes |
-| R-14 | Python runtime | Python 3.9.25 es EOL — Google SDK ya emite FutureWarning en import | 🟡 MEDIO | Aceptado (dev) | Actualizar a Python 3.11+ antes de Beta. La VM es Oracle Linux 9 — evaluar DNF o pyenv |
+| R-03 | Disponibilidad | Render Free — cold start 30-60s tras 15min inactividad | 🟠 Alto | Aceptado (dev) | Upgrade a plan Starter antes de producción real |
+| R-04 | Disponibilidad | connector-whatsapp con cold start pierde webhooks Meta | 🟠 Alto | Aceptado (dev) | Plan Starter o keep-alive externo en producción |
+| R-05 | Escalabilidad | Polling cada 3s en Supabase — no escala con volumen alto | 🟡 Medio | Aceptado | Migrar a pgmq/Realtime en Beta Controlada |
+| R-06 | Calidad | `packages/auth` y `packages/db` incompletos | 🟡 Medio | Deuda técnica | Consolidar en Fase post-deploy |
+| R-07 | Meta/WhatsApp | Baneo por políticas Anti-Spam de Meta | 🟡 Medio | Mitigado parcialmente | Guardrails activos, canal oficial, sin envíos masivos |
+| R-08 | Operacional | Sin canal de alertas Telegram implementado | 🟡 Medio | Pendiente | Implementar en Fase 8 |
+| R-09 | Seguridad | RBAC (owner/manager/agent) no enforceado en API Gateway | 🟡 Medio | Pendiente | Implementar en endpoints de `services/api` |
+| R-10 | Auditoría | Mutaciones sin log de auditoría | 🟡 Medio | Pendiente | Implementar junto con RBAC |
+| R-12 | IA | GEMINI_API_KEY configurada pero sin test E2E real completo | 🟡 Medio | Pendiente | Test E2E Fase 7 PASO 7 (requiere humano) |
+| R-13 | Multi-tenant | `service_role` bypasea RLS — bug en tenant_id resolver expone datos cross-tenant | 🟠 Alto | Mitigado | Validación explícita en workers, tests de aislamiento pendientes |
+| R-14 | Python runtime | Python 3.9.25 EOL — Google SDK emite FutureWarning | 🟡 Medio | Aceptado (dev) | Actualizar a 3.11+ antes de Beta. Evaluar DNF o pyenv |
+| R-15 | Infraestructura | Meta Webhook no configurado — PASO 6 pendiente | 🟠 Alto | Pendiente humano | Configurar Callback URL en Meta Developers |
+| ~~R-16~~ | ~~Seguridad~~ | ~~META_ACCESS_TOKEN temporal (~24h) activo en Render~~ | — | ✅ CERRADO 2026-04-09 | System User Token permanente creado (IH-006) |
+| R-17 | Producto | Tenant Console solo tiene 3/13 módulos implementados | 🟡 Medio | Esperado (en progreso) | Completar en Fases 9-10 |
+| R-18 | Producto | Platform Console inexistente | 🟡 Medio | Esperado (pendiente) | Implementar en Fase 12 |
+| R-19 | Deuda técnica | `services/api/routers/products.py` desalineado con schema real (name≠title, is_active≠status, price/stock no existen en products) | 🟠 Alto | En corrección — Fase 8 | Corregir modelos Pydantic y endpoints antes de exponer API al frontend |
+| R-20 | Disponibilidad | Orchestrator Render Free duerme tras inactividad — mensajes WhatsApp no procesados hasta cold start | 🟠 Alto | Aceptado (dev) | Upgrade a Starter antes de Beta Controlada — R-04 relacionado |
+| R-E01 | Shipping/Envia | Envia API down → cotizaciones no disponibles | 🟠 Alto | No aplica aún | Manejo de error + fallback a humano |
+| R-E02 | Shipping/Envia | Token Envia expirado → falla silenciosa | 🟠 Alto | No aplica aún | Renovación automática + alertas |
+| R-E05 | IA/Shipping | LLM inventando cotizaciones si tool de shipping falla | 🔴 Crítico | No aplica aún | Guardrail obligatorio en shipping tool |
 
-## Criterios de Severidad
+---
+
+## Criterios de severidad
 
 | Nivel | Descripción |
 |-------|-------------|
-| 🔴 CRÍTICO | Falla que detiene el sistema o expone datos. Bloquea producción. |
-| 🟠 ALTO | Falla que degrada significativamente el servicio. Requiere atención antes de producción. |
-| 🟡 MEDIO | Deuda técnica o riesgo potencial. Atender en el siguiente ciclo. |
-| 🟢 BAJO | Mejora deseable. Sin impacto inmediato. |
+| 🔴 Crítico | Falla que detiene el sistema o expone datos. Bloquea producción. |
+| 🟠 Alto | Falla que degrada significativamente el servicio. Requiere atención antes de producción. |
+| 🟡 Medio | Deuda técnica o riesgo potencial. Atender en el siguiente ciclo. |
+| 🟢 Bajo | Mejora deseable. Sin impacto inmediato. |
+
+---
 
 ## Riesgos cerrados
 
 | ID | Riesgo | Cerrado |
 |----|--------|---------|
-| ~~R-01~~ | `META_ACCESS_TOKEN` temporal expirando | 2026-04-08 — token renovado en `.env` ✅ |
-| ~~R-02~~ | `SUPABASE_JWT_SECRET` faltante bloqueaba API Gateway | 2026-04-08 — presente en `.env` ✅ |
-| ~~R-11~~ | Desincronización VM (`supabase==2.10.0`) vs requirements.txt (`2.28.3`) | 2026-04-08 — VM ya tiene 2.28.3, requirements.txt alineados ✅ |
-| ~~R-X~~ | `fastapi==0.115.12` en requirements.txt vs `0.128.8` real en VM | 2026-04-08 — requirements.txt actualizados a 0.128.8 ✅ |
-| ~~R-X~~ | `uvicorn==0.34.0` en requirements.txt vs `0.39.0` real en VM | 2026-04-08 — requirements.txt actualizados a 0.39.0 ✅ |
-| ~~R-X~~ | `python-dotenv==1.0.1` en requirements.txt vs `1.2.1` real en VM | 2026-04-08 — requirements.txt actualizados a 1.2.1 ✅ |
-| ~~R-X~~ | `google-generativeai==0.8.6` (SDK deprecado) instalado en VM | 2026-04-08 — desinstalado vía sudo pip3 uninstall ✅ |
-| ~~R-X~~ | Tenant resolver hardcodeado con `limit(1)` | 2026-04-07 — fix por `meta_waba_id` |
-| ~~R-X~~ | `messages.processed` column faltante | 2026-04-07 — migración aplicada |
-| ~~R-X~~ | SDK Gemini deprecado en código activo | 2026-04-07 — migrado a `google-genai==1.47.0` |
-| ~~R-X~~ | Directorio duplicado `services/orchestrator/` | 2026-04-08 — eliminado, canónico: `services/ai-orchestrator/` |
+| ~~R-01~~ | META_ACCESS_TOKEN temporal expirando | 2026-04-08 — token renovado en `.env` ✅ |
+| ~~R-02~~ | SUPABASE_JWT_SECRET faltante | 2026-04-08 — presente en `.env` ✅ |
+| ~~R-11~~ | Desincronización VM vs requirements.txt (supabase) | 2026-04-08 — alineados ✅ |
+| ~~R-X~~ | fastapi, uvicorn, python-dotenv desalineados en requirements.txt | 2026-04-08 — corregidos ✅ |
+| ~~R-X~~ | SDK Gemini deprecado (`google-generativeai`) en código | 2026-04-08 — migrado a `google-genai==1.47.0` ✅ |
+| ~~R-X~~ | Tenant resolver hardcodeado `limit(1)` | 2026-04-07 — fix por `meta_waba_id` ✅ |
+| ~~R-X~~ | `messages.processed` column faltante | 2026-04-07 — migración aplicada ✅ |
+| ~~R-X~~ | Directorio duplicado `services/orchestrator/` | 2026-04-08 — eliminado ✅ |
+
+---
+
+## Documentos relacionados
+
+- `docs/risks/open-questions.md` — Preguntas abiertas del proyecto
+- `docs/risks/assumptions-to-avoid.md` — Suposiciones a evitar
+- `docs/operations/HUMAN_INTERVENTIONS.md` — Intervenciones humanas activas
