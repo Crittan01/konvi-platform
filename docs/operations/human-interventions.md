@@ -1,5 +1,4 @@
 # Human Interventions
-* INTERVENCIÓN HUMANA REQUERIDA:
-- Meta Business WABA creation (Dueño negocio).
-- Conectar Meli Mapps (Dueño).
-- Cambiar Plan Render (DevOps).
+
+> ⚠️ Este archivo ha sido consolidado en `HUMAN_INTERVENTIONS.md`.
+> Ver `docs/operations/HUMAN_INTERVENTIONS.md` para el registro completo y actualizado.
