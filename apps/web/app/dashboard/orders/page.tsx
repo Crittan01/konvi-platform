@@ -16,7 +16,7 @@ type Order = {
   total_amount: number
   notes: string | null
   created_at: string
-  contacts: Contact | null
+  contacts: Contact | Contact[] | null
   order_items: OrderItem[]
 }
 
@@ -252,7 +252,10 @@ export default async function OrdersPage() {
                         <div>
                           <p className="text-xs text-muted-foreground font-mono">#{o.id.slice(-8)}</p>
                           <p className="font-medium">
-                            {o.contacts?.name || o.contacts?.phone || 'Sin contacto'}
+                            {(() => {
+                              const c = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
+                              return c?.name || c?.phone || 'Sin contacto'
+                            })()}
                           </p>
                           {o.order_items.length > 0 && (
                             <p className="text-sm text-muted-foreground">
