@@ -1,7 +1,7 @@
 # render.yaml — Commerce Ops Platform
 # Infraestructura como código para Render.com
 # Referencia oficial: https://render.com/docs/blueprint-spec
-# Última actualización: 2026-04-08 (v4 — dependencias alineadas)
+# Última actualización: 2026-04-09 (v5 — fix OOM Next.js en Free plan)
 #
 # USO:
 #   1. Render detecta este archivo automáticamente desde el repo
@@ -14,6 +14,9 @@
 #   v3: commerce-ops-orchestrator: type:worker → type:web (worker no disponible en Free)
 #       server.py lanza el OrchestratorWorker en daemon thread + expone /health
 #   v4: supabase==2.28.3 + httpx==0.28.1 en todos los servicios Python (versiones alineadas)
+#   v5: Next.js build: NODE_OPTIONS max-old-space-size=460 + NEXT_TELEMETRY_DISABLED
+#       Razón: Render Free plan (512MB) — edge-server compiler recibe SIGTERM por OOM
+#       Referencia: https://nextjs.org/docs/messages/node-module-load-failure
 
 services:
 
@@ -28,11 +31,13 @@ services:
     region: oregon
     plan: free
     rootDir: apps/web
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && NODE_OPTIONS='--max-old-space-size=460' npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
