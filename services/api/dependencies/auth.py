@@ -1,7 +1,7 @@
 """
 Dependencia de autenticación y contexto de tenant.
 
-Valida el JWT de Supabase, extrae el tenant_id del custom claim,
+Valida el JWT de Supabase, extrae tenant_id y role del custom claim app_metadata,
 y registra el contexto en el cliente de Supabase para que RLS aplique.
 
 Referencia oficial Supabase JWT:
@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+
+# Roles con permiso de escritura
+WRITE_ROLES = {"owner", "manager"}
 
 
 def _get_service_client() -> Client:
@@ -50,16 +53,10 @@ def _decode_supabase_jwt(token: str) -> Optional[dict]:
         return None
 
 
-async def get_current_tenant(request: Request) -> str:
+def _extract_jwt_payload(request: Request) -> dict:
     """
-    Dependencia FastAPI que:
-    1. Extrae el Bearer token del header Authorization
-    2. Valida el JWT contra el secreto de Supabase
-    3. Extrae tenant_id del custom claim `app_metadata.tenant_id`
-    4. Lanza 401/403 si falla cualquier paso
-
-    El tenant_id retornado es de confianza para usar en queries
-    como filtro adicional (defensa en profundidad — RLS es la barrera final).
+    Extrae y valida el JWT del header Authorization.
+    Lanza 401 si falta o es inválido.
     """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -71,7 +68,15 @@ async def get_current_tenant(request: Request) -> str:
     if payload is None:
         raise HTTPException(status_code=401, detail="Token inválido o expirado")
 
-    # El tenant_id se inyecta en el JWT via trigger de Supabase (migration 20260406181239)
+    return payload
+
+
+async def get_current_tenant(request: Request) -> str:
+    """
+    Dependencia FastAPI que extrae y valida el tenant_id del JWT.
+    El tenant_id se inyecta en app_metadata vía trigger handle_new_user_claims.
+    """
+    payload = _extract_jwt_payload(request)
     app_metadata = payload.get("app_metadata") or {}
     tenant_id: Optional[str] = app_metadata.get("tenant_id")
 
@@ -82,16 +87,37 @@ async def get_current_tenant(request: Request) -> str:
     return tenant_id
 
 
+async def get_current_role(request: Request) -> str:
+    """
+    Dependencia FastAPI que extrae el role del JWT.
+    Roles válidos: owner, manager, agent.
+    Si no hay role en app_metadata, retorna 'agent' (mínimo privilegio).
+    """
+    payload = _extract_jwt_payload(request)
+    app_metadata = payload.get("app_metadata") or {}
+    role: str = app_metadata.get("role", "agent")
+    return role
+
+
+async def require_write_role(role: str = Depends(get_current_role)) -> str:
+    """
+    Dependencia que exige role owner o manager.
+    Lanza 403 si el role es agent.
+    """
+    if role not in WRITE_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Permiso insuficiente. Se requiere owner o manager (rol actual: {role})"
+        )
+    return role
+
+
 async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Client:
     """
     Retorna un cliente Supabase con service_role autenticado.
-    Usar cuando se necesita hacer SET de la variable de sesión para RLS.
-
-    Nota: Para producción, usar el cliente con el JWT del usuario directamente
-    (Supabase client con access_token) para que RLS opere nativamente.
+    Setea app.current_tenant_id para que RLS opere via app_current_tenant().
     """
     client = _get_service_client()
-    # Setear el contexto del tenant para que app_current_tenant() en RLS lo resuelva
     try:
         client.rpc("set_config", {
             "parameter": "app.current_tenant_id",
