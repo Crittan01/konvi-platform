@@ -1,5 +1,6 @@
 import * as React from "react"
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { LayoutDashboard, ShoppingCart, MessageSquare, LogOut } from 'lucide-react'
 import { createClient } from '@/utils/supabase/server'
 
@@ -10,7 +11,14 @@ export default async function DashboardLayout({
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  
+
+  const logoutAction = async () => {
+    'use server'
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    redirect('/login')
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Sidebar V2 */}
@@ -29,16 +37,27 @@ export default async function DashboardLayout({
             </Link>
           </nav>
         </div>
-        
+
         <div className="border-t p-4">
-          <div className="flex items-center gap-3 px-2 py-2">
-            <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center font-bold text-primary">
-              {user?.email?.charAt(0).toUpperCase()}
+          <div className="flex items-center justify-between px-2 py-2">
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center font-bold text-primary">
+                {user?.email?.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">{user?.email?.split('@')[0]}</span>
+                <span className="text-xs text-muted-foreground">Operador</span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-medium">{user?.email?.split('@')[0]}</span>
-              <span className="text-xs text-muted-foreground">Operador</span>
-            </div>
+            <form action={logoutAction}>
+              <button
+                type="submit"
+                title="Cerrar sesión"
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </form>
           </div>
         </div>
       </aside>
