@@ -4,7 +4,14 @@ El AI Orchestrator es el cerebro autónomo pero altamente restringido de la plat
 
 ## 1. Patrón Arquitectónico: Agentive Workflow (Worker)
 
-El orquestador no expone APIs a internet de manera síncrona. Opera como un **Background Worker** (FastAPI) corriendo en Render, suscribiéndose a colas de eventos (Supabase Queues / pgmq).
+> **Decisión de implementación (2026-04-08)**: El diseño original preveía pgmq (Supabase Queues).
+> La implementación actual usa **polling activo** sobre la columna `messages.processed` cada 3s.
+> Razón: más simple para Alpha, sin dependencia de pgmq en Supabase Free. La migración a pgmq
+> está prevista para Beta Controlada cuando el volumen de mensajes lo justifique.
+> El plan Free de Render tampoco soporta Background Workers — se usa un Web Service con `server.py`
+> que lanza el worker en un daemon thread.
+
+El orquestador no expone APIs públicas de negocio. Corre como un **Web Service** en Render que internamente hace polling a Supabase, procesa mensajes con Gemini, y envía respuestas por WhatsApp Cloud API.
 
 ```mermaid
 graph TD

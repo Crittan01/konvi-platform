@@ -18,11 +18,12 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 | Tenant activo | ✅ Configurado | `Matriz Commerce Dev`, `meta_waba_id=2159052118202272` |
 | Frontend Backoffice | ✅ Funcional | Auth, Dashboard, Catálogo CRUD, Inbox AI |
 | WhatsApp Connector | ✅ Fix aplicado | tenant resolver por `meta_waba_id` real |
-| AI Orchestrator | ✅ Código completo | nuevo SDK `google-genai==1.47.0` |
+| AI Orchestrator | ✅ Código completo | `google-genai==1.47.0`, server.py wrapper para Render Free |
 | Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
 | API Gateway (Fase 6) | ✅ Completa | JWT real, productos CRUD, conversaciones |
 | render.yaml | ✅ Actualizado | 4 servicios: web + connector + api + orchestrator |
 | Deploy Render (Fase 7) | 🟡 En progreso | IH-004 — ver `docs/deployment/FASE7_RENDER_DEPLOY.md` |
+| `services/orchestrator/` | ✅ ELIMINADO | Prototipo obsoleto — canónico: `services/ai-orchestrator/` |
 | Integración MeLi | ❌ Pendiente | Fase 8 |
 
 **Credenciales activas (`.env` — nunca al repo):**
@@ -34,8 +35,9 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 **Herramientas instaladas en VM (sin venv — máquina dedicada):**
 - `supabase` CLI v2.84.2 → `supabase db query --linked -f archivo.sql`
 - `psql` 15.17 via DNF (TCP bloqueado por Supavisor — usar CLI)
-- `pip3` sistema: `google-genai==1.47.0`, `supabase==2.10.0`, `httpx==0.28.1`, `pydantic==2.12.5`, `PyJWT==2.10.1`, `fastapi==0.115.12`, `uvicorn[standard]==0.34.0`
+- `pip3` sistema: `google-genai==1.47.0`, `supabase==2.10.0`*, `httpx==0.28.1`, `pydantic==2.12.5`, `PyJWT==2.10.1`, `fastapi==0.115.12`, `uvicorn[standard]==0.34.0`
 - Python 3.9.25 (sistema Oracle Linux 9) — compatible con `Optional[]`, no `X | Y`
+- ⚠️ *`supabase==2.10.0` en VM pero requirements.txt usa `2.28.3`. Para alinear: `pip3 install supabase==2.28.3`
 
 ## Próximo a Implementar
 

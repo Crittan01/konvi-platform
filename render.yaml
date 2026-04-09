@@ -1,17 +1,19 @@
 # render.yaml — Commerce Ops Platform
 # Infraestructura como código para Render.com
 # Referencia oficial: https://render.com/docs/blueprint-spec
-# Última actualización: 2026-04-08 (v3 — fixes build)
+# Última actualización: 2026-04-08 (v4 — dependencias alineadas)
 #
 # USO:
 #   1. Render detecta este archivo automáticamente desde el repo
 #   2. Configurar las env vars (sync: false) manualmente en Render Dashboard
+#   3. Ver guía detallada: docs/deployment/FASE7_RENDER_DEPLOY.md
 #
-# FIXES v3:
-#   - commerce-ops-web: eliminados @commerce/auth y @commerce/db (workspace:* roto en npm)
-#   - commerce-ops-connector/api: httpx==0.27.2 (0.28.x incompatible con supabase==2.10.0)
-#   - commerce-ops-orchestrator: cambiado de type:worker a type:web (worker no disponible en Free)
-#     → nuevo server.py lanza el worker en un thread de fondo + expone /health
+# HISTORIAL:
+#   v1: servicios iniciales
+#   v2: 4 servicios (web + connector + api + orchestrator)
+#   v3: commerce-ops-orchestrator: type:worker → type:web (worker no disponible en Free)
+#       server.py lanza el OrchestratorWorker en daemon thread + expone /health
+#   v4: supabase==2.28.3 + httpx==0.28.1 en todos los servicios Python (versiones alineadas)
 
 services:
 
@@ -41,7 +43,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # 2. WHATSAPP CONNECTOR — FastAPI Webhook Gateway
   #    URL: https://commerce-ops-connector.onrender.com
-  #    FIX: httpx==0.27.2 (supabase==2.10.0 requiere httpx<0.28)
+  #    Stack: FastAPI + supabase==2.28.3 + httpx==0.28.1
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
     name: commerce-ops-connector
@@ -72,7 +74,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # 3. CORE API — FastAPI REST Gateway (Fase 6 ✅)
   #    URL: https://commerce-ops-api.onrender.com
-  #    FIX: httpx==0.27.2
+  #    Stack: FastAPI + supabase==2.28.3 + PyJWT==2.10.1
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
     name: commerce-ops-api
