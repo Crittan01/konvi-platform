@@ -1,10 +1,13 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+
+const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
 
 type Integration = {
   provider: string
@@ -72,6 +75,20 @@ export default async function IntegrationsPage({
     }, { onConflict: 'tenant_id,provider' })
 
     revalidatePath('/dashboard/integrations')
+  }
+
+  async function connectMeli() {
+    'use server'
+    const sb = createClient()
+    const { data: { session: s } } = await sb.auth.getSession()
+    if (!s?.access_token) return
+
+    const res = await fetch(`${API_URL}/api/v1/integrations/meli/auth-url`, {
+      headers: { Authorization: `Bearer ${s.access_token}` },
+    })
+    if (!res.ok) return
+    const { auth_url } = await res.json()
+    redirect(auth_url)
   }
 
   async function disconnectEnvia(formData: FormData) {
@@ -198,19 +215,13 @@ export default async function IntegrationsPage({
             ) : isOwner ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Conecta tu cuenta de vendedor via OAuth. Necesitas:
+                  Conecta tu cuenta de vendedor via OAuth. Serás redirigido a MeLi para autorizar.
                 </p>
-                <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
-                  <li>Haber completado IH-007 (registrar app en MeLi Developers)</li>
-                  <li>MELI_CLIENT_ID y MELI_CLIENT_SECRET configurados en Render</li>
-                </ul>
-                <Button size="sm" disabled className="w-full">
-                  Conectar con Mercado Libre
-                  <span className="ml-2 text-xs">(requiere IH-007)</span>
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Ver <code>docs/operations/HUMAN_INTERVENTIONS.md</code> — IH-007.
-                </p>
+                <form action={connectMeli}>
+                  <Button type="submit" size="sm" className="w-full">
+                    Conectar con Mercado Libre
+                  </Button>
+                </form>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Solo el owner puede configurar integraciones.</p>

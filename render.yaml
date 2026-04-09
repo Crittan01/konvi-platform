@@ -42,6 +42,8 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
+      - key: API_URL
+        value: https://commerce-ops-api.onrender.com
     healthCheckPath: /
     autoDeploy: true
 
