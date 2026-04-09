@@ -45,8 +45,8 @@ Adicionalmente:
 | 5 | Inbox AI — Realtime, Human Takeover | ✅ Completa | COMPLETADO Y VIGENTE |
 | 6 | API Gateway base — JWT + CRUD básico | ✅ Completa (RBAC pendiente) | COMPLETADO — RBAC INCOMPLETO (R-09) |
 | 7 | Deploy Render + E2E | ✅ Completa | COMPLETADO 2026-04-09 |
-| 8 | Catálogo completo + RBAC base | 🟡 En progreso | EN IMPLEMENTACIÓN |
-| 9 | Schema core + Pedidos + Configuración + Equipo | ❌ Pendiente | PENDIENTE |
+| 8 | Catálogo completo + RBAC base | ✅ Completa | COMPLETADO 2026-04-09 |
+| 9 | Schema core + Pedidos + Configuración + Equipo | ✅ Completa | COMPLETADO 2026-04-09 |
 | 10 | Integraciones — MeLi + Envia/Shipping | 📋 Diseñado | PENDIENTE (prerequisitos en Fase 9) |
 | 11 | Módulos restantes Tenant Console | ❌ Pendiente | PENDIENTE (prerequisitos en Fases 8-9) |
 | 12 | Platform Console | ❌ Pendiente | PENDIENTE (prerequisito: OQ-P01 + Fase 9+ completa) |
