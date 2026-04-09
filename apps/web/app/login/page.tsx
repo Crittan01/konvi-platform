@@ -5,7 +5,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: { message?: string }
+}) {
   const supabase = createClient()
   const { data } = await supabase.auth.getUser()
 
@@ -18,14 +22,14 @@ export default async function LoginPage() {
     const email = formData.get('email') as string
     const password = formData.get('password') as string
     const supabase = createClient()
-    
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
     if (error) {
-      return redirect('/login?message=Could not authenticate user')
+      return redirect('/login?message=Correo+o+contraseña+incorrectos')
     }
     return redirect('/dashboard')
   }
@@ -55,6 +59,11 @@ export default async function LoginPage() {
               <Label htmlFor="password">Contraseña</Label>
               <Input id="password" name="password" type="password" required />
             </div>
+            {searchParams.message && (
+              <p className="text-sm text-destructive text-center">
+                {searchParams.message}
+              </p>
+            )}
             <Button className="w-full" type="submit">Entrar</Button>
           </form>
         </CardContent>
