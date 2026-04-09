@@ -26,9 +26,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-MELI_AUTH_URL  = "https://auth.mercadolibre.com.mx/authorization"
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 MELI_API_URL   = "https://api.mercadolibre.com"
+
+# URL de autorización OAuth — country-specific.
+# Por defecto Colombia. Configurar via env var si el tenant opera en otro país.
+# MX: https://auth.mercadolibre.com.mx/authorization
+# CO: https://auth.mercadolibre.com.co/authorization
+# AR: https://auth.mercadolibre.com.ar/authorization
+MELI_AUTH_URL = os.getenv("MELI_AUTH_URL", "https://auth.mercadolibre.com.co/authorization")
 
 MELI_CLIENT_ID     = os.getenv("MELI_CLIENT_ID", "")
 MELI_CLIENT_SECRET = os.getenv("MELI_CLIENT_SECRET", "")
