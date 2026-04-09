@@ -224,13 +224,44 @@ supabase db query --linked "SELECT id, from_number, body, processed, created_at 
 
 ---
 
-## Estado de completitud
+## Estado de completitud — 2026-04-09
 
-- [ ] PRE-REQ: Obtener `SUPABASE_JWT_SECRET` de Supabase Dashboard
-- [ ] PASO 1: Cuenta Render creada/conectada
-- [ ] PASO 2: Blueprint aplicado — 4 servicios creados
-- [ ] PASO 3: Variables de entorno configuradas en todos los servicios
-- [ ] PASO 4: Deploy manual exitoso en todos los servicios
+- [x] PRE-REQ: `SUPABASE_JWT_SECRET` ✅ en .env
+- [x] PRE-REQ: `META_ACCESS_TOKEN` ✅ renovado en .env
+- [x] PRE-REQ: `GEMINI_API_KEY` ✅ configurada en .env
+- [x] PASO 1: Cuenta Render creada/conectada ✅
+- [x] PASO 2: Blueprint aplicado — 4 servicios creados ✅
+- [ ] PASO 3: Variables de entorno — **PARCIAL** (faltan vars del orchestrator y web)
+  - `commerce-ops-connector` ✅ live (con versiones antiguas, se actualizará)
+  - `commerce-ops-api` ✅ live
+  - `commerce-ops-orchestrator` ⚠️ — **FALTA configurar env vars en Render Dashboard**
+  - `commerce-ops-web` ❌ — **FALTA configurar NEXT_PUBLIC_* en Render Dashboard**
+- [ ] PASO 4: Deploy exitoso en todos los servicios — pendiente vars del orchestrator y web
 - [ ] PASO 5: Smoke tests pasados desde VM
 - [ ] PASO 6: Webhook Meta → `commerce-ops-connector.onrender.com` actualizado
 - [ ] PASO 7: Test E2E — mensaje WhatsApp procesado y respondido correctamente
+
+## Env vars pendientes de configurar en Render Dashboard
+
+### `commerce-ops-orchestrator` — ACCIÓN INMEDIATA
+
+| Variable | Valor |
+|---------|-------|
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://xmelwnhhphksbpdjmbbp.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | *(del .env local)* — **SECRET** |
+| `META_ACCESS_TOKEN` | *(del .env local)* — **SECRET** |
+| `WHATSAPP_PHONE_ID` | `990364080831295` |
+| `GEMINI_API_KEY` | *(del .env local)* — **SECRET** |
+| `GEMINI_MODEL` | `gemini-1.5-flash` |
+| `POLL_INTERVAL_SECONDS` | `3` |
+| `CONVERSATION_HISTORY_LIMIT` | `10` |
+
+### `commerce-ops-web` — REQUERIDAS EN BUILD TIME
+
+> ⚠️ Las variables `NEXT_PUBLIC_*` en Next.js son embebidas en el bundle durante el build.
+> Si no están configuradas en Render Dashboard ANTES del build, el cliente no tendrá acceso a Supabase.
+
+| Variable | Valor |
+|---------|-------|
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://xmelwnhhphksbpdjmbbp.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | *(del .env local)* |
