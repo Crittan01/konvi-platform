@@ -18,7 +18,7 @@ export default async function CatalogPage() {
   const tenantId = tenantUsers?.[0]?.tenant_id
 
   // 2. Traer el inventario atado al Tenant
-  let products = []
+  let products: Array<{ id: string; title: string; description: string; product_variations: Array<{ price: number; stock_quantity: number }> }> = []
   if (tenantId) {
     const { data } = await supabase
       .from('products')
