@@ -47,7 +47,7 @@ Adicionalmente:
 | 7 | Deploy Render + E2E | ✅ Completa | COMPLETADO 2026-04-09 |
 | 8 | Catálogo completo + RBAC base | ✅ Completa | COMPLETADO 2026-04-09 |
 | 9 | Schema core + Pedidos + Configuración + Equipo | ✅ Completa | COMPLETADO 2026-04-09 |
-| 10 | Integraciones — MeLi + Envia/Shipping | 📋 Diseñado | PENDIENTE (prerequisitos en Fase 9) |
+| 10 | Integraciones — MeLi + Envia/Shipping | 🟡 Parcial | IMPLEMENTADO — pendiente IH-007 (MeLi app) + IH-008 (Envia key) |
 | 11 | Módulos restantes Tenant Console | ❌ Pendiente | PENDIENTE (prerequisitos en Fases 8-9) |
 | 12 | Platform Console | ❌ Pendiente | PENDIENTE (prerequisito: OQ-P01 + Fase 9+ completa) |
 | 13 | Shopify / Tienda custom | ❌ Futuro | FUTURO |
