@@ -35,7 +35,11 @@ SaaS Conversacional Multi-Tenant para e-commerce vía WhatsApp.
 
 ## ⏳ Siguiente tarea — Fase 7: Deploy en Render
 
-**Bloqueante humano [IH-004]:** Requiere cuenta Render.com con el repositorio conectado.
+**Pre-requisitos de credenciales: ✅ TODOS RESUELTOS**
+- `META_ACCESS_TOKEN` ✅ | `GEMINI_API_KEY` ✅ | `SUPABASE_JWT_SECRET` ✅
+
+**Bloqueante humano principal [IH-004]:** Requiere cuenta Render.com con el repositorio conectado.
+**Bloqueante antes de producción [IH-006]:** Migrar META_ACCESS_TOKEN a System User Token permanente.
 
 ### Pasos exactos
 
@@ -84,9 +88,9 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 | Token | Estado | Acción |
 |---|---|---|
-| `META_ACCESS_TOKEN` | Renovado 2026-04-07 ~16:41 CDT (~24h) — **⚠️ verificar si expiró** | Renovar en Meta Developers → App → WhatsApp → API Setup. Para Render: migrar a System User Token (IH-006) |
-| `GEMINI_API_KEY` | ✅ Configurada en `.env` | Verificar antes de deploy en Render |
-| `SUPABASE_JWT_SECRET` | ⚠️ Pendiente obtener (IH-005) | Supabase Dashboard → Project Settings → Data API → JWT Secret |
+| `META_ACCESS_TOKEN` | ✅ Renovado 2026-04-08 | **⚠️ Temporal ~24h**. Para Render producción: crear System User Token permanente (IH-006) |
+| `GEMINI_API_KEY` | ✅ Configurada en `.env` | Lista para deploy |
+| `SUPABASE_JWT_SECRET` | ✅ Presente en `.env` | Lista para deploy |
 
 ---
 
@@ -97,20 +101,21 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 - **Node**: v20.20.2 via nvm, pnpm 10.33.0
 - **Binarios instalados**: `supabase` CLI v2.84.2 en `/usr/local/bin/`
 
-Paquetes Python instalados a nivel sistema:
+Paquetes Python instalados a nivel sistema — verificados 2026-04-08:
 ```
-google-genai==1.47.0    ← SDK NUEVO (no usar google-generativeai — deprecado)
-supabase==2.10.0        ← ⚠️ VM tiene 2.10.0, requirements.txt usa 2.28.3
+google-genai==1.47.0       ← SDK oficial (google-generativeai DESINSTALADO)
+supabase==2.28.3           ← alineado con requirements.txt ✅
 httpx==0.28.1
 pydantic==2.12.5
 PyJWT==2.10.1
-fastapi==0.115.12
-uvicorn[standard]==0.34.0
-python-dotenv==1.0.1
+fastapi==0.128.8           ← alineado con requirements.txt ✅
+uvicorn==0.39.0            ← alineado con requirements.txt ✅
+python-dotenv==1.2.1       ← alineado con requirements.txt ✅
+python-multipart==0.0.20
+starlette==0.49.3          ← dep transitiva de fastapi
+anyio==4.12.1
 git-filter-repo (pip)
 ```
-
-> Para alinear supabase en la VM: `pip3 install supabase==2.28.3`
 
 ---
 

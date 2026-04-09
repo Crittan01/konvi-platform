@@ -26,30 +26,50 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 | `services/orchestrator/` | ✅ ELIMINADO | Prototipo obsoleto — canónico: `services/ai-orchestrator/` |
 | Integración MeLi | ❌ Pendiente | Fase 8 |
 
-**Credenciales activas (`.env` — nunca al repo):**
-- `META_ACCESS_TOKEN`: renovado 2026-04-07 ∼16:41 CDT (∼24h, ver [IH-003]) — **⚠️ renovar si expirado**
-- `GEMINI_API_KEY`: ✅ configurada en `.env`
-- `SUPABASE_JWT_SECRET`: ⚠️ **PENDIENTE** — obtener de Supabase Dashboard → Project Settings → Data API
+**Credenciales activas (`.env` — nunca al repo) — estado 2026-04-08:**
+- `META_ACCESS_TOKEN`: ✅ Renovado 2026-04-08 — **⚠️ token temporal ~24h, renovar periódicamente. Para Render: migrar a System User Token (IH-006)**
+- `GEMINI_API_KEY`: ✅ Configurada en `.env`
+- `SUPABASE_JWT_SECRET`: ✅ Presente en `.env`
 - `meta_waba_id`: `2159052118202272` ✅
 
-**Herramientas instaladas en VM (sin venv — máquina dedicada):**
+**Herramientas instaladas en VM (sin venv — máquina dedicada) — verificado 2026-04-08:**
 - `supabase` CLI v2.84.2 → `supabase db query --linked -f archivo.sql`
-- `psql` 15.17 via DNF (TCP bloqueado por Supavisor — usar CLI)
-- `pip3` sistema: `google-genai==1.47.0`, `supabase==2.10.0`*, `httpx==0.28.1`, `pydantic==2.12.5`, `PyJWT==2.10.1`, `fastapi==0.115.12`, `uvicorn[standard]==0.34.0`
-- Python 3.9.25 (sistema Oracle Linux 9) — compatible con `Optional[]`, no `X | Y`
-- ⚠️ *`supabase==2.10.0` en VM pero requirements.txt usa `2.28.3`. Para alinear: `pip3 install supabase==2.28.3`
+- `psql` 15.17 via DNF (TCP bloqueado por Supavisor — usar CLI `--linked`)
+- Python 3.9.25 (Oracle Linux 9) — `Optional[X]`, no `X | None`. ⚠️ EOL — Google ya emite FutureWarning
+- Node v20.20.2 via nvm, pnpm 10.33.0
+- `pip3` sistema — paquetes alineados con requirements.txt:
+  ```
+  google-genai==1.47.0       ← SDK oficial (google-generativeai deprecado: DESINSTALADO)
+  supabase==2.28.3
+  httpx==0.28.1
+  pydantic==2.12.5
+  PyJWT==2.10.1
+  fastapi==0.128.8
+  uvicorn==0.39.0
+  python-dotenv==1.2.1
+  python-multipart==0.0.20
+  anyio==4.12.1
+  starlette==0.49.3
+  ```
 
 ## Próximo a Implementar
 
 **Fase 7 — Deploy en Render** (próxima prioridad):
 > Ver guía detallada: `docs/deployment/FASE7_RENDER_DEPLOY.md`
 
-1. PRE-REQ: Obtener `SUPABASE_JWT_SECRET` de Supabase Dashboard → Project Settings → Data API
-2. **Humano** → crear cuenta Render + Blueprint con repo `Crittan01/commerce-ops-platform` (IH-004)
-3. **Humano** → configurar env vars secretas en Render Dashboard para cada servicio
-4. **Agente** → smoke tests y verificación de health checks
-5. **Humano** → actualizar Callback URL del webhook en Meta Developers
-6. Test E2E — mensaje WhatsApp → Gemini → respuesta automática
+Pre-requisitos **ya resueltos** ✅:
+- `SUPABASE_JWT_SECRET` ✅ presente en `.env`
+- `META_ACCESS_TOKEN` ✅ renovado en `.env`
+- `GEMINI_API_KEY` ✅ configurada en `.env`
+- requirements.txt ✅ alineados con versiones reales de VM
+
+Pasos pendientes:
+1. **Humano [IH-006]** → crear System User Token permanente en Meta Business Suite (el actual token es temporal ~24h)
+2. **Humano [IH-004]** → crear cuenta Render + Blueprint con repo `Crittan01/commerce-ops-platform`
+3. **Humano** → configurar env vars secretas en Render Dashboard para cada servicio (ver `FASE7_RENDER_DEPLOY.md` → PASO 3)
+4. **Agente** → smoke tests y verificación de health checks (PASO 5)
+5. **Humano** → actualizar Callback URL del webhook en Meta Developers (PASO 6)
+6. Test E2E — mensaje WhatsApp → Gemini → respuesta automática (PASO 7)
 
 **Para activar el Orchestrator hoy (local):**
 ```bash
