@@ -22,7 +22,7 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 | Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
 | API Gateway (Fase 6) | ✅ Completa | JWT real, productos CRUD, conversaciones |
 | render.yaml | ✅ Actualizado | 4 servicios: web + connector + api + orchestrator |
-| Deploy Render (Fase 7) | 🟡 En progreso | IH-004 — ver `docs/deployment/FASE7_RENDER_DEPLOY.md` |
+| Deploy Render (Fase 7) | 🟡 4/4 Live, orchestrator fix pendiente | Smoke tests ✅ — falta GEMINI_MODEL en Dashboard + PASO 6 Meta Webhook |
 | `services/orchestrator/` | ✅ ELIMINADO | Prototipo obsoleto — canónico: `services/ai-orchestrator/` |
 | Integración MeLi | ❌ Pendiente | Fase 8 |
 

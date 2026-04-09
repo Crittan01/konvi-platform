@@ -224,37 +224,41 @@ supabase db query --linked "SELECT id, from_number, body, processed, created_at 
 
 ---
 
-## Estado de completitud — 2026-04-09
+## Estado de completitud — 2026-04-08
 
 - [x] PRE-REQ: `SUPABASE_JWT_SECRET` ✅ en .env
 - [x] PRE-REQ: `META_ACCESS_TOKEN` ✅ renovado en .env
 - [x] PRE-REQ: `GEMINI_API_KEY` ✅ configurada en .env
 - [x] PASO 1: Cuenta Render creada/conectada ✅
 - [x] PASO 2: Blueprint aplicado — 4 servicios creados ✅
-- [ ] PASO 3: Variables de entorno — **PARCIAL** (faltan vars del orchestrator y web)
-  - `commerce-ops-connector` ✅ live (con versiones antiguas, se actualizará)
+- [x] PASO 3: Variables de entorno ✅ — todos los servicios configurados
+  - `commerce-ops-connector` ✅ live
   - `commerce-ops-api` ✅ live
-  - `commerce-ops-orchestrator` ⚠️ — **FALTA configurar env vars en Render Dashboard**
-  - `commerce-ops-web` ❌ — **FALTA configurar NEXT_PUBLIC_* en Render Dashboard**
-- [ ] PASO 4: Deploy exitoso en todos los servicios — pendiente vars del orchestrator y web
-- [ ] PASO 5: Smoke tests pasados desde VM
+  - `commerce-ops-orchestrator` ✅ live (env vars configuradas manualmente en Dashboard)
+  - `commerce-ops-web` ✅ live (NEXT_PUBLIC_* configuradas antes del build)
+- [x] PASO 4: Deploy exitoso en los 4 servicios ✅
+- [x] PASO 5: Smoke tests pasados desde VM ✅ — 2026-04-08
+  - `commerce-ops-web` → HTTP 200 ✅
+  - `commerce-ops-connector /health` → `{"status":"ok","service":"connector-whatsapp"}` ✅
+  - `commerce-ops-api /health` → `{"status":"ok"}` ✅
+  - Webhook verification echo → `test123` ✅
+- [ ] PASO 5b: `commerce-ops-orchestrator` — **ACCIÓN HUMANA PENDIENTE**: actualizar `GEMINI_MODEL=gemini-2.0-flash` en Render Dashboard (actualmente falla con 404 por modelo gemini-1.5-flash inexistente en v1beta)
 - [ ] PASO 6: Webhook Meta → `commerce-ops-connector.onrender.com` actualizado
 - [ ] PASO 7: Test E2E — mensaje WhatsApp procesado y respondido correctamente
 
-## Env vars pendientes de configurar en Render Dashboard
+## Acción humana bloqueante — Orchestrator Gemini fix
 
 ### `commerce-ops-orchestrator` — ACCIÓN INMEDIATA
 
-| Variable | Valor |
-|---------|-------|
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | *(del .env local)* — **SECRET** |
-| `META_ACCESS_TOKEN` | *(del .env local)* — **SECRET** |
-| `WHATSAPP_PHONE_ID` | `990364080831295` |
-| `GEMINI_API_KEY` | *(del .env local)* — **SECRET** |
-| `GEMINI_MODEL` | `gemini-1.5-flash` |
-| `POLL_INTERVAL_SECONDS` | `3` |
-| `CONVERSATION_HISTORY_LIMIT` | `10` |
+El Orchestrator falla con `404 models/gemini-1.5-flash is not found for API version v1beta`.
+
+**Causa**: Render Dashboard tiene `GEMINI_MODEL=gemini-1.5-flash` (valor antiguo que sobreescribe render.yaml).
+El SDK `google-genai==1.47.0` usa el endpoint v1beta donde solo existe `gemini-2.0-flash`.
+
+**Fix**:
+1. Render Dashboard → `commerce-ops-orchestrator` → **Environment**
+2. Cambiar `GEMINI_MODEL` de `gemini-1.5-flash` a `gemini-2.0-flash`
+3. **Save Changes** → **Manual Deploy** → **Deploy latest commit**
 
 ### `commerce-ops-web` — REQUERIDAS EN BUILD TIME
 
