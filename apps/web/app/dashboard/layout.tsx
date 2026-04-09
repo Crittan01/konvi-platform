@@ -1,7 +1,7 @@
 import * as React from "react"
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { LayoutDashboard, ShoppingCart, MessageSquare, LogOut } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, MessageSquare, LogOut, Package, Users, Settings } from 'lucide-react'
 import { createClient } from '@/utils/supabase/server'
 
 export default async function DashboardLayout({
@@ -34,6 +34,15 @@ export default async function DashboardLayout({
             </Link>
             <Link href="/dashboard/inbox" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
               <MessageSquare className="h-4 w-4" /> Inbox AI
+            </Link>
+            <Link href="/dashboard/orders" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
+              <Package className="h-4 w-4" /> Pedidos
+            </Link>
+            <Link href="/dashboard/contacts" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
+              <Users className="h-4 w-4" /> Contactos
+            </Link>
+            <Link href="/dashboard/settings" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
+              <Settings className="h-4 w-4" /> Configuración
             </Link>
           </nav>
         </div>
