@@ -230,8 +230,9 @@ El botón de MeLi en `/dashboard/integrations` ya no muestra "(requiere IH-007)"
 
 ## [IH-008] Obtener API Key de Envia
 
-**Estado**: ⏳ PENDIENTE — bloquea cotizaciones de envío  
-**Bloquea**: Formulario de cotización en `/dashboard/shipping` + `/dashboard/integrations`
+**Estado**: ✅ COMPLETADO — 2026-04-09  
+**Ambiente**: Sandbox (`shipping-test.envia.com`) · Empresa #5017  
+**Bloquea**: ~~Formulario de cotización en `/dashboard/shipping` + `/dashboard/integrations`~~
 
 ### Por qué es necesario
 
