@@ -4,30 +4,30 @@
 
 @layer base {
   :root {
-    /* ── Commerce Ops Design System ──────────────────────────────────────
-       Paleta: Slate profundo + Índigo violeta + Ámbar dorado
-       Inspirado en: Linear, Stripe Dashboard, Vercel
-       Filosofía: oscuro sofisticado — no negro puro, sino slate con alma
+    /* ── Commerce Ops Design System — Cálido Natural ─────────────────────
+       Paleta: Crema / Blanco hueso + Verde bosque + Dorado ámbar
+       Filosofía: cálido, profesional, agradable para uso diurno prolongado
+       Orientado a operadores de negocio — no a desarrolladores
     ─────────────────────────────────────────────────────────────────── */
 
-    /* Backgrounds — capas de profundidad */
-    --background:  224 20% 8%;     /* Slate muy oscuro — base del canvas */
-    --card:        224 18% 11%;    /* Slate medio — cards elevadas sobre el fondo */
-    --popover:     224 18% 11%;
-    --secondary:   224 16% 15%;    /* Slate suave — hover states, inputs */
-    --muted:       224 16% 15%;
-    --accent:      224 16% 15%;
+    /* Backgrounds */
+    --background:  36 30% 96%;    /* #F8F5F0 — crema suave, canvas principal */
+    --card:        0 0% 100%;     /* #FFFFFF — blanco hueso, cards elevadas */
+    --popover:     0 0% 100%;
+    --secondary:   36 20% 93%;    /* Crema grisácea — hover states */
+    --muted:       36 20% 93%;
+    --accent:      36 20% 93%;
 
     /* Texto */
-    --foreground:          210 30% 96%;   /* Blanco cálido — no frío puro */
-    --card-foreground:     210 30% 96%;
-    --popover-foreground:  210 30% 96%;
-    --secondary-foreground: 210 20% 90%;
-    --muted-foreground:    215 16% 55%;   /* Slate gris — texto secundario */
-    --accent-foreground:   210 30% 96%;
+    --foreground:           168 25% 14%;   /* #1C2B2A — slate verdoso oscuro */
+    --card-foreground:      168 25% 14%;
+    --popover-foreground:   168 25% 14%;
+    --secondary-foreground: 168 15% 25%;
+    --muted-foreground:     168 12% 45%;   /* #6B7F7D — gris verdoso suave */
+    --accent-foreground:    168 25% 14%;
 
-    /* Primary — Índigo violeta (identidad de la plataforma) */
-    --primary:             243 75% 65%;   /* #6366F1 Indigo 500 */
+    /* Primary — Verde bosque */
+    --primary:             155 43% 30%;   /* #2D6A4F */
     --primary-foreground:  0 0% 100%;
 
     /* Destructive */
@@ -35,17 +35,16 @@
     --destructive-foreground: 0 0% 100%;
 
     /* Bordes e inputs */
-    --border: 224 15% 18%;
-    --input:  224 15% 18%;
-    --ring:   243 75% 65%;
+    --border: 36 18% 86%;    /* #E2DDD6 — crema gris suave */
+    --input:  36 18% 86%;
+    --ring:   155 43% 30%;
 
-    /* Bordes redondeados — más suave que el default */
+    /* Radio */
     --radius: 0.625rem;
 
-    /* ── Variables custom del sistema ────────────────────────────────── */
-    --amber:  43 96% 56%;    /* #F59E0B — acento ámbar para badges y CTAs secundarios */
-    --green:  142 71% 45%;   /* Verde éxito */
-    --sidebar: 224 22% 7%;   /* Sidebar ligeramente más oscura que el canvas */
+    /* Custom */
+    --amber:   42 78% 55%;   /* #D4A843 — dorado ámbar */
+    --sidebar-bg: 155 40% 18%;  /* Verde bosque oscuro para sidebar */
   }
 }
 
@@ -83,37 +82,41 @@
 }
 
 @layer utilities {
-  /* Gradiente sutil para el sidebar */
+  /* Sidebar verde bosque oscuro */
   .sidebar-gradient {
     background: linear-gradient(
       180deg,
-      hsl(var(--sidebar)) 0%,
-      hsl(224 22% 6%) 100%
+      hsl(155 42% 16%) 0%,
+      hsl(155 44% 13%) 100%
     );
   }
 
-  /* Glow indigo para elementos activos */
+  /* Sombra sutil verde para el logo */
   .glow-primary {
-    box-shadow: 0 0 20px hsl(var(--primary) / 0.25);
+    box-shadow: 0 0 16px hsl(var(--primary) / 0.30);
   }
 
-  /* Card con borde sutil */
-  .card-border {
-    border: 1px solid hsl(var(--border));
-  }
-
-  /* Badge ámbar */
+  /* Badge dorado */
   .badge-amber {
     background: hsl(var(--amber) / 0.15);
-    color: hsl(var(--amber));
-    border: 1px solid hsl(var(--amber) / 0.3);
+    color: hsl(42 78% 38%);
+    border: 1px solid hsl(var(--amber) / 0.35);
   }
 
-  /* Texto degradado */
+  /* Texto degradado verde → dorado */
   .text-gradient {
-    background: linear-gradient(135deg, hsl(var(--primary)), #a78bfa);
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--amber)));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+  }
+
+  /* Card hover sutil */
+  .card-hover {
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .card-hover:hover {
+    box-shadow: 0 2px 12px hsl(155 43% 30% / 0.10);
+    border-color: hsl(var(--primary) / 0.25);
   }
 }

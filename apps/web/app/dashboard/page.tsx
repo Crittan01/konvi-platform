@@ -63,12 +63,12 @@ export default async function DashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Conversaciones', value: stats.conversations, color: 'text-indigo-400' },
-          { label: 'Pedidos',        value: stats.orders,        color: 'text-amber-400' },
-          { label: 'Contactos',      value: stats.contacts,      color: 'text-green-400' },
-          { label: 'Productos activos', value: stats.products,   color: 'text-purple-400' },
+          { label: 'Conversaciones',    value: stats.conversations, color: 'text-primary' },
+          { label: 'Pedidos',           value: stats.orders,        color: 'text-primary' },
+          { label: 'Contactos',         value: stats.contacts,      color: 'text-primary' },
+          { label: 'Productos activos', value: stats.products,      color: 'text-primary' },
         ].map(kpi => (
-          <div key={kpi.label} className="rounded-xl border border-border/60 bg-card p-5">
+          <div key={kpi.label} className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{kpi.label}</p>
             <p className={`text-3xl font-bold ${kpi.color}`}>{kpi.value}</p>
           </div>
@@ -85,7 +85,7 @@ export default async function DashboardPage() {
             <Link
               key={href}
               href={href}
-              className="group relative rounded-xl border border-border/60 bg-card p-4 hover:border-primary/40 hover:bg-primary/5 transition-all duration-200"
+              className="group relative rounded-xl border border-border bg-card p-4 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 card-hover"
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
