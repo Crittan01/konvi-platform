@@ -32,7 +32,7 @@ Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
 
 | Elemento | Versión real | Notas |
 |----------|-------------|-------|
-| Python (VM) | **3.9.25** | EOL — usar `Optional[X]`, no `X | None` |
+| Python (VM) | **3.11.13** | Sin venv — paquetes en sistema. `Optional[X]` es el estilo usado. |
 | FastAPI | 0.128.8 | Todos los servicios |
 | Pydantic | 2.12.5 | — |
 | google-genai | 1.47.0 | SDK oficial Gemini — no `google-generativeai` |
@@ -205,11 +205,30 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 | Bloqueante | Tipo | Impacto |
 |-----------|------|---------|
 | OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea inicio de Fase 12 |
-| Variantes múltiples en Catálogo (UI) | Deuda técnica UI | Solo crea variante "Standard"; gestión multi-variante desde UI pendiente |
-| Variantes múltiples en catálogo | Deuda técnica UI | Solo crea variante "Standard" |
-| RBAC completo por endpoint (R-09) | Deuda técnica | Algunos endpoints falta enforceamiento granular |
-| `packages/db/migrations/` desincronizado | Deuda técnica | Tiene solo las migraciones iniciales; las 13 reales están en `supabase/migrations/` |
-| Python 3.9.25 en VM (EOL) | Deuda técnica infra | FutureWarning activo. Actualizar antes de Beta. |
+| ~~Python 3.9.25 en VM (EOL)~~ | ✅ Resuelto — Python 3.11.13 instalado 2026-04-10 | — |
+
+## Deuda técnica resuelta (2026-04-10)
+
+| Ítem | Resolución |
+|------|-----------|
+| RBAC granular en settings.py (R-09) | ✅ Añadido `require_owner_role` a `auth.py`. `settings.py` refactorizado: 3 endpoints usan `require_owner_role`, 1 usa `require_write_role`. Eliminados checks manuales. |
+| `packages/db/migrations/` desincronizado | ✅ 14 migraciones canónicas sincronizadas. README actualizado indicando `supabase/migrations/` como fuente canónica. |
+| Variantes múltiples — solo editable en UI para productos 1-variante | ✅ API: 3 nuevos endpoints (`PATCH /variations/{id}`, `POST /variations`, `DELETE /variations/{id}`). UI: edición por variante individual en todos los productos. Server Actions migradas a `getUser()`. |
+
+## Procedimiento para Python 3.11 (requiere acción humana en VM)
+
+```bash
+# En la VM:
+sudo dnf install python3.11 python3.11-pip -y
+python3.11 -m pip install google-genai==1.47.0 supabase==2.28.3 httpx==0.28.1 \
+  pydantic==2.12.5 PyJWT==2.10.1 fastapi==0.128.8 uvicorn==0.39.0 \
+  python-dotenv==1.2.1 python-multipart==0.0.20 anyio==4.12.1 starlette==0.49.3
+
+# Validar localmente:
+python3.11 -m uvicorn main:app --port 8001
+
+# En Render Dashboard → cada servicio → Start Command: cambiar python3 → python3.11
+```
 
 ---
 

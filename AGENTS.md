@@ -54,10 +54,10 @@ Ver `docs/HANDOFF.md` para estado completo y próximos pasos.
 > `NODE_ENV=production` hace que `npm install` omita devDeps → solución: `--include=dev` en buildCommand.
 > Si el CSS se ve plano: **"Clear build cache & deploy"** en Render Dashboard (Next.js cachea transformaciones CSS).
 
-**Herramientas instaladas en VM (sin venv — máquina dedicada) — verificado 2026-04-08:**
+**Herramientas instaladas en VM (sin venv — máquina dedicada) — verificado 2026-04-10:**
 - `supabase` CLI v2.84.2 → `supabase db query --linked -f archivo.sql`
 - `psql` 15.17 via DNF (TCP bloqueado por Supavisor — usar CLI `--linked`)
-- Python 3.9.25 (Oracle Linux 9) — `Optional[X]`, no `X | None`. ⚠️ EOL — Google ya emite FutureWarning
+- Python **3.11.13** (Oracle Linux 9, instalado vía dnf) — sin venv, paquetes en sistema. `Optional[X]` sigue siendo el estilo usado en el código.
 - Node v20.20.2 via nvm, pnpm 10.33.0
 - `pip3` sistema — paquetes alineados con requirements.txt:
   ```
@@ -140,7 +140,7 @@ Ver intervenciones humanas: `docs/operations/HUMAN_INTERVENTIONS.md`
 |---|---|---|
 | Frontend | Next.js **14.2.35** + React ^18 + TypeScript ^5 | Next.js 15.x |
 | UI | TailwindCSS ^3.3.0 + shadcn/ui (5 componentes en `apps/web/components/ui/`) | Componentes en `packages/ui` |
-| Backend | Python **3.9.25** (VM, EOL) + FastAPI 0.128.8 | Python 3.11+ |
+| Backend | Python **3.11.13** (VM) + FastAPI 0.128.8 | — |
 | DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) | — |
 | IA | Google Gemini API (`google-genai==1.47.0`, modelo `gemini-2.5-flash`) | — |
 | Mensajería | WhatsApp Cloud API (Meta oficial v21.0) | — |

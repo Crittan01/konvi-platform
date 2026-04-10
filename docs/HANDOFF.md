@@ -15,7 +15,7 @@ Este documento es el punto de entrada para retomar trabajo. **Leer antes de cual
 | Capa | Versión real |
 |------|-------------|
 | Frontend | Next.js **14.2.35**, React ^18, TailwindCSS ^3.3.0 |
-| Backend | Python **3.9.25** (EOL), FastAPI 0.128.8, google-genai 1.47.0 |
+| Backend | Python **3.11.13** (dnf, sin venv), FastAPI 0.128.8, google-genai 1.47.0 |
 | DB / Auth | Supabase — 13 migraciones aplicadas, RLS + JWT Claims |
 | IA | `gemini-2.5-flash` via `google-genai==1.47.0` |
 | Hosting | Render — 4 servicios live (Free plan) |
@@ -46,7 +46,7 @@ Este documento es el punto de entrada para retomar trabajo. **Leer antes de cual
 |--------|------|--------|
 | Dashboard | `/dashboard` | ✅ Tabs Operaciones + Negocio, KPIs, gráficas recharts |
 | Inbox AI | `/dashboard/inbox` | ✅ Realtime, human takeover, envío de mensajes como agente |
-| Catálogo | `/dashboard/catalog` | ✅ CRUD + edición + soft delete (variantes múltiples: deuda) |
+| Catálogo | `/dashboard/catalog` | ✅ CRUD + edición por variante individual (multi-variante resuelto 2026-04-10) |
 | Pedidos | `/dashboard/orders` | ✅ Listado, multi-item form, estados, stock decrementado al confirmar |
 | Contactos | `/dashboard/contacts` | ✅ Listado, consent_given (Habeas Data), auto-upsert desde WhatsApp |
 | Inventario | `/dashboard/inventory` | ✅ Stock por variante, umbral configurable por tenant, ajuste con motivo |
@@ -100,9 +100,18 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 ---
 
-## Trabajo de la última sesión (2026-04-10)
+## Trabajo de la última sesión (2026-04-10) — rev. 16
 
-### Hardening de seguridad y estabilidad
+### Deuda técnica resuelta
+
+| Ítem | Archivos modificados |
+|------|---------------------|
+| RBAC granular (R-09): `require_owner_role` + refactor `settings.py` | `dependencies/auth.py`, `routers/settings.py` |
+| `packages/db/migrations/` sincronizado (14 canónicas) | `packages/db/migrations/`, `packages/db/README.md` |
+| Variantes múltiples: edición por variante en UI + 3 endpoints API | `routers/products.py`, `catalog/page.tsx` |
+| Python 3.9.25 EOL → **3.11.13** (dnf, sistema, sin venv) | VM local, `services/*/runtime.txt` |
+
+### Hardening de seguridad y estabilidad (rev. 15)
 
 | Fix | Detalle |
 |-----|---------|

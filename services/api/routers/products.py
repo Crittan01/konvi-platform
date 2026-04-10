@@ -6,11 +6,14 @@ Schema real (migration 20260406181236_catalog_schema.sql):
   product_variations: id, product_id, tenant_id, price, stock_quantity, attributes, external_variation_id
 
 Endpoints:
-  GET    /api/v1/products/          — listar productos activos del tenant
-  POST   /api/v1/products/          — crear producto + variante inicial  [owner, manager]
-  GET    /api/v1/products/{id}      — obtener producto con variantes
-  PATCH  /api/v1/products/{id}      — editar título / descripción         [owner, manager]
-  DELETE /api/v1/products/{id}      — soft delete (status='inactive')     [owner, manager]
+  GET    /api/v1/products/                              — listar productos activos del tenant
+  POST   /api/v1/products/                              — crear producto + variante inicial  [owner, manager]
+  GET    /api/v1/products/{id}                          — obtener producto con variantes
+  PATCH  /api/v1/products/{id}                          — editar título / descripción        [owner, manager]
+  DELETE /api/v1/products/{id}                          — soft delete (status='inactive')    [owner, manager]
+  PATCH  /api/v1/products/{id}/variations/{var_id}      — editar variante por ID             [owner, manager]
+  POST   /api/v1/products/{id}/variations               — añadir variante a producto         [owner, manager]
+  DELETE /api/v1/products/{id}/variations/{var_id}      — eliminar variante (no si es única) [owner, manager]
 
 RBAC:
   owner / manager → lectura + escritura
@@ -177,37 +180,37 @@ async def patch_product(
         raise HTTPException(status_code=500, detail="Error al editar producto")
 
 
-@router.patch("/{product_id}/variation", response_model=dict)
+@router.patch("/{product_id}/variations/{variation_id}", response_model=dict)
 async def patch_variation(
     product_id: str,
+    variation_id: str,
     variation: VariationPatch,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
 ):
     """
-    Edita precio y/o stock de la variante principal del producto.
-    Actualiza la primera variante encontrada (modelo actual: 1 variante por producto).
-    Gestión de variantes múltiples: deferred a Fase 9/11.
+    Edita precio, stock y/o atributos de una variante específica del producto.
+    Requiere variation_id explícito — soporta productos multi-variante.
+    Solo owner/manager.
     """
     try:
         data = {k: v for k, v in variation.model_dump().items() if v is not None}
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 
-        # Obtener la variante principal del producto
-        var_result = (
+        # Verificar que la variante pertenece al producto y al tenant
+        check = (
             supabase.table("product_variations")
             .select("id")
+            .eq("id", variation_id)
             .eq("product_id", product_id)
             .eq("tenant_id", tenant_id)
-            .limit(1)
             .execute()
         )
-        if not var_result.data:
+        if not check.data:
             raise HTTPException(status_code=404, detail="Variante no encontrada")
 
-        variation_id = var_result.data[0]["id"]
         result = (
             supabase.table("product_variations")
             .update(data)
@@ -221,8 +224,96 @@ async def patch_variation(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error editando variante producto %s: %s", product_id, e)
+        logger.error("Error editando variante %s producto %s: %s", variation_id, product_id, e)
         raise HTTPException(status_code=500, detail="Error al editar variante")
+
+
+@router.post("/{product_id}/variations", response_model=dict, status_code=201)
+async def add_variation(
+    product_id: str,
+    variation: VariationCreate,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """
+    Añade una nueva variante a un producto existente.
+    Permite agregar tallas, colores u otras dimensiones a productos ya creados.
+    Solo owner/manager.
+    """
+    try:
+        # Verificar que el producto pertenece al tenant
+        prod_check = (
+            supabase.table("products")
+            .select("id")
+            .eq("id", product_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not prod_check.data:
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+        result = supabase.table("product_variations").insert({
+            "product_id": product_id,
+            "tenant_id": tenant_id,
+            "price": variation.price,
+            "stock_quantity": variation.stock_quantity,
+            "attributes": variation.attributes,
+        }).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Error al crear variante")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error añadiendo variante a producto %s: %s", product_id, e)
+        raise HTTPException(status_code=500, detail="Error al añadir variante")
+
+
+@router.delete("/{product_id}/variations/{variation_id}", status_code=204)
+async def delete_variation(
+    product_id: str,
+    variation_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """
+    Elimina una variante específica de un producto.
+    No se puede eliminar si es la única variante del producto.
+    Solo owner/manager.
+    """
+    try:
+        # Verificar que no es la única variante
+        count_result = (
+            supabase.table("product_variations")
+            .select("id")
+            .eq("product_id", product_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if len(count_result.data or []) <= 1:
+            raise HTTPException(
+                status_code=422,
+                detail="No se puede eliminar la única variante del producto. Desactiva el producto si deseas retirarlo."
+            )
+
+        result = (
+            supabase.table("product_variations")
+            .delete()
+            .eq("id", variation_id)
+            .eq("product_id", product_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Variante no encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error eliminando variante %s producto %s: %s", variation_id, product_id, e)
+        raise HTTPException(status_code=500, detail="Error al eliminar variante")
 
 
 @router.delete("/{product_id}", status_code=204)

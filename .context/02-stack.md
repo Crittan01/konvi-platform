@@ -19,7 +19,7 @@
 
 | Elemento | Versión real |
 |---------|-------------|
-| Python (VM) | **3.9.25** (EOL) — usar `Optional[X]`, no `X \| None` |
+| Python (VM) | **3.11.13** (dnf, sin venv) — `Optional[X]` es el estilo del código |
 | FastAPI | 0.128.8 |
 | Pydantic | 2.12.5 |
 | google-genai | 1.47.0 — SDK oficial Gemini (no usar `google-generativeai`) |

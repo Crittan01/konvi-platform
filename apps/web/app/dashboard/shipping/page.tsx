@@ -1,7 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Truck, Package, AlertCircle, ExternalLink, Clock } from 'lucide-react'
 import ShippingQuoteForm from './shipping-quote-form'
+import Link from 'next/link'
 
 type Shipment = {
   id: string
@@ -29,17 +29,21 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  quoted:     'Cotizado',
-  labeled:    'Etiquetado',
-  picked_up:  'Recolectado',
-  in_transit: 'En tránsito',
-  delivered:  'Entregado',
-  cancelled:  'Cancelado',
+  quoted:     '📋 Cotizado',
+  labeled:    '🏷️ Etiquetado',
+  picked_up:  '🚚 Recolectado',
+  in_transit: '✈️ En tránsito',
+  delivered:  '✅ Entregado',
+  cancelled:  '❌ Cancelado',
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
-export default async function ShippingPage() {
+export default async function ShippingPage({
+  searchParams,
+}: {
+  searchParams?: { order?: string }
+}) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
@@ -50,6 +54,10 @@ export default async function ShippingPage() {
   let shipments: Shipment[] = []
   let enviaConnected = false
   let shippingOrigin: ShippingOrigin | null = null
+
+  // KPI counters
+  let inTransitCount = 0
+  let deliveredCount = 0
 
   if (tenantId) {
     const [shipmentsRes, integrationRes, tenantRes] = await Promise.all([
@@ -71,85 +79,121 @@ export default async function ShippingPage() {
         .eq('id', tenantId)
         .single(),
     ])
-    shipments = (shipmentsRes.data as Shipment[]) || []
-    enviaConnected = integrationRes.data?.status === 'connected'
-    shippingOrigin = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
+    shipments       = (shipmentsRes.data as Shipment[]) || []
+    enviaConnected  = integrationRes.data?.status === 'connected'
+    shippingOrigin  = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
+    inTransitCount  = shipments.filter(s => s.status === 'in_transit').length
+    deliveredCount  = shipments.filter(s => s.status === 'delivered').length
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold tracking-tight text-primary">Envíos</h1>
-        <Badge variant="outline" className="text-xs capitalize">{role}</Badge>
+    <div className="space-y-5 max-w-7xl">
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+            <Truck className="h-5 w-5 text-primary" /> Envíos
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {shipments.length} envíos · {inTransitCount} en tránsito · {deliveredCount} entregados
+          </p>
+        </div>
       </div>
 
-      {/* Banner de estado de Envia */}
+      {/* Banner Envia desconectado */}
       {!enviaConnected && (
-        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-          <p className="text-sm font-medium text-amber-400">Envia no está conectado</p>
-          <p className="text-xs text-amber-400/80 mt-1">
-            Ve a <a href="/dashboard/integrations" className="underline font-medium">Integraciones</a> para configurar tu API key de Envia antes de cotizar envíos.
-          </p>
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10">
+          <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-amber-400">Envia no está conectado</p>
+            <p className="text-xs text-amber-400/80 mt-0.5">
+              Ve a{' '}
+              <Link href="/dashboard/integrations" className="underline font-medium">Integraciones</Link>
+              {' '}para configurar tu API key de Envia antes de cotizar envíos.
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Formulario de cotización — solo cuando Envia está conectado y tiene permisos */}
+      {/* KPIs rápidas */}
+      {shipments.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-border bg-card p-4 text-center">
+            <p className="text-2xl font-bold text-primary">{shipments.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Total envíos</p>
+          </div>
+          <div className={`rounded-xl border bg-card p-4 text-center ${inTransitCount > 0 ? 'border-indigo-500/30' : 'border-border'}`}>
+            <p className={`text-2xl font-bold ${inTransitCount > 0 ? 'text-indigo-400' : 'text-primary'}`}>{inTransitCount}</p>
+            <p className="text-xs text-muted-foreground mt-1">En tránsito</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4 text-center">
+            <p className="text-2xl font-bold text-emerald-400">{deliveredCount}</p>
+            <p className="text-xs text-muted-foreground mt-1">Entregados</p>
+          </div>
+        </div>
+      )}
+
+      {/* Formulario de cotización */}
       {enviaConnected && canWrite && (
-        <ShippingQuoteForm
-          shippingOrigin={shippingOrigin}
-          apiUrl={API_URL}
-        />
+        <ShippingQuoteForm shippingOrigin={shippingOrigin} apiUrl={API_URL} />
       )}
 
       {/* Historial */}
       <div>
-        <h2 className="text-lg font-semibold mb-3">Historial de envíos</h2>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest mb-3">
+          Historial de envíos
+        </h2>
         {shipments.length === 0 ? (
-          <div className="p-8 border rounded-lg border-dashed text-center">
-            <p className="text-muted-foreground">No hay envíos registrados.</p>
-            {enviaConnected && (
-              <p className="text-sm text-muted-foreground mt-1">Las cotizaciones aparecerán aquí.</p>
-            )}
+          <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
+            <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
+            <p className="text-muted-foreground text-sm">
+              {enviaConnected ? 'No hay envíos aún. Usa el formulario de cotización.' : 'Conecta Envia para comenzar a crear envíos.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
             {shipments.map((s) => {
-              const colorClass = STATUS_COLORS[s.status] || 'bg-gray-500/15 text-gray-400'
+              const colorClass = STATUS_COLORS[s.status] || 'bg-muted text-muted-foreground border-border'
               return (
-                <Card key={s.id}>
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground font-mono">#{s.id.slice(-8)}</p>
-                        <p className="font-medium">{s.carrier ?? 'Carrier pendiente'}</p>
-                        {s.service && <p className="text-sm text-muted-foreground">{s.service}</p>}
-                        {s.tracking_number && (
-                          <p className="text-xs font-mono text-muted-foreground">
-                            Tracking: {s.tracking_number}
-                          </p>
-                        )}
-                        {s.order_id && (
-                          <p className="text-xs text-muted-foreground">
-                            Pedido: #{s.order_id.slice(-8)}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0 ml-4 space-y-1">
-                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full border ${colorClass}`}>
-                          {STATUS_LABELS[s.status] ?? s.status}
+                <div key={s.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all">
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                    {/* Info principal */}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-muted-foreground">#...{s.id.slice(-8)}</span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                          <Clock className="h-3 w-3" />
+                          {new Date(s.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </span>
-                        {s.estimated_delivery && (
-                          <p className="text-xs text-muted-foreground">
-                            Est: {new Date(s.estimated_delivery).toLocaleDateString('es-MX')}
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(s.created_at).toLocaleDateString('es-MX')}
-                        </p>
                       </div>
+                      <p className="font-medium text-sm">{s.carrier ?? 'Carrier por confirmar'}</p>
+                      {s.service && <p className="text-xs text-muted-foreground">{s.service}</p>}
+                      {s.tracking_number && (
+                        <p className="text-xs font-mono text-muted-foreground">
+                          Tracking: <span className="text-foreground">{s.tracking_number}</span>
+                        </p>
+                      )}
+                      {s.order_id && (
+                        <Link href={`/dashboard/orders`}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                          <ExternalLink className="h-3 w-3" /> Pedido #{s.order_id.slice(-8)}
+                        </Link>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
+                    {/* Status + fecha estimada */}
+                    <div className="shrink-0 text-right sm:text-right space-y-1">
+                      <span className={`inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full border ${colorClass}`}>
+                        {STATUS_LABELS[s.status] ?? s.status}
+                      </span>
+                      {s.estimated_delivery && (
+                        <p className="text-xs text-muted-foreground">
+                          Est: {new Date(s.estimated_delivery).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )
             })}
           </div>
