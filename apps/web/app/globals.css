@@ -4,47 +4,48 @@
 
 @layer base {
   :root {
-    /* ── Commerce Ops Design System — Cálido Natural ─────────────────────
-       Paleta: Crema / Blanco hueso + Verde bosque + Dorado ámbar
-       Filosofía: cálido, profesional, agradable para uso diurno prolongado
-       Orientado a operadores de negocio — no a desarrolladores
+    /* ── Commerce Ops Design System — Dark Warm ───────────────────────────
+       Paleta: Carbón cálido con tinte verde + Verde brillante + Dorado ámbar
+       Filosofía: oscuro CÓMODO — sin azul frío, sin negro puro.
+       El sidebar actual (verde bosque oscuro) aplicado a toda la interfaz.
+       Referencia: Notion dark, GitHub dark dimmed, Bear App
     ─────────────────────────────────────────────────────────────────── */
 
-    /* Backgrounds */
-    --background:  36 30% 96%;    /* #F8F5F0 — crema suave, canvas principal */
-    --card:        0 0% 100%;     /* #FFFFFF — blanco hueso, cards elevadas */
-    --popover:     0 0% 100%;
-    --secondary:   36 20% 93%;    /* Crema grisácea — hover states */
-    --muted:       36 20% 93%;
-    --accent:      36 20% 93%;
+    /* Backgrounds — carbón cálido con tinte verde */
+    --background:  168 10% 10%;    /* #181E1D — carbón oscuro con alma verde */
+    --card:        168 10% 13%;    /* #1E2624 — levemente elevado sobre el fondo */
+    --popover:     168 10% 13%;
+    --secondary:   168  9% 17%;    /* #242E2C — hover states, inputs */
+    --muted:       168  9% 17%;
+    --accent:      168  9% 17%;
 
-    /* Texto */
-    --foreground:           168 25% 14%;   /* #1C2B2A — slate verdoso oscuro */
-    --card-foreground:      168 25% 14%;
-    --popover-foreground:   168 25% 14%;
-    --secondary-foreground: 168 15% 25%;
-    --muted-foreground:     168 12% 45%;   /* #6B7F7D — gris verdoso suave */
-    --accent-foreground:    168 25% 14%;
+    /* Texto — blanco cálido, nunca frío */
+    --foreground:           36 25% 92%;    /* #F0EDE8 — crema muy claro */
+    --card-foreground:      36 25% 92%;
+    --popover-foreground:   36 25% 92%;
+    --secondary-foreground: 36 15% 82%;
+    --muted-foreground:     168 10% 52%;   /* #7A9490 — gris verdoso medio */
+    --accent-foreground:    36 25% 92%;
 
-    /* Primary — Verde bosque */
-    --primary:             155 43% 30%;   /* #2D6A4F */
+    /* Primary — verde brillante (contrasta bien en oscuro) */
+    --primary:             155 52% 46%;   /* #38A875 — verde bosque luminoso */
     --primary-foreground:  0 0% 100%;
 
     /* Destructive */
-    --destructive:         0 72% 51%;
+    --destructive:         0 65% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Bordes e inputs */
-    --border: 36 18% 86%;    /* #E2DDD6 — crema gris suave */
-    --input:  36 18% 86%;
-    --ring:   155 43% 30%;
+    /* Bordes e inputs — sutil, no agresivo */
+    --border: 168 10% 20%;    /* #2A3533 */
+    --input:  168 10% 20%;
+    --ring:   155 52% 46%;
 
     /* Radio */
     --radius: 0.625rem;
 
     /* Custom */
-    --amber:   42 78% 55%;   /* #D4A843 — dorado ámbar */
-    --sidebar-bg: 155 40% 18%;  /* Verde bosque oscuro para sidebar */
+    --amber:      42 75% 52%;    /* #D4A843 — dorado ámbar */
+    --sidebar-bg: 168 14%  8%;   /* #131A19 — más oscuro que el canvas */
   }
 }
 
@@ -65,42 +66,25 @@
   }
 
   /* Scrollbar personalizada */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: hsl(var(--background));
-  }
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground));
-  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track  { background: hsl(var(--background)); }
+  ::-webkit-scrollbar-thumb  { background: hsl(var(--border)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 }
 
 @layer utilities {
-  /* Sidebar verde bosque oscuro */
+  /* Sidebar — más oscuro que el canvas */
   .sidebar-gradient {
     background: linear-gradient(
       180deg,
-      hsl(155 42% 16%) 0%,
-      hsl(155 44% 13%) 100%
+      hsl(168 14% 8%) 0%,
+      hsl(168 15% 6%) 100%
     );
   }
 
-  /* Sombra sutil verde para el logo */
+  /* Glow verde sutil para el logo */
   .glow-primary {
-    box-shadow: 0 0 16px hsl(var(--primary) / 0.30);
-  }
-
-  /* Badge dorado */
-  .badge-amber {
-    background: hsl(var(--amber) / 0.15);
-    color: hsl(42 78% 38%);
-    border: 1px solid hsl(var(--amber) / 0.35);
+    box-shadow: 0 0 16px hsl(var(--primary) / 0.25);
   }
 
   /* Texto degradado verde → dorado */
@@ -112,11 +96,8 @@
   }
 
   /* Card hover sutil */
-  .card-hover {
-    transition: box-shadow 0.15s ease, border-color 0.15s ease;
-  }
   .card-hover:hover {
-    box-shadow: 0 2px 12px hsl(155 43% 30% / 0.10);
-    border-color: hsl(var(--primary) / 0.25);
+    border-color: hsl(var(--primary) / 0.30);
+    box-shadow: 0 2px 16px hsl(var(--primary) / 0.08);
   }
 }

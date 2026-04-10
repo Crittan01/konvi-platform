@@ -124,7 +124,7 @@ export default async function DashboardLayout({
       {/* ── Main content ─────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto">
         {/* Top bar */}
-        <div className="sticky top-0 z-10 h-12 border-b border-border bg-white/70 backdrop-blur-sm flex items-center px-8">
+        <div className="sticky top-0 z-10 h-12 border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-8">
           <div className="flex-1" />
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
