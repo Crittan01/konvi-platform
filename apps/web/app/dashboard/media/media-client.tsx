@@ -70,7 +70,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
       .from(BUCKET)
       .list(tenantId, { sortBy: { column: 'created_at', order: 'desc' }, limit: 100 })
 
-    setFiles((updated ?? []).filter(f => f.name !== '.emptyFolderPlaceholder'))
+    setFiles((updated ?? []).filter(f => f.name !== '.emptyFolderPlaceholder') as unknown as StorageFile[])
     setUploading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
