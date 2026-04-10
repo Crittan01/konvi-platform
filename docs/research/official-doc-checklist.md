@@ -86,7 +86,7 @@ Antes de implementar cualquier integración o decisión técnica relevante, vali
 
 | Validación | Estado | Referencia |
 |-----------|--------|-----------|
-| App Router vs Pages Router — decisión vigente | ✅ App Router confirmado | Next.js 14.1.0 Docs (stack real en repo) |
+| App Router vs Pages Router — decisión vigente | ✅ App Router confirmado | Next.js 14.2.35 Docs (stack real en repo) |
 | Server Actions para mutaciones | ✅ Funcional | Next.js Docs — Server Actions |
 | @supabase/ssr para SSR Auth | ✅ Implementado | Supabase Next.js Guide |
 | Middleware para protección de rutas | ✅ Implementado | Next.js Middleware Docs |

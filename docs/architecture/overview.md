@@ -1,6 +1,6 @@
 # Arquitectura del Sistema — Commerce Ops Platform
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-10
 
 ---
 
@@ -17,7 +17,7 @@ El LLM (Gemini) asiste en respuestas conversacionales pero **nunca es fuente de 
 
 | Capa | Versión real (verificada) | Objetivo |
 |------|--------------------------|---------|
-| Frontend | Next.js **14.1.0**, React ^18, TypeScript ^5 | Next.js 15.x |
+| Frontend | Next.js **14.2.35**, React ^18, TypeScript ^5 | Next.js 15.x |
 | UI | TailwindCSS ^3.3.0, 5 componentes shadcn/ui en `apps/web/components/ui/` | Componentes en `packages/ui` |
 | Backend HTTP | Python **3.9.25** (VM, EOL), FastAPI 0.128.8 | Python 3.11+ |
 | DB / Auth | Supabase PostgreSQL, RLS, Auth, Realtime | — |
@@ -26,7 +26,7 @@ El LLM (Gemini) asiste en respuestas conversacionales pero **nunca es fuente de 
 | Canal interno | Telegram Bot API | Pendiente — alertas internas |
 | Marketplace | Mercado Libre API | Fase 8 — pendiente |
 | Marketplace futuro | Shopify Storefront API | Sin fecha |
-| Shipping | Envia Shipping API + Queries API | 📋 Diseñado — no implementado |
+| Shipping | Envia Shipping API | 🟡 Fase Inicial — quote + historial operativos. Label/tracking: Fase 2 |
 | Hosting | Render — Web Services + Background Workers | Plan Starter antes de producción |
 | Monorepo | pnpm workspaces | — |
 
@@ -40,13 +40,12 @@ El LLM (Gemini) asiste en respuestas conversacionales pero **nunca es fuente de 
 ### `apps/web` — Frontend (Tenant Console)
 
 - **Responsabilidad**: Panel de operaciones para cada tenant
-- **Rutas activas**:
-  - `/login` — Auth Supabase SSR
-  - `/dashboard` — Resumen del tenant
-  - `/dashboard/catalog` — CRUD de productos (Server Actions)
-  - `/dashboard/inbox` — Conversaciones WhatsApp con Realtime, human takeover
-- **Rutas pendientes**: media, inventory, orders, contacts, knowledge-base, integrations, shipping, metrics, audit, settings
-- **Platform Console**: No existe en código todavía
+- **Rutas activas (13/13 módulos Tenant Console)**:
+  - `/login`, `/dashboard`, `/dashboard/inbox`, `/dashboard/catalog`
+  - `/dashboard/orders`, `/dashboard/contacts`, `/dashboard/inventory`
+  - `/dashboard/knowledge-base`, `/dashboard/media`, `/dashboard/shipping`
+  - `/dashboard/integrations`, `/dashboard/metrics`, `/dashboard/audit`, `/dashboard/settings`
+- **Platform Console**: ❌ No existe — pendiente Fase 12 (bloqueante: OQ-P01)
 - **Seguridad**: `middleware.ts` protege `/dashboard/*`, redirige a `/login`
 - **Auth SSR**: `@supabase/ssr` via `utils/supabase/server.ts`
 
@@ -79,11 +78,8 @@ El LLM (Gemini) asiste en respuestas conversacionales pero **nunca es fuente de 
 ### `services/api` — REST API Gateway
 
 - **Responsabilidad**: API REST para el frontend. JWT Supabase validado. RBAC por endpoint (pendiente completar).
-- **Endpoints activos**:
-  - `GET /health`
-  - `GET /api/v1/products` — Catálogo del tenant
-  - `GET /api/v1/conversations` — Inbox paginado del tenant
-- **Estado**: ✅ Live en Render. RBAC incompleto (riesgo R-09).
+- **Routers activos**: products, orders, contacts, settings, integrations, shipping, meli_webhook, conversations
+- **Estado**: ✅ Live en Render. RBAC base implementado (R-09 parcialmente resuelto).
 - **URL Render**: `https://commerce-ops-api.onrender.com`
 
 ### `services/connector-mercadolibre` — Pendiente (Fase 8)
@@ -103,20 +99,27 @@ El LLM (Gemini) asiste en respuestas conversacionales pero **nunca es fuente de 
 
 ---
 
-## Esquema de Base de Datos (vigente)
+## Esquema de Base de Datos (vigente — 13 migraciones aplicadas)
 
 ```
-tenants              — id, name, status, meta_waba_id, created_at
+tenants              — id, name, status, meta_waba_id, low_stock_threshold, created_at
 tenant_users         — id, user_id (→auth.users), tenant_id, role (owner/manager/agent)
-products             — id, tenant_id, title, description, status, external_reference_id, is_active
+products             — id, tenant_id, title, description, status, is_active
 product_variations   — id, product_id, tenant_id, price, stock_quantity, attributes (JSONB)
 conversations        — id, tenant_id, customer_phone, status (bot_active/human_takeover/closed)
-messages             — id, conversation_id, tenant_id, direction (inbound/outbound),
-                       content_type, content, meta_message_id, processed (BOOL), processed_at
+messages             — id, conversation_id, tenant_id, direction, processed (BOOL), processed_at
+contacts             — id, tenant_id, phone, name, email, consent_given, consent_date
+orders               — id, tenant_id, status, total_amount, shipping_status, notes
+order_items          — id, order_id, tenant_id, product_id, variation_id, quantity, unit_price
+tenant_integrations  — id, tenant_id, provider, status, credentials (JSONB)
+notification_settings — id, tenant_id, channel, enabled, config
+shipments            — id, tenant_id, order_id, status, carrier, label_url, tracking_number
+stock_movements      — id, tenant_id, variation_id, delta, new_stock, reason, created_by
+kb_documents         — id, tenant_id, title, content, category, is_active
+audit_log            — id, tenant_id, action, entity_type, entity_id, payload, user_email
 ```
 
-**Tablas pendientes de crear**: orders, order_items, contacts, shipments, kb_documents, audit_log, tenant_integrations.
-Ver `docs/data/schema.md` para detalle.
+Ver `docs/data/schema.md` para detalle completo. Tablas Fase 12 pendientes: `platform_users`, `tenant_plans`, `feature_flags`.
 
 ---
 
@@ -187,12 +190,12 @@ Meta Graph API v21.0 (WhatsApp Cloud API)
      │  Realtime SDK)        │                      │
      ▼                       ▼                      ▼
 ┌──────────────────┐  ┌──────────────┐  ┌─────────────────────────────┐
-│  apps/web        │  │ services/api │  │  services/ai-orchestrator   │  ✅ LIVE
-│  (Next.js 14.1)  │  │ (JWT Gateway)│  │  (Worker — polling 3s)      │
-│  Tenant Console  │  │ ✅ LIVE      │  │  • Construye contexto        │
-│  3/13 módulos    │  │              │  │  • Llama Gemini (JSON mode)  │
-│  Platform Console│  └──────────────┘  │  • Valida guardrails         │
-│  (pendiente)     │                    └──────────────┬──────────────┘
+│  apps/web          │  │ services/api │  │  services/ai-orchestrator   │  ✅ LIVE
+│  (Next.js 14.2.35) │  │ (JWT Gateway)│  │  (Worker — polling 3s)      │
+│  Tenant Console    │  │  ✅ LIVE    │  │  • Construye contexto        │
+│  13/13 módulos ✅  │  │  8 routers  │  │  • Llama Gemini (JSON mode)  │
+│  Platform Console  │  └─────────────┘  │  • Valida guardrails         │
+│  (pendiente F12)   │                   └──────────────┬──────────────┘
 └──────────────────┘                                   │ httpx async
                                                        │ (mensajes salientes)
                                                        ▼

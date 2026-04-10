@@ -1,27 +1,26 @@
 # Módulos del Monorepo — Responsabilidades y Estado
 
-## Estado Global — Actualizado 2026-04-09
+## Estado Global — Actualizado 2026-04-10
 
 ```
-apps/web              ✅ Funcional (Auth, Dashboard, Catálogo, Inbox AI)
+apps/web              ✅ Funcional — 13/13 módulos Tenant Console. Next.js 14.2.35
 services/
-  connector-whatsapp  ✅ Fix aplicado (tenant resolver por meta_waba_id real)
-  ai-orchestrator     ✅ Implementado (worker + orchestrator + guardrails + server)
-  api                 ✅ Implementado (JWT real, CRUD productos + conversaciones)
-  connector-meli      ❌ Pendiente (Fase 8)
+  connector-whatsapp  ✅ Live en Render (HMAC validado, tenant resolver por meta_waba_id)
+  ai-orchestrator     ✅ Live en Render (worker + orchestrator + guardrails + server)
+  api                 ✅ Live en Render (JWT real, RBAC base, 8 routers activos)
+  connector-meli      ❌ Directorio vacío (cliente MeLi en services/api/integrations/)
   connector-shopify   ❌ Pendiente (futuro)
-packages/auth         🟡 Parcial (lógica en apps/web/utils/supabase/)
-packages/db           🟡 Parcial (sin tipos TypeScript generados aún)
-packages/ui           ❌ Vacío (componentes en apps/web/components/)
+packages/auth         🟡 Parcial (2 archivos — lógica en apps/web/utils/supabase/)
+packages/db           🟡 Parcial (mirrors iniciales — fuente real: supabase/migrations/)
+packages/ui           ❌ Vacío (componentes en apps/web/components/ui/)
 ```
 
-> ⚠️ `services/orchestrator/` fue eliminado el 2026-04-08 — era un prototipo obsoleto sin requirements.txt,
-> sin graceful shutdown, con bug de async/sync y usando Meta Graph API v18.0 (actual: v21.0).
+> ⚠️ `services/orchestrator/` fue eliminado el 2026-04-08 — era un prototipo obsoleto.
 > La implementación canónica es `services/ai-orchestrator/`.
 
 **Supabase (proyecto `***SUPABASE_PROJECT_REF_REDACTED***`):**
 - Tenant `Matriz Commerce Dev`: `status=active`, `meta_waba_id=2159052118202272` ✅
-- 6 migraciones aplicadas, incluyendo `messages.processed` BOOLEAN + índice parcial ✅
+- **13 migraciones aplicadas** — incluyendo schema core, shipments, stock_movements, kb_documents, audit_log, low_stock_threshold, consent ✅
 
 **Sistema VM (entorno dev, sin venv):**
 - `supabase` CLI v2.84.2 — `/usr/local/bin/supabase` ✅
@@ -45,7 +44,7 @@ python-multipart==0.0.20
 > Para alinear el entorno local, ejecutar: `pip3 install supabase==2.28.3`
 
 **Credenciales activas:**
-- `META_ACCESS_TOKEN`: ⚠️ Token temporal ~24h (ver IH-003 e IH-006). **Renovar periódicamente. Crear System User Token permanente antes de producción.**
+- `META_ACCESS_TOKEN`: ✅ **Token permanente** — System User `commerce-ops` creado en Meta Business Suite (IH-006 resuelto 2026-04-09)
 - `meta_waba_id`: `2159052118202272` ✅
 - `GEMINI_API_KEY`: ✅ configurada en `.env` y en Render
 - `SUPABASE_JWT_SECRET`: ✅ Presente (IH-005 resuelto)
@@ -57,14 +56,11 @@ python-multipart==0.0.20
 ### `apps/web`
 
 - **Responsabilidad:** Panel Backoffice para operadores de e-commerce. Permite gestionar catálogo, ver conversaciones y auditar respuestas de la IA.
-- **Pila Técnica:** Next.js **14.1.0** (App Router), React ^18, TailwindCSS ^3.3.0, shadcn/ui (5 componentes), TypeScript ^5.
-- **Auth SSR:** `@supabase/ssr` via `middleware.ts` — protege todas las rutas `/dashboard`.
-- **Rutas activas:**
-  - `/login` — Formulario de autenticación con Supabase
-  - `/dashboard` — Resumen de tenant y usuario autenticado
-  - `/dashboard/catalog` — CRUD de productos (Server Actions)
-  - `/dashboard/inbox` — ✅ Bandeja de conversaciones con Realtime, Human Takeover, hilo visual
-- **Relaciones:** Consume Supabase directamente en Server Components. En el futuro, consumirá `services/api` para operaciones transaccionales complejas.
+- **Pila Técnica:** Next.js **14.2.35** (App Router), React ^18, TailwindCSS ^3.3.0, shadcn/ui (5 componentes), TypeScript ^5. Dark Warm Theme.
+- **Auth SSR:** `@supabase/ssr` via `middleware.ts` — protege todas las rutas `/dashboard`. `getUser()` en todos los Server Components (seguro JWT).
+- **13/13 módulos Tenant Console activos**: `/dashboard`, `/dashboard/inbox`, `/dashboard/catalog`, `/dashboard/orders`, `/dashboard/contacts`, `/dashboard/inventory`, `/dashboard/knowledge-base`, `/dashboard/media`, `/dashboard/shipping`, `/dashboard/integrations`, `/dashboard/metrics`, `/dashboard/audit`, `/dashboard/settings`
+- **Platform Console**: ❌ No existe — Fase 12 (bloqueante: OQ-P01)
+- **Relaciones:** Consume Supabase directamente en Server Components + Server Actions. Consume `services/api` para operaciones transaccionales (órdenes, shipping, integraciones, settings, equipo).
 
 ---
 
@@ -107,11 +103,8 @@ python-multipart==0.0.20
 
 - **Responsabilidad:** REST API sincrónica para el Frontend. CRUD de catálogos, conversaciones, con JWT Supabase validado.
 - **Pila:** FastAPI, `supabase-py 2.28.3`, `PyJWT 2.10.1`.
-- **Estado**: ✅ Implementado (Fase 6). Endpoints activos:
-  - `GET /health`
-  - `GET /api/v1/products` — Catálogo del tenant (JWT + RLS)
-  - `GET /api/v1/conversations` — Inbox paginado del tenant
-- **Pendiente**: RBAC (owner/manager/agent) enforceado por endpoint.
+- **Estado**: ✅ Live en Render. 8 routers activos: products, orders, contacts, settings, integrations, shipping, meli_webhook, conversations
+- **RBAC**: Base enforceado — owner/manager/agent con decorador por endpoint. R-09 parcialmente resuelto.
 
 ### `services/connector-mercadolibre` (Fase 8)
 

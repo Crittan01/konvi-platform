@@ -1,6 +1,6 @@
 # Registro de Riesgos — Commerce Ops Platform
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-10
 
 ---
 
@@ -15,15 +15,15 @@
 | R-07 | Meta/WhatsApp | Baneo por políticas Anti-Spam de Meta | 🟡 Medio | Mitigado parcialmente | Guardrails activos, canal oficial, sin envíos masivos |
 | R-08 | Operacional | Sin canal de alertas Telegram implementado | 🟡 Medio | Pendiente | Implementar en Fase 8 |
 | R-09 | Seguridad | RBAC (owner/manager/agent) no enforceado en API Gateway | 🟡 Medio | Pendiente | Implementar en endpoints de `services/api` |
-| R-10 | Auditoría | Mutaciones sin log de auditoría | 🟡 Medio | Pendiente | Implementar junto con RBAC |
-| R-12 | IA | GEMINI_API_KEY configurada pero sin test E2E real completo | 🟡 Medio | Pendiente | Test E2E Fase 7 PASO 7 (requiere humano) |
+| R-10 | Auditoría | RBAC granular completo no enforceado en todos los endpoints | 🟡 Medio | Parcialmente resuelto | `audit_log` implementado. RBAC base activo. Falta cobertura granular en algunos endpoints |
+| ~~R-12~~ | ~~IA~~ | ~~GEMINI_API_KEY sin test E2E~~ | — | ✅ CERRADO 2026-04-09 | E2E WhatsApp↔Gemini↔Inbox confirmado |
 | R-13 | Multi-tenant | `service_role` bypasea RLS — bug en tenant_id resolver expone datos cross-tenant | 🟠 Alto | Mitigado | Validación explícita en workers, tests de aislamiento pendientes |
 | R-14 | Python runtime | Python 3.9.25 EOL — Google SDK emite FutureWarning | 🟡 Medio | Aceptado (dev) | Actualizar a 3.11+ antes de Beta. Evaluar DNF o pyenv |
-| R-15 | Infraestructura | Meta Webhook no configurado — PASO 6 pendiente | 🟠 Alto | Pendiente humano | Configurar Callback URL en Meta Developers |
+| ~~R-15~~ | ~~Infraestructura~~ | ~~Meta Webhook no configurado~~ | — | ✅ CERRADO 2026-04-09 | Webhook configurado — E2E WhatsApp confirmado |
 | ~~R-16~~ | ~~Seguridad~~ | ~~META_ACCESS_TOKEN temporal (~24h) activo en Render~~ | — | ✅ CERRADO 2026-04-09 | System User Token permanente creado (IH-006) |
-| R-17 | Producto | Tenant Console solo tiene 3/13 módulos implementados | 🟡 Medio | Esperado (en progreso) | Completar en Fases 9-10 |
+| ~~R-17~~ | ~~Producto~~ | ~~Tenant Console solo tiene 3/13 módulos~~ | — | ✅ CERRADO 2026-04-09 | 13/13 módulos completados (Fases 8-11) |
 | R-18 | Producto | Platform Console inexistente | 🟡 Medio | Esperado (pendiente) | Implementar en Fase 12 |
-| R-19 | Deuda técnica | `services/api/routers/products.py` desalineado con schema real (name≠title, is_active≠status, price/stock no existen en products) | 🟠 Alto | En corrección — Fase 8 | Corregir modelos Pydantic y endpoints antes de exponer API al frontend |
+| ~~R-19~~ | ~~Deuda técnica~~ | ~~`products.py` desalineado con schema real~~ | — | ✅ CERRADO 2026-04-09 | Modelos Pydantic corregidos en Fase 8 |
 | R-20 | Disponibilidad | Orchestrator Render Free duerme tras inactividad — mensajes WhatsApp no procesados hasta cold start | 🟠 Alto | Aceptado (dev) | Upgrade a Starter antes de Beta Controlada — R-04 relacionado |
 | R-E01 | Shipping/Envia | Envia API down → cotizaciones no disponibles | 🟠 Alto | No aplica aún | Manejo de error + fallback a humano |
 | R-E02 | Shipping/Envia | Token Envia expirado → falla silenciosa | 🟠 Alto | No aplica aún | Renovación automática + alertas |
@@ -46,11 +46,15 @@
 
 | ID | Riesgo | Cerrado |
 |----|--------|---------|
-| ~~R-01~~ | META_ACCESS_TOKEN temporal expirando | 2026-04-08 — token renovado en `.env` ✅ |
+| ~~R-01~~ | META_ACCESS_TOKEN temporal expirando | 2026-04-08 — token renovado ✅ |
 | ~~R-02~~ | SUPABASE_JWT_SECRET faltante | 2026-04-08 — presente en `.env` ✅ |
 | ~~R-11~~ | Desincronización VM vs requirements.txt (supabase) | 2026-04-08 — alineados ✅ |
-| ~~R-X~~ | fastapi, uvicorn, python-dotenv desalineados en requirements.txt | 2026-04-08 — corregidos ✅ |
-| ~~R-X~~ | SDK Gemini deprecado (`google-generativeai`) en código | 2026-04-08 — migrado a `google-genai==1.47.0` ✅ |
+| ~~R-12~~ | GEMINI_API_KEY sin test E2E | 2026-04-09 — E2E WhatsApp↔Gemini↔Inbox confirmado ✅ |
+| ~~R-15~~ | Meta Webhook no configurado | 2026-04-09 — Webhook configurado y E2E confirmado ✅ |
+| ~~R-16~~ | META_ACCESS_TOKEN temporal (~24h) | 2026-04-09 — System User Token permanente (IH-006) ✅ |
+| ~~R-17~~ | Tenant Console con solo 3/13 módulos | 2026-04-09 — 13/13 completados (Fases 8-11) ✅ |
+| ~~R-19~~ | `products.py` desalineado con schema real | 2026-04-09 — Pydantic corregido en Fase 8 ✅ |
+| ~~R-X~~ | SDK Gemini deprecado (`google-generativeai`) | 2026-04-08 — migrado a `google-genai==1.47.0` ✅ |
 | ~~R-X~~ | Tenant resolver hardcodeado `limit(1)` | 2026-04-07 — fix por `meta_waba_id` ✅ |
 | ~~R-X~~ | `messages.processed` column faltante | 2026-04-07 — migración aplicada ✅ |
 | ~~R-X~~ | Directorio duplicado `services/orchestrator/` | 2026-04-08 — eliminado ✅ |
