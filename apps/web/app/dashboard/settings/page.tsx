@@ -5,9 +5,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import LogoUpload from './logo-upload'
 
 type TeamMember = { user_id: string; email: string; role: string; joined_at: string }
-type Tenant = { id: string; name: string; meta_waba_id: string | null; status: string }
+type ShippingOrigin = {
+  name?: string; company?: string; street?: string; city?: string
+  state?: string; postal_code?: string; country?: string; phone?: string
+}
+type Tenant = {
+  id: string; name: string; meta_waba_id: string | null; status: string
+  shipping_origin?: ShippingOrigin | null; logo_url?: string | null
+}
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -31,7 +39,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const [tenantRes, teamRes, notifRes] = await Promise.all([
-      supabase.from('tenants').select('id, name, meta_waba_id, status').eq('id', tenantId).single(),
+      supabase.from('tenants').select('id, name, meta_waba_id, status, shipping_origin, logo_url').eq('id', tenantId).single(),
       supabase.rpc('get_tenant_team'),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
     ])
@@ -88,6 +96,23 @@ export default async function SettingsPage() {
     revalidatePath('/dashboard/settings')
   }
 
+  async function saveShippingOrigin(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { session: s } } = await sb.auth.getSession()
+    const m = (s?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const origin: Record<string, string> = {}
+    for (const field of ['name', 'company', 'street', 'city', 'state', 'postal_code', 'country', 'phone']) {
+      const val = formData.get(`origin_${field}`) as string
+      if (val?.trim()) origin[field] = val.trim()
+    }
+
+    await sb.from('tenants').update({ shipping_origin: origin }).eq('id', m.tenant_id)
+    revalidatePath('/dashboard/settings')
+  }
+
   async function saveTelegram(formData: FormData) {
     'use server'
     const sb = createClient()
@@ -124,18 +149,26 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           {isOwner ? (
-            <form action={saveTenant} className="space-y-4 max-w-md">
+            <div className="space-y-6 max-w-md">
+              {/* Logo */}
               <div className="space-y-2">
-                <Label>Nombre del negocio</Label>
-                <Input name="name" defaultValue={tenant?.name ?? ''} required />
+                <Label>Logo del negocio</Label>
+                <LogoUpload currentLogoUrl={tenant?.logo_url ?? null} onSaved={() => {}} />
               </div>
-              <div className="space-y-2">
-                <Label>WABA ID (Meta)</Label>
-                <Input value={tenant?.meta_waba_id ?? 'No configurado'} readOnly className="bg-muted" />
-                <p className="text-xs text-muted-foreground">Para cambiar el WABA ID contacta a soporte.</p>
-              </div>
-              <Button type="submit">Guardar nombre</Button>
-            </form>
+
+              <form action={saveTenant} className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Nombre del negocio</Label>
+                  <Input name="name" defaultValue={tenant?.name ?? ''} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>WABA ID (Meta)</Label>
+                  <Input value={tenant?.meta_waba_id ?? 'No configurado'} readOnly className="bg-muted" />
+                  <p className="text-xs text-muted-foreground">Para cambiar el WABA ID contacta a soporte.</p>
+                </div>
+                <Button type="submit">Guardar nombre</Button>
+              </form>
+            </div>
           ) : (
             <div className="space-y-3 max-w-md">
               <div>
@@ -211,6 +244,64 @@ export default async function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Sección: Dirección de origen (envíos) */}
+      {isOwner && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Dirección de origen — Envíos</CardTitle>
+            <CardDescription>
+              Dirección desde la que se despachan los pedidos. Se usa como default en las cotizaciones de Envia.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form action={saveShippingOrigin} className="space-y-4 max-w-md">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Nombre del remitente</Label>
+                  <Input name="origin_name" defaultValue={tenant?.shipping_origin?.name ?? ''} placeholder="Juan Pérez" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Empresa</Label>
+                  <Input name="origin_company" defaultValue={tenant?.shipping_origin?.company ?? ''} placeholder="Mi Tienda S.A." />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Calle y número</Label>
+                <Input name="origin_street" defaultValue={tenant?.shipping_origin?.street ?? ''} placeholder="Av. Insurgentes 123, Col. Roma" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Ciudad</Label>
+                  <Input name="origin_city" defaultValue={tenant?.shipping_origin?.city ?? ''} placeholder="Ciudad de México" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Estado / Departamento</Label>
+                  <Input name="origin_state" defaultValue={tenant?.shipping_origin?.state ?? ''} placeholder="CDMX" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Código postal</Label>
+                  <Input name="origin_postal_code" defaultValue={tenant?.shipping_origin?.postal_code ?? ''} placeholder="06600" />
+                </div>
+                <div className="space-y-2">
+                  <Label>País (ISO)</Label>
+                  <Input name="origin_country" defaultValue={tenant?.shipping_origin?.country ?? 'MX'} placeholder="MX" maxLength={2} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Teléfono de contacto</Label>
+                <Input name="origin_phone" defaultValue={tenant?.shipping_origin?.phone ?? ''} placeholder="+525512345678" />
+              </div>
+              {tenant?.shipping_origin && (
+                <p className="text-xs text-primary">✓ Dirección guardada</p>
+              )}
+              <Button type="submit">Guardar dirección</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sección: Notificaciones */}
       {canWrite && (

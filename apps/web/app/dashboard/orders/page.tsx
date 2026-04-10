@@ -1,12 +1,11 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import OrdersNewForm from './orders-new-form'
 
-type Variation = { id: string; price: number }
+type Variation = { id: string; price: number | null; attributes: Record<string, string> | null }
 type Product = { id: string; title: string; product_variations: Variation[] }
 type Contact = { id: string; phone: string; name: string | null }
 type OrderItem = { title: string; quantity: number; unit_price: number }
@@ -37,13 +36,15 @@ const STATUS_NEXT: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:    'bg-yellow-100 text-yellow-800',
-  confirmed:  'bg-blue-100 text-blue-800',
-  processing: 'bg-purple-100 text-purple-800',
-  shipped:    'bg-indigo-100 text-indigo-800',
-  delivered:  'bg-green-100 text-green-800',
-  cancelled:  'bg-red-100 text-red-800',
+  pending:    'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  confirmed:  'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  processing: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  shipped:    'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+  delivered:  'bg-green-500/15 text-green-400 border-green-500/30',
+  cancelled:  'bg-red-500/15 text-red-400 border-red-500/30',
 }
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
 export default async function OrdersPage() {
   const supabase = createClient()
@@ -67,7 +68,7 @@ export default async function OrdersPage() {
         .limit(50),
       supabase
         .from('products')
-        .select('id, title, product_variations(id, price)')
+        .select('id, title, product_variations(id, price, attributes)')
         .eq('tenant_id', tenantId)
         .eq('status', 'active'),
       supabase
@@ -82,45 +83,8 @@ export default async function OrdersPage() {
   }
 
   // ── Server Actions ────────────────────────────────────────────────────────
-
-  async function createOrder(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { session: s } } = await sb.auth.getSession()
-    const m = (s?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    const t = m.tenant_id
-
-    const contactId = formData.get('contact_id') as string || null
-    const productId = formData.get('product_id') as string
-    const variationId = formData.get('variation_id') as string || null
-    const productTitle = formData.get('product_title') as string
-    const unitPrice = parseFloat(formData.get('unit_price') as string)
-    const quantity = parseInt(formData.get('quantity') as string)
-    const notes = formData.get('notes') as string || null
-    const total = unitPrice * quantity
-
-    const { data: order } = await sb.from('orders').insert({
-      tenant_id: t,
-      contact_id: contactId || null,
-      status: 'pending',
-      total_amount: total,
-      notes,
-    }).select().single()
-
-    if (order) {
-      await sb.from('order_items').insert({
-        order_id: order.id,
-        tenant_id: t,
-        product_id: productId || null,
-        variation_id: variationId || null,
-        title: productTitle,
-        unit_price: unitPrice,
-        quantity,
-      })
-    }
-    revalidatePath('/dashboard/orders')
-  }
+  // advanceStatus llama al API (no Supabase directo) para que el backend
+  // gestione el decremento de stock al confirmar (pending → confirmed).
 
   async function advanceStatus(formData: FormData) {
     'use server'
@@ -129,10 +93,19 @@ export default async function OrdersPage() {
     const m = (s?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
 
-    await sb.from('orders')
-      .update({ status: formData.get('next_status') as string })
-      .eq('id', formData.get('order_id') as string)
-      .eq('tenant_id', m.tenant_id)
+    const orderId = formData.get('order_id') as string
+    const nextStatus = formData.get('next_status') as string
+    const token = s?.access_token
+    if (!token) return
+
+    await fetch(`${API_URL}/api/v1/orders/${orderId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ status: nextStatus }),
+    })
 
     revalidatePath('/dashboard/orders')
   }
@@ -163,74 +136,15 @@ export default async function OrdersPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
-        {/* Formulario nuevo pedido */}
+        {/* Formulario nuevo pedido — multi-item Client Component */}
         {canWrite && (
           <div className="col-span-1">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Nuevo Pedido</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <form action={createOrder} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Contacto</Label>
-                    <select name="contact_id" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                      <option value="">Sin contacto</option>
-                      {contacts.map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name ? `${c.name} (${c.phone})` : c.phone}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Producto</Label>
-                    <select
-                      name="product_id"
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      required
-                    >
-                      <option value="">Seleccionar producto</option>
-                      {products.map(p => {
-                        const v = p.product_variations?.[0]
-                        return (
-                          <option
-                            key={p.id}
-                            value={p.id}
-                            data-price={v?.price ?? 0}
-                            data-variation={v?.id ?? ''}
-                          >
-                            {p.title} — ${v?.price ?? '?'}
-                          </option>
-                        )
-                      })}
-                    </select>
-                    {/* Hidden fields para title y variation_id — se llenarán al seleccionar */}
-                    <input type="hidden" name="product_title" id="product_title_hidden" />
-                    <input type="hidden" name="variation_id" id="variation_id_hidden" />
-                    <input type="hidden" name="unit_price" id="unit_price_hidden" />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Precio unitario ($)</Label>
-                    <Input name="unit_price" type="number" step="0.01" min="0.01" placeholder="0.00" required />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Cantidad</Label>
-                    <Input name="quantity" type="number" min="1" defaultValue="1" required />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Notas</Label>
-                    <Input name="notes" placeholder="Instrucciones especiales..." />
-                  </div>
-
-                  <Button type="submit" className="w-full">Crear pedido</Button>
-                </form>
-              </CardContent>
-            </Card>
+            <OrdersNewForm
+              products={products}
+              contacts={contacts}
+              apiUrl={API_URL}
+              onCreated={() => { /* revalidatePath no disponible en client — la lista se recarga en próxima navegación */ }}
+            />
           </div>
         )}
 
@@ -244,7 +158,7 @@ export default async function OrdersPage() {
             ) : (
               orders.map((o) => {
                 const nextStatus = STATUS_NEXT[o.status]
-                const colorClass = STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-800'
+                const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-400'
                 return (
                   <Card key={o.id}>
                     <CardContent className="p-5">
@@ -265,7 +179,7 @@ export default async function OrdersPage() {
                           {o.notes && <p className="text-xs text-muted-foreground mt-1 italic">{o.notes}</p>}
                         </div>
                         <div className="text-right shrink-0 ml-4 space-y-1">
-                          <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${colorClass}`}>
+                          <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full border ${colorClass}`}>
                             {STATUS_LABELS[o.status] ?? o.status}
                           </span>
                           <p className="font-bold text-primary">${o.total_amount}</p>
@@ -276,7 +190,7 @@ export default async function OrdersPage() {
                       </div>
 
                       {canWrite && o.status !== 'delivered' && o.status !== 'cancelled' && (
-                        <div className="flex gap-2 pt-2 border-t">
+                        <div className="flex gap-2 pt-2 border-t border-border">
                           {nextStatus && (
                             <form action={advanceStatus}>
                               <input type="hidden" name="order_id" value={o.id} />

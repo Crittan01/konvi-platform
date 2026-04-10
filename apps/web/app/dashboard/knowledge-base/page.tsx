@@ -15,11 +15,11 @@ const CATEGORIES = [
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
-  faq:      'bg-blue-100 text-blue-800',
-  politica: 'bg-purple-100 text-purple-800',
-  negocio:  'bg-green-100 text-green-800',
-  producto: 'bg-orange-100 text-orange-800',
-  general:  'bg-gray-100 text-gray-800',
+  faq:      'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  politica: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+  negocio:  'bg-green-500/15 text-green-400 border border-green-500/30',
+  producto: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  general:  'bg-muted text-muted-foreground border border-border',
 }
 
 type KbDocument = {
@@ -123,6 +123,14 @@ export default async function KnowledgeBasePage() {
         <Badge variant="outline" className="text-xs capitalize">{role}</Badge>
       </div>
 
+      {/* Modo de inyección actual */}
+      <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-sm text-yellow-400">
+        <span className="font-semibold">Modo actual: inyección de texto plano.</span>
+        {' '}Los documentos activos se incluyen como contexto en cada conversación.
+        {' '}RAG con embeddings (pgvector) está planificado como mejora futura —{' '}
+        <span className="opacity-70">ver OQ-T03</span>.
+      </div>
+
       <div className="grid md:grid-cols-3 gap-6">
 
         {/* ── Formulario nuevo documento ── */}
@@ -181,7 +189,7 @@ export default async function KnowledgeBasePage() {
                     <div className="flex justify-between items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category] ?? 'bg-gray-100 text-gray-800'}`}>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category] ?? 'bg-muted text-muted-foreground'}`}>
                             {CATEGORIES.find(c => c.value === doc.category)?.label ?? doc.category}
                           </span>
                           {!doc.is_active && (

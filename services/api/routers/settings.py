@@ -25,9 +25,21 @@ VALID_ROLES = {"owner", "manager", "agent"}
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
 
+class ShippingOrigin(BaseModel):
+    name: Optional[str] = None           # Nombre del remitente
+    company: Optional[str] = None        # Nombre de la empresa
+    street: Optional[str] = None         # Calle y número
+    city: Optional[str] = None           # Ciudad
+    state: Optional[str] = None          # Estado / departamento
+    postal_code: Optional[str] = None    # Código postal
+    country: Optional[str] = None        # Código de país ISO (ej: MX, CO)
+    phone: Optional[str] = None          # Teléfono de contacto
+
+
 class TenantPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1)
     meta_waba_id: Optional[str] = None
+    shipping_origin: Optional[ShippingOrigin] = None
 
 
 class TeamRolePatch(BaseModel):
@@ -50,7 +62,7 @@ async def get_tenant(
     try:
         result = (
             supabase.table("tenants")
-            .select("id, name, status, meta_waba_id, created_at")
+            .select("id, name, status, meta_waba_id, shipping_origin, logo_url, created_at")
             .eq("id", tenant_id)
             .single()
             .execute()
@@ -76,7 +88,11 @@ async def patch_tenant(
     if role != "owner":
         raise HTTPException(status_code=403, detail="Solo el owner puede editar la configuración del tenant")
     try:
-        data = {k: v for k, v in patch.model_dump().items() if v is not None}
+        raw = patch.model_dump()
+        # Serializar shipping_origin a dict si es un objeto Pydantic
+        if raw.get("shipping_origin") is not None:
+            raw["shipping_origin"] = {k: v for k, v in raw["shipping_origin"].items() if v is not None}
+        data = {k: v for k, v in raw.items() if v is not None}
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 

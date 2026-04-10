@@ -1,21 +1,29 @@
 # Esquema de Base de Datos — Commerce Ops Platform
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-09 (rev. 2 — 11 migraciones, tablas Fases 9-11 añadidas)
 
 Supabase PostgreSQL — Proyecto: `***SUPABASE_PROJECT_REF_REDACTED***` (us-east-1)
 
+> **Nota de estructura**: Las migraciones canónicas están en `supabase/migrations/`.
+> `packages/db/migrations/` solo contiene las 5 iniciales (mirrors parciales sin las de Fases 9-11).
+
 ---
 
-## Migraciones aplicadas (6 total)
+## Migraciones aplicadas (11 total)
 
-| Migración | Descripción | Estado |
-|-----------|-------------|--------|
-| `20260406181235` | tenants + tenant_users | ✅ Aplicada |
-| `20260406181236` | products + product_variations | ✅ Aplicada |
-| `20260406181237` | conversations + messages | ✅ Aplicada |
-| `20260406181238` | RLS policies + `app_current_tenant()` | ✅ Aplicada |
-| `20260406181239` | Custom claims trigger (JWT con tenant_id) | ✅ Aplicada |
-| `20260407200700` | messages.processed + índice parcial | ✅ Aplicada |
+| Migración | Descripción | Fase | Estado |
+|-----------|-------------|------|--------|
+| `20260406181235` | tenants + tenant_users | 2 | ✅ Aplicada |
+| `20260406181236` | products + product_variations | 2 | ✅ Aplicada |
+| `20260406181237` | conversations + messages | 3b | ✅ Aplicada |
+| `20260406181238` | RLS policies + `app_current_tenant()` | 2 | ✅ Aplicada |
+| `20260406181239` | Custom claims trigger (JWT con tenant_id) | 2 | ✅ Aplicada |
+| `20260407200700` | messages.processed + índice parcial | 6 | ✅ Aplicada |
+| `20260409220000` | contacts + orders + order_items + tenant_integrations + notification_settings | 9 | ✅ Aplicada |
+| `20260409230000` | shipments | 9 | ✅ Aplicada |
+| `20260409240000` | stock_movements | 11 | ✅ Aplicada |
+| `20260409250000` | kb_documents | 11 | ✅ Aplicada |
+| `20260409260000` | audit_log | 11 | ✅ Aplicada |
 
 ---
 
@@ -135,14 +143,14 @@ WHERE processed = false AND direction = 'inbound';
 
 ---
 
-## Tablas pendientes de crear
+## Tablas vigentes — Fases 9-11 (migración `20260409220000` y siguientes)
 
-Las siguientes tablas son necesarias para completar el producto. No están en el schema todavía.
+Las siguientes tablas fueron creadas en las Fases 9 y 11. Todas están aplicadas en producción.
 
 ### `orders` — Pedidos
 
 ```sql
--- DISEÑO — pendiente migración
+-- APLICADA: migración 20260409220000
 orders (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       UUID NOT NULL REFERENCES tenants(id),
@@ -161,7 +169,7 @@ orders (
 ### `order_items` — Líneas de pedido
 
 ```sql
--- DISEÑO — pendiente migración
+-- APLICADA: migración 20260409220000
 order_items (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id        UUID NOT NULL REFERENCES orders(id),
@@ -177,7 +185,7 @@ order_items (
 ### `contacts` — Clientes del tenant
 
 ```sql
--- DISEÑO — pendiente migración
+-- APLICADA: migración 20260409220000
 contacts (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id   UUID NOT NULL REFERENCES tenants(id),
@@ -192,10 +200,10 @@ contacts (
 
 ### `shipments` — Envíos (Envia)
 
-Ver diseño completo en `docs/integrations/courier-envia.md`.
+Ver detalle completo en `docs/integrations/courier-envia.md`.
 
 ```sql
--- DISEÑO — pendiente migración
+-- APLICADA: migración 20260409230000
 shipments (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id           UUID NOT NULL REFERENCES tenants(id),
@@ -222,51 +230,114 @@ shipments (
 ### `tenant_integrations` — Configuración de conectores por tenant
 
 ```sql
--- DISEÑO — pendiente migración
+-- APLICADA: migración 20260409220000
 tenant_integrations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       UUID NOT NULL REFERENCES tenants(id),
-  integration     TEXT NOT NULL,   -- mercadolibre, envia, shopify, telegram
-  status          TEXT NOT NULL DEFAULT 'active',
-  config          JSONB,           -- config no-sensible
-  encrypted_creds TEXT,            -- tokens encriptados
+  provider        TEXT NOT NULL,   -- mercadolibre, envia, shopify, telegram
+  status          TEXT NOT NULL DEFAULT 'connected',   -- connected, disconnected
+  credentials     JSONB,           -- tokens, api_key, sandbox flag (sensible — no exponer en frontend)
+  meta            JSONB,           -- datos no-sensibles (ej: meli_user_id, empresa_id)
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ,
-  UNIQUE (tenant_id, integration)
+  UNIQUE (tenant_id, provider)
 )
 ```
 
-### `audit_log` — Trazabilidad de acciones
+RLS: `tenant_id = app_current_tenant()`
+
+**Estado en dev**: MeLi conectado (user_id `603780765`). Envia Sandbox conectado (Empresa #5017).
+
+---
+
+### `notification_settings` — Configuración de notificaciones
 
 ```sql
--- DISEÑO — pendiente migración
-audit_log (
+-- APLICADA: migración 20260409220000
+notification_settings (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID REFERENCES tenants(id),   -- NULL para acciones de plataforma
-  user_id         UUID REFERENCES auth.users(id),
-  action          TEXT NOT NULL,    -- product.create, order.update, conversation.takeover...
-  resource_type   TEXT,
-  resource_id     UUID,
-  metadata        JSONB,
-  ip_address      TEXT,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  channel         TEXT NOT NULL,   -- email, telegram, whatsapp
+  enabled         BOOLEAN NOT NULL DEFAULT true,
+  config          JSONB,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 ```
+
+---
 
 ### `stock_movements` — Historial de cambios de stock
 
 ```sql
--- DISEÑO — pendiente migración
+-- APLICADA: migración 20260409240000
 stock_movements (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       UUID NOT NULL REFERENCES tenants(id),
   variation_id    UUID NOT NULL REFERENCES product_variations(id),
-  delta           INTEGER NOT NULL,   -- positivo = entrada, negativo = salida
-  reason          TEXT,   -- sale, restock, adjustment, sync_meli
-  reference_id    UUID,   -- FK a order o shipment si aplica
+  delta           INTEGER NOT NULL,     -- positivo = entrada, negativo = salida
+  new_stock       INTEGER NOT NULL,     -- stock resultante
+  reason          TEXT,                 -- sale, restock, adjustment, sync_meli
+  created_by      TEXT,                 -- email del operador
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 ```
+
+RLS: `tenant_id = app_current_tenant()`
+
+---
+
+### `kb_documents` — Knowledge Base
+
+```sql
+-- APLICADA: migración 20260409250000
+kb_documents (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID NOT NULL REFERENCES tenants(id),
+  title       TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  category    TEXT NOT NULL DEFAULT 'general',   -- faq, politica, negocio, producto, general
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ   -- actualizado via trigger
+)
+```
+
+RLS: `tenant_id = app_current_tenant()`
+
+**Uso en AI**: `kb_tool.py` → `format_kb_for_prompt()` inyecta KB activa en system prompt del Orchestrator.
+**Sin pgvector**: inyección de texto plano (markdown). PV-04 pendiente para RAG real.
+
+---
+
+### `audit_log` — Trazabilidad de acciones
+
+```sql
+-- APLICADA: migración 20260409260000
+audit_log (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       UUID REFERENCES tenants(id),   -- NULL para acciones de plataforma (futuro)
+  action          TEXT NOT NULL,    -- product.create, order.update, conversation.takeover
+  entity_type     TEXT,             -- product, order, contact, shipment, etc.
+  entity_id       UUID,
+  payload         JSONB,            -- snapshot del recurso o diff
+  user_email      TEXT,             -- snapshot del email del operador
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+```
+
+RLS: `tenant_id = app_current_tenant()`
+
+---
+
+## Tablas pendientes — Fase 12 (Platform Console)
+
+| Tabla | Propósito | Fase |
+|-------|-----------|------|
+| `platform_users` | Roles de operadores de plataforma (superadmin, support, ops) | 12 |
+| `tenant_plans` | Planes de suscripción por tenant (billing) | 12 |
+| `feature_flags` | Flags por tenant o por plan | 12 |
+
+> Ninguna de estas tablas debe crearse antes de decidir OQ-P01 (arquitectura Platform Console).
 
 ---
 

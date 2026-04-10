@@ -1,6 +1,6 @@
 # Mapa de Navegación — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 2 — nota de alcance añadida)
+Última actualización: 2026-04-09 (rev. 3 — actualizado post Fases 8-11 completadas)
 
 Este documento cubre **rutas y navegación únicamente**.
 
@@ -8,212 +8,117 @@ Este documento cubre **rutas y navegación únicamente**.
 > **No incluye**: dependencias de backend por módulo ni orden de implementación.
 > Para eso ver:
 > - `docs/product/admin-ui-modules.md` — Módulos con propósito y dependencia backend
-> - `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend y **orden de implementación** (BLOQUES 1-6)
+> - `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend y orden de implementación
 
 **Leyenda de estado**:
 - ✅ **Existe en código** — archivo en `apps/web/app/**`
 - 🟡 **Existe pero incompleto** — archivo existe, funcionalidad limitada
 - ❌ **No existe** — no hay archivo de ruta en el repo
-- 📋 **Propuesta** — diseñada pero no existe ni está en el sidebar
 
 ---
 
 ## A. TENANT CONSOLE
 
-### Rutas reales en el repositorio hoy
+### Rutas reales en el repositorio hoy (Fases 1-11 completadas)
 
 ```
 apps/web/app/
-├── page.tsx                     ✅  /       → redirect a /dashboard o /login
-├── layout.tsx                   ✅  Root layout (fuentes, globals.css)
+├── page.tsx                             ✅  /       → redirect a /dashboard o /login
+├── layout.tsx                           ✅  Root layout (Inter font, globals.css)
 ├── login/
-│   └── page.tsx                 ✅  /login  → Auth con Supabase SSR
+│   └── page.tsx                         ✅  /login  → Auth Supabase SSR + mensaje de error
 └── dashboard/
-    ├── layout.tsx               ✅  /dashboard/* → Sidebar con 3 ítems
-    ├── page.tsx                 🟡  /dashboard  → Muestra email + tenant name
+    ├── layout.tsx                       ✅  /dashboard/* → Sidebar 13 ítems + RBAC visual + logout
+    ├── page.tsx                         🟡  /dashboard  → Email + tenant name (sin KPIs)
+    ├── inbox/
+    │   └── page.tsx                     ✅  /dashboard/inbox → Realtime, human takeover, bubble UI
+    ├── orders/
+    │   └── page.tsx                     ✅  /dashboard/orders → Listado, detalle, estados
+    ├── contacts/
+    │   └── page.tsx                     ✅  /dashboard/contacts → Listado, perfil
     ├── catalog/
-    │   └── page.tsx             🟡  /dashboard/catalog → CRUD básico (solo primera variante)
-    └── inbox/
-        └── page.tsx             ✅  /dashboard/inbox → Realtime, human takeover
+    │   └── page.tsx                     🟡  /dashboard/catalog → CRUD + edición + soft delete (variantes múltiples: pendiente)
+    ├── inventory/
+    │   └── page.tsx                     ✅  /dashboard/inventory → Stock, alertas, ajuste
+    ├── knowledge-base/
+    │   └── page.tsx                     ✅  /dashboard/knowledge-base → CRUD, categorías, toggle
+    ├── media/
+    │   ├── page.tsx                     ✅  /dashboard/media → Listado de archivos
+    │   └── media-client.tsx             ✅  (Client Component — upload, delete, copy URL)
+    ├── shipping/
+    │   └── page.tsx                     🟡  /dashboard/shipping → Historial OK, cotización sin formulario UI
+    ├── integrations/
+    │   └── page.tsx                     ✅  /dashboard/integrations → MeLi + Envia connect/disconnect
+    ├── metrics/
+    │   └── page.tsx                     ✅  /dashboard/metrics → 4 KPIs, pedidos, top productos
+    ├── audit/
+    │   └── page.tsx                     ✅  /dashboard/audit → Filtros, paginación, payload expandible
+    └── settings/
+        └── page.tsx                     ✅  /dashboard/settings → Perfil, WABA, equipo, notificaciones
 ```
 
-**Sidebar actual** (verificado en `apps/web/app/dashboard/layout.tsx`):
+### Sidebar actual — verificado en `apps/web/app/dashboard/layout.tsx`
+
 ```tsx
-<Link href="/dashboard">   Resumen     </Link>   // ✅ existe página
-<Link href="/dashboard/catalog">  Catálogo  </Link>  // 🟡 existe, parcial
-<Link href="/dashboard/inbox">  Inbox AI  </Link>   // ✅ existe, funcional
+// NAV_ITEMS con RBAC: roles: [] = visible para todos, ['owner','manager'] = restringido
+
+{ href: '/dashboard',                label: 'Resumen',        roles: [] }              ✅
+{ href: '/dashboard/inbox',          label: 'Inbox AI',       roles: [] }              ✅
+{ href: '/dashboard/orders',         label: 'Pedidos',        roles: [] }              ✅
+{ href: '/dashboard/contacts',       label: 'Contactos',      roles: [] }              ✅
+{ href: '/dashboard/catalog',        label: 'Catálogo',       roles: ['owner','manager'] }  🟡
+{ href: '/dashboard/inventory',      label: 'Inventario',     roles: ['owner','manager'] }  ✅
+{ href: '/dashboard/knowledge-base', label: 'Knowledge Base', roles: ['owner','manager'] }  ✅
+{ href: '/dashboard/media',          label: 'Media',          roles: ['owner','manager'] }  ✅
+{ href: '/dashboard/shipping',       label: 'Envíos',         roles: [] }              🟡
+{ href: '/dashboard/integrations',   label: 'Integraciones',  roles: ['owner'] }       ✅
+{ href: '/dashboard/metrics',        label: 'Métricas',       roles: ['owner','manager'] }  ✅
+{ href: '/dashboard/audit',          label: 'Auditoría',      roles: ['owner'] }       ✅
+{ href: '/dashboard/settings',       label: 'Configuración',  roles: ['owner'] }       ✅
 ```
 
-No hay links rotos: los 3 ítems del sidebar tienen página.
+**Total**: 13 ítems. Todos tienen página correspondiente. Sin links rotos.
 
----
+### Rutas faltantes (deuda técnica menor)
 
-### Rutas faltantes (necesarias para el producto)
+Ninguna ruta del sidebar está huérfana. Las funcionalidades faltantes son submódulos dentro de páginas existentes (no rutas nuevas), excepto:
 
-Rutas que deben existir en la Tenant Console pero no tienen ningún archivo en el repo:
-
-| Ruta | Módulo | Bloquea |
-|------|--------|---------|
-| `/dashboard/media` | Media | Imágenes en catálogo |
-| `/dashboard/inventory` | Inventario | Control de stock |
-| `/dashboard/orders` | Pedidos | Shipping, métricas de negocio |
-| `/dashboard/contacts` | Contactos | Historial de clientes |
-| `/dashboard/knowledge-base` | Knowledge Base | Mejora contexto IA |
-| `/dashboard/integrations` | Integraciones | MeLi, Envia |
-| `/dashboard/shipping` | Shipping / Courier | Envíos con Envia |
-| `/dashboard/metrics` | Métricas | KPIs operacionales |
-| `/dashboard/audit` | Auditoría | Trazabilidad |
-| `/dashboard/settings` | Configuración | RBAC, WABA, equipo |
-
----
-
-### Rutas propuestas (sub-rutas a validar antes de implementar)
-
-Sub-rutas que tiene sentido diseñar pero que requieren validación de producto:
-
-```
-/dashboard/catalog/[id]              → Detalle / edición de producto
-/dashboard/catalog/[id]/variants     → Gestión de variantes
-/dashboard/orders/[id]               → Detalle de pedido
-/dashboard/shipping/quote            → Formulario de cotización
-/dashboard/shipping/[id]             → Detalle de envío / tracking
-/dashboard/contacts/[id]             → Perfil de contacto
-/dashboard/settings/team             → Gestión de usuarios del equipo
-/dashboard/settings/whatsapp         → Configuración WABA
-/dashboard/settings/integrations     → Config por conector
-```
-
-> Estas rutas están propuestas — no implementarlas sin validar su diseño funcional primero.
-
----
-
-### Navegación objetivo (Tenant Console completa)
-
-```
-Commerce Ops [logo]
-│
-├── Resumen                      🟡  /dashboard
-├── Inbox / Conversaciones       ✅  /dashboard/inbox
-├── Catálogo                     🟡  /dashboard/catalog
-├── Media                        ❌  /dashboard/media
-├── Inventario                   ❌  /dashboard/inventory
-├── Pedidos                      ❌  /dashboard/orders
-├── Contactos                    ❌  /dashboard/contacts
-├── Knowledge Base               ❌  /dashboard/knowledge-base
-├── Integraciones                ❌  /dashboard/integrations
-├── Shipping / Courier           📋  /dashboard/shipping
-├── Métricas                     ❌  /dashboard/metrics
-├── Auditoría                    ❌  /dashboard/audit
-└── Configuración                ❌  /dashboard/settings
-    ├── Perfil
-    ├── WhatsApp / WABA
-    ├── Equipo
-    └── Plan
-```
+| Ruta | Módulo | Justificación |
+|------|--------|---------------|
+| `/dashboard/shipping/quote` | Formulario cotización | Deuda UI — backend `POST /api/v1/shipping/quote` existe |
+| `/dashboard/orders/new` | Crear pedido manual | Actualmente pedidos entran via API/MeLi |
 
 ---
 
 ## B. PLATFORM CONSOLE
 
-### Estado actual
+> **Estado global: ❌ No implementada.**
+> No existe ningún archivo de código, ruta ni layout de Platform Console en el repositorio.
+> Prerequisito: OQ-P01 (misma app vs separada) debe decidirse primero.
 
-**No existe ningún archivo de ruta de Platform Console en el repo.**
-
-No hay:
-- Layout de platform console
-- Archivos en `apps/web/app/platform/`
-- Rutas `/platform/*`
-- Roles de plataforma en DB
-- Separación de auth para operadores de plataforma
-
----
-
-### Rutas faltantes (Platform Console objetivo)
-
-Todas las rutas de Platform Console son inexistentes. Las listamos como objetivo futuro:
-
-| Ruta | Módulo | Estado |
-|------|--------|--------|
-| `/platform` | Overview Global | ❌ No existe |
-| `/platform/tenants` | Tenants | ❌ No existe |
-| `/platform/tenants/[id]` | Tenant Detail | ❌ No existe |
-| `/platform/health` | Health Center | ❌ No existe |
-| `/platform/integrations` | Integraciones Globales | ❌ No existe |
-| `/platform/jobs` | Jobs / Queue Ops | ❌ No existe |
-| `/platform/security` | Seguridad | ❌ No existe |
-| `/platform/audit` | Auditoría Global | ❌ No existe |
-| `/platform/billing` | Billing / Planes | ❌ No existe |
-| `/platform/flags` | Feature Flags | ❌ No existe |
-| `/platform/support` | Soporte Operativo | ❌ No existe |
-
----
-
-### Navegación objetivo (Platform Console completa)
+### Rutas objetivo (Fase 12 — sin implementar)
 
 ```
-Platform Admin [logo]
-│
-├── Overview Global              ❌  /platform
-├── Tenants                      ❌  /platform/tenants
-│   └── Tenant Detail            ❌  /platform/tenants/[id]
-├── Health Center                ❌  /platform/health
-├── Integraciones Globales       ❌  /platform/integrations
-├── Jobs / Queue Ops             ❌  /platform/jobs
-├── Seguridad                    ❌  /platform/security
-├── Auditoría Global             ❌  /platform/audit
-├── Billing / Planes             ❌  /platform/billing
-├── Feature Flags                ❌  /platform/flags
-└── Soporte Operativo            ❌  /platform/support
+/platform                                ❌  Overview Global
+/platform/tenants                        ❌  Tenants (lista)
+/platform/tenants/[id]                   ❌  Tenant Detail
+/platform/health                         ❌  Health Center
+/platform/integrations                   ❌  Integraciones Globales
+/platform/jobs                           ❌  Jobs / Queue Ops
+/platform/security                       ❌  Seguridad
+/platform/audit                          ❌  Auditoría Global
+/platform/billing                        ❌  Billing / Planes
+/platform/flags                          ❌  Feature Flags
+/platform/support                        ❌  Soporte Operativo
 ```
 
----
-
-## Separación técnica de consolas
-
-### Middleware actual (`apps/web/middleware.ts`)
-
-El middleware actual protege `/dashboard/*` redirigiendo a `/login` si no hay sesión.
-No existe separación de rutas `/platform`.
-
-### Separación requerida (objetivo)
-
-```
-middleware.ts debe:
-  /dashboard/* → verificar sesión + rol tenant (owner/manager/agent)
-  /platform/*  → verificar sesión + rol plataforma (platform_superadmin/support/ops)
-```
-
-Esto requiere:
-1. Tabla o campo para roles de plataforma (no existe en DB)
-2. Lógica de middleware diferenciada por path prefix
-3. Layout separado para `/platform/*`
-
-### Pregunta abierta de arquitectura (OQ-P01)
-
-¿La Platform Console comparte la misma Next.js app que la Tenant Console, o es una app separada?
-
-**Opciones**:
-- a) **Misma app**, separada por path (`/dashboard/*` vs `/platform/*`) — más simple, ya usado
-- b) **App separada** en `apps/platform/` — más limpia, más overhead de setup
-- c) **Sub-dominio separado** (`platform.commerce-ops.com`) — mayor separación física
-
-> Decisión pendiente de validación. Por simplicidad inicial se recomienda opción (a) con layout separado.
-
----
-
-## Regla de expansión de navegación
-
-No agregar ítems al sidebar de ninguna consola sin:
-1. Que el módulo tenga una página funcional (aunque sea básica)
-2. Que esté documentado en `admin-ui-modules.md`
-3. Que el backend necesario esté identificado en `front-back-separation.md`
-
-No crear rutas "placeholder" que muestren "Coming Soon" — produce confusión sobre qué está implementado.
+> Ninguno de estos módulos tiene código. Prerrequisito absoluto: `platform_users` tabla + auth diferenciada en `middleware.ts`.
+> Ver `docs/product/personas-and-consoles.md` y `docs/architecture/front-back-separation.md` sección B.
 
 ---
 
 ## Documentos relacionados
 
-- `docs/product/admin-ui-modules.md` — Detalle de cada módulo con evidencia en repo
-- `docs/product/current-scope.md` — Stack real verificado
-- `docs/architecture/front-back-separation.md` — Qué backend sustenta cada ruta
+- `docs/product/admin-ui-modules.md` — Módulos con estado, propósito y dependencia backend
+- `docs/product/current-scope.md` — Stack real, endpoints, tablas, bloqueos
+- `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend por módulo

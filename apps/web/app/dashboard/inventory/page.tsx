@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 
-const LOW_STOCK_THRESHOLD = 5
+const DEFAULT_THRESHOLD = 5
 
 type Variation = {
   id: string
@@ -50,7 +50,7 @@ export default async function InventoryPage() {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  const [productsRes, movementsRes] = await Promise.all([
+  const [productsRes, movementsRes, tenantRes] = await Promise.all([
     supabase
       .from('products')
       .select('id, title, status, product_variations(id, attributes, stock_quantity, price)')
@@ -63,18 +63,24 @@ export default async function InventoryPage() {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(30),
+    supabase
+      .from('tenants')
+      .select('low_stock_threshold')
+      .eq('id', tenantId)
+      .single(),
   ])
 
   const products = (productsRes.data as Product[]) ?? []
   const movements = (movementsRes.data as Movement[]) ?? []
+  const threshold: number = (tenantRes.data as { low_stock_threshold?: number } | null)?.low_stock_threshold ?? DEFAULT_THRESHOLD
 
   // Totales para KPIs
   const allVariations = products.flatMap(p => p.product_variations)
   const totalUnits = allVariations.reduce((s, v) => s + v.stock_quantity, 0)
-  const lowStockCount = allVariations.filter(v => v.stock_quantity <= LOW_STOCK_THRESHOLD).length
+  const lowStockCount = allVariations.filter(v => v.stock_quantity > 0 && v.stock_quantity <= threshold).length
   const zeroStockCount = allVariations.filter(v => v.stock_quantity === 0).length
 
-  // ── Server Action ─────────────────────────────────────────────────────────
+  // ── Server Actions ────────────────────────────────────────────────────────
 
   async function adjustStock(formData: FormData) {
     'use server'
@@ -90,7 +96,6 @@ export default async function InventoryPage() {
 
     if (!variationId || isNaN(delta) || delta === 0) return
 
-    // Obtener stock actual
     const { data: variation } = await sb
       .from('product_variations')
       .select('stock_quantity')
@@ -121,6 +126,20 @@ export default async function InventoryPage() {
     revalidatePath('/dashboard/inventory')
   }
 
+  async function saveThreshold(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { session: s } } = await sb.auth.getSession()
+    const m = (s?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+
+    const val = parseInt(formData.get('threshold') as string)
+    if (isNaN(val) || val < 0) return
+
+    await sb.from('tenants').update({ low_stock_threshold: val }).eq('id', m.tenant_id)
+    revalidatePath('/dashboard/inventory')
+  }
+
   // ── UI ────────────────────────────────────────────────────────────────────
 
   return (
@@ -142,16 +161,16 @@ export default async function InventoryPage() {
         <Card>
           <CardContent className="p-5">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock bajo</p>
-            <p className={`text-3xl font-bold mt-1 ${lowStockCount > 0 ? 'text-yellow-600' : 'text-primary'}`}>
+            <p className={`text-3xl font-bold mt-1 ${lowStockCount > 0 ? 'text-yellow-400' : 'text-primary'}`}>
               {lowStockCount}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">variantes con ≤ {LOW_STOCK_THRESHOLD} unidades</p>
+            <p className="text-xs text-muted-foreground mt-1">variantes con ≤ {threshold} unidades</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Sin stock</p>
-            <p className={`text-3xl font-bold mt-1 ${zeroStockCount > 0 ? 'text-red-600' : 'text-primary'}`}>
+            <p className={`text-3xl font-bold mt-1 ${zeroStockCount > 0 ? 'text-red-400' : 'text-primary'}`}>
               {zeroStockCount}
             </p>
             <p className="text-xs text-muted-foreground mt-1">variantes en cero</p>
@@ -175,7 +194,7 @@ export default async function InventoryPage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {product.product_variations.map(variation => {
-                    const isLow  = variation.stock_quantity > 0 && variation.stock_quantity <= LOW_STOCK_THRESHOLD
+                    const isLow  = variation.stock_quantity > 0 && variation.stock_quantity <= threshold
                     const isZero = variation.stock_quantity === 0
                     return (
                       <div key={variation.id} className="border rounded-md p-3 space-y-2">
@@ -185,11 +204,11 @@ export default async function InventoryPage() {
                             <p className="text-xs text-muted-foreground">${variation.price} c/u</p>
                           </div>
                           <div className="text-right">
-                            <p className={`text-xl font-bold ${isZero ? 'text-red-600' : isLow ? 'text-yellow-600' : 'text-primary'}`}>
+                            <p className={`text-xl font-bold ${isZero ? 'text-red-400' : isLow ? 'text-yellow-400' : 'text-primary'}`}>
                               {variation.stock_quantity}
                             </p>
-                            {isZero && <span className="text-xs text-red-600 font-medium">Sin stock</span>}
-                            {isLow  && <span className="text-xs text-yellow-600 font-medium">Stock bajo</span>}
+                            {isZero && <span className="text-xs text-red-400 font-medium">Sin stock</span>}
+                            {isLow  && <span className="text-xs text-yellow-400 font-medium">Stock bajo</span>}
                           </div>
                         </div>
 
@@ -217,10 +236,40 @@ export default async function InventoryPage() {
           )}
         </div>
 
-        {/* ── Historial de movimientos ── */}
-        <div>
+        {/* ── Panel lateral ── */}
+        <div className="space-y-4">
+
+          {/* Umbral de stock bajo */}
+          {canWrite && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Umbral de stock bajo</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form action={saveThreshold} className="flex gap-2 items-end">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Umbral (unidades)</Label>
+                    <Input
+                      name="threshold"
+                      type="number"
+                      min="0"
+                      defaultValue={threshold}
+                      className="h-8 text-sm"
+                      required
+                    />
+                  </div>
+                  <Button type="submit" size="sm" className="h-8">Guardar</Button>
+                </form>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Las variantes con ≤ {threshold} unidades se marcan como "stock bajo".
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Historial de movimientos */}
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <CardTitle className="text-base">Últimos movimientos</CardTitle>
             </CardHeader>
             <CardContent>
@@ -231,7 +280,7 @@ export default async function InventoryPage() {
                   {movements.map(m => (
                     <div key={m.id} className="text-xs border-b pb-2 last:border-0">
                       <div className="flex justify-between items-center">
-                        <span className={`font-semibold ${m.delta > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <span className={`font-semibold ${m.delta > 0 ? 'text-green-400' : 'text-red-400'}`}>
                           {m.delta > 0 ? `+${m.delta}` : m.delta}
                         </span>
                         <span className="text-muted-foreground">→ {m.new_stock} u.</span>
@@ -246,6 +295,7 @@ export default async function InventoryPage() {
               )}
             </CardContent>
           </Card>
+
         </div>
 
       </div>

@@ -1,6 +1,6 @@
 # Módulos de Interfaz Administrativa — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 2 — B.4-B.11 expandidos con Propósito y Dependencia backend)
+Última actualización: 2026-04-09 (rev. 4 — visión objetivo por módulo añadida; Habeas Data documentado; MeLi disconnect gap registrado)
 
 Este documento define los módulos visibles de ambas consolas con **evidencia real del repo**.
 
@@ -25,9 +25,10 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 | **Estado** | 🟡 Parcial |
 | **Propósito** | Página de inicio del tenant. Muestra contexto de sesión y actividad operacional. |
 | **Submódulos** | Identidad de sesión, empresa acoplada (tenant), accesos rápidos (futuro), métricas resumen (futuro) |
-| **Estado actual real** | Muestra email del usuario y nombre del tenant. Sin métricas, sin alertas, sin KPIs. |
-| **Evidencia en repo** | `apps/web/app/dashboard/page.tsx` — 2 cards estáticas con email y tenant name |
+| **Estado actual real** | 4 KPI cards (totales: conversaciones, pedidos, contactos, productos activos) + quick links RBAC-aware. Sin gráficas, sin tendencias, sin alertas. |
+| **Evidencia en repo** | `apps/web/app/dashboard/page.tsx` — Promise.all para 4 counts + quick links |
 | **Dependencia backend** | `tenant_users` join `tenants` — ya implementado. Métricas futuras requieren queries de agregación |
+| **Visión objetivo** | Tabs: (1) **Operaciones** — conversaciones activas, takeovers humanos, pedidos pendientes, alertas stock bajo clickables; (2) **Negocio** — KPIs con tendencia temporal, gráfica de actividad diaria, distribución pedidos por estado, top productos. Ver `docs/product/module-design-decisions.md#a1`. |
 | **Prioridad** | Media — funcional para el estado actual, no bloquea otras fases |
 
 ---
@@ -42,9 +43,11 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 | **Propósito** | Bandeja de conversaciones WhatsApp con AI activa, takeover humano y hilo visual. |
 | **Submódulos actuales** | Lista de conversaciones, hilo de mensajes, human takeover / volver al bot, Realtime |
 | **Submódulos faltantes** | Filtros por estado, búsqueda por teléfono, notas internas, asignación de agente, adjuntos |
-| **Estado actual real** | Lista conversaciones del tenant. Hilo inbound/outbound. Botón takeover. Realtime via Supabase. |
+| **Estado actual real** | Lista conversaciones del tenant. Hilo inbound/outbound. Botón takeover. Realtime via Supabase. Sin campo de respuesta cuando el agente toma el control. |
 | **Evidencia en repo** | `apps/web/app/dashboard/inbox/page.tsx` — ~200 líneas, Supabase Realtime, status update |
 | **Dependencia backend** | `conversations` + `messages` — tablas existen. Supabase Realtime activo. |
+| **Gap crítico** | ⚠️ El agente puede hacer takeover pero NO puede enviar mensajes desde la consola. El módulo está funcionalmente incompleto sin esta capacidad. |
+| **Visión objetivo** | Campo de texto + envío cuando hay takeover activo → llama endpoint que manda via Meta API. Filtros por estado. Búsqueda por teléfono. Notas internas. |
 | **Prioridad** | Alta — módulo core del producto. Funcional hoy. |
 
 ---
@@ -57,12 +60,13 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 | **Ruta** | `/dashboard/catalog` |
 | **Estado** | 🟡 Parcial |
 | **Propósito** | Gestión de productos del tenant: listado, creación, variantes, precios, stock. |
-| **Submódulos actuales** | Listado de productos (con primera variante), formulario de creación (título, desc, precio, stock) |
-| **Submódulos faltantes** | Editar producto, eliminar (soft delete), gestión de múltiples variantes, imágenes, filtros, paginación, sync MeLi |
-| **Estado actual real** | Crea producto + una variante fija "Standard". Lista solo primera variante de cada producto. No hay edición ni delete desde UI. |
-| **Evidencia en repo** | `apps/web/app/dashboard/catalog/page.tsx` — Server Action de inserción, Supabase directo (no services/api) |
-| **Dependencia backend** | `products` + `product_variations` — tablas existen. No usa `services/api` para lectura (Supabase directo). |
-| **Prioridad** | Alta — necesita variantes y edición antes de ser útil en producción |
+| **Submódulos actuales** | Listado de productos, creación, edición, soft delete (status=inactive), RBAC owner/manager |
+| **Submódulos faltantes** | Gestión de múltiples variantes (UI), paginación, sync con MeLi |
+| **Estado actual real** | Crea producto + una variante "Standard". Edición y soft delete implementados. RBAC visual en sidebar. |
+| **Evidencia en repo** | `apps/web/app/dashboard/catalog/page.tsx` — Server Actions, Supabase directo + `services/api` products router |
+| **Dependencia backend** | `products` + `product_variations` + `services/api/routers/products.py` (Fase 8). RBAC enforceado. |
+| **Visión objetivo** | Formulario N variantes con atributos dinámicos. Importación desde MeLi ID/URL (pre-fill del formulario). Carga masiva CSV con schema por categoría. Búsqueda + paginación. |
+| **Prioridad** | Media — funcional. Variantes múltiples y paginación son deuda técnica. |
 
 ---
 
@@ -72,13 +76,15 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/media` |
-| **Estado** | ❌ Pendiente |
-| **Propósito** | Gestión de imágenes y archivos vinculados al catálogo y conversaciones. |
-| **Submódulos** | Subir imagen, listar media por tenant, asociar media a producto, eliminar |
-| **Estado actual real** | No existe. Ningún archivo en el repo. |
-| **Evidencia en repo** | Ninguna |
-| **Dependencia backend** | Supabase Storage (buckets por tenant) + políticas de acceso. No configurado aún. |
-| **Prioridad** | Baja — no bloquea fases core |
+| **Estado** | ✅ Implementado |
+| **Propósito** | Gestión de imágenes y archivos del tenant vinculados al catálogo y conversaciones. |
+| **Submódulos actuales** | Upload, listado, eliminar, copiar URL pública |
+| **Submódulos faltantes** | Asociación directa a productos, filtros por tipo/fecha |
+| **Estado actual real** | Upload (JPEG/PNG/WebP/GIF ≤ 5MB), listado desde Supabase Storage, delete, copy URL. Bucket: `tenant-media`. Sin preview visual, sin asociación a productos. |
+| **Evidencia en repo** | `apps/web/app/dashboard/media/page.tsx` (Server) + `media-client.tsx` (Client Component) |
+| **Dependencia backend** | Supabase Storage bucket `tenant-media`. RLS por carpeta: `(storage.foldername(name))[1] = auth.uid()`. |
+| **Visión objetivo** | Media como biblioteca centralizada. Preview thumbnails en galería. Vinculación de imágenes a productos/variantes (desde Media o desde Catálogo). Filtros por estado de vinculación. NO fusionar con Inventario — mantener como módulo separado pero integrado. |
+| **Prioridad** | Baja — funcional. Asociación a productos es mejora futura. |
 
 ---
 
@@ -88,13 +94,15 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/inventory` |
-| **Estado** | ❌ Pendiente |
+| **Estado** | ✅ Implementado |
 | **Propósito** | Control de stock por variante, alertas de bajo stock, historial de movimientos. |
-| **Submódulos** | Vista de stock por variante, ajuste manual de stock, alertas configurables, historial de movimientos |
-| **Estado actual real** | No existe. El campo `stock_quantity` existe en `product_variations` pero no hay UI de inventario. |
-| **Evidencia en repo** | `product_variations.stock_quantity` en `packages/db/migrations/00002_catalog_schema.sql` |
-| **Dependencia backend** | `product_variations` (existe). Tabla `stock_movements` (no existe). Endpoint PUT stock en `services/api` (no existe). |
-| **Prioridad** | Media — necesario para Fase 9 |
+| **Submódulos actuales** | Stock por variación con atributos JSONB, alertas stock bajo (≤5), formulario ajuste de stock |
+| **Submódulos faltantes** | Alertas configurables por umbral, historial paginado de movimientos, integración bidireccional con MeLi |
+| **Estado actual real** | Lista stock por variante. Alerta automática ≤5 (hardcoded). Ajuste inserta en `stock_movements` con delta + reason. |
+| **Evidencia en repo** | `apps/web/app/dashboard/inventory/page.tsx` — Server Actions, Supabase directo |
+| **Dependencia backend** | `product_variations` + `stock_movements` (migración `20260409240000`). RLS por tenant. |
+| **Visión objetivo** | Umbral de alerta configurable por tenant (no hardcoded en 5). Historial paginado de movimientos. Decremento automático al confirmar pedido. Sync MeLi bidireccional. Indicador visual de sincronización con MeLi por variante. |
+| **Prioridad** | Media — funcional. Configuración de umbrales y sync MeLi son mejoras futuras. |
 
 ---
 
@@ -104,13 +112,16 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/orders` |
-| **Estado** | ❌ Pendiente |
-| **Propósito** | Registro, seguimiento y gestión de órdenes del tenant. Vínculo con conversaciones y shipping. |
-| **Submódulos** | Listado de pedidos, detalle de pedido, crear pedido manual, cambiar estado, vínculo con conversación, vínculo con envío |
-| **Estado actual real** | No existe. No hay tabla `orders` en DB. |
-| **Evidencia en repo** | Ninguna |
-| **Dependencia backend** | Tablas `orders` + `order_items` (no creadas). Endpoints CRUD en `services/api` (no creados). Conector MeLi (Fase 8). |
-| **Prioridad** | Alta — módulo core del negocio. Bloquea Shipping y métricas de conversión. |
+| **Estado** | ✅ Implementado |
+| **Propósito** | Registro, seguimiento y gestión de órdenes del tenant. Vínculo con contactos y shipping. |
+| **Submódulos actuales** | Listado de pedidos, detalle, cambio de estado, vínculo con contacto y envío |
+| **Submódulos faltantes** | Crear pedido manual desde UI, vínculo directo con conversación WhatsApp, sync MeLi |
+| **Estado actual real** | Lista pedidos con estado, totales, contacto vinculado. Pedidos entran via MeLi webhook o manualmente via API (1 item). Cambio de estado implementado. |
+| **Evidencia en repo** | `apps/web/app/dashboard/orders/page.tsx` + `services/api/routers/orders.py` |
+| **Dependencia backend** | `orders` + `order_items` (migración `20260409220000`). `GET/POST /api/v1/orders`, `PATCH /orders/{id}`. |
+| **Visión objetivo** | Creación manual multi-item con búsqueda de contacto y cálculo automático de total. Decremento de stock al confirmar. Botón "Crear envío" en detalle del pedido. Vinculación opcional a conversación Inbox. Relación con Envíos: `pedido → tiene shipment` (ver `module-design-decisions.md#a6`). |
+| **Nota técnica** | Supabase retorna FK join de `contacts` como array (`Contact[]`). Tipo en UI: `Contact \| Contact[] \| null` con guard `Array.isArray()`. |
+| **Prioridad** | Alta — funcional. Creación manual desde UI y sync MeLi son mejoras planificadas. |
 
 ---
 
@@ -120,13 +131,16 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/contacts` |
-| **Estado** | ❌ Pendiente |
+| **Estado** | ✅ Implementado |
 | **Propósito** | Base de clientes del tenant con historial de conversaciones y pedidos. |
-| **Submódulos** | Listado de contactos, perfil de contacto, historial de interacciones, crear/editar contacto |
-| **Estado actual real** | No existe. Los clientes solo se identifican por `customer_phone` en `conversations`. |
-| **Evidencia en repo** | `conversations.customer_phone` en `packages/db/migrations/00003_conversational_schema.sql` |
-| **Dependencia backend** | Tabla `contacts` (no creada). Endpoint en `services/api` (no creado). |
-| **Prioridad** | Media — deseable pero no bloquea core |
+| **Submódulos actuales** | Listado de contactos, perfil de contacto |
+| **Submódulos faltantes** | Historial de pedidos por contacto, historial de conversaciones por contacto, editar contacto desde UI |
+| **Estado actual real** | Lista contactos del tenant. Creación y edición manual. `contacts` no se auto-crea aún desde conversaciones WhatsApp. |
+| **Evidencia en repo** | `apps/web/app/dashboard/contacts/page.tsx` + `services/api/routers/contacts.py` |
+| **Dependencia backend** | `contacts` (migración `20260409220000`). `GET/POST /api/v1/contacts`. |
+| **Habeas Data Colombia** | ⚖️ Ley 1581/2012: La plataforma es **Encargada del tratamiento**, el tenant es el **Responsable**. Requiere: DPA con cada tenant, campo `consent_given` antes de Beta real, endpoint de eliminación de datos, portabilidad. Ver `module-design-decisions.md#a7` para análisis completo. |
+| **Visión objetivo** | Auto-creación de contacto al iniciar conversación WhatsApp. Vista de perfil con historial cruzado (pedidos + conversaciones). Campo `consent_given` + `consent_timestamp`. Búsqueda por nombre o teléfono. |
+| **Prioridad** | Media — funcional. Historial cruzado con pedidos/conversaciones es mejora futura. |
 
 ---
 
@@ -136,13 +150,15 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/knowledge-base` |
-| **Estado** | ❌ Pendiente |
+| **Estado** | ✅ Implementado |
 | **Propósito** | Documentos y respuestas frecuentes que alimentan el contexto del LLM para este tenant. |
-| **Submódulos** | Crear/editar/eliminar documentos, categorización, estado (activo/inactivo), búsqueda |
-| **Estado actual real** | No existe. El orchestrator solo usa el catálogo como contexto. |
-| **Evidencia en repo** | `docs/ai/rag.md` — diseño del pipeline RAG, no implementado |
-| **Dependencia backend** | Tabla `kb_documents` (no creada). Pipeline RAG / embeddings (no implementado). `tools/kb_tool.py` (no existe). |
-| **Prioridad** | Baja — mejora calidad IA pero no bloquea core |
+| **Submódulos actuales** | Crear/editar/eliminar documentos, categorías (faq/politica/negocio/producto/general), toggle activo/inactivo |
+| **Submódulos faltantes** | Búsqueda interna, RAG con embeddings (pgvector), visualización de uso en conversaciones |
+| **Estado actual real** | CRUD completo con Server Actions. KB inyectada en system prompt del Orchestrator como secciones markdown. Sin pgvector (diferido). |
+| **Evidencia en repo** | `apps/web/app/dashboard/knowledge-base/page.tsx` + `services/ai-orchestrator/tools/kb_tool.py` |
+| **Dependencia backend** | `kb_documents` (migración `20260409250000`). `kb_tool.py` + `orchestrator.py` (asyncio.gather). |
+| **Visión objetivo ("El Giro")** | RAG real con embeddings (pgvector) — solo documentos relevantes a la consulta se inyectan en el prompt, no toda la KB. Prerequisito: verificar pgvector disponible (OQ-T03). Interfaz: vista previa de inyección, indicador de "última vez usado", importación desde PDF/URL (futuro). |
+| **Prioridad** | Media — funcional. pgvector/RAG real queda como deuda técnica (PV-04). |
 
 ---
 
@@ -152,13 +168,16 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/integrations` |
-| **Estado** | ❌ Pendiente |
-| **Propósito** | Configuración y estado de conectores activos por tenant: MeLi, Envia, Telegram. |
-| **Submódulos** | Lista de conectores disponibles, conectar/desconectar conector, estado de sincronización, config por conector |
-| **Estado actual real** | No existe. No hay tabla de config de integraciones por tenant. |
-| **Evidencia en repo** | Ninguna |
-| **Dependencia backend** | Tabla `tenant_integrations` (no creada). OAuth flow MeLi (no implementado). |
-| **Prioridad** | Alta — bloquea MeLi y Envia |
+| **Estado** | ✅ Implementado |
+| **Propósito** | Configuración y estado de conectores activos por tenant: MeLi, Envia. |
+| **Submódulos actuales** | Estado MeLi (conectado/desconectado), OAuth MeLi, conectar/desconectar Envia (API key), estado de integraciones |
+| **Submódulos faltantes** | Telegram, estado de sincronización en tiempo real, logs de errores por integración |
+| **Estado actual real** | MeLi OAuth 2.0 per-tenant (solo conectar — sin desconectar). Envia con Bearer token per-tenant (conectar + desconectar). Tokens en `tenant_integrations`. |
+| **Evidencia en repo** | `apps/web/app/dashboard/integrations/page.tsx` + `services/api/routers/integrations.py` + `integrations/meli_client.py` + `integrations/envia_client.py` |
+| **Dependencia backend** | `tenant_integrations` (migración `20260409220000`). OAuth MeLi callback. Envia Bearer per-tenant. |
+| **Gap crítico** | ⚠️ **Botón "Desconectar MeLi" no existe** en UI. Una vez conectada la cuenta MeLi, el tenant no puede desconectarla. Requiere: `DELETE /api/v1/integrations/mercadolibre` + botón en UI. |
+| **Visión objetivo** | Botón desconectar MeLi. Estado de última sincronización exitosa por integración. Log básico de errores por conector. |
+| **Prioridad** | Alta — funcional. Telegram y logs de sync son mejoras futuras. |
 
 ---
 
@@ -168,13 +187,16 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/shipping` |
-| **Estado** | 📋 Diseñado |
-| **Propósito** | Cotización de envíos, selección de carrier, pickup, historial, tracking. Basado en Envia. |
-| **Submódulos** | Dashboard de envíos, cotizar envío (formulario), historial de cotizaciones, pickups, tracking (futuro), labels (futuro), manifests (futuro) |
-| **Estado actual real** | No existe ningún archivo en el repo. Solo diseño en `docs/integrations/courier-envia.md`. |
-| **Evidencia en repo** | Ninguna — solo documentación |
-| **Dependencia backend** | `services/connector-envia` (no existe). Tabla `shipments` (no existe). Tabla `orders` (no existe). Validar modelo auth Envia antes de implementar (PV-03). |
-| **Prioridad** | Media — depende de Pedidos (A.6) y del connector Envia |
+| **Estado** | 🟡 Parcial — Fase Inicial operativa |
+| **Propósito** | Cotización de envíos, selección de carrier, historial, pickup, tracking. Basado en Envia. |
+| **Submódulos actuales** | Historial de cotizaciones + envíos, banner cuando Envia no conectado, visualización de estados |
+| **Submódulos faltantes** | Formulario interactivo de cotización desde UI (Client Component), labels, pickups, tracking, manifests |
+| **Estado actual real** | UI muestra historial de `shipments`. Envia Sandbox conectado (Empresa #5017). Cotización disponible via `POST /api/v1/shipping/quote` pero sin formulario interactivo en UI todavía. |
+| **Evidencia en repo** | `apps/web/app/dashboard/shipping/page.tsx` + `services/api/routers/shipping.py` + `services/api/integrations/envia_client.py` |
+| **Dependencia backend** | `shipments` (migración `20260409230000`). `tenant_integrations` + `envia_client.py`. PV-03 resuelto: Bearer per-tenant. |
+| **Relación con Pedidos** | El envío se **crea desde un pedido** (botón "Crear envío" en detalle de pedido). Envíos muestra el historial cross-order. No son duplicados — son complementarios. |
+| **Visión objetivo** | Formulario de cotización interactivo (tabla de opciones carrier/precio tras cotizar). Selección de carrier persiste `selected_rate`. Prerequisito: dirección de origen en Configuración. Fases 2-3: labels, tracking, pickup (planificadas). |
+| **Prioridad** | Media — Backend operativo. Formulario UI interactivo es la deuda inmediata. Label/pickup/tracking son Fase 2 de Envia. |
 
 ---
 
@@ -184,13 +206,16 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/metrics` |
-| **Estado** | ❌ Pendiente |
-| **Propósito** | Dashboards operacionales: mensajes/día, tiempo de respuesta IA, conversiones, pedidos. |
-| **Submódulos** | Gráfica de mensajes, tiempo de respuesta, conversaciones cerradas, pedidos por período |
-| **Estado actual real** | No existe. |
-| **Evidencia en repo** | Ninguna |
-| **Dependencia backend** | Queries de agregación sobre `messages` + `conversations` (tablas existen). `orders` (no existe). |
-| **Prioridad** | Baja — requiere datos de pedidos para ser útil |
+| **Estado** | ✅ Implementado |
+| **Propósito** | Dashboards operacionales: mensajes, conversaciones, pedidos, productos. |
+| **Submódulos actuales** | 4 KPI cards (mensajes 30d, conversaciones, pedidos, contactos), pedidos por estado, top 5 productos por cantidad/revenue |
+| **Submódulos faltantes** | Gráficas de tendencia, filtros por período, métricas de tiempo de respuesta IA, conversión por canal |
+| **Estado actual real** | Queries paralelas con `Promise.all` sobre Supabase directo. 4 KPIs + 2 listas (pedidos por estado + top 5 productos). Todo estático, período fijo 30 días. Sin gráficas. |
+| **Evidencia en repo** | `apps/web/app/dashboard/metrics/page.tsx` — Server Component con queries paralelas |
+| **Dependencia backend** | `messages`, `conversations`, `orders`, `order_items`, `contacts`, `products` — todas existen. |
+| **Diferencia con Dashboard** | Dashboard = urgencia operacional + resumen ejecutivo. Métricas = módulo analítico profundo con filtros temporales. Son complementarios, no redundantes. |
+| **Visión objetivo** | Filtro de período (hoy/semana/mes/3 meses/personalizado). Gráficas de tendencia (recharts). Métricas de IA (% takeover vs bot). Tasa de conversión (conversaciones → pedidos). Exportación CSV. |
+| **Prioridad** | Media — funcional con datos actuales. Gráficas y filtros son mejoras futuras. |
 
 ---
 
@@ -200,13 +225,15 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/audit` |
-| **Estado** | ❌ Pendiente |
+| **Estado** | ✅ Implementado |
 | **Propósito** | Log de acciones del tenant: quién hizo qué, cuándo, en qué recurso. |
-| **Submódulos** | Log de acciones con filtros por usuario, tipo de acción, fecha, recurso |
-| **Estado actual real** | No existe. Tabla `audit_log` no creada. |
-| **Evidencia en repo** | Riesgo R-10 activo en `docs/risks/risk-register.md` |
-| **Dependencia backend** | Tabla `audit_log` (no creada). Triggers o escritura explícita desde API. |
-| **Prioridad** | Media — necesario antes de producción real |
+| **Submódulos actuales** | Filtro por entity_type (badges como links), paginación 25/página, payload JSONB expandible con `<details>` |
+| **Submódulos faltantes** | Filtro por usuario, filtro por rango de fechas, exportación CSV |
+| **Estado actual real** | Lista `audit_log` del tenant. Filtros por entity_type via query params. User email snapshot en cada entrada. Paginación 25/página. `<details>` expandible por payload. |
+| **Evidencia en repo** | `apps/web/app/dashboard/audit/page.tsx` — Server Component, paginación, filtros |
+| **Dependencia backend** | `audit_log` (migración `20260409260000`). Escritura explícita desde API (no triggers). RLS por tenant. |
+| **Visión objetivo** | Filtro por usuario (user_email). Filtro por rango de fechas. Descripción legible de la acción (no solo código). Exportación CSV del log filtrado. |
+| **Prioridad** | Media — funcional. Filtros adicionales y exportación son mejoras futuras. |
 
 ---
 
@@ -216,13 +243,16 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 |-------|-------|
 | **Consola** | Tenant Console |
 | **Ruta** | `/dashboard/settings` |
-| **Estado** | ❌ Pendiente |
-| **Propósito** | Ajustes del tenant: WABA, equipo, notificaciones, perfil, plan. |
-| **Submódulos** | Perfil de empresa, configuración WABA, gestión de usuarios del equipo (RBAC), notificaciones, plan |
-| **Estado actual real** | No existe. El WABA ID se configura directamente en DB. No hay UI de configuración. |
-| **Evidencia en repo** | `tenants.meta_waba_id` en DB. `tenant_users.role` en DB. Sin UI correspondiente. |
-| **Dependencia backend** | Endpoints de settings en `services/api` (no existen). RBAC enforceado (no implementado — Riesgo R-09). |
-| **Prioridad** | Alta — RBAC y gestión de equipo son necesarios para tenants reales |
+| **Estado** | ✅ Implementado |
+| **Propósito** | Ajustes del tenant: perfil de empresa, WABA, equipo, notificaciones. |
+| **Submódulos actuales** | Perfil de empresa, WABA ID editable, gestión de usuarios del equipo (RBAC), notificaciones |
+| **Submódulos faltantes** | Cambio de contraseña desde UI, gestión de planes/billing, integraciones de notificación (email/Telegram) |
+| **Estado actual real** | Formulario de perfil + WABA. Lista del equipo con roles. `GET/PUT /api/v1/settings`, `GET/POST/DELETE /team`. `get_tenant_team()` función SECURITY DEFINER para exponer emails de auth.users. Sin branding, sin cambio de contraseña, sin dirección de origen. |
+| **Evidencia en repo** | `apps/web/app/dashboard/settings/page.tsx` + `services/api/routers/settings.py` |
+| **Dependencia backend** | `tenants`, `tenant_users`, `notification_settings` (migración `20260409220000`). `get_tenant_team()` función SQL. |
+| **Visión objetivo (branding)** | Logo del tenant visible en el sidebar de la consola (upload a Supabase Storage, campo `logo_url` en `tenants`). Color primario opcional. Esto hace que el tenant sienta la plataforma como "suya". Estos detalles pequeños suman mucho valor percibido. |
+| **Visión objetivo (operaciones)** | Dirección de origen de envíos (default para cotizaciones Envia). Cambio de contraseña. Invitaciones al equipo por email. Zona horaria del tenant para métricas. |
+| **Prioridad** | Alta — funcional. Billing y cambio de contraseña son mejoras planificadas. |
 
 ---
 
@@ -394,4 +424,5 @@ Actualizar cada vez que:
 
 - `docs/product/current-scope.md` — Estado del stack y evidencia general
 - `docs/product/navigation-map.md` — Rutas reales vs faltantes vs propuestas
+- `docs/product/module-design-decisions.md` — Visión objetivo detallada y deudas por módulo (sesión 2026-04-09)
 - `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend con orden de implementación

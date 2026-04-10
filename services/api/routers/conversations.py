@@ -6,6 +6,7 @@ Endpoints:
   GET  /api/v1/conversations/{id}                 — detalle de conversación + mensajes
   GET  /api/v1/conversations/{id}/messages        — mensajes paginados de una conversación
   PATCH /api/v1/conversations/{id}/status         — cambiar status (human_takeover / bot)
+  POST /api/v1/conversations/{id}/send            — enviar mensaje de agente humano (solo human_takeover)
   GET  /api/v1/conversations/stats                — métricas básicas del inbox
 
 Seguridad:
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client
+from integrations.whatsapp_sender import send_whatsapp_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Conversations"])
@@ -33,6 +35,10 @@ class ConversationStatusUpdate(BaseModel):
         if self.status not in allowed:
             raise ValueError(f"Status debe ser uno de: {allowed}")
         return self.status
+
+
+class AgentMessageRequest(BaseModel):
+    text: str
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -224,3 +230,104 @@ async def update_conversation_status(
     except Exception as e:
         logger.error("Error actualizando status de conversación %s: %s", conversation_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar conversación")
+
+
+@router.post("/{conversation_id}/send", response_model=dict)
+async def send_agent_message(
+    conversation_id: str,
+    body: AgentMessageRequest,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """
+    Envía un mensaje de texto desde el agente humano al cliente vía WhatsApp.
+
+    Reglas:
+    - La conversación debe estar en status 'human_takeover'.
+    - Todos los roles (owner, manager, agent) pueden enviar.
+    - El mensaje se persiste en la tabla 'messages' con direction='outbound'.
+    - El Orchestrator omite mensajes outbound en su loop (solo procesa inbound).
+    """
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="El mensaje no puede estar vacío")
+    if len(text) > 4096:
+        raise HTTPException(status_code=422, detail="El mensaje excede el límite de 4096 caracteres")
+
+    try:
+        # 1. Verificar que la conversación pertenece al tenant y está en takeover
+        conv_result = (
+            supabase.table("conversations")
+            .select("id, customer_phone, status, tenant_id")
+            .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not conv_result.data:
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+        conv = conv_result.data
+        if conv["status"] != "human_takeover":
+            raise HTTPException(
+                status_code=400,
+                detail="Solo se puede responder cuando la conversación está en 'human_takeover'. "
+                       "Toma el control antes de responder.",
+            )
+
+        # 2. Enviar vía Meta API
+        meta_message_id = await send_whatsapp_text(
+            to_phone=conv["customer_phone"],
+            text=text,
+        )
+        if meta_message_id is None:
+            raise HTTPException(
+                status_code=502,
+                detail="No se pudo enviar el mensaje vía WhatsApp. "
+                       "Verifica la configuración de META_ACCESS_TOKEN y WHATSAPP_PHONE_ID.",
+            )
+
+        # 3. Persistir el mensaje outbound en la tabla messages
+        msg_insert = (
+            supabase.table("messages")
+            .insert({
+                "conversation_id": conversation_id,
+                "tenant_id": tenant_id,
+                "direction": "outbound",
+                "content_type": "text",
+                "content": text,
+                "meta_message_id": meta_message_id,
+                "processed": True,  # outbound no necesita ser procesado por el Orchestrator
+            })
+            .execute()
+        )
+
+        if not msg_insert.data:
+            # El mensaje ya fue enviado — solo falta persistencia. Loggear pero no fallar.
+            logger.error(
+                "Mensaje enviado a Meta pero no persistido en DB | conv=%s",
+                conversation_id,
+            )
+            return {
+                "sent": True,
+                "meta_message_id": meta_message_id,
+                "persisted": False,
+            }
+
+        new_msg = msg_insert.data[0]
+        logger.info(
+            "Mensaje de agente enviado y persistido | conv=%s | meta_id=%s",
+            conversation_id, meta_message_id,
+        )
+        return {
+            "sent": True,
+            "meta_message_id": meta_message_id,
+            "persisted": True,
+            "message": new_msg,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error enviando mensaje de agente en conversación %s: %s", conversation_id, e)
+        raise HTTPException(status_code=500, detail="Error al enviar el mensaje")

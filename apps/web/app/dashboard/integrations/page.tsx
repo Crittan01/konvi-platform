@@ -99,6 +99,22 @@ export default async function IntegrationsPage({
     revalidatePath('/dashboard/integrations')
   }
 
+  async function disconnectMeli(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { session: s } } = await sb.auth.getSession()
+    const m = (s?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    await sb.from('tenant_integrations').update({
+      status: 'disconnected',
+      credentials: {},
+      meta: {},
+    }).eq('tenant_id', m.tenant_id).eq('provider', 'mercadolibre')
+
+    revalidatePath('/dashboard/integrations')
+  }
+
   // ── UI ────────────────────────────────────────────────────────────────────
 
   return (
@@ -200,9 +216,9 @@ export default async function IntegrationsPage({
                   </p>
                 </div>
                 {isOwner && (
-                  <Button size="sm" variant="destructive" disabled>
-                    Desconectar (próximamente)
-                  </Button>
+                  <form action={disconnectMeli}>
+                    <Button type="submit" size="sm" variant="destructive">Desconectar</Button>
+                  </form>
                 )}
               </div>
             ) : isOwner ? (

@@ -1,6 +1,6 @@
 # Fases de Implementación — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 9 — Fases 8-10 cerradas, Fase 11 en progreso)
+Última actualización: 2026-04-09 (rev. 10 — Fases 8-11 cerradas, UI redesign completo)
 
 ---
 
@@ -48,7 +48,7 @@ Adicionalmente:
 | 8 | Catálogo completo + RBAC base | ✅ Completa | COMPLETADO 2026-04-09 |
 | 9 | Schema core + Pedidos + Configuración + Equipo | ✅ Completa | COMPLETADO 2026-04-09 |
 | 10 | Integraciones — MeLi + Envia/Shipping | ✅ Completa | COMPLETADO 2026-04-09 — MeLi OAuth + Envia Sandbox conectados |
-| 11 | Módulos restantes Tenant Console | 🟡 En progreso | EN PROGRESO |
+| 11 | Módulos restantes Tenant Console + UI Redesign | ✅ Completa | COMPLETADO 2026-04-09 |
 | 12 | Platform Console | ❌ Pendiente | PENDIENTE (prerequisito: OQ-P01 + Fase 9+ completa) |
 | 13 | Shopify / Tienda custom | ❌ Futuro | FUTURO |
 
@@ -300,27 +300,33 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 11 — Módulos restantes de Tenant Console 🟡 EN PROGRESO
+### Fase 11 — Módulos restantes de Tenant Console + UI Redesign ✅ COMPLETADO — 2026-04-09
 
 **BLOQUE 5 — prerequisito: Fases 8-9 completadas**
 
-**Objetivo**: Visibilidad operacional completa para el tenant.
+**Objetivo**: Visibilidad operacional completa para el tenant + rediseño visual completo.
 
-**Migraciones nuevas:**
-- `audit_log` — log de acciones por usuario
-- `stock_movements` — historial de movimientos de inventario
-- `kb_documents` — base de conocimiento para RAG
+**Migraciones aplicadas:**
+- `20260409240000_stock_movements.sql` — tabla `stock_movements` con delta, new_stock, reason, created_by, RLS
+- `20260409250000_kb_documents.sql` — tabla `kb_documents` con is_active, category, updated_at trigger, RLS
+- `20260409260000_audit_log.sql` — tabla `audit_log` con action, entity_type, entity_id, payload JSONB, user_email
 
-**Frontend + Backend:**
-- `/dashboard/inventory` — control de stock, alertas, historial de movimientos
-- `/dashboard/metrics` — KPIs: mensajes/día, conversiones, pedidos, tiempo respuesta IA
-- `/dashboard/audit` — log de acciones con filtros
-- `/dashboard/media` — Supabase Storage (buckets por tenant)
-- `/dashboard/knowledge-base` — CRUD de documentos KB para contexto IA
+**Frontend + Backend completados:**
+- ✅ `/dashboard/metrics` — 4 KPIs + pedidos por estado + top 5 productos por cantidad/revenue
+- ✅ `/dashboard/inventory` — stock por variación + alertas stock bajo (≤5) + ajuste de stock
+- ✅ `/dashboard/knowledge-base` — CRUD con Server Actions, categorías, toggle active/inactive
+- ✅ `/dashboard/audit` — filtro por entity_type, paginación 25/página, payload expandible
+- ✅ `/dashboard/media` — upload/delete/copy URL con Supabase Storage bucket `tenant-media`
+- ✅ `services/api/routers/meli_webhook.py` — fire-and-forget 200, BackgroundTask, resolución por `meli_user_id`
+- ✅ `services/ai-orchestrator/tools/kb_tool.py` — KB inyectada en system prompt como secciones markdown
 
-**AI:**
-- `tools/kb_tool.py` — integración de Knowledge Base en el contexto del Orchestrator
-- Pipeline RAG / pgvector (requiere validar PV-04: pgvector disponible en plan actual)
+**UI Redesign — Dark Warm Theme:**
+- ✅ `apps/web/app/globals.css` — paleta "carbón cálido con tinte verde": background `#181E1D`, primary `#38A875`, foreground `#F0EDE8`, amber `#D4A843`
+- ✅ `apps/web/app/dashboard/layout.tsx` — sidebar con RBAC visual (NAV_ITEMS[].roles), role badges amber/manager/agent
+- ✅ `apps/web/app/layout.tsx` — `next/font/google` Inter con CSS variable `--font-inter` (fix `@import` error PostCSS)
+- ✅ `apps/web/tailwind.config.ts` — `fontFamily.sans = ['var(--font-inter)', ...]`
+
+**Nota sobre pgvector / RAG**: Diferido — implementación actual usa inyección de texto plano (markdown) en system prompt, sin embeddings. Funcional y suficiente para el volumen actual. PV-04 sigue abierto para validar disponibilidad en plan Supabase.
 
 ---
 

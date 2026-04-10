@@ -1,10 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
-import {
-  MessageSquare, Package, Users, ShoppingCart,
-  Boxes, BarChart2, Plug, ArrowRight,
-} from 'lucide-react'
+import DashboardClient from './dashboard-client'
 
 export default async function DashboardPage() {
   const supabase = createClient()
@@ -18,88 +14,122 @@ export default async function DashboardPage() {
 
   let tenantName = 'Commerce Ops'
   let stats = { conversations: 0, orders: 0, contacts: 0, products: 0 }
+  let ops = { activeConversations: 0, humanTakeovers: 0, pendingOrders: 0, lowStockCount: 0 }
+  let messagesPerDay: { day: string; total: number }[] = []
+  let ordersByStatus: { status: string; count: number }[] = []
 
   if (tenantId) {
-    const [tenantRes, convRes, ordersRes, contactsRes, productsRes] = await Promise.all([
+    // ─── Queries en paralelo ──────────────────────────────────────────────────
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+    const [
+      tenantRes,
+      convRes,
+      ordersRes,
+      contactsRes,
+      productsRes,
+      activeConvRes,
+      takeoverConvRes,
+      pendingOrdersRes,
+      lowStockRes,
+      messagesRes,
+      orderStatusRes,
+    ] = await Promise.all([
       supabase.from('tenants').select('name').eq('id', tenantId).single(),
       supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
       supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
       supabase.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
+      // Ops: conversaciones activas con bot
+      supabase.from('conversations').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('status', 'bot_active'),
+      // Ops: conversaciones en takeover humano
+      supabase.from('conversations').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('status', 'human_takeover'),
+      // Ops: pedidos pendientes
+      supabase.from('orders').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('status', 'pending'),
+      // Ops: variantes con stock ≤ 5
+      supabase.from('product_variations').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).lte('stock_quantity', 5),
+      // Negocio: mensajes últimos 7 días con fecha
+      supabase.from('messages').select('created_at')
+        .eq('tenant_id', tenantId)
+        .gte('created_at', sevenDaysAgo)
+        .order('created_at', { ascending: true }),
+      // Negocio: pedidos por estado
+      supabase.from('orders').select('status').eq('tenant_id', tenantId),
     ])
+
     tenantName = tenantRes.data?.name ?? 'Commerce Ops'
+
     stats = {
       conversations: convRes.count ?? 0,
       orders:        ordersRes.count ?? 0,
       contacts:      contactsRes.count ?? 0,
       products:      productsRes.count ?? 0,
     }
+
+    ops = {
+      activeConversations: activeConvRes.count ?? 0,
+      humanTakeovers:      takeoverConvRes.count ?? 0,
+      pendingOrders:       pendingOrdersRes.count ?? 0,
+      lowStockCount:       lowStockRes.count ?? 0,
+    }
+
+    // Agrupar mensajes por día (formato "Lu", "Ma", etc.)
+    const dayLabels = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá']
+    const dayMap = new Map<string, number>()
+
+    // Inicializar los últimos 7 días
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
+      const key = d.toISOString().split('T')[0]
+      const label = dayLabels[d.getDay()]
+      dayMap.set(key, 0)
+    }
+
+    for (const msg of messagesRes.data ?? []) {
+      const key = (msg.created_at as string).split('T')[0]
+      if (dayMap.has(key)) {
+        dayMap.set(key, (dayMap.get(key) ?? 0) + 1)
+      }
+    }
+
+    messagesPerDay = Array.from(dayMap.entries()).map(([dateStr, total]) => {
+      const d = new Date(dateStr + 'T12:00:00')
+      return { day: dayLabels[d.getDay()], total }
+    })
+
+    // Agrupar pedidos por estado
+    const statusMap = new Map<string, number>()
+    for (const order of orderStatusRes.data ?? []) {
+      const s = (order as { status: string }).status
+      statusMap.set(s, (statusMap.get(s) ?? 0) + 1)
+    }
+    ordersByStatus = Array.from(statusMap.entries()).map(([status, count]) => ({ status, count }))
   }
 
   const quickLinks = [
-    { href: '/dashboard/inbox',    label: 'Inbox AI',     icon: MessageSquare, desc: 'Conversaciones WhatsApp', show: true },
-    { href: '/dashboard/orders',   label: 'Pedidos',      icon: Package,       desc: 'Gestionar pedidos',       show: true },
-    { href: '/dashboard/contacts', label: 'Contactos',    icon: Users,         desc: 'Base de clientes',        show: true },
-    { href: '/dashboard/catalog',  label: 'Catálogo',     icon: ShoppingCart,  desc: 'Productos activos',       show: canWrite },
-    { href: '/dashboard/inventory',label: 'Inventario',   icon: Boxes,         desc: 'Control de stock',        show: canWrite },
-    { href: '/dashboard/metrics',  label: 'Métricas',     icon: BarChart2,     desc: 'KPIs del negocio',        show: canWrite },
-    { href: '/dashboard/integrations', label: 'Integraciones', icon: Plug,     desc: 'MeLi · Envia',           show: role === 'owner' },
-  ].filter(l => l.show)
+    { href: '/dashboard/inbox',         label: 'Inbox AI',      icon: 'MessageSquare', desc: 'Conversaciones WhatsApp', show: true },
+    { href: '/dashboard/orders',         label: 'Pedidos',       icon: 'Package',       desc: 'Gestionar pedidos',       show: true },
+    { href: '/dashboard/contacts',       label: 'Contactos',     icon: 'Users',         desc: 'Base de clientes',        show: true },
+    { href: '/dashboard/catalog',        label: 'Catálogo',      icon: 'ShoppingCart',  desc: 'Productos activos',       show: canWrite },
+    { href: '/dashboard/inventory',      label: 'Inventario',    icon: 'Boxes',         desc: 'Control de stock',        show: canWrite },
+    { href: '/dashboard/metrics',        label: 'Métricas',      icon: 'BarChart2',     desc: 'KPIs del negocio',        show: canWrite },
+    { href: '/dashboard/integrations',   label: 'Integraciones', icon: 'Plug',          desc: 'MeLi · Envia',           show: role === 'owner' },
+  ].filter(l => l.show).map(({ show: _show, ...rest }) => rest)
 
   return (
-    <div className="space-y-8 max-w-5xl">
-
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground tracking-tight">
-          Bienvenido a{' '}
-          <span className="text-gradient">{tenantName}</span>
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {user.email} · <span className="capitalize">{role}</span>
-        </p>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Conversaciones',    value: stats.conversations, color: 'text-primary' },
-          { label: 'Pedidos',           value: stats.orders,        color: 'text-primary' },
-          { label: 'Contactos',         value: stats.contacts,      color: 'text-primary' },
-          { label: 'Productos activos', value: stats.products,      color: 'text-primary' },
-        ].map(kpi => (
-          <div key={kpi.label} className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{kpi.label}</p>
-            <p className={`text-3xl font-bold ${kpi.color}`}>{kpi.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Quick access */}
-      <div>
-        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
-          Acceso rápido
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {quickLinks.map(({ href, label, icon: Icon, desc }) => (
-            <Link
-              key={href}
-              href={href}
-              className="group relative rounded-xl border border-border bg-card p-4 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 card-hover"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                  <Icon className="h-4 w-4 text-primary" />
-                </div>
-                <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-              <p className="text-sm font-medium text-foreground">{label}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-    </div>
+    <DashboardClient
+      tenantName={tenantName}
+      userEmail={user.email ?? ''}
+      role={role}
+      stats={stats}
+      ops={ops}
+      messagesPerDay={messagesPerDay}
+      ordersByStatus={ordersByStatus}
+      quickLinks={quickLinks}
+    />
   )
 }
