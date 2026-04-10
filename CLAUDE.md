@@ -1,551 +1,199 @@
-# CLAUDE.md
+# CLAUDE.md — Commerce Ops Platform
+> Guía de contexto para Claude Code. Leer antes de tocar cualquier archivo.
 
-## Propósito del workspace
+## Qué es este proyecto
 
-Este workspace corresponde exclusivamente al proyecto **Commerce Ops Platform**.
+SaaS conversacional multi-tenant para e-commerce B2B2C vía WhatsApp.
+Cada empresa (tenant) opera en aislamiento total. El canal de ventas es WhatsApp Cloud API (Meta oficial). La IA es Google Gemini. El backend son microservicios Python/FastAPI. El frontend es Next.js 14.
 
-Toda acción debe orientarse a mantener, clarificar y evolucionar este sistema con enfoque de:
-
-- producción real
-- arquitectura modular
-- seguridad multi-tenant
-- trazabilidad documental estricta
-- consistencia entre producto, frontend, backend, integraciones e infraestructura
-
-Este repositorio no debe ser tratado como demo, experimento o MVP improvisado.
+**Estado actual:** Fases 1-11 ✅ completadas. Phase 12 (Platform Console) ❌ pendiente.
+**Versión live:** https://commerce-ops-web.onrender.com
 
 ---
 
-## Fuente de verdad del proyecto
+## Stack exacto (no asumir — verificar en package.json / requirements.txt)
 
-La fuente de verdad persistente del proyecto es el **repositorio**.
-
-Orden de prioridad para reconstrucción de contexto:
-
-1. Código implementado
-2. `AGENTS.md`
-3. `docs/HANDOFF.md`
-4. `docs/**`
-5. Este archivo `CLAUDE.md`
-
-Si detectas contradicciones entre código y documentación, debes:
-
-1. identificarlas explícitamente
-2. evaluar cuál fuente es más reciente y confiable
-3. proponer la corrección
-4. actualizar los `.md` correspondientes
-5. dejar rastro documental del cambio
-
-No inventar implementaciones no presentes en código o documentación.  
-Si algo no está claro, debes marcarlo como **no confirmado**.
+| Capa | Tecnología |
+|------|-----------|
+| Frontend | Next.js 14.2.35 + React 18 + TypeScript 5 |
+| UI | TailwindCSS 3.3 + shadcn/ui (componentes en `apps/web/components/ui/`) |
+| Backend | Python 3.11 + FastAPI 0.128.8 (sin venv — paquetes en sistema) |
+| DB/Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) |
+| Storage | Supabase Storage — bucket `tenant-media` |
+| IA | Google Gemini (`google-genai==1.47.0`, modelo `gemini-2.5-flash`) |
+| WhatsApp | WhatsApp Cloud API v21.0 (Meta oficial — NUNCA librerías no oficiales) |
+| Shipping | Envia API (sandbox + producción vía `tenant_integrations`) |
+| Marketplace | Mercado Libre OAuth 2.0 |
+| Hosting | Render (4 servicios: web, connector, api, orchestrator) |
 
 ---
 
-## Mandato operativo permanente
+## Arquitectura de navegación — Tenant Console (aprobada 2026-04-10)
 
-Esta máquina está dedicada a pruebas y trabajo exclusivo de este proyecto.
+```
+Dashboard          /dashboard            (raíz — tabs internas: Operaciones/Negocio)
+Inbox              /dashboard/inbox      (raíz — uso diario crítico)
 
-Tienes autorización para intervenir técnicamente en el workspace cuando sea necesario para avanzar correctamente, incluyendo:
+▼ Ventas
+   Pedidos          /dashboard/orders
+   Contactos        /dashboard/contacts
+   Envíos           /dashboard/shipping
 
-- crear, mover, actualizar o eliminar archivos del proyecto
-- reorganizar carpetas del repositorio si mejora claridad y mantenibilidad
-- instalar, actualizar o remover dependencias y herramientas necesarias
-- usar `dnf`, `rpm`, `pip`, `python`, `node`, `npm`, `pnpm`, `uv`, `git` u otras herramientas del entorno cuando se justifique técnicamente
-- corregir estructura, scripts, configuración y convenciones del proyecto
-- consolidar duplicidades técnicas o documentales
+▼ Productos        (owner + manager)
+   Catálogo         /dashboard/catalog
+   Inventario       /dashboard/inventory
 
-Aun con esa autorización:
+▼ IA & Contenido   (owner + manager)
+   Base de Conocimiento  /dashboard/knowledge-base
+   Media                 /dashboard/media
 
-- no ejecutar acciones destructivas irreversibles sin explicarlas antes de forma explícita
-- no realizar cambios de alcance funcional visible sin validar antes el impacto en producto
-- no asumir que algo está correcto solo porque compila o existe
-- no tratar archivos vacíos o parciales como si fueran módulos completos
+▼ Analítica        (owner + manager)
+   Métricas         /dashboard/metrics
+   Auditoría        /dashboard/audit     (owner only)
 
----
+▼ Configuración    (owner + manager)
+   General          /dashboard/settings
+   Integraciones    /dashboard/integrations  (owner only)
+```
 
-## Regla obligatoria de documentación oficial vigente
-
-Ninguna decisión técnica, instalación, actualización, eliminación, configuración, integración o cambio arquitectónico debe realizarse sin revisión previa de documentación oficial vigente de la tecnología correspondiente.
-
-Esto aplica especialmente a:
-
-- Claude Code / `CLAUDE.md`
-- Next.js / React / TypeScript / Tailwind
-- Supabase
-- Render
-- FastAPI
-- Meta / WhatsApp
-- Mercado Libre
-- Telegram
-- Envia / Courier / Shipping APIs
-
-Antes de tocar cualquier cosa, debes:
-
-1. identificar qué documentación oficial aplica
-2. resumir la acción a realizar
-3. indicar riesgos
-4. indicar si requiere intervención humana o no
-
-Toda intervención humana debe informarse de manera:
-
-- clara
-- explícita
-- paso a paso
-- dummy-friendly
-- basada en documentación oficial vigente
+**Reglas de navegación:**
+- Sub-item en sidebar = módulo con URL propia y propósito diferenciado
+- Tabs dentro de una página = vistas alternativas del mismo dato (NO ir al sidebar)
+- Los grupos auto-expanden cuando la ruta activa está dentro de ellos
+- RBAC aplicado tanto en grupo como en cada hijo individual
 
 ---
 
-## Reglas obligatorias de documentación del repositorio
+## Estructura de directorios clave
 
-Todo cambio importante debe quedar reflejado en la documentación del repositorio.
+```
+apps/web/
+  app/
+    dashboard/
+      sidebar-client.tsx       ← Navegación (grupos expandibles)
+      layout.tsx               ← Layout principal con SidebarClient
+      dashboard-client.tsx     ← Dashboard con tabs Operaciones/Negocio
+      inbox/page.tsx           ← Inbox AI realtime
+      orders/page.tsx          ← Pedidos con filtros
+      contacts/page.tsx        ← Contactos CRM
+      catalog/page.tsx         ← Catálogo con CatalogForm client
+      inventory/page.tsx       ← Inventario con ajustes
+      knowledge-base/page.tsx  ← KB con búsqueda
+      media/
+        page.tsx               ← Server: lista archivos Storage
+        media-client.tsx       ← Client: drag&drop, lightbox
+      shipping/page.tsx        ← Envíos (bajo Ventas en nav)
+      metrics/page.tsx         ← Métricas históricas
+      audit/page.tsx           ← Auditoría con filtros
+      settings/page.tsx        ← Configuración General
+      integrations/page.tsx    ← Integraciones (bajo Config en nav)
+  components/ui/               ← shadcn/ui components
+  utils/supabase/
+    client.ts                  ← Supabase browser client
+    server.ts                  ← Supabase server client (cookies)
 
-Es obligatorio:
-
-- mantener muy actualizados los archivos `.md`
-- sincronizar código, arquitectura, roadmap, riesgos y estado real
-- documentar decisiones nuevas o cambios de criterio
-- dejar trazabilidad de deuda técnica, contradicciones y validaciones pendientes
-- evitar que el contexto crítico quede solo en el chat
-
-Después de cada bloque importante de trabajo debes:
-
-1. resumir qué cambiaste
-2. listar archivos modificados
-3. explicar por qué lo cambiaste
-4. indicar qué documentación oficial sustentó la decisión
-5. actualizar los `.md` necesarios
-6. señalar riesgos o validaciones pendientes
-
----
-
-## Definición del producto a preservar
-
-Este proyecto corresponde a una **plataforma SaaS multi-tenant de operaciones e-commerce conversacionales**.
-
-La plataforma debe centralizar, de forma modular y segura:
-
-- catálogo
-- variantes
-- media
-- inventario
-- pedidos
-- conversaciones por WhatsApp
-- knowledge base
-- integraciones por tenant
-- métricas
-- auditoría
-- operación interna
-- shipping / courier
-- futura expansión a más canales
-
-### Regla conceptual crítica
-
-El producto **no es un bot**.
-
-El producto es un **centro de operaciones e-commerce conversacional** donde:
-
-- WhatsApp es el canal principal con el cliente
-- el inventario, catálogo, pedidos y reglas viven en el core
-- el LLM es una capa de asistencia controlada
-- las integraciones son módulos desacoplados
-- el tenant opera su negocio desde una consola propia
-- el dueño de la plataforma opera el SaaS desde una consola separada
+services/
+  api/                         ← FastAPI: gateway, RBAC, productos, pedidos
+  connector-whatsapp/          ← Webhook Meta → Supabase messages
+  ai-orchestrator/             ← Gemini + KB + intención → respuesta
+```
 
 ---
 
-## Stack inicial vigente del proyecto
+## Reglas críticas para Claude Code
 
-Debes asumir como stack inicial vigente (no mandatorio), salvo que el código o la documentación indiquen claramente otra cosa:
+### Seguridad
+1. **getUser() NO getSession()** en Server Components — `getSession()` no valida JWT contra servidor
+2. **RLS activo en Supabase** — toda query del frontend debe incluir `tenant_id` (el RLS lo filtra automáticamente por el JWT)
+3. **Server Actions deben re-validar tenant_id y role** — nunca confíar en el cliente
 
-### Frontend inicial
+### Multi-tenant
+4. Toda tabla tiene `tenant_id`. Toda query tiene `.eq('tenant_id', tenantId)`
+5. `app_metadata.tenant_id` y `app_metadata.role` vienen del JWT de Supabase Auth
+6. RLS es la última barrera. El API Gateway es la barrera previa. El frontend no es seguridad.
 
-- Next.js / React
-- TypeScript
-- Tailwind CSS
-- componentes UI reutilizables en `apps/web/components/ui` y/o `packages/ui`
-- utilidades SSR/Auth de Supabase
+### Frontend patterns
+7. **Server Components** para carga inicial de datos (`async function Page()`)
+8. **Client Components** para interactividad (hooks, realtime, drag&drop)
+9. Server Actions (`'use server'`) re-validan con `getUser()` internamente
+10. `revalidatePath()` después de toda mutación exitosa
 
-### Backend inicial
+### IA
+11. Gemini nunca es fuente de verdad para stock, precios, pedidos, permisos
+12. La KB (Base de Conocimiento) se inyecta como texto plano en el prompt
+13. RAG con pgvector está planificado — no implementado aún (OQ-T03)
 
-- Python
-- FastAPI
-- Supabase Postgres
-- RLS + RBAC
-- WhatsApp connector
-- AI orchestrator
-- connector framework para futuras integraciones
+### Shipping
+14. Envia API solo disponible si `tenant_integrations.status = 'connected'` para provider `envia`
+15. `shipping_origin` se guarda como JSONB en `tenants.shipping_origin`
 
-### Infraestructura inicial
-
-- Render
-- Supabase
-
-Esto debe tratarse como **baseline vigente**, no como decisión eterna e inmutable.
-
----
-
-## Restricciones arquitectónicas obligatorias
-
-No romper:
-
-- modelo multi-tenant
-- aislamiento por tenant
-- RLS
-- RBAC
-- Supabase como source of truth operativa
-- arquitectura modular
-- separación entre frontend, backend, workers e integraciones
-- cumplimiento oficial de Meta / WhatsApp
-
-No usar el LLM como fuente de verdad de:
-
-- stock
-- precios
-- pedidos
-- shipping quotes
-- tracking
-- estados transaccionales
-- permisos
-- sincronización de inventario
-
-No proponer soluciones no oficiales para WhatsApp.
-
-No permitir que conectores externos se conviertan en la fuente maestra del negocio.
+### WhatsApp
+16. Solo WhatsApp Cloud API oficial (Meta v21.0). NUNCA Baileys, WPPConnect ni similares
+17. El connector recibe webhooks → inserta en `messages` → orchestrator procesa
 
 ---
 
-## Superficies administrativas obligatorias
+## Comandos útiles
 
-Debes asumir y preservar que existen dos superficies administrativas distintas.
+```bash
+# Frontend dev
+cd apps/web && npm run dev
 
-### 1. Tenant Console
+# TypeScript check
+cd apps/web && node_modules/.bin/tsc --noEmit
 
-Interfaz para el cliente/tenant que compra la plataforma.
+# Backend API
+cd services/api && uvicorn main:app --reload
 
-Debe operar su negocio y no debe exponérsele información de plataforma global ni de otros tenants.
+# Orchestrator local
+cd services/ai-orchestrator
+export $(grep -v '^#' ../../.env | sed 's/="\(.*\)"/=\1/' | xargs)
+python3 main.py
 
-### 2. Platform Console
-
-Interfaz para el dueño de la plataforma, superadmin y soporte interno.
-
-Debe operar el SaaS, no una tienda específica, salvo accesos de soporte debidamente auditados.
-
-### Regla crítica
-
-No mezclar ambas superficies en una sola navegación caótica.
-
-Debe existir separación clara de:
-
-- layout
-- navegación
-- permisos
-- visibilidad
-- casos de uso
-- responsabilidades
+# DB query
+supabase db query --linked -f archivo.sql
+```
 
 ---
 
-## Alcance funcional y visual que debes respetar
+## Variables de entorno (.env — nunca al repo)
 
-### Módulos base de la Tenant Console
-
-Tomar como baseline funcional/documental:
-
-- Inicio / Dashboard
-- Inbox / Conversaciones
-- Catálogo
-- Media
-- Inventario
-- Pedidos
-- Contactos
-- Knowledge Base
-- Integraciones
-- Shipping / Courier
-- Métricas
-- Auditoría
-- Configuración
-
-### Módulos base de la Platform Console
-
-Tomar como baseline funcional/documental:
-
-- Overview global
-- Tenants
-- Tenant detail
-- Health Center
-- Integraciones globales
-- Jobs / Queue Ops
-- Seguridad
-- Auditoría global
-- Billing / planes
-- Feature flags
-- Soporte operativo
-
-### Regla de alcance
-
-No crear, eliminar, fusionar, renombrar ni expandir módulos visibles del producto sin antes:
-
-1. identificar la situación actual en código y docs
-2. justificar el cambio
-3. indicar impacto funcional y técnico
-4. documentarlo
-5. marcar si requiere validación humana
+```
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_JWT_SECRET=
+META_ACCESS_TOKEN=          # Token permanente System User commerce-ops
+META_PHONE_NUMBER_ID=
+META_WABA_ID=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+MELI_CLIENT_ID=
+MELI_CLIENT_SECRET=
+MELI_REDIRECT_URI=
+NEXT_PUBLIC_API_URL=https://commerce-ops-api.onrender.com
+```
 
 ---
 
-## Shipping / Courier como capacidad formal del producto
+## Estado de fases
 
-Debes tratar Courier / Shipping como una capacidad formal del producto, no como detalle marginal.
-
-### Diseño funcional esperado
-
-Debe contemplarse documentalmente:
-
-- cotización de envíos desde la interfaz del tenant
-- uso de la cotización dentro de pedidos y operación
-- soporte de recogida / pickup
-- futura capacidad para label, tracking, manifest y webhook
-- historial de cotizaciones y acciones
-- intervención humana cuando haga falta
-- uso desde WhatsApp solo a través del backend y conectores reales
-
-### Regla crítica
-
-El sistema puede responder cotizaciones o estados de envío por WhatsApp solo si:
-
-- existen datos mínimos válidos
-- el backend puede consultar el conector real
-- la respuesta se basa en datos transaccionales reales
-- no se inventa información
-
-Si faltan datos, debe:
-
-- solicitar los datos faltantes
-- o escalar a humano
-
-### Acoplamiento prohibido
-
-No acoplar Shipping directamente al LLM.  
-Toda cotización, pickup, label o tracking debe modelarse como responsabilidad del backend / conector correspondiente.
+| Fase | Nombre | Estado |
+|------|--------|--------|
+| 1-6 | Base, Auth, UI, WhatsApp, AI, API Gateway | ✅ |
+| 7 | Deploy Render + E2E | ✅ |
+| 8 | Catálogo + RBAC | ✅ |
+| 9 | Schema core + Pedidos + Config + Equipo | ✅ |
+| 10 | MeLi OAuth + Envia Sandbox | ✅ |
+| 11 | Módulos restantes + UI Redesign "Plus Total" | ✅ |
+| 12 | Platform Console | ❌ Bloqueado por OQ-P01 |
+| 13 | Shopify / Tienda custom | ❌ Futuro |
 
 ---
 
-## Reglas sobre interfaz y frontend
+## Preguntas abiertas (OQ)
 
-La UI actual del repositorio debe tratarse como **base parcial**, no como definición final cerrada del producto.
+- **OQ-P01**: ¿Platform Console en misma app Next.js (`/platform/*`) o app separada?
+- **OQ-T03**: pgvector para RAG en KB — ¿Supabase managed o extensión manual?
 
-No debes asumir que la estructura actual de `apps/web/app/**` representa el producto completo.
-
-### Sí puedes hacer sin aprobación previa
-
-- refactor técnico interno sin impacto funcional visible
-- mover componentes a una estructura más mantenible
-- consolidar duplicados
-- corregir naming
-- mejorar organización de `packages/`
-- corregir inconsistencias entre implementación y documentación
-- endurecer validaciones
-- mejorar scripts y tooling
-- documentar gaps de interfaz y estado real
-
-### Debes proponer antes de ejecutar
-
-- nuevas pantallas
-- cambios de navegación
-- eliminación de módulos visibles
-- rediseño funcional del panel
-- ampliaciones visibles no documentadas
-- cambios de experiencia del tenant
-- cambios de experiencia del superadmin
-
-### Si detectas gaps funcionales o UI faltante
-
-No implementarlos automáticamente.
-
-Debes:
-
-1. documentar el gap
-2. indicar evidencia en código/docs
-3. explicar impacto técnico y de producto
-4. proponer opciones
-5. marcarlo como pendiente de validación humana
-
----
-
-## Regla de orden de trabajo
-
-El orden correcto de trabajo es:
-
-### 1. Claridad funcional y visual
-
-Primero dejar claro documentalmente:
-
-- qué producto se construye
-- qué consolas existen
-- qué módulos tiene cada una
-- qué está implementado
-- qué es parcial
-- qué está pendiente
-- qué stack inicial lo sostiene
-
-### 2. Alineación arquitectura ↔ frontend ↔ backend
-
-Después documentar:
-
-- qué backend requiere cada módulo visual
-- qué endpoints existen
-- qué endpoints faltan
-- qué tablas ya soportan cada módulo
-- qué políticas RLS aplican
-- qué workers o procesos async hacen falta
-
-### 3. Implementación técnica
-
-Solo después avanzar en cambios de frontend o backend con menor ambigüedad.
-
-### Regla crítica
-
-Primero claridad funcional/visual.  
-Después backend correspondiente.  
-No al revés.
-
----
-
-## Tipos de cambio y nivel de autonomía
-
-### Puede ejecutar sin aprobación previa
-
-- consolidación de estructura técnica
-- eliminación de duplicidad técnica claramente obsoleta
-- corrección documental
-- refactor interno sin impacto visible
-- mejora de scripts, build, configuración y organización
-- endurecimiento de seguridad
-- corrección de inconsistencias entre código y `.md`
-- creación de nuevos archivos Markdown necesarios
-- consolidación de Markdown redundante si se preserva trazabilidad
-
-### Debe proponer antes de ejecutar
-
-- cambios de alcance funcional
-- decisiones de roadmap con impacto material
-- cambios visibles de interfaz
-- nuevas integraciones no planificadas
-- cambios de contrato entre módulos
-- migraciones con impacto funcional o de datos no trivial
-- eliminación de archivos no Markdown importantes
-
-### Requieren intervención humana obligatoria
-
-- Meta Business / WhatsApp Business Platform
-- credenciales y tokens
-- DNS
-- dominios
-- cuentas de proveedores
-- suscripción/configuración de webhooks externos
-- activación/validación final de canales
-- pruebas E2E que requieren acción fuera del workspace
-
----
-
-## Gestión de inconsistencias y duplicidades
-
-Si detectas duplicidad, deuda técnica, estructura obsoleta o archivos contradictorios, debes:
-
-1. identificarlo
-2. proponer corrección
-3. actualizar la documentación correspondiente
-4. consolidar si es seguro hacerlo
-5. dejar claramente documentado:
-   - qué se consolidó
-   - qué se mantuvo
-   - qué se eliminó
-   - por qué
-
-No eliminar archivos Markdown útiles sin haber consolidado antes su contenido relevante.
-
----
-
-## Archivos de contexto que debes mantener especialmente vivos
-
-### Contexto distilado (para Claude Code y Antigravity)
-
-Los archivos en `.context/` son la fuente distilada para carga rápida de contexto:
-
-- `.context/00-product.md` — qué es el producto y las dos consolas
-- `.context/01-state.md` — estado de implementación resumido
-- `.context/02-stack.md` — stack real con versiones verificadas
-- `.context/03-rules.md` — reglas críticas no negociables
-- `.context/04-next-steps.md` — Fase 12, deuda técnica, lecciones
-
-### Fuentes de verdad (authoritative por dominio)
-
-| Archivo | Autoridad sobre |
-|---------|----------------|
-| `docs/product/current-scope.md` | Estado de implementación real verificado en código |
-| `docs/data/schema.md` | Schema de base de datos y migraciones |
-| `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend por módulo |
-| `docs/integrations/courier-envia.md` | Diseño Shipping/Courier |
-| `docs/roadmap/implementation-phases.md` | Fases 1-13 con estado |
-| `docs/risks/risk-register.md` | Riesgos activos y cerrados |
-
-### Índices de navegación (referencian fuentes de verdad, no duplican)
-
-- `./AGENTS.md` — índice del sistema + reglas + leer primero
-- `./README.md` — descripción pública del proyecto
-- `./docs/HANDOFF.md` — estado de infra + credenciales + qué viene
-
-Si alguno no existe y es necesario para sostener contexto, debes crearlo.
-Cuando algo cambie: actualizar primero `docs/product/current-scope.md` y `.context/01-state.md`, luego los índices.
-
----
-
-## Prioridades inmediatas del workspace
-
-Estado a 2026-04-10: Fases 1-11 completadas. Tenant Console 13/13 módulos live.
-
-La prioridad actual es:
-
-1. **Decidir OQ-P01** — ¿Platform Console en misma app (`/platform/*`) o app separada? Bloqueante para Fase 12.
-2. **Fase 12 — Platform Console** — solo después de OQ-P01 decidido
-3. **Deuda técnica pre-producción** — variantes múltiples, RBAC granular, Python 3.11+
-4. **Envia Fase 2** — label, tracking, pickup (post-Fase 12)
-
-No expandir funcionalidad visible del producto sin decisión de OQ-P01.
-
----
-
-## Formato mínimo esperado en cada respuesta de trabajo
-
-Toda respuesta debe incluir:
-
-- Resumen
-- Decisiones
-- Riesgos
-- Impacto técnico
-- Archivos que deben actualizarse
-- Siguiente paso recomendado
-
-Si hubo cambios, además debes:
-
-- listar archivos creados/modificados/eliminados
-- indicar evidencia en código/docs
-- indicar documentación oficial revisada
-- dejar pendientes claros
-
----
-
-## Criterio final
-
-Trabaja con criterio técnico fuerte, disciplina documental estricta y trazabilidad total.
-
-El repositorio debe quedar preparado para que cualquier sesión futura entienda sin ambigüedad:
-
-- qué producto se está construyendo
-- cómo debe verse
-- qué consolas existen
-- qué módulos tiene cada consola
-- cómo entra Courier / Shipping con Envia
-- qué stack inicial lo sostiene
-- y que después de definir bien la interfaz se aborda el backend correspondiente
+Ver detalles en `docs/roadmap/implementation-phases.md`

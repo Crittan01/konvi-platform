@@ -9,18 +9,18 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
-## Contexto documental vigente (actualizado 2026-04-10, rev. 15 — hardening seguridad + fix RSC)
+## Contexto documental vigente (actualizado 2026-04-10, rev. 16 — UI Plus Total + nav reestructurada)
 
 La documentación del repositorio fue auditada, corregida y actualizada para reflejar el estado real del código.
 Archivos clave del producto y arquitectura existen y están alineados:
 - `docs/product/` — product overview, scope, current-scope, personas-and-consoles, admin-ui-modules, navigation-map
 - `docs/architecture/front-back-separation.md` — mapeo Frontend ↔ Backend + BLOQUEs alineados
+- `docs/architecture/nav-architecture.md` — **[NUEVO]** Mapa de navegación oficial, grupos, RBAC, reglas de sidebar
 - `docs/integrations/courier-envia.md` — Fase Inicial implementada (envia_client.py, shipping.py, /dashboard/shipping)
 - `docs/roadmap/implementation-phases.md` — Fases 1-11 completadas, 12-13 pendientes
-- Todos los stubs de docs/risks/, docs/research/, docs/operations/ expandidos y alineados
-- rev. 11: Gobernanza documental completa — se corrigieron contradicciones críticas entre rev. 7 y estado real del código
+- `CLAUDE.md` — **[NUEVO]** Contexto completo para Claude Code (stack, nav, reglas, comandos)
 
-### ESTRUCTURA DE FASES — estado real 2026-04-09 (rev. 11)
+### ESTRUCTURA DE FASES — estado real 2026-04-10 (rev. 16)
 
 | Fase | Nombre | Estado |
 |------|--------|--------|
@@ -28,8 +28,10 @@ Archivos clave del producto y arquitectura existen y están alineados:
 | 7 | Deploy Render + E2E | ✅ COMPLETADA — WhatsApp↔Gemini↔Inbox confirmado |
 | 8 | Catálogo completo + RBAC base | ✅ COMPLETADA 2026-04-09 |
 | 9 | Schema core + Pedidos + Configuración + Equipo | ✅ COMPLETADA 2026-04-09 |
-| 10 | Integraciones: MeLi + Envia/Shipping | ✅ COMPLETADA 2026-04-09 — MeLi OAuth + Envia Sandbox conectados |
-| 11 | Módulos restantes Tenant Console + UI Redesign | ✅ COMPLETADA 2026-04-09 |
+| 10 | Integraciones: MeLi + Envia/Shipping | ✅ COMPLETADA 2026-04-09 |
+| 11 | Módulos restantes Tenant Console | ✅ COMPLETADA 2026-04-09 |
+| 11.1 | UI "Plus Total" — 13 módulos Enterprise SaaS responsive | ✅ COMPLETADA 2026-04-10 — commit 6a496c7 |
+| 11.2 | Nav reestructurada — grupos expandibles, RBAC dual, labels corregidos | ✅ COMPLETADA 2026-04-10 |
 | 12 | Platform Console | ❌ PENDIENTE — OQ-P01 bloqueante |
 | 13 | Shopify / Tienda custom | ❌ FUTURO |
 
@@ -42,7 +44,7 @@ Ver `docs/HANDOFF.md` para estado completo y próximos pasos.
 > Estado detallado por módulo → `docs/product/current-scope.md`
 > Servicios live, infraestructura, credenciales → `docs/HANDOFF.md`
 
-**Resumen**: Fases 1-11 ✅ completadas. Tenant Console 13/13 módulos live en Render. Fase 12 ❌ pendiente (bloqueante: OQ-P01).
+**Resumen**: Fases 1-11.2 ✅ completadas. Tenant Console 13/13 módulos live con UI Enterprise. Nav reestructurada con grupos expandibles. Fase 12 ❌ pendiente (bloqueante: OQ-P01).
 
 **Credenciales activas (`.env` — nunca al repo):**
 - `META_ACCESS_TOKEN`: ✅ Token permanente — System User `commerce-ops` (IH-006)
@@ -123,10 +125,12 @@ Ver intervenciones humanas: `docs/operations/HUMAN_INTERVENTIONS.md`
 
 ## Leer Antes de Tocar Código
 
-- `.agents/rules/` — Reglas técnicas expandidas
+- `CLAUDE.md` — **Contexto rápido para Claude Code** (stack, nav, reglas, comandos)
+- `.agents/rules/` — Reglas técnicas expandidas (incluye `nav-architecture.md`)
 - `.agents/workflows/` — Workflows de implementación, feature, seguridad
 - `docs/product/current-scope.md` — Estado real de implementación hoy
 - `docs/product/admin-ui-modules.md` — Módulos de ambas consolas con estado
+- `docs/architecture/nav-architecture.md` — Mapa oficial de navegación, grupos, RBAC
 - `docs/architecture/modules.md` — Responsabilidades de cada módulo backend
 - `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend
 - `docs/architecture/multi-tenant-security.md` — Contratos de RLS
