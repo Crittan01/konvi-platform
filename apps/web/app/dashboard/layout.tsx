@@ -1,7 +1,7 @@
 import * as React from "react"
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { LayoutDashboard, ShoppingCart, MessageSquare, LogOut, Package, Users, Settings, Plug, Truck, BarChart2, Boxes, BookOpen } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, MessageSquare, LogOut, Package, Users, Settings, Plug, Truck, BarChart2, Boxes, BookOpen, Image, ClipboardList } from 'lucide-react'
 import { createClient } from '@/utils/supabase/server'
 
 export default async function DashboardLayout({
@@ -53,8 +53,14 @@ export default async function DashboardLayout({
             <Link href="/dashboard/knowledge-base" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
               <BookOpen className="h-4 w-4" /> Knowledge Base
             </Link>
+            <Link href="/dashboard/media" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
+              <Image className="h-4 w-4" /> Media
+            </Link>
             <Link href="/dashboard/metrics" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
               <BarChart2 className="h-4 w-4" /> Métricas
+            </Link>
+            <Link href="/dashboard/audit" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
+              <ClipboardList className="h-4 w-4" /> Auditoría
             </Link>
             <Link href="/dashboard/settings" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-muted-foreground">
               <Settings className="h-4 w-4" /> Configuración
