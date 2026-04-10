@@ -37,38 +37,17 @@ Ver `docs/HANDOFF.md` para estado completo y próximos pasos.
 
 ---
 
-## Estado Actual del Sistema — 2026-04-10 (rev. 14)
+## Estado Actual del Sistema
 
-| Módulo | Estado | Notas |
-|---|---|---|
-| Supabase Cloud | ✅ Activo | proyecto `***SUPABASE_PROJECT_REF_REDACTED***` — 13 migraciones aplicadas |
-| Migraciones SQL | ✅ 13 aplicadas | Todas las migraciones hasta `20260410020000_contacts_consent.sql` están en producción |
-| Tenant activo | ✅ Configurado | `Matriz Commerce Dev`, `meta_waba_id=2159052118202272` |
-| Frontend — Tenant Console | ✅ Live en Render | 13/13 módulos UI. Dark Warm Theme. RBAC visual. Next.js 14.2.35. |
-| WhatsApp Connector | ✅ Live en Render | HMAC validado, persistencia en DB |
-| AI Orchestrator | ✅ Live + polling activo | `gemini-2.5-flash`, KB inyectada en prompt |
-| Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
-| API Gateway | ✅ Live en Render | JWT real, RBAC base, routers: products, orders, contacts, settings, integrations, shipping, meli_webhook |
-| Catálogo | ✅ Implementado | Edición + soft delete. RBAC: owner/manager |
-| Pedidos | ✅ Implementado | `/dashboard/orders` + `GET/POST /api/v1/orders` |
-| Contactos | ✅ Implementado | `/dashboard/contacts` + `GET/POST /api/v1/contacts` |
-| Configuración | ✅ Implementado | `/dashboard/settings` + `GET/PUT /api/v1/settings` |
-| Integraciones | ✅ Implementado | MeLi OAuth + Envia conectado. UI `/dashboard/integrations` |
-| Shipping / Courier | 🟡 Fase Inicial | `/dashboard/shipping`. Backend quote + historial. Label/tracking/pickup: Fase 2 |
-| Inventario | ✅ Implementado | Stock por variante, alertas, ajuste. `stock_movements` |
-| Knowledge Base | ✅ Implementado | CRUD, categorías, inyectada en prompt del Orchestrator |
-| Media | ✅ Implementado | Upload/delete via Supabase Storage bucket `tenant-media` |
-| Métricas | ✅ Implementado | 4 KPIs, pedidos por estado, top 5 productos |
-| Auditoría | ✅ Implementado | Log filtrable, paginado, payload JSONB expandible |
-| Integración MeLi | ✅ Fase Inicial | OAuth 2.0 per-tenant, webhook procesado. Sync catálogo/inventario: futuro |
-| Integración Envia | 🟡 Fase Inicial | Quote + historial operativo. Label/tracking/pickup: Fase 2 |
-| Platform Console | ❌ No existe | Prerequisito: OQ-P01 decidido. Fase 12. |
+> Estado detallado por módulo → `docs/product/current-scope.md`
+> Servicios live, infraestructura, credenciales → `docs/HANDOFF.md`
 
-**Credenciales activas (`.env` — nunca al repo) — estado 2026-04-09:**
-- `META_ACCESS_TOKEN`: ✅ **Token permanente** — System User `commerce-ops` creado en Meta Business Suite (IH-006 ✅ 2026-04-09)
-- `GEMINI_API_KEY`: ✅ Configurada — billing habilitado en Google AI Studio (paid tier)
+**Resumen**: Fases 1-11 ✅ completadas. Tenant Console 13/13 módulos live en Render. Fase 12 ❌ pendiente (bloqueante: OQ-P01).
+
+**Credenciales activas (`.env` — nunca al repo):**
+- `META_ACCESS_TOKEN`: ✅ Token permanente — System User `commerce-ops` (IH-006)
+- `GEMINI_API_KEY`: ✅ Configurada — billing activo (paid tier)
 - `SUPABASE_JWT_SECRET`: ✅ Presente
-- `meta_waba_id`: `2159052118202272` ✅
 - `GEMINI_MODEL`: `gemini-2.5-flash` — único modelo activo en cuentas nuevas con billing
 
 > **Nota CSS (lección aprendida)**: `apps/web` requiere `postcss.config.js` + `autoprefixer` en devDeps.

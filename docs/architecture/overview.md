@@ -37,65 +37,28 @@ El LLM (Gemini) asiste en respuestas conversacionales pero **nunca es fuente de 
 
 ## Componentes del sistema
 
-### `apps/web` — Frontend (Tenant Console)
+> Responsabilidades y estado detallado por componente → `docs/architecture/modules.md`
 
-- **Responsabilidad**: Panel de operaciones para cada tenant
-- **Rutas activas (13/13 módulos Tenant Console)**:
-  - `/login`, `/dashboard`, `/dashboard/inbox`, `/dashboard/catalog`
-  - `/dashboard/orders`, `/dashboard/contacts`, `/dashboard/inventory`
-  - `/dashboard/knowledge-base`, `/dashboard/media`, `/dashboard/shipping`
-  - `/dashboard/integrations`, `/dashboard/metrics`, `/dashboard/audit`, `/dashboard/settings`
-- **Platform Console**: ❌ No existe — pendiente Fase 12 (bloqueante: OQ-P01)
-- **Seguridad**: `middleware.ts` protege `/dashboard/*`, redirige a `/login`
-- **Auth SSR**: `@supabase/ssr` via `utils/supabase/server.ts`
+| Componente | Responsabilidad | Estado |
+|-----------|----------------|--------|
+| `apps/web` | Tenant Console — 13/13 módulos, Next.js 14.2.35, App Router | ✅ Live |
+| `services/connector-whatsapp` | Webhook boundary Meta — HMAC-SHA256, fire-and-forget | ✅ Live |
+| `services/ai-orchestrator` | Worker AI — polling 3s, Gemini JSON mode, guardrails | ✅ Live |
+| `services/api` | REST API Gateway — JWT, RBAC base, 8 routers | ✅ Live |
+| `services/connector-mercadolibre` | Sync catálogo/pedidos MeLi | ❌ Vacío (cliente en `services/api`) |
+| `services/connector-shopify` | Integración Shopify | ❌ Futuro |
 
-### `services/connector-whatsapp` — Webhook Gateway Meta
+**Flujo AI Orchestrator** (crítico):
+```
+Poll messages(processed=False, inbound) cada 3s
+  → Build context (catálogo + KB del tenant + historial)
+  → Gemini JSON mode → OrchestratorOutput Pydantic
+  → Guardrails: confidence ≥ 0.65, longitud ≤ 1000, escalación humana
+  → POST Meta Graph API v21.0 directamente (whatsapp_sender.py)
+  → INSERT message(outbound) + UPDATE processed=True
+```
 
-- **Responsabilidad**: Recibir eventos de WhatsApp y encolar de forma asíncrona
-- **Patrón**: Fire-and-forget — responde HTTP 200 en milisegundos, procesa en Background Task
-- **Endpoints**:
-  - `GET /api/v1/whatsapp/webhook` — Verificación del challenge de Meta
-  - `POST /api/v1/whatsapp/webhook` — Recepción de mensajes (HMAC-SHA256 validado)
-- **Estado**: ✅ Funcional. Tenant resolver por `meta_waba_id` real. HMAC validado.
-- **URL Render**: `https://commerce-ops-connector.onrender.com`
-
-### `services/ai-orchestrator` — Worker AI Asíncrono
-
-- **Responsabilidad**: Ciclo completo de procesamiento de mensajes entrantes
-- **Patrón**: Web Service en Render — `server.py` lanza FastAPI (`/health`, `/status`) + worker asyncio en thread daemon
-- **Entry point Render**: `uvicorn server:app`
-- **Flujo**:
-  ```
-  Poll messages (processed=False, direction=inbound) → cada 3s
-    → Build context (catálogo del tenant + historial conversación)
-    → Call Gemini API (JSON mode) → OrchestratorOutput Pydantic
-    → Guardrails: confidence ≥ 0.65, texto no vacío, longitud ≤ 1000 chars, escalación humana
-    → IF valid → POST Meta Graph API v21.0 (send message)
-    → INSERT message(outbound) + UPDATE processed=True + processed_at (UTC)
-  ```
-- **Estado**: ✅ Implementado y live. Modelo activo: `gemini-2.5-flash` (billing habilitado).
-
-### `services/api` — REST API Gateway
-
-- **Responsabilidad**: API REST para el frontend. JWT Supabase validado. RBAC por endpoint (pendiente completar).
-- **Routers activos**: products, orders, contacts, settings, integrations, shipping, meli_webhook, conversations
-- **Estado**: ✅ Live en Render. RBAC base implementado (R-09 parcialmente resuelto).
-- **URL Render**: `https://commerce-ops-api.onrender.com`
-
-### `services/connector-mercadolibre` — Pendiente (Fase 8)
-
-- Sincronización de catálogo y pedidos con Mercado Libre API
-- Estado: directorio vacío, sin implementación
-
-### `services/connector-shopify` — Futuro
-
-- Integración con Shopify Storefront y Admin API
-- Sin fecha definida
-
-### Shipping Connector (Envia) — Pendiente diseño de implementación
-
-- Ver `docs/integrations/courier-envia.md` para diseño
-- No existe como servicio todavía
+> El `connector-whatsapp` **solo recibe** webhooks. El `ai-orchestrator` envía directamente a Meta.
 
 ---
 
