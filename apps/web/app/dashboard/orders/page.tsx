@@ -151,7 +151,6 @@ export default async function OrdersPage() {
               products={products}
               contacts={contacts}
               apiUrl={API_URL}
-              onCreated={() => { /* revalidatePath no disponible en client — la lista se recarga en próxima navegación */ }}
             />
           </div>
         )}

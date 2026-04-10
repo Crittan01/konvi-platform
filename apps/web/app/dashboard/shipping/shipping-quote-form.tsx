@@ -27,7 +27,7 @@ interface Rate {
 interface Props {
   shippingOrigin: ShippingOrigin | null
   apiUrl: string
-  onQuoted: () => void
+  onQuoted?: () => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ function readAddress(formData: FormData, prefix: string) {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted }: Props) {
+export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = () => {} }: Props) {
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)

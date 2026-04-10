@@ -40,7 +40,7 @@ interface Props {
   products: Product[]
   contacts: Contact[]
   apiUrl: string
-  onCreated: () => void
+  onCreated?: () => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ function variationLabel(v: Variation): string {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function OrdersNewForm({ products, contacts, apiUrl, onCreated }: Props) {
+export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = () => {} }: Props) {
   const [contactId, setContactId] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<LineItem[]>([])

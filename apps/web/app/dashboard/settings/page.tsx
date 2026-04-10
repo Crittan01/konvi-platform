@@ -154,7 +154,7 @@ export default async function SettingsPage() {
               <div className="space-y-2">
                 <Label>Logo del negocio</Label>
                 {tenant && (
-                <LogoUpload tenantId={tenant.id} currentLogoUrl={tenant.logo_url ?? null} onSaved={() => {}} />
+                <LogoUpload tenantId={tenant.id} currentLogoUrl={tenant.logo_url ?? null} />
               )}
               </div>
 
