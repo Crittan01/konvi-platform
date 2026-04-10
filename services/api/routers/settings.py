@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from supabase import Client
-from dependencies.auth import get_current_tenant, get_service_client, get_current_role
+from dependencies.auth import get_current_tenant, get_service_client, require_owner_role, require_write_role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Settings"])
@@ -82,11 +82,9 @@ async def patch_tenant(
     patch: TenantPatch,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
+    _role: str = Depends(require_owner_role),
 ):
     """Edita nombre o WABA ID del tenant. Solo owner."""
-    if role != "owner":
-        raise HTTPException(status_code=403, detail="Solo el owner puede editar la configuración del tenant")
     try:
         raw = patch.model_dump()
         # Serializar shipping_origin a dict si es un objeto Pydantic
@@ -134,11 +132,9 @@ async def patch_team_member(
     patch: TeamRolePatch,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
+    _role: str = Depends(require_owner_role),
 ):
     """Cambia el rol de un miembro. Solo owner."""
-    if role != "owner":
-        raise HTTPException(status_code=403, detail="Solo el owner puede cambiar roles")
     try:
         result = (
             supabase.table("tenant_users")
@@ -162,11 +158,9 @@ async def remove_team_member(
     member_user_id: str,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
+    _role: str = Depends(require_owner_role),
 ):
     """Elimina miembro del equipo. Solo owner. No puede eliminarse a sí mismo."""
-    if role != "owner":
-        raise HTTPException(status_code=403, detail="Solo el owner puede eliminar miembros")
     try:
         # Verificar que no es el propio owner intentando eliminarse
         # (el tenant_id ya garantiza aislamiento)
@@ -214,11 +208,9 @@ async def upsert_notification(
     cfg: NotificationConfig,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
+    _role: str = Depends(require_write_role),
 ):
     """Guarda o actualiza configuración de un canal de notificación. Owner/manager."""
-    if role not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Se requiere owner o manager")
     if channel not in ("telegram", "email"):
         raise HTTPException(status_code=422, detail="Canal inválido. Válidos: telegram, email")
     try:

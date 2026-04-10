@@ -22,7 +22,15 @@
 - Supabase: `xmelwnhhphksbpdjmbbp` (us-east-1) — **13 migraciones aplicadas**
 - Tenant dev: `Matriz Commerce Dev` — `0fb0777e-f3e4-48c7-89bf-a25aa201c0c9`
 
-## Bloqueante activo
+## Bloqueantes activos
 
 **OQ-P01**: ¿Platform Console en misma app Next.js (`/platform/*`) o app separada?
 Sin decidir → no se puede iniciar Fase 12.
+
+**Python 3.9 EOL**: Requiere intervención humana en VM. Ver procedimiento en `docs/product/current-scope.md`.
+
+## Deuda técnica resuelta (2026-04-10)
+
+- ✅ RBAC: `require_owner_role` en `auth.py`, `settings.py` refactorizado sin checks manuales
+- ✅ `packages/db/migrations/` sincronizado con las 14 migraciones canónicas
+- ✅ Variantes múltiples: API 3 endpoints nuevos + UI edición por variante individual

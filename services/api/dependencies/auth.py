@@ -112,6 +112,20 @@ async def require_write_role(role: str = Depends(get_current_role)) -> str:
     return role
 
 
+async def require_owner_role(role: str = Depends(get_current_role)) -> str:
+    """
+    Dependencia que exige role owner exclusivamente.
+    Usar para operaciones de configuración crítica: editar tenant, gestionar equipo.
+    Lanza 403 si el role es manager o agent.
+    """
+    if role != "owner":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Permiso insuficiente. Se requiere owner (rol actual: {role})"
+        )
+    return role
+
+
 async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Client:
     """
     Retorna un cliente Supabase con service_role autenticado.

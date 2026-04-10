@@ -1,6 +1,12 @@
 import { createClient } from '@/utils/supabase/server'
-import { Badge } from '@/components/ui/badge'
+import { Image as ImageIcon, HardDrive } from 'lucide-react'
 import MediaClient from './media-client'
+
+function formatBytesServer(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 export default async function MediaPage() {
   const supabase = createClient()
@@ -14,7 +20,6 @@ export default async function MediaPage() {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  // Listar archivos del tenant desde el servidor
   const { data: files } = await supabase.storage
     .from('tenant-media')
     .list(tenantId, { sortBy: { column: 'created_at', order: 'desc' }, limit: 100 })
@@ -25,16 +30,27 @@ export default async function MediaPage() {
     created_at?: string | null
   }[]
 
+  const totalSize = mediaFiles.reduce((acc, f) => acc + (f.metadata?.size ?? 0), 0)
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-5 max-w-7xl">
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-primary">Media</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {mediaFiles.length} archivos · JPG, PNG, WebP, GIF · máx. 5MB por archivo
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+            <ImageIcon className="h-5 w-5 text-primary" /> Media
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {mediaFiles.length} archivos · {formatBytesServer(totalSize)} usado
           </p>
         </div>
-        <Badge variant="outline" className="text-xs capitalize">{role}</Badge>
+        {totalSize > 0 && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <HardDrive className="h-3.5 w-3.5" />
+            <span>Supabase Storage — bucket tenant-media</span>
+          </div>
+        )}
       </div>
 
       <MediaClient
