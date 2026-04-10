@@ -7,6 +7,7 @@ from google import genai
 from google.genai import types as genai_types
 from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
+from tools.kb_tool import get_tenant_kb, format_kb_for_prompt
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
 
@@ -73,8 +74,8 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
     return list(reversed(result.data or []))
 
 
-def _build_system_prompt(catalog: list, tenant_name: str) -> str:
-    """Construye el system prompt con el catálogo real del tenant."""
+def _build_system_prompt(catalog: list, tenant_name: str, kb_text: str = "") -> str:
+    """Construye el system prompt con catálogo y Knowledge Base del tenant."""
     catalog_text = "\n".join([
         f"- {p['title']}: ${p['price']} (stock: {p['stock']})"
         for p in catalog
@@ -82,18 +83,23 @@ def _build_system_prompt(catalog: list, tenant_name: str) -> str:
     if not catalog_text:
         catalog_text = "(No hay productos disponibles en este momento)"
 
+    kb_section = ""
+    if kb_text:
+        kb_section = f"\n\nINFORMACIÓN DEL NEGOCIO (usa esto para responder preguntas sobre políticas, horarios, FAQ, etc.):\n{kb_text}"
+
     return f"""Eres un asistente de ventas de {tenant_name} en WhatsApp.
-Tu trabajo es responder consultas de clientes sobre productos disponibles.
+Tu trabajo es responder consultas de clientes sobre productos, pedidos e información del negocio.
 
 REGLAS:
 - Solo menciona productos y precios del catálogo real que te proporciono abajo.
 - Nunca inventes stock, precios o características que no están en el catálogo.
+- Usa la información del negocio para responder preguntas de políticas, horarios, FAQ, etc.
 - Si no puedes ayudar, indica que pasarás la consulta a un agente humano.
 - Responde siempre en español, de forma cordial y concisa (máx 3 oraciones).
-- Si el cliente pregunta algo fuera del catálogo o soporte de pedidos complejos, escala (requires_human=true).
+- Si el cliente pregunta algo fuera del catálogo o la información disponible, escala (requires_human=true).
 
 CATÁLOGO ACTUAL:
-{catalog_text}
+{catalog_text}{kb_section}
 
 Responde SIEMPRE en JSON con este esquema exacto:
 {{
@@ -148,12 +154,16 @@ async def build_and_run_orchestration(
         tenant_res = supabase.table("tenants").select("name").eq("id", tenant_id).execute()
         tenant_name = tenant_res.data[0]["name"] if tenant_res.data else "Tienda"
 
-        # ── 2. Obtener catálogo y historial ───────────────────────────────────
-        catalog = await get_tenant_catalog(supabase, tenant_id)
-        history = await _get_conversation_history(supabase, conversation_id)
+        # ── 2. Obtener catálogo, KB e historial ───────────────────────────────
+        catalog, kb_docs, history = await __import__('asyncio').gather(
+            get_tenant_catalog(supabase, tenant_id),
+            get_tenant_kb(supabase, tenant_id),
+            _get_conversation_history(supabase, conversation_id),
+        )
+        kb_text = format_kb_for_prompt(kb_docs)
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
-        system_prompt = _build_system_prompt(catalog, tenant_name)
+        system_prompt = _build_system_prompt(catalog, tenant_name, kb_text)
         user_context = _build_user_context(history, content)
 
         # ── 4. Llamar a Gemini (nuevo SDK google-genai) ───────────────────────
