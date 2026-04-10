@@ -76,7 +76,7 @@ export default async function OrdersPage() {
         .eq('tenant_id', tenantId)
         .order('name'),
     ])
-    orders = (ordersRes.data as Order[]) || []
+    orders = (ordersRes.data as unknown as Order[]) || []
     products = (productsRes.data as Product[]) || []
     contacts = (contactsRes.data as Contact[]) || []
   }
