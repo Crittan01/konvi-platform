@@ -11,7 +11,7 @@ Finaliza con el **orden de implementación recomendado** organizado en BLOQUEs.
 ## Principio de separación
 
 ```
-apps/web (Next.js 14.1.0)
+apps/web (Next.js 14.2.35)
   ├── Server Components  → Supabase directo (lectura con RLS via JWT)
   ├── Server Actions     → Supabase directo (mutaciones simples, actualmente en catálogo)
   ├── Client Components  → Supabase Realtime SDK (subscriptions de inbox)
@@ -43,12 +43,11 @@ services/connector-envia (no existe — cliente Envia en services/api/integratio
 |---------|--------|-----------|
 | Email del usuario | ✅ Existe | `supabase.auth.getUser()` en `dashboard/page.tsx` |
 | Nombre del tenant | ✅ Existe | Join `tenant_users → tenants` en `dashboard/page.tsx` |
-| KPIs / métricas resumen | ❌ No existe | Ningún archivo — requiere queries de agregación |
-| Alertas operacionales | ❌ No existe | Ningún archivo |
+| KPIs / métricas resumen | ✅ Existe | Tabs Operaciones/Negocio — pedidos, conversaciones, contactos, mensajes |
+| Alertas operacionales | ❌ Pendiente | Deuda futura |
 
-**Backend existente**: Solo Supabase directo (lectura de `tenant_users` + `tenants`).
-**Backend faltante**: Endpoint de métricas en `services/api`. Tabla `orders` (para métricas de ventas).
-**Fase**: 11 (parcialmente antes con datos disponibles de mensajes/conversaciones).
+**Backend existente**: Supabase directo + queries paralelas con `Promise.all`.
+**Fase completada**: 11.
 
 ---
 
@@ -174,12 +173,12 @@ services/connector-envia (no existe — cliente Envia en services/api/integratio
 |---------|--------|---------|
 | Historial de envíos | ✅ Existe | `shipping.py` → `GET /api/v1/shipping/history` |
 | Cotización (backend) | ✅ Existe | `POST /api/v1/shipping/quote` → Envia `POST /ship/rate/` |
-| Formulario UI interactivo | ❌ Pendiente | Deuda inmediata — Client Component con estado |
+| Formulario UI interactivo | ✅ Existe | `ShippingQuoteForm` — Client Component con selección de carrier |
 | Labels | ❌ Pendiente | Fase 2 de Envia |
 | Tracking | ❌ Pendiente | Fase 2 de Envia |
 | Pickup | ❌ Pendiente | Fase 2 de Envia |
 
-**Fase completada**: 10 (Fase Inicial). Fases 2-3 de Envia pendientes.
+**Fase completada**: 10-11 (Fase Inicial). Fases 2-3 de Envia pendientes (label/tracking/pickup).
 
 ---
 
@@ -309,7 +308,7 @@ Toda la Platform Console requiere backend que no existe.
 
 ---
 
-## Tablas — estado real (11 migraciones aplicadas, todas en `supabase/migrations/`)
+## Tablas — estado real (13 migraciones aplicadas, todas en `supabase/migrations/`)
 
 | Tabla | Migración | Estado |
 |-------|-----------|--------|
@@ -357,10 +356,10 @@ Antes de iniciar Fase 12, se recomienda cerrar:
 
 | Deuda | Módulo | Prioridad |
 |-------|--------|-----------|
-| Formulario UI interactivo de cotización Envia | Shipping | Alta |
 | Variantes múltiples en catálogo | Catálogo | Media |
 | Label + tracking + pickup Envia | Shipping Fase 2 | Media |
 | Sincronizar `packages/db/migrations/` con `supabase/migrations/` | DB | Media |
+| RBAC granular completo por endpoint (R-09) | API Gateway | Media |
 
 ---
 

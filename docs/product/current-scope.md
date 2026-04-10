@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-Última actualización: 2026-04-09 (rev. 11 — gobernanza documental completa; Fases 8-11 cerradas)
+Última actualización: 2026-04-10 (rev. 15 — hardening seguridad, Next.js 14.2.35, 13 migraciones)
 
 Este documento registra el estado **real y verificado en el repositorio** del producto hoy.
 Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
@@ -15,7 +15,7 @@ Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
 
 | Elemento | Versión real en repo | Notas |
 |----------|---------------------|-------|
-| Next.js | **14.1.0** | `apps/web/package.json` — NO es Next.js 15 |
+| Next.js | **14.2.35** | `apps/web/package.json` — actualizado desde 14.1.0 (CVE patch) |
 | React | ^18 | — |
 | TypeScript | ^5 | — |
 | TailwindCSS | ^3.3.0 | Con `postcss.config.js` (fix Render) |
@@ -46,7 +46,7 @@ Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
 | Package | Archivos | Estado |
 |---------|----------|--------|
 | `packages/auth` | `lib/server-client.ts`, `lib/client-browser.ts` | 🟡 Parcial — 2 archivos implementados |
-| `packages/db` | `migrations/` (5 archivos SQL — mirrors iniciales) | 🟡 Parcial — las 11 migraciones reales están en `supabase/migrations/` |
+| `packages/db` | `migrations/` (5 archivos SQL — mirrors iniciales) | 🟡 Parcial — las 13 migraciones reales están en `supabase/migrations/` |
 | `packages/ui` | — | ❌ Vacío — componentes en `apps/web/components/ui/` |
 | `packages/config` | — | ❌ Vacío |
 | `packages/shared-types` | — | ❌ Vacío |
@@ -60,7 +60,7 @@ Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
 | Tenant Console | ✅ Completa (13/13 módulos) | Todos los módulos implementados |
 | Platform Console | ❌ No existe | Cero rutas, cero layout, cero auth de plataforma |
 | Backend services | ✅ 3 servicios live + 11 routers | WhatsApp connector, API Gateway, AI Orchestrator |
-| Base de datos | ✅ 11 migraciones aplicadas | Incluyendo schema core, shipments, stock_movements, kb_documents, audit_log |
+| Base de datos | ✅ 13 migraciones aplicadas | Incluyendo schema core, shipments, stock_movements, kb_documents, audit_log, low_stock_threshold, consent |
 | Deploy Render | ✅ Completo | 4 servicios live, E2E confirmado |
 | Shipping/Courier (Envia) | 🟡 Fase Inicial | Quote + historial operativos. Sandbox conectado. Label/tracking: Fase 2 |
 | MeLi | 🟡 Fase Inicial | OAuth conectado user_id `603780765`. Sync catálogo/stock: futuro |
@@ -78,7 +78,7 @@ apps/web/app/
 │   └── page.tsx                         ✅ Auth con Supabase SSR + mensaje de error
 └── dashboard/
     ├── layout.tsx                       ✅ Sidebar 13 ítems + RBAC visual + logout
-    ├── page.tsx                         🟡 Dashboard — email + tenant name (sin KPIs)
+    ├── page.tsx                         ✅ Dashboard — Tabs Operaciones/Negocio, KPIs, recharts
     ├── inbox/
     │   └── page.tsx                     ✅ Inbox AI — Realtime, human takeover, bubble UI
     ├── catalog/
@@ -95,7 +95,7 @@ apps/web/app/
     │   ├── page.tsx                     ✅ Media — Server Component lista archivos
     │   └── media-client.tsx             ✅ Upload, delete, copy URL (Client Component)
     ├── shipping/
-    │   └── page.tsx                     🟡 Shipping — historial, banner si Envia no conectado, cotización pendiente forma interactiva
+    │   └── page.tsx                     ✅ Shipping — historial + ShippingQuoteForm interactivo con selección de carrier
     ├── integrations/
     │   └── page.tsx                     ✅ Integraciones — estado MeLi + Envia, connect/disconnect
     ├── metrics/
@@ -117,7 +117,7 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 
 | Módulo | Ruta | Estado | Notas |
 |--------|------|--------|-------|
-| Dashboard | `/dashboard` | 🟡 Parcial | Email + tenant. Sin KPIs. |
+| Dashboard | `/dashboard` | ✅ Implementado | Tabs Operaciones + Negocio. KPIs, gráficas recharts. |
 | Inbox | `/dashboard/inbox` | ✅ Implementado | Realtime, takeover, hilo |
 | Catálogo | `/dashboard/catalog` | 🟡 Parcial | CRUD + edit + delete. Variantes múltiples: pendiente |
 | Pedidos | `/dashboard/orders` | ✅ Implementado | Listado, detalle, estados |
@@ -125,7 +125,7 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 | Inventario | `/dashboard/inventory` | ✅ Implementado | Stock, alertas, ajuste |
 | Knowledge Base | `/dashboard/knowledge-base` | ✅ Implementado | CRUD, categorías, activo/inactivo |
 | Media | `/dashboard/media` | ✅ Implementado | Upload/delete/URL, bucket `tenant-media` |
-| Shipping | `/dashboard/shipping` | 🟡 Parcial | Historial OK. Formulario cotización: Server Action pendiente |
+| Shipping | `/dashboard/shipping` | ✅ Implementado | Historial + ShippingQuoteForm interactivo con tabla de carriers |
 | Integraciones | `/dashboard/integrations` | ✅ Implementado | MeLi + Envia connect/disconnect |
 | Métricas | `/dashboard/metrics` | ✅ Implementado | 4 KPIs, queries paralelas |
 | Auditoría | `/dashboard/audit` | ✅ Implementado | Filtros, paginación, payload JSONB |
@@ -177,7 +177,7 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 
 ---
 
-## Tablas de base de datos — estado real (11 migraciones aplicadas)
+## Tablas de base de datos — estado real (13 migraciones aplicadas)
 
 | Tabla | Migración | Estado |
 |-------|-----------|--------|
@@ -205,10 +205,10 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 | Bloqueante | Tipo | Impacto |
 |-----------|------|---------|
 | OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea inicio de Fase 12 |
-| Shipping formulario interactivo de cotización | Deuda técnica UI | `/dashboard/shipping` muestra banner pero no permite cotizar desde UI |
+| Variantes múltiples en Catálogo (UI) | Deuda técnica UI | Solo crea variante "Standard"; gestión multi-variante desde UI pendiente |
 | Variantes múltiples en catálogo | Deuda técnica UI | Solo crea variante "Standard" |
 | RBAC completo por endpoint (R-09) | Deuda técnica | Algunos endpoints falta enforceamiento granular |
-| `packages/db/migrations/` desincronizado | Deuda técnica | Tiene solo las 5 migraciones iniciales; las 6 nuevas están solo en `supabase/migrations/` |
+| `packages/db/migrations/` desincronizado | Deuda técnica | Tiene solo las migraciones iniciales; las 13 reales están en `supabase/migrations/` |
 | Python 3.9.25 en VM (EOL) | Deuda técnica infra | FutureWarning activo. Actualizar antes de Beta. |
 
 ---
@@ -217,7 +217,7 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 
 | Elemento | Real hoy | Objetivo |
 |----------|----------|----------|
-| Next.js | 14.1.0 | 15.x (cuando sea estable para el proyecto) |
+| Next.js | 14.2.35 | 15.x (cuando sea estable para el proyecto) |
 | Python | 3.9.25 (EOL) | 3.11+ (antes de Beta) |
 | packages/ui | Vacío | Componentes shadcn/ui compartidos entre apps |
 | packages/shared-types | Vacío | Tipos TypeScript generados de Supabase |

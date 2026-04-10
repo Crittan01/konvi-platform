@@ -74,7 +74,7 @@ Equipo que:
 
 | Capa | Versión real en repo | Objetivo futuro |
 |------|---------------------|-----------------|
-| Frontend | Next.js **14.1.0**, React ^18, TypeScript ^5 | Next.js 15.x cuando sea estable |
+| Frontend | Next.js **14.2.35**, React ^18, TypeScript ^5 | Next.js 15.x cuando sea estable |
 | UI | TailwindCSS ^3.3.0, shadcn/ui (5 componentes en `apps/web/components/ui/`) | Componentes en `packages/ui` compartidos |
 | Backend | Python **3.9.25** (VM, EOL), FastAPI 0.128.8 | Python 3.11+ antes de Beta |
 | DB / Auth | Supabase PostgreSQL + RLS + Auth + Realtime | — |

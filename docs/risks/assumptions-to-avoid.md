@@ -55,7 +55,7 @@ Estas son suposiciones que han causado o podrían causar problemas reales. No as
 
 | Suposición a evitar | Realidad |
 |---------------------|----------|
-| Que la UI actual del repo es el producto final | Es una base parcial (3/13 módulos del tenant). |
+| Que la UI actual del repo es el producto final | El Tenant Console está completo (13/13 módulos). Platform Console no existe aún (Fase 12). |
 | Que la Tenant Console y Platform Console son la misma app | Son superficies completamente separadas. No mezclar. |
 | Que implementar primero el backend y luego el frontend es siempre correcto | El orden correcto es: claridad funcional/visual → backend correspondiente. |
 | Que un módulo "existe" porque hay un link en el sidebar | El sidebar tiene links a rutas que no existen todavía. Verificar en código. |

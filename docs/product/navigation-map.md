@@ -29,7 +29,7 @@ apps/web/app/
 │   └── page.tsx                         ✅  /login  → Auth Supabase SSR + mensaje de error
 └── dashboard/
     ├── layout.tsx                       ✅  /dashboard/* → Sidebar 13 ítems + RBAC visual + logout
-    ├── page.tsx                         🟡  /dashboard  → Email + tenant name (sin KPIs)
+    ├── page.tsx                         ✅  /dashboard  → Tabs Operaciones/Negocio, KPIs, gráficas recharts
     ├── inbox/
     │   └── page.tsx                     ✅  /dashboard/inbox → Realtime, human takeover, bubble UI
     ├── orders/
@@ -46,7 +46,7 @@ apps/web/app/
     │   ├── page.tsx                     ✅  /dashboard/media → Listado de archivos
     │   └── media-client.tsx             ✅  (Client Component — upload, delete, copy URL)
     ├── shipping/
-    │   └── page.tsx                     🟡  /dashboard/shipping → Historial OK, cotización sin formulario UI
+    │   └── page.tsx                     ✅  /dashboard/shipping → Historial + ShippingQuoteForm interactivo con tabla de carriers
     ├── integrations/
     │   └── page.tsx                     ✅  /dashboard/integrations → MeLi + Envia connect/disconnect
     ├── metrics/
@@ -62,7 +62,7 @@ apps/web/app/
 ```tsx
 // NAV_ITEMS con RBAC: roles: [] = visible para todos, ['owner','manager'] = restringido
 
-{ href: '/dashboard',                label: 'Resumen',        roles: [] }              ✅
+{ href: '/dashboard',                label: 'Resumen',        roles: [] }              ✅  (con KPIs)
 { href: '/dashboard/inbox',          label: 'Inbox AI',       roles: [] }              ✅
 { href: '/dashboard/orders',         label: 'Pedidos',        roles: [] }              ✅
 { href: '/dashboard/contacts',       label: 'Contactos',      roles: [] }              ✅
@@ -70,7 +70,7 @@ apps/web/app/
 { href: '/dashboard/inventory',      label: 'Inventario',     roles: ['owner','manager'] }  ✅
 { href: '/dashboard/knowledge-base', label: 'Knowledge Base', roles: ['owner','manager'] }  ✅
 { href: '/dashboard/media',          label: 'Media',          roles: ['owner','manager'] }  ✅
-{ href: '/dashboard/shipping',       label: 'Envíos',         roles: [] }              🟡
+{ href: '/dashboard/shipping',       label: 'Envíos',         roles: [] }              ✅
 { href: '/dashboard/integrations',   label: 'Integraciones',  roles: ['owner'] }       ✅
 { href: '/dashboard/metrics',        label: 'Métricas',       roles: ['owner','manager'] }  ✅
 { href: '/dashboard/audit',          label: 'Auditoría',      roles: ['owner'] }       ✅
@@ -85,8 +85,7 @@ Ninguna ruta del sidebar está huérfana. Las funcionalidades faltantes son subm
 
 | Ruta | Módulo | Justificación |
 |------|--------|---------------|
-| `/dashboard/shipping/quote` | Formulario cotización | Deuda UI — backend `POST /api/v1/shipping/quote` existe |
-| `/dashboard/orders/new` | Crear pedido manual | Actualmente pedidos entran via API/MeLi |
+| `/dashboard/orders/new` | Crear pedido manual | Actualmente pedidos entran via API/MeLi — formulario en UI como deuda menor |
 
 ---
 

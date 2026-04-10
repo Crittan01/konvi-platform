@@ -1,6 +1,6 @@
 # Esquema de Base de Datos — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 2 — 11 migraciones, tablas Fases 9-11 añadidas)
+Última actualización: 2026-04-10 (rev. 3 — 13 migraciones, low_stock_threshold + consent añadidos)
 
 Supabase PostgreSQL — Proyecto: `xmelwnhhphksbpdjmbbp` (us-east-1)
 
@@ -9,7 +9,7 @@ Supabase PostgreSQL — Proyecto: `xmelwnhhphksbpdjmbbp` (us-east-1)
 
 ---
 
-## Migraciones aplicadas (11 total)
+## Migraciones aplicadas (13 total)
 
 | Migración | Descripción | Fase | Estado |
 |-----------|-------------|------|--------|
@@ -24,6 +24,8 @@ Supabase PostgreSQL — Proyecto: `xmelwnhhphksbpdjmbbp` (us-east-1)
 | `20260409240000` | stock_movements | 11 | ✅ Aplicada |
 | `20260409250000` | kb_documents | 11 | ✅ Aplicada |
 | `20260409260000` | audit_log | 11 | ✅ Aplicada |
+| `20260410010000` | tenants.low_stock_threshold (umbral configurable por tenant) | 11 | ✅ Aplicada |
+| `20260410020000` | contacts.consent_given + consent_date (Habeas Data) | 11 | ✅ Aplicada |
 
 ---
 

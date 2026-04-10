@@ -1,39 +1,10 @@
 # Fases de Implementación — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 10 — Fases 8-11 cerradas, UI redesign completo)
+Última actualización: 2026-04-10 (rev. 15 — Fases 1-11 completadas)
 
 ---
 
-## Nota de re-baseline (rev. 7 — 2026-04-09)
-
-Esta revisión re-clasifica y reestructura el roadmap completo desde Fase 1.
-
-**Por qué fue necesario:**
-
-El roadmap anterior tenía una **dependencia invertida crítica**:
-- Fase 8 (MeLi) requería `orders`, `order_items` y `tenant_integrations`
-- Esas tablas se creaban en Fase 9 (Tenant Console modules)
-- Era imposible hacer Fase 8 antes que Fase 9
-
-Adicionalmente:
-- Fase 9 mezclaba todos los módulos de Tenant Console incluyendo Shipping (ya corregido en rev. 6)
-- La granularidad de Fases 8-12 no era útil para planificación real
-- MeLi y Envia comparten prerequisitos (tenant_integrations, orders) y deben ir juntos
-
-**Cambios estructurales:**
-| Antes | Ahora | Clasificación |
-|-------|-------|---------------|
-| Fase 8: MeLi | Fase 10: Integraciones (MeLi + Envia juntos) | DEBE MOVERSE DE FASE |
-| Fase 9: Todos los módulos Tenant Console | Fase 8: Catálogo completo + RBAC base | DEBE REDEFINIRSE |
-| — | Fase 9: Schema core + Pedidos + Configuración | NUEVA |
-| Fase 10: Shipping solo | Fase 10: Integraciones (MeLi + Envia juntos) | DEBE REDEFINIRSE |
-| Fase 11: Platform Console | Fase 11: Módulos restantes Tenant Console | DEBE MOVERSE DE FASE |
-| Fase 12: Shopify | Fase 12: Platform Console | DEBE MOVERSE DE FASE |
-| — | Fase 13: Shopify / Tienda custom | DEBE MOVERSE DE FASE |
-
----
-
-## Estado global (re-baseline 2026-04-09)
+## Estado global
 
 | Fase | Nombre | Estado | Clasificación |
 |------|--------|--------|---------------|

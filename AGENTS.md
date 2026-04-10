@@ -9,7 +9,7 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
-## Contexto documental vigente (actualizado 2026-04-10, rev. 14 — gaps 🟡/🟢 resueltos)
+## Contexto documental vigente (actualizado 2026-04-10, rev. 15 — hardening seguridad + fix RSC)
 
 La documentación del repositorio fue auditada, corregida y actualizada para reflejar el estado real del código.
 Archivos clave del producto y arquitectura existen y están alineados:
@@ -41,10 +41,10 @@ Ver `docs/HANDOFF.md` para estado completo y próximos pasos.
 
 | Módulo | Estado | Notas |
 |---|---|---|
-| Supabase Cloud | ✅ Activo | proyecto `xmelwnhhphksbpdjmbbp` — 11 migraciones aplicadas + 2 pendientes (rev.14) |
-| Migraciones SQL (11+2) | ⚠️ 2 pendientes | Aplicar: `20260410010000_tenant_low_stock_threshold.sql` y `20260410020000_contacts_consent.sql` |
+| Supabase Cloud | ✅ Activo | proyecto `xmelwnhhphksbpdjmbbp` — 13 migraciones aplicadas |
+| Migraciones SQL | ✅ 13 aplicadas | Todas las migraciones hasta `20260410020000_contacts_consent.sql` están en producción |
 | Tenant activo | ✅ Configurado | `Matriz Commerce Dev`, `meta_waba_id=2159052118202272` |
-| Frontend — Tenant Console | ✅ Live en Render | 13 módulos UI. Dark Warm Theme. RBAC visual. |
+| Frontend — Tenant Console | ✅ Live en Render | 13/13 módulos UI. Dark Warm Theme. RBAC visual. Next.js 14.2.35. |
 | WhatsApp Connector | ✅ Live en Render | HMAC validado, persistencia en DB |
 | AI Orchestrator | ✅ Live + polling activo | `gemini-2.5-flash`, KB inyectada en prompt |
 | Inbox AI Dashboard | ✅ Funcional | Realtime, Human Takeover, bubble UI |
@@ -94,6 +94,16 @@ Ver `docs/HANDOFF.md` para estado completo y próximos pasos.
   anyio==4.12.1
   starlette==0.49.3
   ```
+
+## Hardening completado (2026-04-10)
+
+- `getSession()` → `getUser()` en todos los Server Components (seguridad JWT)
+- Next.js `14.1.0` → `14.2.35` (CVE crítico + 6 high parcheados)
+- Error boundaries: `app/error.tsx` + `app/dashboard/error.tsx`
+- AbortController (15-20s) en fetch() de orders, inbox, shipping
+- ESLint `^10` → `8.x` + `.eslintrc.json` con `next/core-web-vitals`
+- Fix RSC: props `onCreated/onQuoted/onSaved` movidos a defaults internos (Catálogo, Pedidos, Envíos, Config)
+- 13 migraciones aplicadas: `tenants.low_stock_threshold` + `contacts.consent_given/consent_date`
 
 ## Próximo a Implementar
 
@@ -149,7 +159,7 @@ Ver intervenciones humanas: `docs/operations/HUMAN_INTERVENTIONS.md`
 
 | Capa | Versión real | Objetivo futuro |
 |---|---|---|
-| Frontend | Next.js **14.1.0** + React ^18 + TypeScript ^5 | Next.js 15.x |
+| Frontend | Next.js **14.2.35** + React ^18 + TypeScript ^5 | Next.js 15.x |
 | UI | TailwindCSS ^3.3.0 + shadcn/ui (5 componentes en `apps/web/components/ui/`) | Componentes en `packages/ui` |
 | Backend | Python **3.9.25** (VM, EOL) + FastAPI 0.128.8 | Python 3.11+ |
 | DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) | — |
