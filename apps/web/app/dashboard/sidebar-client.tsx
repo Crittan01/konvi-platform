@@ -161,7 +161,7 @@ export default function SidebarClient({
       g.children.some(c => pathname.startsWith(c.href))
     )
     if (activeGroup) {
-      setOpenGroups(prev => new Set([...prev, activeGroup.id]))
+      setOpenGroups(prev => new Set(Array.from(prev).concat(activeGroup.id)))
     }
   }, [pathname])
 
@@ -182,7 +182,7 @@ export default function SidebarClient({
 
   const toggleGroup = (id: string) =>
     setOpenGroups(prev => {
-      const next = new Set(prev)
+      const next = new Set(Array.from(prev))
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
