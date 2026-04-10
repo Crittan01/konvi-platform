@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Boxes, AlertTriangle, Package } from 'lucide-react'
+import AiInsightPanel from '@/components/ai-insight-panel'
 
 const DEFAULT_THRESHOLD = 5
 
@@ -137,6 +138,11 @@ export default async function InventoryPage() {
           </p>
         </div>
       </div>
+
+      {/* AI Insight — a demanda */}
+      {(role === 'owner' || role === 'manager') && (
+        <AiInsightPanel module="inventory" label="Inventario" />
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-3 gap-3 sm:gap-4">

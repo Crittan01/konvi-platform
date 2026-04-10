@@ -25,29 +25,39 @@ Esto resuelve dos problemas del diseño anterior:
 📍 Ruta raíz     /dashboard/inbox
    Inbox          Conversaciones WhatsApp (antes: "Inbox AI")
 
-▼ GRUPO: Ventas   /dashboard/orders, /contacts, /shipping
+▼ GRUPO: Ventas   /dashboard/orders, /contacts, /shipping, /claims
    Pedidos         Gestión de órdenes con filtros y estados
    Contactos       CRM con consentimiento Habeas Data
-   Envíos          Cotización y tracking vía Envia (antes: nivel raíz)
+   Envíos          Cotización y tracking vía Envia
+   Reclamos        [🔒 PRÓXIMO] Gestión de disputas (Fase 12)
 
 ▼ GRUPO: Productos   /dashboard/catalog, /inventory   [owner + manager]
    Catálogo        Multi-variante con edición inline
-   Inventario      Ajustes de stock y umbral de alerta
+   Inventario      Ajustes de stock, umbral de alerta y AI Insights
 
-▼ GRUPO: IA & Contenido   /dashboard/knowledge-base, /media   [owner + manager]
-   Base de Conocimiento    Documentos para el contexto de Gemini
-                           (antes: "Knowledge Base" en inglés)
-   Media                   Imágenes subidas a Supabase Storage
+▼ GRUPO: Publicaciones [🔒 TODO EL GRUPO PRÓXIMO] /dashboard/marketplace
+   Mercado Libre   [🔒 PRÓXIMO] Gestión de listings y sincronización (Fase 13)
+   Central Ofertas [🔒 PRÓXIMO] Descuentos y campañas
+
+▼ GRUPO: Compras [🔒 TODO EL GRUPO PRÓXIMO] /dashboard/purchases
+   Órdenes de Compra [🔒 PRÓXIMO] Sugerencias de recompra con IA
+
+▼ GRUPO: Finanzas [🔒 TODO EL GRUPO PRÓXIMO] /dashboard/finance
+   Ingresos & Gastos [🔒 PRÓXIMO] Tracking financiero
+   Rentabilidad      [🔒 PRÓXIMO] Análisis de margen con IA
+
+▼ GRUPO: IA & Contenido   /dashboard/knowledge-base, /media, /ai-agents   [owner + manager]
+   Base Conocimiento Documentos para el contexto de Gemini
+   Media             Imágenes subidas a Supabase Storage
+   Agentes IA      [🔒 PRÓXIMO] Prompts, Skills y comportamiento (Fase 14)
 
 ▼ GRUPO: Analítica   /dashboard/metrics, /audit   [owner + manager]
-   Métricas        Análisis histórico por período (7/30/90 días)
+   Métricas        Análisis histórico y AI Insights
    Auditoría       Log de eventos por entidad y usuario   [owner only]
 
 ▼ GRUPO: Configuración   /dashboard/settings, /integrations   [owner + manager]
-   General         Tenant info, logo, equipo, Telegram, dirección de origen
-                   (antes: "Configuración" era el módulo completo)
+   General         Tenant info, logo, equipo, Telegram, etc.
    Integraciones   Conectores Envia y MeLi   [owner only]
-                   (antes: nivel raíz — ahora bajo Config)
 ```
 
 ---
