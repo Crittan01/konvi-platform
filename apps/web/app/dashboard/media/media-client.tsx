@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
-import { Upload, Copy, Check, Trash2, Image, X } from 'lucide-react'
+import { Upload, Copy, Check, Trash2, Image as ImageIcon, X } from 'lucide-react'
 
 type StorageFile = {
   name: string
@@ -139,7 +139,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
         {/* Grid */}
         {files.length === 0 ? (
           <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
-            <Image className="h-10 w-10 text-muted-foreground/40 mb-3" />
+            <ImageIcon className="h-10 w-10 text-muted-foreground/40 mb-3" />
             <p className="text-muted-foreground text-sm font-medium">Sin archivos aún.</p>
             <p className="text-xs text-muted-foreground mt-1">Sube imágenes para asociarlas a tus productos.</p>
           </div>
