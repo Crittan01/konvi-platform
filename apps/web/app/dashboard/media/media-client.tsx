@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 type StorageFile = {
   name: string
   id: string | null
-  metadata?: { size?: number; mimetype?: string }
+  metadata?: { size?: number | null; mimetype?: string | null } | null
   created_at?: string | null
 }
 
@@ -70,7 +70,7 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
       .from(BUCKET)
       .list(tenantId, { sortBy: { column: 'created_at', order: 'desc' }, limit: 100 })
 
-    setFiles((updated ?? []).filter(f => f.name !== '.emptyFolderPlaceholder') as unknown as StorageFile[])
+    setFiles((updated ?? []).filter(f => f.name !== '.emptyFolderPlaceholder') as StorageFile[])
     setUploading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }

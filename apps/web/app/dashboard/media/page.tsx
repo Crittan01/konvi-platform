@@ -19,7 +19,8 @@ export default async function MediaPage() {
     .from('tenant-media')
     .list(tenantId, { sortBy: { column: 'created_at', order: 'desc' }, limit: 100 })
 
-  const mediaFiles = (files ?? []).filter(f => f.name !== '.emptyFolderPlaceholder')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mediaFiles = (files ?? []).filter(f => f.name !== '.emptyFolderPlaceholder') as any[]
 
   return (
     <div className="space-y-6">
