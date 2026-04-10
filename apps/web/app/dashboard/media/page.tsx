@@ -4,8 +4,8 @@ import MediaClient from './media-client'
 
 export default async function MediaPage() {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const { data: { user } } = await supabase.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'agent'
   const canWrite = role === 'owner' || role === 'manager'
@@ -19,8 +19,11 @@ export default async function MediaPage() {
     .from('tenant-media')
     .list(tenantId, { sortBy: { column: 'created_at', order: 'desc' }, limit: 100 })
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mediaFiles = (files ?? []).filter(f => f.name !== '.emptyFolderPlaceholder') as any[]
+  const mediaFiles = (files ?? []).filter(f => f.name !== '.emptyFolderPlaceholder') as {
+    name: string; id: string | null
+    metadata?: { size?: number | null; mimetype?: string | null } | null
+    created_at?: string | null
+  }[]
 
   return (
     <div className="space-y-6">

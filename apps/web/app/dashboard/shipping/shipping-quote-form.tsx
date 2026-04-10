@@ -144,6 +144,8 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted }: 
     }
 
     try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 20000)
       const res = await fetch(`${apiUrl}/api/v1/shipping/quote`, {
         method: 'POST',
         headers: {
@@ -151,7 +153,9 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted }: 
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
+        signal: ctrl.signal,
       })
+      clearTimeout(timeout)
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -220,7 +224,7 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted }: 
             <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-400">
               ⚠️ No tienes dirección de origen configurada. Ve a{' '}
               <a href="/dashboard/settings" className="underline font-medium">Configuración</a>{' '}
-              y completa la sección "Dirección de origen".
+              y completa la sección &quot;Dirección de origen&quot;.
             </div>
           )}
 

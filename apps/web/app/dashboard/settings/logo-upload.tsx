@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
 
 interface Props {
+  tenantId: string
   currentLogoUrl: string | null
   onSaved: (url: string | null) => void
 }
 
-export default function LogoUpload({ currentLogoUrl, onSaved }: Props) {
+export default function LogoUpload({ tenantId, currentLogoUrl, onSaved }: Props) {
   const [preview, setPreview] = useState<string | null>(currentLogoUrl)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,11 +47,10 @@ export default function LogoUpload({ currentLogoUrl, onSaved }: Props) {
       .from('tenant-media')
       .getPublicUrl(path)
 
-    // Persist to tenants.logo_url via API
     const { error: dbErr } = await supabase
       .from('tenants')
       .update({ logo_url: publicUrl })
-      .eq('id', session.user.app_metadata?.tenant_id)
+      .eq('id', tenantId)
 
     if (dbErr) { setError(dbErr.message); setUploading(false); return }
 
@@ -66,10 +66,12 @@ export default function LogoUpload({ currentLogoUrl, onSaved }: Props) {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) { setError('Sesión expirada'); setUploading(false); return }
 
-    await supabase
+    const { error: dbErr } = await supabase
       .from('tenants')
       .update({ logo_url: null })
-      .eq('id', session.user.app_metadata?.tenant_id)
+      .eq('id', tenantId)
+
+    if (dbErr) { setError(dbErr.message); setUploading(false); return }
 
     setPreview(null)
     onSaved(null)

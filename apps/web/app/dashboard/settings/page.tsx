@@ -26,8 +26,8 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default async function SettingsPage() {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const { data: { user } } = await supabase.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'agent'
   const isOwner = role === 'owner'
@@ -49,7 +49,7 @@ export default async function SettingsPage() {
   }
 
   const telegramConfig = notifications.find(n => n.channel === 'telegram')
-  const myUserId = session?.user?.id
+  const myUserId = user?.id
 
   // ── Server Actions ────────────────────────────────────────────────────────
 
@@ -153,7 +153,9 @@ export default async function SettingsPage() {
               {/* Logo */}
               <div className="space-y-2">
                 <Label>Logo del negocio</Label>
-                <LogoUpload currentLogoUrl={tenant?.logo_url ?? null} onSaved={() => {}} />
+                {tenant && (
+                <LogoUpload tenantId={tenant.id} currentLogoUrl={tenant.logo_url ?? null} onSaved={() => {}} />
+              )}
               </div>
 
               <form action={saveTenant} className="space-y-4">

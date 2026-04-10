@@ -62,6 +62,7 @@ export default function InboxPage() {
   const selectedConv = conversations.find(c => c.id === selectedId)
 
   // ── Cargar conversaciones del tenant (via RLS — solo ve las suyas) ──────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const load = async () => {
       const { data } = await supabase
@@ -82,6 +83,7 @@ export default function InboxPage() {
   }, [])
 
   // ── Cargar mensajes de la conversación seleccionada ────────────────────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!selectedId) return
 
@@ -100,6 +102,7 @@ export default function InboxPage() {
   }, [selectedId])
 
   // ── Realtime — nuevos mensajes en la conversación activa ───────────────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!selectedId) return
 
@@ -124,6 +127,7 @@ export default function InboxPage() {
   }, [selectedId])
 
   // ── Realtime — cambios en conversaciones (nuevo estado, nuevo chat) ─────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const channel = supabase
       .channel('conversations:all')
@@ -193,6 +197,8 @@ export default function InboxPage() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
     try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
       const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/send`, {
         method: 'POST',
         headers: {
@@ -200,7 +206,9 @@ export default function InboxPage() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ text: replyText.trim() }),
+        signal: ctrl.signal,
       })
+      clearTimeout(timeout)
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Error desconocido' }))
