@@ -2,28 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Google Fonts: Inter ────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @layer base {
   :root {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
-    --radius: 0.5rem;
+    /* ── Commerce Ops Design System ──────────────────────────────────────
+       Paleta: Slate profundo + Índigo violeta + Ámbar dorado
+       Inspirado en: Linear, Stripe Dashboard, Vercel
+       Filosofía: oscuro sofisticado — no negro puro, sino slate con alma
+    ─────────────────────────────────────────────────────────────────── */
+
+    /* Backgrounds — capas de profundidad */
+    --background:  224 20% 8%;     /* Slate muy oscuro — base del canvas */
+    --card:        224 18% 11%;    /* Slate medio — cards elevadas sobre el fondo */
+    --popover:     224 18% 11%;
+    --secondary:   224 16% 15%;    /* Slate suave — hover states, inputs */
+    --muted:       224 16% 15%;
+    --accent:      224 16% 15%;
+
+    /* Texto */
+    --foreground:          210 30% 96%;   /* Blanco cálido — no frío puro */
+    --card-foreground:     210 30% 96%;
+    --popover-foreground:  210 30% 96%;
+    --secondary-foreground: 210 20% 90%;
+    --muted-foreground:    215 16% 55%;   /* Slate gris — texto secundario */
+    --accent-foreground:   210 30% 96%;
+
+    /* Primary — Índigo violeta (identidad de la plataforma) */
+    --primary:             243 75% 65%;   /* #6366F1 Indigo 500 */
+    --primary-foreground:  0 0% 100%;
+
+    /* Destructive */
+    --destructive:         0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Bordes e inputs */
+    --border: 224 15% 18%;
+    --input:  224 15% 18%;
+    --ring:   243 75% 65%;
+
+    /* Bordes redondeados — más suave que el default */
+    --radius: 0.625rem;
+
+    /* ── Variables custom del sistema ────────────────────────────────── */
+    --amber:  43 96% 56%;    /* #F59E0B — acento ámbar para badges y CTAs secundarios */
+    --green:  142 71% 45%;   /* Verde éxito */
+    --sidebar: 224 22% 7%;   /* Sidebar ligeramente más oscura que el canvas */
   }
 }
 
@@ -31,7 +56,67 @@
   * {
     @apply border-border;
   }
+
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Scrollbar personalizada */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+}
+
+@layer utilities {
+  /* Gradiente sutil para el sidebar */
+  .sidebar-gradient {
+    background: linear-gradient(
+      180deg,
+      hsl(var(--sidebar)) 0%,
+      hsl(224 22% 6%) 100%
+    );
+  }
+
+  /* Glow indigo para elementos activos */
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.25);
+  }
+
+  /* Card con borde sutil */
+  .card-border {
+    border: 1px solid hsl(var(--border));
+  }
+
+  /* Badge ámbar */
+  .badge-amber {
+    background: hsl(var(--amber) / 0.15);
+    color: hsl(var(--amber));
+    border: 1px solid hsl(var(--amber) / 0.3);
+  }
+
+  /* Texto degradado */
+  .text-gradient {
+    background: linear-gradient(135deg, hsl(var(--primary)), #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 }
