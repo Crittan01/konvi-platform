@@ -44,9 +44,22 @@ export default async function DashboardLayout({
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { role?: string }
+  const meta = (user?.app_metadata ?? {}) as { role?: string; tenant_id?: string }
   const role = meta.role ?? 'agent'
   const roleBadge = ROLE_BADGE[role] ?? ROLE_BADGE.agent
+
+  // Cargar nombre y logo del tenant para el sidebar
+  let tenantName: string | null = null
+  let tenantLogoUrl: string | null = null
+  if (meta.tenant_id) {
+    const { data: tenantData } = await supabase
+      .from('tenants')
+      .select('name, logo_url')
+      .eq('id', meta.tenant_id)
+      .single()
+    tenantName = tenantData?.name ?? null
+    tenantLogoUrl = tenantData?.logo_url ?? null
+  }
 
   const visibleItems = NAV_ITEMS.filter(item =>
     item.roles.length === 0 || item.roles.includes(role)
@@ -71,11 +84,24 @@ export default async function DashboardLayout({
         {/* Logo */}
         <div className="px-5 py-5 border-b border-white/10">
           <div className="flex items-center gap-2.5">
-            <div className="h-7 w-7 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center glow-primary">
-              <span className="text-white text-xs font-bold">CO</span>
-            </div>
+            {tenantLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={tenantLogoUrl}
+                alt="Logo"
+                className="h-7 w-7 rounded-lg object-cover border border-white/20"
+              />
+            ) : (
+              <div className="h-7 w-7 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center glow-primary">
+                <span className="text-white text-xs font-bold">
+                  {tenantName ? tenantName.charAt(0).toUpperCase() : 'CO'}
+                </span>
+              </div>
+            )}
             <div>
-              <p className="text-sm font-semibold text-white tracking-tight">Commerce Ops</p>
+              <p className="text-sm font-semibold text-white tracking-tight">
+                {tenantName ?? 'Commerce Ops'}
+              </p>
               <p className="text-[10px] text-white/50">Tenant Console</p>
             </div>
           </div>

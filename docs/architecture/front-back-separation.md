@@ -1,6 +1,6 @@
 # Separación Frontend ↔ Backend — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 7 — re-baseline; BLOQUEs alineados con nueva estructura de Fases)
+Última actualización: 2026-04-09 (rev. 8 — BLOQUEs 1-5 completados; estados actualizados post Fases 8-11)
 
 Este documento mapea cada módulo visual con el backend que lo sustenta.
 Distingue entre lo que **ya existe en el repo** y lo que **falta**.
@@ -27,8 +27,8 @@ services/ai-orchestrator (FastAPI + worker thread)
   └── Polling loop → Gemini → Meta Graph API v21.0 DIRECTAMENTE (whatsapp_sender.py)
   └── NO pasa por connector-whatsapp para enviar — el conector solo recibe
 
-services/connector-mercadolibre (vacío — Fase 10, tras Fase 9)
-services/connector-envia (no existe — Fase 10, tras Fase 9 + validar PV-03)
+services/connector-mercadolibre (vacío — conector MeLi implementado en services/api/integrations/meli_client.py)
+services/connector-envia (no existe — cliente Envia en services/api/integrations/envia_client.py)
 ```
 
 ---
@@ -78,144 +78,147 @@ services/connector-envia (no existe — Fase 10, tras Fase 9 + validar PV-03)
 |---------|--------|-----------|
 | Listar productos (con primera variante) | ✅ Existe | `catalog/page.tsx` — query con variantes |
 | Crear producto + variante única | ✅ Existe | Server Action en `catalog/page.tsx` |
-| Editar producto | ❌ No existe | Sin formulario de edición |
-| Eliminar / soft delete | ❌ No existe | Lógica `is_active` en DB pero sin botón en UI |
-| Variantes múltiples | ❌ No existe | Solo crea una variante "Standard" hardcodeada |
-| Imágenes de producto | ❌ No existe | Sin Supabase Storage configurado |
-| Sincronización con MeLi | ❌ No existe | `services/connector-mercadolibre` vacío |
-| Paginación | ❌ No existe | — |
-| Migración a services/api | ❌ Pendiente | Catálogo usa Supabase directo — `GET /api/v1/products` existe pero no se consume |
+| Editar producto | ✅ Existe | Server Action + PUT en `services/api` (Fase 8) |
+| Eliminar / soft delete | ✅ Existe | status = 'inactive' (Fase 8) |
+| Variantes múltiples | ❌ Pendiente | Solo crea una variante "Standard" — deuda técnica |
+| Imágenes de producto | ❌ Pendiente | Supabase Storage existe (Media A.4) pero no vinculado a productos |
+| Sincronización con MeLi | ❌ Pendiente | OAuth MeLi conectado. Sync catálogo: deuda futura |
+| Paginación | ❌ Pendiente | Sin volumen real todavía |
 
-**Backend existente**: Supabase directo. `GET /api/v1/products` en `services/api` (existe pero no usado en frontend hoy).
-**Backend faltante**: Endpoints `PUT/DELETE/variantes` en `services/api`. Supabase Storage. Connector MeLi.
-**Fase**: 8.
+**Backend existente**: `products.py` router con CRUD completo. RBAC enforceado (owner/manager).
+**Backend pendiente**: Variantes múltiples, paginación, sync MeLi.
+**Fase completada**: 8. Deuda técnica en módulo.
 
 ---
 
 ### A.4 Media
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Subir archivo | ❌ No existe | Supabase Storage — buckets por tenant (sin configurar) |
-| Listar media | ❌ No existe | Supabase Storage API |
-| Asociar a producto | ❌ No existe | Campo `image_url` o tabla relacional en productos |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Subir archivo | ✅ Existe | Supabase Storage bucket `tenant-media` |
+| Listar media | ✅ Existe | `supabase.storage.from('tenant-media').list(folder)` |
+| Eliminar | ✅ Existe | `supabase.storage.from('tenant-media').remove([path])` |
+| Asociar a producto | ❌ Pendiente | Deuda técnica — campo `image_url` no vinculado |
 
-**Fase**: 11.
+**Fase completada**: 11.
 
 ---
 
 ### A.5 Inventario
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Ver stock por variante | ❌ No existe como UI | `product_variations.stock_quantity` existe en DB |
-| Actualizar stock | ❌ No existe | Endpoint `PUT /api/v1/products/{id}/variations/{vid}` — no creado |
-| Historial de movimientos | ❌ No existe | Tabla `stock_movements` no creada |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Ver stock por variante | ✅ Existe | `product_variations.stock_quantity` |
+| Ajuste de stock | ✅ Existe | Server Action → inserta en `stock_movements` |
+| Alerta stock bajo (≤5) | ✅ Existe | Condicional en UI |
+| Historial de movimientos | 🟡 Parcial | `stock_movements` existe pero sin UI paginada |
 
-**Fase**: 11.
+**Fase completada**: 11.
 
 ---
 
 ### A.6 Pedidos
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Listar pedidos | ❌ No existe | Tabla `orders` no creada |
-| Detalle de pedido | ❌ No existe | Tabla `order_items` no creada |
-| Crear pedido manual | ❌ No existe | Endpoint POST en `services/api` |
-| Pedidos desde MeLi | ❌ No existe | `services/connector-mercadolibre` vacío |
-| Cambiar estado | ❌ No existe | Endpoint PATCH en `services/api` |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Listar pedidos | ✅ Existe | `orders.py` + `orders` tabla |
+| Detalle de pedido | ✅ Existe | `order_items` tabla |
+| Crear pedido manual (UI) | ❌ Pendiente | Endpoint existe — formulario en UI pendiente |
+| Pedidos desde MeLi | 🟡 Parcial | `meli_webhook.py` procesa notificaciones `orders_v2` |
+| Cambiar estado | ✅ Existe | `PATCH /api/v1/orders/{id}` |
 
-**Dependencia bloqueante**: Shipping, Métricas e Integraciones dependen de esta tabla.
-**Fase**: 9.
+**Fase completada**: 9. Crear pedido manual desde UI es deuda menor.
 
 ---
 
 ### A.7 Contactos
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Listar contactos | ❌ No existe | Tabla `contacts` no creada |
-| Perfil de contacto | ❌ No existe | Join `contacts + conversations + orders` |
-| Crear/editar | ❌ No existe | Endpoint en `services/api` |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Listar contactos | ✅ Existe | `contacts.py` + `contacts` tabla |
+| Perfil de contacto | ✅ Existe | Vista individual |
+| Historial cruzado (pedidos + convs) | ❌ Pendiente | Join no implementado en UI |
 
-**Fase**: 9 (derivable de `conversations.customer_phone` inicialmente).
+**Fase completada**: 9. Historial cruzado es mejora futura.
 
 ---
 
 ### A.8 Knowledge Base
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| CRUD de documentos | ❌ No existe | Tabla `kb_documents` no creada |
-| Embeddings | ❌ No existe | Pipeline RAG / pgvector no configurado |
-| Integración con orchestrator | ❌ No existe | `tools/kb_tool.py` no creado |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| CRUD de documentos | ✅ Existe | Server Actions + `kb_documents` tabla |
+| Categorías + toggle activo | ✅ Existe | Categorías: faq/politica/negocio/producto/general |
+| Inyección en orchestrator | ✅ Existe | `kb_tool.py` — `asyncio.gather()` con catálogo |
+| Embeddings / pgvector RAG | ❌ Pendiente | PV-04 sin validar. Diferido — texto plano es suficiente ahora. |
 
-**Prerequisito**: Validar PV-04 (pgvector en Supabase Free).
-**Fase**: 11.
+**Fase completada**: 11. pgvector como deuda técnica (PV-04).
 
 ---
 
 ### A.9 Integraciones
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Conectar cuenta MeLi | ❌ No existe | OAuth MeLi por tenant. Tabla `tenant_integrations` no creada |
-| Conectar Envia | ❌ No existe | Config API Key Envia. Tabla `tenant_integrations` no creada |
-| Estado de sincronización | ❌ No existe | — |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Conectar MeLi (OAuth) | ✅ Existe | `meli_client.py` + OAuth callback + `tenant_integrations` |
+| Conectar Envia (API key) | ✅ Existe | `envia_client.py` + `integrations.py` router |
+| Estado de sincronización | 🟡 Parcial | Status `connected/disconnected` visible — logs de sync pendientes |
 
-**Prerequisito**: Tabla `tenant_integrations` (Fase 9) antes de conectar cualquier integración.
-**Fase**: 10.
+**Fase completada**: 10.
 
 ---
 
 ### A.10 Shipping / Courier
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Formulario de cotización | 📋 Diseñado | `services/connector-envia` no existe |
-| Opciones de carrier | 📋 Diseñado | Envia Shipping API (rates) + Queries API |
-| Historial de cotizaciones | 📋 Diseñado | Tabla `shipments` no creada |
-| Pickup | 📋 Diseñado | Envia Pickups API |
-| Tracking | 📋 Diseñado | Envia Tracking API |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Historial de envíos | ✅ Existe | `shipping.py` → `GET /api/v1/shipping/history` |
+| Cotización (backend) | ✅ Existe | `POST /api/v1/shipping/quote` → Envia `POST /ship/rate/` |
+| Formulario UI interactivo | ❌ Pendiente | Deuda inmediata — Client Component con estado |
+| Labels | ❌ Pendiente | Fase 2 de Envia |
+| Tracking | ❌ Pendiente | Fase 2 de Envia |
+| Pickup | ❌ Pendiente | Fase 2 de Envia |
 
-**Prerequisitos bloqueantes**: Tabla `orders` (Fase 9), `services/connector-envia` (Fase 10), PV-03 validado.
-**Fase**: 10 (junto con MeLi, después de Fase 9).
+**Fase completada**: 10 (Fase Inicial). Fases 2-3 de Envia pendientes.
 
 ---
 
 ### A.11 Métricas
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Mensajes por día | ❌ No existe | Query GROUP BY sobre `messages` (tabla existe) |
-| Conversaciones activas | ❌ No existe | Query sobre `conversations.status` (tabla existe) |
-| Pedidos / conversiones | ❌ No existe | Tabla `orders` no creada |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| KPIs (mensajes, convs, pedidos, contactos) | ✅ Existe | `Promise.all` sobre Supabase directo |
+| Pedidos por estado | ✅ Existe | Query con GROUP BY |
+| Top 5 productos | ✅ Existe | Query sobre `order_items` |
+| Gráficas de tendencia | ❌ Pendiente | Deuda futura |
 
-**Fase**: 11 (mensajes/conversaciones pueden hacerse antes; pedidos requieren Fase 9).
+**Fase completada**: 11.
 
 ---
 
 ### A.12 Auditoría
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Log de acciones | ❌ No existe | Tabla `audit_log` no creada |
-| Filtros | ❌ No existe | — |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Log de acciones | ✅ Existe | `audit_log` tabla + escritura explícita desde API |
+| Filtro por entity_type | ✅ Existe | Query params en Server Component |
+| Paginación | ✅ Existe | 25 items/página |
+| Filtro por usuario | ❌ Pendiente | Deuda futura |
 
-**Fase**: 11.
+**Fase completada**: 11.
 
 ---
 
 ### A.13 Configuración
 
-| Aspecto | Estado | Backend requerido |
-|---------|--------|-------------------|
-| Editar WABA ID | ❌ No existe | Endpoint PUT en `services/api` |
-| Gestión de equipo (RBAC) | ❌ No existe | Endpoints RBAC en `services/api` (incompleto — R-09) |
-| Notificaciones | ❌ No existe | Tabla `notification_settings` no creada |
+| Aspecto | Estado | Backend |
+|---------|--------|---------|
+| Editar WABA ID | ✅ Existe | `PUT /api/v1/settings` |
+| Gestión de equipo | ✅ Existe | `GET/POST/DELETE /api/v1/team` + `get_tenant_team()` SECURITY DEFINER |
+| Notificaciones | ✅ Existe | `notification_settings` tabla |
+| Billing / planes | ❌ Pendiente | Fase 12 |
 
-**Fase**: 9.
+**Fase completada**: 9.
 
 ---
 
@@ -264,130 +267,83 @@ Toda la Platform Console requiere backend que no existe.
 
 ---
 
-## Servicios backend — estado real
+## Servicios backend — estado real (post Fase 11)
 
-| Servicio | Existe | Live | Endpoints activos |
-|----------|--------|------|-------------------|
-| `services/api` | ✅ | ✅ Render | `GET /health`, `GET /api/v1/products`, `GET /api/v1/conversations` |
-| `services/connector-whatsapp` | ✅ | ✅ Render | `GET/POST /api/v1/whatsapp/webhook` |
-| `services/ai-orchestrator` | ✅ | ✅ Render | `GET /health`, `GET /status` + worker interno |
-| `services/connector-mercadolibre` | ✅ directorio | ❌ vacío | Ninguno — Fase 10 |
+| Servicio | Existe | Live | Routers / funcionalidad |
+|----------|--------|------|------------------------|
+| `services/api` | ✅ | ✅ Render | 8 routers: products, orders, contacts, settings, integrations, shipping, meli_webhook, conversations |
+| `services/connector-whatsapp` | ✅ | ✅ Render | Recibe webhooks Meta, HMAC validado, persiste en DB |
+| `services/ai-orchestrator` | ✅ | ✅ Render | Polling, Gemini, KB + catálogo en prompt, `tools/kb_tool.py` |
+| `services/connector-mercadolibre` | ✅ directorio | ❌ vacío | Cliente en `services/api/integrations/meli_client.py` |
 | `services/connector-shopify` | ✅ directorio | ❌ vacío | Ninguno — Fase 13 |
-| `services/connector-envia` | ❌ no existe | ❌ | No existe — Fase 10 + PV-03 |
 
-### Endpoints faltantes en `services/api` (por fase y prioridad)
+### Endpoints activos en `services/api` (Fases 1-11)
 
-| Endpoint | Módulo | Fase | Prioridad |
-|----------|--------|------|-----------|
-| `PUT /api/v1/products/{id}` | Catálogo — editar | 8 | Alta |
-| `DELETE /api/v1/products/{id}` | Catálogo — soft delete | 8 | Alta |
-| `GET/POST /api/v1/products/{id}/variations` | Catálogo — variantes | 8 | Alta |
-| `GET/POST /api/v1/orders` | Pedidos | 9 | Alta |
-| `PATCH /api/v1/orders/{id}` | Pedidos — cambiar estado | 9 | Alta |
-| `GET/PUT /api/v1/settings` | Configuración | 9 | Alta |
-| `GET/POST/DELETE /api/v1/team` | Configuración — equipo | 9 | Alta |
-| `GET/POST /api/v1/contacts` | Contactos | 9 | Media |
-| `POST /api/v1/shipping/quote` | Shipping — cotizar | 10 | Media |
-| `GET /api/v1/metrics` | Métricas | 11 | Media |
-| `GET /api/v1/audit` | Auditoría | 11 | Media |
+| Endpoint | Estado |
+|----------|--------|
+| `GET /health` | ✅ |
+| `GET/POST /api/v1/products` | ✅ |
+| `PUT/DELETE /api/v1/products/{id}` | ✅ |
+| `GET /api/v1/conversations` | ✅ |
+| `GET/POST /api/v1/orders` | ✅ |
+| `PATCH /api/v1/orders/{id}` | ✅ |
+| `GET/POST /api/v1/contacts` | ✅ |
+| `GET/PUT /api/v1/settings` | ✅ |
+| `GET/POST/DELETE /api/v1/team` | ✅ |
+| `POST /api/v1/integrations/envia` | ✅ |
+| `DELETE /api/v1/integrations/envia` | ✅ |
+| `GET/POST /api/v1/integrations/meli` | ✅ |
+| `GET /api/v1/integrations/meli/callback` | ✅ |
+| `POST /api/v1/shipping/quote` | ✅ |
+| `GET /api/v1/shipping/history` | ✅ |
+| `POST /api/v1/meli/webhook` | ✅ |
+
+### Endpoints pendientes (próximas fases)
+
+| Endpoint | Módulo | Fase |
+|----------|--------|------|
+| `POST /api/v1/shipping/label` | Envia Fase 2 | 12 deuda |
+| `GET /api/v1/shipping/tracking/{id}` | Envia Fase 2 | 12 deuda |
+| `POST /api/v1/shipping/pickup` | Envia Fase 2 | 12 deuda |
+| Endpoints platform-only | Platform Console | 12 |
 
 ---
 
-## Tablas pendientes de crear (por fase y prioridad)
+## Tablas — estado real (11 migraciones aplicadas, todas en `supabase/migrations/`)
 
-| Tabla | Módulo dependiente | Fase | Prioridad |
-|-------|--------------------|------|-----------|
-| `orders` | Pedidos, Shipping, Métricas, MeLi | 9 | Alta |
-| `order_items` | Pedidos | 9 | Alta |
-| `tenant_integrations` | Integraciones (MeLi, Envia) — prerequisito Fase 10 | 9 | Alta |
-| `notification_settings` | Configuración | 9 | Media |
-| `contacts` | Contactos | 9 | Media |
-| `shipments` | Shipping / Courier | 10 | Media |
-| `audit_log` | Auditoría Tenant + Platform | 11 | Media |
-| `stock_movements` | Inventario | 11 | Media |
-| `kb_documents` | Knowledge Base | 11 | Baja |
+| Tabla | Migración | Estado |
+|-------|-----------|--------|
+| `tenants`, `tenant_users` | 20260406181235 | ✅ |
+| `products`, `product_variations` | 20260406181236 | ✅ |
+| `conversations`, `messages` | 20260406181237 + 20260407200700 | ✅ |
+| `contacts`, `orders`, `order_items`, `tenant_integrations`, `notification_settings` | 20260409220000 | ✅ |
+| `shipments` | 20260409230000 | ✅ |
+| `stock_movements` | 20260409240000 | ✅ |
+| `kb_documents` | 20260409250000 | ✅ |
+| `audit_log` | 20260409260000 | ✅ |
+| `platform_users` | — | ❌ Fase 12 |
 
 ---
 
 ## Orden de implementación — BLOQUEs (granular) y Fases (estratégicas)
 
-### PRERREQUISITO ACTUAL (bloqueante humano)
+### BLOQUEs 1-5 COMPLETADOS (2026-04-09)
 
-Completar Fase 7 PASO 6 + 7 y IH-006 (Meta Webhook + System User Token + E2E test).
-No tiene sentido seguir hasta confirmar que el ciclo WhatsApp→Gemini funciona en producción.
-
----
-
-### BLOQUE 1 → Fase 8: Catálogo completo + RBAC base
-
-> Objetivo: Catálogo usable en producción con control de acceso real.
-> **Sin migraciones nuevas** — usa tablas existentes.
-
-1. Agregar edición de producto en UI (Server Action o `PUT /api/v1/products/{id}`)
-2. Agregar soft delete en UI (UPDATE `is_active=false`)
-3. Agregar gestión de variantes múltiples (formulario + endpoints)
-4. Migrar lectura de catálogo a `services/api` (en vez de Supabase directo)
-5. Implementar RBAC básico en `services/api` (owner puede crear/editar, agent solo lee)
+| BLOQUE | Fase | Estado |
+|--------|------|--------|
+| BLOQUE 1 | Fase 8: Catálogo + RBAC | ✅ Completado |
+| BLOQUE 2+3 | Fase 9: Schema core + Pedidos + Config | ✅ Completado |
+| BLOQUE 4 | Fase 10: MeLi + Envia | ✅ Completado (Fase Inicial) |
+| BLOQUE 5 | Fase 11: Módulos restantes TC + UI Redesign | ✅ Completado |
 
 ---
 
-### BLOQUE 2 → Fase 9 (primera mitad): Schema core + Pedidos
-
-> Objetivo: Ciclo catálogo → pedido funcional.
-
-1. Crear migraciones: `orders` + `order_items` + `tenant_integrations` + `contacts` + `notification_settings`
-2. Implementar endpoints CRUD en `services/api` para orders
-3. Implementar UI `/dashboard/orders`
-4. Vincular pedido con conversación desde el Inbox
-5. Crear endpoint y UI básica de `/dashboard/contacts`
-
----
-
-### BLOQUE 3 → Fase 9 (segunda mitad): Configuración + equipo
-
-> Objetivo: Tenant puede gestionar su equipo sin intervención técnica.
-
-1. Implementar endpoints RBAC (invite, change role, remove) en `services/api`
-2. Implementar UI `/dashboard/settings` (WABA, equipo, notificaciones, plan)
-3. RBAC completo en todos los endpoints existentes
-
----
-
-### BLOQUE 4 → Fase 10: Integraciones (MeLi + Envia juntos)
-
-> Objetivo: Conectar MeLi y Envia. Van juntos porque comparten prerequisitos.
-> **Prerequisito**: `tenant_integrations` + `orders` de Fases 9. PV-03 y PV-06 validados.
-
-1. Implementar OAuth MeLi por tenant → credenciales en `tenant_integrations`
-2. Crear `services/connector-mercadolibre` (sync catálogo + orders via IPN)
-3. Validar PV-03 (modelo auth Envia) → diseño final de `connector-envia`
-4. Crear migración: `shipments`
-5. Implementar `services/connector-envia` (Shipping API + Queries API)
-6. Implementar UI `/dashboard/integrations`
-7. Implementar UI `/dashboard/shipping`
-
----
-
-### BLOQUE 5 → Fase 11: Módulos restantes Tenant Console
-
-> Objetivo: Visibilidad operacional completa para el tenant.
-
-1. Crear migraciones: `audit_log`, `stock_movements`, `kb_documents`
-2. Implementar log de auditoría en `services/api` para todas las mutaciones
-3. Implementar UI `/dashboard/audit`
-4. Implementar UI `/dashboard/inventory`
-5. Implementar UI `/dashboard/metrics`
-6. Implementar Supabase Storage + UI `/dashboard/media`
-7. Implementar pipeline RAG + UI `/dashboard/knowledge-base` (post PV-04)
-
----
-
-### BLOQUE 6 → Fase 12: Platform Console
+### BLOQUE 6 → Fase 12: Platform Console ❌ PENDIENTE
 
 > Objetivo: Herramientas internas para operar el SaaS.
-> **Prerequisito absoluto**: OQ-P01 decidido + `platform_users` + Fases 8-11 completadas.
+> **Prerequisito absoluto**: OQ-P01 decidido + `platform_users` + Fases 8-11 completadas ✅.
 
-1. Decidir OQ-P01 (misma app `/platform/*` vs app separada)
+1. Decidir OQ-P01 (misma app `/platform/*` vs app separada) — **BLOQUEANTE**
 2. Crear tabla `platform_users` con roles de plataforma
 3. Actualizar `middleware.ts` para separar auth de `/platform/*` vs `/dashboard/*`
 4. Implementar layout de Platform Console
@@ -395,15 +351,27 @@ No tiene sentido seguir hasta confirmar que el ciclo WhatsApp→Gemini funciona 
 
 ---
 
+### Deuda técnica pendiente (pre-Fase 12)
+
+Antes de iniciar Fase 12, se recomienda cerrar:
+
+| Deuda | Módulo | Prioridad |
+|-------|--------|-----------|
+| Formulario UI interactivo de cotización Envia | Shipping | Alta |
+| Variantes múltiples en catálogo | Catálogo | Media |
+| Label + tracking + pickup Envia | Shipping Fase 2 | Media |
+| Sincronizar `packages/db/migrations/` con `supabase/migrations/` | DB | Media |
+
+---
+
 ## Resumen visual del orden
 
 ```
-HOY (humano)  → Fase 7 PASO 6 + IH-006 + PASO 7 (E2E)
-BLOQUE 1      → Fase 8:  Catálogo completo + RBAC base
-BLOQUE 2+3    → Fase 9:  Schema core + Pedidos + Contactos + Configuración + Equipo
-BLOQUE 4      → Fase 10: MeLi + Envia (validar PV-03 y PV-06 antes)
-BLOQUE 5      → Fase 11: Auditoría + Inventario + Métricas + Media + KB
-BLOQUE 6      → Fase 12: Platform Console (OQ-P01 antes)
+BLOQUE 1      → Fase 8:  ✅ Catálogo completo + RBAC base
+BLOQUE 2+3    → Fase 9:  ✅ Schema core + Pedidos + Contactos + Configuración + Equipo
+BLOQUE 4      → Fase 10: ✅ MeLi OAuth + Envia Fase Inicial
+BLOQUE 5      → Fase 11: ✅ Auditoría + Inventario + Métricas + Media + KB + UI Redesign
+BLOQUE 6      → Fase 12: ❌ Platform Console (OQ-P01 antes)
 ```
 
 ---
@@ -414,4 +382,4 @@ BLOQUE 6      → Fase 12: Platform Console (OQ-P01 antes)
 - `docs/product/navigation-map.md` — Rutas reales vs faltantes
 - `docs/data/schema.md` — Tablas vigentes y pendientes
 - `docs/architecture/modules.md` — Estado de servicios backend
-- `docs/roadmap/implementation-phases.md` — Fases re-baselined (rev. 7)
+- `docs/roadmap/implementation-phases.md` — Fases 1-11 completadas, 12-13 pendientes

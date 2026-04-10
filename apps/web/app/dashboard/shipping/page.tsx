@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import ShippingQuoteForm from './shipping-quote-form'
 
 type Shipment = {
   id: string
@@ -13,13 +14,18 @@ type Shipment = {
   order_id: string | null
 }
 
+type ShippingOrigin = {
+  name?: string; company?: string; street?: string; city?: string
+  state?: string; postal_code?: string; country?: string; phone?: string
+}
+
 const STATUS_COLORS: Record<string, string> = {
-  quoted:     'bg-yellow-100 text-yellow-800',
-  labeled:    'bg-blue-100 text-blue-800',
-  picked_up:  'bg-purple-100 text-purple-800',
-  in_transit: 'bg-indigo-100 text-indigo-800',
-  delivered:  'bg-green-100 text-green-800',
-  cancelled:  'bg-red-100 text-red-800',
+  quoted:     'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  labeled:    'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  picked_up:  'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  in_transit: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+  delivered:  'bg-green-500/15 text-green-400 border-green-500/30',
+  cancelled:  'bg-red-500/15 text-red-400 border-red-500/30',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -31,18 +37,22 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled:  'Cancelado',
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
+
 export default async function ShippingPage() {
   const supabase = createClient()
   const { data: { session } } = await supabase.auth.getSession()
   const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'agent'
+  const canWrite = role === 'owner' || role === 'manager'
 
   let shipments: Shipment[] = []
   let enviaConnected = false
+  let shippingOrigin: ShippingOrigin | null = null
 
   if (tenantId) {
-    const [shipmentsRes, integrationRes] = await Promise.all([
+    const [shipmentsRes, integrationRes, tenantRes] = await Promise.all([
       supabase
         .from('shipments')
         .select('id, status, carrier, service, tracking_number, estimated_delivery, created_at, order_id')
@@ -55,9 +65,15 @@ export default async function ShippingPage() {
         .eq('tenant_id', tenantId)
         .eq('provider', 'envia')
         .maybeSingle(),
+      supabase
+        .from('tenants')
+        .select('shipping_origin')
+        .eq('id', tenantId)
+        .single(),
     ])
     shipments = (shipmentsRes.data as Shipment[]) || []
     enviaConnected = integrationRes.data?.status === 'connected'
+    shippingOrigin = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
   }
 
   return (
@@ -69,35 +85,21 @@ export default async function ShippingPage() {
 
       {/* Banner de estado de Envia */}
       {!enviaConnected && (
-        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-sm font-medium text-yellow-800">Envia no está conectado</p>
-          <p className="text-xs text-yellow-700 mt-1">
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <p className="text-sm font-medium text-amber-400">Envia no está conectado</p>
+          <p className="text-xs text-amber-400/80 mt-1">
             Ve a <a href="/dashboard/integrations" className="underline font-medium">Integraciones</a> para configurar tu API key de Envia antes de cotizar envíos.
           </p>
         </div>
       )}
 
-      {/* Cotización — solo cuando Envia está conectado */}
-      {enviaConnected && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Cotizar Envío</CardTitle>
-            <CardDescription>
-              Ingresa los datos del paquete y destino para obtener tarifas de carriers disponibles.
-              La cotización se guarda automáticamente en el historial.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="p-4 bg-muted rounded-lg text-sm text-muted-foreground">
-              <p className="font-medium mb-1">Formulario de cotización</p>
-              <p>El formulario interactivo de cotización (con selección de carrier y confirmación) se implementa en Fase 11 como Client Component con estado dinámico.</p>
-              <p className="mt-2">Para cotizar via API directamente:</p>
-              <code className="block mt-1 text-xs bg-background p-2 rounded border">
-                POST /api/v1/shipping/quote
-              </code>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Formulario de cotización — solo cuando Envia está conectado y tiene permisos */}
+      {enviaConnected && canWrite && (
+        <ShippingQuoteForm
+          shippingOrigin={shippingOrigin}
+          apiUrl={API_URL}
+          onQuoted={() => { /* El historial se recarga en la próxima navegación */ }}
+        />
       )}
 
       {/* Historial */}
@@ -113,7 +115,7 @@ export default async function ShippingPage() {
         ) : (
           <div className="space-y-3">
             {shipments.map((s) => {
-              const colorClass = STATUS_COLORS[s.status] || 'bg-gray-100 text-gray-800'
+              const colorClass = STATUS_COLORS[s.status] || 'bg-gray-500/15 text-gray-400'
               return (
                 <Card key={s.id}>
                   <CardContent className="p-5">
@@ -134,7 +136,7 @@ export default async function ShippingPage() {
                         )}
                       </div>
                       <div className="text-right shrink-0 ml-4 space-y-1">
-                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${colorClass}`}>
+                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full border ${colorClass}`}>
                           {STATUS_LABELS[s.status] ?? s.status}
                         </span>
                         {s.estimated_delivery && (

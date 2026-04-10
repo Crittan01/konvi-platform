@@ -154,6 +154,31 @@ async def build_and_run_orchestration(
         tenant_res = supabase.table("tenants").select("name").eq("id", tenant_id).execute()
         tenant_name = tenant_res.data[0]["name"] if tenant_res.data else "Tienda"
 
+        # ── 1.5 Auto-crear contacto si no existe (desde WhatsApp) ─────────────
+        # Solo insertamos si no existe — nunca sobreescribimos datos manuales.
+        # consent_given se deja en FALSE (default): el tenant debe obtenerlo
+        # por canal propio (link de términos, mensaje explícito, etc.).
+        try:
+            conv_res = supabase.table("conversations") \
+                .select("customer_phone") \
+                .eq("id", conversation_id) \
+                .execute()
+            customer_phone_raw = conv_res.data[0]["customer_phone"] if conv_res.data else None
+            if customer_phone_raw:
+                supabase.table("contacts").upsert(
+                    {
+                        "tenant_id": tenant_id,
+                        "phone": customer_phone_raw,
+                        # name/notes remain NULL — tenant fills them manually
+                        "consent_given": False,
+                    },
+                    on_conflict="tenant_id,phone",
+                    ignore_duplicates=True,
+                ).execute()
+                logger.debug(f"[CONTACT] Upsert contacto {customer_phone_raw} en tenant {tenant_id}")
+        except Exception as ce:
+            logger.warning(f"[CONTACT] No se pudo upsert contacto: {ce}")
+
         # ── 2. Obtener catálogo, KB e historial ───────────────────────────────
         catalog, kb_docs, history = await __import__('asyncio').gather(
             get_tenant_catalog(supabase, tenant_id),

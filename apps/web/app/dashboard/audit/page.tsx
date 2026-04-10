@@ -1,6 +1,9 @@
 import { createClient } from '@/utils/supabase/server'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Download } from 'lucide-react'
 
 const ENTITY_LABELS: Record<string, string> = {
   order:       'Pedido',
@@ -13,17 +16,17 @@ const ENTITY_LABELS: Record<string, string> = {
 }
 
 const ACTION_COLORS: Record<string, string> = {
-  created:        'bg-green-100 text-green-800',
-  updated:        'bg-blue-100 text-blue-800',
-  deleted:        'bg-red-100 text-red-800',
-  status_changed: 'bg-purple-100 text-purple-800',
-  connected:      'bg-green-100 text-green-800',
-  disconnected:   'bg-gray-100 text-gray-800',
+  created:        'bg-green-500/15 text-green-400 border border-green-500/30',
+  updated:        'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  deleted:        'bg-red-500/15 text-red-400 border border-red-500/30',
+  status_changed: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+  connected:      'bg-green-500/15 text-green-400 border border-green-500/30',
+  disconnected:   'bg-muted text-muted-foreground border border-border',
 }
 
 function actionColor(action: string): string {
   const key = Object.keys(ACTION_COLORS).find(k => action.includes(k))
-  return key ? ACTION_COLORS[key] : 'bg-gray-100 text-gray-800'
+  return key ? ACTION_COLORS[key] : 'bg-muted text-muted-foreground border border-border'
 }
 
 function formatAction(action: string): string {
@@ -43,7 +46,7 @@ type AuditEntry = {
 export default async function AuditPage({
   searchParams,
 }: {
-  searchParams: { entity?: string; page?: string }
+  searchParams: { entity?: string; page?: string; user?: string; from_date?: string; to_date?: string }
 }) {
   const supabase = createClient()
   const { data: { session } } = await supabase.auth.getSession()
@@ -56,9 +59,12 @@ export default async function AuditPage({
   }
 
   const entityFilter = searchParams.entity ?? ''
-  const page = Math.max(1, parseInt(searchParams.page ?? '1'))
-  const pageSize = 25
-  const offset = (page - 1) * pageSize
+  const userFilter   = searchParams.user ?? ''
+  const fromDate     = searchParams.from_date ?? ''
+  const toDate       = searchParams.to_date ?? ''
+  const page         = Math.max(1, parseInt(searchParams.page ?? '1'))
+  const pageSize     = 25
+  const offset       = (page - 1) * pageSize
 
   let query = supabase
     .from('audit_log')
@@ -67,31 +73,82 @@ export default async function AuditPage({
     .order('created_at', { ascending: false })
     .range(offset, offset + pageSize - 1)
 
-  if (entityFilter) {
-    query = query.eq('entity_type', entityFilter)
-  }
+  if (entityFilter) query = query.eq('entity_type', entityFilter)
+  if (userFilter)   query = query.ilike('user_email', `%${userFilter}%`)
+  if (fromDate)     query = query.gte('created_at', new Date(fromDate).toISOString())
+  if (toDate)       query = query.lte('created_at', new Date(toDate + 'T23:59:59').toISOString())
 
   const { data, count } = await query
   const entries = (data as AuditEntry[]) ?? []
   const totalPages = Math.ceil((count ?? 0) / pageSize)
 
+  // Build export URL preserving active filters
+  const exportParams = new URLSearchParams()
+  if (entityFilter) exportParams.set('entity', entityFilter)
+  if (userFilter)   exportParams.set('user', userFilter)
+  if (fromDate)     exportParams.set('from_date', fromDate)
+  if (toDate)       exportParams.set('to_date', toDate)
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-start gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-primary">Auditoría</h1>
           <p className="text-sm text-muted-foreground mt-1">{count ?? 0} eventos registrados</p>
         </div>
-        <Badge variant="outline" className="text-xs capitalize">{role}</Badge>
+        <div className="flex items-center gap-2">
+          {role === 'owner' && (
+            <a href={`/api/audit/export?${exportParams.toString()}`}>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs">
+                <Download className="h-3.5 w-3.5" /> Exportar CSV
+              </Button>
+            </a>
+          )}
+          <Badge variant="outline" className="text-xs capitalize">{role}</Badge>
+        </div>
       </div>
 
       {/* Filtros */}
+      <Card>
+        <CardContent className="p-4">
+          <form method="GET" action="/dashboard/audit" className="flex flex-wrap gap-3 items-end">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Desde</p>
+              <Input type="date" name="from_date" defaultValue={fromDate} className="h-8 text-xs w-36" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Hasta</p>
+              <Input type="date" name="to_date" defaultValue={toDate} className="h-8 text-xs w-36" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Usuario</p>
+              <Input
+                name="user"
+                placeholder="email parcial..."
+                defaultValue={userFilter}
+                className="h-8 text-xs w-44"
+              />
+            </div>
+            {entityFilter && <input type="hidden" name="entity" value={entityFilter} />}
+            <Button type="submit" size="sm" className="h-8 text-xs">Filtrar</Button>
+            {(fromDate || toDate || userFilter) && (
+              <a href={entityFilter ? `/dashboard/audit?entity=${entityFilter}` : '/dashboard/audit'}>
+                <Button type="button" size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground">
+                  Limpiar
+                </Button>
+              </a>
+            )}
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Filtros por entidad */}
       <div className="flex gap-2 flex-wrap">
-        <a href="/dashboard/audit">
+        <a href={`/dashboard/audit?user=${userFilter}&from_date=${fromDate}&to_date=${toDate}`}>
           <Badge variant={!entityFilter ? 'default' : 'outline'} className="cursor-pointer">Todos</Badge>
         </a>
         {Object.entries(ENTITY_LABELS).map(([key, label]) => (
-          <a key={key} href={`/dashboard/audit?entity=${key}`}>
+          <a key={key} href={`/dashboard/audit?entity=${key}&user=${userFilter}&from_date=${fromDate}&to_date=${toDate}`}>
             <Badge variant={entityFilter === key ? 'default' : 'outline'} className="cursor-pointer">{label}</Badge>
           </a>
         ))}
@@ -105,9 +162,9 @@ export default async function AuditPage({
         </CardHeader>
         <CardContent>
           {entries.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Sin eventos registrados aún.</p>
+            <p className="text-sm text-muted-foreground py-4 text-center">Sin eventos en el período o filtro seleccionado.</p>
           ) : (
-            <div className="space-y-0 divide-y">
+            <div className="space-y-0 divide-y divide-border">
               {entries.map(entry => (
                 <div key={entry.id} className="py-3 flex gap-4 items-start">
                   <div className="shrink-0 w-36 text-xs text-muted-foreground pt-0.5">
@@ -136,7 +193,7 @@ export default async function AuditPage({
                     )}
                     {entry.payload && Object.keys(entry.payload).length > 0 && (
                       <details className="text-xs">
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
                           Ver detalle
                         </summary>
                         <pre className="mt-1 p-2 bg-muted rounded text-xs overflow-auto max-h-32">
@@ -150,18 +207,17 @@ export default async function AuditPage({
             </div>
           )}
 
-          {/* Paginación */}
           {totalPages > 1 && (
             <div className="flex justify-between items-center pt-4 border-t mt-4">
               <p className="text-xs text-muted-foreground">Página {page} de {totalPages}</p>
               <div className="flex gap-2">
                 {page > 1 && (
-                  <a href={`/dashboard/audit?entity=${entityFilter}&page=${page - 1}`}>
+                  <a href={`/dashboard/audit?entity=${entityFilter}&user=${userFilter}&from_date=${fromDate}&to_date=${toDate}&page=${page - 1}`}>
                     <Badge variant="outline" className="cursor-pointer">← Anterior</Badge>
                   </a>
                 )}
                 {page < totalPages && (
-                  <a href={`/dashboard/audit?entity=${entityFilter}&page=${page + 1}`}>
+                  <a href={`/dashboard/audit?entity=${entityFilter}&user=${userFilter}&from_date=${fromDate}&to_date=${toDate}&page=${page + 1}`}>
                     <Badge variant="outline" className="cursor-pointer">Siguiente →</Badge>
                   </a>
                 )}

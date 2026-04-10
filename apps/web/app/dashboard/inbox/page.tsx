@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { MessageSquare, User, Bot, Phone, Clock, AlertCircle } from 'lucide-react'
+import { MessageSquare, User, Bot, Phone, Clock, AlertCircle, Send } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -53,7 +53,11 @@ export default function InboxPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
   const [takingOver, setTakingOver] = useState(false)
+  const [replyText, setReplyText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const replyInputRef = useRef<HTMLTextAreaElement>(null)
 
   const selectedConv = conversations.find(c => c.id === selectedId)
 
@@ -169,6 +173,48 @@ export default function InboxPage() {
       prev.map(c => c.id === selectedId ? { ...c, status: 'bot_active' } : c)
     )
     setTakingOver(false)
+  }
+
+  // ── Enviar mensaje como agente humano ──────────────────────────────────────
+  const handleSendMessage = async () => {
+    if (!selectedId || !replyText.trim() || sending) return
+    setSending(true)
+    setSendError(null)
+
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+
+    if (!token) {
+      setSendError('Sesión expirada. Recarga la página.')
+      setSending(false)
+      return
+    }
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text: replyText.trim() }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        setSendError(err.detail || 'No se pudo enviar el mensaje')
+      } else {
+        setReplyText('')
+        // El nuevo mensaje llegará vía Realtime — no necesitamos añadirlo manualmente
+      }
+    } catch {
+      setSendError('Error de red. Verifica la conexión.')
+    } finally {
+      setSending(false)
+      replyInputRef.current?.focus()
+    }
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -323,16 +369,57 @@ export default function InboxPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Footer informativo */}
-            <div className="p-3 border-t border-border bg-card/50">
-              <p className="text-xs text-muted-foreground text-center">
-                {selectedConv.status === 'bot_active'
-                  ? '🤖 El bot está respondiendo automáticamente'
-                  : selectedConv.status === 'human_takeover'
-                  ? '👤 Agente humano tomó control — el bot no responderá'
-                  : '🔒 Conversación cerrada'}
-              </p>
-            </div>
+            {/* Footer — input de respuesta (takeover) o info (bot/cerrada) */}
+            {selectedConv.status === 'human_takeover' ? (
+              <div className="p-3 border-t border-border bg-card/50 space-y-2">
+                {sendError && (
+                  <p className="text-xs text-red-400 text-center">{sendError}</p>
+                )}
+                <div className="flex gap-2 items-end">
+                  <textarea
+                    ref={replyInputRef}
+                    value={replyText}
+                    onChange={e => {
+                      setReplyText(e.target.value)
+                      setSendError(null)
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage()
+                      }
+                    }}
+                    placeholder="Escribe tu respuesta... (Enter para enviar, Shift+Enter para salto de línea)"
+                    disabled={sending}
+                    rows={2}
+                    className="flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleSendMessage}
+                    disabled={sending || !replyText.trim()}
+                    className="h-10 px-3 bg-primary hover:bg-primary/90 text-primary-foreground"
+                  >
+                    {sending ? (
+                      <span className="text-xs">Enviando...</span>
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-amber-400/70 text-center">
+                  👤 Modo agente — el bot no responderá mientras tengas el control
+                </p>
+              </div>
+            ) : (
+              <div className="p-3 border-t border-border bg-card/50">
+                <p className="text-xs text-muted-foreground text-center">
+                  {selectedConv.status === 'bot_active'
+                    ? '🤖 El bot está respondiendo automáticamente'
+                    : '🔒 Conversación cerrada'}
+                </p>
+              </div>
+            )}
           </>
         )}
       </div>

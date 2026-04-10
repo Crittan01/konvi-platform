@@ -6,11 +6,37 @@
 
 ## Estado
 
-📋 **Diseñado — pendiente de implementación**
+🟡 **Fase Inicial implementada — Fases 2 y 3 pendientes**
 
-Este documento establece el diseño funcional, arquitectónico y de contrato para la integración de capacidades de shipping y courier basadas en Envia dentro de la Commerce Ops Platform.
+Última actualización: 2026-04-09 (rev. 2 — Fase 10 completada)
 
-No debe implementarse hasta cerrar el contexto documental y definir el schema de tablas correspondientes.
+### Qué está implementado (Fase Inicial — ✅)
+
+| Componente | Archivo | Estado |
+|-----------|---------|--------|
+| HTTP client para Envia API | `services/api/integrations/envia_client.py` | ✅ Bearer per-tenant, sandbox/prod |
+| Quote endpoint | `services/api/routers/shipping.py` → `POST /api/v1/shipping/quote` | ✅ Rates + persistencia en `shipments` |
+| Historial endpoint | `services/api/routers/shipping.py` → `GET /api/v1/shipping/history` | ✅ |
+| UI historial | `apps/web/app/dashboard/shipping/page.tsx` | ✅ Listado, estados, banner si Envia no conectado |
+| Tabla `shipments` | `supabase/migrations/20260409230000_shipments.sql` | ✅ Aplicada |
+| Gestión de credenciales | `services/api/routers/integrations.py` | ✅ Envia connect/disconnect por tenant |
+| Sandbox conectado | Empresa #5017 en Envia Sandbox | ✅ Token en `tenant_integrations` |
+| PV-03 resuelto | Bearer per-tenant (no global) | ✅ Validado 2026-04-09 |
+
+### Qué falta (Fase 2 y 3 — ❌ Pendiente)
+
+| Capacidad | Fase | Endpoint Envia |
+|-----------|------|----------------|
+| Formulario UI interactivo de cotización | Inmediato (deuda) | — (backend existe) |
+| Generación de label | Fase 2 | `POST /ship/` |
+| Tracking de envío | Fase 2 | `GET /track/` |
+| Programar pickup | Fase 2 | `POST /pickup/` |
+| Cancelar envío | Fase 2 | `DELETE /ship/{id}` |
+| Manifest | Fase 3 | `POST /manifest/` |
+| Webhooks de estado | Fase 3 | Configuración en Envia portal |
+| Queries API (carriers/services/country) | Fase 2 | `GET /carrier/`, `GET /service/` |
+
+Este documento establece el diseño funcional, arquitectónico y de contrato para la integración completa de Envia dentro de la Commerce Ops Platform.
 
 ---
 
@@ -140,30 +166,42 @@ SI faltan datos o hay error:
 
 ## Arquitectura del conector
 
-### Ubicación
+### Ubicación actual (implementada en Fase 10)
+
+> **Nota**: La Fase 10 implementó Envia directamente dentro de `services/api` como cliente integrado,
+> no como un microservicio separado. Esta decisión fue tomada por simplicidad operativa en la Fase Inicial.
+> Si el volumen justifica separarlo en Fase 2/3, se puede extraer a `services/connector-envia/`.
 
 ```
-services/connector-envia/
-├── main.py              ← FastAPI app (endpoints internos)
-├── client.py            ← HTTP client para Envia API
-├── schemas.py           ← Pydantic schemas: QuoteRequest, QuoteResponse, etc.
-├── queries.py           ← Queries API: carriers, services, country/state
-├── requirements.txt
-└── README.md
+services/api/integrations/
+└── envia_client.py       ← HTTP client Bearer per-tenant (sandbox + prod)
+
+services/api/routers/
+└── shipping.py           ← Endpoints: /quote, /history
+                            Pydantic schemas: Address, Parcel, QuoteRequest
+
+services/api/routers/
+└── integrations.py       ← Connect/disconnect Envia (gestión de credenciales en tenant_integrations)
 ```
 
-### Endpoints internos (desde services/api)
+### Endpoints activos (Fase Inicial)
+
+| Endpoint | Estado |
+|----------|--------|
+| `POST /api/v1/shipping/quote` | ✅ Llama Envia `POST /ship/rate/`, persiste en `shipments` |
+| `GET /api/v1/shipping/history` | ✅ Lista `shipments` del tenant |
+
+### Endpoints internos diseñados (Fases 2-3)
 
 ```
-POST /shipping/quote       ← cotización de envío
-POST /shipping/label       ← generación de label (Fase 2)
-GET  /shipping/tracking    ← estado de envío (Fase 2)
-POST /shipping/pickup      ← programar recogida (Fase 2)
-POST /shipping/cancel      ← cancelar envío (Fase 2)
-GET  /queries/carriers     ← carriers disponibles para un origen
-GET  /queries/services     ← servicios disponibles por carrier
-GET  /queries/country      ← datos de país/estado/municipio
-GET  /queries/pickup-opts  ← opciones de pickup disponibles
+POST /api/v1/shipping/quote      ← ✅ IMPLEMENTADO — cotización de envío
+GET  /api/v1/shipping/history    ← ✅ IMPLEMENTADO — historial del tenant
+POST /api/v1/shipping/label      ← ❌ Fase 2 — generación de label
+GET  /api/v1/shipping/tracking/{id} ← ❌ Fase 2 — estado de envío
+POST /api/v1/shipping/pickup     ← ❌ Fase 2 — programar recogida
+DELETE /api/v1/shipping/{id}     ← ❌ Fase 2 — cancelar envío
+GET  /api/v1/shipping/carriers   ← ❌ Fase 2 — carriers disponibles (Queries API)
+GET  /api/v1/shipping/services   ← ❌ Fase 2 — servicios por carrier (Queries API)
 ```
 
 ### Path vs Background
@@ -214,16 +252,17 @@ CREATE POLICY "Tenant Isolation" ON public.shipments
 
 ---
 
-## Variables de entorno requeridas
+## Variables de entorno y autenticación
 
-```
-ENVIA_API_KEY=...          ← API Key de Envia (por tenant o global)
-ENVIA_API_URL=...          ← Base URL de la Shipping API de Envia
-ENVIA_QUERIES_URL=...      ← Base URL de la Queries API de Envia
-```
+**Modelo de auth resuelto (PV-03 — validado 2026-04-09):**
+- Bearer token **per-tenant** — cada tenant tiene su propia API key de Envia
+- Tokens almacenados en `tenant_integrations.credentials.api_token`
+- Ambiente configurable: `sandbox: true/false` en `tenant_integrations.credentials`
+- Producción: `https://api.envia.com` / Sandbox: `https://api-test.envia.com`
 
-> Nunca hardcodear. Configurar en Render Environment Variables.
-> Revisar si Envia soporta API Keys por tenant o requiere un modelo global con sub-cuentas.
+> No hay variables de entorno globales de Envia en el backend — el token se extrae por tenant desde la DB en cada request.
+
+**Sandox activo**: Empresa #5017 conectada en el tenant dev `Matriz Commerce Dev`.
 
 ---
 
