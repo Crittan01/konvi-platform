@@ -107,10 +107,17 @@ apps/web/app/
         └── page.tsx                     ✅ Configuración — perfil, WABA, equipo, notificaciones
 ```
 
-**Sidebar actual** (verificado en `apps/web/app/dashboard/layout.tsx`):
-Resumen, Inbox AI, Pedidos, Contactos, Catálogo (owner/mgr), Inventario (owner/mgr),
-Knowledge Base (owner/mgr), Media (owner/mgr), Envíos, Integraciones (owner),
-Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
+**Sidebar actual** (verificado en `apps/web/app/dashboard/sidebar-client.tsx`):
+Usa árbol de grupos expandibles con auto-expand y RBAC dual.
+- Raíz: Dashboard, Inbox
+- Ventas: Pedidos, Contactos, Envíos, Reclamos (Pronto)
+- Productos: Catálogo, Inventario
+- Publicaciones (Pronto): Mercado Libre, Central Ofertas
+- Compras (Pronto): Órdenes de Compra
+- Finanzas (Pronto): Ingresos & Gastos, Rentabilidad
+- IA & Contenido: Base de Conocimiento, Media, Agentes IA (Pronto)
+- Analítica: Métricas, Auditoría
+- Configuración: General, Integraciones
 
 ---
 
@@ -121,16 +128,22 @@ Métricas (owner/mgr), Auditoría (owner), Configuración (owner).
 | Dashboard | `/dashboard` | ✅ Implementado | Tabs Operaciones + Negocio. KPIs, gráficas recharts. |
 | Inbox | `/dashboard/inbox` | ✅ Implementado | Realtime, takeover, hilo |
 | Catálogo | `/dashboard/catalog` | 🟡 Parcial | CRUD + edit + delete. Variantes múltiples: pendiente |
-| Pedidos | `/dashboard/orders` | ✅ Implementado | Listado, detalle, estados |
-| Contactos | `/dashboard/contacts` | ✅ Implementado | Listado, perfil |
-| Inventario | `/dashboard/inventory` | ✅ Implementado | Stock, alertas, ajuste |
+| Pedidos | `/dashboard/orders` | ✅ Implementado | Listado, detalle, estados. + AI Insight Panel |
+| Contactos | `/dashboard/contacts` | ✅ Implementado | Listado, perfil. + AI Insight Panel |
+| Inventario | `/dashboard/inventory` | ✅ Implementado | Stock, alertas, ajuste. + AI Insight Panel |
 | Knowledge Base | `/dashboard/knowledge-base` | ✅ Implementado | CRUD, categorías, activo/inactivo |
 | Media | `/dashboard/media` | ✅ Implementado | Upload/delete/URL, bucket `tenant-media` |
 | Shipping | `/dashboard/shipping` | ✅ Implementado | Historial + ShippingQuoteForm interactivo con tabla de carriers |
 | Integraciones | `/dashboard/integrations` | ✅ Implementado | MeLi + Envia connect/disconnect |
-| Métricas | `/dashboard/metrics` | ✅ Implementado | 4 KPIs, queries paralelas |
+| Métricas | `/dashboard/metrics` | ✅ Implementado | 4 KPIs, queries paralelas. + AI Insight Panel |
 | Auditoría | `/dashboard/audit` | ✅ Implementado | Filtros, paginación, payload JSONB |
 | Configuración | `/dashboard/settings` | ✅ Implementado | Equipo RBAC, WABA, notificaciones |
+| Reclamos | `/dashboard/claims` | 🔒 Pronto | Stub page (visión de producto, Fase 12) |
+| MeLi Listings | `/dashboard/marketplace` | 🔒 Pronto | Stub page (visión de producto, Fase 13) |
+| Compras | `/dashboard/purchases` | 🔒 Pronto | Stub page (visión de producto, Fase 12.2) |
+| Finanzas | `/dashboard/finance` | 🔒 Pronto | Stub page (visión de producto, Fase 12.3) |
+| Agentes IA | `/dashboard/ai-agents` | 🔒 Pronto | Stub page (gestión prompts/skills, Fase 14) |
+| API AI Insights | `/api/insights` | ✅ Implementado | Router genérico a Gemini con RBAC y prompts por dominio |
 
 ---
 

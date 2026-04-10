@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Package, Clock, ChevronRight, Plus } from 'lucide-react'
 import OrdersNewForm from './orders-new-form'
 import Link from 'next/link'
+import AiInsightPanel from '@/components/ai-insight-panel'
 
 type Variation = { id: string; price: number | null; attributes: Record<string, string> | null }
 type Product   = { id: string; title: string; product_variations: Variation[] }
@@ -173,6 +174,11 @@ export default async function OrdersPage({
           {role}
         </Badge>
       </div>
+
+      {/* AI Insight — a demanda */}
+      {(role === 'owner' || role === 'manager') && (
+        <AiInsightPanel module="orders" label="Pedidos" />
+      )}
 
       {/* Filtros de estado — scrollable horizontal en mobile */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">

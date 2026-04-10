@@ -31,29 +31,42 @@ Cada empresa (tenant) opera en aislamiento total. El canal de ventas es WhatsApp
 ## Arquitectura de navegación — Tenant Console (aprobada 2026-04-10)
 
 ```
-Dashboard          /dashboard            (raíz — tabs internas: Operaciones/Negocio)
-Inbox              /dashboard/inbox      (raíz — uso diario crítico)
+Dashboard          /dashboard            (Tabs: Operaciones/Negocio + AI Insights)
+Inbox              /dashboard/inbox      (Uso diario crítico)
 
 ▼ Ventas
-   Pedidos          /dashboard/orders
-   Contactos        /dashboard/contacts
+   Pedidos          /dashboard/orders    (+ AI Insights)
+   Contactos        /dashboard/contacts  (+ AI Insights)
    Envíos           /dashboard/shipping
+   Reclamos         /dashboard/claims    (🔒 Pronto - Fase 12)
 
 ▼ Productos        (owner + manager)
    Catálogo         /dashboard/catalog
-   Inventario       /dashboard/inventory
+   Inventario       /dashboard/inventory (+ AI Insights)
+
+▼ Publicaciones    (owner + manager) [🔒 TODO EL GRUPO PRÓXIMO]
+   Mercado Libre    /dashboard/marketplace
+   Central Ofertas  /dashboard/marketplace
+
+▼ Compras          (owner) [🔒 TODO EL GRUPO PRÓXIMO]
+   Órdenes Compra   /dashboard/purchases
+
+▼ Finanzas         (owner) [🔒 TODO EL GRUPO PRÓXIMO]
+   Ingresos & Gst.  /dashboard/finance
+   Rentabilidad     /dashboard/finance
 
 ▼ IA & Contenido   (owner + manager)
-   Base de Conocimiento  /dashboard/knowledge-base
-   Media                 /dashboard/media
+   Base Conocimient /dashboard/knowledge-base
+   Media            /dashboard/media
+   Agentes IA       /dashboard/ai-agents (🔒 Pronto - Fase 14)
 
 ▼ Analítica        (owner + manager)
-   Métricas         /dashboard/metrics
+   Métricas         /dashboard/metrics   (+ AI Insights)
    Auditoría        /dashboard/audit     (owner only)
 
 ▼ Configuración    (owner + manager)
    General          /dashboard/settings
-   Integraciones    /dashboard/integrations  (owner only)
+   Integraciones    /dashboard/integrations (owner only)
 ```
 
 **Reglas de navegación:**

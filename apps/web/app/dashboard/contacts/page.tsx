@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ShieldCheck, ShieldOff, Users, Phone, Search } from 'lucide-react'
+import AiInsightPanel from '@/components/ai-insight-panel'
 
 type Contact = {
   id: string
@@ -120,6 +121,11 @@ export default async function ContactsPage({
           </p>
         </div>
       </div>
+
+      {/* AI Insight — a demanda */}
+      {(meta.role === 'owner' || meta.role === 'manager') && (
+        <AiInsightPanel module="contacts" label="Contactos" />
+      )}
 
       {/* Habeas Data notice */}
       <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-400 flex items-start gap-2">

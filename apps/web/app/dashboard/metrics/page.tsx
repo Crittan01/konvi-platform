@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server'
 import { BarChart2, MessageSquare, ShoppingCart, Users, Package, TrendingUp } from 'lucide-react'
 import MetricsFilters from './metrics-filters'
 import { MessagesBarChart, OrdersPieChart } from './metrics-charts'
+import AiInsightPanel from '@/components/ai-insight-panel'
 
 const DAY_LABELS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá']
 
@@ -128,6 +129,11 @@ export default async function MetricsPage({
           <MetricsFilters current={period} />
         </Suspense>
       </div>
+
+      {/* AI Insight — a demanda */}
+      {(role === 'owner' || role === 'manager') && (
+        <AiInsightPanel module="metrics" label="Analítica y Rendimiento" />
+      )}
 
       {/* ── KPI Cards principales ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

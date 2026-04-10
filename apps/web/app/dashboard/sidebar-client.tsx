@@ -6,8 +6,10 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, MessageSquare, LogOut, ShoppingCart,
   Package, Users, Settings, Plug, Truck, BarChart2,
-  Boxes, BookOpen, Image, ClipboardList, BrainCircuit,
+  Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2, ShoppingBag,
+  ShoppingBag as StoreIcon, Wallet, DollarSign,
+  AlertCircle, Bot, ImageIcon,
 } from 'lucide-react'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -18,6 +20,7 @@ type NavLeaf = {
   label: string
   icon: React.ElementType
   roles: string[]
+  locked?: boolean       // ← página existe, está en roadmap (muestra "Próximo")
 }
 
 type NavGroup = {
@@ -26,105 +29,110 @@ type NavGroup = {
   label: string
   icon: React.ElementType
   roles: string[]
+  locked?: boolean       // ← todo el grupo está en roadmap
   children: NavLeaf[]
 }
 
 type NavItem = NavLeaf | NavGroup
 
-// ── Estructura de navegación ──────────────────────────────────────────────────
+// ── Estructura oficial de navegación ─────────────────────────────────────────
 //
-// Arquitectura aprobada 2026-04-10:
-//   Dashboard  → raíz, sin sub-items (tabs internas = Operaciones/Negocio)
-//   Inbox      → raíz (uso diario crítico)
-//   Ventas     → grupo: Pedidos, Contactos, Envíos
-//   Productos  → grupo: Catálogo, Inventario
-//   IA & Contenido → grupo: Base de Conocimiento, Media
-//   Analítica  → grupo: Métricas, Auditoría
-//   Configuración → grupo: General, Integraciones
+//  Aprobada 2026-04-10 (rev. 2 — árbol completo con visión de producto)
 //
-// Regla: sub-item en sidebar = módulo con URL propia.
-//        Tabs dentro de una página = vistas alternativas del mismo dato.
+//  ✅ ACTIVO    → módulo live en producción
+//  🔒 PRÓXIMO   → módulo planificado, stub page visible (sirve de sales tool)
+//
+//  Fuente de verdad: docs/architecture/nav-architecture.md
+//  Labels: .agents/rules/nav-architecture.md → Regla N-02
 
 const NAV_ITEMS: NavItem[] = [
+  // ── Raíz ──────────────────────────────────────────────────────────────────
+  { kind: 'leaf', href: '/dashboard',       label: 'Dashboard', icon: LayoutDashboard, roles: [] },
+  { kind: 'leaf', href: '/dashboard/inbox', label: 'Inbox',     icon: MessageSquare,   roles: [] },
+
+  // ── Ventas ✅ + ítems próximos ────────────────────────────────────────────
   {
-    kind: 'leaf',
-    href: '/dashboard',
-    label: 'Dashboard',
-    icon: LayoutDashboard,
-    roles: [],
-  },
-  {
-    kind: 'leaf',
-    href: '/dashboard/inbox',
-    label: 'Inbox',
-    icon: MessageSquare,
-    roles: [],
-  },
-  {
-    kind: 'group',
-    id: 'ventas',
-    label: 'Ventas',
-    icon: ShoppingCart,
-    roles: [],
+    kind: 'group', id: 'ventas', label: 'Ventas', icon: ShoppingCart, roles: [],
     children: [
-      { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,        roles: [] },
-      { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,          roles: [] },
-      { kind: 'leaf', href: '/dashboard/shipping', label: 'Envíos',    icon: Truck,          roles: [] },
+      { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,       roles: [] },
+      { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,         roles: [] },
+      { kind: 'leaf', href: '/dashboard/shipping', label: 'Envíos',    icon: Truck,         roles: [] },
+      { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle,   roles: [], locked: true },
     ],
   },
+
+  // ── Productos ✅ ──────────────────────────────────────────────────────────
   {
-    kind: 'group',
-    id: 'productos',
-    label: 'Productos',
-    icon: ShoppingBag,
-    roles: ['owner', 'manager'],
+    kind: 'group', id: 'productos', label: 'Productos', icon: ShoppingBag, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/catalog',   label: 'Catálogo',   icon: ShoppingBag, roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/inventory', label: 'Inventario', icon: Boxes,       roles: ['owner', 'manager'] },
     ],
   },
+
+  // ── Publicaciones 🔒 ──────────────────────────────────────────────────────
   {
-    kind: 'group',
-    id: 'ia-contenido',
-    label: 'IA & Contenido',
-    icon: BrainCircuit,
-    roles: ['owner', 'manager'],
+    kind: 'group', id: 'publicaciones', label: 'Publicaciones', icon: StoreIcon,
+    roles: ['owner', 'manager'], locked: true,
     children: [
-      { kind: 'leaf', href: '/dashboard/knowledge-base', label: 'Base de Conocimiento', icon: BookOpen, roles: ['owner', 'manager'] },
-      { kind: 'leaf', href: '/dashboard/media',          label: 'Media',                icon: Image,    roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre',   icon: ShoppingCart, roles: ['owner', 'manager'], locked: true },
+      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Central Ofertas', icon: TrendingUp,   roles: ['owner', 'manager'], locked: true },
     ],
   },
+
+  // ── Compras 🔒 ────────────────────────────────────────────────────────────
   {
-    kind: 'group',
-    id: 'analitica',
-    label: 'Analítica',
-    icon: BarChart2,
-    roles: ['owner', 'manager'],
+    kind: 'group', id: 'compras', label: 'Compras', icon: Wallet,
+    roles: ['owner'], locked: true,
+    children: [
+      { kind: 'leaf', href: '/dashboard/purchases', label: 'Órdenes de Compra', icon: ClipboardList, roles: ['owner'], locked: true },
+    ],
+  },
+
+  // ── Finanzas 🔒 ───────────────────────────────────────────────────────────
+  {
+    kind: 'group', id: 'finanzas', label: 'Finanzas', icon: DollarSign,
+    roles: ['owner'], locked: true,
+    children: [
+      { kind: 'leaf', href: '/dashboard/finance', label: 'Ingresos & Gastos', icon: TrendingUp,  roles: ['owner'], locked: true },
+      { kind: 'leaf', href: '/dashboard/finance', label: 'Rentabilidad',       icon: BarChart2,   roles: ['owner'], locked: true },
+    ],
+  },
+
+  // ── IA & Contenido ✅ + Agentes 🔒 ───────────────────────────────────────
+  {
+    kind: 'group', id: 'ia-contenido', label: 'IA & Contenido', icon: BrainCircuit, roles: ['owner', 'manager'],
+    children: [
+      { kind: 'leaf', href: '/dashboard/knowledge-base', label: 'Base de Conocimiento', icon: BookOpen,  roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/media',          label: 'Media',                icon: ImageIcon, roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/ai-agents',      label: 'Agentes IA',           icon: Bot,       roles: ['owner'], locked: true },
+    ],
+  },
+
+  // ── Analítica ✅ ──────────────────────────────────────────────────────────
+  {
+    kind: 'group', id: 'analitica', label: 'Analítica', icon: BarChart2, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/metrics', label: 'Métricas',  icon: TrendingUp,    roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/audit',   label: 'Auditoría', icon: ClipboardList, roles: ['owner'] },
     ],
   },
+
+  // ── Configuración ✅ ──────────────────────────────────────────────────────
   {
-    kind: 'group',
-    id: 'configuracion',
-    label: 'Configuración',
-    icon: Settings,
-    roles: ['owner', 'manager'],
+    kind: 'group', id: 'configuracion', label: 'Configuración', icon: Settings, roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/settings',     label: 'General',        icon: Building2, roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',  icon: Plug,      roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/settings',     label: 'General',       icon: Building2, roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones', icon: Plug,      roles: ['owner'] },
     ],
   },
 ]
 
-// ── RBAC helpers ──────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function hasAccess(roles: string[], role: string): boolean {
   return roles.length === 0 || roles.includes(role)
 }
-
-// ── Role badge ────────────────────────────────────────────────────────────────
 
 const ROLE_BADGE: Record<string, { label: string; color: string }> = {
   owner:   { label: '👑 Owner',   color: 'bg-amber-400/20 text-amber-200 border border-amber-400/30' },
@@ -147,38 +155,36 @@ interface SidebarProps {
 export default function SidebarClient({
   role, userEmail, tenantName, tenantLogoUrl, logoutAction,
 }: SidebarProps) {
-  const [mobileOpen, setMobileOpen]   = useState(false)
-  const [openGroups, setOpenGroups]   = useState<Set<string>>(new Set())
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const pathname = usePathname()
   const roleBadge   = ROLE_BADGE[role] ?? ROLE_BADGE.agent
   const userInitial = userEmail?.charAt(0).toUpperCase() ?? '?'
   const userName    = userEmail?.split('@')[0] ?? ''
 
-  // Auto-expand el grupo que contiene la ruta activa
+  // Auto-expand grupo activo
   useEffect(() => {
     const groups = NAV_ITEMS.filter((i): i is NavGroup => i.kind === 'group')
     const activeGroup = groups.find(g =>
-      g.children.some(c => pathname.startsWith(c.href))
+      g.children.some(c => pathname.startsWith(c.href) && !c.locked)
     )
     if (activeGroup) {
       setOpenGroups(prev => new Set(Array.from(prev).concat(activeGroup.id)))
     }
   }, [pathname])
 
-  // Cerrar sidebar mobile al navegar
   useEffect(() => { setMobileOpen(false) }, [pathname])
 
-  // Bloquear scroll body en mobile con overlay abierto
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [mobileOpen])
 
   const isActive = (href: string) =>
-    href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href)
+    href === '/dashboard' ? pathname === '/dashboard' : pathname === href
 
   const isGroupActive = (group: NavGroup) =>
-    group.children.some(c => isActive(c.href))
+    group.children.some(c => !c.locked && isActive(c.href))
 
   const toggleGroup = (id: string) =>
     setOpenGroups(prev => {
@@ -187,14 +193,13 @@ export default function SidebarClient({
       return next
     })
 
-  // Filtrar por RBAC
   const visibleItems = NAV_ITEMS.filter(item => hasAccess(item.roles, role))
 
-  // ── Inner content ───────────────────────────────────────────────────────────
+  // ── Sidebar content ─────────────────────────────────────────────────────────
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
 
-      {/* Logo / Tenant header */}
+      {/* Tenant header */}
       <div className="px-4 py-4 border-b border-white/10">
         <div className="flex items-center gap-2.5">
           {tenantLogoUrl ? (
@@ -228,12 +233,12 @@ export default function SidebarClient({
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
         {visibleItems.map(item => {
 
-          // ── Leaf item ────────────────────────────────────────────────────
+          // ── Leaf ──────────────────────────────────────────────────────────
           if (item.kind === 'leaf') {
             const active = isActive(item.href)
             const Icon = item.icon
             return (
-              <Link key={item.href} href={item.href}
+              <Link key={`leaf-${item.href}-${item.label}`} href={item.href}
                 className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
                   active ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/10 hover:text-white'
                 }`}
@@ -246,7 +251,7 @@ export default function SidebarClient({
             )
           }
 
-          // ── Group item ───────────────────────────────────────────────────
+          // ── Group ─────────────────────────────────────────────────────────
           const group = item
           const visibleChildren = group.children.filter(c => hasAccess(c.roles, role))
           if (visibleChildren.length === 0) return null
@@ -257,7 +262,6 @@ export default function SidebarClient({
 
           return (
             <div key={group.id}>
-              {/* Group header — clickable toggle */}
               <button
                 onClick={() => toggleGroup(group.id)}
                 className={`w-full group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
@@ -268,10 +272,17 @@ export default function SidebarClient({
               >
                 <GroupIcon className={`h-4 w-4 shrink-0 transition-colors ${
                   groupActive ? 'text-amber-300' : 'group-hover:text-amber-300'
-                }`} />
-                <span className="flex-1 text-left">{group.label}</span>
-                {/* Indicador de ítem activo inside group */}
-                {groupActive && !isOpen && (
+                } ${group.locked ? 'opacity-60' : ''}`} />
+                <span className={`flex-1 text-left ${group.locked ? 'opacity-70' : ''}`}>
+                  {group.label}
+                </span>
+                {/* Badge "Pronto" para grupos locked */}
+                {group.locked && (
+                  <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-amber-400/10 text-amber-400/70 border border-amber-400/20 shrink-0">
+                    Pronto
+                  </span>
+                )}
+                {groupActive && !isOpen && !group.locked && (
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
                 )}
                 <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${
@@ -279,26 +290,34 @@ export default function SidebarClient({
                 }`} />
               </button>
 
-              {/* Children — collapsible con animación CSS */}
+              {/* Children */}
               <div className={`overflow-hidden transition-all duration-200 ${
                 isOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
               }`}>
                 <div className="ml-3 pl-3 border-l border-white/10 mt-0.5 space-y-0.5 pb-1">
                   {visibleChildren.map(child => {
-                    const childActive = isActive(child.href)
+                    const childActive = !child.locked && isActive(child.href)
                     const ChildIcon   = child.icon
                     return (
-                      <Link key={child.href} href={child.href}
+                      <Link key={`${group.id}-${child.href}-${child.label}`} href={child.href}
                         className={`group flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-all duration-150 ${
                           childActive
                             ? 'bg-white/15 text-white font-medium'
-                            : 'text-white/50 hover:bg-white/10 hover:text-white'
+                            : child.locked
+                              ? 'text-white/35 hover:text-white/50'
+                              : 'text-white/50 hover:bg-white/10 hover:text-white'
                         }`}
                       >
                         <ChildIcon className={`h-3.5 w-3.5 shrink-0 transition-colors ${
-                          childActive ? 'text-amber-300' : 'group-hover:text-amber-300'
+                          childActive ? 'text-amber-300' :
+                          child.locked ? 'opacity-40' : 'group-hover:text-amber-300'
                         }`} />
                         <span className="flex-1 text-[13px]">{child.label}</span>
+                        {child.locked && (
+                          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-amber-400/10 text-amber-400/60 border border-amber-400/20 shrink-0">
+                            Pronto
+                          </span>
+                        )}
                         {childActive && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
                       </Link>
                     )
@@ -335,12 +354,10 @@ export default function SidebarClient({
 
   return (
     <>
-      {/* Desktop sidebar */}
       <aside className="hidden lg:flex w-60 flex-shrink-0 flex-col sidebar-gradient border-r border-white/10 h-screen sticky top-0">
         <SidebarContent />
       </aside>
 
-      {/* Mobile: hamburger */}
       <button
         className="lg:hidden fixed top-3 left-3 z-50 p-2 rounded-lg sidebar-gradient border border-white/10 text-white/70 hover:text-white shadow-lg"
         onClick={() => setMobileOpen(true)}
@@ -349,13 +366,11 @@ export default function SidebarClient({
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Mobile: overlay */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
           onClick={() => setMobileOpen(false)} />
       )}
 
-      {/* Mobile: drawer */}
       <aside className={`lg:hidden fixed inset-y-0 left-0 z-50 w-72 flex flex-col sidebar-gradient border-r border-white/10 shadow-2xl transition-transform duration-300 ease-in-out ${
         mobileOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
