@@ -8,10 +8,10 @@ import { createClient } from '@/utils/supabase/client'
 interface Props {
   tenantId: string
   currentLogoUrl: string | null
-  onSaved: (url: string | null) => void
+  onSaved?: (url: string | null) => void
 }
 
-export default function LogoUpload({ tenantId, currentLogoUrl, onSaved }: Props) {
+export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {} }: Props) {
   const [preview, setPreview] = useState<string | null>(currentLogoUrl)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)

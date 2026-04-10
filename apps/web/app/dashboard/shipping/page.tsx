@@ -98,7 +98,6 @@ export default async function ShippingPage() {
         <ShippingQuoteForm
           shippingOrigin={shippingOrigin}
           apiUrl={API_URL}
-          onQuoted={() => { /* El historial se recarga en la próxima navegación */ }}
         />
       )}
 

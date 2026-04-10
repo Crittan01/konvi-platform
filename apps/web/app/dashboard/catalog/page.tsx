@@ -102,7 +102,6 @@ export default async function CatalogPage() {
           <div className="col-span-1">
             <CatalogForm
               apiUrl={API_URL}
-              onCreated={() => { /* revalidatePath no disponible en client — recarga en siguiente nav */ }}
             />
           </div>
         )}

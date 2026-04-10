@@ -12,7 +12,7 @@ import { createClient } from '@/utils/supabase/client'
 
 interface Attr { key: string; value: string }
 interface VariantDraft { attrs: Attr[]; price: number; stock: number }
-interface Props { apiUrl: string; onCreated: () => void }
+interface Props { apiUrl: string; onCreated?: () => void }
 
 const DEFAULT_VARIANT: VariantDraft = { attrs: [{ key: 'Talla', value: '' }], price: 0, stock: 0 }
 
@@ -32,7 +32,7 @@ function variantLabel(v: VariantDraft): string {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function CatalogForm({ apiUrl, onCreated }: Props) {
+export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [variants, setVariants] = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
