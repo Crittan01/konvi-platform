@@ -48,8 +48,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onr
 
 export default async function OrdersPage() {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const { data: { user } } = await supabase.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'agent'
   const canWrite = role === 'owner' || role === 'manager'
@@ -98,14 +98,22 @@ export default async function OrdersPage() {
     const token = s?.access_token
     if (!token) return
 
-    await fetch(`${API_URL}/api/v1/orders/${orderId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ status: nextStatus }),
-    })
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      await fetch(`${API_URL}/api/v1/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: nextStatus }),
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+    } catch {
+      // Non-fatal: revalidatePath still runs — UI will reflect DB state on next load
+    }
 
     revalidatePath('/dashboard/orders')
   }

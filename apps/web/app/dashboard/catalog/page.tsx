@@ -21,12 +21,9 @@ type Product = {
 export default async function CatalogPage() {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
-
-  // Resolver tenant y role desde app_metadata (seteado por trigger handle_new_user_claims)
-  const { data: { session } } = await supabase.auth.getSession()
-  const appMeta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = appMeta.tenant_id
-  const role = appMeta.role ?? 'agent'
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const tenantId = meta.tenant_id
+  const role = meta.role ?? 'agent'
   const canWrite = role === 'owner' || role === 'manager'
 
   let products: Product[] = []

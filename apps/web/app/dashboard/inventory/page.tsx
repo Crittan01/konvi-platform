@@ -40,8 +40,8 @@ function formatAttributes(attrs: Record<string, string> | null): string {
 
 export default async function InventoryPage() {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const { data: { user } } = await supabase.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'agent'
   const canWrite = role === 'owner' || role === 'manager'
@@ -261,7 +261,7 @@ export default async function InventoryPage() {
                   <Button type="submit" size="sm" className="h-8">Guardar</Button>
                 </form>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Las variantes con ≤ {threshold} unidades se marcan como "stock bajo".
+                  Las variantes con ≤ {threshold} unidades se marcan como &quot;stock bajo&quot;.
                 </p>
               </CardContent>
             </Card>

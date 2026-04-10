@@ -201,7 +201,7 @@ export default function OrdersNewForm({ products, contacts, apiUrl, onCreated }:
 
           {items.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-3 border border-dashed rounded-lg">
-              Presiona "Añadir" para agregar productos
+              Presiona &quot;Añadir&quot; para agregar productos
             </p>
           )}
 

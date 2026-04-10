@@ -28,8 +28,8 @@ export default async function IntegrationsPage({
   searchParams: { connected?: string; error?: string }
 }) {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const { data: { user } } = await supabase.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'agent'
   const isOwner = role === 'owner'
