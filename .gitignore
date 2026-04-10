@@ -19,6 +19,7 @@ apps/web/.next/
 apps/web/out/
 .next/
 out/
+*.tsbuildinfo
 
 # ─── Environment (NUNCA al repositorio) ───────────────────────────────────────
 .env
