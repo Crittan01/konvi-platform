@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-Última actualización: 2026-04-10 (rev. 15 — hardening seguridad, Next.js 14.2.35, 13 migraciones)
+Última actualización: 2026-04-10 (rev. 16 — UI Plus Total 13 módulos + nav reestructurada con grupos expandibles)
 
 Este documento registra el estado **real y verificado en el repositorio** del producto hoy.
 Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
@@ -57,7 +57,8 @@ Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
 
 | Capa | Estado | Notas |
 |------|--------|-------|
-| Tenant Console | ✅ Completa (13/13 módulos) | Todos los módulos implementados |
+| Tenant Console | ✅ Completa (13/13 módulos) | UI "Plus Total" — Enterprise SaaS responsive — commit 6a496c7 |
+| Navegación Tenant | ✅ Reestructurada | Grupos expandibles, RBAC dual, auto-expand activo — commit pendiente |
 | Platform Console | ❌ No existe | Cero rutas, cero layout, cero auth de plataforma |
 | Backend services | ✅ 3 servicios live + 11 routers | WhatsApp connector, API Gateway, AI Orchestrator |
 | Base de datos | ✅ 13 migraciones aplicadas | Incluyendo schema core, shipments, stock_movements, kb_documents, audit_log, low_stock_threshold, consent |
