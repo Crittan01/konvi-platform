@@ -469,46 +469,50 @@ No eliminar archivos Markdown útiles sin haber consolidado antes su contenido r
 
 ## Archivos de contexto que debes mantener especialmente vivos
 
-Debes prestar especial atención a mantener alineados:
+### Contexto distilado (para Claude Code y Antigravity)
 
-- `./AGENTS.md`
-- `./README.md`
-- `./docs/HANDOFF.md`
-- `./docs/product/overview.md`
-- `./docs/product/scope.md`
-- `./docs/product/current-scope.md`
-- `./docs/product/personas-and-consoles.md`
-- `./docs/product/admin-ui-modules.md`
-- `./docs/product/navigation-map.md`
-- `./docs/architecture/overview.md`
-- `./docs/architecture/modules.md`
-- `./docs/architecture/front-back-separation.md`
-- `./docs/integrations/whatsapp.md`
-- `./docs/integrations/mercadolibre.md`
-- `./docs/integrations/telegram.md`
-- `./docs/integrations/courier-envia.md`
-- `./docs/roadmap/implementation-phases.md`
-- `./docs/research/official-doc-checklist.md`
-- `./docs/risks/risk-register.md`
+Los archivos en `.context/` son la fuente distilada para carga rápida de contexto:
+
+- `.context/00-product.md` — qué es el producto y las dos consolas
+- `.context/01-state.md` — estado de implementación resumido
+- `.context/02-stack.md` — stack real con versiones verificadas
+- `.context/03-rules.md` — reglas críticas no negociables
+- `.context/04-next-steps.md` — Fase 12, deuda técnica, lecciones
+
+### Fuentes de verdad (authoritative por dominio)
+
+| Archivo | Autoridad sobre |
+|---------|----------------|
+| `docs/product/current-scope.md` | Estado de implementación real verificado en código |
+| `docs/data/schema.md` | Schema de base de datos y migraciones |
+| `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend por módulo |
+| `docs/integrations/courier-envia.md` | Diseño Shipping/Courier |
+| `docs/roadmap/implementation-phases.md` | Fases 1-13 con estado |
+| `docs/risks/risk-register.md` | Riesgos activos y cerrados |
+
+### Índices de navegación (referencian fuentes de verdad, no duplican)
+
+- `./AGENTS.md` — índice del sistema + reglas + leer primero
+- `./README.md` — descripción pública del proyecto
+- `./docs/HANDOFF.md` — estado de infra + credenciales + qué viene
 
 Si alguno no existe y es necesario para sostener contexto, debes crearlo.
+Cuando algo cambie: actualizar primero `docs/product/current-scope.md` y `.context/01-state.md`, luego los índices.
 
 ---
 
 ## Prioridades inmediatas del workspace
 
-La prioridad actual del workspace es:
+Estado a 2026-04-10: Fases 1-11 completadas. Tenant Console 13/13 módulos live.
 
-1. clarificar y gobernar el contexto persistente del repo
-2. dejar explícita la intención visual y funcional de la interfaz
-3. separar claramente Tenant Console y Platform Console
-4. documentar el stack inicial vigente de frontend, backend e infraestructura
-5. integrar Courier / Shipping con Envia a nivel documental/arquitectónico (https://docs.envia.com/docs/getting-started)
-6. dejar claro que después de definir bien la interfaz se aborda el backend correspondiente
-7. resolver inconsistencias documentales y duplicidades
-8. proponer el siguiente paso técnico más seguro
+La prioridad actual es:
 
-No expandir funcionalidad visible del producto hasta cerrar ese contexto.
+1. **Decidir OQ-P01** — ¿Platform Console en misma app (`/platform/*`) o app separada? Bloqueante para Fase 12.
+2. **Fase 12 — Platform Console** — solo después de OQ-P01 decidido
+3. **Deuda técnica pre-producción** — variantes múltiples, RBAC granular, Python 3.11+
+4. **Envia Fase 2** — label, tracking, pickup (post-Fase 12)
+
+No expandir funcionalidad visible del producto sin decisión de OQ-P01.
 
 ---
 

@@ -1,53 +1,11 @@
 # Módulos del Monorepo — Responsabilidades y Estado
 
-## Estado Global — Actualizado 2026-04-10
+## Estado Global
 
-```
-apps/web              ✅ Funcional — 13/13 módulos Tenant Console. Next.js 14.2.35
-services/
-  connector-whatsapp  ✅ Live en Render (HMAC validado, tenant resolver por meta_waba_id)
-  ai-orchestrator     ✅ Live en Render (worker + orchestrator + guardrails + server)
-  api                 ✅ Live en Render (JWT real, RBAC base, 8 routers activos)
-  connector-meli      ❌ Directorio vacío (cliente MeLi en services/api/integrations/)
-  connector-shopify   ❌ Pendiente (futuro)
-packages/auth         🟡 Parcial (2 archivos — lógica en apps/web/utils/supabase/)
-packages/db           🟡 Parcial (mirrors iniciales — fuente real: supabase/migrations/)
-packages/ui           ❌ Vacío (componentes en apps/web/components/ui/)
-```
+> Estado actual por módulo → `docs/product/current-scope.md`
+> Stack con versiones → `.context/02-stack.md`
 
-> ⚠️ `services/orchestrator/` fue eliminado el 2026-04-08 — era un prototipo obsoleto.
-> La implementación canónica es `services/ai-orchestrator/`.
-
-**Supabase (proyecto `xmelwnhhphksbpdjmbbp`):**
-- Tenant `Matriz Commerce Dev`: `status=active`, `meta_waba_id=2159052118202272` ✅
-- **13 migraciones aplicadas** — incluyendo schema core, shipments, stock_movements, kb_documents, audit_log, low_stock_threshold, consent ✅
-
-**Sistema VM (entorno dev, sin venv):**
-- `supabase` CLI v2.84.2 — `/usr/local/bin/supabase` ✅
-- `psql` 15.17 — via DNF ✅ (TCP bloqueado por Supavisor — usar CLI `--linked`)
-
-**Paquetes Python en requirements.txt (versiones de producción):**
-```
-google-genai==1.47.0       ← SDK oficial Gemini (no usar google-generativeai — deprecado)
-supabase==2.28.3
-httpx==0.28.1
-pydantic==2.12.5
-PyJWT==2.10.1              ← solo en services/api
-fastapi==0.128.8
-uvicorn[standard]==0.39.0
-python-dotenv==1.2.1
-python-multipart==0.0.20
-```
-
-> ⚠️ La VM tiene instalado `supabase==2.10.0` vía pip3 de sistema (sin venv).
-> Los requirements.txt especifican `supabase==2.28.3`. En Render se instala 2.28.3.
-> Para alinear el entorno local, ejecutar: `pip3 install supabase==2.28.3`
-
-**Credenciales activas:**
-- `META_ACCESS_TOKEN`: ✅ **Token permanente** — System User `commerce-ops` creado en Meta Business Suite (IH-006 resuelto 2026-04-09)
-- `meta_waba_id`: `2159052118202272` ✅
-- `GEMINI_API_KEY`: ✅ configurada en `.env` y en Render
-- `SUPABASE_JWT_SECRET`: ✅ Presente (IH-005 resuelto)
+**Resumen**: Fases 1-11 ✅. `apps/web` (13/13 módulos), `services/api` (8 routers), `connector-whatsapp`, `ai-orchestrator` todos live en Render. Supabase: 13 migraciones aplicadas.
 
 ---
 

@@ -1,0 +1,33 @@
+# Reglas Críticas — No Negociables
+
+## Multi-tenant
+
+- Toda operación atada a `tenant_id` y filtrada por RLS en Postgres
+- `app_current_tenant()` resuelve desde JWT (`app_metadata.tenant_id`) o session config
+- Workers usan `service_role` + `SET app.current_tenant_id = '<uuid>'`
+- RLS es la última barrera. El API Gateway es la barrera previa. El frontend no es seguridad.
+
+## LLM (Gemini)
+
+El LLM **nunca es fuente de verdad** de:
+stock · precios · pedidos · shipping quotes · tracking · estados transaccionales · permisos
+
+Si faltan datos → solicitar al usuario o escalar a humano. No inventar.
+
+## WhatsApp / Meta
+
+- Solo WhatsApp Cloud API oficial (Meta v21.0). Sin librerías no oficiales.
+- Respuestas al cliente solo con datos reales del backend — nunca inventados.
+- Cumplimiento Anti-Spam de Meta.
+
+## Código seguro
+
+- `getUser()` en Server Components — nunca `getSession()` (inseguro JWT)
+- Python 3.9.25: `Optional[X]` — no `X | None` (sintaxis 3.10+)
+- Funciones `() => {}` no son serializables como props de RSC — usar props opcionales con default interno
+- `.env` nunca al repositorio
+
+## Orden de trabajo
+
+1. Claridad funcional/visual → 2. Backend correspondiente → 3. Implementación
+No al revés. No implementar basándose en suposiciones de APIs externas — validar docs oficiales primero.
