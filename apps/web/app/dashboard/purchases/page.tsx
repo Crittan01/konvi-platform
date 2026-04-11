@@ -1,12 +1,12 @@
-import { ClipboardList, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { ClipboardList, ArrowRight, CheckCircle2, PackageSearch, FileText, Bot, CalendarClock, PackageCheck, LineChart, Package } from 'lucide-react'
 
 const FEATURES = [
-  { icon: '📦', label: 'Gestión de proveedores y catálogos de compra' },
-  { icon: '📝', label: 'Creación y seguimiento de Órdenes de Compra (OC)' },
-  { icon: '🤖', label: 'Agente IA: predicción de quiebre de stock y sugerencias de recompra' },
-  { icon: '📅', label: 'Cálculo de lead time automático por proveedor' },
-  { icon: '✅', label: 'Recepción total o parcial contra de órdenes de compra' },
-  { icon: '📈', label: 'Actualización automática del costo promedio ponderado' },
+  { icon: PackageSearch, label: 'Gestión de proveedores y catálogos de compra' },
+  { icon: FileText, label: 'Creación y seguimiento de Órdenes de Compra (OC)' },
+  { icon: Bot, label: 'Agente IA: predicción de quiebre de stock y sugerencias de recompra' },
+  { icon: CalendarClock, label: 'Cálculo de lead time automático por proveedor' },
+  { icon: PackageCheck, label: 'Recepción total o parcial contra de órdenes de compra' },
+  { icon: LineChart, label: 'Actualización automática del costo promedio ponderado' },
 ]
 
 export default function PurchasesPage() {
@@ -29,8 +29,8 @@ export default function PurchasesPage() {
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center shrink-0 text-2xl">
-            🤝
+          <div className="h-12 w-12 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center shrink-0">
+            <ClipboardList className="h-6 w-6 text-blue-500" />
           </div>
           <div>
             <p className="font-semibold text-foreground">No te quedes sin stock. Recompra antes del quiebre.</p>
@@ -49,7 +49,7 @@ export default function PurchasesPage() {
         <div className="space-y-2">
           {FEATURES.map(f => (
             <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <span className="text-lg shrink-0">{f.icon}</span>
+              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
               <p className="text-sm text-muted-foreground">{f.label}</p>
             </div>
           ))}
@@ -60,7 +60,7 @@ export default function PurchasesPage() {
         <p className="text-sm font-semibold mb-3">Mientras tanto, controla tu stock en:</p>
         <a href="/dashboard/inventory"
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group">
-          <span className="text-lg">📦</span>
+          <Package className="h-5 w-5 text-muted-foreground" />
           <span className="text-sm text-muted-foreground group-hover:text-foreground flex-1">Ajustar inventario y umbrales de alerta manuales</span>
           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-all group-hover:translate-x-0.5" />
         </a>

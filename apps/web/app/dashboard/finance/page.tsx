@@ -1,12 +1,12 @@
-import { DollarSign, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { DollarSign, ArrowRight, CheckCircle2, TrendingUp, PieChart, Bot, CreditCard, Receipt, Building2, BarChart2 } from 'lucide-react'
 
 const FEATURES = [
-  { icon: '💸', label: 'Seguimiento de ingresos (Ventas) y egresos (Compras, Gastos logísticos)' },
-  { icon: '📊', label: 'Cálculo de rentabilidad por producto, categoría y canal' },
-  { icon: '🤖', label: 'IA: Análisis de salud financiera y alertas de márgenes decrecientes' },
-  { icon: '💳', label: 'Conciliación de cobros de Mercado Libre y pasarelas de pago' },
-  { icon: '📝', label: 'Control de gastos fijos y variables recurrentes' },
-  { icon: '🏦', label: 'Múltiples cajas y cuentas bancarias' },
+  { icon: TrendingUp, label: 'Seguimiento de ingresos (Ventas) y egresos (Compras, Gastos logísticos)' },
+  { icon: PieChart, label: 'Cálculo de rentabilidad por producto, categoría y canal' },
+  { icon: Bot, label: 'IA: Análisis de salud financiera y alertas de márgenes decrecientes' },
+  { icon: CreditCard, label: 'Conciliación de cobros de Mercado Libre y pasarelas de pago' },
+  { icon: Receipt, label: 'Control de gastos fijos y variables recurrentes' },
+  { icon: Building2, label: 'Múltiples cajas y cuentas bancarias' },
 ]
 
 export default function FinancePage() {
@@ -29,8 +29,8 @@ export default function FinancePage() {
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0 text-2xl">
-            📈
+          <div className="h-12 w-12 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
+            <TrendingUp className="h-6 w-6 text-emerald-500" />
           </div>
           <div>
             <p className="font-semibold text-foreground">Conoce tu margen neto real con precisión.</p>
@@ -50,7 +50,7 @@ export default function FinancePage() {
         <div className="space-y-2">
           {FEATURES.map(f => (
             <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <span className="text-lg shrink-0">{f.icon}</span>
+              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
               <p className="text-sm text-muted-foreground">{f.label}</p>
             </div>
           ))}
@@ -61,7 +61,7 @@ export default function FinancePage() {
         <p className="text-sm font-semibold mb-3">Mientras tanto, mide tu desempeño de ingresos en:</p>
         <a href="/dashboard/metrics"
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group">
-          <span className="text-lg">📊</span>
+          <BarChart2 className="h-5 w-5 text-muted-foreground" />
           <span className="text-sm text-muted-foreground group-hover:text-foreground flex-1">Ver panel de analítica de ventas históricas</span>
           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-all group-hover:translate-x-0.5" />
         </a>

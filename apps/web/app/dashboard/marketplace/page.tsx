@@ -1,14 +1,14 @@
-import { Store, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { Store, ArrowRight, CheckCircle2, ShoppingBag, Target, LineChart, Bot, Image as ImageIcon, AlertTriangle, Ruler, RefreshCw, ShoppingCart, Link as LinkIcon } from 'lucide-react'
 
 const FEATURES = [
-  { icon: '🏪', label: 'Gestión de publicaciones MeLi: crear, editar, pausar, activar' },
-  { icon: '🎯', label: 'Central de ofertas: descuentos y campañas de precio' },
-  { icon: '📊', label: 'Reglas automáticas de precio y stock sincronizado con tu inventario' },
-  { icon: '🤖', label: 'Agente IA: optimizador de títulos, descripción y keywords' },
-  { icon: '📸', label: 'Gestión de fotos desde tu galería Media' },
-  { icon: '⚠️', label: 'Monitor de infracciones y moderación MeLi' },
-  { icon: '📐', label: 'Guías de talles y atributos por categoría MeLi' },
-  { icon: '🔄', label: 'Sync bidireccional: cambios en catálogo → actualización automática en MeLi' },
+  { icon: ShoppingBag, label: 'Gestión de publicaciones MeLi: crear, editar, pausar, activar' },
+  { icon: Target, label: 'Central de ofertas: descuentos y campañas de precio' },
+  { icon: LineChart, label: 'Reglas automáticas de precio y stock sincronizado con tu inventario' },
+  { icon: Bot, label: 'Agente IA: optimizador de títulos, descripción y keywords' },
+  { icon: ImageIcon, label: 'Gestión de fotos desde tu galería Media' },
+  { icon: AlertTriangle, label: 'Monitor de infracciones y moderación MeLi' },
+  { icon: Ruler, label: 'Guías de talles y atributos por categoría MeLi' },
+  { icon: RefreshCw, label: 'Sync bidireccional: cambios en catálogo → actualización automática en MeLi' },
 ]
 
 export default function MarketplacePage() {
@@ -31,8 +31,8 @@ export default function MarketplacePage() {
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-yellow-400/15 border border-yellow-400/25 flex items-center justify-center shrink-0 text-2xl">
-            🛒
+          <div className="h-12 w-12 rounded-xl bg-yellow-400/15 border border-yellow-400/25 flex items-center justify-center shrink-0">
+            <ShoppingCart className="h-6 w-6 text-yellow-500" />
           </div>
           <div>
             <p className="font-semibold text-foreground">MeLi conectado — gestión de listings próximamente</p>
@@ -52,7 +52,7 @@ export default function MarketplacePage() {
         <div className="space-y-2">
           {FEATURES.map(f => (
             <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <span className="text-lg shrink-0">{f.icon}</span>
+              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
               <p className="text-sm text-muted-foreground">{f.label}</p>
             </div>
           ))}
@@ -63,7 +63,7 @@ export default function MarketplacePage() {
         <p className="text-sm font-semibold mb-3">Mientras tanto, tu integración MeLi está activa en:</p>
         <a href="/dashboard/integrations"
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group">
-          <span className="text-lg">🔗</span>
+          <LinkIcon className="h-5 w-5 text-muted-foreground" />
           <span className="text-sm text-muted-foreground group-hover:text-foreground flex-1">Ver estado de integración Mercado Libre</span>
           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-all group-hover:translate-x-0.5" />
         </a>
