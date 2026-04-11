@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { createClient } from '@/utils/supabase/client'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -187,9 +189,15 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
         <CardTitle className="text-xl">Añadir Producto</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <Tabs defaultValue="general" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-4">
+            <TabsTrigger value="general">1. Información General</TabsTrigger>
+            <TabsTrigger value="variants">2. Variantes e Inventario</TabsTrigger>
+          </TabsList>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
+          <TabsContent value="general" className="space-y-4 mt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
             <Label>Nombre del Producto *</Label>
             <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Zapatillas Pro V2" />
           </div>
@@ -232,28 +240,37 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
             </div>
           </div>
         </div>
+        </TabsContent>
 
-        {/* Variantes */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label>Variantes ({variants.length})</Label>
-            <Button type="button" size="sm" variant="outline" onClick={addVariant} className="h-7 text-xs gap-1">
-              <Plus className="h-3 w-3" /> Añadir variante
-            </Button>
+        <TabsContent value="variants" className="space-y-4 mt-2">
+        <div className="flex items-center justify-between bg-muted/20 p-3 rounded-lg border border-border/50">
+          <div className="space-y-0.5">
+            <Label className="text-base">Variantes de Producto</Label>
+            <p className="text-xs text-muted-foreground mr-4">Agrega tallas, colores y gestiona el inventario ({variants.length} en total)</p>
           </div>
+          <Button type="button" size="sm" variant="secondary" onClick={addVariant} className="h-8 text-xs gap-1.5 flex-shrink-0">
+            <Plus className="h-3.5 w-3.5" /> Añadir variante
+          </Button>
+        </div>
 
+        <Accordion type="multiple" defaultValue={["item-0"]} className="w-full space-y-3">
           {variants.map((v, vIdx) => (
-            <div key={vIdx} className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Variante {vIdx + 1} — {variantLabel(v)}
-                </span>
-                {variants.length > 1 && (
-                  <button type="button" onClick={() => removeVariant(vIdx)} className="text-muted-foreground hover:text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
+            <AccordionItem key={vIdx} value={`item-${vIdx}`} className="border border-border/60 bg-card rounded-lg px-4 shadow-sm overflow-hidden data-[state=open]:border-primary/30">
+              <AccordionTrigger className="hover:no-underline py-4">
+                <div className="flex items-center gap-3 text-left">
+                  <span className="text-sm font-semibold">{v.sku || `Variante ${vIdx + 1}`}</span>
+                  <span className="text-xs text-muted-foreground hidden sm:inline-block">— {variantLabel(v)}</span>
+                  {v.price > 0 && <span className="text-[10px] font-medium border border-primary/20 text-primary px-2 py-0.5 rounded-full bg-primary/5">${v.price}</span>}
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-5 space-y-5 border-t border-border/30 mt-1">
+                <div className="flex justify-end p-0 m-0">
+                  {variants.length > 1 && (
+                    <button type="button" onClick={() => removeVariant(vIdx)} className="text-muted-foreground hover:text-destructive flex items-center gap-1.5 text-xs font-medium -mt-2 bg-destructive/5 px-2 py-1 rounded">
+                      <Trash2 className="h-3.5 w-3.5" /> Eliminar
+                    </button>
+                  )}
+                </div>
 
               {/* Atributos */}
               <div className="space-y-1">
@@ -367,17 +384,22 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                     <label className="text-[10px] text-muted-foreground uppercase">Alto (cm)</label>
                     <Input type="number" step="0.01" value={v.height_cm} onChange={e => updateVariantField(vIdx, 'height_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
                   </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </AccordionContent>
+            </AccordionItem>
           ))}
+        </Accordion>
+        </TabsContent>
+        </Tabs>
+
+        {error && <p className="text-xs text-red-500 font-medium px-1 bg-red-500/10 p-2 rounded">{error}</p>}
+
+        <div className="pt-4 mt-2 border-t border-border">
+            <Button type="button" onClick={handleSubmit} disabled={submitting} className="w-full sm:w-auto sm:min-w-[200px]">
+              {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : 'Guardar Producto'}
+            </Button>
         </div>
-
-        {error && <p className="text-xs text-red-400">{error}</p>}
-
-        <Button type="button" onClick={handleSubmit} disabled={submitting} className="w-full">
-          {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : 'Guardar producto'}
-        </Button>
       </CardContent>
     </Card>
   )
