@@ -35,6 +35,7 @@ type Props = {
   canWrite: boolean
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
+  addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
 }
 
@@ -58,7 +59,7 @@ function fmtPrice(vars: Variation[]): string {
 
 export default function CatalogTable({
   products, catMap, canWrite,
-  editProductAction, editVariationAction, deactivateProductAction,
+  editProductAction, editVariationAction, addVariationAction, deactivateProductAction,
 }: Props) {
   const [search, setSearch]           = useState('')
   const [viewMode, setViewMode]       = useState<'list' | 'grid'>('list')
@@ -291,6 +292,23 @@ export default function CatalogTable({
                                       </td>
                                     </tr>
                                   ))}
+                                  {canWrite && (
+                                    <tr className="bg-muted/5">
+                                      <td colSpan={4} className="px-3 py-2">
+                                        <form action={addVariationAction} className="flex items-center gap-2">
+                                          <input type="hidden" name="product_id" value={p.id} />
+                                          <div className="flex-1 flex gap-2">
+                                            <Input name="attr_key" placeholder="Atr. (ej: Tamaño)" className="h-7 text-xs flex-1" required />
+                                            <Input name="attr_val" placeholder="Valor (ej: 50ml)" className="h-7 text-xs flex-1" required />
+                                            <Input name="sku" placeholder="SKU (opcional)" className="h-7 text-xs w-24" />
+                                          </div>
+                                          <Input name="price" type="number" step="0.01" min="0.01" placeholder="Precio ($)" className="h-7 text-xs w-24 text-center" required />
+                                          <Input name="stock" type="number" min="0" placeholder="Stock (u.)" className="h-7 text-xs w-16 text-center" required />
+                                          <Button type="submit" size="sm" variant="outline" className="h-7 text-xs px-3">Añadir</Button>
+                                        </form>
+                                      </td>
+                                    </tr>
+                                  )}
                                 </tbody>
                               </table>
                             </div>
@@ -480,6 +498,21 @@ export default function CatalogTable({
                           <Button type="submit" size="sm" className="h-6 text-[10px] px-2 shrink-0">✓</Button>
                         </form>
                       ))}
+                      {canWrite && (
+                        <form action={addVariationAction} className="flex flex-col gap-1.5 pt-1 mt-1 border-t border-border/40">
+                          <input type="hidden" name="product_id" value={p.id} />
+                          <div className="flex items-center gap-1.5">
+                            <Input name="attr_key" placeholder="Atr. (ej: Tam)" className="h-6 text-[10px] flex-1 px-1.5" required />
+                            <Input name="attr_val" placeholder="Val (ej: 50ml)" className="h-6 text-[10px] flex-1 px-1.5" required />
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Input name="sku" placeholder="SKU (opc)" className="h-6 text-[10px] flex-1 px-1.5" />
+                            <Input name="price" type="number" step="0.01" min="0.01" placeholder="Precio" className="h-6 text-[10px] w-14 text-center px-1" required />
+                            <Input name="stock" type="number" min="0" placeholder="Stock" className="h-6 text-[10px] w-14 text-center px-1" required />
+                            <Button type="submit" size="sm" variant="secondary" className="h-6 text-[10px] px-2 shrink-0">+</Button>
+                          </div>
+                        </form>
+                      )}
                       {canWrite && (
                         <form action={deactivateProductAction} className="pt-1">
                           <input type="hidden" name="product_id" value={p.id} />
