@@ -114,7 +114,7 @@ export default async function CatalogPage() {
                 <p className="text-sm font-semibold flex items-center gap-1.5"><Plus className="h-4 w-4" /> Nuevo producto</p>
               </div>
               <div className="p-5">
-                <CatalogForm apiUrl={API_URL} categories={platformCategories} />
+                <CatalogForm apiUrl={API_URL} categories={platformCategories} tenantId={tenantId ?? ''} />
               </div>
             </div>
           </div>
