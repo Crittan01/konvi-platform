@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Trash2, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Loader2, Upload, Image as ImageIcon, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,7 +15,7 @@ interface VariantDraft {
   sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''; stock: number;
   weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''; image_url: string;
 }
-interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[] }
+interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
   sku: '', attrs: [{ key: 'Talla', value: '' }], price: 0, compare_at_price: '', stock: 0,
@@ -38,9 +38,11 @@ function variantLabel(v: VariantDraft): string {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [] }: Props) {
+export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [], tenantId }: Props) {
   const [platformCategoryId, setPlatformCategoryId] = useState('')
   const [coverImageUrl, setCoverImageUrl] = useState('')
+  const [uploadingCover, setUploadingCover] = useState(false)
+  const [uploadingVariantIdx, setUploadingVariantIdx] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [variants, setVariants] = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
@@ -61,6 +63,38 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
 
   const updateVariantField = (idx: number, field: keyof VariantDraft, val: any) =>
     setVariants(prev => prev.map((v, i) => i === idx ? { ...v, [field]: val } : v))
+
+  // ── Upload ──────────────────────────────────────────────────────────────────
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>, variantIdx?: number) {
+    const file = e.target.files?.[0]
+    if (!file || !tenantId) return
+
+    const isCover = variantIdx === undefined
+    if (isCover) setUploadingCover(true)
+    else setUploadingVariantIdx(variantIdx)
+    setError(null)
+
+    try {
+      const ext = file.name.split('.').pop()
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const path = `${tenantId}/${filename}`
+      const supabase = createClient()
+      const { error: uploadError } = await supabase.storage.from('tenant-media').upload(path, file)
+      if (uploadError) throw new Error(uploadError.message)
+      const { data } = supabase.storage.from('tenant-media').getPublicUrl(path)
+
+      if (isCover) {
+        setCoverImageUrl(data.publicUrl)
+      } else {
+        updateVariantField(variantIdx, 'image_url', data.publicUrl)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al subir imagen')
+    } finally {
+      if (isCover) setUploadingCover(false)
+      else setUploadingVariantIdx(null)
+    }
+  }
 
   const addAttr = (vIdx: number) =>
     setVariants(prev => prev.map((v, i) =>
@@ -178,8 +212,25 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
         </div>
 
         <div className="space-y-2">
-          <Label>URL de Imagen Principal (Cover)</Label>
-          <Input value={coverImageUrl} onChange={e => setCoverImageUrl(e.target.value)} placeholder="https://..." className="font-mono text-xs" />
+          <Label>Imagen Principal</Label>
+          <div className="flex items-center gap-3">
+            {coverImageUrl ? (
+              <div className="relative h-16 w-16 border border-border rounded-lg bg-muted overflow-hidden flex-shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={coverImageUrl} alt="Cover" className="object-cover w-full h-full" />
+                <button type="button" onClick={() => setCoverImageUrl('')} className="absolute top-1 right-1 bg-black/60 text-white p-0.5 rounded-full hover:bg-black">
+                  <Plus className="h-3 w-3 rotate-45" />
+                </button>
+              </div>
+            ) : null}
+            <div className="relative overflow-hidden inline-block">
+              <input type="file" accept="image/*" onChange={handleFileUpload} disabled={uploadingCover} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+              <Button type="button" variant="outline" disabled={uploadingCover} className="gap-2 h-9 text-sm">
+                {uploadingCover ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploadingCover ? 'Subiendo...' : 'Subir Foto'}
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* Variantes */}
@@ -279,23 +330,43 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                 </div>
               </div>
 
-              {/* Dimensiones - Ocultables o colapsadas */}
-              <div className="grid grid-cols-4 gap-3 bg-background/50 p-2 rounded border border-border/50">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase">Peso (kg)</label>
-                  <Input type="number" step="0.001" value={v.weight_kg} onChange={e => updateVariantField(vIdx, 'weight_kg', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
+              {/* Opciones Avanzadas (Dimensiones e Imagen Variante) */}
+              <div className="space-y-3 bg-muted/40 p-3 rounded-lg border border-border/40">
+                <div className="flex items-center gap-2">
+                  <div className="relative overflow-hidden inline-block">
+                    <input type="file" accept="image/*" onChange={e => handleFileUpload(e, vIdx)} disabled={uploadingVariantIdx === vIdx} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+                    <Button type="button" variant="secondary" size="sm" disabled={uploadingVariantIdx === vIdx} className="h-7 text-xs gap-1.5 px-2">
+                      {uploadingVariantIdx === vIdx ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
+                      Foto Variante
+                    </Button>
+                  </div>
+                  {v.image_url && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background px-2 py-1 rounded border">
+                      <Check className="h-3 w-3 text-green-500" /> Adjunta
+                      <button type="button" onClick={() => updateVariantField(vIdx, 'image_url', '')} className="text-secondary-foreground hover:text-destructive shrink-0 ml-1">
+                        <Plus className="h-3 w-3 rotate-45" />
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase">Largo (cm)</label>
-                  <Input type="number" step="0.01" value={v.length_cm} onChange={e => updateVariantField(vIdx, 'length_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase">Ancho (cm)</label>
-                  <Input type="number" step="0.01" value={v.width_cm} onChange={e => updateVariantField(vIdx, 'width_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase">Alto (cm)</label>
-                  <Input type="number" step="0.01" value={v.height_cm} onChange={e => updateVariantField(vIdx, 'height_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
+
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-muted-foreground uppercase">Peso (kg)</label>
+                    <Input type="number" step="0.001" value={v.weight_kg} onChange={e => updateVariantField(vIdx, 'weight_kg', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-muted-foreground uppercase">Largo (cm)</label>
+                    <Input type="number" step="0.01" value={v.length_cm} onChange={e => updateVariantField(vIdx, 'length_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-muted-foreground uppercase">Ancho (cm)</label>
+                    <Input type="number" step="0.01" value={v.width_cm} onChange={e => updateVariantField(vIdx, 'width_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-muted-foreground uppercase">Alto (cm)</label>
+                    <Input type="number" step="0.01" value={v.height_cm} onChange={e => updateVariantField(vIdx, 'height_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
+                  </div>
                 </div>
               </div>
             </div>
