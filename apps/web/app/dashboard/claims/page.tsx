@@ -2,15 +2,16 @@ import { createClient } from '@/utils/supabase/server'
 import {
   AlertCircle, ArrowRight, CheckCircle2, Clock,
   MessageSquare, ShoppingCart, TrendingDown,
+  ClipboardList, Zap, BarChart2, Bot, BellRing, DollarSign
 } from 'lucide-react'
 
 const FEATURES = [
-  { icon: '📋', label: 'Registro de reclamos MeLi y WhatsApp en un solo lugar' },
-  { icon: '⚡', label: 'Clasificación automática por IA: devolución, daño, demora, fraude' },
-  { icon: '📊', label: 'Dashboard de tasa de reclamos por categoría y producto' },
-  { icon: '🤖', label: 'Respuestas sugeridas por IA basadas en tu política de devoluciones (KB)' },
-  { icon: '🔔', label: 'Alertas automáticas antes del vencimiento del plazo MeLi' },
-  { icon: '💰', label: 'Cálculo de impacto financiero por reclamo' },
+  { icon: ClipboardList, label: 'Registro de reclamos MeLi y WhatsApp en un solo lugar' },
+  { icon: Zap, label: 'Clasificación automática por IA: devolución, daño, demora, fraude' },
+  { icon: BarChart2, label: 'Dashboard de tasa de reclamos por categoría y producto' },
+  { icon: Bot, label: 'Respuestas sugeridas por IA basadas en tu política de devoluciones (KB)' },
+  { icon: BellRing, label: 'Alertas automáticas antes del vencimiento del plazo MeLi' },
+  { icon: DollarSign, label: 'Cálculo de impacto financiero por reclamo' },
 ]
 
 export default async function ClaimsPage() {
@@ -63,7 +64,7 @@ export default async function ClaimsPage() {
         <div className="space-y-2">
           {FEATURES.map(f => (
             <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <span className="text-lg shrink-0">{f.icon}</span>
+              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
               <p className="text-sm text-muted-foreground">{f.label}</p>
             </div>
           ))}
