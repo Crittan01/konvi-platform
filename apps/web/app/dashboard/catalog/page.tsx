@@ -58,6 +58,36 @@ export default async function CatalogPage() {
     revalidatePath('/dashboard/catalog')
   }
 
+  async function addVariation(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const price = parseFloat(formData.get('price') as string)
+    const stock = parseInt(formData.get('stock') as string)
+    const sku = (formData.get('sku') as string) || null
+    const attrKey = formData.get('attr_key') as string
+    const attrVal = formData.get('attr_val') as string
+    
+    if (isNaN(price) || price <= 0 || isNaN(stock) || stock < 0) return
+
+    let attributes = null
+    if (attrKey && attrVal) {
+      attributes = { [attrKey.trim()]: attrVal.trim() }
+    }
+
+    await sb.from('product_variations').insert({
+      tenant_id: m.tenant_id,
+      product_id: formData.get('product_id') as string,
+      sku,
+      price,
+      stock_quantity: stock,
+      attributes
+    })
+    revalidatePath('/dashboard/catalog')
+  }
+
   async function editVariation(formData: FormData) {
     'use server'
     const sb = createClient()
@@ -154,6 +184,7 @@ export default async function CatalogPage() {
             canWrite={canWrite}
             editProductAction={editProduct}
             editVariationAction={editVariation}
+            addVariationAction={addVariation}
             deactivateProductAction={deactivateProduct}
           />
         </div>
