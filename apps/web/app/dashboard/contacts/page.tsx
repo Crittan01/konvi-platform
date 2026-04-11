@@ -230,7 +230,7 @@ export default async function ContactsPage({
                           {c.consent_given ? (
                             <span className="flex items-center gap-1 text-[11px] text-emerald-400">
                               <ShieldCheck className="h-3 w-3" /> Consent.{' '}
-                              {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-MX')}</span>}
+                              {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-CO')}</span>}
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -243,7 +243,7 @@ export default async function ContactsPage({
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground shrink-0">
-                      {new Date(c.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
+                      {new Date(c.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
                     </p>
                   </div>
 

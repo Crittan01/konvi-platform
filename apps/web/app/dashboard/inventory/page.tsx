@@ -271,7 +271,7 @@ export default async function InventoryPage() {
                     </div>
                     <p className="text-muted-foreground truncate">{m.reason ?? 'Sin motivo'}</p>
                     <p className="text-muted-foreground/60 text-[10px]">
-                      {new Date(m.created_at).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(m.created_at).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 ))}

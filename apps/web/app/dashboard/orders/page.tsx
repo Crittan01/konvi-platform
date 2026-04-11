@@ -253,7 +253,7 @@ export default async function OrdersPage({
                           <span className="text-xs font-mono text-muted-foreground">#...{o.id.slice(-8)}</span>
                           <span className="text-xs text-muted-foreground flex items-center gap-0.5">
                             <Clock className="h-3 w-3" />
-                            {new Date(o.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            {new Date(o.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </span>
                         </div>
                         {/* Contacto */}

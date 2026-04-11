@@ -248,7 +248,7 @@ export default async function KnowledgeBasePage({
                         <p className="font-medium text-sm">{doc.title}</p>
                         <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">{doc.content}</p>
                         <p className="text-[11px] text-muted-foreground/70 mt-2">
-                          Actualizado: {new Date(doc.updated_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          Actualizado: {new Date(doc.updated_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </p>
                       </div>
 

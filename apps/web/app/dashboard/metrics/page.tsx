@@ -148,7 +148,7 @@ export default async function MetricsPage({
           },
           {
             icon: ShoppingCart, label: 'Pedidos', value: orders.length, color: 'text-emerald-400',
-            sub: `$${totalRevenue.toLocaleString('es-MX', { minimumFractionDigits: 0 })} en ventas`,
+            sub: `$${totalRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })} en ventas`,
           },
           {
             icon: Package, label: 'Contactos / Prods.', value: contacts.length, color: 'text-violet-400',
@@ -170,7 +170,7 @@ export default async function MetricsPage({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Tasa conversión', value: `${conversionRate}%`, note: 'Conv. → Pedido', icon: '📈' },
-          { label: 'Ingresos confirmados', value: `$${deliveredRevenue.toLocaleString('es-MX', { minimumFractionDigits: 0 })}`, note: 'Pedidos entregados', icon: '✅' },
+          { label: 'Ingresos confirmados', value: `$${deliveredRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}`, note: 'Pedidos entregados', icon: '✅' },
           { label: '% Inbound', value: messages.length > 0 ? `${Math.round((inboundMessages / messages.length) * 100)}%` : '—', note: 'del los mensajes', icon: '📥' },
           { label: 'Pedidos cancelados', value: (ordersByStatus['cancelled'] ?? 0).toString(), note: 'en el período', icon: '❌' },
         ].map(k => (
@@ -224,7 +224,7 @@ export default async function MetricsPage({
               <div className="pt-2 border-t border-border flex justify-between items-center">
                 <span className="text-xs text-muted-foreground">Ingresos confirmados</span>
                 <span className="font-bold text-primary text-sm">
-                  ${deliveredRevenue.toLocaleString('es-MX', { minimumFractionDigits: 0 })}
+                  ${deliveredRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                 </span>
               </div>
             </div>
@@ -253,7 +253,7 @@ export default async function MetricsPage({
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-sm font-semibold">{data.quantity} uds.</p>
-                    <p className="text-xs text-muted-foreground">${data.revenue.toLocaleString('es-MX', { minimumFractionDigits: 0 })}</p>
+                    <p className="text-xs text-muted-foreground">${data.revenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</p>
                   </div>
                 </div>
               ))}

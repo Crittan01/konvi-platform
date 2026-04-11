@@ -217,7 +217,7 @@ export default async function SettingsPage() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground ml-9 mt-0.5">
-                  Desde {new Date(m.joined_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  Desde {new Date(m.joined_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
                 </p>
               </div>
 

@@ -51,7 +51,7 @@ function fmtPrice(vars: Variation[]): string {
   const prices = vars.map(v => v.price)
   const min = Math.min(...prices)
   const max = Math.max(...prices)
-  const locale = (n: number) => n.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  const locale = (n: number) => n.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
   return min === max ? `$${locale(min)}` : `$${locale(min)} – $${locale(max)}`
 }
 

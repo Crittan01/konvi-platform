@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     created_at: string; user_email: string | null; action: string;
     entity_type: string; entity_id: string | null; payload: unknown
   }) => [
-    new Date(r.created_at).toLocaleString('es-MX'),
+    new Date(r.created_at).toLocaleString('es-CO'),
     r.user_email ?? '',
     r.action,
     ENTITY_LABELS[r.entity_type] ?? r.entity_type,
