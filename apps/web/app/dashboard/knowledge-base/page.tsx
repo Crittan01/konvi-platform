@@ -3,14 +3,14 @@ import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { BookOpen, Search, BrainCircuit } from 'lucide-react'
+import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine } from 'lucide-react'
 
 const CATEGORIES = [
-  { value: 'faq',      label: 'FAQ',          emoji: '❓' },
-  { value: 'politica', label: 'Políticas',    emoji: '📜' },
-  { value: 'negocio',  label: 'Negocio',      emoji: '🏢' },
-  { value: 'producto', label: 'Productos',    emoji: '📦' },
-  { value: 'general',  label: 'General',      emoji: '📝' },
+  { value: 'faq',      label: 'FAQ',          icon: HelpCircle },
+  { value: 'politica', label: 'Políticas',    icon: FileText },
+  { value: 'negocio',  label: 'Negocio',      icon: Building2 },
+  { value: 'producto', label: 'Productos',    icon: Package },
+  { value: 'general',  label: 'General',      icon: StickyNote },
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -151,18 +151,22 @@ export default async function KnowledgeBasePage({
         </form>
         {/* Filtros de categoría — scrollable */}
         <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-          {[{ value: '', label: 'Todas', emoji: '🔍' }, ...CATEGORIES].map(opt => (
-            <a key={opt.value}
-              href={`/dashboard/knowledge-base?cat=${opt.value}${q ? `&q=${encodeURIComponent(q)}` : ''}`}
-              className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                cat === opt.value
-                  ? 'bg-primary/15 text-primary border-primary/40'
-                  : 'border-border text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {opt.emoji} {opt.label}
-            </a>
-          ))}
+          {[{ value: '', label: 'Todas', icon: Search }, ...CATEGORIES].map(opt => {
+            const Icon = opt.icon
+            return (
+              <a key={opt.value}
+                href={`/dashboard/knowledge-base?cat=${opt.value}${q ? `&q=${encodeURIComponent(q)}` : ''}`}
+                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  cat === opt.value
+                    ? 'bg-primary/15 text-primary border-primary/40'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {opt.label}
+              </a>
+            )
+          })}
         </div>
       </div>
 
@@ -173,7 +177,7 @@ export default async function KnowledgeBasePage({
         {canWrite && (
           <div className="xl:col-span-1">
             <div className="rounded-xl border border-border bg-card p-5 sticky top-4">
-              <h2 className="font-semibold text-base mb-4">✍️ Nuevo documento</h2>
+              <h2 className="font-semibold text-base mb-4 flex items-center gap-2"><PenLine className="h-4 w-4" /> Nuevo documento</h2>
               <form action={createDocument} className="space-y-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Título *</Label>
@@ -184,7 +188,7 @@ export default async function KnowledgeBasePage({
                   <select name="category"
                     className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
                     {CATEGORIES.map(c => (
-                      <option key={c.value} value={c.value}>{c.emoji} {c.label}</option>
+                      <option key={c.value} value={c.value}>{c.label}</option>
                     ))}
                   </select>
                 </div>
@@ -231,8 +235,9 @@ export default async function KnowledgeBasePage({
                       <div className="flex-1 min-w-0">
                         {/* Categoría + estado */}
                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category] ?? 'bg-muted text-muted-foreground'}`}>
-                            {catInfo?.emoji} {catInfo?.label ?? doc.category}
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category] ?? 'bg-muted text-muted-foreground'}`}>
+                            {catInfo?.icon && <catInfo.icon className="h-3 w-3 shrink-0" />}
+                            {catInfo?.label ?? doc.category}
                           </span>
                           {!doc.is_active && (
                             <span className="text-[11px] text-muted-foreground border border-border rounded-full px-2 py-0.5">
