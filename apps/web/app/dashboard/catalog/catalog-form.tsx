@@ -11,10 +11,16 @@ import { createClient } from '@/utils/supabase/client'
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface Attr { key: string; value: string }
-interface VariantDraft { attrs: Attr[]; price: number; stock: number }
-interface Props { apiUrl: string; onCreated?: () => void }
+interface VariantDraft {
+  sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''; stock: number;
+  weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''; image_url: string;
+}
+interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[] }
 
-const DEFAULT_VARIANT: VariantDraft = { attrs: [{ key: 'Talla', value: '' }], price: 0, stock: 0 }
+const DEFAULT_VARIANT: VariantDraft = {
+  sku: '', attrs: [{ key: 'Talla', value: '' }], price: 0, compare_at_price: '', stock: 0,
+  weight_kg: '', length_cm: '', width_cm: '', height_cm: '', image_url: ''
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,7 +38,9 @@ function variantLabel(v: VariantDraft): string {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
+export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [] }: Props) {
+  const [platformCategoryId, setPlatformCategoryId] = useState('')
+  const [coverImageUrl, setCoverImageUrl] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [variants, setVariants] = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
@@ -43,7 +51,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
 
   const addVariant = () => setVariants(prev => [
     ...prev,
-    { attrs: [{ key: 'Talla', value: '' }], price: 0, stock: 0 },
+    { ...DEFAULT_VARIANT },
   ])
 
   const removeVariant = (idx: number) => {
@@ -51,7 +59,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
     setVariants(prev => prev.filter((_, i) => i !== idx))
   }
 
-  const updateVariantField = (idx: number, field: 'price' | 'stock', val: number) =>
+  const updateVariantField = (idx: number, field: keyof VariantDraft, val: any) =>
     setVariants(prev => prev.map((v, i) => i === idx ? { ...v, [field]: val } : v))
 
   const addAttr = (vIdx: number) =>
@@ -92,8 +100,10 @@ export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
         .from('products')
         .insert({
           tenant_id: meta.tenant_id,
+          platform_category_id: platformCategoryId || null,
           title: title.trim(),
           description: description.trim() || null,
+          cover_image_url: coverImageUrl.trim() || null,
           status: 'active',
         })
         .select()
@@ -105,9 +115,16 @@ export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
       const variationsPayload = variants.map(v => ({
         product_id: prod.id,
         tenant_id: meta.tenant_id,
+        sku: v.sku.trim(),
         price: v.price,
+        compare_at_price: v.compare_at_price === '' ? null : v.compare_at_price,
         stock_quantity: v.stock,
         attributes: attrsToObj(v.attrs),
+        weight_kg: v.weight_kg === '' ? null : v.weight_kg,
+        length_cm: v.length_cm === '' ? null : v.length_cm,
+        width_cm: v.width_cm === '' ? null : v.width_cm,
+        height_cm: v.height_cm === '' ? null : v.height_cm,
+        image_url: v.image_url.trim() || null,
       }))
 
       const { error: varErr } = await supabase
@@ -137,14 +154,32 @@ export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
       </CardHeader>
       <CardContent className="space-y-4">
 
-        <div className="space-y-2">
-          <Label>Nombre *</Label>
-          <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Zapatillas Pro V2" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Nombre del Producto *</Label>
+            <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Zapatillas Pro V2" />
+          </div>
+          <div className="space-y-2">
+            <Label>Categoría Global</Label>
+            <select
+              value={platformCategoryId}
+              onChange={e => setPlatformCategoryId(e.target.value)}
+              className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background"
+            >
+              <option value="">-- Seleccionar Categoría --</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
         </div>
 
         <div className="space-y-2">
           <Label>Descripción</Label>
           <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Breve descripción..." />
+        </div>
+
+        <div className="space-y-2">
+          <Label>URL de Imagen Principal (Cover)</Label>
+          <Input value={coverImageUrl} onChange={e => setCoverImageUrl(e.target.value)} placeholder="https://..." className="font-mono text-xs" />
         </div>
 
         {/* Variantes */}
@@ -202,25 +237,65 @@ export default function CatalogForm({ apiUrl, onCreated = () => {} }: Props) {
                 </button>
               </div>
 
-              {/* Precio y stock */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-0.5">
-                  <label className="text-xs text-muted-foreground">Precio ($)</label>
+              {/* Pricing, SKU y Configuración de Stock */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase">SKU *</label>
+                  <Input
+                    value={v.sku}
+                    onChange={e => updateVariantField(vIdx, 'sku', e.target.value.toUpperCase())}
+                    className="h-8 text-xs font-mono"
+                    placeholder="PROD-001"
+                    maxLength={50}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio ($) *</label>
                   <Input
                     type="number" step="0.01" min="0.01"
                     value={v.price || ''}
                     onChange={e => updateVariantField(vIdx, 'price', parseFloat(e.target.value) || 0)}
-                    className="h-7 text-xs"
+                    className="h-8 text-xs"
                   />
                 </div>
-                <div className="space-y-0.5">
-                  <label className="text-xs text-muted-foreground">Stock</label>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Lista ($)</label>
+                  <Input
+                    type="number" step="0.01" min="0.01"
+                    value={v.compare_at_price}
+                    onChange={e => updateVariantField(vIdx, 'compare_at_price', parseFloat(e.target.value) || '')}
+                    className="h-8 text-xs placeholder:text-muted-foreground/50"
+                    placeholder="Oferta"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Inventario</label>
                   <Input
                     type="number" min="0"
                     value={v.stock}
                     onChange={e => updateVariantField(vIdx, 'stock', parseInt(e.target.value) || 0)}
-                    className="h-7 text-xs"
+                    className="h-8 text-xs"
                   />
+                </div>
+              </div>
+
+              {/* Dimensiones - Ocultables o colapsadas */}
+              <div className="grid grid-cols-4 gap-3 bg-background/50 p-2 rounded border border-border/50">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground uppercase">Peso (kg)</label>
+                  <Input type="number" step="0.001" value={v.weight_kg} onChange={e => updateVariantField(vIdx, 'weight_kg', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground uppercase">Largo (cm)</label>
+                  <Input type="number" step="0.01" value={v.length_cm} onChange={e => updateVariantField(vIdx, 'length_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground uppercase">Ancho (cm)</label>
+                  <Input type="number" step="0.01" value={v.width_cm} onChange={e => updateVariantField(vIdx, 'width_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground uppercase">Alto (cm)</label>
+                  <Input type="number" step="0.01" value={v.height_cm} onChange={e => updateVariantField(vIdx, 'height_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs" />
                 </div>
               </div>
             </div>

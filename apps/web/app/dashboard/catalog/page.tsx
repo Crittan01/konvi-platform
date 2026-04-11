@@ -30,6 +30,10 @@ export default async function CatalogPage() {
   const role = meta.role ?? 'agent'
   const canWrite = role === 'owner' || role === 'manager'
 
+  let platformCategories: { id: string, name: string }[] = []
+  const { data: cats } = await supabase.from('platform_categories').select('id, name').eq('is_active', true).order('name')
+  platformCategories = (cats as { id: string, name: string }[]) || []
+
   let products: Product[] = []
   if (tenantId) {
     const { data } = await supabase
@@ -110,7 +114,7 @@ export default async function CatalogPage() {
                 <p className="text-sm font-semibold flex items-center gap-1.5"><Plus className="h-4 w-4" /> Nuevo producto</p>
               </div>
               <div className="p-5">
-                <CatalogForm apiUrl={API_URL} />
+                <CatalogForm apiUrl={API_URL} categories={platformCategories} />
               </div>
             </div>
           </div>
