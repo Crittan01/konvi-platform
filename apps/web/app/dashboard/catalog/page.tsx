@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ShoppingBag, Package, ChevronDown, Plus } from 'lucide-react'
 import CatalogForm from './catalog-form'
+import MassImporter from './mass-importer'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
@@ -106,10 +107,10 @@ export default async function CatalogPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
 
-        {/* Formulario multi-variante */}
+        {/* Formulario multi-variante e Importador Masivo */}
         {canWrite && (
-          <div className="xl:col-span-1">
-            <div className="rounded-xl border border-border bg-card overflow-hidden sticky top-4">
+          <div className="xl:col-span-1 space-y-5">
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="px-5 py-4 border-b border-border bg-muted/20">
                 <p className="text-sm font-semibold flex items-center gap-1.5"><Plus className="h-4 w-4" /> Nuevo producto</p>
               </div>
@@ -117,6 +118,8 @@ export default async function CatalogPage() {
                 <CatalogForm apiUrl={API_URL} categories={platformCategories} tenantId={tenantId ?? ''} />
               </div>
             </div>
+
+            <MassImporter categories={platformCategories} tenantId={tenantId ?? ''} />
           </div>
         )}
 
