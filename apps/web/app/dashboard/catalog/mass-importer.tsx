@@ -18,30 +18,77 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const HEADERS = [
-    "SKU_Variante (Obligatorio)", 
-    "Nombre_Producto", 
-    "Descripcion", 
-    "Imagen_Leyenda_URL", 
-    "Variante_Atributo_1 (Ej: Talla)", 
-    "Variante_Valor_1 (Ej: L)", 
-    "Precio ($)", 
-    "Precio_Lista ($)", 
-    "Inventario", 
-    "Peso (kg)", "Largo (cm)", "Ancho (cm)", "Alto (cm)", "Variante_Foto_URL"
+  // Columnas amigables y su ancho en caracteres
+  const COLUMNS: { label: string; key: string; width: number }[] = [
+    { label: 'SKU (Obligatorio)',           key: 'sku',        width: 22 },
+    { label: 'Nombre del Producto',         key: 'nombre',     width: 30 },
+    { label: 'Descripción',                key: 'desc',       width: 40 },
+    { label: 'Imagen Portada (URL)',        key: 'imgProd',    width: 35 },
+    { label: 'Tipo de Variante (Ej: Talla)', key: 'attrKey',  width: 25 },
+    { label: 'Valor Variante (Ej: L)',      key: 'attrVal',    width: 22 },
+    { label: 'Precio de Venta ($)',         key: 'precio',     width: 20 },
+    { label: 'Precio Tachado / Lista ($)',  key: 'precioLista', width: 26 },
+    { label: 'Cantidad en Stock',           key: 'stock',      width: 20 },
+    { label: 'Peso en kilos (kg)',          key: 'peso',       width: 20 },
+    { label: 'Largo del empaque (cm)',      key: 'largo',      width: 22 },
+    { label: 'Ancho del empaque (cm)',      key: 'ancho',      width: 22 },
+    { label: 'Alto del empaque (cm)',       key: 'alto',       width: 22 },
+    { label: 'Foto de esta Variante (URL)', key: 'imgVar',     width: 30 },
   ]
 
   const handleDownloadTemplate = () => {
-    if (!selectedCat) { setError("Selecciona una categoría primero para la plantilla."); return }
+    if (!selectedCat) { setError('Selecciona una categoría primero para la plantilla.'); return }
     setError(null)
     setSuccess(null)
     const catName = categories.find(c => c.id === selectedCat)?.name || 'General'
-    const ws = XLSX.utils.aoa_to_sheet([HEADERS,
-      ["VAR-EJEMPLO-01", "Zapatillas Comfort", "Unas zapatillas", "", "Color", "Rojo", 599.99, 799.00, 10, 0.5, 30, 20, 10, ""]
-    ])
-    // Estilos muy básicos, XLSX libre es limitado pero el UX de dar la tabla es gigante
+
+    // --- Construir celdas manualmente para poder aplicar estilos ---
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Plantilla")
+    const ws: XLSX.WorkSheet = {}
+
+    // Estilo de cabecera
+    const headerStyle = {
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Arial' },
+      fill: { fgColor: { rgb: '4338CA' }, patternType: 'solid' as const },
+      alignment: { horizontal: 'center' as const, vertical: 'center' as const, wrapText: true },
+      border: {
+        bottom: { style: 'medium', color: { rgb: '6D28D9' } },
+        right:  { style: 'thin',   color: { rgb: '6D28D9' } },
+      }
+    }
+
+    // Estilo de fila de ejemplo
+    const exampleStyle = {
+      font: { color: { rgb: '6B7280' }, sz: 10, italic: true },
+      fill: { fgColor: { rgb: 'F3F4F6' }, patternType: 'solid' as const },
+      alignment: { horizontal: 'left' as const }
+    }
+
+    const exampleRow = [
+      'VAR-ZAP-001-ROJO', 'Zapatillas Comfort Pro', 'Zapatilla deportiva premium para hombre y mujer',
+      '', 'Color', 'Rojo', 599.99, 799.00, 10, 0.65, 32, 18, 12, ''
+    ]
+
+    COLUMNS.forEach((col, i) => {
+      const cellRef  = XLSX.utils.encode_cell({ r: 0, c: i })
+      const exRef    = XLSX.utils.encode_cell({ r: 1, c: i })
+      ws[cellRef] = { v: col.label, t: 's', s: headerStyle }
+      ws[exRef]   = { v: exampleRow[i], t: typeof exampleRow[i] === 'number' ? 'n' : 's', s: exampleStyle }
+    })
+
+    // Rango de la hoja
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 1, c: COLUMNS.length - 1 } })
+
+    // Anchos de columna
+    ws['!cols'] = COLUMNS.map(c => ({ wch: c.width }))
+
+    // Altura de la fila de encabezado
+    ws['!rows'] = [{ hpt: 36 }, { hpt: 20 }]
+
+    // Congelar primera fila
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+
+    XLSX.utils.book_append_sheet(wb, ws, catName.substring(0, 31))
     XLSX.writeFile(wb, `Plantilla_${catName.replace(/[^a-z0-9]/gi, '_')}.xlsx`)
   }
 
@@ -61,33 +108,33 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
 
       if (rows.length === 0) throw new Error("El archivo está vacío o mal formateado.")
 
-      // Agrupamos filas por Nombre_Producto para saber qué son Variantes de un mismo producto
+      // Agrupamos filas por Nombre del Producto para saber qué son Variantes del mismo
       const productsMap: Record<string, { desc: string, img: string, variants: any[] }> = {}
       for (const row of rows) {
-        const pName = row["Nombre_Producto"]?.toString().trim()
-        const sku = row["SKU_Variante (Obligatorio)"]?.toString().trim()
+        const pName = row['Nombre del Producto']?.toString().trim()
+        const sku = row['SKU (Obligatorio)']?.toString().trim()
         if (!pName || !sku) continue
 
         if (!productsMap[pName]) {
           productsMap[pName] = {
-            desc: row["Descripcion"]?.toString().trim(),
-            img: row["Imagen_Leyenda_URL"]?.toString().trim(),
+            desc: row['Descripción']?.toString().trim(),
+            img: row['Imagen Portada (URL)']?.toString().trim(),
             variants: []
           }
         }
         
         productsMap[pName].variants.push({
           sku: sku,
-          attrKey: row["Variante_Atributo_1 (Ej: Talla)"]?.toString().trim() || "Genérico",
-          attrVal: row["Variante_Valor_1 (Ej: L)"]?.toString().trim() || "Estándar",
-          price: parseFloat(row["Precio ($)"]) || 0,
-          compare: parseFloat(row["Precio_Lista ($)"]) || null,
-          stock: parseInt(row["Inventario"]) || 0,
-          weight: parseFloat(row["Peso (kg)"]) || null,
-          length: parseFloat(row["Largo (cm)"]) || null,
-          width: parseFloat(row["Ancho (cm)"]) || null,
-          height: parseFloat(row["Alto (cm)"]) || null,
-          vImg: row["Variante_Foto_URL"]?.toString().trim() || null
+          attrKey: row['Tipo de Variante (Ej: Talla)']?.toString().trim() || 'Genérico',
+          attrVal: row['Valor Variante (Ej: L)']?.toString().trim() || 'Estándar',
+          price: parseFloat(row['Precio de Venta ($)']) || 0,
+          compare: parseFloat(row['Precio Tachado / Lista ($)']) || null,
+          stock: parseInt(row['Cantidad en Stock']) || 0,
+          weight: parseFloat(row['Peso en kilos (kg)']) || null,
+          length: parseFloat(row['Largo del empaque (cm)']) || null,
+          width: parseFloat(row['Ancho del empaque (cm)']) || null,
+          height: parseFloat(row['Alto del empaque (cm)']) || null,
+          vImg: row['Foto de esta Variante (URL)']?.toString().trim() || null
         })
       }
 

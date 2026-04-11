@@ -105,14 +105,15 @@ export default async function CatalogPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
 
-        {/* Formulario multi-variante e Importador Masivo */}
+        {/* Panel izquierdo: Formulario + Importador Masivo */}
         {canWrite && (
-          <div className="xl:col-span-1 space-y-5">
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="px-5 py-4 border-b border-border bg-muted/20">
-                <p className="text-sm font-semibold flex items-center gap-1.5"><Plus className="h-4 w-4" /> Nuevo producto</p>
+          <div className="xl:col-span-2 space-y-5">
+            <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+              <div className="px-5 py-4 border-b border-border bg-muted/30 flex items-center gap-2">
+                <Plus className="h-4 w-4 text-primary" />
+                <p className="text-sm font-semibold">Nuevo Producto</p>
               </div>
               <div className="p-5">
                 <CatalogForm apiUrl={API_URL} categories={platformCategories} tenantId={tenantId ?? ''} />
@@ -123,14 +124,30 @@ export default async function CatalogPage() {
           </div>
         )}
 
-        {/* Lista de productos */}
-        <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
+        {/* Panel derecho: Lista de productos */}
+        <div className={canWrite ? 'xl:col-span-3' : 'xl:col-span-5'}>
           {products.length === 0 ? (
-            <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
-              <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground text-sm font-medium">El catálogo está vacío.</p>
+            <div className="flex flex-col items-center justify-center h-full min-h-[400px] rounded-xl border border-dashed border-border/60 bg-muted/10 text-center px-8 py-12 gap-4">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Package className="h-8 w-8 text-primary/60" />
+              </div>
+              <div className="space-y-1.5">
+                <p className="font-semibold text-foreground">Tu catálogo está listo para crecer</p>
+                <p className="text-sm text-muted-foreground max-w-xs mx-auto leading-relaxed">
+                  {canWrite
+                    ? 'Agrega tu primer producto manualmente o importa una lista completa desde Excel.'
+                    : 'Aún no hay productos en este catálogo.'}
+                </p>
+              </div>
               {canWrite && (
-                <p className="text-xs text-muted-foreground mt-1">Agrega productos para que la IA pueda venderlos por WhatsApp.</p>
+                <div className="flex flex-col sm:flex-row gap-2 text-xs text-muted-foreground mt-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/60 border border-border">
+                    <span className="font-bold text-primary">1</span> Llena el formulario a la izquierda
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/60 border border-border">
+                    <span className="font-bold text-primary">2</span> O importa un Excel con cientos de productos
+                  </span>
+                </div>
               )}
             </div>
           ) : (
