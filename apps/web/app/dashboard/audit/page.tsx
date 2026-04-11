@@ -171,8 +171,8 @@ export default async function AuditPage({
                 className="px-4 py-3 flex flex-col sm:flex-row gap-1.5 sm:gap-4 items-start hover:bg-muted/20 transition-colors">
                 {/* Timestamp */}
                 <div className="shrink-0 sm:w-32 text-[11px] text-muted-foreground font-mono pt-0.5">
-                  {new Date(entry.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
-                  {' '}{new Date(entry.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                  {new Date(entry.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
+                  {' '}{new Date(entry.created_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
                 </div>
                 {/* Contenido */}
                 <div className="flex-1 min-w-0 space-y-1">
