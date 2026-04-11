@@ -147,21 +147,39 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
       // Procesamos secuencialmente producto por producto
       for (const pName of pNames) {
         const prodData = productsMap[pName]
-        // 1. Inyectamos Producto Base
-        const { data: prodResp, error: prodErr } = await supabase.from('products').insert({
-          tenant_id: tenantId,
-          title: pName,
-          description: prodData.desc || null,
-          cover_image_url: prodData.img || null,
-          platform_category_id: selectedCat,
-          status: 'active'
-        }).select().single()
+        let productId: string
 
-        if (prodErr || !prodResp) throw new Error(prodErr?.message || "Error insertando producto " + pName)
+        // 1. Check if base product already exists by title
+        const { data: existingProd, error: findErr } = await supabase
+          .from('products')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('title', pName)
+          .limit(1)
+          .single()
 
-        // 2. Inyectamos Variantes
-        const varsToInsert = prodData.variants.map((v: any) => ({
-          product_id: prodResp.id,
+        if (existingProd) {
+          productId = existingProd.id
+          // Optional: Update existing product details? Let's leave them or update status to active
+          await supabase.from('products').update({ status: 'active' }).eq('id', productId)
+        } else {
+          // Inyectamos Nuevo Producto Base
+          const { data: prodResp, error: prodErr } = await supabase.from('products').insert({
+            tenant_id: tenantId,
+            title: pName,
+            description: prodData.desc || null,
+            cover_image_url: prodData.img || null,
+            platform_category_id: selectedCat,
+            status: 'active'
+          }).select().single()
+
+          if (prodErr || !prodResp) throw new Error(prodErr?.message || "Error insertando producto " + pName)
+          productId = prodResp.id
+        }
+
+        // 2. Inyectamos / Upsertamos Variantes
+        const varsToUpsert = prodData.variants.map((v: any) => ({
+          product_id: productId,
           tenant_id: tenantId,
           sku: v.sku,
           price: v.price > 0 ? v.price : 1, // safety fallback prevent RLS crash
@@ -175,15 +193,18 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
           image_url: v.vImg
         }))
 
-        const { error: varErr } = await supabase.from('product_variations').insert(varsToInsert)
+        // Usamos upsert basado en onConflict (tenant_id y sku deben ser unique en DB uc_tenant_sku)
+        const { error: varErr } = await supabase.from('product_variations').upsert(varsToUpsert, {
+          onConflict: 'tenant_id, sku'
+        })
+
         if (varErr) {
-          // Fallback delete of base product is recommended in real systems but omitted for simplicity
-          throw new Error(`Fallo insertando variantes de ${pName}: ${varErr.message}`)
+          throw new Error(`Fallo guardando variantes de ${pName}: ${varErr.message}`)
         }
-        totalVars += varsToInsert.length
+        totalVars += varsToUpsert.length
       }
 
-      setSuccess(`¡Importación exitosa! Se cargaron ${pNames.length} productos con un total de ${totalVars} variantes.`)
+      setSuccess(`¡Importación exitosa! Se procesaron ${pNames.length} productos con ${totalVars} variantes.`)
       
       // Pequeño timeout antes de recargar la interfaz para que vean el éxito
       setTimeout(() => {
