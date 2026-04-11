@@ -2,7 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Package, Clock, ChevronRight, Plus } from 'lucide-react'
+import { Package, Clock, ChevronRight, Plus, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList } from 'lucide-react'
 import OrdersNewForm from './orders-new-form'
 import Link from 'next/link'
 import AiInsightPanel from '@/components/ai-insight-panel'
@@ -46,13 +46,14 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled:  'bg-red-500/15 text-red-400 border-red-500/30',
 }
 
-const STATUS_ICONS: Record<string, string> = {
-  pending:    '⏳',
-  confirmed:  '✅',
-  processing: '⚙️',
-  shipped:    '📦',
-  delivered:  '🏁',
-  cancelled:  '❌',
+const STATUS_ICONS: Record<string, React.ElementType> = {
+  all:        LayoutList,
+  pending:    Hourglass,
+  confirmed:  CheckCircle2,
+  processing: Settings2,
+  shipped:    Package,
+  delivered:  MapPin,
+  cancelled:  X,
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
@@ -192,7 +193,10 @@ export default async function OrdersPage({
                 : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
             }`}
           >
-            {STATUS_ICONS[s] ?? '🔘'}
+            {(() => {
+              const Icon = STATUS_ICONS[s] ?? LayoutList
+              return <Icon className="h-4 w-4 mr-1.5 opacity-70 shrink-0" />
+            })()}
             <span>{s === 'all' ? 'Todos' : STATUS_LABELS[s]}</span>
             {counts[s] !== undefined && counts[s] > 0 && (
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
@@ -268,8 +272,12 @@ export default async function OrdersPage({
                       </div>
                       {/* Status + Total */}
                       <div className="text-right shrink-0 space-y-1">
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${colorClass}`}>
-                          {STATUS_ICONS[o.status]} {STATUS_LABELS[o.status] ?? o.status}
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${colorClass}`}>
+                          {(() => {
+                            const Icon = STATUS_ICONS[o.status] ?? LayoutList
+                            return <Icon className="h-3.5 w-3.5 shrink-0" />
+                          })()}
+                          <span>{STATUS_LABELS[o.status] ?? o.status}</span>
                         </span>
                         <p className="font-bold text-primary text-base">
                           ${revenue.toFixed(2)}
