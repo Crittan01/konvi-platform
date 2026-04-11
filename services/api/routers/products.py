@@ -33,26 +33,44 @@ router = APIRouter(tags=["Products"])
 # ─── Modelos Pydantic ──────────────────────────────────────────────────────────
 
 class VariationCreate(BaseModel):
+    sku: str = Field(..., min_length=1, max_length=100)
     price: float = Field(..., gt=0)
+    compare_at_price: Optional[float] = Field(default=None, ge=0)
     stock_quantity: int = Field(default=0, ge=0)
     attributes: dict = Field(default={"default": "Standard"})
+    weight_kg: Optional[float] = Field(default=None, ge=0)
+    length_cm: Optional[float] = Field(default=None, ge=0)
+    width_cm: Optional[float] = Field(default=None, ge=0)
+    height_cm: Optional[float] = Field(default=None, ge=0)
+    image_url: Optional[str] = None
 
 
 class ProductCreate(BaseModel):
+    platform_category_id: Optional[str] = None
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    cover_image_url: Optional[str] = None
     variation: VariationCreate
 
 
 class ProductPatch(BaseModel):
+    platform_category_id: Optional[str] = None
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
+    cover_image_url: Optional[str] = None
 
 
 class VariationPatch(BaseModel):
+    sku: Optional[str] = Field(default=None, min_length=1, max_length=100)
     price: Optional[float] = Field(default=None, gt=0)
+    compare_at_price: Optional[float] = Field(default=None, ge=0)
     stock_quantity: Optional[int] = Field(default=None, ge=0)
     attributes: Optional[dict] = None
+    weight_kg: Optional[float] = Field(default=None, ge=0)
+    length_cm: Optional[float] = Field(default=None, ge=0)
+    width_cm: Optional[float] = Field(default=None, ge=0)
+    height_cm: Optional[float] = Field(default=None, ge=0)
+    image_url: Optional[str] = None
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -69,7 +87,7 @@ async def list_products(
     try:
         query = (
             supabase.table("products")
-            .select("id, title, description, status, created_at, product_variations(id, price, stock_quantity, attributes)")
+            .select("id, title, description, status, platform_category_id, cover_image_url, created_at, product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("tenant_id", tenant_id)
             .order("title")
             .limit(limit)
@@ -96,8 +114,10 @@ async def create_product(
     try:
         prod_result = supabase.table("products").insert({
             "tenant_id": tenant_id,
+            "platform_category_id": product.platform_category_id,
             "title": product.title,
             "description": product.description,
+            "cover_image_url": product.cover_image_url,
             "status": "active",
         }).execute()
 
@@ -109,9 +129,16 @@ async def create_product(
         var_result = supabase.table("product_variations").insert({
             "product_id": prod["id"],
             "tenant_id": tenant_id,
+            "sku": product.variation.sku,
             "price": product.variation.price,
+            "compare_at_price": product.variation.compare_at_price,
             "stock_quantity": product.variation.stock_quantity,
             "attributes": product.variation.attributes,
+            "weight_kg": product.variation.weight_kg,
+            "length_cm": product.variation.length_cm,
+            "width_cm": product.variation.width_cm,
+            "height_cm": product.variation.height_cm,
+            "image_url": product.variation.image_url,
         }).execute()
 
         prod["product_variations"] = var_result.data or []
@@ -133,7 +160,7 @@ async def get_product(
     try:
         result = (
             supabase.table("products")
-            .select("id, title, description, status, created_at, product_variations(id, price, stock_quantity, attributes)")
+            .select("id, title, description, status, platform_category_id, cover_image_url, created_at, product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("id", product_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -256,9 +283,16 @@ async def add_variation(
         result = supabase.table("product_variations").insert({
             "product_id": product_id,
             "tenant_id": tenant_id,
+            "sku": variation.sku,
             "price": variation.price,
+            "compare_at_price": variation.compare_at_price,
             "stock_quantity": variation.stock_quantity,
             "attributes": variation.attributes,
+            "weight_kg": variation.weight_kg,
+            "length_cm": variation.length_cm,
+            "width_cm": variation.width_cm,
+            "height_cm": variation.height_cm,
+            "image_url": variation.image_url,
         }).execute()
 
         if not result.data:
