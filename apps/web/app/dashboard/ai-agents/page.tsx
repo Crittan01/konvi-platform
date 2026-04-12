@@ -92,17 +92,17 @@ export default async function AiAgentsPage() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="role_description">Directrices de Comportamiento (Prompt Maestro)</Label>
+          <Label htmlFor="role_description" className="text-base font-semibold">Directrices de Comportamiento (Prompt Maestro)</Label>
           <Textarea 
             id="role_description" 
             name="role_description" 
             defaultValue={agent.role_description} 
-            className="min-h-[120px]"
+            className="min-h-[350px] font-mono text-sm leading-relaxed"
             placeholder="Escribe cómo debe interactuar el bot... Ej: Eres muy formal y nunca das descuentos."
             readOnly={!canWrite}
           />
           <p className="text-xs text-muted-foreground">
-            Instrucciones explícitas de actuación. Define su actitud, manejo de disputas y forma de hablar.
+            Instrucciones explícitas de actuación. Define su actitud, manejo de disputas y forma de hablar. Cuanto más detallado sea el prompt, más exacto será su comportamiento.
           </p>
         </div>
 
