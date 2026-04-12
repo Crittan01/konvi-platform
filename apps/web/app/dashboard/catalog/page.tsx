@@ -1,9 +1,10 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { ShoppingBag, Package, Tag } from 'lucide-react'
-import CatalogForm from './catalog-form'
-import MassImporter from './mass-importer'
-import CatalogTable from './catalog-table'
+import CatalogForm from './_components/catalog-form'
+import MassImporter from './_components/mass-importer'
+import CatalogTable from './_components/catalog-table'
+import type { Product } from './types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
@@ -25,9 +26,6 @@ export default async function CatalogPage() {
   const catMap = Object.fromEntries(platformCategories.map(c => [c.id, c.name]))
 
   // Products
-  type Variation = { id: string; sku: string | null; price: number; stock_quantity: number; attributes: Record<string, string> | null }
-  type Product   = { id: string; title: string; description: string | null; cover_image_url: string | null; platform_category_id: string | null; product_variations: Variation[] }
-
   let products: Product[] = []
   if (tenantId) {
     const { data } = await supabase
