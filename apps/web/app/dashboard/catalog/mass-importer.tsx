@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
 import { Download, Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,8 +25,8 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     { label: 'Descripción',                key: 'desc',       width: 40 },
     { label: 'Tipo de Variante (Ej: Talla)', key: 'attrKey',  width: 25 },
     { label: 'Valor Variante (Ej: L)',      key: 'attrVal',    width: 22 },
-    { label: 'Precio de Venta ($)',         key: 'precio',     width: 20 },
-    { label: 'Precio Tachado / Lista ($)',  key: 'precioLista', width: 26 },
+    { label: 'Precio Normal ($)',           key: 'precioNormal', width: 22 },
+    { label: 'Precio Promocional ($)',      key: 'precioPromo',  width: 26 },
     { label: 'Cantidad en Stock',           key: 'stock',      width: 20 },
     { label: 'Peso en kilos (kg)',          key: 'peso',       width: 20 },
     { label: 'Largo del empaque (cm)',      key: 'largo',      width: 22 },
@@ -64,7 +64,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
 
     const exampleRow = [
       'VAR-ZAP-001-ROJO', 'Zapatillas Comfort Pro', 'Zapatilla deportiva premium para hombre y mujer',
-      'Color', 'Rojo', 599.99, 799.00, 10, 0.65, 32, 18, 12
+      'Color', 'Rojo', 120000, 85000, 10, 0.65, 32, 18, 12
     ]
 
     COLUMNS.forEach((col, i) => {
@@ -125,8 +125,8 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
           sku: sku,
           attrKey: row['Tipo de Variante (Ej: Talla)']?.toString().trim() || 'Genérico',
           attrVal: row['Valor Variante (Ej: L)']?.toString().trim() || 'Estándar',
-          price: parseFloat(row['Precio de Venta ($)']) || 0,
-          compare: parseFloat(row['Precio Tachado / Lista ($)']) || null,
+          pNormal: parseFloat(row['Precio Normal ($)']) || 0,
+          pPromo: parseFloat(row['Precio Promocional ($)']) || null,
           stock: parseInt(row['Cantidad en Stock']) || 0,
           weight: parseFloat(row['Peso en kilos (kg)']) || null,
           length: parseFloat(row['Largo del empaque (cm)']) || null,
@@ -176,20 +176,30 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
         }
 
         // 2. Inyectamos / Upsertamos Variantes
-        const varsToUpsert = prodData.variants.map((v: any) => ({
-          product_id: productId,
-          tenant_id: tenantId,
-          sku: v.sku,
-          price: v.price > 0 ? v.price : 1, // safety fallback prevent RLS crash
-          compare_at_price: v.compare,
-          stock_quantity: v.stock,
-          attributes: { [v.attrKey]: v.attrVal },
-          weight_kg: v.weight,
-          length_cm: v.length,
-          width_cm: v.width,
-          height_cm: v.height,
-          image_url: v.vImg
-        }))
+        const varsToUpsert = prodData.variants.map((v: any) => {
+          let price = v.pNormal > 0 ? v.pNormal : 1;
+          let compare_at_price = null;
+          
+          if (v.pPromo && v.pPromo > 0) {
+            price = v.pPromo;
+            compare_at_price = v.pNormal;
+          }
+
+          return {
+            product_id: productId,
+            tenant_id: tenantId,
+            sku: v.sku,
+            price: price,
+            compare_at_price: compare_at_price,
+            stock_quantity: v.stock,
+            attributes: { [v.attrKey]: v.attrVal },
+            weight_kg: v.weight,
+            length_cm: v.length,
+            width_cm: v.width,
+            height_cm: v.height,
+            image_url: v.vImg
+          }
+        })
 
         // Usamos upsert basado en onConflict (tenant_id y sku deben ser unique en DB uc_tenant_sku)
         const { error: varErr } = await supabase.from('product_variations').upsert(varsToUpsert, {
