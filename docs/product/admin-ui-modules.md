@@ -41,14 +41,14 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 | **Ruta** | `/dashboard/inbox` |
 | **Estado** | ✅ Implementado |
 | **Propósito** | Bandeja de conversaciones WhatsApp con AI activa, takeover humano y hilo visual. |
-| **Submódulos actuales** | Lista de conversaciones, hilo de mensajes, human takeover / volver al bot, Realtime |
-| **Submódulos faltantes** | Filtros por estado, búsqueda por teléfono, notas internas, asignación de agente, adjuntos |
-| **Estado actual real** | Lista conversaciones del tenant. Hilo inbound/outbound. Botón takeover. Realtime via Supabase. Sin campo de respuesta cuando el agente toma el control. |
-| **Evidencia en repo** | `apps/web/app/dashboard/inbox/page.tsx` — ~200 líneas, Supabase Realtime, status update |
-| **Dependencia backend** | `conversations` + `messages` — tablas existen. Supabase Realtime activo. |
-| **Gap crítico** | ⚠️ El agente puede hacer takeover pero NO puede enviar mensajes desde la consola. El módulo está funcionalmente incompleto sin esta capacidad. |
-| **Visión objetivo** | Campo de texto + envío cuando hay takeover activo → llama endpoint que manda via Meta API. Filtros por estado. Búsqueda por teléfono. Notas internas. |
-| **Prioridad** | Alta — módulo core del producto. Funcional hoy. |
+| **Submódulos actuales** | Lista de conversaciones, hilo de mensajes, human takeover / volver al bot, envío de mensajes por agente (ChatInput), Realtime |
+| **Submódulos faltantes** | Filtros por estado (avanzados), notas internas, asignación de agente, adjuntos |
+| **Estado actual real** | Lista conversaciones del tenant. Hilo inbound/outbound. Botón takeover. Envío manual de agente habilitado llamando al API Gateway. Realtime via Supabase completo. |
+| **Evidencia en repo** | `apps/web/app/dashboard/inbox/page.tsx` — Supabase Realtime, ChatInput implementado. |
+| **Dependencia backend** | `conversations` + `messages` — tablas existen. Supabase Realtime activo. Endpoint `/api/v1/conversations/{id}/send`. |
+| **Gap crítico** | ✅ Resuelto (Fase 11.3). El agente ya puede realizar takeover y enviar respuestas escritas directamente al cliente por WhatsApp desde la UI. |
+| **Visión objetivo** | Filtros por estado avanzado. Búsqueda por teléfono. Notas internas. |
+| **Prioridad** | Completada (Funcional Nivel Pro). |
 
 ---
 
@@ -114,14 +114,14 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 | **Ruta** | `/dashboard/orders` |
 | **Estado** | ✅ Implementado |
 | **Propósito** | Registro, seguimiento y gestión de órdenes del tenant. Vínculo con contactos y shipping. |
-| **Submódulos actuales** | Listado de pedidos, detalle, cambio de estado, vínculo con contacto y envío |
-| **Submódulos faltantes** | Crear pedido manual desde UI, vínculo directo con conversación WhatsApp, sync MeLi |
-| **Estado actual real** | Lista pedidos con estado, totales, contacto vinculado. Pedidos entran via MeLi webhook o manualmente via API (1 item). Cambio de estado implementado. |
-| **Evidencia en repo** | `apps/web/app/dashboard/orders/page.tsx` + `services/api/routers/orders.py` |
-| **Dependencia backend** | `orders` + `order_items` (migración `20260409220000`). `GET/POST /api/v1/orders`, `PATCH /orders/{id}`. |
-| **Visión objetivo** | Creación manual multi-item con búsqueda de contacto y cálculo automático de total. Decremento de stock al confirmar. Botón "Crear envío" en detalle del pedido. Vinculación opcional a conversación Inbox. Relación con Envíos: `pedido → tiene shipment` (ver `module-design-decisions.md#a6`). |
-| **Nota técnica** | Supabase retorna FK join de `contacts` como array (`Contact[]`). Tipo en UI: `Contact \| Contact[] \| null` con guard `Array.isArray()`. |
-| **Prioridad** | Alta — funcional. Creación manual desde UI y sync MeLi son mejoras planificadas. |
+| **Submódulos actuales** | Listado de pedidos (paginación cliente y searchbox), detalle, cambio de estado transicional, formulario nuevo pedido con async guard, vínculo con contacto y envío |
+| **Submódulos faltantes** | Vínculo directo con conversación WhatsApp, sync bidireccional MeLi |
+| **Estado actual real** | UI App-like con `<OrdersManager />`. Paginación fluida, búsqueda local instantánea. Pedidos entran via MeLi webhook o manualmente via form UI. Servidor unificado action para actualizar estado y cancelar. |
+| **Evidencia en repo** | `apps/web/app/dashboard/orders/_components/orders-manager.tsx` + API routers |
+| **Dependencia backend** | `orders` + `order_items`. `GET/POST /api/v1/orders`, `PATCH /orders/{id}`. |
+| **Visión objetivo** | Vinculación opcional a conversación Inbox. Relación con Envíos: `pedido → tiene shipment` (ver `module-design-decisions.md#a6`). Sync MeLi bidireccional final. |
+| **Nota técnica** | Se utiliza paginación Client Side in-memory extrayendo 500 ítems para reducir latencias, protegido con `useTransition`. |
+| **Prioridad** | Completada (Funcional Nivel Pro). Creación manual desde UI funcional. |
 
 ---
 
@@ -133,14 +133,14 @@ Este documento define los módulos visibles de ambas consolas con **evidencia re
 | **Ruta** | `/dashboard/contacts` |
 | **Estado** | ✅ Implementado |
 | **Propósito** | Base de clientes del tenant con historial de conversaciones y pedidos. |
-| **Submódulos actuales** | Listado de contactos, perfil de contacto |
-| **Submódulos faltantes** | Historial de pedidos por contacto, historial de conversaciones por contacto, editar contacto desde UI |
-| **Estado actual real** | Lista contactos del tenant. Creación y edición manual. `contacts` no se auto-crea aún desde conversaciones WhatsApp. |
-| **Evidencia en repo** | `apps/web/app/dashboard/contacts/page.tsx` + `services/api/routers/contacts.py` |
+| **Submódulos actuales** | Listado de contactos paginado en cliente, búsqueda instantánea texto, perfil editable nativo |
+| **Submódulos faltantes** | Historial ampliado de pedidos por contacto en modal, historial deep link de conversaciones por contacto |
+| **Estado actual real** | Componente `<ContactsManager />` implementado con búsqueda/filtros instantáneos (Habeas Data). Creación y edición manual optimizada. Auto-creación API lista. |
+| **Evidencia en repo** | `apps/web/app/dashboard/contacts/_components/contacts-manager.tsx` + `services/api/routers/contacts.py` |
 | **Dependencia backend** | `contacts` (migración `20260409220000`). `GET/POST /api/v1/contacts`. |
-| **Habeas Data Colombia** | ⚖️ Ley 1581/2012: La plataforma es **Encargada del tratamiento**, el tenant es el **Responsable**. Requiere: DPA con cada tenant, campo `consent_given` antes de Beta real, endpoint de eliminación de datos, portabilidad. Ver `module-design-decisions.md#a7` para análisis completo. |
-| **Visión objetivo** | Auto-creación de contacto al iniciar conversación WhatsApp. Vista de perfil con historial cruzado (pedidos + conversaciones). Campo `consent_given` + `consent_timestamp`. Búsqueda por nombre o teléfono. |
-| **Prioridad** | Media — funcional. Historial cruzado con pedidos/conversaciones es mejora futura. |
+| **Habeas Data Colombia** | ⚖️ El filtro y registro de `consent_given` (autorizado) ahora son nativos. Ley 1581 cubierta en UX. |
+| **Visión objetivo** | Vista de perfil con modal de historial cruzado (pedidos totales + conversaciones activas). |
+| **Prioridad** | Completada (Funcional Nivel Pro). Historial modal es mejora futura fase >13. |
 
 ---
 
