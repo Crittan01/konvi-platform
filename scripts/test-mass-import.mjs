@@ -45,7 +45,7 @@ function transformRows(rows) {
 
     productsMap[pName].variants.push({
       sku,
-      attrKey: row['Tipo de Variante (Ej: Talla)']?.toString().trim() || 'Genérico',
+      attrKey: row['Atributo Variante (Ej: Color)']?.toString().trim() || 'Genérico',
       attrVal: row['Valor Variante (Ej: L)']?.toString().trim() || 'Estándar',
       pNormal, pPromo,
       stock:  parseInt(row['Cantidad en Stock']) || 0,
@@ -169,7 +169,7 @@ const TEST_ROWS = [
     'SKU (Obligatorio)': 'TEST-SIMPLE-001',
     'Nombre del Producto': '[TEST] Audífonos Básicos',
     'Descripción': 'Audífonos on-ear de entrada',
-    'Tipo de Variante (Ej: Talla)': '',
+    'Atributo Variante (Ej: Color)': '',
     'Valor Variante (Ej: L)': '',
     'Precio Normal ($)': 89000,
     'Precio Promocional ($)': '',
@@ -182,7 +182,7 @@ const TEST_ROWS = [
     'SKU (Obligatorio)': 'TEST-PROMO-001',
     'Nombre del Producto': '[TEST] Cargador Rápido 65W',
     'Descripción': 'Cargador GaN PD 65W',
-    'Tipo de Variante (Ej: Talla)': '',
+    'Atributo Variante (Ej: Color)': '',
     'Valor Variante (Ej: L)': '',
     'Precio Normal ($)': 120000,
     'Precio Promocional ($)': 85000,   // ← debe invertirse: price=85000, compare=120000
@@ -195,7 +195,7 @@ const TEST_ROWS = [
     'SKU (Obligatorio)': 'TEST-MULTI-BLK',
     'Nombre del Producto': '[TEST] Cable USB-C 2m',
     'Descripción': 'Cable trenzado nylon USB-C a USB-C',
-    'Tipo de Variante (Ej: Talla)': 'Color',
+    'Atributo Variante (Ej: Color)': 'Color',
     'Valor Variante (Ej: L)': 'Negro',
     'Precio Normal ($)': 35000,
     'Precio Promocional ($)': '',
@@ -206,7 +206,7 @@ const TEST_ROWS = [
     'SKU (Obligatorio)': 'TEST-MULTI-WHT',
     'Nombre del Producto': '[TEST] Cable USB-C 2m',  // mismo nombre → misma variante
     'Descripción': '',
-    'Tipo de Variante (Ej: Talla)': 'Color',
+    'Atributo Variante (Ej: Color)': 'Color',
     'Valor Variante (Ej: L)': 'Blanco',
     'Precio Normal ($)': 35000,
     'Precio Promocional ($)': '',
@@ -217,7 +217,7 @@ const TEST_ROWS = [
     'SKU (Obligatorio)': 'TEST-MULTI-RED',
     'Nombre del Producto': '[TEST] Cable USB-C 2m',
     'Descripción': '',
-    'Tipo de Variante (Ej: Talla)': 'Color',
+    'Atributo Variante (Ej: Color)': 'Color',
     'Valor Variante (Ej: L)': 'Rojo',
     'Precio Normal ($)': 35000,
     'Precio Promocional ($)': '',
@@ -232,7 +232,7 @@ const TEST_ROWS = [
     'Precio Normal ($)': 50000,
     'Cantidad en Stock': 5,
     'Precio Promocional ($)': '', 'Descripción': '',
-    'Tipo de Variante (Ej: Talla)': '', 'Valor Variante (Ej: L)': '',
+    'Atributo Variante (Ej: Color)': '', 'Valor Variante (Ej: L)': '',
     'Peso en kilos (kg)': '', 'Largo del empaque (cm)': '', 'Ancho del empaque (cm)': '', 'Alto del empaque (cm)': ''
   },
 
@@ -241,7 +241,7 @@ const TEST_ROWS = [
     'SKU (Obligatorio)': 'TEST-NOPROMO-001',
     'Nombre del Producto': '[TEST] Hub USB 4 Puertos',
     'Descripción': 'Hub activo 4×USB-A 3.0',
-    'Tipo de Variante (Ej: Talla)': '',
+    'Atributo Variante (Ej: Color)': '',
     'Valor Variante (Ej: L)': '',
     'Precio Normal ($)': 65000,
     'Precio Promocional ($)': 70000,   // ← pPromo > pNormal: debe ignorarse

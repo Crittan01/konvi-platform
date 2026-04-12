@@ -206,7 +206,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Tipo</label>
-                  <Input name="attr_key" placeholder="Ej: Talla" className="h-8 text-xs" />
+                  <Input name="attr_key" placeholder="Propiedad (Ej: Color)" className="h-8 text-xs" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Valor</label>
