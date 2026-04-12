@@ -163,7 +163,7 @@ export default function InboxPage() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     try {
       const ctrl = new AbortController()
-      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      const timeout = setTimeout(() => ctrl.abort(), 60000) // Render Cold Start fix
       const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
