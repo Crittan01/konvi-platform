@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Trash2, Loader2, Upload, Image as ImageIcon, Check, Info, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -238,9 +239,14 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label>Descripción</Label>
-          <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Breve descripción..." />
+        <div className="space-y-1">
+          <Label className="text-xs">Descripción detallada (Leída por la IA)</Label>
+          <Textarea 
+            value={description} 
+            onChange={e => setDescription(e.target.value)} 
+            placeholder="Especificaciones, material, usos... Entre más detalles incluyas, mejor responderá el Agente IA." 
+            className="resize-y min-h-[100px]"
+          />
         </div>
 
         <div className="space-y-2">

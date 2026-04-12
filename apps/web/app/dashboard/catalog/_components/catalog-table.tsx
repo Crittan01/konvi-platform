@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, memo } from 'react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Search, LayoutGrid, List as ListIcon,
   ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw,
@@ -268,8 +269,8 @@ const ExpandedPanel = memo(function ExpandedPanel({
                 <Input name="title" defaultValue={p.title} className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción</label>
-                <Input name="description" defaultValue={p.description ?? ''} className="h-8 text-xs" />
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción detallada</label>
+                <Textarea name="description" defaultValue={p.description ?? ''} className="min-h-[80px] text-xs resize-y" />
               </div>
               <div className="col-span-1 sm:col-span-2 flex gap-2 justify-end">
                 <Button type="submit" size="sm" className="h-7 text-xs">Guardar</Button>
