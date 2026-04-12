@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Package, Clock, ChevronRight, Plus, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList } from 'lucide-react'
 import OrdersNewForm from './orders-new-form'
+import OrdersManager from './_components/orders-manager'
 import Link from 'next/link'
 import AiInsightPanel from '@/components/ai-insight-panel'
 
@@ -118,17 +119,29 @@ export default async function OrdersPage({
   }
 
   // ── Server Actions ────────────────────────────────────────────────────────
-  async function advanceStatus(formData: FormData) {
+  async function updateOrderStatus(formData: FormData) {
     'use server'
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    
     const orderId = formData.get('order_id') as string
+    const isCancel = formData.get('cancel') === 'true'
     const nextStatus = formData.get('next_status') as string
+    
+    if (isCancel) {
+      await sb.from('orders').update({ status: 'cancelled' })
+        .eq('id', orderId)
+        .eq('tenant_id', m.tenant_id)
+      revalidatePath('/dashboard/orders')
+      return
+    }
+
     const { data: { session: s } } = await sb.auth.getSession()
     const token = s?.access_token
     if (!token) return
+    
     try {
       const ctrl = new AbortController()
       const timeout = setTimeout(() => ctrl.abort(), 15000)
@@ -140,190 +153,20 @@ export default async function OrdersPage({
       })
       clearTimeout(timeout)
     } catch { /* non-fatal */ }
-    revalidatePath('/dashboard/orders')
-  }
-
-  async function cancelOrder(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('orders').update({ status: 'cancelled' })
-      .eq('id', formData.get('order_id') as string)
-      .eq('tenant_id', m.tenant_id)
+    
     revalidatePath('/dashboard/orders')
   }
 
   // ── UI ────────────────────────────────────────────────────────────────────
-  const TAB_FILTERS = ['all', 'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
-
   return (
-    <div className="space-y-5 max-w-7xl">
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Package className="h-5 w-5 text-primary" /> Pedidos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {counts['all'] ?? 0} pedidos totales
-          </p>
-        </div>
-        <Badge variant="outline" className="text-xs capitalize self-start sm:self-auto">
-          {role}
-        </Badge>
-      </div>
-
-      {/* AI Insight — a demanda */}
-      {(role === 'owner' || role === 'manager') && (
-        <AiInsightPanel module="orders" label="Pedidos" />
-      )}
-
-      {/* Filtros de estado — scrollable horizontal en mobile */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-        {TAB_FILTERS.map(s => (
-          <Link
-            key={s}
-            href={s === 'all' ? '/dashboard/orders' : `/dashboard/orders?status=${s}`}
-            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-              filterStatus === s
-                ? 'bg-primary/15 text-primary border-primary/40'
-                : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`}
-          >
-            {(() => {
-              const Icon = STATUS_ICONS[s] ?? LayoutList
-              return <Icon className="h-4 w-4 mr-1.5 opacity-70 shrink-0" />
-            })()}
-            <span>{s === 'all' ? 'Todos' : STATUS_LABELS[s]}</span>
-            {counts[s] !== undefined && counts[s] > 0 && (
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                filterStatus === s ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
-              }`}>
-                {counts[s]}
-              </span>
-            )}
-          </Link>
-        ))}
-      </div>
-
-      {/* Grid principal */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-
-        {/* Formulario nuevo pedido */}
-        {canWrite && (
-          <div className="xl:col-span-1">
-            <OrdersNewForm products={products} contacts={contacts} apiUrl={API_URL} />
-          </div>
-        )}
-
-        {/* Lista de pedidos */}
-        <div className={canWrite ? 'xl:col-span-2' : 'xl:col-span-3'}>
-          {orders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 rounded-xl border border-dashed border-border text-center">
-              <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-muted-foreground text-sm">
-                {filterStatus === 'all' ? 'No hay pedidos aún.' : `No hay pedidos con estado "${STATUS_LABELS[filterStatus] ?? filterStatus}".`}
-              </p>
-              {filterStatus !== 'all' && (
-                <Link href="/dashboard/orders" className="mt-2 text-xs text-primary hover:underline">
-                  Ver todos los pedidos
-                </Link>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {orders.map((o) => {
-                const nextStatus = STATUS_NEXT[o.status]
-                const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-400'
-                const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
-                const revenue = o.total_amount ?? o.order_items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
-
-                return (
-                  <div
-                    key={o.id}
-                    className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all"
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div className="min-w-0 flex-1">
-                        {/* ID + Fecha */}
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-mono text-muted-foreground">#...{o.id.slice(-8)}</span>
-                          <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                            <Clock className="h-3 w-3" />
-                            {new Date(o.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
-                          </span>
-                        </div>
-                        {/* Contacto */}
-                        <p className="font-medium text-sm text-foreground truncate">
-                          {contact?.name || contact?.phone || 'Sin contacto'}
-                        </p>
-                        {/* Ítems */}
-                        {o.order_items.length > 0 && (
-                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                            {o.order_items.map(i => `${i.quantity}× ${i.title}`).join(', ')}
-                          </p>
-                        )}
-                        {o.notes && (
-                          <p className="text-xs text-muted-foreground mt-1 italic">{o.notes}</p>
-                        )}
-                      </div>
-                      {/* Status + Total */}
-                      <div className="text-right shrink-0 space-y-1">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${colorClass}`}>
-                          {(() => {
-                            const Icon = STATUS_ICONS[o.status] ?? LayoutList
-                            return <Icon className="h-3.5 w-3.5 shrink-0" />
-                          })()}
-                          <span>{STATUS_LABELS[o.status] ?? o.status}</span>
-                        </span>
-                        <p className="font-bold text-primary text-base">
-                          ${revenue.toFixed(2)}
-                        </p>
-                        {o.order_items.length > 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            {o.order_items.length} ítem{o.order_items.length !== 1 ? 's' : ''}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Acciones */}
-                    {canWrite && o.status !== 'delivered' && o.status !== 'cancelled' && (
-                      <div className="flex gap-2 pt-3 border-t border-border">
-                        {nextStatus && (
-                          <form action={advanceStatus}>
-                            <input type="hidden" name="order_id" value={o.id} />
-                            <input type="hidden" name="next_status" value={nextStatus} />
-                            <Button type="submit" size="sm" variant="outline" className="h-7 text-xs gap-1">
-                              <ChevronRight className="h-3 w-3" />
-                              {STATUS_LABELS[nextStatus]}
-                            </Button>
-                          </form>
-                        )}
-                        <Link
-                          href={`/dashboard/shipping?order=${o.id}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors h-7"
-                        >
-                          📦 Crear envío
-                        </Link>
-                        <form action={cancelOrder} className="ml-auto">
-                          <input type="hidden" name="order_id" value={o.id} />
-                          <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10">
-                            Cancelar
-                          </Button>
-                        </form>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <OrdersManager
+      initialOrders={orders}
+      products={products}
+      contacts={contacts}
+      role={role}
+      canWrite={canWrite}
+      apiUrl={API_URL}
+      updateStatusAction={updateOrderStatus}
+    />
   )
 }
