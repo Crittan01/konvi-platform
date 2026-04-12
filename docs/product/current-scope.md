@@ -89,7 +89,7 @@ apps/web/app/
     ├── contacts/
     │   └── page.tsx                     ✅ Contactos — listado, perfil
     ├── inventory/
-    │   └── page.tsx                     ✅ Inventario — stock por variante, alertas, ajuste
+    │   └── page.tsx                     ✅ Inventario — stock por variante, alertas, ajuste, paginación, búsqueda en memoria
     ├── knowledge-base/
     │   └── page.tsx                     ✅ Knowledge Base — CRUD, categorías, toggle activo
     ├── media/
@@ -130,7 +130,7 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 | Catálogo | `/dashboard/catalog` | 🟡 Parcial | CRUD + edit + delete. Variantes múltiples: pendiente |
 | Pedidos | `/dashboard/orders` | ✅ Implementado | Listado, detalle, estados. + AI Insight Panel |
 | Contactos | `/dashboard/contacts` | ✅ Implementado | Listado, perfil. + AI Insight Panel |
-| Inventario | `/dashboard/inventory` | ✅ Implementado | Stock, alertas, ajuste. + AI Insight Panel |
+| Inventario | `/dashboard/inventory` | ✅ Implementado | Paginación, búsqueda, responsive UX, ajuste stock con protección de doble clic |
 | Knowledge Base | `/dashboard/knowledge-base` | ✅ Implementado | CRUD, categorías, activo/inactivo |
 | Media | `/dashboard/media` | ✅ Implementado | Upload/delete/URL, bucket `tenant-media` |
 | Shipping | `/dashboard/shipping` | ✅ Implementado | Historial + ShippingQuoteForm interactivo con tabla de carriers |
