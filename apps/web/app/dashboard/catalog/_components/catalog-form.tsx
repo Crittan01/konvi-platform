@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Trash2, Loader2, Upload, Image as ImageIcon, Check } from 'lucide-react'
+import { Plus, Trash2, Loader2, Upload, Image as ImageIcon, Check, Info, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -203,9 +203,17 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
       </CardHeader>
       <CardContent className="space-y-4">
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="general">1. Información General</TabsTrigger>
-            <TabsTrigger value="variants">2. Variantes e Inventario</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 mb-4 h-auto">
+            <TabsTrigger value="general" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
+              <Info className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="hidden xs:inline sm:inline">Info</span>
+              <span className="hidden sm:inline"> General</span>
+            </TabsTrigger>
+            <TabsTrigger value="variants" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
+              <Layers className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="hidden xs:inline sm:inline">Variantes</span>
+              <span className="hidden sm:inline"> e Inventario</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-2">
@@ -391,7 +399,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                   )}
                 </div>
 
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="space-y-1">
                     <label className="text-[10px] text-muted-foreground uppercase">Peso (kg)</label>
                     <Input type="number" step="0.001" value={v.weight_kg} onChange={e => updateVariantField(vIdx, 'weight_kg', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
