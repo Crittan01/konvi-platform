@@ -18,20 +18,20 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Columnas amigables y su ancho en caracteres
-  const COLUMNS: { label: string; key: string; width: number }[] = [
-    { label: 'SKU (Obligatorio)',           key: 'sku',        width: 22 },
-    { label: 'Nombre del Producto',         key: 'nombre',     width: 30 },
-    { label: 'Descripción',                key: 'desc',       width: 40 },
-    { label: 'Tipo de Variante (Ej: Talla)', key: 'attrKey',  width: 25 },
-    { label: 'Valor Variante (Ej: L)',      key: 'attrVal',    width: 22 },
-    { label: 'Precio Normal ($)',           key: 'precioNormal', width: 22 },
-    { label: 'Precio Promocional ($)',      key: 'precioPromo',  width: 26 },
-    { label: 'Cantidad en Stock',           key: 'stock',      width: 20 },
-    { label: 'Peso en kilos (kg)',          key: 'peso',       width: 20 },
-    { label: 'Largo del empaque (cm)',      key: 'largo',      width: 22 },
-    { label: 'Ancho del empaque (cm)',      key: 'ancho',      width: 22 },
-    { label: 'Alto del empaque (cm)',       key: 'alto',       width: 22 }
+  // Columnas amigables, ancho, obligatoriedad y descripción
+  const COLUMNS: { label: string; key: string; width: number; req: boolean; desc: string }[] = [
+    { label: 'SKU (Obligatorio)',           key: 'sku',        width: 24, req: true,  desc: 'Identificador único del producto o variante (Ej: JAB-001-20M)' },
+    { label: 'Nombre del Producto',         key: 'nombre',     width: 30, req: true,  desc: 'Nombre principal. Si varias filas tienen el mismo nombre, se agrupan en un solo producto con varias opciones.' },
+    { label: 'Descripción',                key: 'desc',       width: 40, req: false, desc: 'Detalle largo del producto (Solo se procesará el de la primera fila del grupo)' },
+    { label: 'Tipo de Variante (Ej: Talla)', key: 'attrKey',  width: 28, req: false, desc: 'Qué cambia en esta fila. Ejemplos: Talla, Color, Tamaño, Sabor.' },
+    { label: 'Valor Variante (Ej: L)',      key: 'attrVal',    width: 24, req: false, desc: 'El valor específico de la variante. Ejemplos: L, Rojo, 50ml, Vainilla.' },
+    { label: 'Precio Normal ($)',           key: 'precioNormal', width: 22, req: true,  desc: 'Precio base de venta al público. Solo números y sin comas.' },
+    { label: 'Precio Promocional ($)',      key: 'precioPromo',  width: 26, req: false, desc: 'Opcional. Si lo llenas, este será el precio final y el Normal aparecerá tachado.' },
+    { label: 'Cantidad en Stock',           key: 'stock',      width: 20, req: true,  desc: 'Unidades exactas disponibles en tu bodega.' },
+    { label: 'Peso en kilos (kg)',          key: 'peso',       width: 20, req: false, desc: 'Valor numérico para calcular costos de envío (Ej: 1.5).' },
+    { label: 'Largo del empaque (cm)',      key: 'largo',      width: 24, req: false, desc: 'Medida del paquete enviado.' },
+    { label: 'Ancho del empaque (cm)',      key: 'ancho',      width: 24, req: false, desc: 'Medida del paquete enviado.' },
+    { label: 'Alto del empaque (cm)',       key: 'alto',       width: 24, req: false, desc: 'Medida del paquete enviado.' }
   ]
 
   const handleDownloadTemplate = () => {
@@ -44,14 +44,25 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     const wb = XLSX.utils.book_new()
     const ws: XLSX.WorkSheet = {}
 
-    // Estilo de cabecera
-    const headerStyle = {
+    // Estilo de cabecera obligatoria (Rojo)
+    const reqHeaderStyle = {
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 12, name: 'Arial' },
+      fill: { fgColor: { rgb: 'B91C1C' }, patternType: 'solid' as const }, 
+      alignment: { horizontal: 'center' as const, vertical: 'center' as const, wrapText: true },
+      border: {
+        bottom: { style: 'medium', color: { rgb: '7F1D1D' } },
+        right:  { style: 'thin',   color: { rgb: '7F1D1D' } },
+      }
+    }
+
+    // Estilo de cabecera opcional (Indigo)
+    const optHeaderStyle = {
       font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Arial' },
       fill: { fgColor: { rgb: '4338CA' }, patternType: 'solid' as const },
       alignment: { horizontal: 'center' as const, vertical: 'center' as const, wrapText: true },
       border: {
-        bottom: { style: 'medium', color: { rgb: '6D28D9' } },
-        right:  { style: 'thin',   color: { rgb: '6D28D9' } },
+        bottom: { style: 'medium', color: { rgb: '312E81' } },
+        right:  { style: 'thin',   color: { rgb: '312E81' } },
       }
     }
 
@@ -70,7 +81,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     COLUMNS.forEach((col, i) => {
       const cellRef  = XLSX.utils.encode_cell({ r: 0, c: i })
       const exRef    = XLSX.utils.encode_cell({ r: 1, c: i })
-      ws[cellRef] = { v: col.label, t: 's', s: headerStyle }
+      ws[cellRef] = { v: col.label, t: 's', s: col.req ? reqHeaderStyle : optHeaderStyle }
       ws[exRef]   = { v: exampleRow[i], t: typeof exampleRow[i] === 'number' ? 'n' : 's', s: exampleStyle }
     })
 
@@ -83,10 +94,41 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     // Altura de la fila de encabezado
     ws['!rows'] = [{ hpt: 36 }, { hpt: 20 }]
 
-    // Congelar primera fila
+    // Congelar primera fila principal
     ws['!freeze'] = { xSplit: 0, ySplit: 1 }
 
+    // --- Segunda Hoja: Instrucciones ---
+    const wsInstruct: XLSX.WorkSheet = {}
+    const instHeaders = ['Columna', '¿Obligatorio?', 'Descripción de lo que debes llenar', 'Ejemplo']
+    
+    instHeaders.forEach((h, i) => {
+      wsInstruct[XLSX.utils.encode_cell({ r: 0, c: i })] = { v: h, t: 's', s: optHeaderStyle }
+    })
+
+    COLUMNS.forEach((col, idx) => {
+      const r = idx + 1;
+      const baseFont = { font: { name: 'Arial', sz: 10 } }
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 0 })] = { v: col.label, t: 's', s: { font: { bold: true, name: 'Arial', sz: 10 } } }
+      
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 1 })] = { 
+        v: col.req ? '⚠️ SÍ, OBLIGATORIO' : 'Opcional', 
+        t: 's', 
+        s: { font: { color: { rgb: col.req ? 'B91C1C' : '6B7280' }, bold: col.req, name: 'Arial', sz: 10 }, alignment: { horizontal: 'center' } } 
+      }
+      
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 2 })] = { v: col.desc, t: 's', s: { ...baseFont, alignment: { wrapText: true, vertical: 'center' } } }
+      wsInstruct[XLSX.utils.encode_cell({ r, c: 3 })] = { v: exampleRow[idx], t: typeof exampleRow[idx] === 'number' ? 'n' : 's', s: { font: { italic: true, color: { rgb: '4B5563' }, name: 'Arial' } } }
+    })
+
+    wsInstruct['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: COLUMNS.length, c: 3 } })
+    wsInstruct['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 75 }, { wch: 30 }]
+    wsInstruct['!rows'] = [{ hpt: 30 }, ...COLUMNS.map(() => ({ hpt: 45 }))]
+    wsInstruct['!freeze'] = { xSplit: 0, ySplit: 1 }
+
+    XLSX.utils.book_append_sheet(wb, wsInstruct, 'Instrucciones')
     XLSX.utils.book_append_sheet(wb, ws, catName.substring(0, 31))
+    
+    // Convertir nombre a seguro
     XLSX.writeFile(wb, `Plantilla_${catName.replace(/[^a-z0-9]/gi, '_')}.xlsx`)
   }
 
