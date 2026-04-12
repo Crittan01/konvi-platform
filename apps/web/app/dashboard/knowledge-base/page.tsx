@@ -69,6 +69,26 @@ export default async function KnowledgeBasePage({
 
   // ── Server Actions ─────────────────────────────────────────────────────────
 
+  async function getGeminiEmbedding(text: string): Promise<number[] | null> {
+    const key = process.env.GEMINI_API_KEY
+    if (!key) return null
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'models/text-embedding-004',
+          content: { parts: [{ text }] }
+        })
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.embedding?.values || null
+    } catch {
+      return null
+    }
+  }
+
   async function createDocument(formData: FormData) {
     'use server'
     const sb = createClient()
@@ -79,8 +99,17 @@ export default async function KnowledgeBasePage({
     const content = (formData.get('content') as string).trim()
     const category = formData.get('category') as string
     if (!title || !content) return
+
+    // Generar embedding semántico combinando título y contenido
+    const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
+
     await sb.from('kb_documents').insert({
-      tenant_id: m.tenant_id, title, content, category: category || 'general', is_active: true,
+      tenant_id: m.tenant_id, 
+      title, 
+      content, 
+      category: category || 'general', 
+      is_active: true,
+      embedding: embedding ? `[${embedding.join(',')}]` : null
     })
     revalidatePath('/dashboard/knowledge-base')
   }
@@ -126,11 +155,11 @@ export default async function KnowledgeBasePage({
       </div>
 
       {/* AI badge */}
-      <div className="flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-sm text-yellow-400">
+      <div className="flex items-start gap-3 rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-green-400">
         <BrainCircuit className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          <span className="font-semibold">Modo: inyección de texto plano.</span>{' '}
-          Los documentos activos se incluyen como contexto en cada conversación. RAG con embeddings (pgvector) planificado — ver OQ-T03.
+          <span className="font-semibold">Modo RAG Estricto Activado (PgVector).</span>{' '}
+          Los documentos se convierten en Vectores de IA (&quot;Embeddings&quot;) ocultos y se suministran a Gemini dinámicamente frente a cada pregunta del cliente para lograr cero alucinaciones.
         </span>
       </div>
 

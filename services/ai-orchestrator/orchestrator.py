@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types as genai_types
 from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
-from tools.kb_tool import get_tenant_kb, format_kb_for_prompt
+from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
 
@@ -74,8 +74,20 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
     return list(reversed(result.data or []))
 
 
-def _build_system_prompt(catalog: list, tenant_name: str, kb_text: str = "") -> str:
-    """Construye el system prompt con catálogo y Knowledge Base del tenant."""
+async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
+    """Extrae las reglas del Agente IA parametrizado por el tenant."""
+    res = supabase.table("ai_agents").select("*").eq("tenant_id", tenant_id).execute()
+    if res.data:
+        return res.data[0]
+    # Default agent si no ha configurado uno
+    return {
+        "name": "Bot Asistente",
+        "role_description": "Eres un asistente de ventas cordial básico.",
+        "strict_guardrails": True
+    }
+
+def _build_system_prompt(catalog: list, tenant_name: str, kb_text: str, ai_agent: dict) -> str:
+    """Construye el system prompt con RAG dinámico, catálogo, y Anti-Spam estricto."""
     catalog_text = "\n".join([
         f"- {p['title']}: ${p['price']} (stock: {p['stock']})"
         for p in catalog
@@ -85,26 +97,32 @@ def _build_system_prompt(catalog: list, tenant_name: str, kb_text: str = "") -> 
 
     kb_section = ""
     if kb_text:
-        kb_section = f"\n\nINFORMACIÓN DEL NEGOCIO (usa esto para responder preguntas sobre políticas, horarios, FAQ, etc.):\n{kb_text}"
+        kb_section = f"\n\nINFORMACIÓN EXTRAÍDA DE LA BASE DE CONOCIMIENTOS (ÚSALA PARA RESPONDER):\n{kb_text}"
 
-    return f"""Eres un asistente de ventas de {tenant_name} en WhatsApp.
-Tu trabajo es responder consultas de clientes sobre productos, pedidos e información del negocio.
+    # Reglas dinámicas inyectadas desde UI del Tenant
+    strict_rules = ""
+    if ai_agent.get("strict_guardrails"):
+        strict_rules = """
+- ESTRICTO: NO INVENTES INFORMACIÓN, PRECIOS, NI POLÍTICAS que no estén explícitas arriba.
+- Si desconoces la respuesta o la KB no es clara, ESCALA a un agente humano inmediatamente (requires_human=true).
+- NUNCA des consejos médicos, legales o financieros.
+"""
 
-REGLAS:
-- Solo menciona productos y precios del catálogo real que te proporciono abajo.
-- Nunca inventes stock, precios o características que no están en el catálogo.
-- Usa la información del negocio para responder preguntas de políticas, horarios, FAQ, etc.
-- Si no puedes ayudar, indica que pasarás la consulta a un agente humano.
-- Responde siempre en español, de forma cordial y concisa (máx 3 oraciones).
-- Si el cliente pregunta algo fuera del catálogo o la información disponible, escala (requires_human=true).
+    return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
+Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
 
-CATÁLOGO ACTUAL:
+REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
+- Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
+- No seas repetitivo. Evita saludar en cada mensaje si ya están en conversación.
+- NUNCA envíes promociones crudas no solicitadas o texto masivo (Evita el bloqueo de la línea WABA).
+{strict_rules}
+CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{kb_section}
 
-Responde SIEMPRE en JSON con este esquema exacto:
+Responde SIEMPRE en JSON puro con este esquema exacto:
 {{
   "should_respond": true/false,
-  "response_text": "texto o null",
+  "response_text": "texto escrito o null",
   "confidence": 0.0-1.0,
   "requires_human": true/false,
   "intent_detected": "product_inquiry|order_status|complaint|greeting|off_topic|other"
@@ -179,16 +197,17 @@ async def build_and_run_orchestration(
         except Exception as ce:
             logger.warning(f"[CONTACT] No se pudo upsert contacto: {ce}")
 
-        # ── 2. Obtener catálogo, KB e historial ───────────────────────────────
-        catalog, kb_docs, history = await __import__('asyncio').gather(
+        # ── 2. Obtener catálogo, RAG KB, historial y Config. AI ───────────────
+        catalog, kb_docs, history, ai_agent = await __import__('asyncio').gather(
             get_tenant_catalog(supabase, tenant_id),
-            get_tenant_kb(supabase, tenant_id),
+            get_tenant_kb_rag(supabase, tenant_id, content),
             _get_conversation_history(supabase, conversation_id),
+            _get_tenant_ai_agent(supabase, tenant_id)
         )
         kb_text = format_kb_for_prompt(kb_docs)
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
-        system_prompt = _build_system_prompt(catalog, tenant_name, kb_text)
+        system_prompt = _build_system_prompt(catalog, tenant_name, kb_text, ai_agent)
         user_context = _build_user_context(history, content)
 
         # ── 4. Llamar a Gemini (nuevo SDK google-genai) ───────────────────────
