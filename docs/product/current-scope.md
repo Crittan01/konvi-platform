@@ -83,7 +83,7 @@ apps/web/app/
     ├── inbox/
     │   └── page.tsx                     ✅ Inbox AI — Realtime, human takeover, bubble UI
     ├── catalog/
-    │   └── page.tsx                     🟡 Catálogo — CRUD + edición + soft delete (variantes múltiples pendiente)
+    │   └── page.tsx                     ✅ Catálogo — CRUD completo, multi-variante, mobile-first UX, archivados y auto-refresh
     ├── orders/
     │   └── page.tsx                     ✅ Pedidos — listado, detalle, cambio de estado
     ├── contacts/

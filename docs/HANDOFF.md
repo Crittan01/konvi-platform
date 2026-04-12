@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-10
+# Handoff — Estado del Proyecto al 2026-04-12
 
 Este documento es el punto de entrada para retomar trabajo. **Leer antes de cualquier otra acción.**
 
@@ -129,6 +129,21 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 **Causa**: Funciones arrow `() => {}` pasadas como props de Server Components a Client Components no son serializables en React RSC — lanzaban excepción en runtime.
 
 **Fix**: props opcionales con default `() => {}` dentro del Client Component; removidas del Server Component.
+
+---
+
+## Trabajo de la última sesión (2026-04-12) — Enterprise Catalog UX Refactor
+
+### Mejoras en Catálogo y UX Mobile-First
+
+| Funcionalidad / Título | Detalles |
+|------------------------|----------|
+| **Mobile-First UX** | Se refactorizó la tabla de catálogo `catalog-table.tsx` para usar un layout de tarjetas expandibles (`ProductMobileCard`) en pantallas pequeñas en lugar de tabla horizontal, imitando patrones de Kaiu. |
+| **Pestañas Responsivas** | Se ajustaron las pestañas del `catalog-form` para usar íconos en pantallas pequeñas y texto completo en pantallas mayores, para evitar colisiones de texto. |
+| **Grid de Variantes** | El grid de atributos físicos de variantes (dimensiones) es ahora `grid-cols-2 sm:grid-cols-4`. |
+| **Auto-refresh en el cliente** | `CatalogForm` ahora llama `useRouter().refresh()` post-inserción a Supabase para actualizar forzadamente la vista del Server Component del listado principal sin F5 manual. |
+| **Productos Archivados** | Se añadió una interfaz visual y colapsable en la vista principal (`ArchivedSection`) donde caen los productos cuyo `status = 'inactive'`. Se implementó un Server Action de `restoreProduct` para des-archivarlos. |
+| **Test Integración Mass-Importer** | Se implementó y verificó sobre BD real un script que réplica la lógica del importador masivo (`scripts/test-mass-import.mjs`), demostrando funcionalidad completa, multi-variantes automáticos e idempotencia. |
 
 ---
 
