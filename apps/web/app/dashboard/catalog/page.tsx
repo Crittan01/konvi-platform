@@ -27,15 +27,26 @@ export default async function CatalogPage() {
 
   // Products
   let products: Product[] = []
+  let archivedProducts: Product[] = []
   if (tenantId) {
-    const { data } = await supabase
-      .from('products')
-      .select(`id, title, description, cover_image_url, platform_category_id,
-               product_variations(id, sku, price, stock_quantity, attributes)`)
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .order('title')
-    products = (data as Product[]) ?? []
+    const [activeRes, archivedRes] = await Promise.all([
+      supabase
+        .from('products')
+        .select(`id, title, description, cover_image_url, platform_category_id,
+                 product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('title'),
+      supabase
+        .from('products')
+        .select(`id, title, description, cover_image_url, platform_category_id,
+                 product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'inactive')
+        .order('title')
+    ])
+    products = (activeRes.data as Product[]) ?? []
+    archivedProducts = (archivedRes.data as Product[]) ?? []
   }
 
   const totalVariations = products.reduce((s, p) => s + p.product_variations.length, 0)
@@ -101,6 +112,19 @@ export default async function CatalogPage() {
     await sb.from('product_variations')
       .update(updates)
       .eq('id', formData.get('variation_id') as string)
+      .eq('tenant_id', m.tenant_id)
+    revalidatePath('/dashboard/catalog')
+  }
+
+  async function restoreProduct(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    await sb.from('products')
+      .update({ status: 'active' })
+      .eq('id', formData.get('product_id') as string)
       .eq('tenant_id', m.tenant_id)
     revalidatePath('/dashboard/catalog')
   }
@@ -178,12 +202,14 @@ export default async function CatalogPage() {
         <div className={canWrite ? 'xl:col-span-3' : 'xl:col-span-5'}>
           <CatalogTable
             products={products}
+            archivedProducts={archivedProducts}
             catMap={catMap}
             canWrite={canWrite}
             editProductAction={editProduct}
             editVariationAction={editVariation}
             addVariationAction={addVariation}
             deactivateProductAction={deactivateProduct}
+            restoreProductAction={restoreProduct}
           />
         </div>
       </div>

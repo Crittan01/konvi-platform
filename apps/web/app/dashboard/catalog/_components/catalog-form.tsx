@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plus, Trash2, Loader2, Upload, Image as ImageIcon, Check, Info, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -41,6 +42,7 @@ function variantLabel(v: VariantDraft): string {
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [], tenantId }: Props) {
+  const router = useRouter()
   const [platformCategoryId, setPlatformCategoryId] = useState('')
   const [coverImageUrl, setCoverImageUrl] = useState('')
   const [uploadingCover, setUploadingCover] = useState(false)
@@ -182,11 +184,12 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
 
       if (varErr) throw new Error(varErr.message)
 
-      // Reset
+      // Reset y refrescar Server Component
       setTitle('')
       setDescription('')
       setVariants([{ ...DEFAULT_VARIANT }])
       onCreated()
+      router.refresh() // Fuerza re-fetch del Server Component para mostrar el nuevo producto
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al crear producto')
     } finally {
