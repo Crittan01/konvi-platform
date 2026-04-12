@@ -23,7 +23,6 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     { label: 'SKU (Obligatorio)',           key: 'sku',        width: 22 },
     { label: 'Nombre del Producto',         key: 'nombre',     width: 30 },
     { label: 'Descripción',                key: 'desc',       width: 40 },
-    { label: 'Imagen Portada (URL)',        key: 'imgProd',    width: 35 },
     { label: 'Tipo de Variante (Ej: Talla)', key: 'attrKey',  width: 25 },
     { label: 'Valor Variante (Ej: L)',      key: 'attrVal',    width: 22 },
     { label: 'Precio de Venta ($)',         key: 'precio',     width: 20 },
@@ -32,8 +31,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     { label: 'Peso en kilos (kg)',          key: 'peso',       width: 20 },
     { label: 'Largo del empaque (cm)',      key: 'largo',      width: 22 },
     { label: 'Ancho del empaque (cm)',      key: 'ancho',      width: 22 },
-    { label: 'Alto del empaque (cm)',       key: 'alto',       width: 22 },
-    { label: 'Foto de esta Variante (URL)', key: 'imgVar',     width: 30 },
+    { label: 'Alto del empaque (cm)',       key: 'alto',       width: 22 }
   ]
 
   const handleDownloadTemplate = () => {
@@ -66,7 +64,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
 
     const exampleRow = [
       'VAR-ZAP-001-ROJO', 'Zapatillas Comfort Pro', 'Zapatilla deportiva premium para hombre y mujer',
-      '', 'Color', 'Rojo', 599.99, 799.00, 10, 0.65, 32, 18, 12, ''
+      'Color', 'Rojo', 599.99, 799.00, 10, 0.65, 32, 18, 12
     ]
 
     COLUMNS.forEach((col, i) => {
@@ -109,7 +107,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
       if (rows.length === 0) throw new Error("El archivo está vacío o mal formateado.")
 
       // Agrupamos filas por Nombre del Producto para saber qué son Variantes del mismo
-      const productsMap: Record<string, { desc: string, img: string, variants: any[] }> = {}
+      const productsMap: Record<string, { desc: string, img: string | null, variants: any[] }> = {}
       for (const row of rows) {
         const pName = row['Nombre del Producto']?.toString().trim()
         const sku = row['SKU (Obligatorio)']?.toString().trim()
@@ -118,7 +116,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
         if (!productsMap[pName]) {
           productsMap[pName] = {
             desc: row['Descripción']?.toString().trim(),
-            img: row['Imagen Portada (URL)']?.toString().trim(),
+            img: null,
             variants: []
           }
         }
@@ -134,7 +132,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
           length: parseFloat(row['Largo del empaque (cm)']) || null,
           width: parseFloat(row['Ancho del empaque (cm)']) || null,
           height: parseFloat(row['Alto del empaque (cm)']) || null,
-          vImg: row['Foto de esta Variante (URL)']?.toString().trim() || null
+          vImg: null
         })
       }
 
@@ -246,6 +244,10 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
           <Button type="button" variant="secondary" className="w-full gap-2 border shadow-sm hover:!bg-primary/5 hover:text-primary transition-all" onClick={handleDownloadTemplate}>
             <Download className="h-4 w-4" /> Bajar Plantilla .xlsx
           </Button>
+          
+          <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-400">
+            <strong>Nota visual:</strong> La importación masiva es 100% texto para evitar complicaciones con URLs. Una vez cargues tus productos, podrás subir sus fotos directamente visualizando tu Catálogo.
+          </div>
         </div>
 
         <div className="space-y-2 pt-4 border-t border-border/40">
