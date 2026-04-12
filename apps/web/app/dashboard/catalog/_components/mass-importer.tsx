@@ -23,7 +23,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
     { label: 'SKU (Obligatorio)',           key: 'sku',        width: 24, req: true,  desc: 'Identificador único del producto o variante (Ej: JAB-001-20M)' },
     { label: 'Nombre del Producto',         key: 'nombre',     width: 30, req: true,  desc: 'Nombre principal. Si varias filas tienen el mismo nombre, se agrupan en un solo producto con varias opciones.' },
     { label: 'Descripción',                key: 'desc',       width: 40, req: false, desc: 'Detalle largo del producto (Solo se procesará el de la primera fila del grupo)' },
-    { label: 'Tipo de Variante (Ej: Talla)', key: 'attrKey',  width: 28, req: false, desc: 'Qué cambia en esta fila. Ejemplos: Talla, Color, Tamaño, Sabor.' },
+    { label: 'Atributo Variante (Ej: Color)', key: 'attrKey',  width: 28, req: false, desc: 'Qué cambia en esta fila. Ejemplos: Talla, Color, Tamaño, Sabor.' },
     { label: 'Valor Variante (Ej: L)',      key: 'attrVal',    width: 24, req: false, desc: 'El valor específico de la variante. Ejemplos: L, Rojo, 50ml, Vainilla.' },
     { label: 'Precio Normal ($)',           key: 'precioNormal', width: 22, req: true,  desc: 'Precio base de venta al público. Solo números y sin comas.' },
     { label: 'Precio Promocional ($)',      key: 'precioPromo',  width: 26, req: false, desc: 'Opcional. Si lo llenas, este será el precio final y el Normal aparecerá tachado.' },
@@ -165,7 +165,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
         
         productsMap[pName].variants.push({
           sku: sku,
-          attrKey: row['Tipo de Variante (Ej: Talla)']?.toString().trim() || 'Genérico',
+          attrKey: row['Atributo Variante (Ej: Color)']?.toString().trim() || 'Genérico',
           attrVal: row['Valor Variante (Ej: L)']?.toString().trim() || 'Estándar',
           pNormal: parseFloat(row['Precio Normal ($)']) || 0,
           pPromo: parseFloat(row['Precio Promocional ($)']) || null,

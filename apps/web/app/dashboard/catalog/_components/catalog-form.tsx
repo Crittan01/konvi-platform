@@ -21,7 +21,7 @@ interface VariantDraft {
 interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
-  sku: '', attrs: [{ key: 'Talla', value: '' }], price: 0, compare_at_price: '', stock: 0,
+  sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '', stock: 0,
   weight_kg: '', length_cm: '', width_cm: '', height_cm: '', image_url: ''
 }
 
@@ -314,14 +314,14 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                     <Input
                       value={attr.key}
                       onChange={e => updateAttr(vIdx, aIdx, 'key', e.target.value)}
-                      placeholder="Talla"
+                      placeholder="Propiedad"
                       className="h-7 text-xs w-24 flex-shrink-0"
                     />
                     <span className="text-muted-foreground text-xs">:</span>
                     <Input
                       value={attr.value}
                       onChange={e => updateAttr(vIdx, aIdx, 'value', e.target.value)}
-                      placeholder="M"
+                      placeholder="Valor"
                       className="h-7 text-xs flex-1"
                     />
                     {v.attrs.length > 1 && (
