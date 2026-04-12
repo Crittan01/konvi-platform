@@ -56,12 +56,15 @@ const VariantRow = memo(function VariantRow({
         </td>
         <td className="px-2 py-2 text-center">
           {editing ? (
-            <form action={editVariationAction} onSubmit={() => setEditing(false)} className="flex gap-1 justify-center">
+            <form action={editVariationAction} onSubmit={() => setEditing(false)} className="flex flex-col gap-1 items-center">
               <input type="hidden" name="variation_id" value={v.id} />
               <input type="hidden" name="stock" value={v.stock_quantity} />
-              <Input name="price" type="number" defaultValue={v.price} step="1" min="1" className="h-7 w-24 text-xs text-center font-mono" autoFocus />
-              <Button type="submit" size="sm" className="h-7 px-2 text-xs">✓</Button>
-              <button type="button" onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground px-1"><X className="h-3 w-3" /></button>
+              <Input name="price" type="number" defaultValue={v.price} step="1" min="1" placeholder="Precio" className="h-7 w-24 text-xs text-center font-mono" autoFocus title="Precio Final" />
+              <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="1" min="1" placeholder="Tachado..." className="h-6 w-24 text-[10px] text-center font-mono border-dashed bg-muted/30" title="Precio Normal Tachado (Op)" />
+              <div className="flex gap-1 w-24">
+                <Button type="submit" size="sm" className="h-6 flex-1 px-1 text-[10px]">Guardar</Button>
+                <button type="button" onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground p-1"><X className="h-3 w-3" /></button>
+              </div>
             </form>
           ) : (
             <button onClick={() => canWrite && setEditing(true)} className={`font-mono font-semibold text-primary tabular-nums ${canWrite ? 'hover:opacity-70 cursor-pointer' : 'cursor-default'}`}>
@@ -103,7 +106,12 @@ const VariantRow = memo(function VariantRow({
         </div>
         <div className="text-right flex items-center gap-3">
           <div>
-            <p className="text-xs font-bold text-primary tabular-nums">${v.price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</p>
+            <div className="flex items-center justify-end gap-1.5">
+              <p className="text-xs font-bold text-primary tabular-nums">${v.price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</p>
+              {v.compare_at_price && (
+                <p className="text-[10px] text-muted-foreground line-through tabular-nums">${v.compare_at_price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</p>
+              )}
+            </div>
             <p className={`text-[10px] tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= 5 ? 'text-amber-500' : 'text-muted-foreground'}`}>
               {v.stock_quantity} u.
             </p>
@@ -121,6 +129,10 @@ const VariantRow = memo(function VariantRow({
               <div>
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio</label>
                 <Input name="price" type="number" defaultValue={v.price} step="1" min="1" className="h-8 text-xs font-mono mt-1" />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Tachado (Promo)</label>
+                <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="1" min="1" className="h-8 text-xs font-mono mt-1" placeholder="Opcional" />
               </div>
               <div>
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock</label>
@@ -217,8 +229,12 @@ const ExpandedPanel = memo(function ExpandedPanel({
                   <Input name="sku" placeholder="PROD-001" className="h-8 text-xs font-mono" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio *</label>
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Normal *</label>
                   <Input name="price" type="number" min="1" step="1" placeholder="0" className="h-8 text-xs font-mono" required />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Tachado</label>
+                  <Input name="compare_at_price" type="number" min="1" step="1" placeholder="Opcional" className="h-8 text-xs font-mono border-dashed bg-muted/30" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Stock *</label>
