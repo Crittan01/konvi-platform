@@ -75,6 +75,10 @@ export default async function CatalogPage() {
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const price = parseFloat(formData.get('price') as string)
     const stock = parseInt(formData.get('stock') as string)
+    const compareStr = formData.get('compare_at_price') as string
+    const compareObj = compareStr ? parseFloat(compareStr) : null
+    const finalCompare = compareObj && compareObj > price ? compareObj : null
+    
     const sku = (formData.get('sku') as string) || null
     const attrKey = formData.get('attr_key') as string
     const attrVal = formData.get('attr_val') as string
@@ -91,6 +95,7 @@ export default async function CatalogPage() {
       product_id: formData.get('product_id') as string,
       sku,
       price,
+      compare_at_price: finalCompare,
       stock_quantity: stock,
       attributes
     })
@@ -105,9 +110,20 @@ export default async function CatalogPage() {
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const price = parseFloat(formData.get('price') as string)
     const stock = parseInt(formData.get('stock') as string)
-    const updates: Record<string, number> = {}
+    const compareStr = formData.get('compare_at_price') as string
+
+    // Record<string, any> para poder inyectar null
+    const updates: Record<string, any> = {}
+    
     if (!isNaN(price) && price > 0) updates.price = price
     if (!isNaN(stock) && stock >= 0) updates.stock_quantity = stock
+    
+    // Si se pasa compare_at_price, se verifica que sea mayor al precio validado o inicial
+    if (compareStr !== null) {
+       const cmp = parseFloat(compareStr)
+       const basePrice = updates.price || 0 // el trigger DB se encarga del resto
+       updates.compare_at_price = (!isNaN(cmp) && cmp > 0 && cmp > basePrice) ? cmp : null
+    }
     if (!Object.keys(updates).length) return
     await sb.from('product_variations')
       .update(updates)
