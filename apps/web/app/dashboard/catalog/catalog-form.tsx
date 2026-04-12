@@ -119,7 +119,8 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
 
   const handleSubmit = async () => {
     if (!title.trim()) { setError('El nombre del producto es obligatorio'); return }
-    if (variants.some(v => v.price <= 0)) { setError('Todos los precios deben ser mayores a 0'); return }
+    if (variants.some(v => !v.sku.trim())) { setError('Todas las variantes deben tener un SKU (Obligatorio)'); return }
+    if (variants.some(v => v.price <= 0)) { setError('Todos los precios normales deben ser mayores a 0'); return }
 
     setSubmitting(true)
     setError(null)
@@ -148,20 +149,32 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
       if (prodErr || !prod) throw new Error(prodErr?.message ?? 'Error al crear producto')
 
       // Crear variantes
-      const variationsPayload = variants.map(v => ({
-        product_id: prod.id,
-        tenant_id: meta.tenant_id,
-        sku: v.sku.trim(),
-        price: v.price,
-        compare_at_price: v.compare_at_price === '' ? null : v.compare_at_price,
-        stock_quantity: v.stock,
-        attributes: attrsToObj(v.attrs),
-        weight_kg: v.weight_kg === '' ? null : v.weight_kg,
-        length_cm: v.length_cm === '' ? null : v.length_cm,
-        width_cm: v.width_cm === '' ? null : v.width_cm,
-        height_cm: v.height_cm === '' ? null : v.height_cm,
-        image_url: v.image_url.trim() || null,
-      }))
+      const variationsPayload = variants.map(v => {
+        let finalPrice = v.price > 0 ? v.price : 1;
+        let finalCompare = null;
+        const promo = v.compare_at_price === '' ? null : Number(v.compare_at_price);
+
+        // Lógica de inversión automática de promoción
+        if (promo && promo > 0 && promo < finalPrice) {
+          finalPrice = promo;
+          finalCompare = v.price; // El "Precio Normal" original pasa a ser el tachado
+        }
+
+        return {
+          product_id: prod.id,
+          tenant_id: meta.tenant_id,
+          sku: v.sku.trim(),
+          price: finalPrice,
+          compare_at_price: finalCompare,
+          stock_quantity: v.stock,
+          attributes: attrsToObj(v.attrs),
+          weight_kg: v.weight_kg === '' ? null : v.weight_kg,
+          length_cm: v.length_cm === '' ? null : v.length_cm,
+          width_cm: v.width_cm === '' ? null : v.width_cm,
+          height_cm: v.height_cm === '' ? null : v.height_cm,
+          image_url: v.image_url.trim() || null,
+        }
+      })
 
       const { error: varErr } = await supabase
         .from('product_variations')
@@ -260,7 +273,18 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                 <div className="flex items-center gap-3 text-left">
                   <span className="text-sm font-semibold">{v.sku || `Variante ${vIdx + 1}`}</span>
                   <span className="text-xs text-muted-foreground hidden sm:inline-block">— {variantLabel(v)}</span>
-                  {v.price > 0 && <span className="text-[10px] font-medium border border-primary/20 text-primary px-2 py-0.5 rounded-full bg-primary/5">${v.price}</span>}
+                  {v.price > 0 && (
+                     <div className="flex items-center gap-1.5 ml-2">
+                       {v.compare_at_price && Number(v.compare_at_price) > 0 && Number(v.compare_at_price) < v.price ? (
+                         <>
+                           <span className="text-[10px] text-muted-foreground line-through">${v.price}</span>
+                           <span className="text-[10px] font-bold border border-green-500/20 text-green-600 px-2 py-0.5 rounded-full bg-green-500/10">${v.compare_at_price}</span>
+                         </>
+                       ) : (
+                         <span className="text-[10px] font-medium border border-primary/20 text-primary px-2 py-0.5 rounded-full bg-primary/5">${v.price}</span>
+                       )}
+                     </div>
+                  )}
                 </div>
               </AccordionTrigger>
               <AccordionContent className="pt-2 pb-5 space-y-5 border-t border-border/30 mt-1">
@@ -318,22 +342,22 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio ($) *</label>
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Normal ($) *</label>
                   <Input
-                    type="number" step="0.01" min="0.01"
-                    value={v.price || ''}
+                    type="number" step="1" min="1"
+                    value={v.price === 0 ? '' : v.price}
                     onChange={e => updateVariantField(vIdx, 'price', parseFloat(e.target.value) || 0)}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Lista ($)</label>
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Promo ($)</label>
                   <Input
-                    type="number" step="0.01" min="0.01"
+                    type="number" step="1" min="1"
                     value={v.compare_at_price}
                     onChange={e => updateVariantField(vIdx, 'compare_at_price', parseFloat(e.target.value) || '')}
-                    className="h-8 text-xs placeholder:text-muted-foreground/50"
-                    placeholder="Oferta"
+                    className="h-8 text-xs font-mono placeholder:text-muted-foreground/50"
+                    placeholder="Opcional"
                   />
                 </div>
                 <div className="space-y-1">
