@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Search, LayoutGrid, List as ListIcon,
-  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus,
+  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw,
 } from 'lucide-react'
 import type { Product, Variation } from '../types'
 
@@ -14,12 +14,14 @@ import type { Product, Variation } from '../types'
 
 type Props = {
   products: Product[]
+  archivedProducts: Product[]
   catMap: Record<string, string>
   canWrite: boolean
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
+  restoreProductAction: (fd: FormData) => Promise<void>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -347,11 +349,68 @@ const ProductMobileCard = memo(function ProductMobileCard({
   )
 })
 
+// ── ArchivedSection — muestra productos inactivos con opción de restaurar ────
+
+const ArchivedSection = memo(function ArchivedSection({
+  archivedProducts, catMap, restoreProductAction
+}: {
+  archivedProducts: Product[]
+  catMap: Record<string, string>
+  restoreProductAction: (fd: FormData) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  if (archivedProducts.length === 0) return null
+
+  return (
+    <div className="mt-4 border border-border/40 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors"
+      >
+        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <Archive className="h-4 w-4" />
+          Archivados ({archivedProducts.length})
+        </span>
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+      </button>
+      {open && (
+        <div className="divide-y divide-border/30">
+          {archivedProducts.map(p => (
+            <div key={p.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10 hover:bg-muted/20 transition-colors">
+              <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-muted border border-border flex-shrink-0 opacity-60">
+                {p.cover_image_url ? (
+                  <Image src={p.cover_image_url} alt={p.title} fill className="object-cover grayscale" sizes="36px" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <ImageOff className="h-3 w-3 text-muted-foreground/40" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-muted-foreground line-through line-clamp-1">{p.title}</p>
+                {p.platform_category_id && catMap[p.platform_category_id] && (
+                  <p className="text-[10px] text-muted-foreground/60">{catMap[p.platform_category_id]}</p>
+                )}
+              </div>
+              <form action={restoreProductAction}>
+                <input type="hidden" name="product_id" value={p.id} />
+                <Button type="submit" size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
+                  <RotateCcw className="h-3 w-3" /> Restaurar
+                </Button>
+              </form>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+})
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function CatalogTable({
-  products, catMap, canWrite,
-  editProductAction, editVariationAction, addVariationAction, deactivateProductAction,
+  products, archivedProducts, catMap, canWrite,
+  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction,
 }: Props) {
   const [search, setSearch]           = useState('')
   const [viewMode, setViewMode]       = useState<'list' | 'grid'>('list')
@@ -558,6 +617,11 @@ export default function CatalogTable({
             </div>
           )}
         </div>
+        <ArchivedSection
+          archivedProducts={archivedProducts}
+          catMap={catMap}
+          restoreProductAction={restoreProductAction}
+        />
       </div>
     )
   }
@@ -654,6 +718,11 @@ export default function CatalogTable({
           })}
         </div>
       )}
+      <ArchivedSection
+        archivedProducts={archivedProducts}
+        catMap={catMap}
+        restoreProductAction={restoreProductAction}
+      />
     </div>
   )
 }
