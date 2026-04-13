@@ -18,13 +18,17 @@ Endpoints:
 RBAC:
   owner / manager → lectura + escritura
   agent           → solo lectura (403 en escritura)
+
+Nota: patch_variation dispara sync_meli_stock si stock_quantity cambia y hay listing activo.
 """
 import logging
+import asyncio
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from routers.marketplace import sync_meli_stock
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Products"])
@@ -247,6 +251,13 @@ async def patch_variation(
         )
         if not result.data:
             raise HTTPException(status_code=404, detail="Error al actualizar variante")
+
+        # Si el stock cambió, sincronizar con MeLi en background (best-effort)
+        if "stock_quantity" in data:
+            asyncio.ensure_future(
+                sync_meli_stock(variation_id, data["stock_quantity"], supabase)
+            )
+
         return result.data[0]
     except HTTPException:
         raise

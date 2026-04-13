@@ -15,11 +15,10 @@ Una vez decidido:
 
 | Deuda | Prioridad |
 |-------|-----------|
-| Variantes múltiples en catálogo (UI solo crea "Standard") | Media |
 | Label + tracking + pickup Envia (Fase 2) | Media |
 | RBAC granular completo por endpoint | Media |
 | `packages/db/migrations/` desincronizado con `supabase/migrations/` | Baja |
-| Python 3.9.25 EOL → actualizar a 3.11+ antes de Beta | Alta (pre-prod) |
+| Aplicar migraciones nuevas en Supabase prod (claims, ai_agents, purchases/finance, marketplace) | Alta |
 
 ## Lecciones aprendidas (no repetir)
 

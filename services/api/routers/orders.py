@@ -10,11 +10,13 @@ Endpoints:
 Estados válidos: pending → confirmed → processing → shipped → delivered | cancelled
 """
 import logging
+import asyncio
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from routers.marketplace import sync_meli_stock
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Orders"])
@@ -268,6 +270,9 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
                 "new_stock": new_stock,
                 "reason": "sale",
             }).execute()
+
+            # Sync stock a MeLi si hay listing activo vinculado
+            asyncio.ensure_future(sync_meli_stock(variation_id, new_stock, supabase))
 
     except Exception as e:
         # No fallar la confirmación del pedido si el stock no se puede decrementar

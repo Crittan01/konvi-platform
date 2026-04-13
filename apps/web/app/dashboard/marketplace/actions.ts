@@ -3,59 +3,84 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/utils/supabase/server'
 
-// In a real app we'd load this from env variables instead of hard-coding the api service url
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
-export async function publishToMarketplace(variationId: string, externalPrice: number) {
+async function getToken(): Promise<string> {
   const supabase = createClient()
   const { data: { session } } = await supabase.auth.getSession()
-  const token = session?.access_token || ''
-
-  try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/publish`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ variation_id: variationId, external_price: externalPrice })
-    })
-
-    if (!res.ok) {
-       const detail = await res.text()
-       throw new Error(detail || res.statusText)
-    }
-
-    revalidatePath('/dashboard/marketplace')
-    return { success: true }
-  } catch(error: any) {
-    return { error: error.message || 'Error al conectar con la API' }
-  }
+  return session?.access_token ?? ''
 }
 
-export async function changeListingStatus(listingId: string, status: 'active' | 'paused' | 'closed') {
-  const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const token = session?.access_token || ''
-
+export async function linkListing(meliId: string, variationId: string, meliPrice?: number) {
+  const token = await getToken()
   try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/${listingId}/status`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ status })
+    const res = await fetch(`${API_URL}/api/v1/marketplace/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ meli_id: meliId, variation_id: variationId, meli_price: meliPrice })
     })
-
     if (!res.ok) {
-       const detail = await res.text()
-       throw new Error(detail || res.statusText)
+      const detail = await res.text()
+      throw new Error(detail || res.statusText)
     }
-
     revalidatePath('/dashboard/marketplace')
     return { success: true }
   } catch (error: any) {
-    return { error: error.message || 'Error al conectar con la API' }
+    return { error: error.message || 'Error al vincular' }
+  }
+}
+
+export async function unlinkListing(listingId: string) {
+  const token = await getToken()
+  try {
+    const res = await fetch(`${API_URL}/api/v1/marketplace/link/${listingId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      throw new Error(detail || res.statusText)
+    }
+    revalidatePath('/dashboard/marketplace')
+    return { success: true }
+  } catch (error: any) {
+    return { error: error.message || 'Error al desvincular' }
+  }
+}
+
+export async function changeListingStatus(listingId: string, status: 'active' | 'paused') {
+  const token = await getToken()
+  try {
+    const res = await fetch(`${API_URL}/api/v1/marketplace/${listingId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ status })
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      throw new Error(detail || res.statusText)
+    }
+    revalidatePath('/dashboard/marketplace')
+    return { success: true }
+  } catch (error: any) {
+    return { error: error.message || 'Error al actualizar estado' }
+  }
+}
+
+export async function syncStockFromSupabase(listingId: string) {
+  const token = await getToken()
+  try {
+    const res = await fetch(`${API_URL}/api/v1/marketplace/${listingId}/sync-stock`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      throw new Error(detail || res.statusText)
+    }
+    revalidatePath('/dashboard/marketplace')
+    return { success: true }
+  } catch (error: any) {
+    return { error: error.message || 'Error al sincronizar stock' }
   }
 }

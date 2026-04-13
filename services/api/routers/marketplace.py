@@ -1,114 +1,371 @@
-import uuid
+"""
+Router de Marketplace — Gestión de publicaciones en Mercado Libre.
+
+Supabase es la fuente de verdad de inventario.
+MeLi es un canal de venta cuyo stock refleja Supabase automáticamente.
+
+Endpoints:
+  GET    /api/v1/marketplace/listings          — items reales de MeLi + estado de vinculación
+  POST   /api/v1/marketplace/link              — vincular item MeLi existente a variante Supabase
+  DELETE /api/v1/marketplace/link/{listing_id} — desvincular (el item MeLi queda intacto)
+  PATCH  /api/v1/marketplace/{listing_id}/status   — pausar / activar en MeLi
+  PATCH  /api/v1/marketplace/{listing_id}/sync-stock — forzar sync de stock Supabase → MeLi
+
+Flujo de sync automático (llamado desde orders.py y products.py):
+  sync_meli_stock(variation_id, new_qty, supabase) → si hay listing activo → PUT MeLi
+"""
+import logging
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Body
 from dependencies.auth import get_current_tenant, _get_service_client
+from integrations.meli_client import (
+    get_tenant_meli_credentials,
+    get_user_items,
+    get_items_details,
+    update_item_quantity,
+    update_item_status,
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
+
+
+# ─── Sync utility (llamado desde otros routers) ───────────────────────────────
+
+async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
+    """
+    Empuja el nuevo stock de una variante a MeLi si tiene un listing activo vinculado.
+
+    Llamar después de cualquier operación que cambie stock_quantity en product_variations:
+      - orders.py: _decrement_stock_on_confirm()
+      - products.py: patch_variation() cuando stock_quantity cambia
+
+    Falla silenciosa: un error en MeLi no debe romper la operación principal.
+    """
+    try:
+        listing_res = (
+            supabase.table("marketplace_listings")
+            .select("id, external_id, tenant_id")
+            .eq("variation_id", variation_id)
+            .eq("provider", "mercadolibre")
+            .eq("status", "active")
+            .execute()
+        )
+        if not listing_res.data:
+            return  # No hay listing vinculado activo
+
+        listing = listing_res.data[0]
+        tenant_id = listing["tenant_id"]
+        external_id = listing["external_id"]
+
+        creds = get_tenant_meli_credentials(supabase, tenant_id)
+        if not creds or not creds.get("access_token"):
+            logger.warning("MeLi no conectado para tenant %s — sync omitido", tenant_id)
+            return
+
+        await update_item_quantity(external_id, new_qty, creds["access_token"])
+        logger.info("MeLi stock sync: item %s → %d unidades (variation %s)", external_id, new_qty, variation_id)
+
+    except Exception as e:
+        # No propagar: el sync es best-effort, no debe romper la operación principal
+        logger.error("Error en sync_meli_stock para variation %s: %s", variation_id, e)
+
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/listings")
 async def get_listings(tenant_id: str = Depends(get_current_tenant)):
     """
-    Devuelve todo el catálogo (variaciones) cruzado con su posible estado 
-    en marketplace_listings (Mercado Libre).
+    Retorna los items reales de la cuenta MeLi del tenant más su estado de vinculación.
+
+    Si MeLi no está conectado, retorna lista vacía con connected=False.
+    Los datos de stock y precio vienen de MeLi; la vinculación con Supabase
+    se indica via variation_id si existe en marketplace_listings.
     """
     supabase = _get_service_client()
 
-    # Traemos las variaciones con información de producto
-    var_res = supabase.table("product_variations").select(
-        "id, product_id, sku, price, stock_quantity, products(title)"
-    ).eq("tenant_id", tenant_id).execute()
+    # Verificar conexión MeLi
+    creds = get_tenant_meli_credentials(supabase, tenant_id)
+    if not creds or not creds.get("access_token") or not creds.get("user_id"):
+        return {"connected": False, "items": [], "paging": {"total": 0}}
 
-    if not var_res.data:
-        return {"items": []}
+    access_token = creds["access_token"]
+    user_id = str(creds["user_id"])
 
-    variations = var_res.data
+    try:
+        # 1. Obtener IDs de items del seller (paginado — traemos hasta 100)
+        search_res = await get_user_items(user_id, access_token, limit=100, offset=0)
+        item_ids = search_res.get("results", [])
+        paging = search_res.get("paging", {"total": 0, "limit": 100, "offset": 0})
 
-    # Traemos los listings activos de ese tenant
-    list_res = supabase.table("marketplace_listings").select(
-        "id, variation_id, external_id, status, external_price, external_url"
-    ).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
+        if not item_ids:
+            return {"connected": True, "items": [], "paging": paging}
 
-    listings = {item["variation_id"]: item for item in (list_res.data or [])}
+        # 2. Detalle de items via multiget
+        raw_items = await get_items_details(item_ids, access_token)
 
-    results = []
-    for var in variations:
-        product_name = var.get("products", {}).get("title", "Unknown") if var.get("products") else "Unknown"
-        listing = listings.get(var["id"])
+        # 3. Cargar vinculaciones existentes en Supabase
+        link_res = (
+            supabase.table("marketplace_listings")
+            .select("id, external_id, variation_id, status")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "mercadolibre")
+            .execute()
+        )
+        links_by_external = {
+            lnk["external_id"]: lnk for lnk in (link_res.data or [])
+        }
 
-        results.append({
-            "variation_id": var["id"],
-            "product_name": product_name,
-            "sku": var["sku"],
-            "base_price": var["price"],
-            "stock": var["stock_quantity"],
-            "is_published": listing is not None,
-            "listing_id": listing["id"] if listing else None,
-            "external_id": listing["external_id"] if listing else None,
-            "status": listing["status"] if listing else "unlisted",
-            "external_price": listing["external_price"] if listing else var["price"],
-            "external_url": listing["external_url"] if listing else None,
-        })
+        # 4. Cargar nombres de variantes vinculadas para enriquecer la respuesta
+        linked_variation_ids = [
+            lnk["variation_id"] for lnk in (link_res.data or []) if lnk.get("variation_id")
+        ]
+        variation_names = {}
+        if linked_variation_ids:
+            var_res = (
+                supabase.table("product_variations")
+                .select("id, sku, stock_quantity, products(title)")
+                .in_("id", linked_variation_ids)
+                .execute()
+            )
+            for v in (var_res.data or []):
+                product_name = v.get("products", {}).get("title", "") if v.get("products") else ""
+                variation_names[v["id"]] = {
+                    "sku": v["sku"],
+                    "product_name": product_name,
+                    "supabase_stock": v["stock_quantity"],
+                }
 
-    return {"items": results}
+        # 5. Construir respuesta normalizada
+        items = []
+        for entry in raw_items:
+            if entry.get("code") != 200:
+                continue
+            item = entry.get("body", {})
+            if not item:
+                continue
+
+            meli_id = item.get("id")
+            link = links_by_external.get(meli_id)
+            variation_id = link["variation_id"] if link else None
+            var_info = variation_names.get(variation_id, {}) if variation_id else {}
+
+            items.append({
+                "meli_id": meli_id,
+                "title": item.get("title"),
+                "status": item.get("status"),         # active | paused | closed
+                "price": item.get("price"),
+                "available_quantity": item.get("available_quantity"),
+                "thumbnail": item.get("thumbnail"),
+                "permalink": item.get("permalink"),
+                # Vinculación con Supabase
+                "listing_id": link["id"] if link else None,
+                "variation_id": variation_id,
+                "sku": var_info.get("sku"),
+                "product_name": var_info.get("product_name"),
+                "supabase_stock": var_info.get("supabase_stock"),
+                "is_linked": link is not None,
+            })
+
+        return {"connected": True, "items": items, "paging": paging}
+
+    except Exception as e:
+        logger.error("Error obteniendo listings MeLi tenant %s: %s", tenant_id, e)
+        raise HTTPException(status_code=502, detail=f"Error al consultar Mercado Libre: {str(e)}")
 
 
-@router.post("/publish")
-async def publish_listing(
+@router.post("/link")
+async def link_listing(
     payload: dict = Body(...),
-    tenant_id: str = Depends(get_current_tenant)
+    tenant_id: str = Depends(get_current_tenant),
 ):
     """
-    Publica una variación en Mercado Libre.
-    (MOCK: Genera un ID 'MLA...' para validar la arquitectura funcional)
+    Vincula un item existente de MeLi con una variante de Supabase.
+
+    Body: { meli_id: "MLA123456", variation_id: "uuid", meli_price: 15000 }
+
+    Una vez vinculado, cualquier cambio de stock en Supabase se propaga a MeLi
+    automáticamente vía sync_meli_stock().
     """
     supabase = _get_service_client()
+
+    meli_id = payload.get("meli_id", "").strip().upper()
     variation_id = payload.get("variation_id")
-    external_price = payload.get("external_price")
+    meli_price = payload.get("meli_price")
 
-    if not variation_id or not external_price:
-        raise HTTPException(status_code=400, detail="Missing variation_id or external_price")
+    if not meli_id or not variation_id:
+        raise HTTPException(status_code=400, detail="meli_id y variation_id son requeridos")
 
-    # 1. Chequear si la variación existe
-    var_chk = supabase.table("product_variations").select("id").eq("id", variation_id).eq("tenant_id", tenant_id).single().execute()
-    if not var_chk.data:
-        raise HTTPException(status_code=404, detail="Variation not found")
+    # Verificar que la variante pertenece al tenant
+    var_check = (
+        supabase.table("product_variations")
+        .select("id, stock_quantity")
+        .eq("id", variation_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    if not var_check.data:
+        raise HTTPException(status_code=404, detail="Variante no encontrada en Supabase")
 
-    # 2. MOCK: Aquí se llamaría a httpx.post("https://api.mercadolibre.com/items", ...)
-    # Para la demo, simularemos el comportamiento existoso de Mercado Libre:
-    fake_mla_id = f"MLA{uuid.uuid4().hex[:10].upper()}"
+    # Verificar conexión MeLi y que el item existe
+    creds = get_tenant_meli_credentials(supabase, tenant_id)
+    if not creds or not creds.get("access_token"):
+        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado para este tenant")
 
-    # 3. Guardar en Base de Datos de Sindicación
-    res = supabase.table("marketplace_listings").insert({
-        "tenant_id": tenant_id,
-        "variation_id": variation_id,
-        "external_id": fake_mla_id,
-        "provider": "mercadolibre",
-        "status": "active",
-        "external_price": external_price,
-        "external_url": f"https://articulo.mercadolibre.com.ar/{fake_mla_id}"
-    }).execute()
+    # Construir URL del item
+    external_url = f"https://articulo.mercadolibre.com/{meli_id}"
 
-    return res.data[0] if res.data else {"ok": True}
+    try:
+        res = supabase.table("marketplace_listings").insert({
+            "tenant_id": tenant_id,
+            "variation_id": variation_id,
+            "external_id": meli_id,
+            "provider": "mercadolibre",
+            "status": "active",
+            "external_price": meli_price,
+            "external_url": external_url,
+        }).execute()
+
+        return res.data[0] if res.data else {"ok": True}
+
+    except Exception as e:
+        error_str = str(e)
+        if "unique" in error_str.lower() or "duplicate" in error_str.lower():
+            raise HTTPException(status_code=409, detail="Este item MeLi o esta variante ya están vinculados")
+        logger.error("Error vinculando listing MeLi tenant %s: %s", tenant_id, e)
+        raise HTTPException(status_code=500, detail="Error al crear vinculación")
+
+
+@router.delete("/link/{listing_id}")
+async def unlink_listing(
+    listing_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+):
+    """
+    Desvincula un item MeLi de su variante Supabase.
+    El item en MeLi queda intacto — solo se elimina la sincronización de stock.
+    """
+    supabase = _get_service_client()
+
+    res = (
+        supabase.table("marketplace_listings")
+        .delete()
+        .eq("id", listing_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Vinculación no encontrada")
+
+    return {"ok": True}
 
 
 @router.patch("/{listing_id}/status")
 async def update_listing_status(
     listing_id: str,
     payload: dict = Body(...),
-    tenant_id: str = Depends(get_current_tenant)
+    tenant_id: str = Depends(get_current_tenant),
 ):
     """
-    Pausa o Activa una publicación.
+    Pausa o activa un listing en MeLi.
+    Body: { "status": "active" | "paused" }
+
+    Nota: "closed" es irreversible en MeLi — no se expone desde esta UI.
     """
     supabase = _get_service_client()
     new_status = payload.get("status")
 
-    if new_status not in ["active", "paused", "closed"]:
-        raise HTTPException(status_code=400, detail="Invalid status")
+    if new_status not in ("active", "paused"):
+        raise HTTPException(status_code=400, detail="Status válido: active | paused")
 
-    # MOCK: Aquí notificaríamos a la API externa PUT /items/{external_id} {"status": "paused"}
+    # Obtener el listing con external_id
+    listing_res = (
+        supabase.table("marketplace_listings")
+        .select("id, external_id")
+        .eq("id", listing_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not listing_res.data:
+        raise HTTPException(status_code=404, detail="Listing no encontrado")
 
-    res = supabase.table("marketplace_listings").update({
-        "status": new_status
-    }).eq("id", listing_id).eq("tenant_id", tenant_id).execute()
+    external_id = listing_res.data["external_id"]
 
-    return res.data[0] if res.data else {"ok": True}
+    creds = get_tenant_meli_credentials(supabase, tenant_id)
+    if not creds or not creds.get("access_token"):
+        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
+
+    try:
+        # 1. Actualizar en MeLi
+        await update_item_status(external_id, new_status, creds["access_token"])
+
+        # 2. Actualizar estado local
+        res = (
+            supabase.table("marketplace_listings")
+            .update({"status": new_status})
+            .eq("id", listing_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        return res.data[0] if res.data else {"ok": True}
+
+    except Exception as e:
+        logger.error("Error actualizando status MeLi item %s: %s", external_id, e)
+        raise HTTPException(status_code=502, detail=f"Error al actualizar Mercado Libre: {str(e)}")
+
+
+@router.patch("/{listing_id}/sync-stock")
+async def sync_stock_from_supabase(
+    listing_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+):
+    """
+    Fuerza la sincronización de stock desde Supabase hacia MeLi para un listing.
+    Útil cuando se necesita alinear manualmente después de un ajuste.
+    """
+    supabase = _get_service_client()
+
+    # Obtener listing + variation
+    listing_res = (
+        supabase.table("marketplace_listings")
+        .select("id, external_id, variation_id")
+        .eq("id", listing_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not listing_res.data:
+        raise HTTPException(status_code=404, detail="Listing no encontrado")
+
+    listing = listing_res.data
+    variation_id = listing.get("variation_id")
+    external_id = listing["external_id"]
+
+    if not variation_id:
+        raise HTTPException(status_code=400, detail="Este listing no tiene variante de Supabase vinculada")
+
+    # Obtener stock actual de Supabase
+    var_res = (
+        supabase.table("product_variations")
+        .select("stock_quantity")
+        .eq("id", variation_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not var_res.data:
+        raise HTTPException(status_code=404, detail="Variante no encontrada")
+
+    current_stock = var_res.data["stock_quantity"]
+
+    creds = get_tenant_meli_credentials(supabase, tenant_id)
+    if not creds or not creds.get("access_token"):
+        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
+
+    try:
+        await update_item_quantity(external_id, current_stock, creds["access_token"])
+        return {"ok": True, "meli_id": external_id, "synced_quantity": current_stock}
+    except Exception as e:
+        logger.error("Error en sync-stock MeLi item %s: %s", external_id, e)
+        raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
