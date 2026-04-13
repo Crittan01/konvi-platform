@@ -57,7 +57,7 @@ const NAV_ITEMS: NavItem[] = [
       { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,       roles: [] },
       { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,         roles: [] },
       { kind: 'leaf', href: '/dashboard/shipping', label: 'Envíos',    icon: Truck,         roles: [] },
-      { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle,   roles: [], locked: true },
+      { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle,   roles: [] },
     ],
   },
 

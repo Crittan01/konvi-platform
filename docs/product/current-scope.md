@@ -179,6 +179,7 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 | `shipping.py` | `POST /api/v1/shipping/quote`, `GET /shipping/history` | ✅ |
 | `meli_webhook.py` | `POST /api/v1/meli/webhook` | ✅ |
 | `conversations.py` | `GET /api/v1/conversations` | ✅ |
+| `marketplace.py` | `GET/POST /api/v1/marketplace`, `PATCH /marketplace/{id}/status` | ✅ |
 
 ### Endpoints significativos pendientes (próximas fases)
 
@@ -210,6 +211,7 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 | `stock_movements` | 20260409240000 (Fase 11) | ✅ |
 | `kb_documents` | 20260409250000 (Fase 11) | ✅ |
 | `audit_log` | 20260409260000 (Fase 11) | ✅ |
+| `marketplace_listings` | 20260413000000 (Fase 11.5) | ✅ |
 | `platform_users` | — | ❌ Fase 12 |
 
 ---
