@@ -107,7 +107,7 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
                    <XAxis dataKey="name" tick={{fill: '#888', fontSize: 10}} tickLine={false} axisLine={false} />
                    <Tooltip 
-                     formatter={(value: number) => [fmt(value), 'Monto']}
+                     formatter={(value: any) => [fmt(Number(value) || 0), 'Monto']}
                      contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }}
                    />
                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
