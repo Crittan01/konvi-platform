@@ -48,23 +48,15 @@ export default async function MarketplacePage() {
 
   // ── Variantes del catálogo interno (Supabase directo con join de producto) ─
   // Usamos Supabase directo (no API) para poder resolver la categoría en el servidor
-  type RawVariation = {
-    id: string
-    sku: string
-    stock_quantity: number
-    price: number
-    attributes: Record<string, string> | null
-    products: { id: string; title: string; platform_category_id: string | null } | null
-  }
-
-  let rawVariations: RawVariation[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rawVariations: any[] = []
   if (tenantId) {
     const { data } = await supabase
       .from('product_variations')
       .select('id, sku, stock_quantity, price, attributes, products(id, title, platform_category_id)')
       .eq('tenant_id', tenantId)
       .order('sku')
-    rawVariations = (data ?? []) as RawVariation[]
+    rawVariations = data ?? []
   }
 
   // ── Construir lista enriquecida para el selector ───────────────────────────
@@ -81,10 +73,12 @@ export default async function MarketplacePage() {
     category_name: string
   }
 
-  const variations: VariationOption[] = rawVariations
+  const variations = rawVariations
     .filter(v => v.products)
     .map(v => {
-      const product      = v.products!
+      // Supabase puede retornar el join como objeto o array según la dirección del FK
+      const product      = Array.isArray(v.products) ? v.products[0] : v.products
+      if (!product) return null
       const category_id  = product.platform_category_id
       const category_name = category_id ? (catMap[category_id] ?? 'Sin categoría') : 'Sin categoría'
       return {
@@ -98,7 +92,7 @@ export default async function MarketplacePage() {
         category_id,
         category_name,
       }
-    })
+    }).filter(Boolean) as VariationOption[]
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto flex-1 h-full overflow-auto">

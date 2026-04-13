@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -202,10 +203,13 @@ export default function MarketplaceManager({ connected, items, paging, variation
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           {item.thumbnail && (
-                            <img
+                            <Image
                               src={item.thumbnail}
-                              alt=""
-                              className="h-10 w-10 rounded object-cover flex-shrink-0 bg-muted"
+                              alt={item.title ?? ''}
+                              width={40}
+                              height={40}
+                              className="rounded object-cover flex-shrink-0 bg-muted"
+                              unoptimized
                             />
                           )}
                           <div className="min-w-0">
