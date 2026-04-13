@@ -113,8 +113,8 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 - Ventas: Pedidos, Contactos, Envíos, Reclamos (Pronto)
 - Productos: Catálogo, Inventario
 - Publicaciones (Pronto): Mercado Libre, Central Ofertas
-- Compras (Pronto): Órdenes de Compra
-- Finanzas (Pronto): Ingresos & Gastos, Rentabilidad
+- Compras: Órdenes de Compra
+- Finanzas: Ingresos & Gastos
 - IA & Contenido: Base de Conocimiento, Media, Agentes IA (Pronto)
 - Analítica: Métricas, Auditoría
 - Configuración: General, Integraciones
@@ -140,8 +140,8 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 | Configuración | `/dashboard/settings` | ✅ Implementado | Equipo RBAC, WABA, notificaciones |
 | Reclamos | `/dashboard/claims` | ❌ Pendiente | Fase 11.5 |
 | MeLi Listings | `/dashboard/marketplace` | ❌ Pendiente | Publicaciones Fase 11.5 |
-| Compras | `/dashboard/purchases` | ❌ Pendiente | Fase 11.5 |
-| Finanzas | `/dashboard/finance` | ❌ Pendiente | Fase 11.5 |
+| Compras | `/dashboard/purchases` | ✅ Implementado | POs, Proveedores, WAC |
+| Finanzas | `/dashboard/finance` | ✅ Implementado | P&L Dashboard, Registro OPEX |
 | Agentes IA | `/dashboard/ai-agents` | ✅ Implementado | Configuración directrices, roles y RAG parameters (Fase 14) |
 | API AI Insights | `/api/insights` | ✅ Implementado | Router genérico a Gemini con RBAC y prompts por dominio |
 

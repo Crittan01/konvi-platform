@@ -302,17 +302,17 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 11.5 — Profundización Tenant Console (Enterprise Super App) ❌ PENDIENTE
+### Fase 11.5 — Profundización Tenant Console (Enterprise Super App) 🟡 EN PROGRESO
 
 **Objetivo**: Completar al 100% todos los módulos que actualmente figuran como "Pronto" (Stubs) en la barra de navegación para que la consola alcance el estado de "Super App" con las mejores prácticas.
 
 **Módulos a construir / expandir:**
-1. **Reclamos (`/dashboard/claims`)**: Gestión de disputas y quejas formales de clientes.
-2. **Publicaciones (`/dashboard/publications`)**: Publicación cruzada (Mercado Libre / Central Ofertas).
-3. **Compras (`/dashboard/purchases`)**: Órdenes de compra a proveedores y abastecimiento.
-4. **Finanzas (`/dashboard/finance`)**: Control de Ingresos, Gastos y Rentabilidad neta por producto.
+1. **Reclamos (`/dashboard/claims`)**: ❌ Pendiente. Gestión de disputas y quejas formales de clientes.
+2. **Publicaciones (`/dashboard/marketplace`)**: ❌ Pendiente. Publicación cruzada (Mercado Libre / Central Ofertas).
+3. **Compras (`/dashboard/purchases`)**: ✅ COMPLETADO (2026-04-13). Órdenes de compra a proveedores, WAC y abastecimiento.
+4. **Finanzas (`/dashboard/finance`)**: ✅ COMPLETADO (2026-04-13). Control de Ingresos, Gastos (OPEX) y Rentabilidad neta (Gross/Net Profit) usando histórico WAC congelado.
 
-**Estado Actual:** Todo este bloque detiene el inicio de la Fase 12 hasta asegurar que el Tenant Console sea comercialmente impecable.
+**Estado Actual:** El "Eje de Rentabilidad" (Compras + Finanzas) fue implementado bajo estándares rigurosos SaaS. Queda pendiente el "Eje Comercial" (Reclamos + Publicaciones) antes de saltar a Fase 12.
 
 ---
 
