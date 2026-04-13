@@ -1,101 +1,59 @@
 import { createClient } from '@/utils/supabase/server'
-import {
-  AlertCircle, ArrowRight, CheckCircle2, Clock,
-  MessageSquare, ShoppingCart, TrendingDown,
-  ClipboardList, Zap, BarChart2, Bot, BellRing, DollarSign
-} from 'lucide-react'
-
-const FEATURES = [
-  { icon: ClipboardList, label: 'Registro de reclamos MeLi y WhatsApp en un solo lugar' },
-  { icon: Zap, label: 'Clasificación automática por IA: devolución, daño, demora, fraude' },
-  { icon: BarChart2, label: 'Dashboard de tasa de reclamos por categoría y producto' },
-  { icon: Bot, label: 'Respuestas sugeridas por IA basadas en tu política de devoluciones (KB)' },
-  { icon: BellRing, label: 'Alertas automáticas antes del vencimiento del plazo MeLi' },
-  { icon: DollarSign, label: 'Cálculo de impacto financiero por reclamo' },
-]
+import { redirect } from 'next/navigation'
+import ClaimsManager from './_components/claims-manager'
 
 export default async function ClaimsPage() {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const role = ((user?.app_metadata ?? {}) as { role?: string }).role ?? 'agent'
+  const { data: { session } } = await supabase.auth.getSession()
 
-  void role // future RBAC
+  if (!session) {
+    redirect('/auth/login')
+  }
+
+  const { data: { user } } = await supabase.auth.getUser()
+  const role = user?.app_metadata?.role || 'agent'
+  const canWrite = ['owner', 'manager', 'agent'].includes(role) // agents can manage claims!
+
+  // Fetch claims with relationships
+  const { data: claimsData } = await supabase
+    .from('claims')
+    .select(`
+      id, status, reason, requested_amount, resolution_notes, created_at,
+      orders ( id, display_id, total_amount ),
+      contacts ( id, first_name, last_name, email )
+    `)
+    .order('created_at', { ascending: false })
+
+  // Fetch recent orders for the "New Claim" selector
+  const { data: ordersData } = await supabase
+    .from('orders')
+    .select('id, display_id, status, total_amount, contact_id')
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  // Map to flat structures
+  const claims = (claimsData || []).map(c => ({
+    id: c.id,
+    order: c.orders,
+    customer: c.contacts,
+    status: c.status,
+    reason: c.reason,
+    requested_amount: c.requested_amount,
+    resolution_notes: c.resolution_notes,
+    created_at: c.created_at
+  }))
 
   return (
-    <div className="space-y-6 max-w-3xl">
-
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2.5 mb-1">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-primary" /> Reclamos
-          </h1>
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400">
-            En desarrollo
-          </span>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Gestiona disputas de clientes y en Mercado Libre con apoyo de IA.
+    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto flex-1 h-full overflow-hidden flex flex-col">
+      <div className="flex flex-col gap-2 flex-none">
+        <h1 className="text-3xl font-bold tracking-tight text-red-600">Centro de Reclamos</h1>
+        <p className="text-muted-foreground w-full max-w-3xl">
+          Visualiza, investiga y resuelve disputas, devoluciones y solicitudes de garantías ligadas a pedidos existentes.
         </p>
       </div>
 
-      {/* Vision card */}
-      <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
-        <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
-            <AlertCircle className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">¿Por qué importan los reclamos?</p>
-            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-              Un reclamo mal gestionado en MeLi puede afectar tu reputación, pausar tus publicaciones
-              y perderte posición en el ranking. Este módulo centraliza todos los reclamos y usa IA para
-              sugerirte la mejor respuesta según tu historial y políticas.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Features list */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-          Funcionalidades planificadas
-        </p>
-        <div className="space-y-2">
-          {FEATURES.map(f => (
-            <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
-              <p className="text-sm text-muted-foreground">{f.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Mientras tanto */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <p className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <Clock className="h-4 w-4 text-muted-foreground" /> Mientras tanto puedes...
-        </p>
-        <div className="space-y-2">
-          {[
-            { href: '/dashboard/inbox', icon: MessageSquare, text: 'Gestionar conversaciones de reclamo vía Inbox WhatsApp' },
-            { href: '/dashboard/orders', icon: ShoppingCart, text: 'Revisar el estado de los pedidos relacionados' },
-            { href: '/dashboard/metrics', icon: TrendingDown, text: 'Ver métricas de órdenes canceladas en Analítica' },
-          ].map(item => (
-            <a key={item.href} href={item.href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group">
-              <item.icon className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-              <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors flex-1">{item.text}</span>
-              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-all group-hover:translate-x-0.5" />
-            </a>
-          ))}
-        </div>
-      </div>
-
-      {/* Status */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-        <span>Planificado para Fase 12 · sujeto a decisión OQ-P01 sobre canal de reclamos</span>
+      <div className="flex-1 min-h-0">
+        <ClaimsManager claims={claims} recentOrders={ordersData || []} canWrite={canWrite} />
       </div>
     </div>
   )
