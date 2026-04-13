@@ -2,7 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import MarketplaceManager from './_components/marketplace-manager'
 
-const API_URL = process.env.API_URL || 'http://127.0.0.1:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
 export default async function MarketplacePage() {
   const supabase = createClient()

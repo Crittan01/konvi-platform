@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 
 // In a real app we'd load this from env variables instead of hard-coding the api service url
-const API_URL = process.env.API_URL || 'http://localhost:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
 
 export async function publishToMarketplace(variationId: string, externalPrice: number) {
   const cookieStore = cookies()
