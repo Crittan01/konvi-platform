@@ -10,6 +10,9 @@ import {
   Search, AlertTriangle, CheckCircle2, WifiOff
 } from 'lucide-react'
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+} from '@/components/ui/select'
+import {
   linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase
 } from '../actions'
 
@@ -333,27 +336,38 @@ export default function MarketplaceManager({ connected, items, paging, variation
 
                     {/* Panel de vinculación inline */}
                     {isLinking && (
-                      <tr key={`link-${item.meli_id}`} className="bg-muted/20">
-                        <td colSpan={6} className="px-4 py-3">
+                      <tr key={`link-${item.meli_id}`} className="bg-muted/20 border-b border-primary/20">
+                        <td colSpan={6} className="px-4 py-4">
                           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                            <p className="text-xs text-muted-foreground whitespace-nowrap">
-                              Vincular <strong>{item.title}</strong> a:
+                            <p className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                              Vincular a producto interno:
                             </p>
-                            <select
-                              className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                              value={selectedVariationId}
-                              onChange={e => setSelectedVariationId(e.target.value)}
-                            >
-                              <option value="">Seleccionar variante de Supabase...</option>
-                              {variations.map(v => (
-                                <option key={v.id} value={v.id}>{v.label}</option>
-                              ))}
-                            </select>
-                            <div className="flex gap-2">
+                            <Select value={selectedVariationId} onValueChange={setSelectedVariationId}>
+                              <SelectTrigger className="flex-1 h-9 text-sm">
+                                <SelectValue placeholder="Seleccionar variante del catálogo..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {variations.length === 0 ? (
+                                  <SelectItem value="_empty" disabled>
+                                    No hay variantes en el catálogo
+                                  </SelectItem>
+                                ) : (
+                                  variations.map(v => (
+                                    <SelectItem key={v.id} value={v.id}>
+                                      {v.product_title} — {v.sku}
+                                      <span className="ml-2 text-muted-foreground text-xs">
+                                        (Stock: {v.stock_quantity})
+                                      </span>
+                                    </SelectItem>
+                                  ))
+                                )}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex gap-2 shrink-0">
                               <Button
                                 size="sm"
                                 className="h-8 text-xs"
-                                disabled={!selectedVariationId}
+                                disabled={!selectedVariationId || selectedVariationId === '_empty'}
                                 onClick={() => handleLink(item.meli_id)}
                               >
                                 Confirmar
