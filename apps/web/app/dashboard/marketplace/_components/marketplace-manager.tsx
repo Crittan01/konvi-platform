@@ -10,7 +10,7 @@ import {
   Search, AlertTriangle, CheckCircle2, WifiOff
 } from 'lucide-react'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue
 } from '@/components/ui/select'
 import {
   linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase
@@ -35,10 +35,14 @@ type MeliItem = {
 
 type Variation = {
   id: string
-  label: string
   sku: string
   stock_quantity: number
+  price: number
+  attributes: Record<string, string>
+  product_id: string
   product_title: string
+  category_id: string | null
+  category_name: string
 }
 
 type Props = {
@@ -346,19 +350,41 @@ export default function MarketplaceManager({ connected, items, paging, variation
                               <SelectTrigger className="flex-1 h-9 text-sm">
                                 <SelectValue placeholder="Seleccionar variante del catálogo..." />
                               </SelectTrigger>
-                              <SelectContent>
+                              <SelectContent className="max-h-72">
                                 {variations.length === 0 ? (
                                   <SelectItem value="_empty" disabled>
                                     No hay variantes en el catálogo
                                   </SelectItem>
                                 ) : (
-                                  variations.map(v => (
-                                    <SelectItem key={v.id} value={v.id}>
-                                      {v.product_title} — {v.sku}
-                                      <span className="ml-2 text-muted-foreground text-xs">
-                                        (Stock: {v.stock_quantity})
-                                      </span>
-                                    </SelectItem>
+                                  // Agrupar por categoría
+                                  Object.entries(
+                                    variations.reduce<Record<string, Variation[]>>((acc, v) => {
+                                      const key = v.category_name
+                                      ;(acc[key] ??= []).push(v)
+                                      return acc
+                                    }, {})
+                                  ).sort(([a], [b]) => a.localeCompare(b)).map(([catName, vars]) => (
+                                    <SelectGroup key={catName}>
+                                      <SelectLabel className="text-xs font-semibold text-primary/80 uppercase tracking-wide">
+                                        {catName}
+                                      </SelectLabel>
+                                      {vars.map(v => {
+                                        // Atributos: omitir "default"/"Standard", mostrar el resto
+                                        const attrs = Object.entries(v.attributes)
+                                          .filter(([k]) => k !== 'default')
+                                          .map(([, val]) => val)
+                                          .join(' / ')
+                                        return (
+                                          <SelectItem key={v.id} value={v.id}>
+                                            <span className="font-medium">{v.product_title}</span>
+                                            {attrs && <span className="text-muted-foreground"> — {attrs}</span>}
+                                            <span className="text-muted-foreground text-xs ml-1">
+                                              · {v.sku} · Stock: {v.stock_quantity}
+                                            </span>
+                                          </SelectItem>
+                                        )
+                                      })}
+                                    </SelectGroup>
                                   ))
                                 )}
                               </SelectContent>
