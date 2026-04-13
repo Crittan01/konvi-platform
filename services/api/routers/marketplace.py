@@ -14,7 +14,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
 
     # Traemos las variaciones con información de producto
     var_res = supabase.table("product_variations").select(
-        "id, product_id, sku, price, stock_quantity, products(name)"
+        "id, product_id, sku, price, stock_quantity, products(title)"
     ).eq("tenant_id", tenant_id).execute()
 
     if not var_res.data:
@@ -31,7 +31,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
 
     results = []
     for var in variations:
-        product_name = var.get("products", {}).get("name", "Unknown") if var.get("products") else "Unknown"
+        product_name = var.get("products", {}).get("title", "Unknown") if var.get("products") else "Unknown"
         listing = listings.get(var["id"])
 
         results.append({
