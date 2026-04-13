@@ -1,212 +1,153 @@
 # CLAUDE.md — Commerce Ops Platform
-> Guía de contexto para Claude Code. Leer antes de tocar cualquier archivo.
+
+Este archivo define el contexto estable del proyecto.
+Usarlo para entender arquitectura, restricciones, stack, convenciones y prioridades antes de proponer o aplicar cambios.
+No sustituye validaciones en código, documentación oficial ni checks del repositorio.
 
 ## Qué es este proyecto
 
 SaaS conversacional multi-tenant para e-commerce B2B2C vía WhatsApp.
-Cada empresa (tenant) opera en aislamiento total. El canal de ventas es WhatsApp Cloud API (Meta oficial). La IA es Google Gemini. El backend son microservicios Python/FastAPI. El frontend es Next.js 14.
+Cada empresa (tenant) opera en aislamiento total.
+El canal de ventas es WhatsApp Cloud API oficial de Meta.
+La IA actual es Google Gemini.
+El backend usa servicios Python/FastAPI.
+El frontend usa Next.js.
 
-**Estado actual:** Fases 1-11 ✅ completadas. Phase 12 (Platform Console) ❌ pendiente.
-**Versión live:** https://commerce-ops-web.onrender.com
+## Estado actual
 
----
+- Fases 1-11: completadas
+- Fase 12: Platform Console pendiente
+- Versión live: https://commerce-ops-web.onrender.com
 
-## Stack exacto (no asumir — verificar en package.json / requirements.txt)
+## Stack actual del proyecto
 
-| Capa | Tecnología |
-|------|-----------|
-| Frontend | Next.js 14.2.35 + React 18 + TypeScript 5 |
-| UI | TailwindCSS 3.3 + shadcn/ui (componentes en `apps/web/components/ui/`) |
-| Backend | Python 3.11 + FastAPI 0.128.8 (sin venv — paquetes en sistema) |
-| DB/Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) |
-| Storage | Supabase Storage — bucket `tenant-media` |
-| IA | Google Gemini (`google-genai==1.47.0`, modelo `gemini-2.5-flash`) |
-| WhatsApp | WhatsApp Cloud API v21.0 (Meta oficial — NUNCA librerías no oficiales) |
-| Shipping | Envia API (sandbox + producción vía `tenant_integrations`) |
-| Marketplace | Mercado Libre OAuth 2.0 |
-| Hosting | Render (4 servicios: web, connector, api, orchestrator) |
+Verificar siempre en `package.json`, `requirements.txt`, `render.yaml` y configuración real antes de asumir compatibilidad o versiones.
 
----
+- Frontend: Next.js 14.2.35 + React 18 + TypeScript 5
+- UI: TailwindCSS 3.3 + shadcn/ui
+- Backend: Python 3.11 + FastAPI 0.128.8
+- DB/Auth: Supabase PostgreSQL + RLS + Auth + Realtime
+- Storage: Supabase Storage
+- IA: Google Gemini (`google-genai==1.47.0`, modelo actual `gemini-2.5-flash`)
+- WhatsApp: WhatsApp Cloud API oficial
+- Shipping: Envia API
+- Marketplace: Mercado Libre OAuth 2.0
+- Hosting: Render
 
-## Arquitectura de navegación — Tenant Console (aprobada 2026-04-10)
+## Principios críticos del proyecto
 
-```
-Dashboard          /dashboard            (Tabs: Operaciones/Negocio + AI Insights)
-Inbox              /dashboard/inbox      (Uso diario crítico)
+- Multi-tenant desde el día 1.
+- Toda entidad sensible debe tener `tenant_id`.
+- RLS es obligatorio y es la barrera final de seguridad.
+- El frontend no es una barrera de seguridad.
+- El API/Gateway valida antes de llegar a DB cuando aplique.
+- Nada crítico depende del LLM como fuente de verdad.
+- Stock, precios, pedidos, permisos y estados operativos salen de DB y servicios internos.
+- Solo herramientas oficiales para WhatsApp.
+- Toda integración externa debe estar desacoplada del núcleo.
+- Cambios importantes deben ser auditables.
 
-▼ Ventas
-   Pedidos          /dashboard/orders    (+ AI Insights)
-   Contactos        /dashboard/contacts  (+ AI Insights)
-   Envíos           /dashboard/shipping
-   Reclamos         /dashboard/claims    (🔒 Pronto - Fase 12)
+## Reglas críticas de implementación
 
-▼ Productos        (owner + manager)
-   Catálogo         /dashboard/catalog
-   Inventario       /dashboard/inventory (+ AI Insights)
+### Seguridad
 
-▼ Publicaciones    (owner + manager) [🔒 TODO EL GRUPO PRÓXIMO]
-   Mercado Libre    /dashboard/marketplace
-   Central Ofertas  /dashboard/marketplace
+1. En Server Components usar `getUser()`, no `getSession()` como garantía de validación.
+2. Toda operación sensible debe revalidar identidad, tenant y rol.
+3. Nunca confiar en datos de tenant/role enviados por cliente.
+4. Service-role keys solo en backend/controlado, nunca expuestas al cliente.
+5. Secretos y credenciales nunca deben escribirse en el repo.
 
-▼ Compras          (owner) [🔒 TODO EL GRUPO PRÓXIMO]
-   Órdenes Compra   /dashboard/purchases
+### Multi-tenant
 
-▼ Finanzas         (owner) [🔒 TODO EL GRUPO PRÓXIMO]
-   Ingresos & Gst.  /dashboard/finance
-   Rentabilidad     /dashboard/finance
+6. Toda tabla operativa relevante debe incluir `tenant_id`.
+7. Toda query debe respetar el aislamiento por tenant.
+8. Subdominio o UI separada no reemplazan seguridad en DB.
+9. RLS y RBAC son obligatorios; filtros en frontend no cuentan como aislamiento real.
 
-▼ IA & Contenido   (owner + manager)
-   Base Conocimient /dashboard/knowledge-base
-   Media            /dashboard/media
-   Agentes IA       /dashboard/ai-agents (🔒 Pronto - Fase 14)
+### Frontend
 
-▼ Analítica        (owner + manager)
-   Métricas         /dashboard/metrics   (+ AI Insights)
-   Auditoría        /dashboard/audit     (owner only)
+10. Server Components para carga inicial de datos.
+11. Client Components para interactividad.
+12. Mutaciones deben revalidar permisos y contexto de tenant.
+13. Revalidar caché o paths después de mutaciones exitosas cuando aplique.
 
-▼ Configuración    (owner + manager)
-   General          /dashboard/settings
-   Integraciones    /dashboard/integrations (owner only)
-```
+### IA
 
-**Reglas de navegación:**
-- Sub-item en sidebar = módulo con URL propia y propósito diferenciado
-- Tabs dentro de una página = vistas alternativas del mismo dato (NO ir al sidebar)
-- Los grupos auto-expanden cuando la ruta activa está dentro de ellos
-- RBAC aplicado tanto en grupo como en cada hijo individual
+14. Gemini no decide verdad transaccional.
+15. La knowledge base no reemplaza datos operativos.
+16. Si una respuesta depende de datos vivos, consultarlos desde herramientas o backend.
+17. RAG con pgvector está previsto, pero debe tratarse como capacidad controlada, no como autoridad.
 
----
+### WhatsApp
+
+18. Solo WhatsApp Cloud API oficial.
+19. El flujo base es: webhook -> persistencia -> procesamiento -> respuesta.
+20. Cualquier límite, template, media capability o política debe validarse en documentación oficial vigente antes de implementarse.
+
+## Navegación aprobada — Tenant Console
+
+- Dashboard: `/dashboard`
+- Inbox: `/dashboard/inbox`
+
+### Ventas
+
+- Pedidos: `/dashboard/orders`
+- Contactos: `/dashboard/contacts`
+- Envíos: `/dashboard/shipping`
+- Reclamos: `/dashboard/claims` (pendiente)
+
+### Productos
+
+- Catálogo: `/dashboard/catalog`
+- Inventario: `/dashboard/inventory`
+
+### Publicaciones
+
+- Mercado Libre: `/dashboard/marketplace`
+- Central Ofertas: `/dashboard/marketplace` (pendiente)
+
+### Compras
+
+- Órdenes Compra: `/dashboard/purchases` (pendiente)
+
+### Finanzas
+
+- Ingresos y Gastos: `/dashboard/finance` (pendiente)
+- Rentabilidad: `/dashboard/finance` (pendiente)
+
+### IA y Contenido
+
+- Base de conocimiento: `/dashboard/knowledge-base`
+- Media: `/dashboard/media`
+- Agentes IA: `/dashboard/ai-agents` (pendiente)
+
+### Analítica
+
+- Métricas: `/dashboard/metrics`
+- Auditoría: `/dashboard/audit`
+
+### Configuración
+
+- General: `/dashboard/settings`
+- Integraciones: `/dashboard/integrations`
+
+## Reglas de navegación
+
+- Sub-item en sidebar = módulo con URL propia y propósito diferenciado.
+- Tabs dentro de una página = vistas alternativas del mismo dato.
+- Los grupos se expanden según ruta activa.
+- RBAC aplica al grupo y al hijo.
 
 ## Estructura de directorios clave
 
-```
+```text
 apps/web/
-  app/
-    dashboard/
-      sidebar-client.tsx       ← Navegación (grupos expandibles)
-      layout.tsx               ← Layout principal con SidebarClient
-      dashboard-client.tsx     ← Dashboard con tabs Operaciones/Negocio
-      inbox/page.tsx           ← Inbox AI realtime
-      orders/page.tsx          ← Pedidos con filtros
-      contacts/page.tsx        ← Contactos CRM
-      catalog/page.tsx         ← Catálogo con CatalogForm client
-      inventory/page.tsx       ← Inventario con ajustes
-      knowledge-base/page.tsx  ← KB con búsqueda
-      media/
-        page.tsx               ← Server: lista archivos Storage
-        media-client.tsx       ← Client: drag&drop, lightbox
-      shipping/page.tsx        ← Envíos (bajo Ventas en nav)
-      metrics/page.tsx         ← Métricas históricas
-      audit/page.tsx           ← Auditoría con filtros
-      settings/page.tsx        ← Configuración General
-      integrations/page.tsx    ← Integraciones (bajo Config en nav)
-  components/ui/               ← shadcn/ui components
+  app/dashboard/
+  components/ui/
   utils/supabase/
-    client.ts                  ← Supabase browser client
-    server.ts                  ← Supabase server client (cookies)
 
 services/
-  api/                         ← FastAPI: gateway, RBAC, productos, pedidos
-  connector-whatsapp/          ← Webhook Meta → Supabase messages
-  ai-orchestrator/             ← Gemini + KB + intención → respuesta
+  api/
+  connector-whatsapp/
+  ai-orchestrator/
 ```
-
----
-
-## Reglas críticas para Claude Code
-
-### Seguridad
-1. **getUser() NO getSession()** en Server Components — `getSession()` no valida JWT contra servidor
-2. **RLS activo en Supabase** — toda query del frontend debe incluir `tenant_id` (el RLS lo filtra automáticamente por el JWT)
-3. **Server Actions deben re-validar tenant_id y role** — nunca confíar en el cliente
-
-### Multi-tenant
-4. Toda tabla tiene `tenant_id`. Toda query tiene `.eq('tenant_id', tenantId)`
-5. `app_metadata.tenant_id` y `app_metadata.role` vienen del JWT de Supabase Auth
-6. RLS es la última barrera. El API Gateway es la barrera previa. El frontend no es seguridad.
-
-### Frontend patterns
-7. **Server Components** para carga inicial de datos (`async function Page()`)
-8. **Client Components** para interactividad (hooks, realtime, drag&drop)
-9. Server Actions (`'use server'`) re-validan con `getUser()` internamente
-10. `revalidatePath()` después de toda mutación exitosa
-
-### IA
-11. Gemini nunca es fuente de verdad para stock, precios, pedidos, permisos
-12. La KB (Base de Conocimiento) se inyecta como texto plano en el prompt
-13. RAG con pgvector está planificado — no implementado aún (OQ-T03)
-
-### Shipping
-14. Envia API solo disponible si `tenant_integrations.status = 'connected'` para provider `envia`
-15. `shipping_origin` se guarda como JSONB en `tenants.shipping_origin`
-
-### WhatsApp
-16. Solo WhatsApp Cloud API oficial (Meta v21.0). NUNCA Baileys, WPPConnect ni similares
-17. El connector recibe webhooks → inserta en `messages` → orchestrator procesa
-
----
-
-## Comandos útiles
-
-```bash
-# Frontend dev
-cd apps/web && npm run dev
-
-# TypeScript check
-cd apps/web && node_modules/.bin/tsc --noEmit
-
-# Backend API
-cd services/api && uvicorn main:app --reload
-
-# Orchestrator local
-cd services/ai-orchestrator
-export $(grep -v '^#' ../../.env | sed 's/="\(.*\)"/=\1/' | xargs)
-python3 main.py
-
-# DB query
-supabase db query --linked -f archivo.sql
-```
-
----
-
-## Variables de entorno (.env — nunca al repo)
-
-```
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_JWT_SECRET=
-META_ACCESS_TOKEN=          # Token permanente System User commerce-ops
-META_PHONE_NUMBER_ID=
-META_WABA_ID=
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
-MELI_CLIENT_ID=
-MELI_CLIENT_SECRET=
-MELI_REDIRECT_URI=
-NEXT_PUBLIC_API_URL=https://commerce-ops-api.onrender.com
-```
-
----
-
-## Estado de fases
-
-| Fase | Nombre | Estado |
-|------|--------|--------|
-| 1-6 | Base, Auth, UI, WhatsApp, AI, API Gateway | ✅ |
-| 7 | Deploy Render + E2E | ✅ |
-| 8 | Catálogo + RBAC | ✅ |
-| 9 | Schema core + Pedidos + Config + Equipo | ✅ |
-| 10 | MeLi OAuth + Envia Sandbox | ✅ |
-| 11 | Módulos restantes + UI Redesign "Plus Total" | ✅ |
-| 12 | Platform Console | ❌ Bloqueado por OQ-P01 |
-| 13 | Shopify / Tienda custom | ❌ Futuro |
-
----
-
-## Preguntas abiertas (OQ)
-
-- **OQ-P01**: ¿Platform Console en misma app Next.js (`/platform/*`) o app separada?
-- **OQ-T03**: pgvector para RAG en KB — ¿Supabase managed o extensión manual?
-
-Ver detalles en `docs/roadmap/implementation-phases.md`

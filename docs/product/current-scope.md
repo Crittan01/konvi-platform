@@ -139,7 +139,7 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 | Auditoría | `/dashboard/audit` | ✅ Implementado | Filtros, paginación, payload JSONB |
 | Configuración | `/dashboard/settings` | ✅ Implementado | Equipo RBAC, WABA, notificaciones |
 | Reclamos | `/dashboard/claims` | ❌ Pendiente | Fase 11.5 |
-| MeLi Listings | `/dashboard/marketplace` | ❌ Pendiente | Publicaciones Fase 11.5 |
+| MeLi Listings | `/dashboard/marketplace` | ✅ Implementado | Datos reales de MeLi API. Vinculación variation↔listing. Sync automático stock Supabase→MeLi. |
 | Compras | `/dashboard/purchases` | ✅ Implementado | POs, Proveedores, WAC |
 | Finanzas | `/dashboard/finance` | ✅ Implementado | P&L Dashboard, Registro OPEX |
 | Agentes IA | `/dashboard/ai-agents` | ✅ Implementado | Configuración directrices, roles y RAG parameters (Fase 14) |
