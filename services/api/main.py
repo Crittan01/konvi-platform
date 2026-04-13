@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook
+from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace
 from dependencies.auth import get_current_tenant
 
 app = FastAPI(title="Commerce Ops Core API", description="Síncrona REST")
@@ -27,6 +27,7 @@ app.include_router(contacts.router, prefix="/api/v1/contacts")
 app.include_router(settings.router, prefix="/api/v1/settings")
 app.include_router(integrations.router, prefix="/api/v1/integrations")
 app.include_router(shipping.router, prefix="/api/v1/shipping")
+app.include_router(marketplace.router, prefix="/api/v1")
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 
 @app.get("/health")
