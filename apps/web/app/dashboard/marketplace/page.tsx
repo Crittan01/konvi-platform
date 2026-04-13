@@ -48,7 +48,6 @@ export default async function MarketplacePage() {
 
   // ── Variantes del catálogo interno (Supabase directo con join de producto) ─
   // Usamos Supabase directo (no API) para poder resolver la categoría en el servidor
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let rawVariations: any[] = []
   if (tenantId) {
     const { data } = await supabase
