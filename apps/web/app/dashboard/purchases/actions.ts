@@ -70,6 +70,22 @@ export async function createPurchaseOrder(formData: FormData) {
   revalidatePath('/dashboard/purchases')
 }
 
+export async function cancelPurchaseOrder(poId: string) {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const m = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+
+  await supabase
+    .from('purchase_orders')
+    .update({ status: 'cancelled' })
+    .eq('id', poId)
+    .eq('tenant_id', m.tenant_id)
+    .eq('status', 'ordered')
+
+  revalidatePath('/dashboard/purchases')
+}
+
 export async function receivePurchaseOrder(poId: string) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -95,19 +111,30 @@ export async function receivePurchaseOrder(poId: string) {
   
   if (poErr) return
 
-  // 3. Update stock and cost_price for each variation
+  // 3. Update stock and WAC cost_price for each variation
   for (const item of items) {
     const { data: varData } = await supabase
       .from('product_variations')
-      .select('stock_quantity')
+      .select('stock_quantity, cost_price')
       .eq('id', item.variation_id)
       .single()
     
     if (varData) {
-      const newStock = (varData.stock_quantity || 0) + item.quantity
+      const currentStock = varData.stock_quantity || 0
+      const currentCost = varData.cost_price || 0
+      const newStock = currentStock + item.quantity
+      
+      // Calculate Weighted Average Cost (WAC)
+      let wac = 0
+      if (newStock > 0) {
+        // Handle negative stock anomalies safely
+        const effectiveStock = Math.max(0, currentStock)
+        wac = ((effectiveStock * currentCost) + (item.quantity * item.unit_cost)) / (effectiveStock + item.quantity)
+      }
+
       await supabase.from('product_variations').update({
         stock_quantity: newStock,
-        cost_price: item.unit_cost // set last unit cost
+        cost_price: wac
       }).eq('id', item.variation_id)
 
       // Audit movement
