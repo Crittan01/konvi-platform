@@ -39,7 +39,10 @@ export default function MarketplaceManager({ items, canWrite }: { items: Marketp
 
     setLoadingIds(prev => [...prev, itemId])
     try {
-      await publishToMarketplace(itemId, externalPrice)
+      const resp = await publishToMarketplace(itemId, externalPrice)
+      if (resp?.error) {
+         alert(`Error: ${resp.error}`)
+      }
     } finally {
       setLoadingIds(prev => prev.filter(id => id !== itemId))
     }
@@ -49,7 +52,10 @@ export default function MarketplaceManager({ items, canWrite }: { items: Marketp
     if (!canWrite) return
     setLoadingIds(prev => [...prev, variationId]) // disable the row temporarily
     try {
-      await changeListingStatus(listingId, newStatus)
+      const resp = await changeListingStatus(listingId, newStatus)
+      if (resp?.error) {
+         alert(`Error: ${resp.error}`)
+      }
     } finally {
       setLoadingIds(prev => prev.filter(id => id !== variationId))
     }
