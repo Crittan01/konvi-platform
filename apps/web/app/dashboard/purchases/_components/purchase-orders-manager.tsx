@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Plus, PackageSearch, Trash2, Check, Clock } from 'lucide-react'
-import { createPurchaseOrder, receivePurchaseOrder } from '../actions'
+import { Plus, PackageSearch, Trash2, Check, XCircle } from 'lucide-react'
+import { createPurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder } from '../actions'
 
 type Props = {
   orders: any[]
@@ -148,9 +148,11 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
                </div>
                <div className="text-left sm:text-right">
                   <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                    o.status === 'received' ? 'bg-green-500/15 text-green-500' : 'bg-blue-500/15 text-blue-500'
+                    o.status === 'received' ? 'bg-green-500/15 text-green-500' :
+                    o.status === 'cancelled' ? 'bg-red-500/15 text-red-500' :
+                    'bg-blue-500/15 text-blue-500'
                   }`}>
-                    {o.status === 'ordered' ? 'Solicitado / Pendiente' : 'Recibido'}
+                    {o.status === 'ordered' ? 'Solicitado / Pendiente' : o.status === 'received' ? 'Recibido' : 'Cancelado'}
                   </span>
                   <p className="font-bold text-sm mt-1">${o.total_amount.toLocaleString()}</p>
                </div>
@@ -166,7 +168,12 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
              </div>
 
              {o.status === 'ordered' && canWrite && (
-               <div className="mt-3 flex gap-2 justify-end pt-3 border-t">
+               <div className="mt-3 flex flex-wrap gap-2 justify-end pt-3 border-t">
+                  <form action={async () => await cancelPurchaseOrder(o.id)}>
+                    <Button variant="outline" size="sm" type="submit" className="h-8 text-xs text-red-500 hover:text-red-600 hover:bg-red-500/10 gap-2 border-red-500/20">
+                      <XCircle className="h-3.5 w-3.5" /> Cancelar Orden
+                    </Button>
+                  </form>
                   <form action={async () => await receivePurchaseOrder(o.id)}>
                     <Button size="sm" type="submit" className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white gap-2">
                       <Check className="h-3.5 w-3.5" /> Marcar como Recibida (Ingresar al Inventario)

@@ -5,18 +5,54 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import ExpensesManager from './expenses-manager'
 import { DollarSign, TrendingDown, TrendingUp, Activity, PieChart } from 'lucide-react'
 
+import { useState, useMemo } from 'react'
+
 type Props = {
   orders: any[]
   expenses: any[]
   canWrite: boolean
 }
 
+type TimeFilter = 'all' | 'month' | 'last_month'
+
 export default function FinanceDashboard({ orders, expenses, canWrite }: Props) {
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('month')
+
+  // Derive target dates based on filter
+  const { startDate, endDate } = useMemo(() => {
+    const now = new Date()
+    if (timeFilter === 'all') return { startDate: new Date(0), endDate: new Date(8640000000000000) }
+    
+    if (timeFilter === 'month') {
+      return { 
+        startDate: new Date(now.getFullYear(), now.getMonth(), 1), 
+        endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59) 
+      }
+    }
+    
+    // last_month
+    return { 
+      startDate: new Date(now.getFullYear(), now.getMonth() - 1, 1), 
+      endDate: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59) 
+    }
+  }, [timeFilter])
+
+  // Filter Data
+  const filteredOrders = useMemo(() => orders.filter(o => {
+    const d = new Date(o.created_at || new Date())
+    return d >= startDate && d <= endDate
+  }), [orders, startDate, endDate])
+
+  const filteredExpenses = useMemo(() => expenses.filter(e => {
+    const d = new Date(e.expense_date)
+    return d >= startDate && d <= endDate
+  }), [expenses, startDate, endDate])
+
   // 1. Calcular métricas principales
   let totalRevenue = 0
-  let totalCOGS = 0 // Costo de mercancía vendida
+  let totalCOGS = 0 
   
-  orders.forEach(o => {
+  filteredOrders.forEach(o => {
     if (o.status === 'cancelled') return
     totalRevenue += o.total_amount
     o.order_items.forEach((item: any) => {
@@ -25,7 +61,7 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
     })
   })
 
-  const totalOpex = expenses.reduce((acc, e) => acc + e.amount, 0)
+  const totalOpex = filteredExpenses.reduce((acc, e) => acc + e.amount, 0)
   
   const grossProfit = totalRevenue - totalCOGS
   const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0
@@ -46,7 +82,14 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
 
   return (
     <div className="space-y-6">
-       
+      
+      {/* Filtros */}
+      <div className="flex bg-muted/30 border border-border/50 p-1 w-fit rounded-lg">
+        <button onClick={() => setTimeFilter('last_month')} className={`text-xs px-4 py-1.5 rounded-md font-medium transition-colors ${timeFilter === 'last_month' ? 'bg-background shadow-sm border text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Mes Pasado</button>
+        <button onClick={() => setTimeFilter('month')} className={`text-xs px-4 py-1.5 rounded-md font-medium transition-colors ${timeFilter === 'month' ? 'bg-background shadow-sm border text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Mes Actual</button>
+        <button onClick={() => setTimeFilter('all')} className={`text-xs px-4 py-1.5 rounded-md font-medium transition-colors ${timeFilter === 'all' ? 'bg-background shadow-sm border text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Todo el Histórico</button>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border-border/50 shadow-sm">
           <CardContent className="p-5 flex flex-col items-center justify-center text-center">
@@ -126,7 +169,7 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
         </div>
         
         <div className="lg:col-span-2">
-           <ExpensesManager expenses={expenses} canWrite={canWrite} />
+           <ExpensesManager expenses={filteredExpenses} canWrite={canWrite} />
         </div>
       </div>
       
