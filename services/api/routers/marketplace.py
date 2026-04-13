@@ -1,17 +1,16 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
-from dependencies.auth import get_current_user_tenant, _get_service_client
+from dependencies.auth import get_current_tenant, _get_service_client
 
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
 
 @router.get("/listings")
-async def get_listings(tenant: dict = Depends(get_current_user_tenant)):
+async def get_listings(tenant_id: str = Depends(get_current_tenant)):
     """
     Devuelve todo el catálogo (variaciones) cruzado con su posible estado 
     en marketplace_listings (Mercado Libre).
     """
     supabase = _get_service_client()
-    tenant_id = tenant["tenant_id"]
 
     # Traemos las variaciones con información de producto
     var_res = supabase.table("product_variations").select(
@@ -55,14 +54,13 @@ async def get_listings(tenant: dict = Depends(get_current_user_tenant)):
 @router.post("/publish")
 async def publish_listing(
     payload: dict = Body(...),
-    tenant: dict = Depends(get_current_user_tenant)
+    tenant_id: str = Depends(get_current_tenant)
 ):
     """
     Publica una variación en Mercado Libre.
     (MOCK: Genera un ID 'MLA...' para validar la arquitectura funcional)
     """
     supabase = _get_service_client()
-    tenant_id = tenant["tenant_id"]
     variation_id = payload.get("variation_id")
     external_price = payload.get("external_price")
 
@@ -96,13 +94,12 @@ async def publish_listing(
 async def update_listing_status(
     listing_id: str,
     payload: dict = Body(...),
-    tenant: dict = Depends(get_current_user_tenant)
+    tenant_id: str = Depends(get_current_tenant)
 ):
     """
     Pausa o Activa una publicación.
     """
     supabase = _get_service_client()
-    tenant_id = tenant["tenant_id"]
     new_status = payload.get("status")
 
     if new_status not in ["active", "paused", "closed"]:
