@@ -133,7 +133,7 @@ def get_tenant_meli_credentials(supabase, tenant_id: str) -> Optional[dict]:
             .select("credentials")
             .eq("tenant_id", tenant_id)
             .eq("provider", "mercadolibre")
-            .eq("active", True)
+            .eq("status", "connected")
             .single()
             .execute()
         )
