@@ -29,6 +29,7 @@ class OrderItemCreate(BaseModel):
     variation_id: Optional[str] = None
     title: str = Field(..., min_length=1)
     unit_price: float = Field(..., gt=0)
+    unit_cost: Optional[float] = None
     quantity: int = Field(default=1, ge=1)
 
 
@@ -98,6 +99,13 @@ async def create_order(
 
         order_id = order_result.data[0]["id"]
 
+        # Lookup cost_price for the variations since we shouldn't rely on frontend
+        variation_ids = [str(item.variation_id) for item in order.items if item.variation_id]
+        variation_costs = {}
+        if variation_ids:
+            var_res = supabase.table("product_variations").select("id, cost_price").in_("id", variation_ids).execute()
+            variation_costs = {v["id"]: float(v["cost_price"] or 0) for v in (var_res.data or [])}
+
         items_data = [
             {
                 "order_id": order_id,
@@ -106,6 +114,7 @@ async def create_order(
                 "variation_id": item.variation_id,
                 "title": item.title,
                 "unit_price": item.unit_price,
+                "unit_cost": variation_costs.get(str(item.variation_id), 0.0) if item.variation_id else 0.0,
                 "quantity": item.quantity,
             }
             for item in order.items

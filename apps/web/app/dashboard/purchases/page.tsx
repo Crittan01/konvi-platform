@@ -1,75 +1,78 @@
-import { ClipboardList, ArrowRight, CheckCircle2, PackageSearch, FileText, Bot, CalendarClock, PackageCheck, LineChart, Package } from 'lucide-react'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/utils/supabase/server'
+import PurchasesClient from './_components/purchases-client'
 
-const FEATURES = [
-  { icon: PackageSearch, label: 'Gestión de proveedores y catálogos de compra' },
-  { icon: FileText, label: 'Creación y seguimiento de Órdenes de Compra (OC)' },
-  { icon: Bot, label: 'Agente IA: predicción de quiebre de stock y sugerencias de recompra' },
-  { icon: CalendarClock, label: 'Cálculo de lead time automático por proveedor' },
-  { icon: PackageCheck, label: 'Recepción total o parcial contra de órdenes de compra' },
-  { icon: LineChart, label: 'Actualización automática del costo promedio ponderado' },
-]
+export const dynamic = 'force-dynamic'
 
-export default function PurchasesPage() {
+export default async function PurchasesPage() {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    redirect('/auth/login')
+  }
+
+  const meta = user.app_metadata as { tenant_id?: string; role?: string }
+  if (!meta.tenant_id) {
+    return <div className="p-8 text-center text-red-500">Error: Usuario no asociado a ningún tenant.</div>
+  }
+
+  const role = meta.role ?? ''
+  const canWrite = role === 'owner' || role === 'manager'
+
+  // Fetch Suppliers
+  const { data: suppliersRes } = await supabase
+    .from('suppliers')
+    .select('*')
+    .eq('tenant_id', meta.tenant_id)
+    .order('name')
+  
+  const suppliers = suppliersRes || []
+
+  // Fetch Purchase Orders
+  const { data: posRes } = await supabase
+    .from('purchase_orders')
+    .select(`
+      id, status, expected_date, total_amount, created_at,
+      suppliers(id, name),
+      purchase_order_items(id, quantity, unit_cost, variation_id, product_variations(sku, price, products(title)))
+    `)
+    .eq('tenant_id', meta.tenant_id)
+    .order('created_at', { ascending: false })
+  
+  const purchaseOrders = posRes || []
+
+  // Fetch product variations to build new POs
+  const { data: prods } = await supabase
+    .from('products')
+    .select(`
+      id, title, status,
+      product_variations(id, sku, price, cost_price, stock_quantity)
+    `)
+    .eq('tenant_id', meta.tenant_id)
+    .eq('status', 'active')
+    .order('title')
+
+  const products = prods || []
+
   return (
-    <div className="space-y-6 max-w-3xl">
-
+    <div className="flex-1 w-full space-y-6">
       <div>
-        <div className="flex items-center gap-2.5 mb-1">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-foreground">
-            <ClipboardList className="h-5 w-5 text-primary" /> Compras
-          </h1>
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400">
-            En desarrollo
-          </span>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Control de proveedores, abastecimiento y sugerencias de recompra potenciadas por IA.
+        <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+           Compras y Proveedores
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Gestiona tu cadena de suministro, reabastece inventario y controla costos
         </p>
       </div>
 
-      <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
-        <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center shrink-0">
-            <ClipboardList className="h-6 w-6 text-blue-500" />
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">No te quedes sin stock. Recompra antes del quiebre.</p>
-            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-              El módulo de compras cerrará el ciclo del e-commerce. La IA analizará tu ritmo de ventas y el lead time de
-              tus proveedores para sugerirte qué, cuánto y cuándo comprar, automatizando la creación de la Orden de Compra.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-          Funcionalidades planificadas
-        </p>
-        <div className="space-y-2">
-          {FEATURES.map(f => (
-            <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
-              <p className="text-sm text-muted-foreground">{f.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-5">
-        <p className="text-sm font-semibold mb-3">Mientras tanto, controla tu stock en:</p>
-        <a href="/dashboard/inventory"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group">
-          <Package className="h-5 w-5 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground group-hover:text-foreground flex-1">Ajustar inventario y umbrales de alerta manuales</span>
-          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-all group-hover:translate-x-0.5" />
-        </a>
-      </div>
-
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-        <span>Planificado para Fase 12.2 · integrado con Inventario</span>
-      </div>
+      <PurchasesClient 
+        tenantId={meta.tenant_id}
+        role={role}
+        canWrite={canWrite}
+        initialSuppliers={suppliers}
+        initialPurchaseOrders={purchaseOrders}
+        products={products}
+      />
     </div>
   )
 }

@@ -16,13 +16,13 @@ import { createClient } from '@/utils/supabase/client'
 
 interface Attr { key: string; value: string }
 interface VariantDraft {
-  sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''; stock: number;
+  sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''; stock: number; cost_price: number | '';
   weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''; image_url: string;
 }
 interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
-  sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '', stock: 0,
+  sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '', stock: 0, cost_price: '',
   weight_kg: '', length_cm: '', width_cm: '', height_cm: '', image_url: ''
 }
 
@@ -169,6 +169,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
           sku: v.sku.trim(),
           price: finalPrice,
           compare_at_price: finalCompare,
+          cost_price: v.cost_price === '' ? 0 : Number(v.cost_price),
           stock_quantity: v.stock,
           attributes: attrsToObj(v.attrs),
           weight_kg: v.weight_kg === '' ? null : v.weight_kg,
@@ -375,6 +376,16 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                     onChange={e => updateVariantField(vIdx, 'compare_at_price', parseFloat(e.target.value) || '')}
                     className="h-8 text-xs font-mono placeholder:text-muted-foreground/50"
                     placeholder="Opcional"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground text-amber-600/90 uppercase">Costo Proveedor ($)</label>
+                  <Input
+                    type="number" step="1" min="0"
+                    value={v.cost_price}
+                    onChange={e => updateVariantField(vIdx, 'cost_price', parseFloat(e.target.value) || '')}
+                    className="h-8 text-xs font-mono border-amber-500/30"
+                    placeholder="Para rentabilidad"
                   />
                 </div>
                 <div className="space-y-1">

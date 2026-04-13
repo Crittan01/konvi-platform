@@ -136,6 +136,10 @@ const VariantRow = memo(function VariantRow({
                 <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="1" min="1" className="h-8 text-xs font-mono mt-1" placeholder="Opcional" />
               </div>
               <div>
+                <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
+                <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="1" min="0" className="h-8 text-xs font-mono mt-1 border-amber-500/30" placeholder="0" />
+              </div>
+              <div>
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock</label>
                 <Input name="stock" type="number" defaultValue={v.stock_quantity} min="0" className="h-8 text-xs font-mono mt-1" />
               </div>
@@ -236,6 +240,10 @@ const ExpandedPanel = memo(function ExpandedPanel({
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Tachado</label>
                   <Input name="compare_at_price" type="number" min="1" step="1" placeholder="Opcional" className="h-8 text-xs font-mono border-dashed bg-muted/30" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-amber-600/90 uppercase">Costo Base ($)</label>
+                  <Input name="cost_price" type="number" min="0" step="1" placeholder="0" className="h-8 text-xs font-mono border-amber-500/30" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Stock *</label>

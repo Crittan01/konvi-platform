@@ -13,6 +13,7 @@ export interface Variation {
   width_cm: number | null
   height_cm: number | null
   image_url: string | null
+  cost_price: number | null
 }
 
 export interface Product {
