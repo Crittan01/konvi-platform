@@ -44,8 +44,9 @@ export default async function MarketplacePage() {
     if (res.ok) {
       const products = await res.json()
       // Aplanar variantes con nombre del producto
+      // El campo viene como 'product_variations' del join de Supabase
       for (const product of products) {
-        for (const v of product.variations ?? []) {
+        for (const v of product.product_variations ?? []) {
           variations.push({
             id: v.id,
             label: `${product.title} — ${v.sku} (Stock: ${v.stock_quantity})`,
