@@ -31,26 +31,35 @@ def _get_service_client() -> Client:
 
 def _decode_supabase_jwt(token: str) -> Optional[dict]:
     """
-    Decodifica y valida el JWT emitido por Supabase Auth.
-    Retorna el payload completo si es válido, None si no.
+    Decodifica y valida el JWT. Si es HS256 (local/default) usa el SECRET.
+    Si es ES256 (nuevo default de Supabase Cloud), delega a supabase.auth.get_user
+    para confirmación criptográfica en su infraestructura y luego decodifica.
     """
-    if not SUPABASE_JWT_SECRET:
-        logger.error("SUPABASE_JWT_SECRET no configurado")
-        return None
-    try:
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        return payload
-    except jwt.ExpiredSignatureError:
-        logger.warning("JWT expirado")
-        return None
-    except jwt.InvalidTokenError as e:
-        logger.warning("JWT inválido: %s", e)
-        return None
+    header = jwt.get_unverified_header(token)
+    alg = header.get("alg", "HS256")
+
+    if alg == "HS256":
+        if not SUPABASE_JWT_SECRET:
+            logger.error("SUPABASE_JWT_SECRET no configurado")
+            return None
+        try:
+            return jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        except Exception as e:
+            logger.warning("HS256 JWT inválido: %s", e)
+            return None
+    else:
+        # Para ES256 / RS256, delegamos validación al servidor de Supabase
+        sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) # admin client
+        try:
+            # Validates against Supabase server
+            user_res = sb.auth.get_user(token)
+            if not user_res.user:
+                return None
+            # Return unverified payload since Supabase just verified the real token
+            return jwt.decode(token, options={"verify_signature": False})
+        except Exception as e:
+            logger.warning("Validación delegada a Supabase falló para ES256: %s", e)
+            return None
 
 
 def _extract_jwt_payload(request: Request) -> dict:
