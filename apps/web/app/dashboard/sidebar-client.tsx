@@ -80,22 +80,21 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── Compras 🔒 ────────────────────────────────────────────────────────────
+  // ── Compras ✅ ────────────────────────────────────────────────────────────
   {
     kind: 'group', id: 'compras', label: 'Compras', icon: Wallet,
-    roles: ['owner'], locked: true,
+    roles: ['owner'],
     children: [
-      { kind: 'leaf', href: '/dashboard/purchases', label: 'Órdenes de Compra', icon: ClipboardList, roles: ['owner'], locked: true },
+      { kind: 'leaf', href: '/dashboard/purchases', label: 'Órdenes de Compra', icon: ClipboardList, roles: ['owner'] },
     ],
   },
 
-  // ── Finanzas 🔒 ───────────────────────────────────────────────────────────
+  // ── Finanzas ✅ ───────────────────────────────────────────────────────────
   {
     kind: 'group', id: 'finanzas', label: 'Finanzas', icon: DollarSign,
-    roles: ['owner'], locked: true,
+    roles: ['owner'],
     children: [
-      { kind: 'leaf', href: '/dashboard/finance', label: 'Ingresos & Gastos', icon: TrendingUp,  roles: ['owner'], locked: true },
-      { kind: 'leaf', href: '/dashboard/finance', label: 'Rentabilidad',       icon: BarChart2,   roles: ['owner'], locked: true },
+      { kind: 'leaf', href: '/dashboard/finance', label: 'Ingresos & Gastos', icon: TrendingUp,  roles: ['owner'] },
     ],
   },
 
