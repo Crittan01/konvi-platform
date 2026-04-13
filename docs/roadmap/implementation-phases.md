@@ -20,6 +20,7 @@
 | 9 | Schema core + Pedidos + Configuración + Equipo | ✅ Completa | COMPLETADO 2026-04-09 |
 | 10 | Integraciones — MeLi + Envia/Shipping | ✅ Completa | COMPLETADO 2026-04-09 — MeLi OAuth + Envia Sandbox conectados |
 | 11 | Módulos restantes Tenant Console + UI Redesign | ✅ Completa | COMPLETADO 2026-04-09 |
+| 11.5 | Tenant Console "Enterprise Super App" (Módulos pendientes) | ❌ Pendiente | PENDIENTE (Reclamos, Compras, Finanzas, Pubs) |
 | 12 | Platform Console | ❌ Pendiente | PENDIENTE (prerequisito: OQ-P01 + Fase 9+ completa) |
 | 13 | Shopify / Tienda custom | ❌ Futuro | FUTURO |
 
@@ -297,7 +298,21 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 - ✅ `apps/web/app/layout.tsx` — `next/font/google` Inter con CSS variable `--font-inter` (fix `@import` error PostCSS)
 - ✅ `apps/web/tailwind.config.ts` — `fontFamily.sans = ['var(--font-inter)', ...]`
 
-**Nota sobre pgvector / RAG**: Diferido — implementación actual usa inyección de texto plano (markdown) en system prompt, sin embeddings. Funcional y suficiente para el volumen actual. PV-04 sigue abierto para validar disponibilidad en plan Supabase.
+**Nota sobre pgvector / RAG**: [ACTUALIZADO 2026-04-12] Implementación de Zero-Hallucinations completada (Fase 14) utilizando Google `text-embedding-004` y pgvector, con UI funcional en `/dashboard/ai-agents`.
+
+---
+
+### Fase 11.5 — Profundización Tenant Console (Enterprise Super App) ❌ PENDIENTE
+
+**Objetivo**: Completar al 100% todos los módulos que actualmente figuran como "Pronto" (Stubs) en la barra de navegación para que la consola alcance el estado de "Super App" con las mejores prácticas.
+
+**Módulos a construir / expandir:**
+1. **Reclamos (`/dashboard/claims`)**: Gestión de disputas y quejas formales de clientes.
+2. **Publicaciones (`/dashboard/publications`)**: Publicación cruzada (Mercado Libre / Central Ofertas).
+3. **Compras (`/dashboard/purchases`)**: Órdenes de compra a proveedores y abastecimiento.
+4. **Finanzas (`/dashboard/finance`)**: Control de Ingresos, Gastos y Rentabilidad neta por producto.
+
+**Estado Actual:** Todo este bloque detiene el inicio de la Fase 12 hasta asegurar que el Tenant Console sea comercialmente impecable.
 
 ---
 

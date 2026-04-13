@@ -138,11 +138,11 @@ Usa árbol de grupos expandibles con auto-expand y RBAC dual.
 | Métricas | `/dashboard/metrics` | ✅ Implementado | 4 KPIs, queries paralelas. + AI Insight Panel |
 | Auditoría | `/dashboard/audit` | ✅ Implementado | Filtros, paginación, payload JSONB |
 | Configuración | `/dashboard/settings` | ✅ Implementado | Equipo RBAC, WABA, notificaciones |
-| Reclamos | `/dashboard/claims` | 🔒 Pronto | Stub page (visión de producto, Fase 12) |
-| MeLi Listings | `/dashboard/marketplace` | 🔒 Pronto | Stub page (visión de producto, Fase 13) |
-| Compras | `/dashboard/purchases` | 🔒 Pronto | Stub page (visión de producto, Fase 12.2) |
-| Finanzas | `/dashboard/finance` | 🔒 Pronto | Stub page (visión de producto, Fase 12.3) |
-| Agentes IA | `/dashboard/ai-agents` | 🔒 Pronto | Stub page (gestión prompts/skills, Fase 14) |
+| Reclamos | `/dashboard/claims` | ❌ Pendiente | Fase 11.5 |
+| MeLi Listings | `/dashboard/marketplace` | ❌ Pendiente | Publicaciones Fase 11.5 |
+| Compras | `/dashboard/purchases` | ❌ Pendiente | Fase 11.5 |
+| Finanzas | `/dashboard/finance` | ❌ Pendiente | Fase 11.5 |
+| Agentes IA | `/dashboard/ai-agents` | ✅ Implementado | Configuración directrices, roles y RAG parameters (Fase 14) |
 | API AI Insights | `/api/insights` | ✅ Implementado | Router genérico a Gemini con RBAC y prompts por dominio |
 
 ---

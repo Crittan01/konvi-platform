@@ -33,14 +33,14 @@ export default async function CatalogPage() {
       supabase
         .from('products')
         .select(`id, title, description, cover_image_url, platform_category_id,
-                 product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
+                 product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .order('title'),
       supabase
         .from('products')
         .select(`id, title, description, cover_image_url, platform_category_id,
-                 product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
+                 product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
         .eq('status', 'inactive')
         .order('title')
@@ -79,6 +79,9 @@ export default async function CatalogPage() {
     const compareObj = compareStr ? parseFloat(compareStr) : null
     const finalCompare = compareObj && compareObj > price ? compareObj : null
     
+    const costStr = formData.get('cost_price') as string
+    const cost_price = costStr ? parseFloat(costStr) : 0
+    
     const sku = (formData.get('sku') as string) || null
     const attrKey = formData.get('attr_key') as string
     const attrVal = formData.get('attr_val') as string
@@ -96,6 +99,7 @@ export default async function CatalogPage() {
       sku,
       price,
       compare_at_price: finalCompare,
+      cost_price,
       stock_quantity: stock,
       attributes
     })
@@ -111,12 +115,18 @@ export default async function CatalogPage() {
     const price = parseFloat(formData.get('price') as string)
     const stock = parseInt(formData.get('stock') as string)
     const compareStr = formData.get('compare_at_price') as string
+    const costStr = formData.get('cost_price') as string
 
     // Record<string, any> para poder inyectar null
     const updates: Record<string, any> = {}
     
     if (!isNaN(price) && price > 0) updates.price = price
     if (!isNaN(stock) && stock >= 0) updates.stock_quantity = stock
+    
+    if (costStr !== null) {
+      const parsedCost = parseFloat(costStr)
+      if (!isNaN(parsedCost) && parsedCost >= 0) updates.cost_price = parsedCost
+    }
     
     // Si se pasa compare_at_price, se verifica que sea mayor al precio validado o inicial
     if (compareStr !== null) {
