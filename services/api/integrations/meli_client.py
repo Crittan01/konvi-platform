@@ -126,20 +126,28 @@ def get_tenant_meli_credentials(supabase, tenant_id: str) -> Optional[dict]:
     """
     Lee las credenciales MeLi del tenant desde tenant_integrations.
     Retorna { access_token, refresh_token, user_id } o None si no conectado.
+
+    Nota: access_token está en 'credentials', user_id está en 'meta' —
+    ambos campos se seleccionan y se fusionan en el resultado.
     """
     try:
         result = (
             supabase.table("tenant_integrations")
-            .select("credentials")
+            .select("credentials, meta")
             .eq("tenant_id", tenant_id)
             .eq("provider", "mercadolibre")
             .eq("status", "connected")
             .single()
             .execute()
         )
-        if result.data and result.data.get("credentials"):
-            return result.data["credentials"]
-        return None
+        if not result.data:
+            return None
+        creds = result.data.get("credentials") or {}
+        meta = result.data.get("meta") or {}
+        # user_id vive en meta (ver integrations.py meli_oauth_callback)
+        if meta.get("user_id"):
+            creds["user_id"] = meta["user_id"]
+        return creds if creds.get("access_token") else None
     except Exception as e:
         logger.warning("No se pudo leer credenciales MeLi para tenant %s: %s", tenant_id, e)
         return None
