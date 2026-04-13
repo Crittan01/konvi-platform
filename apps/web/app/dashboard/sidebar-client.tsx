@@ -70,13 +70,13 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── Publicaciones 🔒 ──────────────────────────────────────────────────────
+  // ── Publicaciones ────────────────────────────────────────────────────────
   {
     kind: 'group', id: 'publicaciones', label: 'Publicaciones', icon: StoreIcon,
-    roles: ['owner', 'manager'], locked: true,
+    roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre',   icon: ShoppingCart, roles: ['owner', 'manager'], locked: true },
-      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Central Ofertas', icon: TrendingUp,   roles: ['owner', 'manager'], locked: true },
+      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre',   icon: ShoppingCart, roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/marketplace/central', label: 'Central Ofertas', icon: TrendingUp,   roles: ['owner', 'manager'], locked: true },
     ],
   },
 

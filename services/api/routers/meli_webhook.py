@@ -196,7 +196,16 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
     if topic == "orders_v2":
         await _process_order(resource, tenant_id, access_token, supabase)
     elif topic == "items":
-        logger.info("Notificación items MeLi recibida — sync de catálogo pendiente (Fase 12)")
+        # Fetch the item from MeLi
+        item_data = await _fetch_meli_resource(resource, access_token)
+        if item_data:
+            meli_status = item_data.get("status", "active")
+            # Update our database sync status
+            supabase.table("marketplace_listings").update({
+                "status": meli_status,
+                "external_price": item_data.get("price")
+            }).eq("tenant_id", tenant_id).eq("external_id", item_data.get("id")).execute()
+            logger.info("Sync Webhook: Artículo MeLi %s actualizado a status %s para tenant %s", item_data.get("id"), meli_status, tenant_id)
     elif topic == "shipments":
         logger.info("Notificación shipments MeLi recibida — sync de envíos pendiente (Fase 12)")
     else:

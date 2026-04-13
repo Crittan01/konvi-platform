@@ -1,78 +1,50 @@
-import { Store, ArrowRight, CheckCircle2, ShoppingBag, Target, LineChart, Bot, Image as ImageIcon, AlertTriangle, Ruler, RefreshCw, ShoppingCart, Link as LinkIcon } from 'lucide-react'
+import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
+import MarketplaceManager from './_components/marketplace-manager'
 
-const FEATURES = [
-  { icon: ShoppingBag, label: 'Gestión de publicaciones MeLi: crear, editar, pausar, activar' },
-  { icon: Target, label: 'Central de ofertas: descuentos y campañas de precio' },
-  { icon: LineChart, label: 'Reglas automáticas de precio y stock sincronizado con tu inventario' },
-  { icon: Bot, label: 'Agente IA: optimizador de títulos, descripción y keywords' },
-  { icon: ImageIcon, label: 'Gestión de fotos desde tu galería Media' },
-  { icon: AlertTriangle, label: 'Monitor de infracciones y moderación MeLi' },
-  { icon: Ruler, label: 'Guías de talles y atributos por categoría MeLi' },
-  { icon: RefreshCw, label: 'Sync bidireccional: cambios en catálogo → actualización automática en MeLi' },
-]
+const API_URL = process.env.API_URL || 'http://127.0.0.1:8000'
 
-export default function MarketplacePage() {
+export default async function MarketplacePage() {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  if (!session) {
+    redirect('/auth/login')
+  }
+
+  const { data: { user } } = await supabase.auth.getUser()
+  const role = user?.app_metadata?.role || 'agent'
+  const canWrite = ['owner', 'manager'].includes(role)
+
+  // Fetch listing data from Backend
+  let items = []
+  try {
+    const res = await fetch(`${API_URL}/api/v1/marketplace/listings`, {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      cache: 'no-store'
+    })
+    if (res.ok) {
+      const data = await res.json()
+      items = data.items || []
+    }
+  } catch (error) {
+    console.error("Failed to fetch marketplace listings:", error)
+  }
+
   return (
-    <div className="space-y-6 max-w-3xl">
-
-      <div>
-        <div className="flex items-center gap-2.5 mb-1">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-foreground">
-            <Store className="h-5 w-5 text-primary" /> Publicaciones
-          </h1>
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400">
-            En desarrollo
-          </span>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Gestiona tus publicaciones en Mercado Libre directamente desde la consola, con ayuda de IA.
+    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto flex-1 h-full overflow-auto">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-3xl font-bold tracking-tight text-primary">Sindicación a Mercado Libre</h1>
+        <p className="text-muted-foreground w-full max-w-3xl">
+          Visualiza qué parte de tu Catálogo Central se encuentra publicado en la plataforma externa. 
+          Aquí puedes publicar nuevos productos, ajustar sus precios unitarios (para cubrir comisiones) 
+          y pausar anuncios en tiempo real.
         </p>
       </div>
 
-      <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
-        <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-yellow-400/15 border border-yellow-400/25 flex items-center justify-center shrink-0">
-            <ShoppingCart className="h-6 w-6 text-yellow-500" />
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">MeLi conectado — gestión de listings próximamente</p>
-            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-              Tu cuenta de Mercado Libre ya está autenticada (OAuth 2.0). Este módulo te permitirá
-              crear y actualizar publicaciones, gestionar precios y stock, y optimizar tus listings
-              con IA para mejorar CTR y conversión — todo sin salir de la consola.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-          Funcionalidades planificadas
-        </p>
-        <div className="space-y-2">
-          {FEATURES.map(f => (
-            <div key={f.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-              <f.icon className="h-5 w-5 text-muted-foreground shrink-0" />
-              <p className="text-sm text-muted-foreground">{f.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-5">
-        <p className="text-sm font-semibold mb-3">Mientras tanto, tu integración MeLi está activa en:</p>
-        <a href="/dashboard/integrations"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group">
-          <LinkIcon className="h-5 w-5 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground group-hover:text-foreground flex-1">Ver estado de integración Mercado Libre</span>
-          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-all group-hover:translate-x-0.5" />
-        </a>
-      </div>
-
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-        <span>Planificado para Fase 13 · requiere MeLi API v2 listings endpoints</span>
-      </div>
+      <MarketplaceManager items={items} canWrite={canWrite} />
     </div>
   )
 }
