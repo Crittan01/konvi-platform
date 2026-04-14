@@ -4,17 +4,18 @@ import ClaimsManager from './_components/claims-manager'
 
 export default async function ClaimsPage() {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  if (!session) {
-    redirect('/auth/login')
+  if (!user) {
+    redirect('/login')
   }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  const role = user?.app_metadata?.role || 'agent'
-  const canWrite = ['owner', 'manager', 'agent'].includes(role) // agents can manage claims!
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const tenantId = meta.tenant_id
+  const role = meta.role || 'agent'
+  const canWrite = ['owner', 'manager', 'agent'].includes(role)
 
-  // Fetch claims with relationships
+  // Fetch claims with relationships — filtrado por tenant (defensa en profundidad + RLS)
   const { data: claimsData } = await supabase
     .from('claims')
     .select(`
@@ -28,6 +29,7 @@ export default async function ClaimsPage() {
   const { data: ordersData } = await supabase
     .from('orders')
     .select('id, display_id, status, total_amount, contact_id')
+    .eq('tenant_id', tenantId ?? '')
     .order('created_at', { ascending: false })
     .limit(100)
 
