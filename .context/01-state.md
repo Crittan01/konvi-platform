@@ -59,20 +59,20 @@
 
 | Módulo | Ruta | Estado | Notas |
 |---|---|---|---|
-| Dashboard | `/dashboard` | ✅ Live | Tabs Ops/Negocio — 11 queries paralelas — KPIs recharts |
+| Dashboard | `/dashboard` | ✅ Live | Tabs Ops/Negocio — 11 queries paralelas — umbral dinámico por tenant |
 | Inbox | `/dashboard/inbox` | ✅ Live | Realtime, human takeover, envío como agente |
 | Pedidos | `/dashboard/orders` | ✅ Live | Listado, detalle, estados, stock decrementado al confirmar |
 | Contactos | `/dashboard/contacts` | ✅ Live | Listado, perfil, consent Habeas Data |
-| Reclamos | `/dashboard/claims` | 🟡 Parcial | Tabla `claims` + página stub. Acciones reales pendientes |
+| Reclamos | `/dashboard/claims` | ✅ Live | Crear reclamo, cambiar estado, vincular pedido. Fix: getUser + tenant_id |
 | Catálogo | `/dashboard/catalog` | ✅ Live | CRUD, multi-variante, archivados, auto-refresh |
 | Inventario | `/dashboard/inventory` | ✅ Live | Stock por variante, umbral configurable, ajuste con motivo |
 | Media | `/dashboard/media` | ✅ Live | Upload/delete/URL via Supabase Storage `tenant-media` |
 | Mercado Libre | `/dashboard/marketplace` | ✅ Live | Listings MeLi, sync stock, vinculación variation↔listing |
-| Cotizaciones (Envia) | `/dashboard/shipping` | ✅ Live | Historial + ShippingQuoteForm interactivo |
+| Despachos (Envia) | `/dashboard/shipping` | ✅ Live | Cotizaciones + historial — renombrado de "Envíos" |
 | Órdenes de Compra | `/dashboard/purchases` | ✅ Live | POs, proveedores, WAC |
 | P&L / Finanzas | `/dashboard/finance` | ✅ Live | P&L Dashboard, Registro OPEX |
 | Base de Conocimiento | `/dashboard/knowledge-base` | ✅ Live | CRUD, categorías, toggle activo, inyectada en Orchestrator |
-| Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloquear en sidebar** |
+| Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
 | Configuración | `/dashboard/settings` | ✅ Live | Equipo RBAC, logo tenant, dirección origen, WABA, Telegram |
@@ -172,13 +172,13 @@ apps/web/app/
 
 | Ítem | Prioridad |
 |---|---|
-| Reclamos — acciones reales (crear, cambiar estado, vincular a pedido/MeLi) | Alta |
 | Sync bidireccional catálogo ↔ MeLi listings | Media |
 | Envia Fase 2: label, tracking, pickup | Media |
 | WhatsApp Config centralizada (templates aprobados, WABA management) | Media |
-| Agentes IA — desbloquear en sidebar (módulo existe y está implementado) | Alta |
-| Dashboard — usar `tenants.low_stock_threshold` dinámico (eliminado hardcode `<= 5`) | Media |
-| Dashboard KPIs — eliminar trends hardcodeados (`+12%`, `+5%` sin base real) | Media |
+| ~~Reclamos — acciones reales~~ | ✅ Resuelto Vuelta 3 |
+| ~~Agentes IA — desbloquear en sidebar~~ | ✅ Resuelto Vuelta 3 |
+| ~~Dashboard — usar `tenants.low_stock_threshold` dinámico~~ | ✅ Resuelto Vuelta 3 |
+| ~~Dashboard KPIs — eliminar trends hardcodeados~~ | ✅ Resuelto Vuelta 3 |
 
 ---
 
