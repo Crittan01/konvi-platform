@@ -467,7 +467,19 @@ async def import_from_meli(
     if compare_at_price and compare_at_price > price:
         var_payload["compare_at_price"] = compare_at_price
 
-    var_res = supabase.table("product_variations").insert(var_payload).execute()
+    try:
+        var_res = supabase.table("product_variations").insert(var_payload).execute()
+    except Exception as e:
+        # Rollback producto creado
+        supabase.table("products").delete().eq("id", product_id).execute()
+        err_str = str(e)
+        if "duplicate key" in err_str or "23505" in err_str:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya existe una variante con el SKU {sku} en este catálogo. La publicación ya fue importada previamente."
+            )
+        logger.error("Error creando variante para import MeLi %s: %s", meli_id, e)
+        raise HTTPException(status_code=500, detail="Error al crear variante en catálogo")
 
     if not var_res.data:
         # Rollback: eliminar el producto creado
