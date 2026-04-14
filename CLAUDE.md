@@ -84,59 +84,11 @@ Verificar siempre en `package.json`, `requirements.txt`, `render.yaml` y configu
 19. El flujo base es: webhook -> persistencia -> procesamiento -> respuesta.
 20. Cualquier límite, template, media capability o política debe validarse en documentación oficial vigente antes de implementarse.
 
-## Navegación aprobada — Tenant Console
+## Arquitectura Funcional y Navegación
 
-- Dashboard: `/dashboard`
-- Inbox: `/dashboard/inbox`
+> **IMPORTANTE**: La fuente de verdad innegociable del árbol de módulos, navegación, consolas y dominios reside en `.context/00-product.md` (Fase 0 dictada).
+> NO confíes en agrupaciones de código pre-restructuración. Antes de proponer crear o mover un módulo, lee obligatoriamente `.context/00-product.md`.
 
-### Ventas
-
-- Pedidos: `/dashboard/orders`
-- Contactos: `/dashboard/contacts`
-- Envíos: `/dashboard/shipping`
-- Reclamos: `/dashboard/claims` (pendiente)
-
-### Productos
-
-- Catálogo: `/dashboard/catalog`
-- Inventario: `/dashboard/inventory`
-
-### Publicaciones
-
-- Mercado Libre: `/dashboard/marketplace`
-- Central Ofertas: `/dashboard/marketplace` (pendiente)
-
-### Compras
-
-- Órdenes Compra: `/dashboard/purchases` (pendiente)
-
-### Finanzas
-
-- Ingresos y Gastos: `/dashboard/finance` (pendiente)
-- Rentabilidad: `/dashboard/finance` (pendiente)
-
-### IA y Contenido
-
-- Base de conocimiento: `/dashboard/knowledge-base`
-- Media: `/dashboard/media`
-- Agentes IA: `/dashboard/ai-agents` (pendiente)
-
-### Analítica
-
-- Métricas: `/dashboard/metrics`
-- Auditoría: `/dashboard/audit`
-
-### Configuración
-
-- General: `/dashboard/settings`
-- Integraciones: `/dashboard/integrations`
-
-## Reglas de navegación
-
-- Sub-item en sidebar = módulo con URL propia y propósito diferenciado.
-- Tabs dentro de una página = vistas alternativas del mismo dato.
-- Los grupos se expanden según ruta activa.
-- RBAC aplica al grupo y al hijo.
 
 ## Estructura de directorios clave
 

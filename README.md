@@ -97,9 +97,9 @@ python3 main.py
 | Documento | Propósito |
 |-----------|-----------|
 | `AGENTS.md` | **Estado del sistema vigente** — leer primero |
-| `docs/HANDOFF.md` | Estado actual y próximos pasos |
-| `docs/product/current-scope.md` | Estado real de implementación verificado en código |
-| `docs/product/admin-ui-modules.md` | Módulos de ambas consolas con estado |
+| `.context/00-product.md` | **Tree Funcional y Reglas Base** — leer siempre antes de mover o crear UI |
+| `.context/01-state.md` | Estado real de implementación verificado en código |
+| `docs/HANDOFF.md` | Estado actual y próximos pasos de handoff |
 | `docs/architecture/overview.md` | Arquitectura técnica del sistema |
 | `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend |
 | `docs/integrations/courier-envia.md` | Diseño del módulo Shipping/Courier |

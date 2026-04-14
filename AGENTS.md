@@ -9,16 +9,16 @@ Este repositorio es la matriz de un producto **SaaS Conversacional Multi-Tenant*
 - **Canal oficial**: WhatsApp Cloud API (Meta) — sin librerías no oficiales.
 - **IA**: Google Gemini API con output estructurado Pydantic — el LLM nunca es fuente de verdad de datos.
 
-## Contexto documental vigente (actualizado 2026-04-10, rev. 16 — UI Plus Total + nav reestructurada)
+## Contexto documental vigente
 
-La documentación del repositorio fue auditada, corregida y actualizada para reflejar el estado real del código.
-Archivos clave del producto y arquitectura existen y están alineados:
-- `docs/product/` — product overview, scope, current-scope, personas-and-consoles, admin-ui-modules, navigation-map
-- `docs/architecture/front-back-separation.md` — mapeo Frontend ↔ Backend + BLOQUEs alineados
-- `docs/architecture/nav-architecture.md` — **[NUEVO]** Mapa de navegación oficial, grupos, RBAC, reglas de sidebar
+La fuente innegociable de estructura de producto vive en `.context/`.
+Archivos clave del producto y arquitectura:
+- `.context/00-product.md` — **Single Source of Truth** del Árbol Funcional y Módulos.
+- `.context/01-state.md` — Estado real de implementación hoy.
+- `docs/architecture/front-back-separation.md` — mapeo Frontend ↔ Backend + BLOQUEs alineados.
 - `docs/integrations/courier-envia.md` — Fase Inicial implementada (envia_client.py, shipping.py, /dashboard/shipping)
 - `docs/roadmap/implementation-phases.md` — Fases 1-11 completadas, 12-13 pendientes
-- `CLAUDE.md` — **[NUEVO]** Contexto completo para Claude Code (stack, nav, reglas, comandos)
+- `CLAUDE.md` — Contexto completo para Claude Code (stack, reglas, comandos)
 
 ### ESTRUCTURA DE FASES — estado real 2026-04-10 (rev. 16)
 
@@ -125,16 +125,15 @@ Ver intervenciones humanas: `docs/operations/HUMAN_INTERVENTIONS.md`
 
 ## Leer Antes de Tocar Código
 
-- `CLAUDE.md` — **Contexto rápido para Claude Code** (stack, nav, reglas, comandos)
-- `.agents/rules/` — Reglas técnicas expandidas (incluye `nav-architecture.md`)
-- `.agents/workflows/` — Workflows de implementación, feature, seguridad
-- `docs/product/current-scope.md` — Estado real de implementación hoy
-- `docs/product/admin-ui-modules.md` — Módulos de ambas consolas con estado
-- `docs/architecture/nav-architecture.md` — Mapa oficial de navegación, grupos, RBAC
-- `docs/architecture/modules.md` — Responsabilidades de cada módulo backend
-- `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend
-- `docs/architecture/multi-tenant-security.md` — Contratos de RLS
-- `docs/integrations/courier-envia.md` — Diseño de Shipping/Courier
+- `.context/00-product.md` — **OBLIGATORIO**: Árbol funcional dictado para estructurar cualquier módulo.
+- `CLAUDE.md` — Contexto rápido auxiliar.
+- `.context/01-state.md` — Estado real de implementación hoy (antiguo current-scope).
+- `.agents/rules/` — Reglas técnicas expandidas.
+- `.agents/workflows/` — Workflows de implementación, feature, seguridad.
+- `docs/architecture/modules.md` — Responsabilidades de cada módulo backend.
+- `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend.
+- `docs/architecture/multi-tenant-security.md` — Contratos de RLS.
+- `docs/integrations/courier-envia.md` — Diseño de Shipping/Courier.
 
 ## Stack — Versiones Reales en Repo
 

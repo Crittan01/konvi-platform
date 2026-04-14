@@ -42,11 +42,11 @@ type NavItem = NavLeaf | NavGroup
 //  ✅ ACTIVO    → módulo live en producción
 //  🔒 PRÓXIMO   → módulo planificado, stub page visible (sirve de sales tool)
 //
-//  Fuente de verdad: docs/architecture/nav-architecture.md
-//  Labels: .agents/rules/nav-architecture.md → Regla N-02
+//  Fuente de verdad: .context/00-product.md
+//  Labels: Base Arquitectónica Fase 0
 
 const NAV_ITEMS: NavItem[] = [
-  // ── Raíz ──────────────────────────────────────────────────────────────────
+  // ── Inicio ──────────────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard',       label: 'Dashboard', icon: LayoutDashboard, roles: [] },
   { kind: 'leaf', href: '/dashboard/inbox', label: 'Inbox',     icon: MessageSquare,   roles: [] },
 
@@ -56,7 +56,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,       roles: [] },
       { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,         roles: [] },
-      { kind: 'leaf', href: '/dashboard/shipping', label: 'Envíos',    icon: Truck,         roles: [] },
+      { kind: 'leaf', href: '/dashboard/shipping', label: 'Envíos (Despachos)', icon: Truck, roles: [] },
       { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle,   roles: [] },
     ],
   },
@@ -67,12 +67,13 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { kind: 'leaf', href: '/dashboard/catalog',   label: 'Catálogo',   icon: ShoppingBag, roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/inventory', label: 'Inventario', icon: Boxes,       roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/media',     label: 'Media',      icon: ImageIcon,   roles: ['owner', 'manager'] },
     ],
   },
 
-  // ── Publicaciones ────────────────────────────────────────────────────────
+  // ── Canales ────────────────────────────────────────────────────────
   {
-    kind: 'group', id: 'publicaciones', label: 'Publicaciones', icon: StoreIcon,
+    kind: 'group', id: 'canales', label: 'Canales', icon: StoreIcon,
     roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre',   icon: ShoppingCart, roles: ['owner', 'manager'] },
@@ -89,6 +90,15 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
+  // ── Logística 🔒 ──────────────────────────────────────────────────────────
+  {
+    kind: 'group', id: 'logistica', label: 'Logística', icon: Truck,
+    roles: ['owner', 'manager'],
+    children: [
+      { kind: 'leaf', href: '/dashboard/logistics', label: 'Tarifas y Reglas', icon: Truck, roles: ['owner', 'manager'], locked: true },
+    ],
+  },
+
   // ── Finanzas ✅ ───────────────────────────────────────────────────────────
   {
     kind: 'group', id: 'finanzas', label: 'Finanzas', icon: DollarSign,
@@ -98,12 +108,11 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── IA & Contenido ✅ + Agentes 🔒 ───────────────────────────────────────
+  // ── IA y Conocimiento ✅ + Agentes 🔒 ───────────────────────────────────────
   {
-    kind: 'group', id: 'ia-contenido', label: 'IA & Contenido', icon: BrainCircuit, roles: ['owner', 'manager'],
+    kind: 'group', id: 'ia-conocimiento', label: 'IA y Conocimiento', icon: BrainCircuit, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/knowledge-base', label: 'Base de Conocimiento', icon: BookOpen,  roles: ['owner', 'manager'] },
-      { kind: 'leaf', href: '/dashboard/media',          label: 'Media',                icon: ImageIcon, roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/ai-agents',      label: 'Agentes IA',           icon: Bot,       roles: ['owner'], locked: true },
     ],
   },
