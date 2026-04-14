@@ -427,18 +427,28 @@ async def import_from_meli(
     price             = float(meli_item.get("price") or 0)
     available_qty     = int(meli_item.get("available_quantity") or 0)
     permalink         = meli_item.get("permalink")
+    # Precio tachado (precio normal antes del descuento en MeLi)
+    original_price    = meli_item.get("original_price")
+    compare_at_price  = float(original_price) if original_price else None
+    # Imagen de portada — primera foto en alta resolución
+    pictures          = meli_item.get("pictures") or []
+    cover_image_url   = pictures[0].get("secure_url") if pictures else meli_item.get("thumbnail")
 
     # Generar SKU base desde el ID de MeLi
     sku = f"ML-{meli_id}"
 
     # 2. Crear producto en Supabase
-    prod_res = supabase.table("products").insert({
+    prod_payload = {
         "tenant_id":            tenant_id,
         "title":                title,
         "description":          f"Importado desde Mercado Libre. ID: {meli_id}",
         "status":               "active",
         "platform_category_id": category_id,
-    }).execute()
+    }
+    if cover_image_url:
+        prod_payload["cover_image_url"] = cover_image_url
+
+    prod_res = supabase.table("products").insert(prod_payload).execute()
 
     if not prod_res.data:
         raise HTTPException(status_code=500, detail="Error al crear producto en catálogo")
@@ -446,14 +456,18 @@ async def import_from_meli(
     product_id = prod_res.data[0]["id"]
 
     # 3. Crear variante con stock y precio de MeLi
-    var_res = supabase.table("product_variations").insert({
+    var_payload = {
         "product_id":     product_id,
         "tenant_id":      tenant_id,
         "sku":            sku,
         "price":          price,
         "stock_quantity": available_qty,
         "attributes":     {"default": "Standard"},
-    }).execute()
+    }
+    if compare_at_price and compare_at_price > price:
+        var_payload["compare_at_price"] = compare_at_price
+
+    var_res = supabase.table("product_variations").insert(var_payload).execute()
 
     if not var_res.data:
         # Rollback: eliminar el producto creado
@@ -485,10 +499,12 @@ async def import_from_meli(
         "variation_id": variation_id,
         "listing_id":   link_res.data[0]["id"],
         "imported": {
-            "title":          title,
-            "sku":            sku,
-            "price":          price,
-            "stock_quantity": available_qty,
-            "meli_id":        meli_id,
+            "title":            title,
+            "sku":              sku,
+            "price":            price,
+            "compare_at_price": compare_at_price,
+            "stock_quantity":   available_qty,
+            "cover_image_url":  cover_image_url,
+            "meli_id":          meli_id,
         }
     }

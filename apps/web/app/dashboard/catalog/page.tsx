@@ -168,6 +168,39 @@ export default async function CatalogPage() {
     revalidatePath('/dashboard/catalog')
   }
 
+  async function deleteProduct(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const productId = formData.get('product_id') as string
+
+    // Get variation IDs to cascade-delete marketplace_listings first
+    const { data: vars } = await sb.from('product_variations')
+      .select('id')
+      .eq('product_id', productId)
+      .eq('tenant_id', m.tenant_id)
+    const varIds = (vars ?? []).map((v: { id: string }) => v.id)
+
+    if (varIds.length > 0) {
+      await sb.from('marketplace_listings')
+        .delete()
+        .in('variation_id', varIds)
+      await sb.from('product_variations')
+        .delete()
+        .in('id', varIds)
+    }
+
+    await sb.from('products')
+      .delete()
+      .eq('id', productId)
+      .eq('tenant_id', m.tenant_id)
+
+    revalidatePath('/dashboard/catalog')
+    revalidatePath('/dashboard/marketplace')
+  }
+
   // ── UI ──────────────────────────────────────────────────────────────────────
 
   return (
@@ -236,6 +269,7 @@ export default async function CatalogPage() {
             addVariationAction={addVariation}
             deactivateProductAction={deactivateProduct}
             restoreProductAction={restoreProduct}
+            deleteProductAction={deleteProduct}
           />
         </div>
       </div>

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Search, LayoutGrid, List as ListIcon,
-  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw,
+  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2,
 } from 'lucide-react'
 import type { Product, Variation } from '../types'
 
@@ -23,6 +23,7 @@ type Props = {
   addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
   restoreProductAction: (fd: FormData) => Promise<void>
+  deleteProductAction: (fd: FormData) => Promise<void>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -377,11 +378,12 @@ const ProductMobileCard = memo(function ProductMobileCard({
 // ── ArchivedSection — muestra productos inactivos con opción de restaurar ────
 
 const ArchivedSection = memo(function ArchivedSection({
-  archivedProducts, catMap, restoreProductAction
+  archivedProducts, catMap, restoreProductAction, deleteProductAction
 }: {
   archivedProducts: Product[]
   catMap: Record<string, string>
   restoreProductAction: (fd: FormData) => Promise<void>
+  deleteProductAction: (fd: FormData) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   if (archivedProducts.length === 0) return null
@@ -417,12 +419,25 @@ const ArchivedSection = memo(function ArchivedSection({
                   <p className="text-[10px] text-muted-foreground/60">{catMap[p.platform_category_id]}</p>
                 )}
               </div>
-              <form action={restoreProductAction}>
-                <input type="hidden" name="product_id" value={p.id} />
-                <Button type="submit" size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
-                  <RotateCcw className="h-3 w-3" /> Restaurar
-                </Button>
-              </form>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <form action={restoreProductAction}>
+                  <input type="hidden" name="product_id" value={p.id} />
+                  <Button type="submit" size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
+                    <RotateCcw className="h-3 w-3" /> Restaurar
+                  </Button>
+                </form>
+                <form
+                  action={deleteProductAction}
+                  onSubmit={(e) => {
+                    if (!window.confirm('¿Eliminar permanentemente este producto? Esta acción no se puede deshacer.')) e.preventDefault()
+                  }}
+                >
+                  <input type="hidden" name="product_id" value={p.id} />
+                  <Button type="submit" size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </form>
+              </div>
             </div>
           ))}
         </div>
@@ -435,7 +450,7 @@ const ArchivedSection = memo(function ArchivedSection({
 
 export default function CatalogTable({
   products, archivedProducts, catMap, canWrite,
-  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction,
+  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
 }: Props) {
   const [search, setSearch]           = useState('')
   const [viewMode, setViewMode]       = useState<'list' | 'grid'>('list')
@@ -646,6 +661,7 @@ export default function CatalogTable({
           archivedProducts={archivedProducts}
           catMap={catMap}
           restoreProductAction={restoreProductAction}
+          deleteProductAction={deleteProductAction}
         />
       </div>
     )
@@ -747,6 +763,7 @@ export default function CatalogTable({
         archivedProducts={archivedProducts}
         catMap={catMap}
         restoreProductAction={restoreProductAction}
+        deleteProductAction={deleteProductAction}
       />
     </div>
   )
