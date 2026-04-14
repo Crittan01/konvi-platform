@@ -244,8 +244,8 @@ export default function DashboardClient({
           {/* KPI Cards con comparativa */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <KpiCard label="Conversaciones" value={stats.conversations} trend="neutral" />
-            <KpiCard label="Pedidos"        value={stats.orders}        trend="up"      trendValue="+12%" />
-            <KpiCard label="Contactos"      value={stats.contacts}      trend="up"      trendValue="+5%" />
+            <KpiCard label="Pedidos"        value={stats.orders}        trend="neutral" />
+            <KpiCard label="Contactos"      value={stats.contacts}      trend="neutral" />
             <KpiCard label="Productos"      value={stats.products}      trend="neutral" />
           </div>
 

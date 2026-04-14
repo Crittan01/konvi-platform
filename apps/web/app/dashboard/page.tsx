@@ -22,8 +22,16 @@ export default async function DashboardPage() {
     // ─── Queries en paralelo ──────────────────────────────────────────────────
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
+    // Primero obtenemos el tenant para sacar low_stock_threshold antes de las queries paralelas
+    const tenantRes = await supabase
+      .from('tenants')
+      .select('name, low_stock_threshold')
+      .eq('id', tenantId)
+      .single()
+
+    const lowStockThreshold = tenantRes.data?.low_stock_threshold ?? 5
+
     const [
-      tenantRes,
       convRes,
       ordersRes,
       contactsRes,
@@ -35,7 +43,6 @@ export default async function DashboardPage() {
       messagesRes,
       orderStatusRes,
     ] = await Promise.all([
-      supabase.from('tenants').select('name').eq('id', tenantId).single(),
       supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
       supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
@@ -49,9 +56,9 @@ export default async function DashboardPage() {
       // Ops: pedidos pendientes
       supabase.from('orders').select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId).eq('status', 'pending'),
-      // Ops: variantes con stock ≤ 5
+      // Ops: variantes bajo umbral configurable del tenant (tenants.low_stock_threshold)
       supabase.from('product_variations').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).lte('stock_quantity', 5),
+        .eq('tenant_id', tenantId).lte('stock_quantity', lowStockThreshold),
       // Negocio: mensajes últimos 7 días con fecha
       supabase.from('messages').select('created_at')
         .eq('tenant_id', tenantId)
