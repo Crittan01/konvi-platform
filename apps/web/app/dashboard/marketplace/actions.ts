@@ -67,6 +67,26 @@ export async function changeListingStatus(listingId: string, status: 'active' | 
   }
 }
 
+export async function importFromMeli(meliId: string, categoryId?: string) {
+  const token = await getToken()
+  try {
+    const res = await fetch(`${API_URL}/api/v1/marketplace/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ meli_id: meliId, category_id: categoryId || null })
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      throw new Error(detail || res.statusText)
+    }
+    revalidatePath('/dashboard/marketplace')
+    revalidatePath('/dashboard/catalog')
+    return { success: true, data: await res.json() }
+  } catch (error: any) {
+    return { error: error.message || 'Error al importar' }
+  }
+}
+
 export async function syncStockFromSupabase(listingId: string) {
   const token = await getToken()
   try {
