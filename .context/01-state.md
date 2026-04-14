@@ -1,269 +1,198 @@
 # Current Scope — Estado Real de Implementación
 
-Última actualización: 2026-04-10 (rev. 16 — UI Plus Total 13 módulos + nav reestructurada con grupos expandibles)
-
-Este documento registra el estado **real y verificado en el repositorio** del producto hoy.
-Distingue explícitamente entre lo implementado, lo parcial y lo pendiente.
-
-> **Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
+**Última actualización**: 2026-04-14 (rev. 17 — Revisión arquitectónica vuelta 1, restructuring-review ejecutado)
+**Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
+**Tree funcional vigente**: `.context/00-product.md`
 
 ---
 
-## Stack real vigente (verificado en repo)
+## Stack Real Vigente
 
 ### Frontend — `apps/web`
 
-| Elemento | Versión real en repo | Notas |
-|----------|---------------------|-------|
-| Next.js | **14.2.35** | `apps/web/package.json` — actualizado desde 14.1.0 (CVE patch) |
+| Elemento | Versión real | Notas |
+|---|---|---|
+| Next.js | **14.2.35** | CVE patch aplicado (14.1.0 → 14.2.35) |
 | React | ^18 | — |
-| TypeScript | ^5 | — |
-| TailwindCSS | ^3.3.0 | Con `postcss.config.js` (fix Render) |
-| shadcn/ui components | 5 componentes | En `apps/web/components/ui/` — badge, button, card, input, label |
+| TypeScript | ^5 | strict + strictNullChecks + noImplicitAny |
+| TailwindCSS | ^3.3.0 | `postcss.config.js` + `autoprefixer` en devDeps (fix Render) |
+| shadcn/ui components | 5 componentes | En `apps/web/components/ui/`: badge, button, card, input, label |
 | `@supabase/ssr` | ^0.10.0 | — |
-| `@supabase/supabase-js` | ^2.101.1 | — |
-| Patrón routing | App Router | Confirmado por estructura `app/` |
-| Server Actions | Sí | Usado en catalog, knowledge-base, inventory |
-| Font | Inter via `next/font/google` | CSS variable `--font-inter`, integrada en `tailwind.config.ts` |
+| Patrón routing | App Router + Route Groups | `(sales)`, `(products)`, `(channels)`, `(ai)`, `(analytics)`, `(settings-group)` |
+| Server Actions | Sí | catalog, knowledge-base, inventory, orders, contacts |
+| Font | Inter via `next/font/google` | CSS variable `--font-inter` |
+| Prettier | `.prettierrc.json` | Formato estándar — singleQuote, trailing comma |
+| ESLint | `eslint@8` + `@typescript-eslint/recommended` | `.eslintrc.json` — next/core-web-vitals base |
 
-> **`packages/ui`**: directorio vacío — sin archivos. Los componentes viven en `apps/web/components/ui/`.
+> `packages/ui` está vacío. Componentes en `apps/web/components/ui/`.
 
-### Backend — servicios Python
+### Backend — Python
 
 | Elemento | Versión real | Notas |
-|----------|-------------|-------|
-| Python (VM) | **3.11.13** | Sin venv — paquetes en sistema. `Optional[X]` es el estilo usado. |
+|---|---|---|
+| Python | **3.11.13** | Oracle Linux 9, instalado vía dnf, sin venv |
 | FastAPI | 0.128.8 | Todos los servicios |
 | Pydantic | 2.12.5 | — |
-| google-genai | 1.47.0 | SDK oficial Gemini — no `google-generativeai` |
+| google-genai | 1.47.0 | SDK oficial — `google-generativeai` DESINSTALADO |
 | supabase-py | 2.28.3 | — |
 | PyJWT | 2.10.1 | Solo en `services/api` |
-
-> **Python objetivo**: 3.11+ para producción. La VM usa 3.9.25 (EOL). No actualizar sin revisar impacto en Oracle Linux 9.
-
-### Packages — estado real
-
-| Package | Archivos | Estado |
-|---------|----------|--------|
-| `packages/auth` | `lib/server-client.ts`, `lib/client-browser.ts` | 🟡 Parcial — 2 archivos implementados |
-| `packages/db` | `migrations/` (5 archivos SQL — mirrors iniciales) | 🟡 Parcial — las 13 migraciones reales están en `supabase/migrations/` |
-| `packages/ui` | — | ❌ Vacío — componentes en `apps/web/components/ui/` |
-| `packages/config` | — | ❌ Vacío |
-| `packages/shared-types` | — | ❌ Vacío |
+| Ruff | `pyproject.toml` | Linter — E, F, W, I, B, C — line-length 100 |
 
 ---
 
-## Resumen ejecutivo de implementación
+## Resumen Ejecutivo de Implementación
 
-| Capa | Estado | Notas |
-|------|--------|-------|
-| Tenant Console | ✅ Completa (13/13 módulos) | UI "Plus Total" — Enterprise SaaS responsive — commit 6a496c7 |
-| Navegación Tenant | ✅ Reestructurada | Grupos expandibles, RBAC dual, auto-expand activo — commit pendiente |
-| Platform Console | ❌ No existe | Cero rutas, cero layout, cero auth de plataforma |
-| Backend services | ✅ 3 servicios live + 11 routers | WhatsApp connector, API Gateway, AI Orchestrator |
-| Base de datos | ✅ 13 migraciones aplicadas | Incluyendo schema core, shipments, stock_movements, kb_documents, audit_log, low_stock_threshold, consent |
-| Deploy Render | ✅ Completo | 4 servicios live, E2E confirmado |
-| Shipping/Courier (Envia) | 🟡 Fase Inicial | Quote + historial operativos. Sandbox conectado. Label/tracking: Fase 2 |
-| MeLi | 🟡 Fase Inicial | OAuth conectado user_id `603780765`. Sync catálogo/stock: futuro |
+| Capa | Estado |
+|---|---|
+| Tenant Console — Módulos | ✅ Live (ver tabla abajo) |
+| Navegación Sidebar | ✅ Reestructurada con Route Groups + grupos expandibles RBAC |
+| Platform Console | ❌ No existe — bloqueante OQ-P01 no resuelto |
+| Backend API | ✅ 3 servicios live + 9 routers |
+| Base de datos | ✅ 20 migraciones aplicadas |
+| Deploy Render | ✅ 4 servicios live |
+| Envia / Shipping | 🟡 Fase Inicial — quote + historial live. Label/tracking: Fase 2 |
+| MeLi | 🟡 Fase Inicial — OAuth + webhook + listings operativos. Sync bidireccional: pendiente |
 
 ---
 
-## Frontend — rutas reales en repo (Fases 1-11 completas)
+## Estado por Módulo — Tenant Console
+
+| Módulo | Ruta | Estado | Notas |
+|---|---|---|---|
+| Dashboard | `/dashboard` | ✅ Live | Tabs Ops/Negocio — 11 queries paralelas — KPIs recharts |
+| Inbox | `/dashboard/inbox` | ✅ Live | Realtime, human takeover, envío como agente |
+| Pedidos | `/dashboard/orders` | ✅ Live | Listado, detalle, estados, stock decrementado al confirmar |
+| Contactos | `/dashboard/contacts` | ✅ Live | Listado, perfil, consent Habeas Data |
+| Reclamos | `/dashboard/claims` | 🟡 Parcial | Tabla `claims` + página stub. Acciones reales pendientes |
+| Catálogo | `/dashboard/catalog` | ✅ Live | CRUD, multi-variante, archivados, auto-refresh |
+| Inventario | `/dashboard/inventory` | ✅ Live | Stock por variante, umbral configurable, ajuste con motivo |
+| Media | `/dashboard/media` | ✅ Live | Upload/delete/URL via Supabase Storage `tenant-media` |
+| Mercado Libre | `/dashboard/marketplace` | ✅ Live | Listings MeLi, sync stock, vinculación variation↔listing |
+| Cotizaciones (Envia) | `/dashboard/shipping` | ✅ Live | Historial + ShippingQuoteForm interactivo |
+| Órdenes de Compra | `/dashboard/purchases` | ✅ Live | POs, proveedores, WAC |
+| P&L / Finanzas | `/dashboard/finance` | ✅ Live | P&L Dashboard, Registro OPEX |
+| Base de Conocimiento | `/dashboard/knowledge-base` | ✅ Live | CRUD, categorías, toggle activo, inyectada en Orchestrator |
+| Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloquear en sidebar** |
+| Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
+| Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
+| Configuración | `/dashboard/settings` | ✅ Live | Equipo RBAC, logo tenant, dirección origen, WABA, Telegram |
+| Integraciones | `/dashboard/integrations` | ✅ Live | MeLi + Envia connect/disconnect |
+
+---
+
+## Estructura de Directorios Frontend (Real)
 
 ```
 apps/web/app/
-├── page.tsx                             ✅ Landing / redirect a /dashboard o /login
-├── layout.tsx                           ✅ Root layout (Inter font, globals.css)
-├── globals.css                          ✅ Dark Warm Theme: carbón cálido + verde bosque + ámbar
-├── login/
-│   └── page.tsx                         ✅ Auth con Supabase SSR + mensaje de error
+├── page.tsx                       ✅ Landing / redirect
+├── layout.tsx                     ✅ Root layout (Inter font, globals.css)
+├── globals.css                    ✅ Dark Warm Theme — HSL tokens
+├── login/page.tsx                 ✅ Auth Supabase SSR
 └── dashboard/
-    ├── layout.tsx                       ✅ Sidebar 13 ítems + RBAC visual + logout
-    ├── page.tsx                         ✅ Dashboard — Tabs Operaciones/Negocio, KPIs, recharts
-    ├── inbox/
-    │   └── page.tsx                     ✅ Inbox AI — Realtime, human takeover, bubble UI
-    ├── catalog/
-    │   └── page.tsx                     ✅ Catálogo — CRUD completo, multi-variante, mobile-first UX, archivados y auto-refresh
-    ├── orders/
-    │   └── page.tsx                     ✅ Pedidos — listado, detalle, cambio de estado
-    ├── contacts/
-    │   └── page.tsx                     ✅ Contactos — listado, perfil
-    ├── inventory/
-    │   └── page.tsx                     ✅ Inventario — stock por variante, alertas, ajuste, paginación, búsqueda en memoria
-    ├── knowledge-base/
-    │   └── page.tsx                     ✅ Knowledge Base — CRUD, categorías, toggle activo
-    ├── media/
-    │   ├── page.tsx                     ✅ Media — Server Component lista archivos
-    │   └── media-client.tsx             ✅ Upload, delete, copy URL (Client Component)
-    ├── shipping/
-    │   └── page.tsx                     ✅ Shipping — historial + ShippingQuoteForm interactivo con selección de carrier
-    ├── integrations/
-    │   └── page.tsx                     ✅ Integraciones — estado MeLi + Envia, connect/disconnect
-    ├── metrics/
-    │   └── page.tsx                     ✅ Métricas — 4 KPIs, pedidos por estado, top 5 productos
-    ├── audit/
-    │   └── page.tsx                     ✅ Auditoría — filtros, paginación 25/pág, payload expandible
-    └── settings/
-        └── page.tsx                     ✅ Configuración — perfil, WABA, equipo, notificaciones
+    ├── layout.tsx                 ✅ Shell: Sidebar + Main + top bar
+    ├── page.tsx                   ✅ Dashboard RSC — 11 queries paralelas
+    ├── dashboard-client.tsx       ✅ Tabs Ops/Negocio + recharts
+    ├── sidebar-client.tsx         ✅ NAV_ITEMS — árbol de navegación
+    ├── error.tsx                  ✅ Error boundary
+    ├── inbox/                     ✅ Realtime WhatsApp
+    ├── finance/                   ✅ P&L
+    ├── purchases/                 ✅ Compras
+    ├── (sales)/                   Route Group — /orders, /contacts, /shipping, /claims
+    ├── (products)/                Route Group — /catalog, /inventory, /media
+    ├── (channels)/                Route Group — /marketplace
+    ├── (ai)/                      Route Group — /knowledge-base, /ai-agents
+    ├── (analytics)/               Route Group — /metrics, /audit
+    └── (settings-group)/          Route Group — /settings, /integrations
 ```
 
-**Sidebar actual** (verificado en `apps/web/app/dashboard/sidebar-client.tsx`):
-Usa árbol de grupos expandibles con auto-expand y RBAC dual.
-- Raíz: Dashboard, Inbox
-- Ventas: Pedidos, Contactos, Envíos, Reclamos (Pronto)
-- Productos: Catálogo, Inventario
-- Publicaciones (Pronto): Mercado Libre, Central Ofertas
-- Compras: Órdenes de Compra
-- Finanzas: Ingresos & Gastos
-- IA & Contenido: Base de Conocimiento, Media, Agentes IA (Pronto)
-- Analítica: Métricas, Auditoría
-- Configuración: General, Integraciones
-
 ---
 
-## Estado detallado por módulo — Tenant Console
+## Backend Services — Estado Real
 
-| Módulo | Ruta | Estado | Notas |
-|--------|------|--------|-------|
-| Dashboard | `/dashboard` | ✅ Implementado | Tabs Operaciones + Negocio. KPIs, gráficas recharts. |
-| Inbox | `/dashboard/inbox` | ✅ Implementado | Realtime, takeover, hilo |
-| Catálogo | `/dashboard/catalog` | 🟡 Parcial | CRUD + edit + delete. Variantes múltiples: pendiente |
-| Pedidos | `/dashboard/orders` | ✅ Implementado | Listado, detalle, estados. + AI Insight Panel |
-| Contactos | `/dashboard/contacts` | ✅ Implementado | Listado, perfil. + AI Insight Panel |
-| Inventario | `/dashboard/inventory` | ✅ Implementado | Paginación, búsqueda, responsive UX, ajuste stock con protección de doble clic |
-| Knowledge Base | `/dashboard/knowledge-base` | ✅ Implementado | CRUD, categorías, activo/inactivo |
-| Media | `/dashboard/media` | ✅ Implementado | Upload/delete/URL, bucket `tenant-media` |
-| Shipping | `/dashboard/shipping` | ✅ Implementado | Historial + ShippingQuoteForm interactivo con tabla de carriers |
-| Integraciones | `/dashboard/integrations` | ✅ Implementado | MeLi + Envia connect/disconnect |
-| Métricas | `/dashboard/metrics` | ✅ Implementado | 4 KPIs, queries paralelas. + AI Insight Panel |
-| Auditoría | `/dashboard/audit` | ✅ Implementado | Filtros, paginación, payload JSONB |
-| Configuración | `/dashboard/settings` | ✅ Implementado | Equipo RBAC, WABA, notificaciones |
-| Reclamos | `/dashboard/claims` | ❌ Pendiente | Fase 11.5 |
-| MeLi Listings | `/dashboard/marketplace` | ✅ Implementado | Datos reales de MeLi API. Vinculación variation↔listing. Sync automático stock Supabase→MeLi. |
-| Compras | `/dashboard/purchases` | ✅ Implementado | POs, Proveedores, WAC |
-| Finanzas | `/dashboard/finance` | ✅ Implementado | P&L Dashboard, Registro OPEX |
-| Agentes IA | `/dashboard/ai-agents` | ✅ Implementado | Configuración directrices, roles y RAG parameters (Fase 14) |
-| API AI Insights | `/api/insights` | ✅ Implementado | Router genérico a Gemini con RBAC y prompts por dominio |
+| Servicio | URL Render | Estado |
+|---|---|---|
+| `commerce-ops-web` | `https://commerce-ops-web.onrender.com` | ✅ Live |
+| `commerce-ops-connector` | `https://commerce-ops-connector.onrender.com` | ✅ Live |
+| `commerce-ops-api` | `https://commerce-ops-api.onrender.com` | ✅ Live |
+| `commerce-ops-orchestrator` | (no URL pública — /health interno) | ✅ Live, polling 3s |
 
----
-
-## Platform Console
-
-**Estado**: ❌ No existe en absoluto.
-
-- No hay rutas `/platform/*`
-- No hay layout de platform console
-- No hay tabla `platform_users` en DB
-- No hay separación de auth para operadores de plataforma
-- **Prerrequisito bloqueante**: OQ-P01 (misma app vs separada) debe resolverse antes de empezar
-
----
-
-## Backend services — estado real
-
-| Servicio | Estado | URL / Evidencia |
-|----------|--------|-----------------|
-| `services/connector-whatsapp` | ✅ Live en Render | `https://commerce-ops-connector.onrender.com` |
-| `services/ai-orchestrator` | ✅ Live en Render | Background worker, polling cada 3s |
-| `services/api` | ✅ Live en Render | `https://commerce-ops-api.onrender.com` |
-
-### Routers activos en `services/api`
+### Routers Activos en `services/api`
 
 | Router | Endpoints clave | Estado |
-|--------|----------------|--------|
-| `products.py` | `GET/POST /api/v1/products`, `PUT/DELETE /products/{id}` | ✅ |
-| `orders.py` | `GET/POST /api/v1/orders`, `PATCH /orders/{id}` | ✅ |
-| `contacts.py` | `GET/POST /api/v1/contacts` | ✅ |
-| `settings.py` | `GET/PUT /api/v1/settings`, `GET/POST/DELETE /team` | ✅ |
+|---|---|---|
+| `products.py` | `GET/POST /products`, `PUT/DELETE /products/{id}`, `PATCH/POST/DELETE /variations/{id}` | ✅ |
+| `orders.py` | `GET/POST /orders`, `PATCH /orders/{id}` | ✅ |
+| `contacts.py` | `GET/POST /contacts` | ✅ |
+| `settings.py` | `GET/PUT /settings`, `GET/POST/DELETE /team` | ✅ |
 | `integrations.py` | `/integrations/envia`, `/integrations/meli`, OAuth callback | ✅ |
-| `shipping.py` | `POST /api/v1/shipping/quote`, `GET /shipping/history` | ✅ |
-| `meli_webhook.py` | `POST /api/v1/meli/webhook` | ✅ |
-| `conversations.py` | `GET /api/v1/conversations` | ✅ |
-| `marketplace.py` | `GET/POST /api/v1/marketplace`, `PATCH /marketplace/{id}/status` | ✅ |
+| `shipping.py` | `POST /shipping/quote`, `GET /shipping/history` | ✅ |
+| `meli_webhook.py` | `POST /meli/webhook` | ✅ |
+| `conversations.py` | `GET /conversations` | ✅ |
+| `marketplace.py` | `GET/POST /marketplace`, `PATCH /marketplace/{id}/status` | ✅ |
 
-### Endpoints significativos pendientes (próximas fases)
+### Endpoints Pendientes
 
-| Endpoint | Fase | Justificación |
-|----------|------|---------------|
-| `POST /api/v1/shipping/label` | Envia Fase 2 | Generación de etiqueta |
-| `GET /api/v1/shipping/tracking/{id}` | Envia Fase 2 | Tracking real |
-| `POST /api/v1/shipping/pickup` | Envia Fase 2 | Programar recolección |
-| Endpoints platform-only | Fase 12 | Platform Console |
-
----
-
-## Tablas de base de datos — estado real (13 migraciones aplicadas)
-
-| Tabla | Migración | Estado |
-|-------|-----------|--------|
-| `tenants` | 20260406181235 | ✅ |
-| `tenant_users` | 20260406181235 | ✅ |
-| `products` | 20260406181236 | ✅ |
-| `product_variations` | 20260406181236 | ✅ |
-| `conversations` | 20260406181237 | ✅ |
-| `messages` | 20260406181237 + processed flag | ✅ |
-| `contacts` | 20260409220000 (Fase 9) | ✅ |
-| `orders` | 20260409220000 (Fase 9) | ✅ |
-| `order_items` | 20260409220000 (Fase 9) | ✅ |
-| `tenant_integrations` | 20260409220000 (Fase 9) | ✅ |
-| `notification_settings` | 20260409220000 (Fase 9) | ✅ |
-| `shipments` | 20260409230000 (Fase 9) | ✅ |
-| `stock_movements` | 20260409240000 (Fase 11) | ✅ |
-| `kb_documents` | 20260409250000 (Fase 11) | ✅ |
-| `audit_log` | 20260409260000 (Fase 11) | ✅ |
-| `marketplace_listings` | 20260413000000 (Fase 11.5) | ✅ |
-| `platform_users` | — | ❌ Fase 12 |
+| Endpoint | Fase | Estado |
+|---|---|---|
+| `POST /shipping/label` | Envia Fase 2 | 🔒 Pendiente |
+| `GET /shipping/tracking/{id}` | Envia Fase 2 | 🔒 Pendiente |
+| `POST /shipping/pickup` | Envia Fase 2 | 🔒 Pendiente |
+| Endpoints platform-only | Fase 12 | ❌ Fuera de alcance actual |
 
 ---
 
-## Bloqueos activos
+## Base de Datos — Migraciones (20 aplicadas)
+
+| Tabla principal | Migración | Estado |
+|---|---|---|
+| `tenants`, `tenant_users` | 20260406181235 | ✅ |
+| `products`, `product_variations` | 20260406181236 | ✅ |
+| `conversations`, `messages` | 20260406181237 | ✅ |
+| `rls_policies` | 20260406181238 | ✅ |
+| `contacts`, `orders`, `order_items`, `tenant_integrations`, `notification_settings` | 20260409220000 | ✅ |
+| `shipments` | 20260409230000 | ✅ |
+| `stock_movements` | 20260409240000 | ✅ |
+| `kb_documents` | 20260409250000 | ✅ |
+| `audit_log` | 20260409260000 | ✅ |
+| `tenant_shipping_origin` | 20260409270000 | ✅ |
+| `tenants.low_stock_threshold` | 20260410010000 | ✅ |
+| `contacts.consent_given/consent_date` | 20260410020000 | ✅ |
+| Catalog enterprise fields | 20260411162042 | ✅ |
+| `ai_agents`, `ai_agent_documents` (pgvector) | 20260412000000 | ✅ |
+| `purchase_orders`, `suppliers`, `finance_entries` | 20260413000000 | ✅ |
+| Finance polish | 20260413000001 | ✅ |
+| `marketplace_listings` | 20260413000002 | ✅ |
+| `claims` | 20260413150000 | ✅ |
+
+> Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
+
+---
+
+## Deuda Técnica Activa
+
+| Ítem | Prioridad |
+|---|---|
+| Reclamos — acciones reales (crear, cambiar estado, vincular a pedido/MeLi) | Alta |
+| Sync bidireccional catálogo ↔ MeLi listings | Media |
+| Envia Fase 2: label, tracking, pickup | Media |
+| WhatsApp Config centralizada (templates aprobados, WABA management) | Media |
+| Agentes IA — desbloquear en sidebar (módulo existe y está implementado) | Alta |
+| Dashboard — usar `tenants.low_stock_threshold` dinámico (eliminado hardcode `<= 5`) | Media |
+| Dashboard KPIs — eliminar trends hardcodeados (`+12%`, `+5%` sin base real) | Media |
+
+---
+
+## Bloqueos Activos
 
 | Bloqueante | Tipo | Impacto |
-|-----------|------|---------|
-| OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea inicio de Fase 12 |
-| ~~Python 3.9.25 en VM (EOL)~~ | ✅ Resuelto — Python 3.11.13 instalado 2026-04-10 | — |
-
-## Deuda técnica resuelta (2026-04-10)
-
-| Ítem | Resolución |
-|------|-----------|
-| RBAC granular en settings.py (R-09) | ✅ Añadido `require_owner_role` a `auth.py`. `settings.py` refactorizado: 3 endpoints usan `require_owner_role`, 1 usa `require_write_role`. Eliminados checks manuales. |
-| `packages/db/migrations/` desincronizado | ✅ 14 migraciones canónicas sincronizadas. README actualizado indicando `supabase/migrations/` como fuente canónica. |
-| Variantes múltiples — solo editable en UI para productos 1-variante | ✅ API: 3 nuevos endpoints (`PATCH /variations/{id}`, `POST /variations`, `DELETE /variations/{id}`). UI: edición por variante individual en todos los productos. Server Actions migradas a `getUser()`. |
-
-## Procedimiento para Python 3.11 (requiere acción humana en VM)
-
-```bash
-# En la VM:
-sudo dnf install python3.11 python3.11-pip -y
-python3.11 -m pip install google-genai==1.47.0 supabase==2.28.3 httpx==0.28.1 \
-  pydantic==2.12.5 PyJWT==2.10.1 fastapi==0.128.8 uvicorn==0.39.0 \
-  python-dotenv==1.2.1 python-multipart==0.0.20 anyio==4.12.1 starlette==0.49.3
-
-# Validar localmente:
-python3.11 -m uvicorn main:app --port 8001
-
-# En Render Dashboard → cada servicio → Start Command: cambiar python3 → python3.11
-```
+|---|---|---|
+| OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea Fase 12 — sin impacto en Tenant Console |
 
 ---
 
-## Stack objetivo (no vigente todavía)
+## Política de Actualización
 
-| Elemento | Real hoy | Objetivo |
-|----------|----------|----------|
-| Next.js | 14.2.35 | 15.x (cuando sea estable para el proyecto) |
-| Python | 3.9.25 (EOL) | 3.11+ (antes de Beta) |
-| packages/ui | Vacío | Componentes shadcn/ui compartidos entre apps |
-| packages/shared-types | Vacío | Tipos TypeScript generados de Supabase |
-
-> No actualizar versiones automáticamente. Cada upgrade requiere validar impacto en Render y en código existente.
-
----
-
-## Documentos relacionados
-
-- `docs/product/admin-ui-modules.md` — Módulos con evidencia, dependencias y prioridad
-- `docs/product/navigation-map.md` — Rutas reales y sidebar actual
-- `docs/architecture/front-back-separation.md` — Mapeo UI ↔ Backend con BLOQUEs de implementación
-- `docs/roadmap/implementation-phases.md` — Fases 1-13 con estado
+- Actualizar este archivo al cierre de cada sesión de trabajo.
+- No duplicar estado en múltiples archivos. Este es el único lugar.
+- No incluir aquí intenciones ni roadmap — eso es `docs/roadmap/` y `.context/04-next-steps.md`.
+- Los docs eliminados en sesiones previas no deben reaparecer en referencias.

@@ -1,58 +1,48 @@
 # Commerce Ops Platform
 
-> Plataforma SaaS Multi-Tenant de operaciones e-commerce conversacionales vía WhatsApp.
+> SaaS Multi-Tenant de operaciones e-commerce conversacionales vía WhatsApp.
 
 ## Qué es este producto
 
 **El producto NO es un bot.** Es un centro de operaciones e-commerce conversacional donde:
 
-- WhatsApp (Meta Cloud API oficial) es el canal principal con el cliente final
+- WhatsApp Cloud API (Meta oficial) es el canal principal con el cliente final
 - El catálogo, pedidos, inventario y reglas viven en el core del sistema
-- El LLM (Gemini) es una capa de asistencia controlada — nunca fuente de verdad de datos
+- El LLM (Gemini) es asistencia controlada — nunca fuente de verdad de datos
 - Los conectores con marketplaces y servicios externos son módulos desacoplados
 - El tenant opera su negocio desde la **Tenant Console**
-- El dueño de la plataforma opera el SaaS desde la **Platform Console** (consola separada, aún no implementada)
+- La **Platform Console** (administración SaaS) es frontera futura — no implementada
 
-## Estado Actual (2026-04-10)
+## Estado (2026-04-14 — rev. 17)
 
-**Fases 1-11 completadas.** Fase 12 (Platform Console) pendiente.
+**Fases 1-11.2 completadas.** Fase 12 (Platform Console) bloqueada por OQ-P01.
 
 | Componente | Estado |
 |---|---|
-| Supabase Cloud (`xmelwnhhphksbpdjmbbp`) | ✅ Activo — 13 migraciones aplicadas |
-| RLS + Custom Claims JWT | ✅ Implementados |
-| Frontend — Tenant Console (13/13 módulos) | ✅ Live en Render |
+| Tenant Console (Tenant Console) | ✅ Live — 17 módulos, Route Groups, RBAC |
 | WhatsApp Connector | ✅ Live — HMAC validado, tenant resolver real |
 | AI Orchestrator | ✅ Live — polling 3s, gemini-2.5-flash, KB inyectada |
-| API Gateway | ✅ Live — JWT real, RBAC base, 8 routers |
-| Meta Webhook | ✅ Configurado — E2E WhatsApp ↔ Gemini ↔ Inbox confirmado |
-| Platform Console | ❌ Pendiente — Fase 12 (bloqueante: OQ-P01) |
+| API Gateway | ✅ Live — JWT, RBAC, 9 routers |
+| Supabase Cloud | ✅ Activo — 20 migraciones aplicadas, RLS activo |
+| Platform Console | ❌ No implementada — Fase 12, bloqueante OQ-P01 |
 
-> Ver `AGENTS.md` para el estado completo del sistema y `docs/HANDOFF.md` para próximos pasos.
+> Ver estado completo por módulo → `.context/01-state.md`
+> Ver infra y credenciales → `docs/HANDOFF.md`
 
 ## Stack Técnico
 
-| Capa | Versión real | Notas |
-|------|-------------|-------|
-| Frontend | **Next.js 14.2.35**, React ^18, TypeScript ^5 | App Router, Server Actions |
-| UI | TailwindCSS ^3.3.0, shadcn/ui (5 componentes) | Dark Warm Theme |
-| Backend | **Python 3.9.25** (EOL), FastAPI 0.128.8 | VM Oracle Linux 9 |
-| DB / Auth | Supabase PostgreSQL + RLS + Auth + Realtime | |
-| IA | Google Gemini API (`gemini-2.5-flash`, `google-genai==1.47.0`) | |
-| Mensajería | WhatsApp Cloud API (Meta oficial v21.0) | |
-| Shipping | Envia API — Fase Inicial operativa (quote + historial) | Label/tracking: Fase 2 |
-| Hosting | Render — 4 servicios (Free plan) | Upgrade a Starter antes de producción |
+| Capa | Versión real |
+|---|---|
+| Frontend | **Next.js 14.2.35**, React ^18, TypeScript ^5 |
+| UI | TailwindCSS ^3.3.0, shadcn/ui (5 componentes) — Dark Warm Theme |
+| Backend | **Python 3.11.13**, FastAPI 0.128.8 |
+| DB / Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
+| IA | `gemini-2.5-flash` via `google-genai==1.47.0` |
+| Mensajería | WhatsApp Cloud API (Meta oficial v21.0) |
+| Shipping | Envia API — Fase Inicial live (quote + historial) |
+| Hosting | Render — 4 servicios (Free plan) |
 
 > Fuente de verdad de versiones: `apps/web/package.json` y `services/*/requirements.txt`.
-
-## Dos Consolas Separadas
-
-| Consola | Para quién | Estado |
-|---------|-----------|--------|
-| **Tenant Console** (`/dashboard/*`) | El cliente/tenant — opera su negocio | ✅ 13/13 módulos implementados |
-| **Platform Console** (`/platform/*`) | El dueño de la plataforma / superadmin | ❌ No implementada (Fase 12) |
-
-No mezclar. No unificar. Separación estricta de layout, auth y permisos.
 
 ## Estructura del Monorepo
 
@@ -63,14 +53,13 @@ services/
   connector-whatsapp/      # Webhook Gateway Meta ✅ LIVE
   ai-orchestrator/         # Worker AI asíncrono ✅ LIVE
   api/                     # REST API Gateway ✅ LIVE
-  connector-mercadolibre/  # ❌ Pendiente Fase 10 (conector backend)
 packages/
   auth/                    # Wrappers SSR Supabase Auth (parcial)
   db/                      # Mirrors iniciales de migraciones (fuente real: supabase/migrations/)
-  ui/                      # ❌ Vacío (componentes en apps/web/components/ui/)
-docs/                      # Documentación completa
+supabase/migrations/       # 20 migraciones SQL — FUENTE CANÓNICA del esquema
+.context/                  # Contexto activo del sistema — leer primero
 .agents/                   # Reglas y workflows para AI agents
-supabase/migrations/       # 13 migraciones SQL aplicadas en producción
+docs/                      # Documentación técnica detallada
 ```
 
 ## Comandos Frecuentes
@@ -79,12 +68,8 @@ supabase/migrations/       # 13 migraciones SQL aplicadas en producción
 # Frontend dev
 pnpm --filter web dev
 
-# Build de verificación
-cd apps/web && pnpm build
-
 # Aplicar migración SQL
 supabase db query --linked -f supabase/migrations/archivo.sql
-# (psql directo NO funciona — Supavisor bloquea TCP)
 
 # AI Orchestrator local
 cd services/ai-orchestrator
@@ -95,13 +80,13 @@ python3 main.py
 ## Documentación — Leer antes de tocar código
 
 | Documento | Propósito |
-|-----------|-----------|
-| `AGENTS.md` | **Estado del sistema vigente** — leer primero |
-| `.context/00-product.md` | **Tree Funcional y Reglas Base** — leer siempre antes de mover o crear UI |
+|---|---|
+| `.context/00-product.md` | **Tree Funcional vigente** — leer siempre antes de crear o mover UI |
 | `.context/01-state.md` | Estado real de implementación verificado en código |
-| `docs/HANDOFF.md` | Estado actual y próximos pasos de handoff |
-| `docs/architecture/overview.md` | Arquitectura técnica del sistema |
+| `.context/04-next-steps.md` | Próximos pasos y deuda técnica |
+| `.context/05-doc-policy.md` | **Política documental** — jerarquía y reglas de consistencia |
+| `AGENTS.md` | Quick context para agentes IA |
+| `docs/HANDOFF.md` | Estado operativo, credenciales, lecciones |
 | `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend |
 | `docs/integrations/courier-envia.md` | Diseño del módulo Shipping/Courier |
-| `docs/roadmap/implementation-phases.md` | Fases 1-13 con estado real |
 | `docs/risks/open-questions.md` | Preguntas abiertas y bloqueantes |
