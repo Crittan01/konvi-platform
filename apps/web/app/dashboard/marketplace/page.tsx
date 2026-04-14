@@ -42,9 +42,8 @@ export default async function MarketplacePage() {
     .select('id, name')
     .eq('is_active', true)
     .order('name')
-  const catMap = Object.fromEntries(
-    ((cats ?? []) as { id: string; name: string }[]).map(c => [c.id, c.name])
-  )
+  const categories = (cats ?? []) as { id: string; name: string }[]
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]))
 
   // ── Variantes del catálogo interno (Supabase directo con join de producto) ─
   // Usamos Supabase directo (no API) para poder resolver la categoría en el servidor
@@ -108,6 +107,7 @@ export default async function MarketplacePage() {
         items={items}
         paging={paging}
         variations={variations}
+        categories={categories}
         canWrite={canWrite}
       />
     </div>

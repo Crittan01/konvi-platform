@@ -14,7 +14,7 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue
 } from '@/components/ui/select'
 import {
-  linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase
+  linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase, importFromMeli
 } from '../actions'
 
 type MeliItem = {
@@ -46,11 +46,17 @@ type Variation = {
   category_name: string
 }
 
+type Category = {
+  id: string
+  name: string
+}
+
 type Props = {
   connected: boolean
   items: MeliItem[]
   paging: { total: number }
   variations: Variation[]
+  categories: Category[]
   canWrite: boolean
 }
 
@@ -60,12 +66,14 @@ const STATUS_CONFIG = {
   closed:  { label: 'Cerrado', className: 'bg-red-500/15 text-red-500' },
 }
 
-export default function MarketplaceManager({ connected, items, paging, variations, canWrite }: Props) {
+export default function MarketplaceManager({ connected, items, paging, variations, categories, canWrite }: Props) {
   const [search, setSearch] = useState('')
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
-  // Estado para el panel de vinculación
-  const [linkingMeliId, setLinkingMeliId] = useState<string | null>(null)
+  // Panel de acción por fila: null | { meliId, mode: 'link' | 'import' }
+  const [activePanel, setActivePanel] = useState<{ meliId: string; mode: 'link' | 'import' } | null>(null)
   const [selectedVariationId, setSelectedVariationId] = useState('')
+  const [selectedCategoryId, setSelectedCategoryId] = useState('')
+  const [importResult, setImportResult] = useState<{ meliId: string; title: string } | null>(null)
 
   const setLoading = (id: string, on: boolean) => {
     setLoadingIds(prev => {
@@ -108,15 +116,29 @@ export default function MarketplaceManager({ connected, items, paging, variation
     setLoading(item.meli_id, false)
   }
 
+  const closePanel = () => {
+    setActivePanel(null)
+    setSelectedVariationId('')
+    setSelectedCategoryId('')
+  }
+
   const handleLink = async (meliId: string) => {
     if (!selectedVariationId) return
     setLoading(meliId, true)
     const resp = await linkListing(meliId, selectedVariationId)
+    if (resp?.error) alert(`Error: ${resp.error}`)
+    else closePanel()
+    setLoading(meliId, false)
+  }
+
+  const handleImport = async (meliId: string, meliTitle: string) => {
+    setLoading(meliId, true)
+    const resp = await importFromMeli(meliId, selectedCategoryId || undefined)
     if (resp?.error) {
       alert(`Error: ${resp.error}`)
     } else {
-      setLinkingMeliId(null)
-      setSelectedVariationId('')
+      setImportResult({ meliId, title: meliTitle })
+      closePanel()
     }
     setLoading(meliId, false)
   }
@@ -187,7 +209,6 @@ export default function MarketplaceManager({ connected, items, paging, variation
             <tbody className="divide-y divide-border/50">
               {filtered.map(item => {
                 const isLoading = loadingIds.has(item.meli_id)
-                const isLinking = linkingMeliId === item.meli_id
                 const stockDiff = item.is_linked && item.supabase_stock !== null
                   ? item.supabase_stock - item.available_quantity
                   : null
@@ -332,7 +353,10 @@ export default function MarketplaceManager({ connected, items, paging, variation
                                 variant="outline"
                                 size="sm"
                                 className="h-8 text-xs gap-1.5"
-                                onClick={() => setLinkingMeliId(isLinking ? null : item.meli_id)}
+                                onClick={() => {
+                                  const isOpen = activePanel?.meliId === item.meli_id
+                                  isOpen ? closePanel() : setActivePanel({ meliId: item.meli_id, mode: 'link' })
+                                }}
                               >
                                 <Link2 className="h-3 w-3" /> Vincular
                               </Button>
@@ -343,75 +367,120 @@ export default function MarketplaceManager({ connected, items, paging, variation
                     </tr>
 
                     {/* Panel de vinculación inline */}
-                    {isLinking && (
-                      <tr key={`link-${item.meli_id}`} className="bg-muted/20 border-b border-primary/20">
+                    {activePanel?.meliId === item.meli_id && (
+                      <tr key={`panel-${item.meli_id}`} className="bg-muted/20 border-b border-primary/20">
                         <td colSpan={6} className="px-4 py-4">
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                            <p className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                              Vincular a producto interno:
-                            </p>
-                            <Select value={selectedVariationId} onValueChange={setSelectedVariationId}>
-                              <SelectTrigger className="flex-1 h-9 text-sm">
-                                <SelectValue placeholder="Seleccionar variante del catálogo..." />
-                              </SelectTrigger>
-                              <SelectContent className="max-h-72">
-                                {variations.length === 0 ? (
-                                  <SelectItem value="_empty" disabled>
-                                    No hay variantes en el catálogo
-                                  </SelectItem>
-                                ) : (
-                                  // Agrupar por categoría
-                                  Object.entries(
-                                    variations.reduce<Record<string, Variation[]>>((acc, v) => {
-                                      const key = v.category_name
-                                      ;(acc[key] ??= []).push(v)
-                                      return acc
-                                    }, {})
-                                  ).sort(([a], [b]) => a.localeCompare(b)).map(([catName, vars]) => (
-                                    <SelectGroup key={catName}>
-                                      <SelectLabel className="text-xs font-semibold text-primary/80 uppercase tracking-wide">
-                                        {catName}
-                                      </SelectLabel>
-                                      {vars.map(v => {
-                                        // Atributos: omitir "default"/"Standard", mostrar el resto
-                                        const attrs = Object.entries(v.attributes)
-                                          .filter(([k]) => k !== 'default')
-                                          .map(([, val]) => val)
-                                          .join(' / ')
-                                        return (
-                                          <SelectItem key={v.id} value={v.id}>
-                                            <span className="font-medium">{v.product_title}</span>
-                                            {attrs && <span className="text-muted-foreground"> — {attrs}</span>}
-                                            <span className="text-muted-foreground text-xs ml-1">
-                                              · {v.sku} · Stock: {v.stock_quantity}
-                                            </span>
-                                          </SelectItem>
-                                        )
-                                      })}
-                                    </SelectGroup>
-                                  ))
-                                )}
-                              </SelectContent>
-                            </Select>
-                            <div className="flex gap-2 shrink-0">
-                              <Button
-                                size="sm"
-                                className="h-8 text-xs"
-                                disabled={!selectedVariationId || selectedVariationId === '_empty'}
-                                onClick={() => handleLink(item.meli_id)}
-                              >
-                                Confirmar
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs"
-                                onClick={() => { setLinkingMeliId(null); setSelectedVariationId('') }}
-                              >
-                                Cancelar
-                              </Button>
-                            </div>
+                          {/* Tabs de modo */}
+                          <div className="flex gap-1 mb-4">
+                            <button
+                              className={`px-3 py-1.5 text-xs rounded font-medium transition-colors ${activePanel.mode === 'link' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              onClick={() => setActivePanel({ meliId: item.meli_id, mode: 'link' })}
+                            >
+                              Vincular a producto existente
+                            </button>
+                            <button
+                              className={`px-3 py-1.5 text-xs rounded font-medium transition-colors ${activePanel.mode === 'import' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              onClick={() => setActivePanel({ meliId: item.meli_id, mode: 'import' })}
+                            >
+                              Importar desde MeLi
+                            </button>
                           </div>
+
+                          {/* Modo: Vincular */}
+                          {activePanel.mode === 'link' && (
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                              <p className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                                Seleccionar variante del catálogo:
+                              </p>
+                              <Select value={selectedVariationId} onValueChange={setSelectedVariationId}>
+                                <SelectTrigger className="flex-1 h-9 text-sm">
+                                  <SelectValue placeholder="Categoría → Producto → Variante..." />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-72">
+                                  {variations.length === 0 ? (
+                                    <SelectItem value="_empty" disabled>
+                                      No hay variantes en el catálogo. Usa "Importar desde MeLi".
+                                    </SelectItem>
+                                  ) : (
+                                    Object.entries(
+                                      variations.reduce<Record<string, Variation[]>>((acc, v) => {
+                                        const key = v.category_name
+                                        ;(acc[key] ??= []).push(v)
+                                        return acc
+                                      }, {})
+                                    ).sort(([a], [b]) => a.localeCompare(b)).map(([catName, vars]) => (
+                                      <SelectGroup key={catName}>
+                                        <SelectLabel className="text-xs font-semibold text-primary/80 uppercase tracking-wide">
+                                          {catName}
+                                        </SelectLabel>
+                                        {vars.map(v => {
+                                          const attrs = Object.entries(v.attributes)
+                                            .filter(([k]) => k !== 'default')
+                                            .map(([, val]) => val)
+                                            .join(' / ')
+                                          return (
+                                            <SelectItem key={v.id} value={v.id}>
+                                              <span className="font-medium">{v.product_title}</span>
+                                              {attrs && <span className="text-muted-foreground"> — {attrs}</span>}
+                                              <span className="text-muted-foreground text-xs ml-1">
+                                                · {v.sku} · Stock: {v.stock_quantity}
+                                              </span>
+                                            </SelectItem>
+                                          )
+                                        })}
+                                      </SelectGroup>
+                                    ))
+                                  )}
+                                </SelectContent>
+                              </Select>
+                              <div className="flex gap-2 shrink-0">
+                                <Button size="sm" className="h-8 text-xs"
+                                  disabled={!selectedVariationId || selectedVariationId === '_empty'}
+                                  onClick={() => handleLink(item.meli_id)}
+                                >Confirmar</Button>
+                                <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={closePanel}>Cancelar</Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Modo: Importar */}
+                          {activePanel.mode === 'import' && (
+                            <div className="space-y-3">
+                              <div className="rounded-md border border-border/50 bg-background p-3 text-sm space-y-1">
+                                <p className="font-medium">{item.title}</p>
+                                <div className="flex gap-4 text-xs text-muted-foreground">
+                                  <span>Precio MeLi: <strong className="text-foreground">${item.price?.toLocaleString('es-CO')}</strong></span>
+                                  <span>Stock: <strong className="text-foreground">{item.available_quantity} u.</strong></span>
+                                  <span>ID: <strong className="text-foreground">{item.meli_id}</strong></span>
+                                </div>
+                                <p className="text-xs text-muted-foreground pt-1">
+                                  Se creará un producto en el Catálogo con estos datos. Podrás editar descripción e imágenes desde el Catálogo.
+                                </p>
+                              </div>
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                                <p className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Categoría (opcional):</p>
+                                <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                                  <SelectTrigger className="flex-1 h-9 text-sm">
+                                    <SelectValue placeholder="Sin categoría" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-60">
+                                    <SelectItem value="_none">Sin categoría</SelectItem>
+                                    {categories.map(c => (
+                                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <div className="flex gap-2 shrink-0">
+                                  <Button size="sm" className="h-8 text-xs bg-primary gap-1.5"
+                                    onClick={() => handleImport(item.meli_id, item.title)}
+                                  >
+                                    Importar y Vincular
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={closePanel}>Cancelar</Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}

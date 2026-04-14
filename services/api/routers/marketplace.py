@@ -7,6 +7,7 @@ MeLi es un canal de venta cuyo stock refleja Supabase automáticamente.
 Endpoints:
   GET    /api/v1/marketplace/listings          — items reales de MeLi + estado de vinculación
   POST   /api/v1/marketplace/link              — vincular item MeLi existente a variante Supabase
+  POST   /api/v1/marketplace/import            — importar item MeLi: crea producto en Supabase y vincula
   DELETE /api/v1/marketplace/link/{listing_id} — desvincular (el item MeLi queda intacto)
   PATCH  /api/v1/marketplace/{listing_id}/status   — pausar / activar en MeLi
   PATCH  /api/v1/marketplace/{listing_id}/sync-stock — forzar sync de stock Supabase → MeLi
@@ -22,6 +23,7 @@ from integrations.meli_client import (
     get_tenant_meli_credentials,
     get_user_items,
     get_items_details,
+    get_item,
     update_item_quantity,
     update_item_status,
 )
@@ -369,3 +371,124 @@ async def sync_stock_from_supabase(
     except Exception as e:
         logger.error("Error en sync-stock MeLi item %s: %s", external_id, e)
         raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
+
+
+@router.post("/import")
+async def import_from_meli(
+    payload: dict = Body(...),
+    tenant_id: str = Depends(get_current_tenant),
+):
+    """
+    Importa una publicación de MeLi al catálogo interno de Supabase y la vincula.
+
+    Flujo en un solo click:
+      1. GET /items/{meli_id}           → trae título, precio, stock de MeLi
+      2. INSERT products                → crea producto en Supabase
+      3. INSERT product_variations      → crea variante con stock y precio de MeLi
+      4. INSERT marketplace_listings    → vincula automáticamente
+
+    Body: { meli_id: "MLA123456", category_id: "uuid" (opcional) }
+
+    Solo importa: título, precio, stock disponible.
+    Descripción, imágenes y atributos adicionales se completan desde el Catálogo.
+    """
+    supabase = _get_service_client()
+
+    meli_id = payload.get("meli_id", "").strip().upper()
+    category_id = payload.get("category_id")  # platform_categories.id — opcional
+
+    if not meli_id:
+        raise HTTPException(status_code=400, detail="meli_id es requerido")
+
+    # Verificar credenciales MeLi
+    creds = get_tenant_meli_credentials(supabase, tenant_id)
+    if not creds or not creds.get("access_token"):
+        raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
+
+    # Verificar que no exista ya un listing para este meli_id
+    existing = (
+        supabase.table("marketplace_listings")
+        .select("id")
+        .eq("tenant_id", tenant_id)
+        .eq("external_id", meli_id)
+        .eq("provider", "mercadolibre")
+        .execute()
+    )
+    if existing.data:
+        raise HTTPException(status_code=409, detail="Esta publicación ya está vinculada al catálogo")
+
+    # 1. Obtener datos del item desde MeLi
+    try:
+        meli_item = await get_item(meli_id, creds["access_token"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo obtener el item de Mercado Libre: {str(e)}")
+
+    title             = meli_item.get("title", meli_id)
+    price             = float(meli_item.get("price") or 0)
+    available_qty     = int(meli_item.get("available_quantity") or 0)
+    permalink         = meli_item.get("permalink")
+
+    # Generar SKU base desde el ID de MeLi
+    sku = f"ML-{meli_id}"
+
+    # 2. Crear producto en Supabase
+    prod_res = supabase.table("products").insert({
+        "tenant_id":            tenant_id,
+        "title":                title,
+        "description":          f"Importado desde Mercado Libre. ID: {meli_id}",
+        "status":               "active",
+        "platform_category_id": category_id,
+    }).execute()
+
+    if not prod_res.data:
+        raise HTTPException(status_code=500, detail="Error al crear producto en catálogo")
+
+    product_id = prod_res.data[0]["id"]
+
+    # 3. Crear variante con stock y precio de MeLi
+    var_res = supabase.table("product_variations").insert({
+        "product_id":     product_id,
+        "tenant_id":      tenant_id,
+        "sku":            sku,
+        "price":          price,
+        "stock_quantity": available_qty,
+        "attributes":     {"default": "Standard"},
+    }).execute()
+
+    if not var_res.data:
+        # Rollback: eliminar el producto creado
+        supabase.table("products").delete().eq("id", product_id).execute()
+        raise HTTPException(status_code=500, detail="Error al crear variante en catálogo")
+
+    variation_id = var_res.data[0]["id"]
+
+    # 4. Crear vínculo en marketplace_listings
+    link_res = supabase.table("marketplace_listings").insert({
+        "tenant_id":    tenant_id,
+        "variation_id": variation_id,
+        "external_id":  meli_id,
+        "provider":     "mercadolibre",
+        "status":       meli_item.get("status", "active"),
+        "external_price": price,
+        "external_url": permalink,
+    }).execute()
+
+    if not link_res.data:
+        # Rollback: eliminar producto y variante
+        supabase.table("product_variations").delete().eq("id", variation_id).execute()
+        supabase.table("products").delete().eq("id", product_id).execute()
+        raise HTTPException(status_code=500, detail="Error al vincular con Mercado Libre")
+
+    return {
+        "ok":           True,
+        "product_id":   product_id,
+        "variation_id": variation_id,
+        "listing_id":   link_res.data[0]["id"],
+        "imported": {
+            "title":          title,
+            "sku":            sku,
+            "price":          price,
+            "stock_quantity": available_qty,
+            "meli_id":        meli_id,
+        }
+    }
