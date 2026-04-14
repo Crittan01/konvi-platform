@@ -399,7 +399,7 @@ export default function MarketplaceManager({ connected, items, paging, variation
                                 <SelectContent className="max-h-72">
                                   {variations.length === 0 ? (
                                     <SelectItem value="_empty" disabled>
-                                      No hay variantes en el catálogo. Usa "Importar desde MeLi".
+                                      No hay variantes en el catálogo. Usa &quot;Importar desde MeLi&quot;.
                                     </SelectItem>
                                   ) : (
                                     Object.entries(
