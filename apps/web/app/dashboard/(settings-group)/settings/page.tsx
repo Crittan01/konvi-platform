@@ -298,12 +298,15 @@ export default async function SettingsPage() {
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-xs text-muted-foreground">Estado</span>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
                   tenant?.status === 'active'
                     ? 'bg-emerald-500/15 text-emerald-400'
                     : 'bg-muted text-muted-foreground'
                 }`}>
-                  {tenant?.status === 'active' ? '✅ Activo' : tenant?.status ?? '—'}
+                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                    tenant?.status === 'active' ? 'bg-emerald-400' : 'bg-muted-foreground'
+                  }`} />
+                  {tenant?.status === 'active' ? 'Activo' : tenant?.status ?? '—'}
                 </span>
               </div>
               <div className="flex justify-between items-center">

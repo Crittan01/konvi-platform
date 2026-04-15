@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import { createClient } from '@/utils/supabase/server'
-import { BarChart2, MessageSquare, ShoppingCart, Users, Package, TrendingUp } from 'lucide-react'
+import { BarChart2, MessageSquare, ShoppingCart, Users, Package, TrendingUp, CheckCircle2, XCircle, ArrowDownToLine } from 'lucide-react'
 import MetricsFilters from './metrics-filters'
 import { MessagesBarChart, OrdersPieChart } from './metrics-charts'
 import AiInsightPanel from '@/components/ai-insight-panel'
@@ -169,14 +169,17 @@ export default async function MetricsPage({
       {/* ── KPIs derivados ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Tasa conversión', value: `${conversionRate}%`, note: 'Conv. → Pedido', icon: '📈' },
-          { label: 'Ingresos confirmados', value: `$${deliveredRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}`, note: 'Pedidos entregados', icon: '✅' },
-          { label: '% Inbound', value: messages.length > 0 ? `${Math.round((inboundMessages / messages.length) * 100)}%` : '—', note: 'del los mensajes', icon: '📥' },
-          { label: 'Pedidos cancelados', value: (ordersByStatus['cancelled'] ?? 0).toString(), note: 'en el período', icon: '❌' },
+          { label: 'Tasa conversión', value: `${conversionRate}%`, note: 'Conv. → Pedido', Icon: TrendingUp, color: 'text-primary' },
+          { label: 'Ingresos confirmados', value: `$${deliveredRevenue.toLocaleString('es-CO', { minimumFractionDigits: 0 })}`, note: 'Pedidos entregados', Icon: CheckCircle2, color: 'text-emerald-400' },
+          { label: '% Inbound', value: messages.length > 0 ? `${Math.round((inboundMessages / messages.length) * 100)}%` : '—', note: 'de los mensajes', Icon: ArrowDownToLine, color: 'text-blue-400' },
+          { label: 'Pedidos cancelados', value: (ordersByStatus['cancelled'] ?? 0).toString(), note: 'en el período', Icon: XCircle, color: 'text-red-400' },
         ].map(k => (
           <div key={k.label} className="rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">{k.icon} {k.label}</p>
-            <p className="text-xl font-bold text-primary mt-1">{k.value}</p>
+            <div className="flex items-center gap-1.5 mb-1">
+              <k.Icon className={`h-3.5 w-3.5 ${k.color}`} />
+              <p className="text-xs text-muted-foreground">{k.label}</p>
+            </div>
+            <p className="text-xl font-bold text-primary">{k.value}</p>
             <p className="text-[11px] text-muted-foreground">{k.note}</p>
           </div>
         ))}
