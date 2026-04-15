@@ -13,7 +13,7 @@ export default async function MarketplacePage() {
   const { data: { session } } = await supabase.auth.getSession()
   const meta     = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
-  const role     = meta.role ?? 'agent'
+  const role     = meta.role ?? 'operator'
   const canWrite = ['owner', 'manager'].includes(role)
 
   // ── Publicaciones MeLi (desde API — datos reales de MeLi) ─────────────────

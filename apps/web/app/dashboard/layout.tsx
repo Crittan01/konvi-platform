@@ -14,7 +14,7 @@ export default async function DashboardLayout({
   if (!user) redirect('/login')
 
   const meta = (user?.app_metadata ?? {}) as { role?: string; tenant_id?: string }
-  const role = meta.role ?? 'agent'
+  const role = meta.role ?? 'operator'
 
   // Cargar nombre y logo del tenant
   let tenantName: string | null = null

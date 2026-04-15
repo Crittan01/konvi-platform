@@ -50,7 +50,7 @@ export default async function AuditPage({
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
-  const role = meta.role ?? 'agent'
+  const role = meta.role ?? 'operator'
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
