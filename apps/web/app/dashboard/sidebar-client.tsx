@@ -8,11 +8,11 @@ import {
   Package, Users, Settings, Plug, Truck, BarChart2,
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
-  Tag, Wallet, DollarSign, AlertCircle, Bot, ImageIcon,
+  Tag, Wallet, DollarSign, AlertCircle, Bot,
   Store,
 } from 'lucide-react'
 
-// ── Tipos ────────────────────────────────────────────────────────────────────
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
 type NavLeaf = {
   kind: 'leaf'
@@ -33,20 +33,20 @@ type NavGroup = {
 
 type NavItem = NavLeaf | NavGroup
 
-// ── Estructura oficial de navegación ─────────────────────────────────────────
+// ── Estructura oficial de navegación — Rev. 4 ─────────────────────────────────
 //
-//  Rev. 3 — 2026-04-14 (Vuelta 3 — Estabilización funcional)
+//  2026-04-14 (Vuelta 4 — Cierre semántico del tenant)
 //  Fuente de verdad: .context/00-product.md
 //
-//  Reglas de esta versión:
-//  • Solo módulos con trabajo funcional real para el tenant
-//  • Sin locked/Próximo — si no está listo, no se expone
-//  • Grupos de un solo hijo aplanados como hoja directa
-//  • Inicio sin accordeon — Dashboard e Inbox siempre visibles
-//
+//  Decisiones de cierre:
+//  • Despachos dentro de Ventas — es paso del ciclo comercial PYME, no dominio independiente
+//  • Canales restaurado como grupo — Mercado Libre no debe flotar sin familia conceptual
+//  • Media oculta del menú — biblioteca de assets del catálogo, no operativa independiente
+//  • "IA y Conocimiento" — no existe Automatizaciones live; nombre honesto con lo que hay
+//  • Configuración: Equipo/RBAC ya implementado in-page (settings); Reglas de Negocio pendiente
 
 const NAV_ITEMS: NavItem[] = [
-  // ── Inicio (sin accordeon) ───────────────────────────────────────────────
+  // ── Inicio ───────────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard',       label: 'Dashboard', icon: LayoutDashboard, roles: [] },
   { kind: 'leaf', href: '/dashboard/inbox', label: 'Inbox',     icon: MessageSquare,   roles: [] },
 
@@ -56,37 +56,40 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,     roles: [] },
       { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,       roles: [] },
+      { kind: 'leaf', href: '/dashboard/shipping', label: 'Despachos', icon: Truck,       roles: [] },
       { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle, roles: [] },
     ],
   },
 
   // ── Productos ✅ ──────────────────────────────────────────────────────────
+  // Media ocultada del menú — no tiene valor operativo independiente del catálogo
   {
     kind: 'group', id: 'productos', label: 'Productos', icon: Tag, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/catalog',   label: 'Catálogo',   icon: ShoppingCart, roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/inventory', label: 'Inventario', icon: Boxes,        roles: ['owner', 'manager'] },
-      { kind: 'leaf', href: '/dashboard/media',     label: 'Media',      icon: ImageIcon,    roles: ['owner', 'manager'] },
     ],
   },
 
-  // ── Canales ✅ — hoja directa (un único canal live: Mercado Libre) ────────
-  { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre', icon: Store, roles: ['owner', 'manager'] },
+  // ── Canales ✅ ────────────────────────────────────────────────────────────
+  // Restaurado como grupo — Shopify, tienda custom entrarán aquí en fases futuras
+  {
+    kind: 'group', id: 'canales', label: 'Canales', icon: Store, roles: ['owner', 'manager'],
+    children: [
+      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre', icon: Store, roles: ['owner', 'manager'] },
+    ],
+  },
 
-  // ── Despachos ✅ — hoja directa (Cotizaciones Envia live) ─────────────────
-  //  Renombrado de "Logística" — semántica real para PYME Colombia
-  //  Órdenes de Envío en Fase 2 — no exponer aún
-  { kind: 'leaf', href: '/dashboard/shipping', label: 'Despachos', icon: Truck, roles: [] },
-
-  // ── Compras ✅ — hoja directa ─────────────────────────────────────────────
+  // ── Compras ✅ ────────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard/purchases', label: 'Compras', icon: Wallet, roles: ['owner'] },
 
-  // ── Finanzas ✅ — hoja directa ────────────────────────────────────────────
+  // ── Finanzas ✅ ───────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard/finance', label: 'Finanzas', icon: DollarSign, roles: ['owner'] },
 
-  // ── IA y Automatización ✅ ────────────────────────────────────────────────
+  // ── IA y Conocimiento ✅ ──────────────────────────────────────────────────
+  // Renombrado: no existe Automatizaciones live — el nombre refleja lo que realmente hay
   {
-    kind: 'group', id: 'ia', label: 'IA y Automatización', icon: BrainCircuit, roles: ['owner', 'manager'],
+    kind: 'group', id: 'ia', label: 'IA y Conocimiento', icon: BrainCircuit, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/knowledge-base', label: 'Base de Conocimiento', icon: BookOpen, roles: ['owner', 'manager'] },
       { kind: 'leaf', href: '/dashboard/ai-agents',      label: 'Agentes IA',           icon: Bot,      roles: ['owner'] },
@@ -103,11 +106,13 @@ const NAV_ITEMS: NavItem[] = [
   },
 
   // ── Configuración ✅ ──────────────────────────────────────────────────────
+  // Equipo/RBAC implementado in-page en settings/page.tsx (Sección "Equipo")
+  // Reglas de Negocio: pendiente funcional — no se expone aún
   {
     kind: 'group', id: 'configuracion', label: 'Configuración', icon: Settings, roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/settings',     label: 'General',       icon: Building2, roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones', icon: Plug,      roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/settings',     label: 'General y Equipo',  icon: Building2, roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',     icon: Plug,      roles: ['owner'] },
     ],
   },
 ]
@@ -231,7 +236,7 @@ export default function SidebarClient({
 
         {/* ── Nav items ──────────────────────────────────────────────────── */}
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-          {NAV_ITEMS.map((item, i) => {
+          {NAV_ITEMS.map((item) => {
             if (!hasAccess(item.roles, role)) return null
 
             if (item.kind === 'leaf') {
