@@ -481,7 +481,7 @@ export default async function IntegrationsPage({
                   <ol className="space-y-2">
                     <li className="flex gap-2 text-xs text-muted-foreground">
                       <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
-                      <span>En Telegram busca <strong className="text-foreground font-mono">@BotFather</strong> → envía <span className="font-mono text-sky-400">/newbot</span> → dale un nombre y un username → copia el <strong className="text-foreground">Bot Token</strong> que te entrega.</span>
+                      <span>En Telegram busca <strong className="text-foreground font-mono">@BotFather</strong> → envía <span className="font-mono text-sky-400">/newbot</span> → dale un nombre y un username → copia el <strong className="text-foreground">Bot Token</strong> que te entrega: <strong className="text-foreground">Bot ID:Token</strong></span>
                     </li>
                     <li className="flex gap-2 text-xs text-muted-foreground">
                       <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
@@ -489,7 +489,7 @@ export default async function IntegrationsPage({
                     </li>
                     <li className="flex gap-2 text-xs text-muted-foreground">
                       <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
-                      <span>Agrega <strong className="text-foreground font-mono">@RawDataBot</strong> al grupo → envía cualquier mensaje → busca el campo <span className="font-mono text-sky-400">"id"</span> dentro de <span className="font-mono">"chat"</span> (es un número negativo, ej: <span className="font-mono">-1001234567890</span>) → anótalo → elimina @RawDataBot del grupo.</span>
+                      <span>Dentro del grupo, escribe cualquier mensaje y abre el navegador y pega (reemplaza -TOKEN-) <span className="font-mono text-sky-400">"https://api.telegram.org/bot'TOKEN'/getUpdates"</span> En la respuesta JSON, busca <span className="font-mono">"El valor de "id" dentro de "chat" es el Chat ID"</span> → Si getUpdates devuelve "result": '[]' — el bot no ha recibido ningún mensaje aún. Escribe un mensaje en el grupo y vuelve a cargar la URL.</span>
                     </li>
                     <li className="flex gap-2 text-xs text-muted-foreground">
                       <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
