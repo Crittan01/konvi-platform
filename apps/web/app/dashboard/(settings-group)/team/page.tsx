@@ -14,7 +14,7 @@ export const metadata = {
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
-type TeamMember = { user_id: string; email: string; role: string; joined_at: string }
+type TeamMember = { user_id: string; email: string; role: string; joined_at: string; confirmed: boolean }
 
 // ─── Configuración de Roles ───────────────────────────────────────────────────
 //
@@ -329,6 +329,11 @@ export default async function TeamPage({
                         <p className="font-medium text-sm truncate">{m.email}</p>
                         {m.user_id === myUserId && (
                           <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5 shrink-0">Tú</span>
+                        )}
+                        {!m.confirmed && (
+                          <span className="text-[10px] font-medium text-amber-400 border border-amber-500/30 bg-amber-500/10 rounded-full px-1.5 py-0.5 shrink-0">
+                            Pendiente
+                          </span>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
