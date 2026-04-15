@@ -3,12 +3,15 @@ import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Settings, Truck, Bell, ShieldCheck, Building2, AlertCircle } from 'lucide-react'
+import {
+  Settings, Truck, ShieldCheck, Building2, AlertCircle, SlidersHorizontal,
+} from 'lucide-react'
 import LogoUpload from './logo-upload'
+import ShippingOriginForm from './shipping-origin-form'
 
 export const metadata = {
   title: 'General — Configuración — Commerce Ops',
-  description: 'Configuración general del negocio: datos, logo, dirección de despacho y notificaciones.',
+  description: 'Configuración general del negocio: datos, logo y dirección de despacho.',
 }
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -21,9 +24,10 @@ type Tenant = {
   id: string; name: string; meta_waba_id: string | null; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
   low_stock_threshold?: number | null
+  nit?: string | null
+  email_contacto?: string | null
+  telefono_contacto?: string | null
 }
-type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
-
 // ─── Componentes reutilizables ────────────────────────────────────────────────
 
 function FormSection({ icon: Icon, title, description, children }: {
@@ -60,25 +64,16 @@ export default async function SettingsPage() {
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'
-  const isOwner  = role === 'owner'
-  const canWrite = role === 'owner' || role === 'manager'
+  const isOwner = role === 'owner'
 
   let tenant: Tenant | null = null
-  let notifications: NotifSetting[] = []
 
   if (tenantId) {
-    const [tenantRes, notifRes] = await Promise.all([
-      supabase.from('tenants')
-        .select('id, name, meta_waba_id, status, shipping_origin, logo_url, low_stock_threshold')
-        .eq('id', tenantId).single(),
-      supabase.from('notification_settings')
-        .select('channel, enabled, config').eq('tenant_id', tenantId),
-    ])
-    tenant        = tenantRes.data as Tenant
-    notifications = (notifRes.data as NotifSetting[]) || []
+    const { data } = await supabase.from('tenants')
+      .select('id, name, meta_waba_id, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto')
+      .eq('id', tenantId).single()
+    tenant = data as Tenant
   }
-
-  const telegramConfig = notifications.find(n => n.channel === 'telegram')
 
   // ─── Server Actions ───────────────────────────────────────────────────────
 
@@ -88,12 +83,26 @@ export default async function SettingsPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
-    const threshold = parseInt(formData.get('low_stock_threshold') as string, 10)
     await sb.from('tenants').update({
-      name: formData.get('name') as string,
-      ...(Number.isInteger(threshold) && threshold >= 1 && threshold <= 999
-        ? { low_stock_threshold: threshold } : {}),
+      name:              (formData.get('name') as string)?.trim() || undefined,
+      nit:               (formData.get('nit') as string)?.trim()  || null,
+      email_contacto:    (formData.get('email_contacto') as string)?.trim() || null,
+      telefono_contacto: (formData.get('telefono_contacto') as string)?.trim() || null,
     }).eq('id', m.tenant_id)
+    revalidatePath('/dashboard/settings')
+    revalidatePath('/dashboard')
+  }
+
+  async function saveOperativa(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+    const threshold = parseInt(formData.get('low_stock_threshold') as string, 10)
+    if (Number.isInteger(threshold) && threshold >= 1 && threshold <= 999) {
+      await sb.from('tenants').update({ low_stock_threshold: threshold }).eq('id', m.tenant_id)
+    }
     revalidatePath('/dashboard/settings')
     revalidatePath('/dashboard')
   }
@@ -114,24 +123,6 @@ export default async function SettingsPage() {
     revalidatePath('/dashboard/settings')
   }
 
-  async function saveTelegram(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('notification_settings').upsert({
-      tenant_id: m.tenant_id,
-      channel: 'telegram',
-      enabled: formData.get('enabled') === 'on',
-      config: {
-        bot_token: (formData.get('bot_token') as string) || '',
-        chat_id:   (formData.get('chat_id') as string) || '',
-      },
-    }, { onConflict: 'tenant_id,channel' })
-    revalidatePath('/dashboard/settings')
-  }
-
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
@@ -144,14 +135,14 @@ export default async function SettingsPage() {
           General
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Datos de tu negocio, configuración operativa y notificaciones
+          Datos de tu negocio y configuración operativa
         </p>
       </div>
 
       {/*
         ── Layout de 2 columnas en desktop ──────────────────────────────────
         Columna izquierda (2/3): Identidad + Dirección de envío
-        Columna derecha  (1/3): Operaciones + Notificaciones
+        Columna derecha  (1/3): Resumen + Configuración Operativa
       */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
@@ -160,7 +151,7 @@ export default async function SettingsPage() {
 
           {/* Identidad del negocio */}
           <FormSection icon={Building2} title="Identidad del negocio"
-            description="Nombre y logo que aparecen en la consola y en las comunicaciones.">
+            description="Nombre, logo y datos legales del negocio.">
             {isOwner ? (
               <div className="space-y-5">
                 {/* Logo */}
@@ -171,7 +162,7 @@ export default async function SettingsPage() {
                   </div>
                 )}
 
-                {/* Nombre + guardar */}
+                {/* Campos de identidad */}
                 <form action={saveTenant} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
@@ -179,18 +170,27 @@ export default async function SettingsPage() {
                       <Input id="tenant-name" name="name" defaultValue={tenant?.name ?? ''} required className="h-9" />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-medium" htmlFor="low-stock">Umbral stock bajo</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id="low-stock"
-                          name="low_stock_threshold"
-                          type="number" min={1} max={999}
-                          defaultValue={tenant?.low_stock_threshold ?? 5}
-                          className="h-9 w-24"
-                        />
-                        <span className="text-xs text-muted-foreground">unidades</span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">Alerta cuando stock ≤ este número</p>
+                      <Label className="text-xs font-medium" htmlFor="tenant-nit">NIT / Razón social</Label>
+                      <Input id="tenant-nit" name="nit"
+                        defaultValue={tenant?.nit ?? ''}
+                        placeholder="900.123.456-7"
+                        className="h-9" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium" htmlFor="email-contacto">Email de contacto</Label>
+                      <Input id="email-contacto" name="email_contacto" type="email"
+                        defaultValue={tenant?.email_contacto ?? ''}
+                        placeholder="contacto@minegocio.com"
+                        className="h-9" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium" htmlFor="telefono-contacto">Teléfono de contacto</Label>
+                      <Input id="telefono-contacto" name="telefono_contacto"
+                        defaultValue={tenant?.telefono_contacto ?? ''}
+                        placeholder="+573001234567"
+                        className="h-9" />
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -214,6 +214,9 @@ export default async function SettingsPage() {
             ) : (
               <div className="grid grid-cols-2 gap-4">
                 <ReadOnlyField label="Nombre" value={tenant?.name ?? ''} />
+                <ReadOnlyField label="NIT" value={tenant?.nit ?? '—'} />
+                <ReadOnlyField label="Email" value={tenant?.email_contacto ?? '—'} />
+                <ReadOnlyField label="Teléfono" value={tenant?.telefono_contacto ?? '—'} />
                 <ReadOnlyField label="WABA ID" value={tenant?.meta_waba_id ?? 'No configurado'} />
               </div>
             )}
@@ -223,68 +226,10 @@ export default async function SettingsPage() {
           {isOwner && (
             <FormSection icon={Truck} title="Dirección de origen — Envíos"
               description="Dirección desde donde se despachan los pedidos. Usada por defecto en cotizaciones Envia.">
-              <form action={saveShippingOrigin} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-name">Nombre del remitente</Label>
-                    <Input id="origin-name" name="origin_name"
-                      defaultValue={tenant?.shipping_origin?.name ?? ''}
-                      placeholder="Juan Pérez" className="h-8 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-company">Empresa</Label>
-                    <Input id="origin-company" name="origin_company"
-                      defaultValue={tenant?.shipping_origin?.company ?? ''}
-                      placeholder="Mi Tienda S.A." className="h-8 text-sm" />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium" htmlFor="origin-street">Calle y número</Label>
-                  <Input id="origin-street" name="origin_street"
-                    defaultValue={tenant?.shipping_origin?.street ?? ''}
-                    placeholder="Av. Principal 123" className="h-8 text-sm" />
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="col-span-2 space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-city">Ciudad</Label>
-                    <Input id="origin-city" name="origin_city"
-                      defaultValue={tenant?.shipping_origin?.city ?? ''}
-                      placeholder="Bogotá" className="h-8 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-cp">C.P.</Label>
-                    <Input id="origin-cp" name="origin_postal_code"
-                      defaultValue={tenant?.shipping_origin?.postal_code ?? ''}
-                      placeholder="110111" className="h-8 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-country">País</Label>
-                    <Input id="origin-country" name="origin_country"
-                      defaultValue={tenant?.shipping_origin?.country ?? 'CO'}
-                      placeholder="CO" maxLength={2} className="h-8 text-sm" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-state">Departamento</Label>
-                    <Input id="origin-state" name="origin_state"
-                      defaultValue={tenant?.shipping_origin?.state ?? ''}
-                      placeholder="Cundinamarca" className="h-8 text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="origin-phone">Teléfono</Label>
-                    <Input id="origin-phone" name="origin_phone"
-                      defaultValue={tenant?.shipping_origin?.phone ?? ''}
-                      placeholder="+573001234567" className="h-8 text-sm" />
-                  </div>
-                </div>
-                {tenant?.shipping_origin && (
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                    <ShieldCheck className="h-3 w-3" /> Dirección guardada
-                  </div>
-                )}
-                <Button type="submit" size="sm">Guardar dirección</Button>
-              </form>
+              <ShippingOriginForm
+                initialData={tenant?.shipping_origin}
+                action={saveShippingOrigin}
+              />
             </FormSection>
           )}
         </div>
@@ -322,40 +267,28 @@ export default async function SettingsPage() {
             </div>
           </div>
 
-          {/* Notificaciones Telegram */}
-          {canWrite && (
-            <FormSection icon={Bell} title="Alertas — Telegram"
-              description="Recibe notificaciones operativas en tu canal de Telegram.">
-              <form action={saveTelegram} className="space-y-4">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input type="checkbox" name="enabled" id="tg-enabled"
-                    defaultChecked={telegramConfig?.enabled ?? false}
-                    className="h-4 w-4 rounded accent-primary" />
-                  <span className="text-sm">Habilitar alertas</span>
-                </label>
+          {/* Configuración Operativa — umbral de stock bajo */}
+          {isOwner && (
+            <FormSection icon={SlidersHorizontal} title="Configuración Operativa"
+              description="Parámetros globales que afectan el comportamiento del sistema.">
+              <form action={saveOperativa} className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-medium" htmlFor="bot-token">Bot Token</Label>
-                  <Input id="bot-token" name="bot_token" type="password"
-                    placeholder="123456789:ABC-DEF..."
-                    defaultValue={telegramConfig?.config?.bot_token ?? ''}
-                    className="h-9 text-sm font-mono" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium" htmlFor="chat-id">Chat ID</Label>
-                  <Input id="chat-id" name="chat_id"
-                    placeholder="-100123456789"
-                    defaultValue={telegramConfig?.config?.chat_id ?? ''}
-                    className="h-9 text-sm font-mono" />
+                  <Label className="text-xs font-medium" htmlFor="low-stock">Umbral stock bajo</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="low-stock"
+                      name="low_stock_threshold"
+                      type="number" min={1} max={999}
+                      defaultValue={tenant?.low_stock_threshold ?? 5}
+                      className="h-9 w-24"
+                    />
+                    <span className="text-xs text-muted-foreground">unidades</span>
+                  </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Usa @userinfobot en Telegram para obtener tu Chat ID.
+                    Alerta en Inventario cuando stock ≤ este número.
                   </p>
                 </div>
-                {telegramConfig?.enabled && (
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                    <ShieldCheck className="h-3 w-3" /> Telegram conectado
-                  </div>
-                )}
-                <Button type="submit" size="sm">Guardar</Button>
+                <Button type="submit" size="sm" variant="outline">Guardar</Button>
               </form>
             </FormSection>
           )}

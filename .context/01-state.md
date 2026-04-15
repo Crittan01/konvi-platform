@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-14 (rev. 17 — Revisión arquitectónica vuelta 1, restructuring-review ejecutado)
+**Última actualización**: 2026-04-15 (rev. 19 — Vuelta 6 completada: módulo Configuración certificado, Telegram→Integraciones, flujo invitación completo)
 **Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
 **Tree funcional vigente**: `.context/00-product.md`
 
@@ -77,9 +77,9 @@
 | Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
-| Configuración (General) | `/dashboard/settings` | 🟡 Certificación | Nombre, logo, WABA (read-only), **low_stock_threshold editable**, dirección origen, Telegram |
-| Usuarios y Acceso | `/dashboard/team` | 🟡 Certificación | Invite por email (adminClient), changeRole, removeMember, descripción de roles. RLS ✅ |
-| Integraciones | `/dashboard/integrations` | 🟡 Certificación | MeLi OAuth, Envia API key. RLS ✅ |
+| Configuración (General) | `/dashboard/settings` | ✅ Live | Nombre, NIT, email/tel contacto, logo, WABA (read-only), umbral en sección "Configuración Operativa" propia, selects DANE dirección origen |
+| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Admin/Supervisor/Gestor (íconos Lucide), invite→/set-password, resendInvite, changeRole, removeMember. RLS ✅ |
+| Integraciones | `/dashboard/integrations` | ✅ Live | Envia + MeLi + **Telegram** (card nueva). testTelegram lee token desde DB, feedback explícito de errores Telegram. |
 
 ---
 
@@ -168,8 +168,51 @@ apps/web/app/
 | `claims` | 20260413150000 | ✅ |
 | RLS `tenant_users` + `add_member_to_tenant` | 20260415000000 | ✅ |
 | `get_tenant_team` return confirmed status | 20260415010000 | ✅ |
+| `tenants.nit`, `email_contacto`, `telefono_contacto` | 20260415020000 | ✅ |
 
 > Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
+
+---
+
+## Artefactos Nuevos — Vuelta 6 (2026-04-15)
+
+| Artefacto | Ruta | Descripción |
+|-----------|------|-------------|
+| Dataset DANE | `apps/web/lib/dane-colombia.ts` | 33 departamentos + 1.103 municipios DIVIPOLA. Función `getMunicipiosByDpto(codigo)` |
+| ShippingOriginForm | `apps/web/app/dashboard/(settings-group)/settings/shipping-origin-form.tsx` | Client Component con select dependiente dpto→municipio. Guarda nombre (no código DANE) para compatibilidad Envia |
+| Auth Confirm route | `apps/web/app/auth/confirm/route.ts` | Route handler GET. Maneja `token_hash` (OTP) y `code` (PKCE). Param `?next=/ruta` para redirect post-verificación |
+| Set Password page | `apps/web/app/set-password/page.tsx` | Server Component. Valida sesión activa, form contraseña (min 8 chars, confirmación), Server Action `updateUser`. Redirect a `/dashboard` |
+| Migración identidad | `supabase/migrations/20260415020000_tenant_identity_fields.sql` | Agrega `nit`, `email_contacto`, `telefono_contacto` a tabla `tenants`. **Aplicada en Supabase** |
+
+## Intervenciones Humanas Pendientes — Vuelta 6
+
+### IH-SUPABASE-REDIRECT — Agregar URLs permitidas en Supabase Auth
+**RESPONSABLE**: Arquitecto técnico
+**PASOS**:
+1. Supabase Dashboard → Project Settings → Auth → URL Configuration
+2. En "Redirect URLs" agregar:
+   - `https://commerce-ops-web.onrender.com/auth/confirm`
+   - `https://commerce-ops-web.onrender.com/set-password`
+   - `http://localhost:3000/auth/confirm` (desarrollo)
+   - `http://localhost:3000/set-password` (desarrollo)
+3. Guardar
+
+**CRITERIO DE ÉXITO**: Usuario invitado hace clic en email → llega a `/set-password` → puede crear contraseña → accede al dashboard.
+
+### IH-SMTP — SMTP custom Supabase con Resend (ver también IH-003)
+**RESPONSABLE**: Arquitecto técnico
+**PASOS**:
+1. Resend.com → API Keys → crear key con scope `Sending access`
+2. Supabase Dashboard → Project Settings → Auth → SMTP Settings → Enable Custom SMTP
+3. Host: `smtp.resend.com` | Port: `465` | User: `resend` | Password: API Key de Resend
+4. Sender: `noreply@tudominio.com` (dominio verificado en Resend)
+5. Guardar y enviar email de prueba
+**CRITERIO DE ÉXITO**: Invitación llega en <1 minuto sin error de rate limit.
+
+### IH-TELEGRAM — Configurar bot (ver guía completa en sesión 2026-04-15)
+**RESPONSABLE**: Owner del tenant
+**RESUMEN**: @BotFather → /newbot → token → crear grupo → agregar bot → obtener Chat ID con @RawDataBot → configurar en Integraciones → Probar
+**CRITERIO DE ÉXITO**: Botón "Probar" en Integraciones → mensaje aparece en grupo Telegram.
 
 ---
 
@@ -180,7 +223,8 @@ apps/web/app/
 | Sync bidireccional catálogo ↔ MeLi listings | Media |
 | Envia Fase 2: label, tracking, pickup | Media |
 | WhatsApp Config centralizada (templates aprobados, WABA management) | Media |
-| Invite de miembros via formulario UI | Media — IH-001 requerida (NEXT_PUBLIC_APP_URL en Render) |
+| Invite de miembros via formulario UI | Media — IH-001 requerida (APP_URL en Render) + IH-SMTP (SMTP custom Supabase con Resend, ver IH-003) |
+| SMTP Supabase Free (3 emails/hora) → configura SMTP propio con Resend | Alta — bloquea invitaciones en producción con volumen |
 | ~~Reclamos — acciones reales~~ | ✅ Resuelto Vuelta 3 |
 | ~~Agentes IA — desbloquear en sidebar~~ | ✅ Resuelto Vuelta 3 |
 | ~~Dashboard — usar `tenants.low_stock_threshold` dinámico~~ | ✅ Resuelto Vuelta 3 |
@@ -189,6 +233,14 @@ apps/web/app/
 | ~~`logo-upload.tsx` `getSession()` inseguro~~ | ✅ Resuelto Vuelta 5 — `getUser()` |
 | ~~Security Headers ausentes en Next.js~~ | ✅ Resuelto Vuelta 5 — `next.config.js` |
 | ~~`low_stock_threshold` sin UI editable~~ | ✅ Resuelto Vuelta 5 — en General |
+| ~~Configuración: sección Identidad sin NIT/email/teléfono~~ | ✅ Resuelto Vuelta 6 — migración 20260415020000 |
+| ~~Dirección de origen: ciudad/dpto texto libre~~ | ✅ Resuelto Vuelta 6 — selects DANE DIVIPOLA (33 dptos, 1.103 municipios) |
+| ~~Umbral stock bajo en sección incorrecta (Identidad)~~ | ✅ Resuelto Vuelta 6 — movido a sección "Configuración Operativa" |
+| ~~Telegram en General Settings~~ | ✅ Resuelto Vuelta 6 — movido a Integraciones como card propia |
+| ~~testTelegram silencioso (catch null, token en DOM)~~ | ✅ Resuelto Vuelta 6 — lee token desde DB, feedback explícito con código de error Telegram |
+| ~~Roles con emojis (no renderizan en Linux/algunos browsers)~~ | ✅ Resuelto Vuelta 6 — íconos Lucide (Crown, Briefcase, Headphones) |
+| ~~Roles con nombres genéricos (Owner/Manager/Operador)~~ | ✅ Resuelto Vuelta 6 — Administrador/Supervisor/Gestor (valores DB sin cambio) |
+| ~~Flujo invitación sin página set-password~~ | ✅ Resuelto Vuelta 6 — /auth/confirm route + /set-password page |
 
 ---
 
@@ -197,7 +249,8 @@ apps/web/app/
 | Bloqueante | Tipo | Impacto |
 |---|---|---|
 | OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea Fase 12 — sin impacto en Tenant Console |
-| Certificación Configuración | En proceso | Validando flujos de invite y OAuth MeLi |
+| IH-SMTP — SMTP custom Supabase con Resend | Intervención humana pendiente | Rate limit 3 emails/hora en Free bloquea invitaciones. Ver IH-003. |
+| Supabase Redirect URLs — agregar `/auth/confirm` y `/set-password` | Intervención humana pendiente | Sin esto el flujo de invitación falla al hacer click en el email |
 
 ---
 
