@@ -138,7 +138,7 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 | Reclamos — `resolution_notes` editables (Server Action faltante) | Alta |
 | Envia Fase 2: label, tracking, pickup | Media |
 | Sync bidireccional catálogo ↔ MeLi listings | Media |
-| IH-001: `NEXT_PUBLIC_APP_URL` en Render (invite flow) | Media — intervención humana |
+| **IH-003: SMTP propio en Supabase** — Free tier tiene rate limit ~4 emails/hora. Sin SMTP propio el invite/resend falla en uso real. Usar Resend.com (gratis 3k/mes) o Gmail App Password. `Supabase Dashboard → Auth → Settings → SMTP` | **Alta** — bloquea invitaciones |
 | IH-002: `ALLOWED_ORIGINS` en FastAPI (CORS producción) | Media — intervención humana |
 | Reglas de Negocio — definir caso de uso antes de implementar | Baja |
 
