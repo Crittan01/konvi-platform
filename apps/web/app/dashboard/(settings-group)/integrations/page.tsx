@@ -156,7 +156,7 @@ export default async function IntegrationsPage({
           {/* Card body */}
           <div className="px-5 py-4 space-y-3">
             <p className="text-xs text-muted-foreground">
-              Cotiza envíos con múltiples carriers (DHL, FedEx, Estafeta...), genera etiquetas y haz tracking desde la plataforma.
+              Cotiza envíos con múltiples carriers (Coordinadora, Interrapidisimo, Servientrega, DHL, FedEx...), genera etiquetas y haz tracking desde la plataforma.
             </p>
 
             {enviaConnected ? (

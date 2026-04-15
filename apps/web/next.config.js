@@ -51,7 +51,8 @@ const securityHeaders = [
       // Imágenes: mismo origen + Supabase Storage + data URIs
       "img-src 'self' data: blob: https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co",
       // Conexiones API: mismo origen + Supabase + Render services
-      "connect-src 'self' https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co wss://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co https://commerce-ops-api.onrender.com https://commerce-ops-orchestrator.onrender.com",
+      // IMPORTANTE: actualizar si los nombres de servicio de Render cambian
+      "connect-src 'self' https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co wss://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co https://commerce-ops-web.onrender.com https://commerce-ops-api.onrender.com https://commerce-ops-orchestrator.onrender.com https://commerce-ops-connector.onrender.com",
       // Frames: ninguno
       "frame-src 'none'",
     ].join('; '),

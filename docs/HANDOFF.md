@@ -114,9 +114,9 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 | Campo | Detalle |
 |---|---|
 | **RESPONSABLE** | DevOps / Owner del proyecto |
-| **PASOS** | 1. Render Dashboard → Service `commerce-ops-web` → Environment <br> 2. Agregar `NEXT_PUBLIC_APP_URL=https://[dominio-real].onrender.com` <br> 3. Verificar que `SUPABASE_SERVICE_ROLE_KEY` esté configurado <br> 4. Redeploy del servicio web |
-| **INSUMOS** | URL real del frontend en Render; Service Role Key de Supabase (Project Settings → API) |
-| **CRITERIO DE ÉXITO** | Al invitar desde `/dashboard/team`, el email llega con URL correcta de Render |
+| **PASOS** | 1. Render Dashboard → Service `commerce-ops-web` → Environment <br> 2. Agregar `NEXT_PUBLIC_APP_URL=https://commerce-ops-web.onrender.com` <br> 3. Verificar que `SUPABASE_SERVICE_ROLE_KEY` esté configurado (no `NEXT_PUBLIC_`) <br> 4. Redeploy del servicio web |
+| **INSUMOS** | URL: `https://commerce-ops-web.onrender.com` · Service Role Key: Supabase Dashboard → Project Settings → API |
+| **CRITERIO DE ÉXITO** | Al invitar desde `/dashboard/team`, el email llega con enlace `https://commerce-ops-web.onrender.com/auth/confirm?token=...` |
 
 ### IH-002 — ALLOWED_ORIGINS en FastAPI
 
@@ -125,9 +125,9 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 | Campo | Detalle |
 |---|---|
 | **RESPONSABLE** | DevOps / Owner del proyecto |
-| **PASOS** | 1. Render → Service `commerce-ops-api` → Environment <br> 2. `ALLOWED_ORIGINS=https://[dominio-real].onrender.com,http://localhost:3000` <br> 3. Redeploy del servicio api |
-| **INSUMOS** | URL real del frontend |
-| **CRITERIO DE ÉXITO** | No aparecen errores CORS en producción |
+| **PASOS** | 1. Render → Service `commerce-ops-api` → Environment <br> 2. `ALLOWED_ORIGINS=https://commerce-ops-web.onrender.com,http://localhost:3000` <br> 3. Redeploy del servicio api |
+| **INSUMOS** | URL: `https://commerce-ops-web.onrender.com` |
+| **CRITERIO DE ÉXITO** | No aparecen errores CORS en producción (`Access-Control-Allow-Origin` presente en responses de la API) |
 
 ---
 
