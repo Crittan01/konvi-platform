@@ -273,7 +273,7 @@ export default async function IntegrationsPage({
       <div className="rounded-xl border border-dashed border-border p-5">
         <p className="text-sm font-medium text-muted-foreground mb-3">🔜 Próximamente</p>
         <div className="flex flex-wrap gap-2">
-          {['Shopify', 'WooCommerce', 'Telegram Bot', 'Zapier / Make', 'Stripe'].map(name => (
+          {['Shopify', 'WooCommerce', 'Zapier / Make', 'Stripe'].map(name => (
             <span key={name} className="px-3 py-1 rounded-lg border border-border text-xs text-muted-foreground">
               {name}
             </span>
