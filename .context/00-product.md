@@ -27,45 +27,38 @@ La navegación visible debe calzar exactamente en este árbol. No agregar nada s
 ```text
 Tenant Console
 │
-├── INICIO
-│   ├── Dashboard          ← visión operativa + negocio del tenant (umbral dinámico por tenant)
-│   └── Inbox              ← canal conversacional WhatsApp en tiempo real
+├── Dashboard          ← visión operativa + negocio del tenant (umbral dinámico)
+├── Inbox              ← canal conversacional WhatsApp en tiempo real
 │
 ├── VENTAS
 │   ├── Pedidos            ← ciclo de vida de la venta: creación, estados, ítems
 │   ├── Contactos          ← CRM mínimo: cliente, historial, consent habeas data
-│   ├── Despachos          ← cotizaciones Envia post-pedido (paso logístico del ciclo comercial)
+│   ├── Despachos          ← cotizaciones Envia post-pedido (logística comercial)
 │   └── Reclamos           ← post-venta: tickets, devoluciones, disputas
 │
 ├── PRODUCTOS
 │   ├── Catálogo           ← maestro de producto: info, variantes, precios, imágenes
 │   └── Inventario         ← stock por variante, ajustes, alertas por umbral
-│   [Media: biblioteca de assets — no visible en menú, accesible desde Catálogo]
 │
 ├── CANALES
-│   └── Mercado Libre      ← listings, sync catálogo/stock, órdenes MeLi      [✅ live]
-│   [Shopify, tienda custom: Fases futuras — entrarán aquí]
+│   └── Mercado Libre      ← listings, sync catálogo/stock, órdenes MeLi
 │
-├── COMPRAS
-│   └── Órdenes de Compra  ← POs a proveedores, recepciones, WAC
+├── COMPRAS            ← repositorio de órdenes de compra a proveedores
 │
-├── FINANZAS
-│   └── Ingresos y Gastos  ← P&L, OPEX, rentabilidad
+├── FINANZAS           ← P&L, OPEX, rentabilidad operativa
 │
 ├── IA Y CONOCIMIENTO
-│   ├── Base de Conocimiento ← documentos que alimentan el Orchestrator       [✅ live]
-│   └── Agentes IA         ← directrices, roles, parámetros del bot           [✅ live]
-│   [Automatizaciones: no existe implementación real — no exponer hasta que exista]
+│   ├── Base de Conocimiento ← documentos que alimentan el Orchestrator
+│   └── Agentes IA         ← directrices, roles, parámetros del bot
 │
 ├── ANALÍTICA
 │   ├── Métricas           ← KPIs de negocio
 │   └── Auditoría          ← log de acceso/cambios, exportación CSV
 │
-└── CONFIGURACIÓN  ✅ CERRADO — Rev. 5 (2026-04-15)
-    ├── General            ← /settings: nombre, logo, WABA, low_stock_threshold, dirección origen, Telegram
-    ├── Usuarios y Acceso  ← /team: invite email, changeRole, removeMember — RBAC completo
+└── CONFIGURACIÓN (🟡 En Certificación)
+    ├── General            ← /settings: nombre, logo, WABA, threshold, dirección origen
+    ├── Usuarios y Acceso  ← /team: invite email, changeRole, removeMember
     └── Integraciones      ← /integrations: MeLi OAuth, Envia API key
-    [Reglas de Negocio: pendiente funcional — definir caso de uso antes de implementar → /rules]
 ```
 
 **Platform Console — Fuera de alcance absoluto en esta iniciativa:**
@@ -112,7 +105,7 @@ commerce-ops-platform/
 │       ├── (channels)/          # Route Group → /dashboard/marketplace
 │       ├── (ai)/                # Route Group → /dashboard/{knowledge-base,ai-agents}
 │       ├── (analytics)/         # Route Group → /dashboard/{metrics,audit}
-│       ├── (settings-group)/    # Route Group → /dashboard/{settings,integrations}
+│       ├── (settings-group)/    # Route Group → /dashboard/{settings,team,integrations}
 │       ├── inbox/               # /dashboard/inbox
 │       ├── finance/             # /dashboard/finance
 │       └── purchases/           # /dashboard/purchases

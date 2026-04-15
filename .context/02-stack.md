@@ -11,7 +11,7 @@
 | TypeScript | ^5 |
 | TailwindCSS | ^3.3.0 |
 | `@supabase/ssr` | ^0.10.0 |
-| shadcn/ui | 5 componentes en `apps/web/components/ui/` |
+| shadcn/ui | 11 componentes en `apps/web/components/ui/` |
 
 ⚠️ `packages/ui` está vacío. Los componentes UI viven en `apps/web/components/ui/`.
 
@@ -24,6 +24,8 @@
 | Pydantic | 2.12.5 |
 | google-genai | 1.47.0 — SDK oficial Gemini (no usar `google-generativeai`) |
 | supabase-py | 2.28.3 |
+| httpx | 0.28.1 |
+| PyJWT | 2.10.1 |
 | GEMINI_MODEL | `gemini-2.5-flash` |
 
 ## Infraestructura

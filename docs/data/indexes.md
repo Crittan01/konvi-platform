@@ -1,2 +1,0 @@
-# Índices
-UUID y FKs.
