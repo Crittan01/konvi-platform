@@ -246,6 +246,21 @@ export default async function IntegrationsPage({
                 {decodeURIComponent(searchParams.tg_msg)}
               </p>
             )}
+            {searchParams.tg_msg?.includes('403') && (
+              <p className="text-xs text-red-300/90 mt-1.5">
+                El grupo fue eliminado o el bot fue expulsado. Desconecta Telegram, crea un nuevo grupo, agrega el bot como miembro y reconecta con el nuevo Chat ID.
+              </p>
+            )}
+            {searchParams.tg_msg?.includes('400') && (
+              <p className="text-xs text-red-300/90 mt-1.5">
+                El Chat ID no es válido. Asegúrate de que el número es negativo (ej: -1001234567890) y pertenece a un grupo donde está el bot.
+              </p>
+            )}
+            {searchParams.tg_msg?.includes('401') && (
+              <p className="text-xs text-red-300/90 mt-1.5">
+                El Bot Token es inválido o fue revocado. Desconecta y vuelve a generar el token en @BotFather → /token.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -459,27 +474,47 @@ export default async function IntegrationsPage({
                 </div>
               </div>
             ) : canWrite ? (
-              <form action={saveTelegram} className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs" htmlFor="tg-token">Bot Token</Label>
-                  <Input id="tg-token" name="bot_token" type="password"
-                    placeholder="123456789:AAF-xYz..." required className="h-8 text-xs font-mono" />
-                  <p className="text-[10px] text-muted-foreground">
-                    Obtén el token en @BotFather → /newbot
-                  </p>
+              <div className="space-y-3">
+                {/* Pasos de configuración inline */}
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 space-y-2.5">
+                  <p className="text-[11px] font-semibold text-sky-400 uppercase tracking-wide">Pasos de configuración</p>
+                  <ol className="space-y-2">
+                    <li className="flex gap-2 text-xs text-muted-foreground">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                      <span>En Telegram busca <strong className="text-foreground font-mono">@BotFather</strong> → envía <span className="font-mono text-sky-400">/newbot</span> → dale un nombre y un username → copia el <strong className="text-foreground">Bot Token</strong> que te entrega.</span>
+                    </li>
+                    <li className="flex gap-2 text-xs text-muted-foreground">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                      <span>Crea un <strong className="text-foreground">grupo privado</strong> en Telegram (ej: "Commerce Ops Alertas") y agrega el bot que creaste como miembro del grupo.</span>
+                    </li>
+                    <li className="flex gap-2 text-xs text-muted-foreground">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                      <span>Agrega <strong className="text-foreground font-mono">@RawDataBot</strong> al grupo → envía cualquier mensaje → busca el campo <span className="font-mono text-sky-400">"id"</span> dentro de <span className="font-mono">"chat"</span> (es un número negativo, ej: <span className="font-mono">-1001234567890</span>) → anótalo → elimina @RawDataBot del grupo.</span>
+                    </li>
+                    <li className="flex gap-2 text-xs text-muted-foreground">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
+                      <span>Ingresa el <strong className="text-foreground">Bot Token</strong> y el <strong className="text-foreground">Chat ID</strong> en el formulario de abajo y presiona Conectar.</span>
+                    </li>
+                  </ol>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs" htmlFor="tg-chat">Chat ID del grupo</Label>
-                  <Input id="tg-chat" name="chat_id"
-                    placeholder="-1001234567890" required className="h-8 text-xs font-mono" />
-                  <p className="text-[10px] text-muted-foreground">
-                    Añade @RawDataBot al grupo y escribe un mensaje para ver el Chat ID.
-                  </p>
-                </div>
-                <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5">
-                  <Bot className="h-3.5 w-3.5" /> Conectar Telegram
-                </Button>
-              </form>
+
+                {/* Formulario */}
+                <form action={saveTelegram} className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="tg-token">Bot Token</Label>
+                    <Input id="tg-token" name="bot_token" type="password"
+                      placeholder="123456789:AAF-xYz..." required className="h-8 text-xs font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="tg-chat">Chat ID del grupo</Label>
+                    <Input id="tg-chat" name="chat_id"
+                      placeholder="-1001234567890" required className="h-8 text-xs font-mono" />
+                  </div>
+                  <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5">
+                    <Bot className="h-3.5 w-3.5" /> Conectar Telegram
+                  </Button>
+                </form>
+              </div>
             ) : (
               <p className="text-xs text-muted-foreground">Solo Owner o Manager pueden configurar Telegram.</p>
             )}
