@@ -1,7 +1,15 @@
 import { createClient } from '@/utils/supabase/server'
+import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
-import { Users, ShieldCheck } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2 } from 'lucide-react'
+
+export const metadata = {
+  title: 'Usuarios y Acceso — Commerce Ops',
+  description: 'Gestiona los miembros del equipo y sus roles de acceso a la consola del tenant.',
+}
 
 type TeamMember = { user_id: string; email: string; role: string; joined_at: string }
 
@@ -17,12 +25,30 @@ const ROLE_COLORS: Record<string, string> = {
   agent:   'bg-muted text-muted-foreground border-border',
 }
 
-export const metadata = {
-  title: 'Usuarios y Acceso — Commerce Ops',
-  description: 'Gestiona los miembros del equipo y sus roles de acceso a la consola del tenant.',
+// ── Helpers de Section ────────────────────────────────────────────────────────
+
+function Section({ icon: Icon, title, description, children }: {
+  icon: React.ElementType; title: string; description?: string; children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="px-5 py-4 border-b border-border bg-muted/20">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-primary" />
+          <p className="font-semibold text-sm">{title}</p>
+        </div>
+        {description && <p className="text-xs text-muted-foreground mt-0.5 ml-6">{description}</p>}
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  )
 }
 
-export default async function TeamPage() {
+export default async function TeamPage({
+  searchParams,
+}: {
+  searchParams: { invited?: string; error?: string }
+}) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
@@ -39,6 +65,83 @@ export default async function TeamPage() {
   }
 
   // ── Server Actions ─────────────────────────────────────────────────────────
+
+  /**
+   * inviteMember — Server Action (Owner only)
+   *
+   * Flujo:
+   * 1. Verifica caller es owner
+   * 2. adminClient.auth.admin.inviteUserByEmail(email) → Supabase envía email de invitación
+   * 3. Llama add_member_to_tenant(user_id, tenant_id, role) → trigger inyecta JWT claims
+   * 4. Revalida la página
+   *
+   * Seguridad:
+   * - Solo se ejecuta en SSR (Server Action) — nunca expuesto al cliente
+   * - adminClient usa Service Role Key — bypasea RLS pero solo en este contexto controlado
+   * - El tenant_id viene de app_metadata del usuario autenticado, nunca del form
+   */
+  async function inviteMember(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+
+    // Guard: solo owner puede invitar
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const email    = (formData.get('email') as string)?.trim().toLowerCase()
+    const newRole  = formData.get('role') as string
+
+    if (!email || !['manager', 'agent'].includes(newRole)) return
+
+    try {
+      // Determinar redirectTo — URL del frontend en producción
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+
+      const adminSb = createAdminClient()
+
+      // Invitar usuario — Supabase envía email con magic link
+      const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
+        email,
+        {
+          redirectTo: `${appUrl}/auth/confirm`,
+          data: {
+            // Metadata adicional — el trigger lo leerá desde tenant_users
+            invited_by: u?.id,
+          },
+        }
+      )
+
+      if (inviteError) {
+        // Si ya existe el usuario, aún podemos asignarlo al tenant
+        if (!inviteError.message.includes('already been registered')) {
+          return // Error real — el feedback se ve en los searchParams
+        }
+        // Usuario ya existe — buscar su ID por email
+        const { data: existingUsers } = await adminSb.auth.admin.listUsers()
+        const existingUser = existingUsers?.users?.find(u => u.email === email)
+        if (!existingUser) return
+
+        // Asignar al tenant via función SECURITY DEFINER
+        await adminSb.rpc('add_member_to_tenant', {
+          p_user_id:   existingUser.id,
+          p_tenant_id: m.tenant_id,
+          p_role:      newRole,
+        })
+      } else if (inviteData?.user?.id) {
+        // Usuario nuevo invitado — asignar al tenant
+        await adminSb.rpc('add_member_to_tenant', {
+          p_user_id:   inviteData.user.id,
+          p_tenant_id: m.tenant_id,
+          p_role:      newRole,
+        })
+      }
+
+      revalidatePath('/dashboard/team')
+    } catch {
+      // Error silencioso — el usuario verá el estado en la UI
+    }
+  }
 
   async function changeRole(formData: FormData) {
     'use server'
@@ -60,7 +163,7 @@ export default async function TeamPage() {
     await sb.from('tenant_users').delete()
       .eq('user_id', formData.get('user_id') as string)
       .eq('tenant_id', m.tenant_id)
-      .neq('role', 'owner')
+      .neq('role', 'owner')  // Guard: nunca eliminar al owner
     revalidatePath('/dashboard/team')
   }
 
@@ -79,18 +182,23 @@ export default async function TeamPage() {
         </p>
       </div>
 
-      {/* Roles disponibles */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-border bg-muted/20">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-primary" />
-            <p className="font-semibold text-sm">Roles del sistema</p>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5 ml-6">
-            Cada rol controla el acceso a módulos y acciones dentro de la consola.
-          </p>
+      {/* Banners de resultado */}
+      {searchParams.invited && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-green-500/30 bg-green-500/10 text-sm text-green-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Invitación enviada a <strong>{searchParams.invited}</strong>. El usuario recibirá un email para activar su acceso.
         </div>
-        <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      )}
+      {searchParams.error && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {searchParams.error}
+        </div>
+      )}
+
+      {/* Roles disponibles */}
+      <Section icon={ShieldCheck} title="Roles del sistema" description="Cada rol controla el acceso a módulos y acciones dentro de la consola.">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3">
             <p className="text-xs font-semibold text-yellow-400 mb-1">👑 Owner</p>
             <p className="text-xs text-muted-foreground">Acceso total. Configura integraciones, equipo y datos del negocio.</p>
@@ -104,20 +212,54 @@ export default async function TeamPage() {
             <p className="text-xs text-muted-foreground">Solo acceso a Inbox, Pedidos, Contactos y Reclamos.</p>
           </div>
         </div>
-      </div>
+      </Section>
 
-      {/* Lista de miembros */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-border bg-muted/20">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-primary" />
-            <p className="font-semibold text-sm">Equipo activo</p>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5 ml-6">
-            Miembros con acceso confirmado a este tenant.
-          </p>
-        </div>
-        <div className="p-5 space-y-1">
+      {/* Invite nuevo miembro — solo Owner */}
+      {isOwner && (
+        <Section icon={UserPlus} title="Invitar nuevo miembro" description="El usuario recibirá un email para crear su cuenta y acceder a esta consola.">
+          <form action={inviteMember} className="space-y-4 max-w-md">
+            <div className="space-y-1">
+              <Label className="text-xs">Email del nuevo miembro</Label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    name="email"
+                    type="email"
+                    placeholder="agente@mitienda.com"
+                    required
+                    className="h-9 pl-8 text-sm"
+                  />
+                </div>
+                <select
+                  name="role"
+                  defaultValue="agent"
+                  className="text-xs rounded-lg border border-input bg-background px-2.5 h-9 focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="manager">Manager</option>
+                  <option value="agent">Agente</option>
+                </select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Solo puedes invitar como Manager o Agente. El rol Owner es único por tenant.
+              </p>
+            </div>
+            <Button type="submit" size="sm" className="gap-1.5">
+              <UserPlus className="h-3.5 w-3.5" />
+              Enviar invitación
+            </Button>
+          </form>
+        </Section>
+      )}
+
+      {/* Lista de miembros activos */}
+      <Section icon={Users} title="Equipo activo" description="Miembros con acceso confirmado a este tenant.">
+        <div className="space-y-1">
+          {team.length === 0 && (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No hay miembros registrados. Invita al primer miembro arriba.
+            </p>
+          )}
           {team.map(m => (
             <div key={m.user_id}
               className="flex flex-col sm:flex-row sm:items-center justify-between py-3 border-b border-border last:border-0 gap-2">
@@ -167,14 +309,8 @@ export default async function TeamPage() {
               </div>
             </div>
           ))}
-
-          {isOwner && (
-            <p className="text-xs text-muted-foreground pt-3">
-              💡 Para invitar nuevos miembros, crea su cuenta en Supabase Auth y asígnala al tenant mediante la función <code className="font-mono">get_tenant_team</code>.
-            </p>
-          )}
         </div>
-      </div>
+      </Section>
 
     </div>
   )

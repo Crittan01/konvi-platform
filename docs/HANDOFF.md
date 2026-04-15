@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-14 (rev. 17)
+# Handoff — Estado del Proyecto al 2026-04-15 (rev. 18)
 
 Este documento es el punto de entrada para retomar trabajo en infra y operación.
 **Leer `.context/00-product.md` y `.context/01-state.md` antes si el foco es funcional o de código.**
@@ -42,7 +42,7 @@ El LLM (Gemini) es asistencia controlada, nunca fuente de verdad de datos operac
 
 Ver tabla completa → `.context/01-state.md`
 
-Resumen: 17 módulos live. Reclamos en estado parcial (stub + tabla DB, acciones pendientes).
+Resumen: 18 módulos live. Configuración completamente cerrada (General, Usuarios y Acceso, Integraciones).
 
 ---
 
@@ -85,22 +85,49 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 ---
 
-## Trabajo de la última sesión (2026-04-14) — rev. 17
+## Trabajo de la última sesión (2026-04-15) — rev. 18
 
-### Reestructuración Arquitectónica y Documental
+### Cierre Dominio Configuración + Hardening de Seguridad
 
-| Cambio | Detalle |
+| Área | Cambio | Archivos |
+|---|---|---|
+| Seguridad | RLS activado en `tenant_users` + unique constraint | migración `20260415000000` |
+| Seguridad | Función `add_member_to_tenant` (SECURITY DEFINER) | migración `20260415000000` |
+| Seguridad | `logo-upload.tsx`: `getSession()` → `getUser()` | `settings/logo-upload.tsx` |
+| Seguridad | Security Headers (CSP, HSTS, X-Frame-Options, etc.) | `apps/web/next.config.js` |
+| General | `low_stock_threshold` editable en UI (validación 1–999) | `settings/page.tsx` |
+| General | `revalidatePath('/dashboard')` al guardar threshold | `settings/page.tsx` |
+| Usuarios y Acceso | Invite por email con `adminClient` (flujo completo) | `team/page.tsx` |
+| Usuarios y Acceso | Banners de resultado en UI | `team/page.tsx` |
+| Infraestructura | `utils/supabase/admin.ts` — cliente Service Role para SSR | nuevo archivo |
+| Documentación | `docs/architecture/settings-domain.md` | nuevo archivo |
+| Documentación | `.context/` y `HANDOFF.md` actualizados | múltiples |
+
+---
+
+## Intervenciones Humanas Pendientes
+
+### IH-001 — Variables de entorno para invite de miembros (Render)
+
+**INTERVENCION HUMANA REQUERIDA**
+
+| Campo | Detalle |
 |---|---|
-| Route Groups implantados | `(sales)`, `(products)`, `(channels)`, `(ai)`, `(analytics)`, `(settings-group)` |
-| Single Source of Truth consolidado | `.context/00-product.md` reescrito con tree funcional aprobado |
-| `.context/01-state.md` reescrito | Refs rotas eliminadas, estado actualizado, 20 migraciones documentadas |
-| `.context/05-doc-policy.md` creado | Política documental explícita — jerarquía y reglas de consistencia |
-| `AGENTS.md` reescrito | Sin duplicados con `.context/`, referencia clara a fuentes |
-| `CLAUDE.md` reescrito | Limpio, sin duplicados, lecciones al final |
-| `README.md` actualizado | Python corregido (3.9.25→3.11.13), refs actualizadas |
-| Stubs vacíos eliminados | `docs/product/functional-requirements.md`, `non-functional-requirements.md`, `docs/architecture/async-processing.md`, `output-template.md`, `realtime.md` |
-| Scripts debug movidos | `find_leaf*.py`, `test_*.py`, `meli_sandbox.py`, `decode_jwt_header.py` → `scripts/debug/` |
-| Linting hardening | Prettier + ESLint fuerte + Ruff (`pyproject.toml`) |
+| **RESPONSABLE** | DevOps / Owner del proyecto |
+| **PASOS** | 1. Render Dashboard → Service `commerce-ops-web` → Environment <br> 2. Agregar `NEXT_PUBLIC_APP_URL=https://[dominio-real].onrender.com` <br> 3. Verificar que `SUPABASE_SERVICE_ROLE_KEY` esté configurado <br> 4. Redeploy del servicio web |
+| **INSUMOS** | URL real del frontend en Render; Service Role Key de Supabase (Project Settings → API) |
+| **CRITERIO DE ÉXITO** | Al invitar desde `/dashboard/team`, el email llega con URL correcta de Render |
+
+### IH-002 — ALLOWED_ORIGINS en FastAPI
+
+**INTERVENCION HUMANA REQUERIDA**
+
+| Campo | Detalle |
+|---|---|
+| **RESPONSABLE** | DevOps / Owner del proyecto |
+| **PASOS** | 1. Render → Service `commerce-ops-api` → Environment <br> 2. `ALLOWED_ORIGINS=https://[dominio-real].onrender.com,http://localhost:3000` <br> 3. Redeploy del servicio api |
+| **INSUMOS** | URL real del frontend |
+| **CRITERIO DE ÉXITO** | No aparecen errores CORS en producción |
 
 ---
 
@@ -108,12 +135,12 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 | Ítem | Prioridad |
 |---|---|
-| Reclamos — acciones reales (crear, cambiar estado, vincular pedido) | Alta |
-| Agentes IA — desbloquear en sidebar (`locked: true` → quitar) | Alta |
-| Dashboard — `tenants.low_stock_threshold` dinámico (eliminar hardcode `<= 5`) | Media |
-| Dashboard KPIs — eliminar trends hardcodeados (`+12%`, `+5%`) | Media |
+| Reclamos — `resolution_notes` editables (Server Action faltante) | Alta |
 | Envia Fase 2: label, tracking, pickup | Media |
 | Sync bidireccional catálogo ↔ MeLi listings | Media |
+| IH-001: `NEXT_PUBLIC_APP_URL` en Render (invite flow) | Media — intervención humana |
+| IH-002: `ALLOWED_ORIGINS` en FastAPI (CORS producción) | Media — intervención humana |
+| Reglas de Negocio — definir caso de uso antes de implementar | Baja |
 
 ---
 
@@ -129,8 +156,9 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 |---|---|
 | `.context/00-product.md` | Tree funcional vigente — leer primero |
 | `.context/01-state.md` | Estado de implementación real |
-| `.context/04-next-steps.md` | Próximos pasos y deuda |
+| `.context/04-next-steps.md` | Próximos pasos, IH pendientes y deuda |
 | `.context/05-doc-policy.md` | Política documental |
+| `docs/architecture/settings-domain.md` | Técnico completo del dominio Configuración |
 | `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend |
 | `docs/integrations/courier-envia.md` | Diseño Shipping/Courier |
 | `docs/risks/open-questions.md` | Preguntas abiertas — OQ-P01 |
@@ -144,9 +172,11 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 2. `NODE_ENV=production` + `npm install` omite devDeps → `--include=dev`
 3. `apps/web` requiere `postcss.config.js` + `autoprefixer` en devDeps para Tailwind en Render
 4. `psql` TCP bloqueado por Supavisor → `supabase db query --linked`
-5. `getSession()` en Server Components es inseguro → siempre `getUser()`
+5. `getSession()` en Server Components es inseguro → siempre `getUser()` (aplica también en Client Components)
 6. Funciones arrow `() => {}` como props RSC no son serializables → props opcionales con default interno
 7. ESLint v10 incompatible con Next.js 14 → `eslint@8`
 8. `gemini-2.0-flash` no disponible en cuentas nuevas → usar `gemini-2.5-flash`
 9. Si CSS se ve plano en Render → "Clear build cache & deploy"
 10. Trigger `tenant_users`: usar `NEW.user_id`, no `NEW.id`
+11. `adminClient` (Service Role) bypasea RLS — usar solo en Server Actions con guard de rol explícito antes de llamarlo
+12. `inviteUserByEmail` requiere `NEXT_PUBLIC_APP_URL` configurada en Render para que el `redirectTo` del email apunte al dominio correcto

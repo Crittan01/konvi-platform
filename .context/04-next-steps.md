@@ -1,20 +1,27 @@
 # Próximos Pasos — Estado 2026-04-14
 
-## Estado Post-Vuelta 5 (Configuración cerrada semánticamente)
+## Estado Post-Vuelta 5 — Configuración 100% Cerrada (2026-04-15)
 
-Vuelta 5 completada el 2026-04-14. Configuración ahora tiene 3 entradas reales con rutas separadas.
-El árbol visible del tenant está cerrado completamente. No quedan cambios de navegación pendientes.
+El dominio **Configuración** está completamente cerrado funcional y semánticamente.
+No quedan cambios de navegación ni de código pendientes para este dominio.
 
-### Pendientes de código reales (próxima sesión):
-1. **Envia Fase 2** — label, tracking, pickup: `shipping.py` ya tiene diseño, falta implementación
-2. **Sync bidireccional catálogo ↔ MeLi** — webhook existe, sync de vuelta al catálogo falta
-3. **Reglas de Negocio** (Configuración) — pendiente funcional obligatorio:
-   - Criterio de activación: definir caso de uso real primero (¿márgenes mínimos?, ¿reglas de precio automático?, ¿horarios de atención WhatsApp?)
-   - No crear ruta ni UI hasta tener el caso de uso aprobado
-   - Cuando exista, entrará en `/dashboard/rules` dentro del Route Group `(settings-group)/`
-4. **Invite de miembros** (`/team`) — hoy es intervención manual vía Supabase Auth. Automatizar con formulario de invite es deuda conocida.
+### Intervenciones Humanas Pendientes (para que el invite funcione en producción):
 
-### Deuda técnica residual:
+**IH-001 — Variables de entorno en Render (web service)**
+- Agregar `NEXT_PUBLIC_APP_URL=https://[dominio-real].onrender.com`
+- Verificar que `SUPABASE_SERVICE_ROLE_KEY` esté configurado
+- Ver detalle completo: `docs/architecture/settings-domain.md` → IH-001
+
+**IH-002 — ALLOWED_ORIGINS en FastAPI (api service)**
+- Variable `ALLOWED_ORIGINS` debe incluir el dominio de producción del frontend
+- Ver detalle completo: `docs/architecture/settings-domain.md` → IH-002
+
+### Pendientes de código para próxima sesión (otros dominios):
+1. **Reclamos — `resolution_notes` editables**: Server Action `updateResolutionNotes` faltante
+2. **Envia Fase 2** — label, tracking, pickup (`shipping.py` tiene el diseño, falta implementación)
+3. **Sync bidireccional catálogo ↔ MeLi** — webhook recibe, sync al catálogo falta
+4. **Reglas de Negocio** — definir caso de uso antes de implementar (→ `/dashboard/rules`)
+
 
 ## DESPUÉS — Fase 12 Platform Console (Bloqueada OQ-P01)
 

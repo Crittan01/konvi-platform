@@ -61,11 +61,11 @@ Tenant Console
 │   ├── Métricas           ← KPIs de negocio
 │   └── Auditoría          ← log de acceso/cambios, exportación CSV
 │
-└── CONFIGURACIÓN
-    ├── General            ← datos del negocio, logo, WABA, dirección de origen, Telegram [✅ /settings]
-    ├── Usuarios y Acceso  ← equipo RBAC: listado, roles, changeRole, removeMember         [✅ /team]
-    └── Integraciones      ← MeLi OAuth, Envia API key — estado, connect/disconnect        [✅ /integrations]
-    [Reglas de Negocio: pendiente funcional obligatorio — definir caso de uso antes de implementar]
+└── CONFIGURACIÓN  ✅ CERRADO — Rev. 5 (2026-04-15)
+    ├── General            ← /settings: nombre, logo, WABA, low_stock_threshold, dirección origen, Telegram
+    ├── Usuarios y Acceso  ← /team: invite email, changeRole, removeMember — RBAC completo
+    └── Integraciones      ← /integrations: MeLi OAuth, Envia API key
+    [Reglas de Negocio: pendiente funcional — definir caso de uso antes de implementar → /rules]
 ```
 
 **Platform Console — Fuera de alcance absoluto en esta iniciativa:**

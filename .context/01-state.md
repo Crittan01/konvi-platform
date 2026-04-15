@@ -75,9 +75,9 @@
 | Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
-| Configuración (General) | `/dashboard/settings` | ✅ Live | Datos del negocio, logo, WABA, dirección de origen, Telegram |
-| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Equipo RBAC: listado, changeRole, removeMember. Extraído de settings en Vuelta 5 |
-| Integraciones | `/dashboard/integrations` | ✅ Live | MeLi + Envia connect/disconnect |
+| Configuración (General) | `/dashboard/settings` | ✅ Live | Nombre, logo, WABA (read-only), **low_stock_threshold editable**, dirección origen, Telegram |
+| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Invite por email (adminClient), changeRole, removeMember, descripción de roles. RLS ✅ |
+| Integraciones | `/dashboard/integrations` | ✅ Live | MeLi OAuth, Envia API key. RLS ✅ |
 
 ---
 
@@ -164,6 +164,7 @@ apps/web/app/
 | Finance polish | 20260413000001 | ✅ |
 | `marketplace_listings` | 20260413000002 | ✅ |
 | `claims` | 20260413150000 | ✅ |
+| RLS `tenant_users` + `add_member_to_tenant` | 20260415000000 | ✅ |
 
 > Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
 
@@ -176,10 +177,15 @@ apps/web/app/
 | Sync bidireccional catálogo ↔ MeLi listings | Media |
 | Envia Fase 2: label, tracking, pickup | Media |
 | WhatsApp Config centralizada (templates aprobados, WABA management) | Media |
+| Invite de miembros via formulario UI | Media — IH-001 requerida (NEXT_PUBLIC_APP_URL en Render) |
 | ~~Reclamos — acciones reales~~ | ✅ Resuelto Vuelta 3 |
 | ~~Agentes IA — desbloquear en sidebar~~ | ✅ Resuelto Vuelta 3 |
 | ~~Dashboard — usar `tenants.low_stock_threshold` dinámico~~ | ✅ Resuelto Vuelta 3 |
 | ~~Dashboard KPIs — eliminar trends hardcodeados~~ | ✅ Resuelto Vuelta 3 |
+| ~~`tenant_users` sin RLS~~ | ✅ Resuelto Vuelta 5 — migración 20260415000000 |
+| ~~`logo-upload.tsx` `getSession()` inseguro~~ | ✅ Resuelto Vuelta 5 — `getUser()` |
+| ~~Security Headers ausentes en Next.js~~ | ✅ Resuelto Vuelta 5 — `next.config.js` |
+| ~~`low_stock_threshold` sin UI editable~~ | ✅ Resuelto Vuelta 5 — en General |
 
 ---
 
