@@ -237,9 +237,6 @@ export default async function TeamPage({
             )
           })}
         </div>
-        <p className="text-xs text-muted-foreground mt-3 pl-1">
-          💡 Los <strong>Operadores</strong> no son Agentes IA — son personas del equipo con acceso operativo.
-        </p>
       </Section>
 
       {/* Invitar nuevo miembro — solo Owner */}
