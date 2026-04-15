@@ -48,7 +48,7 @@ export default async function ShippingPage({
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
-  const role = meta.role ?? 'agent'
+  const role = meta.role ?? 'operator'
   const canWrite = role === 'owner' || role === 'manager'
 
   let shipments: Shipment[] = []

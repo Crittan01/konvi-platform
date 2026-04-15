@@ -133,7 +133,6 @@ const ROLE_BADGE: Record<string, { label: string; color: string }> = {
   owner:    { label: '👑 Owner',    color: 'bg-amber-400/20 text-amber-200 border border-amber-400/30' },
   manager:  { label: '🛠️ Manager',  color: 'bg-white/15 text-white/80 border border-white/20' },
   operator: { label: '🎧 Operador', color: 'bg-white/10 text-white/60 border border-white/15' },
-  agent:    { label: '🎧 Operador', color: 'bg-white/10 text-white/60 border border-white/15' }, // backward compat
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────

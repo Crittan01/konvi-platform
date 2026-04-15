@@ -12,8 +12,8 @@ export default async function ClaimsPage() {
 
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
-  const role = meta.role || 'agent'
-  const canWrite = ['owner', 'manager', 'agent'].includes(role)
+  const role = meta.role || 'operator'
+  const canWrite = ['owner', 'manager', 'operator'].includes(role)
 
   // Fetch claims with relationships — filtrado por tenant (defensa en profundidad + RLS)
   const { data: claimsData } = await supabase
