@@ -32,3 +32,17 @@
 - **Hosting**: Render (Free plan dev → Starter antes de producción)
 - **Monorepo**: pnpm workspaces
 - **SQL**: `supabase db query --linked -f archivo.sql` (psql TCP bloqueado por Supavisor)
+- **Supabase CLI**: **2.90.0** — binario nativo en `/usr/local/bin/supabase`
+
+## VM — Política de herramientas nativas
+
+Esta VM es dedicada 100% al proyecto. Todas las herramientas del sistema se instalan **nativas** — sin venv, sin pipx, sin brew, sin contenedores locales.
+
+| Herramienta | Instalación | Actualización |
+|---|---|---|
+| Python 3.11.13 | dnf (sistema) | `sudo dnf upgrade python3` |
+| Node 20.x | nvm | `nvm install --lts` |
+| pnpm | npm global | `npm i -g pnpm` |
+| Supabase CLI | binario estático `/usr/local/bin/` | `curl releases GitHub → sudo mv /usr/local/bin/supabase` |
+
+**Regla:** si una herramienta muestra aviso de nueva versión, actualizar en la misma sesión antes de continuar. Registrar la versión nueva aquí.
