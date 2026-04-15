@@ -97,7 +97,8 @@ export default async function TeamPage({
 
   let team: TeamMember[] = []
   if (tenantId) {
-    const { data } = await supabase.rpc('get_tenant_team')
+    const { data, error: teamErr } = await supabase.rpc('get_tenant_team')
+    if (teamErr) console.error('[team] get_tenant_team:', teamErr.message, teamErr.code)
     team = (data as TeamMember[]) || []
   }
 
