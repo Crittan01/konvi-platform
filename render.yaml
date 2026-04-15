@@ -42,6 +42,13 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
+      # URL pública del frontend — requerida para el redirectTo del invite de miembros
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://commerce-ops-web.onrender.com
+      # Service Role Key — requerida para auth.admin.inviteUserByEmail() en SSR
+      # NUNCA exponer con prefijo NEXT_PUBLIC_
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
       - key: MELI_CLIENT_ID
