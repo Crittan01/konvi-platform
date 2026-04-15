@@ -19,17 +19,17 @@ La IA (Gemini) es asistencia, nunca fuente de verdad de datos operacionales.
 
 ## Stack
 
-| Capa | Versión | Notas |
-|---|---|---|
-| Frontend | Next.js 14.2.35 + React 18 + TypeScript 5 | App Router + Route Groups |
-| UI | TailwindCSS 3.3 + shadcn/ui | Dark Warm Theme — HSL tokens |
-| Backend | Python 3.11.13 + FastAPI 0.128.8 | Sin venv — paquetes en sistema |
-| DB/Auth | Supabase PostgreSQL + RLS + Auth + Realtime | 20 migraciones aplicadas |
-| IA | `google-genai==1.47.0` — `gemini-2.5-flash` | SDK oficial |
-| WhatsApp | WhatsApp Cloud API v21.0 | Solo oficial Meta |
-| Shipping | Envia API | Fase Inicial live |
-| Marketplace | Mercado Libre OAuth 2.0 | Listings live |
-| Hosting | Render — 4 servicios (Free) | `render.yaml` IaC |
+| Capa        | Versión                                     | Notas                          |
+| ----------- | ------------------------------------------- | ------------------------------ |
+| Frontend    | Next.js 14.2.35 + React 18 + TypeScript 5   | App Router + Route Groups      |
+| UI          | TailwindCSS 3.3 + shadcn/ui                 | Dark Warm Theme — HSL tokens   |
+| Backend     | Python 3.11.13 + FastAPI 0.128.8            | Sin venv — paquetes en sistema |
+| DB/Auth     | Supabase PostgreSQL + RLS + Auth + Realtime | 20 migraciones aplicadas       |
+| IA          | `google-genai==1.47.0` — `gemini-2.5-flash` | SDK oficial                    |
+| WhatsApp    | WhatsApp Cloud API v21.0                    | Solo oficial Meta              |
+| Shipping    | Envia API                                   | Fase Inicial live              |
+| Marketplace | Mercado Libre OAuth 2.0                     | Listings live                  |
+| Hosting     | Render — 4 servicios (Free)                 | `render.yaml` IaC              |
 
 Verificar siempre versiones reales en `package.json` y `requirements.txt`.
 
@@ -101,3 +101,10 @@ python3 main.py
 - Funciones arrow `() => {}` como props RSC no son serializables → props opcionales con default interno
 - `gemini-2.0-flash` no disponible en cuentas nuevas → usar `gemini-2.5-flash`
 - Si CSS se ve plano en Render → "Clear build cache & deploy"
+
+## Política de brevedad
+
+- Responder con la menor cantidad de texto posible sin perder precisión, trazabilidad ni seguridad.
+- Evitar relleno, repeticiones, muletillas y explicaciones obvias.
+- Expandir solo cuando haya riesgo, ambigüedad, decisiones irreversibles o impacto arquitectónico.
+- No sacrificar contexto crítico por brevedad.

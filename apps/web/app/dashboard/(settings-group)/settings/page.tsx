@@ -18,6 +18,7 @@ type ShippingOrigin = {
 type Tenant = {
   id: string; name: string; meta_waba_id: string | null; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
+  low_stock_threshold?: number | null
 }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
 
@@ -55,7 +56,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const [tenantRes, notifRes] = await Promise.all([
-      supabase.from('tenants').select('id, name, meta_waba_id, status, shipping_origin, logo_url').eq('id', tenantId).single(),
+      supabase.from('tenants').select('id, name, meta_waba_id, status, shipping_origin, logo_url, low_stock_threshold').eq('id', tenantId).single(),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
     ])
     tenant        = tenantRes.data as Tenant
@@ -72,8 +73,16 @@ export default async function SettingsPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
-    await sb.from('tenants').update({ name: formData.get('name') as string }).eq('id', m.tenant_id)
+    const threshold = parseInt(formData.get('low_stock_threshold') as string, 10)
+    await sb.from('tenants').update({
+      name: formData.get('name') as string,
+      // Validación: entre 1 y 999. Si inválido, no se actualiza (undefined)
+      ...(Number.isInteger(threshold) && threshold >= 1 && threshold <= 999
+        ? { low_stock_threshold: threshold }
+        : {}),
+    }).eq('id', m.tenant_id)
     revalidatePath('/dashboard/settings')
+    revalidatePath('/dashboard') // Actualiza el dashboard que usa el threshold
   }
 
   async function saveShippingOrigin(formData: FormData) {
@@ -142,12 +151,30 @@ export default async function SettingsPage() {
                 <Input name="name" defaultValue={tenant?.name ?? ''} required className="h-9" />
               </div>
               <div className="space-y-1">
+                <Label className="text-xs">Umbral de stock bajo</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    name="low_stock_threshold"
+                    type="number"
+                    min={1}
+                    max={999}
+                    defaultValue={tenant?.low_stock_threshold ?? 5}
+                    className="h-9 w-24"
+                  />
+                  <span className="text-xs text-muted-foreground">unidades</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  El dashboard mostrará alerta de stock bajo cuando una variante tenga ≤ este número.
+                </p>
+              </div>
+              <div className="space-y-1">
                 <Label className="text-xs">WABA ID (Meta)</Label>
                 <Input value={tenant?.meta_waba_id ?? 'No configurado'} readOnly className="h-9 bg-muted text-muted-foreground font-mono text-sm" />
                 <p className="text-xs text-muted-foreground">Para cambiar el WABA ID contacta a soporte.</p>
               </div>
-              <Button type="submit" size="sm">Guardar nombre</Button>
+              <Button type="submit" size="sm">Guardar</Button>
             </form>
+
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 max-w-md">

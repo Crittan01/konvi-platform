@@ -31,11 +31,11 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
     setError(null)
 
     const supabase = createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) { setError('Sesión expirada'); setUploading(false); return }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setError('Sesión expirada'); setUploading(false); return }
 
     const ext = file.name.split('.').pop() ?? 'png'
-    const path = `${session.user.id}/logo/logo.${ext}`
+    const path = `${user.id}/logo/logo.${ext}`
 
     const { error: uploadErr } = await supabase.storage
       .from('tenant-media')
@@ -63,8 +63,8 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
     setUploading(true)
     setError(null)
     const supabase = createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) { setError('Sesión expirada'); setUploading(false); return }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setError('Sesión expirada'); setUploading(false); return }
 
     const { error: dbErr } = await supabase
       .from('tenants')
