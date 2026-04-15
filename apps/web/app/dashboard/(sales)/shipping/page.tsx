@@ -29,12 +29,12 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  quoted:     '📋 Cotizado',
-  labeled:    '🏷️ Etiquetado',
-  picked_up:  '🚚 Recolectado',
-  in_transit: '✈️ En tránsito',
-  delivered:  '✅ Entregado',
-  cancelled:  '❌ Cancelado',
+  quoted:     'Cotizado',
+  labeled:    'Etiquetado',
+  picked_up:  'Recolectado',
+  in_transit: 'En tránsito',
+  delivered:  'Entregado',
+  cancelled:  'Cancelado',
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'

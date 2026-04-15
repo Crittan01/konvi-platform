@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Wrench, Headphones } from 'lucide-react'
+import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2 } from 'lucide-react'
 
 export const metadata = {
   title: 'Usuarios y Acceso — Commerce Ops',
@@ -24,7 +24,6 @@ const ROLES = {
   owner: {
     label: 'Owner',
     emoji: '👑',
-    icon: Crown,
     color: 'bg-amber-500/10 text-amber-400 border-amber-500/25',
     headerColor: 'border-amber-500/20 bg-amber-500/5',
     textColor: 'text-amber-400',
@@ -33,7 +32,6 @@ const ROLES = {
   manager: {
     label: 'Manager',
     emoji: '🛠️',
-    icon: Wrench,
     color: 'bg-blue-500/10 text-blue-400 border-blue-500/25',
     headerColor: 'border-blue-500/20 bg-blue-500/5',
     textColor: 'text-blue-400',
@@ -42,7 +40,6 @@ const ROLES = {
   operator: {
     label: 'Operador',
     emoji: '🎧',
-    icon: Headphones,
     color: 'bg-slate-500/10 text-slate-400 border-slate-500/25',
     headerColor: 'border-border bg-muted/20',
     textColor: 'text-muted-foreground',
@@ -226,12 +223,11 @@ export default async function TeamPage({
       <Section icon={ShieldCheck} title="Roles del sistema" description="Define qué puede hacer cada miembro en la consola.">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {(Object.entries(ROLES) as [RoleKey, typeof ROLES[RoleKey]][]).map(([key, cfg]) => {
-            const Icon = cfg.icon
             return (
               <div key={key} className={`rounded-xl border p-4 ${cfg.headerColor}`}>
                 <div className="flex items-center gap-2 mb-2">
-                  <Icon className={`h-4 w-4 ${cfg.textColor}`} />
-                  <p className={`text-sm font-semibold ${cfg.textColor}`}>{cfg.emoji} {cfg.label}</p>
+                  <span className="text-base leading-none" role="img" aria-label={cfg.label}>{cfg.emoji}</span>
+                  <p className={`text-sm font-semibold ${cfg.textColor}`}>{cfg.label}</p>
                   <span className="ml-auto text-xs text-muted-foreground font-mono">
                     {counts[key] ?? 0}
                   </span>
