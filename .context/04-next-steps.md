@@ -1,18 +1,20 @@
 # Próximos Pasos — Estado 2026-04-14
 
-## AHORA — Estado Post-Vuelta 4 (Cierre Semántico del Tenant)
+## Estado Post-Vuelta 5 (Configuración cerrada semánticamente)
 
-Vuelta 4 completada el 2026-04-14. Árbol funcional cerrado semánticamente.
-Navegación Rev.4 aplicada. No quedan cambios de navegación pendientes para esta etapa.
+Vuelta 5 completada el 2026-04-14. Configuración ahora tiene 3 entradas reales con rutas separadas.
+El árbol visible del tenant está cerrado completamente. No quedan cambios de navegación pendientes.
 
 ### Pendientes de código reales (próxima sesión):
-1. **Envia Fase 2** — label, tracking, pickup: endpoints en `shipping.py` ya diseñados, no implementados
+1. **Envia Fase 2** — label, tracking, pickup: `shipping.py` ya tiene diseño, falta implementación
 2. **Sync bidireccional catálogo ↔ MeLi** — webhook existe, sync de vuelta al catálogo falta
-3. **Reglas de Negocio** — pendiente funcional de Configuración (no inventar pantalla hasta definir el caso de uso real: ¿márgenes?, ¿reglas de precio?, ¿horarios de atención?)
-4. **Media** — ahora invisible en menú. Pendiente: agregar link/acceso rápido desde `Catálogo` si el tenant lo necesita
+3. **Reglas de Negocio** (Configuración) — pendiente funcional obligatorio:
+   - Criterio de activación: definir caso de uso real primero (¿márgenes mínimos?, ¿reglas de precio automático?, ¿horarios de atención WhatsApp?)
+   - No crear ruta ni UI hasta tener el caso de uso aprobado
+   - Cuando exista, entrará en `/dashboard/rules` dentro del Route Group `(settings-group)/`
+4. **Invite de miembros** (`/team`) — hoy es intervención manual vía Supabase Auth. Automatizar con formulario de invite es deuda conocida.
 
-### Pendientes documentales NO urgentes:
-- `docs/architecture/restructuring-review.md` — registrar decisiones de Vuelta 4 al final del documento
+### Deuda técnica residual:
 
 ## DESPUÉS — Fase 12 Platform Console (Bloqueada OQ-P01)
 

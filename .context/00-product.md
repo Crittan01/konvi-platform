@@ -62,9 +62,10 @@ Tenant Console
 │   └── Auditoría          ← log de acceso/cambios, exportación CSV
 │
 └── CONFIGURACIÓN
-    ├── General y Equipo   ← datos del tenant + Equipo RBAC in-page (changeRole, removeMember)
-    └── Integraciones      ← MeLi OAuth, Envia — estado, connect/disconnect
-    [Reglas de Negocio: pendiente funcional — no se expone hasta implementación]
+    ├── General            ← datos del negocio, logo, WABA, dirección de origen, Telegram [✅ /settings]
+    ├── Usuarios y Acceso  ← equipo RBAC: listado, roles, changeRole, removeMember         [✅ /team]
+    └── Integraciones      ← MeLi OAuth, Envia API key — estado, connect/disconnect        [✅ /integrations]
+    [Reglas de Negocio: pendiente funcional obligatorio — definir caso de uso antes de implementar]
 ```
 
 **Platform Console — Fuera de alcance absoluto en esta iniciativa:**
