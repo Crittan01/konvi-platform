@@ -191,10 +191,14 @@ export default async function TeamPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
+    const newRole = formData.get('role') as string
+    // Guard: owner es único por tenant — no puede asignarse por esta vía
+    if (!['manager', 'operator'].includes(newRole)) return
     await sb.from('tenant_users')
-      .update({ role: formData.get('role') as string })
+      .update({ role: newRole })
       .eq('user_id', formData.get('user_id') as string)
       .eq('tenant_id', m.tenant_id)
+      .neq('role', 'owner') // guard DB: nunca cambiar al propio owner
     revalidatePath('/dashboard/team')
   }
 
@@ -414,10 +418,9 @@ export default async function TeamPage({
                           <input type="hidden" name="user_id" value={m.user_id} />
                           <select
                             name="role"
-                            defaultValue={m.role}
+                            defaultValue={m.role === 'owner' ? 'manager' : m.role}
                             className="text-xs rounded-lg border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
                           >
-                            <option value="owner">Administrador</option>
                             <option value="manager">Supervisor</option>
                             <option value="operator">Gestor</option>
                           </select>
