@@ -166,7 +166,9 @@ export default async function SettingsPage() {
                 <form action={saveTenant} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-medium" htmlFor="tenant-name">Nombre del negocio</Label>
+                      <Label className="text-xs font-medium" htmlFor="tenant-name">
+                        Nombre del negocio <span className="text-destructive">*</span>
+                      </Label>
                       <Input id="tenant-name" name="name" defaultValue={tenant?.name ?? ''} required className="h-9" />
                     </div>
                     <div className="space-y-1.5">
@@ -175,22 +177,36 @@ export default async function SettingsPage() {
                         defaultValue={tenant?.nit ?? ''}
                         placeholder="900.123.456-7"
                         className="h-9" />
+                      <p className="text-[10px] text-muted-foreground">Opcional — persona natural puede omitirlo</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-medium" htmlFor="email-contacto">Email de contacto</Label>
+                      <Label className="text-xs font-medium" htmlFor="email-contacto">
+                        Email de contacto <span className="text-destructive">*</span>
+                      </Label>
                       <Input id="email-contacto" name="email_contacto" type="email"
                         defaultValue={tenant?.email_contacto ?? ''}
                         placeholder="contacto@minegocio.com"
+                        required
                         className="h-9" />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-medium" htmlFor="telefono-contacto">Teléfono de contacto</Label>
-                      <Input id="telefono-contacto" name="telefono_contacto"
-                        defaultValue={tenant?.telefono_contacto ?? ''}
-                        placeholder="+573001234567"
-                        className="h-9" />
+                      <Label className="text-xs font-medium" htmlFor="celular-contacto">
+                        Celular de contacto <span className="text-destructive">*</span>
+                      </Label>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-9 px-2.5 rounded-md border border-input bg-muted/50 text-xs text-muted-foreground flex items-center shrink-0">+57</span>
+                        <Input id="celular-contacto" name="telefono_contacto"
+                          type="tel"
+                          defaultValue={tenant?.telefono_contacto ?? ''}
+                          placeholder="3121234567"
+                          pattern="3[0-9]{9}"
+                          maxLength={10}
+                          required
+                          className="h-9" />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">10 dígitos, ej: 3121234567</p>
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -216,7 +232,7 @@ export default async function SettingsPage() {
                 <ReadOnlyField label="Nombre" value={tenant?.name ?? ''} />
                 <ReadOnlyField label="NIT" value={tenant?.nit ?? '—'} />
                 <ReadOnlyField label="Email" value={tenant?.email_contacto ?? '—'} />
-                <ReadOnlyField label="Teléfono" value={tenant?.telefono_contacto ?? '—'} />
+                <ReadOnlyField label="Celular" value={tenant?.telefono_contacto ? `+57 ${tenant.telefono_contacto}` : '—'} />
                 <ReadOnlyField label="WABA ID" value={tenant?.meta_waba_id ?? 'No configurado'} />
               </div>
             )}

@@ -18,28 +18,19 @@ interface Props {
 }
 
 export default function ShippingOriginForm({ initialData, action }: Props) {
-  // Encuentra el código DANE del departamento guardado por nombre
   const initialDpto = DEPARTAMENTOS.find(
     (d) => d.nombre === initialData?.state
   )?.codigo ?? ''
 
   const [codigoDpto, setCodigoDpto] = useState<string>(initialDpto)
-  const [busquedaMunicipio, setBusquedaMunicipio] = useState('')
 
-  const municipios = useMemo(
-    () => getMunicipiosByDpto(codigoDpto),
-    [codigoDpto]
-  )
-
-  const municipiosFiltrados = useMemo(() => {
-    const q = busquedaMunicipio.toLowerCase()
-    return q ? municipios.filter((m) => m.nombre.toLowerCase().includes(q)) : municipios
-  }, [municipios, busquedaMunicipio])
+  const municipios = useMemo(() => getMunicipiosByDpto(codigoDpto), [codigoDpto])
 
   const nombreDpto = DEPARTAMENTOS.find((d) => d.codigo === codigoDpto)?.nombre ?? ''
 
   return (
     <form action={action} className="space-y-4">
+
       {/* Nombre del remitente + empresa */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
@@ -64,22 +55,19 @@ export default function ShippingOriginForm({ initialData, action }: Props) {
           placeholder="Av. Principal 123" className="h-8 text-sm" />
       </div>
 
-      {/* Departamento + Municipio */}
+      {/* Departamento + Municipio — selects directos, sin buscador libre */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs font-medium" htmlFor="origin-state">Departamento</Label>
-          {/* Campo oculto que guarda el nombre del dpto para compatibilidad con Envia */}
+          {/* Guarda el nombre del dpto para compatibilidad con Envia */}
           <input type="hidden" name="origin_state" value={nombreDpto} />
           <select
             id="origin-state"
             value={codigoDpto}
-            onChange={(e) => {
-              setCodigoDpto(e.target.value)
-              setBusquedaMunicipio('')
-            }}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(e) => setCodigoDpto(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            <option value="">Seleccionar departamento…</option>
+            <option value="">Seleccionar…</option>
             {DEPARTAMENTOS.map((d) => (
               <option key={d.codigo} value={d.codigo}>{d.nombre}</option>
             ))}
@@ -87,38 +75,23 @@ export default function ShippingOriginForm({ initialData, action }: Props) {
         </div>
 
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium" htmlFor="municipio-search">Municipio / Ciudad</Label>
-          {codigoDpto ? (
-            <>
-              <Input
-                placeholder="Buscar municipio…"
-                value={busquedaMunicipio}
-                onChange={(e) => setBusquedaMunicipio(e.target.value)}
-                className="h-8 text-sm mb-1"
-              />
-              <select
-                id="origin-city"
-                name="origin_city"
-                defaultValue={initialData?.city ?? ''}
-                className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">Seleccionar municipio…</option>
-                {municipiosFiltrados.map((m) => (
-                  <option key={m.codigo} value={m.nombre}>{m.nombre}</option>
-                ))}
-              </select>
-            </>
-          ) : (
-            <Input
-              disabled
-              placeholder="Selecciona un departamento primero"
-              className="h-8 text-sm opacity-50"
-            />
-          )}
+          <Label className="text-xs font-medium" htmlFor="origin-city">Municipio / Ciudad</Label>
+          <select
+            id="origin-city"
+            name="origin_city"
+            defaultValue={initialData?.city ?? ''}
+            disabled={!codigoDpto}
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <option value="">{codigoDpto ? 'Seleccionar…' : 'Primero selecciona departamento'}</option>
+            {municipios.map((m) => (
+              <option key={m.codigo} value={m.nombre}>{m.nombre}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {/* Código postal + País + Teléfono */}
+      {/* Código postal + País (fijo Colombia) + Celular */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs font-medium" htmlFor="origin-cp">Código postal</Label>
@@ -127,16 +100,26 @@ export default function ShippingOriginForm({ initialData, action }: Props) {
             placeholder="110111" className="h-8 text-sm" />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium" htmlFor="origin-country">País</Label>
-          <Input id="origin-country" name="origin_country"
-            defaultValue={initialData?.country ?? 'CO'}
-            placeholder="CO" maxLength={2} className="h-8 text-sm" />
+          <Label className="text-xs font-medium">País</Label>
+          {/* Fijo Colombia — Envia solo opera en Colombia */}
+          <input type="hidden" name="origin_country" value="Colombia" />
+          <div className="h-8 rounded-md border border-input bg-muted/50 px-3 flex items-center text-sm text-muted-foreground">
+            Colombia
+          </div>
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium" htmlFor="origin-phone">Teléfono</Label>
-          <Input id="origin-phone" name="origin_phone"
-            defaultValue={initialData?.phone ?? ''}
-            placeholder="+573001234567" className="h-8 text-sm" />
+          <Label className="text-xs font-medium" htmlFor="origin-phone">Celular</Label>
+          <div className="flex items-center gap-1">
+            <span className="h-8 px-2.5 rounded-md border border-input bg-muted/50 text-xs text-muted-foreground flex items-center shrink-0">+57</span>
+            <Input id="origin-phone" name="origin_phone"
+              type="tel"
+              defaultValue={initialData?.phone ?? ''}
+              placeholder="3121234567"
+              pattern="3[0-9]{9}"
+              maxLength={10}
+              className="h-8 text-sm" />
+          </div>
+          <p className="text-[10px] text-muted-foreground">10 dígitos, ej: 3121234567</p>
         </div>
       </div>
 
