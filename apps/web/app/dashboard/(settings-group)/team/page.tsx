@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones } from 'lucide-react'
 
 export const metadata = {
   title: 'Usuarios y Acceso — Commerce Ops',
@@ -23,27 +23,30 @@ type TeamMember = { user_id: string; email: string; role: string; joined_at: str
 //
 const ROLES = {
   owner: {
-    label: 'Owner',
-    emoji: '👑',
+    label: 'Administrador',
+    icon: Crown,
     color: 'bg-amber-500/10 text-amber-400 border-amber-500/25',
     headerColor: 'border-amber-500/20 bg-amber-500/5',
     textColor: 'text-amber-400',
+    iconColor: 'text-amber-400',
     description: 'Acceso total. Configura integraciones, equipo y datos del negocio.',
   },
   manager: {
-    label: 'Manager',
-    emoji: '🛠️',
+    label: 'Supervisor',
+    icon: Briefcase,
     color: 'bg-blue-500/10 text-blue-400 border-blue-500/25',
     headerColor: 'border-blue-500/20 bg-blue-500/5',
     textColor: 'text-blue-400',
+    iconColor: 'text-blue-400',
     description: 'Gestiona operaciones: pedidos, catálogo, inventario, métricas, IA.',
   },
   operator: {
-    label: 'Operador',
-    emoji: '🎧',
+    label: 'Gestor',
+    icon: Headphones,
     color: 'bg-slate-500/10 text-slate-400 border-slate-500/25',
     headerColor: 'border-border bg-muted/20',
     textColor: 'text-muted-foreground',
+    iconColor: 'text-muted-foreground',
     description: 'Acceso operativo: Inbox, Pedidos, Contactos y Reclamos.',
   },
 } as const
@@ -53,9 +56,10 @@ type RoleKey = keyof typeof ROLES
 function RoleBadge({ role }: { role: string }) {
   const cfg = ROLES[role as RoleKey]
   if (!cfg) return <span className="text-xs text-muted-foreground">{role}</span>
+  const Icon = cfg.icon
   return (
     <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border ${cfg.color}`}>
-      <span>{cfg.emoji}</span> {cfg.label}
+      <Icon className="h-3 w-3 shrink-0" /> {cfg.label}
     </span>
   )
 }
@@ -138,7 +142,7 @@ export default async function TeamPage({
 
     const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
       email,
-      { redirectTo: `${appUrl}/auth/confirm`, data: { invited_by: u?.id } }
+      { redirectTo: `${appUrl}/auth/confirm?next=/set-password`, data: { invited_by: u?.id } }
     )
 
     if (inviteError) {
@@ -222,7 +226,7 @@ export default async function TeamPage({
     // inviteUserByEmail para usuario NO confirmado = reenvía el email de invitación
     // generateLink() solo retorna el link sin enviar email — NO usar para reenvío
     const { error } = await adminSb.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${appUrl}/auth/confirm`,
+      redirectTo: `${appUrl}/auth/confirm?next=/set-password`,
     })
 
     // "already been registered" solo ocurre para usuarios CONFIRMADOS
@@ -297,10 +301,11 @@ export default async function TeamPage({
       <Section icon={ShieldCheck} title="Roles del sistema" description="Define qué puede hacer cada miembro en la consola.">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {(Object.entries(ROLES) as [RoleKey, typeof ROLES[RoleKey]][]).map(([key, cfg]) => {
+            const Icon = cfg.icon
             return (
               <div key={key} className={`rounded-xl border p-4 ${cfg.headerColor}`}>
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-base leading-none" role="img" aria-label={cfg.label}>{cfg.emoji}</span>
+                  <Icon className={`h-4 w-4 shrink-0 ${cfg.iconColor}`} />
                   <p className={`text-sm font-semibold ${cfg.textColor}`}>{cfg.label}</p>
                   <span className="ml-auto text-xs text-muted-foreground font-mono">
                     {counts[key] ?? 0}
@@ -338,8 +343,8 @@ export default async function TeamPage({
                   defaultValue="operator"
                   className="text-xs rounded-lg border border-input bg-background px-2.5 h-9 focus:outline-none focus:ring-1 focus:ring-primary"
                 >
-                  <option value="manager">Manager</option>
-                  <option value="operator">Operador</option>
+                  <option value="manager">Supervisor</option>
+                  <option value="operator">Gestor</option>
                 </select>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -412,9 +417,9 @@ export default async function TeamPage({
                             defaultValue={m.role}
                             className="text-xs rounded-lg border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
                           >
-                            <option value="owner">👑 Owner</option>
-                            <option value="manager">🛠️ Manager</option>
-                            <option value="operator">🎧 Operador</option>
+                            <option value="owner">Administrador</option>
+                            <option value="manager">Supervisor</option>
+                            <option value="operator">Gestor</option>
                           </select>
                           <Button type="submit" size="sm" variant="outline" className="text-xs h-7 px-2.5">Cambiar</Button>
                         </form>
