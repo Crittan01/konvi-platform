@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -120,39 +121,63 @@ export default async function TeamPage({
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
+    if (!m.tenant_id || m.role !== 'owner') {
+      redirect('/dashboard/team?error=sin-permiso')
+    }
 
     const email   = (formData.get('email') as string)?.trim().toLowerCase()
     const newRole = formData.get('role') as string
-    if (!email || !['manager', 'operator'].includes(newRole)) return
+    if (!email || !['manager', 'operator'].includes(newRole)) {
+      redirect('/dashboard/team?error=datos-invalidos')
+    }
 
-    try {
-      const appUrl  = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-      const adminSb = createAdminClient()
+    // APP_URL (sin prefijo NEXT_PUBLIC_) = variable de runtime, no baked en el build
+    const appUrl  = process.env.APP_URL ?? 'https://commerce-ops-web.onrender.com'
+    const adminSb = createAdminClient()
 
-      const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
-        email,
-        { redirectTo: `${appUrl}/auth/confirm`, data: { invited_by: u?.id } }
-      )
+    const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
+      email,
+      { redirectTo: `${appUrl}/auth/confirm`, data: { invited_by: u?.id } }
+    )
 
-      if (inviteError) {
-        // Usuario ya existente: buscar y asignar al tenant
-        if (inviteError.message.includes('already been registered')) {
-          const { data: list } = await adminSb.auth.admin.listUsers()
-          const existing = list?.users?.find(x => x.email === email)
-          if (existing) {
-            await adminSb.rpc('add_member_to_tenant', {
-              p_user_id: existing.id, p_tenant_id: m.tenant_id, p_role: newRole,
-            })
-          }
+    if (inviteError) {
+      // Usuario ya existente en Supabase Auth — asignar directamente al tenant
+      if (inviteError.message.includes('already been registered')) {
+        const { data: list, error: listError } = await adminSb.auth.admin.listUsers()
+        if (listError) {
+          console.error('[invite] listUsers error:', listError.message)
+          redirect(`/dashboard/team?error=${encodeURIComponent(listError.message)}`)
         }
-      } else if (inviteData?.user?.id) {
-        await adminSb.rpc('add_member_to_tenant', {
-          p_user_id: inviteData.user.id, p_tenant_id: m.tenant_id, p_role: newRole,
+        const existing = list?.users?.find(x => x.email === email)
+        if (!existing) {
+          redirect('/dashboard/team?error=usuario-no-encontrado')
+        }
+        const { error: rpcErr } = await adminSb.rpc('add_member_to_tenant', {
+          p_user_id: existing!.id, p_tenant_id: m.tenant_id, p_role: newRole,
         })
+        if (rpcErr) {
+          console.error('[invite] add_member_to_tenant (existing):', rpcErr.message)
+          redirect(`/dashboard/team?error=${encodeURIComponent(rpcErr.message)}`)
+        }
+      } else {
+        console.error('[invite] inviteUserByEmail error:', inviteError.message)
+        redirect(`/dashboard/team?error=${encodeURIComponent(inviteError.message)}`)
       }
-      revalidatePath('/dashboard/team')
-    } catch { /* error silencioso — el usuario verá el estado en la UI */ }
+    } else if (inviteData?.user?.id) {
+      const { error: rpcErr } = await adminSb.rpc('add_member_to_tenant', {
+        p_user_id: inviteData.user.id, p_tenant_id: m.tenant_id, p_role: newRole,
+      })
+      if (rpcErr) {
+        console.error('[invite] add_member_to_tenant (new):', rpcErr.message)
+        redirect(`/dashboard/team?error=${encodeURIComponent(rpcErr.message)}`)
+      }
+    } else {
+      console.error('[invite] inviteUserByEmail returned no user and no error')
+      redirect('/dashboard/team?error=respuesta-inesperada')
+    }
+
+    revalidatePath('/dashboard/team')
+    redirect(`/dashboard/team?invited=${encodeURIComponent(email)}`)
   }
 
   async function changeRole(formData: FormData) {
