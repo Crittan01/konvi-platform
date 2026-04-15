@@ -89,7 +89,7 @@ function Section({ icon: Icon, title, description, children, className = '' }: {
 export default async function TeamPage({
   searchParams,
 }: {
-  searchParams: { invited?: string; error?: string; tab?: string; resent?: string }
+  searchParams: { invited?: string; error?: string; tab?: string; resent?: string; role_changed?: string }
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -191,15 +191,21 @@ export default async function TeamPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
-    const newRole = formData.get('role') as string
+    const newRole    = formData.get('role') as string
+    const targetId   = formData.get('user_id') as string
     // Guard: owner es único por tenant — no puede asignarse por esta vía
     if (!['manager', 'operator'].includes(newRole)) return
     await sb.from('tenant_users')
       .update({ role: newRole })
-      .eq('user_id', formData.get('user_id') as string)
+      .eq('user_id', targetId)
       .eq('tenant_id', m.tenant_id)
       .neq('role', 'owner') // guard DB: nunca cambiar al propio owner
+    // Invalidar sesión del miembro para forzar JWT fresco con el nuevo rol.
+    // Sin esto, el usuario mantiene claims viejos hasta que el access token expire (~1h).
+    const adminSb = createAdminClient()
+    await adminSb.auth.admin.signOut(targetId, 'global')
     revalidatePath('/dashboard/team')
+    redirect('/dashboard/team?role_changed=1')
   }
 
   async function removeMember(formData: FormData) {
@@ -297,6 +303,15 @@ export default async function TeamPage({
           <div>
             <p className="font-medium">Invitación reenviada</p>
             <p className="text-xs text-emerald-400/70 mt-0.5">{decodeURIComponent(searchParams.resent)} recibirá un nuevo email con enlace de acceso.</p>
+          </div>
+        </div>
+      )}
+      {searchParams.role_changed && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-500/30 bg-blue-500/8 text-sm text-blue-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Rol actualizado</p>
+            <p className="text-xs text-blue-400/70 mt-0.5">La sesión del miembro fue cerrada. Al iniciar sesión nuevamente tendrá el nuevo rol activo en su JWT.</p>
           </div>
         </div>
       )}
