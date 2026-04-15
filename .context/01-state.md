@@ -75,7 +75,8 @@
 | Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
-| Configuración | `/dashboard/settings` | ✅ Live | Equipo RBAC, logo tenant, dirección origen, WABA, Telegram |
+| Configuración (General) | `/dashboard/settings` | ✅ Live | Datos del negocio, logo, WABA, dirección de origen, Telegram |
+| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Equipo RBAC: listado, changeRole, removeMember. Extraído de settings en Vuelta 5 |
 | Integraciones | `/dashboard/integrations` | ✅ Live | MeLi + Envia connect/disconnect |
 
 ---

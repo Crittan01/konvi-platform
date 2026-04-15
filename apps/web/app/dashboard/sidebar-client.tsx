@@ -106,13 +106,19 @@ const NAV_ITEMS: NavItem[] = [
   },
 
   // ── Configuración ✅ ──────────────────────────────────────────────────────
-  // Equipo/RBAC implementado in-page en settings/page.tsx (Sección "Equipo")
-  // Reglas de Negocio: pendiente funcional — no se expone aún
+  //  Rev. 5 — 2026-04-14 (Vuelta 5 — Cierre dominio Configuración)
+  //
+  //  General         → /settings   — datos del negocio, logo, WABA, dirección de envío, Telegram
+  //  Usuarios y Acceso → /team     — equipo RBAC: listado, changeRole, removeMember (extraído)
+  //  Integraciones   → /integrations — MeLi OAuth, Envia API key (ruta existente)
+  //
+  //  Reglas de Negocio: pendiente funcional — no existe base real. No se expone.
   {
     kind: 'group', id: 'configuracion', label: 'Configuración', icon: Settings, roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/settings',     label: 'General y Equipo',  icon: Building2, roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',     icon: Plug,      roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/settings',     label: 'General',            icon: Building2, roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/team',         label: 'Usuarios y Acceso',  icon: Users,     roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',      icon: Plug,      roles: ['owner'] },
     ],
   },
 ]

@@ -3,10 +3,14 @@ import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Settings, Users, Truck, Bell, ShieldCheck, Building2 } from 'lucide-react'
+import { Settings, Truck, Bell, ShieldCheck, Building2 } from 'lucide-react'
 import LogoUpload from './logo-upload'
 
-type TeamMember    = { user_id: string; email: string; role: string; joined_at: string }
+export const metadata = {
+  title: 'General — Configuración — Commerce Ops',
+  description: 'Configuración general del negocio: datos, logo, dirección de despacho y notificaciones.',
+}
+
 type ShippingOrigin = {
   name?: string; company?: string; street?: string; city?: string
   state?: string; postal_code?: string; country?: string; phone?: string
@@ -16,18 +20,6 @@ type Tenant = {
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
 }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
-
-const ROLE_LABELS: Record<string, string> = {
-  owner:   '👑 Owner',
-  manager: '🛠️ Manager',
-  agent:   '🎧 Agente',
-}
-
-const ROLE_COLORS: Record<string, string> = {
-  owner:   'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  manager: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  agent:   'bg-muted text-muted-foreground border-border',
-}
 
 function Section({ icon: Icon, title, description, children }: {
   icon: React.ElementType
@@ -59,22 +51,18 @@ export default async function SettingsPage() {
   const canWrite = role === 'owner' || role === 'manager'
 
   let tenant: Tenant | null = null
-  let team: TeamMember[] = []
   let notifications: NotifSetting[] = []
 
   if (tenantId) {
-    const [tenantRes, teamRes, notifRes] = await Promise.all([
+    const [tenantRes, notifRes] = await Promise.all([
       supabase.from('tenants').select('id, name, meta_waba_id, status, shipping_origin, logo_url').eq('id', tenantId).single(),
-      supabase.rpc('get_tenant_team'),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
     ])
     tenant        = tenantRes.data as Tenant
-    team          = (teamRes.data as TeamMember[]) || []
     notifications = (notifRes.data as NotifSetting[]) || []
   }
 
   const telegramConfig = notifications.find(n => n.channel === 'telegram')
-  const myUserId = user?.id
 
   // ── Server Actions ─────────────────────────────────────────────────────────
 
@@ -85,30 +73,6 @@ export default async function SettingsPage() {
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
     await sb.from('tenants').update({ name: formData.get('name') as string }).eq('id', m.tenant_id)
-    revalidatePath('/dashboard/settings')
-  }
-
-  async function changeRole(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    await sb.from('tenant_users').update({ role: formData.get('role') as string })
-      .eq('user_id', formData.get('user_id') as string).eq('tenant_id', m.tenant_id)
-    revalidatePath('/dashboard/settings')
-  }
-
-  async function removeMember(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    await sb.from('tenant_users').delete()
-      .eq('user_id', formData.get('user_id') as string)
-      .eq('tenant_id', m.tenant_id)
-      .neq('role', 'owner')
     revalidatePath('/dashboard/settings')
   }
 
@@ -154,10 +118,10 @@ export default async function SettingsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Settings className="h-5 w-5 text-primary" /> Configuración
+            <Settings className="h-5 w-5 text-primary" /> General
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5 capitalize">
-            {tenant?.name ?? '—'} · {role}
+            {tenant?.name ?? '—'} · Datos del negocio y notificaciones
           </p>
         </div>
       </div>
@@ -166,7 +130,6 @@ export default async function SettingsPage() {
       <Section icon={Building2} title="Información del negocio" description="Datos básicos de tu organización en la plataforma.">
         {isOwner ? (
           <div className="space-y-5 max-w-md">
-            {/* Logo */}
             {tenant && (
               <div className="space-y-1.5">
                 <Label className="text-xs">Logo del negocio</Label>
@@ -200,67 +163,6 @@ export default async function SettingsPage() {
         )}
       </Section>
 
-      {/* ── Equipo ── */}
-      <Section icon={Users} title="Equipo" description="Miembros con acceso a esta consola de operaciones.">
-        <div className="space-y-1">
-          {team.map(m => (
-            <div key={m.user_id}
-              className="flex flex-col sm:flex-row sm:items-center justify-between py-3 border-b border-border last:border-0 gap-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 rounded-full bg-primary/15 flex items-center justify-center text-xs font-bold text-primary">
-                    {m.email.charAt(0).toUpperCase()}
-                  </div>
-                  <p className="font-medium text-sm">{m.email}</p>
-                  {m.user_id === myUserId && (
-                    <span className="text-[11px] text-muted-foreground border border-border rounded-full px-2 py-0.5">Tú</span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground ml-9 mt-0.5">
-                  Desde {new Date(m.joined_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 ml-9 sm:ml-0">
-                {isOwner && m.user_id !== myUserId ? (
-                  <>
-                    <form action={changeRole} className="flex items-center gap-1.5">
-                      <input type="hidden" name="user_id" value={m.user_id} />
-                      <select name="role" defaultValue={m.role}
-                        className="text-xs rounded-lg border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary">
-                        <option value="owner">Owner</option>
-                        <option value="manager">Manager</option>
-                        <option value="agent">Agente</option>
-                      </select>
-                      <Button type="submit" size="sm" variant="outline" className="text-xs h-7">Cambiar</Button>
-                    </form>
-                    {m.role !== 'owner' && (
-                      <form action={removeMember}>
-                        <input type="hidden" name="user_id" value={m.user_id} />
-                        <Button type="submit" size="sm" variant="ghost"
-                          className="text-xs h-7 text-destructive hover:text-destructive hover:bg-destructive/10">
-                          Eliminar
-                        </Button>
-                      </form>
-                    )}
-                  </>
-                ) : (
-                  <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${ROLE_COLORS[m.role] ?? 'bg-muted text-muted-foreground border-border'}`}>
-                    {ROLE_LABELS[m.role] ?? m.role}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {isOwner && (
-            <p className="text-xs text-muted-foreground pt-3">
-              💡 Para invitar nuevos miembros, crea su cuenta en Supabase Auth y asígnala al tenant. (IH — pendiente de automatizar.)
-            </p>
-          )}
-        </div>
-      </Section>
-
       {/* ── Dirección de origen ── */}
       {isOwner && (
         <Section icon={Truck} title="Dirección de origen — Envíos"
@@ -283,26 +185,26 @@ export default async function SettingsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Ciudad</Label>
-                <Input name="origin_city" defaultValue={tenant?.shipping_origin?.city ?? ''} placeholder="Ciudad de México" className="h-8 text-sm" />
+                <Input name="origin_city" defaultValue={tenant?.shipping_origin?.city ?? ''} placeholder="Bogotá" className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Estado / Departamento</Label>
-                <Input name="origin_state" defaultValue={tenant?.shipping_origin?.state ?? ''} placeholder="CDMX" className="h-8 text-sm" />
+                <Label className="text-xs">Departamento</Label>
+                <Input name="origin_state" defaultValue={tenant?.shipping_origin?.state ?? ''} placeholder="Cundinamarca" className="h-8 text-sm" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Código postal</Label>
-                <Input name="origin_postal_code" defaultValue={tenant?.shipping_origin?.postal_code ?? ''} placeholder="06600" className="h-8 text-sm" />
+                <Input name="origin_postal_code" defaultValue={tenant?.shipping_origin?.postal_code ?? ''} placeholder="110111" className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">País (ISO)</Label>
-                <Input name="origin_country" defaultValue={tenant?.shipping_origin?.country ?? 'MX'} placeholder="MX" maxLength={2} className="h-8 text-sm" />
+                <Input name="origin_country" defaultValue={tenant?.shipping_origin?.country ?? 'CO'} placeholder="CO" maxLength={2} className="h-8 text-sm" />
               </div>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Teléfono de contacto</Label>
-              <Input name="origin_phone" defaultValue={tenant?.shipping_origin?.phone ?? ''} placeholder="+525512345678" className="h-8 text-sm" />
+              <Input name="origin_phone" defaultValue={tenant?.shipping_origin?.phone ?? ''} placeholder="+573001234567" className="h-8 text-sm" />
             </div>
             {tenant?.shipping_origin && (
               <p className="text-xs text-emerald-400 flex items-center gap-1">
