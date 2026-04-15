@@ -19,76 +19,73 @@ Los tenants (empresas B2B2C) venden por WhatsApp. El sistema centraliza catálog
 
 ---
 
-## 2. Tree Funcional Vigente — Tenant Console
+## 2. Tree Funcional Vigente — Tenant Console (Rev. 4 — Cierre Definitivo)
 
-Esta es la estructura funcional aprobada (rev. 2, 2026-04-14). La navegación debe calzar en este árbol.
+Esta es la estructura funcional aprobada y cerrada semánticamente (rev. 4, 2026-04-14).
+La navegación visible debe calzar exactamente en este árbol. No agregar nada sin decisión formal.
 
 ```text
 Tenant Console
 │
 ├── INICIO
-│   ├── Dashboard          ← visión operativa + negocio del tenant
+│   ├── Dashboard          ← visión operativa + negocio del tenant (umbral dinámico por tenant)
 │   └── Inbox              ← canal conversacional WhatsApp en tiempo real
 │
 ├── VENTAS
 │   ├── Pedidos            ← ciclo de vida de la venta: creación, estados, ítems
 │   ├── Contactos          ← CRM mínimo: cliente, historial, consent habeas data
-│   └── Reclamos           ← post-venta: tickets, devoluciones, disputas MeLi
+│   ├── Despachos          ← cotizaciones Envia post-pedido (paso logístico del ciclo comercial)
+│   └── Reclamos           ← post-venta: tickets, devoluciones, disputas
 │
 ├── PRODUCTOS
-│   ├── Catálogo           ← maestro de producto: info, variantes, precios base
-│   ├── Inventario         ← stock por variante, ajustes, alertas por umbral
-│   └── Media              ← assets del tenant: imágenes, documentos (Supabase Storage)
+│   ├── Catálogo           ← maestro de producto: info, variantes, precios, imágenes
+│   └── Inventario         ← stock por variante, ajustes, alertas por umbral
+│   [Media: biblioteca de assets — no visible en menú, accesible desde Catálogo]
 │
 ├── CANALES
-│   └── Mercado Libre      ← listings, sync catálogo/stock, órdenes MeLi
-│
-├── DESPACHOS
-│   ├── Cotizaciones       ← integración Envia: cotizar envíos por pedido  [✅ live]
-│   └── Órdenes de Envío   ← historial despachos, tracking, labels           [🔒 Fase 2]
+│   └── Mercado Libre      ← listings, sync catálogo/stock, órdenes MeLi      [✅ live]
+│   [Shopify, tienda custom: Fases futuras — entrarán aquí]
 │
 ├── COMPRAS
 │   └── Órdenes de Compra  ← POs a proveedores, recepciones, WAC
 │
 ├── FINANZAS
-│   └── P&L                ← ingresos, OPEX, costos, rentabilidad
+│   └── Ingresos y Gastos  ← P&L, OPEX, rentabilidad
 │
-├── IA Y AUTOMATIZACIÓN
+├── IA Y CONOCIMIENTO
 │   ├── Base de Conocimiento ← documentos que alimentan el Orchestrator       [✅ live]
-│   └── Agentes IA         ← directrices, roles, parámetros RAG del bot      [✅ live]
+│   └── Agentes IA         ← directrices, roles, parámetros del bot           [✅ live]
+│   [Automatizaciones: no existe implementación real — no exponer hasta que exista]
 │
 ├── ANALÍTICA
-│   ├── Métricas           ← KPIs de negocio: conversación, pedidos, ingresos
+│   ├── Métricas           ← KPIs de negocio
 │   └── Auditoría          ← log de acceso/cambios, exportación CSV
 │
 └── CONFIGURACIÓN
-    ├── General            ← datos del tenant, logo
-    ├── Equipo             ← usuarios, roles RBAC
-    ├── WhatsApp           ← WABA, Phone ID, templates aprobados
-    ├── Integraciones      ← MeLi OAuth, Envia — estado, connect/disconnect
-    └── Notificaciones     ← Telegram, alertas de umbral y operación
+    ├── General y Equipo   ← datos del tenant + Equipo RBAC in-page (changeRole, removeMember)
+    └── Integraciones      ← MeLi OAuth, Envia — estado, connect/disconnect
+    [Reglas de Negocio: pendiente funcional — no se expone hasta implementación]
 ```
 
-**Platform Console — Fuera de alcance actual:**
-Existe como concepto (tenants, soporte, observabilidad global) pero no tiene implementación.
-No debe ser diseñada, expandida ni planificada en esta iniciativa.
-Bloqueante: OQ-P01 sin resolver.
+**Platform Console — Fuera de alcance absoluto en esta iniciativa:**
+No tiene implementación. Bloqueante OQ-P01 sin resolver.
+
 
 ---
 
 ## 3. Cómo Leer Este Tree Sin Equivocarte
 
-| Dominio | Regla de Lectura |
-|---|---|
-| **INICIO** | No es "misc". Es la capa de operación inmediata: ver qué pasa, reaccionar, entrar a conversaciones. |
-| **VENTAS** | Flujo comercial transaccional. Pedidos + clientes + reclamos. Los *despachos físicos* NO son Ventas. |
-| **PRODUCTOS** | Core maestro del producto. Las publicaciones externas (MeLi) **no** son "Productos". |
-| **CANALES** | Proyección del catálogo hacia marketplaces externos. Nunca mezclar producto maestro con listing. |
-| **DESPACHOS** | Operación logística del envío post-pedido. No "Logística corporativa" — semántica PYME Colombia. |
-| **COMPRAS** | Reposición de inventario desde proveedores. Dominio distinto a Ventas. |
-| **FINANZAS** | Solo reportería financiera. No incluye operación ni estado transaccional. |
-| **IA Y AUTOMATIZACIÓN** | Infraestructura de IA. KB + Agentes. No llamarlo "Contenido" — error semántico. |
-| **CONFIGURACIÓN** | Setup y gobierno del tenant. No ocurre a diario. |
+| Dominio | Regla de Lectura | Decisión Rev.4 |
+|---|---|---|
+| **INICIO** | Capa de operación inmediata. No es "misc". | Sin cambio |
+| **VENTAS** | Flujo comercial completo: pedido → despachar → resolver. Despachos es un paso del ciclo, no dominio independiente. | Despachos movido a Ventas |
+| **PRODUCTOS** | Core maestro del producto. Media es biblioteca de assets del catálogo, no operativa independiente. | Media oculta del menú |
+| **CANALES** | Proyección del catálogo hacia marketplaces externos. Aunque hoy solo hay MeLi, el grupo existe para que no flote suelto. | Restaurado como grupo |
+| **COMPRAS** | Reposición de inventario. Dominio distinto a Ventas. | Sin cambio |
+| **FINANZAS** | Reportería financiera. No incluye operación ni estado transaccional. | Sin cambio |
+| **IA Y CONOCIMIENTO** | KB + Agentes. Honesto con lo que existe. No se llama "Automatización" hasta que haya algo real. | Renombrado |
+| **ANALÍTICA** | KPIs y auditoría. No ocurre a diario. | Sin cambio |
+| **CONFIGURACIÓN** | Setup y gobierno del tenant. Equipo/RBAC in-page. Reglas de Negocio pendiente. | Label corregido |
 
 ---
 

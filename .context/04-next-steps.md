@@ -1,22 +1,18 @@
 # Próximos Pasos — Estado 2026-04-14
 
-## AHORA — Vuelta 2 de Reestructuración (Pre-Fase 12)
+## AHORA — Estado Post-Vuelta 4 (Cierre Semántico del Tenant)
 
-Se realizó una revisión arquitectónica completa (Vuelta 1) el 2026-04-14.
-El diagnóstico completo está en `docs/architecture/restructuring-review.md`.
+Vuelta 4 completada el 2026-04-14. Árbol funcional cerrado semánticamente.
+Navegación Rev.4 aplicada. No quedan cambios de navegación pendientes para esta etapa.
 
-### Cambios de código pendientes (Vuelta 2):
-1. `sidebar-client.tsx` — restructurar NAV_ITEMS: sección Inicio sin accordeon, Envíos → Despachos, eliminar Central Ofertas, desbloquear ai-agents, arreglar íconos duplicados
-2. `layout.tsx` — breadcrumb en top bar desktop; top bar reducida/eliminada en mobile
-3. Crear `components/bottom-nav.tsx` — bottom navigation para mobile (Inbox, Pedidos, Contactos)
-4. `dashboard/page.tsx` — usar `tenants.low_stock_threshold` dinámico en lugar del hardcodeado `<= 5`
-5. `dashboard-client.tsx` — eliminar trends hardcodeados (`+12%`, `+5%`)
+### Pendientes de código reales (próxima sesión):
+1. **Envia Fase 2** — label, tracking, pickup: endpoints en `shipping.py` ya diseñados, no implementados
+2. **Sync bidireccional catálogo ↔ MeLi** — webhook existe, sync de vuelta al catálogo falta
+3. **Reglas de Negocio** — pendiente funcional de Configuración (no inventar pantalla hasta definir el caso de uso real: ¿márgenes?, ¿reglas de precio?, ¿horarios de atención?)
+4. **Media** — ahora invisible en menú. Pendiente: agregar link/acceso rápido desde `Catálogo` si el tenant lo necesita
 
-### Limpieza documental pendiente (Vuelta 2):
-- `.context/01-state.md` líneas 266-270: remover refs a docs eliminados
-- `docs/HANDOFF.md` "Referencias rápidas": actualizar tabla
-- Eliminar stubs vacíos en `docs/product/` y `docs/architecture/`
-- Mover scripts debug de raíz a `scripts/debug/`
+### Pendientes documentales NO urgentes:
+- `docs/architecture/restructuring-review.md` — registrar decisiones de Vuelta 4 al final del documento
 
 ## DESPUÉS — Fase 12 Platform Console (Bloqueada OQ-P01)
 
