@@ -85,7 +85,7 @@ function Section({ icon: Icon, title, description, children, className = '' }: {
 export default async function TeamPage({
   searchParams,
 }: {
-  searchParams: { invited?: string; error?: string; tab?: string }
+  searchParams: { invited?: string; error?: string; tab?: string; resent?: string }
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -207,6 +207,31 @@ export default async function TeamPage({
     revalidatePath('/dashboard/team')
   }
 
+  async function resendInvite(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') {
+      redirect('/dashboard/team?error=sin-permiso')
+    }
+    const email   = formData.get('email') as string
+    const appUrl  = process.env.APP_URL ?? 'https://commerce-ops-web.onrender.com'
+    const adminSb = createAdminClient()
+    // generateLink type 'invite' genera un nuevo link para usuario existente no confirmado
+    const { error } = await adminSb.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: { redirectTo: `${appUrl}/auth/confirm` },
+    })
+    if (error) {
+      console.error('[resend] generateLink:', error.message)
+      redirect(`/dashboard/team?error=${encodeURIComponent(error.message)}`)
+    }
+    revalidatePath('/dashboard/team')
+    redirect(`/dashboard/team?resent=${encodeURIComponent(email)}`)
+  }
+
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
@@ -241,6 +266,15 @@ export default async function TeamPage({
           <div>
             <p className="font-medium">Error al invitar</p>
             <p className="text-xs text-red-400/70 mt-0.5">{searchParams.error}</p>
+          </div>
+        </div>
+      )}
+      {searchParams.resent && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Invitación reenviada</p>
+            <p className="text-xs text-emerald-400/70 mt-0.5">{decodeURIComponent(searchParams.resent)} recibirá un nuevo email con enlace de acceso.</p>
           </div>
         </div>
       )}
@@ -306,8 +340,8 @@ export default async function TeamPage({
         </Section>
       )}
 
-      {/* Equipo activo */}
-      <Section icon={Users} title="Equipo activo" description="Miembros con acceso confirmado a esta consola.">
+      {/* Equipo */}
+      <Section icon={Users} title="Equipo" description="Miembros del equipo — confirmados y pendientes de aceptar invitación.">
         {team.length === 0 ? (
           <div className="text-center py-8">
             <Users className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
@@ -347,6 +381,16 @@ export default async function TeamPage({
                   <div className="flex items-center gap-2 pl-11 sm:pl-0">
                     {isOwner && m.user_id !== myUserId ? (
                       <>
+                        {/* Reenviar invitación — solo para pendientes */}
+                        {!m.confirmed && (
+                          <form action={resendInvite}>
+                            <input type="hidden" name="email" value={m.email} />
+                            <Button type="submit" size="sm" variant="outline"
+                              className="text-xs h-7 px-2.5 text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
+                              Reenviar
+                            </Button>
+                          </form>
+                        )}
                         <form action={changeRole} className="flex items-center gap-1.5">
                           <input type="hidden" name="user_id" value={m.user_id} />
                           <select
