@@ -218,14 +218,17 @@ export default async function TeamPage({
     const email   = formData.get('email') as string
     const appUrl  = process.env.APP_URL ?? 'https://commerce-ops-web.onrender.com'
     const adminSb = createAdminClient()
-    // generateLink type 'invite' genera un nuevo link para usuario existente no confirmado
-    const { error } = await adminSb.auth.admin.generateLink({
-      type: 'invite',
-      email,
-      options: { redirectTo: `${appUrl}/auth/confirm` },
+
+    // inviteUserByEmail para usuario NO confirmado = reenvía el email de invitación
+    // generateLink() solo retorna el link sin enviar email — NO usar para reenvío
+    const { error } = await adminSb.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${appUrl}/auth/confirm`,
     })
-    if (error) {
-      console.error('[resend] generateLink:', error.message)
+
+    // "already been registered" solo ocurre para usuarios CONFIRMADOS
+    // para no-confirmados, Supabase reenvía sin error
+    if (error && !error.message.toLowerCase().includes('already')) {
+      console.error('[resend] inviteUserByEmail:', error.message)
       redirect(`/dashboard/team?error=${encodeURIComponent(error.message)}`)
     }
     revalidatePath('/dashboard/team')
