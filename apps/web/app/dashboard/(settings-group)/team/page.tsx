@@ -263,15 +263,26 @@ export default async function TeamPage({
           </div>
         </div>
       )}
-      {searchParams.error && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-500/30 bg-red-500/8 text-sm text-red-400">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium">Error al invitar</p>
-            <p className="text-xs text-red-400/70 mt-0.5">{searchParams.error}</p>
+      {searchParams.error && (() => {
+        const raw = decodeURIComponent(searchParams.error).toLowerCase()
+        const msg = raw.includes('rate') || raw.includes('limit')
+          ? 'Demasiados intentos. Espera unos minutos antes de reenviar otra invitación. En producción, configura un SMTP propio en Supabase para eliminar este límite.'
+          : raw.includes('sin-permiso') || raw.includes('permission')
+          ? 'No tienes permiso para realizar esta acción.'
+          : raw.includes('datos-invalidos')
+          ? 'Email o rol inválido. Verifica los datos e inténtalo de nuevo.'
+          : decodeURIComponent(searchParams.error)
+
+        return (
+          <div className="flex items-start gap-3 p-4 rounded-xl border border-red-500/30 bg-red-500/8 text-sm text-red-400">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Error al procesar la acción</p>
+              <p className="text-xs text-red-400/70 mt-0.5">{msg}</p>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
       {searchParams.resent && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
