@@ -15,13 +15,11 @@ El LLM (Gemini) es asistencia controlada — nunca fuente de verdad de datos tra
 |---|---|
 | Tree funcional, dominios, qué es módulo | `.context/00-product.md` ← **OBLIGATORIO leer primero** |
 | Estado de implementación real | `.context/01-state.md` |
-| Stack con versiones reales | `.context/02-stack.md` |
+| Reality Snapshot (Esquema, RLS, DB) | `docs/tech/DATABASE.md` |
+| Reality Snapshot (API, Routers, Híbrido) | `docs/tech/API_GATEWAY.md` |
+| Reality Snapshot (Ecosistema, WhatsApp) | `docs/tech/ECOSYSTEM.md` |
 | Reglas de implementación | `.context/03-rules.md` |
 | Próximos pasos y deuda | `.context/04-next-steps.md` |
-| Política documental | `.context/05-doc-policy.md` |
-| Infra, credenciales, lecciones | `docs/HANDOFF.md` |
-| Arquitectura técnica | `docs/architecture/` |
-| Integraciones | `docs/integrations/` |
 | Reglas técnicas expandidas | `.agents/rules/` |
 | Workflows de implementación | `.agents/workflows/` |
 
