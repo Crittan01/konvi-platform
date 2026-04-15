@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
-  Bot, SendHorizonal, ShieldCheck,
+  Bot, SendHorizonal, ShieldCheck, Package, Store,
 } from 'lucide-react'
 
 export const metadata = {
@@ -275,8 +275,8 @@ export default async function IntegrationsPage({
           <div className={`px-5 py-4 border-b ${enviaConnected ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-muted/20'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center text-xl">
-                  📦
+                <div className="h-10 w-10 rounded-xl bg-orange-500/15 border border-orange-500/20 flex items-center justify-center">
+                  <Package className="h-5 w-5 text-orange-400" />
                 </div>
                 <div>
                   <p className="font-semibold text-sm">Envia</p>
@@ -343,8 +343,8 @@ export default async function IntegrationsPage({
           <div className={`px-5 py-4 border-b ${meliConnected ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-border bg-muted/20'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-yellow-400 flex items-center justify-center text-black font-bold text-xs">
-                  ML
+                <div className="h-10 w-10 rounded-xl bg-yellow-400/15 border border-yellow-400/30 flex items-center justify-center">
+                  <Store className="h-5 w-5 text-yellow-400" />
                 </div>
                 <div>
                   <p className="font-semibold text-sm">Mercado Libre</p>
@@ -476,39 +476,58 @@ export default async function IntegrationsPage({
             ) : canWrite ? (
               <div className="space-y-3">
                 {/* Pasos de configuración inline */}
-                <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 space-y-2.5">
-                  <p className="text-[11px] font-semibold text-sky-400 uppercase tracking-wide">Pasos de configuración</p>
-                  <ol className="space-y-2">
-                    <li className="flex gap-2 text-xs text-muted-foreground">
-                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
-                      <span>En Telegram busca <strong className="text-foreground font-mono">@BotFather</strong> → envía <span className="font-mono text-sky-400">/newbot</span> → dale un nombre y un username → copia el <strong className="text-foreground">Bot Token</strong> que te entrega: <strong className="text-foreground">Bot ID:Token</strong></span>
-                    </li>
-                    <li className="flex gap-2 text-xs text-muted-foreground">
-                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
-                      <span>Crea un <strong className="text-foreground">grupo privado</strong> en Telegram (ej: "Commerce Ops Alertas") y agrega el bot que creaste como miembro del grupo.</span>
-                    </li>
-                    <li className="flex gap-2 text-xs text-muted-foreground">
-                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
-                      <span>Dentro del grupo, escribe cualquier mensaje y abre el navegador y pega (reemplaza -TOKEN-) <span className="font-mono text-sky-400">"https://api.telegram.org/bot'TOKEN'/getUpdates"</span> En la respuesta JSON, busca <span className="font-mono">"El valor de "id" dentro de "chat" es el Chat ID"</span> → Si getUpdates devuelve "result": '[]' — el bot no ha recibido ningún mensaje aún. Escribe un mensaje en el grupo y vuelve a cargar la URL.</span>
-                    </li>
-                    <li className="flex gap-2 text-xs text-muted-foreground">
-                      <span className="h-4 w-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
-                      <span>Ingresa el <strong className="text-foreground">Bot Token</strong> y el <strong className="text-foreground">Chat ID</strong> en el formulario de abajo y presiona Conectar.</span>
-                    </li>
-                  </ol>
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-sky-400 uppercase tracking-wider">Pasos de configuración</p>
+                  <div className="space-y-2.5">
+
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        En Telegram busca <span className="font-mono text-foreground">@BotFather</span> → escribe <span className="font-mono text-sky-400">/newbot</span> → sigue los pasos → copia el <strong className="text-foreground font-medium">Bot Token</strong>.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Crea un <strong className="text-foreground font-medium">grupo privado</strong> y agrega el bot como miembro.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                      <div className="text-[11px] text-muted-foreground leading-relaxed space-y-1 min-w-0">
+                        <p>Abre en el navegador (reemplaza <span className="text-sky-400 font-mono">TOKEN</span>):</p>
+                        <p className="font-mono text-[10px] text-sky-300/80 bg-black/20 rounded px-2 py-1 break-all leading-normal">
+                          api.telegram.org/bot<span className="text-sky-400">TOKEN</span>/getUpdates
+                        </p>
+                        <p>En el JSON busca <span className="font-mono text-foreground">"chat"</span> → <span className="font-mono text-foreground">"id"</span>: número negativo (ej: <span className="font-mono text-sky-400">-5269497288</span>).</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-sky-500/25 text-sky-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">4</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Ingresa el <strong className="text-foreground font-medium">Bot Token</strong> y el <strong className="text-foreground font-medium">Chat ID</strong> abajo y presiona Conectar.
+                      </p>
+                    </div>
+
+                  </div>
                 </div>
 
                 {/* Formulario */}
                 <form action={saveTelegram} className="space-y-3">
                   <div className="space-y-1">
                     <Label className="text-xs" htmlFor="tg-token">Bot Token</Label>
-                    <Input id="tg-token" name="bot_token" type="password"
-                      placeholder="123456789:AAF-xYz..." required className="h-8 text-xs font-mono" />
+                    <Input id="tg-token" name="bot_token" type="text"
+                      placeholder="123456789:AAGXcUg6Tub4XLX0Hu-S3gB0fgnjRIKEZzM"
+                      required className="h-8 text-xs font-mono" />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs" htmlFor="tg-chat">Chat ID del grupo</Label>
                     <Input id="tg-chat" name="chat_id"
-                      placeholder="-1001234567890" required className="h-8 text-xs font-mono" />
+                      placeholder="-5269497288"
+                      required className="h-8 text-xs font-mono" />
                   </div>
                   <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5">
                     <Bot className="h-3.5 w-3.5" /> Conectar Telegram
