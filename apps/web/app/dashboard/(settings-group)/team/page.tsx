@@ -367,7 +367,7 @@ export default async function TeamPage({
                 </select>
               </div>
               <p className="text-xs text-muted-foreground">
-                Solo Manager u Operador. El rol Owner es único por tenant y no puede invitarse.
+                Solo Supervisor o Gestor. El rol Administrador es único por negocio y no puede invitarse.
               </p>
             </div>
             <Button type="submit" size="sm" className="gap-1.5">

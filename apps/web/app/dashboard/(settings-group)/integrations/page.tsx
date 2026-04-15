@@ -265,13 +265,12 @@ export default async function IntegrationsPage({
         </div>
       )}
 
-      {/* Grid de integraciones */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-
-        {/* ── Envia ──────────────────────────────────────────────────────── */}
-        <div className={`rounded-xl border bg-card overflow-hidden ${
-          enviaConnected ? 'border-emerald-500/30' : 'border-border'
-        }`}>
+      {/* ── Sección: Logística ─────────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <Package className="h-3.5 w-3.5" /> Logística
+        </p>
+        <div className={`rounded-xl border bg-card overflow-hidden ${enviaConnected ? 'border-emerald-500/30' : 'border-border'}`}>
           <div className={`px-5 py-4 border-b ${enviaConnected ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-muted/20'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -284,9 +283,7 @@ export default async function IntegrationsPage({
                 </div>
               </div>
               <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
-                enviaConnected
-                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                  : 'bg-muted text-muted-foreground border-border'
+                enviaConnected ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-muted text-muted-foreground border-border'
               }`}>
                 {enviaConnected ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
                 {enviaConnected ? 'Conectado' : 'Desconectado'}
@@ -295,7 +292,7 @@ export default async function IntegrationsPage({
           </div>
           <div className="px-5 py-4 space-y-3">
             <p className="text-xs text-muted-foreground">
-              Cotiza envíos con múltiples carriers (Coordinadora, Interrapidisimo, Servientrega, DHL, FedEx...), genera etiquetas y haz tracking.
+              Cotiza envíos con múltiples carriers (Coordinadora, Interrapidísimo, Servientrega, DHL, FedEx), genera etiquetas y haz tracking.
             </p>
             {enviaConnected ? (
               <div className="space-y-3">
@@ -319,27 +316,49 @@ export default async function IntegrationsPage({
                 )}
               </div>
             ) : isOwner ? (
-              <form action={saveEnviaKey} className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">API Token de Envia</Label>
-                  <Input name="api_token" type="password" placeholder="Bearer token de app.envia.com" required className="h-8 text-xs" />
+              <div className="space-y-3">
+                <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Pasos de configuración</p>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Ve a <span className="font-mono text-foreground">app.envia.com</span> → crea una cuenta o inicia sesión con tu cuenta de vendedor.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">En Envia → <strong className="text-foreground font-medium">Configuración</strong> → <strong className="text-foreground font-medium">API</strong> → genera un nuevo API Token.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Copia el token y pégalo en el campo de abajo. Usa <strong className="text-foreground font-medium">sandbox</strong> para pruebas sin cargos reales.</p>
+                    </div>
+                  </div>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" name="sandbox" className="h-3.5 w-3.5 rounded" />
-                  <span className="text-xs text-muted-foreground">Usar entorno sandbox (pruebas)</span>
-                </label>
-                <Button type="submit" size="sm" className="w-full h-8 text-xs">Conectar Envia</Button>
-              </form>
+                <form action={saveEnviaKey} className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">API Token de Envia</Label>
+                    <Input name="api_token" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required className="h-8 text-xs font-mono" />
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="sandbox" className="h-3.5 w-3.5 rounded" />
+                    <span className="text-xs text-muted-foreground">Usar entorno sandbox (pruebas)</span>
+                  </label>
+                  <Button type="submit" size="sm" className="w-full h-8 text-xs">Conectar Envia</Button>
+                </form>
+              </div>
             ) : (
-              <p className="text-xs text-muted-foreground">Solo el Owner puede configurar esta integración.</p>
+              <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
             )}
           </div>
         </div>
+      </div>
 
-        {/* ── Mercado Libre ───────────────────────────────────────────────── */}
-        <div className={`rounded-xl border bg-card overflow-hidden ${
-          meliConnected ? 'border-yellow-500/30' : 'border-border'
-        }`}>
+      {/* ── Sección: Marketplace ───────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <Store className="h-3.5 w-3.5" /> Marketplace
+        </p>
+        <div className={`rounded-xl border bg-card overflow-hidden ${meliConnected ? 'border-yellow-500/30' : 'border-border'}`}>
           <div className={`px-5 py-4 border-b ${meliConnected ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-border bg-muted/20'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -352,9 +371,7 @@ export default async function IntegrationsPage({
                 </div>
               </div>
               <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
-                meliConnected
-                  ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
-                  : 'bg-muted text-muted-foreground border-border'
+                meliConnected ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' : 'bg-muted text-muted-foreground border-border'
               }`}>
                 {meliConnected ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
                 {meliConnected ? 'Conectado' : 'Desconectado'}
@@ -382,8 +399,22 @@ export default async function IntegrationsPage({
               </div>
             ) : isOwner ? (
               <div className="space-y-3">
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-                  Serás redirigido a Mercado Libre para autorizar acceso a tu cuenta de vendedor vía OAuth 2.0.
+                <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wider">Pasos de configuración</p>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Asegúrate de tener una cuenta <strong className="text-foreground font-medium">vendedor</strong> activa en Mercado Libre Colombia.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Presiona <strong className="text-foreground font-medium">Conectar con Mercado Libre</strong> — serás redirigido a MeLi para autorizar el acceso.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Acepta los permisos → serás redirigido de vuelta y la card mostrará tu <strong className="text-foreground font-medium">Usuario MeLi ID</strong>.</p>
+                    </div>
+                  </div>
                 </div>
                 {meliAuthUrl ? (
                   <a href={meliAuthUrl} className="block">
@@ -399,10 +430,17 @@ export default async function IntegrationsPage({
                 )}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">Solo el Owner puede configurar esta integración.</p>
+              <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
             )}
           </div>
         </div>
+      </div>
+
+      {/* ── Sección: Notificaciones ────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <Bot className="h-3.5 w-3.5" /> Notificaciones
+        </p>
 
         {/* ── Telegram ────────────────────────────────────────────────────── */}
         <div className={`rounded-xl border bg-card overflow-hidden ${
@@ -535,7 +573,7 @@ export default async function IntegrationsPage({
                 </form>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">Solo Owner o Manager pueden configurar Telegram.</p>
+              <p className="text-xs text-muted-foreground">Solo Administrador o Supervisor pueden configurar Telegram.</p>
             )}
           </div>
         </div>
