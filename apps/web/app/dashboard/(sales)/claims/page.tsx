@@ -38,8 +38,8 @@ export default async function ClaimsPage() {
   // Map to flat structures
   const claims = (claimsData || []).map(c => ({
     id: c.id,
-    order: c.orders,
-    customer: c.contacts,
+    order:    Array.isArray(c.orders)   ? (c.orders[0]   ?? null) : (c.orders   ?? null),
+    customer: Array.isArray(c.contacts) ? (c.contacts[0] ?? null) : (c.contacts ?? null),
     status: c.status,
     reason: c.reason,
     requested_amount: c.requested_amount,
