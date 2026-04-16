@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  Settings, Truck, ShieldCheck, Building2, AlertCircle, SlidersHorizontal,
+  Settings, Truck, ShieldCheck, Building2, AlertCircle, SlidersHorizontal, Palette,
 } from 'lucide-react'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
@@ -126,7 +126,7 @@ export default async function SettingsPage() {
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6">
 
       {/* Header */}
       <div>
@@ -311,7 +311,7 @@ export default async function SettingsPage() {
 
           {/* Nota sobre tema oscuro/claro */}
           <div className="rounded-xl border border-border border-dashed p-4">
-            <p className="text-xs font-medium text-muted-foreground mb-1">🎨 Tema de la interfaz</p>
+            <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1.5"><Palette className="h-3.5 w-3.5" /> Tema de la interfaz</p>
             <p className="text-xs text-muted-foreground/70 leading-relaxed">
               La consola usa tema oscuro por defecto. El selector de tema claro/oscuro estará disponible como preferencia de usuario en una próxima actualización.
             </p>

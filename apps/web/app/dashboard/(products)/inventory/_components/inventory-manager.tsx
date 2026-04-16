@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useTransition } from 'react'
 import { useFormStatus } from 'react-dom'
-import { Boxes, AlertTriangle, Package, Search, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Boxes, AlertTriangle, Package, Search, X, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -250,7 +250,7 @@ export default function InventoryManager({
           {/* Umbral configurable */}
           {canWrite && (
             <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <p className="font-semibold text-sm mb-3 text-foreground">⚙️ Umbral de alerta</p>
+              <p className="font-semibold text-sm mb-3 text-foreground flex items-center gap-1.5"><SlidersHorizontal className="h-3.5 w-3.5" /> Umbral de alerta</p>
               <form action={saveThresholdAction} className="flex gap-2 items-end">
                 <div className="flex-1 space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground uppercase">Unidades mínimas</Label>
