@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-15 (rev. 19 — Vuelta 6 completada: módulo Configuración certificado, Telegram→Integraciones, flujo invitación completo)
+**Última actualización**: 2026-04-15 (rev. 20 — Vuelta 7: Configuración CERTIFICADA con 2 pendientes, flujo invite corregido implicit flow, agent→operator, JWT invalidación en changeRole)
 **Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
 **Tree funcional vigente**: `.context/00-product.md`
 
@@ -49,11 +49,11 @@
 | Navegación Sidebar | ✅ Reestructurada con Route Groups + grupos expandibles RBAC |
 | Platform Console | ❌ No existe — bloqueante OQ-P01 no resuelto |
 | Backend API | ✅ 3 servicios live + 9 routers |
-| Base de datos | ✅ 20 migraciones aplicadas |
+| Base de datos | ✅ 22 migraciones aplicadas |
 | Deploy Render | ✅ 4 servicios live |
 | Envia / Shipping | 🟡 Fase Inicial — quote + historial live. Label/tracking: Fase 2 |
 | MeLi | 🟡 Fase Inicial — OAuth + webhook + listings operativos. Sync bidireccional: pendiente |
-| Configuración | 🟡 En Certificación | General, Equipo e Integraciones bajo revisión final |
+| Configuración | 🟡 Certificado (2 pendientes) | General ✅ Equipo ✅ Integraciones ✅ — pendiente: validar invite flow en Render + SMTP propio |
 
 ---
 
@@ -77,9 +77,9 @@
 | Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
-| Configuración (General) | `/dashboard/settings` | ✅ Live | Nombre, NIT, email/tel contacto, logo, WABA (read-only), umbral en sección "Configuración Operativa" propia, selects DANE dirección origen |
-| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Admin/Supervisor/Gestor (íconos Lucide), invite→/set-password, resendInvite, changeRole, removeMember. RLS ✅ |
-| Integraciones | `/dashboard/integrations` | ✅ Live | Envia + MeLi + **Telegram** (card nueva). testTelegram lee token desde DB, feedback explícito de errores Telegram. |
+| Configuración (General) | `/dashboard/settings` | ✅ Live | Identidad: Nombre+Email+Celular obligatorios, NIT opcional, `+57` fijo, pattern `3[0-9]{9}`. Dirección origen: País bloqueado Colombia, select dpto→municipio DANE sin buscador libre |
+| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Administrador/Supervisor/Gestor (Lucide icons). Invite→/auth/confirm→/set-password. changeRole invalida JWT via admin.signOut(). Guard owner único. DB: agent→operator migrado |
+| Integraciones | `/dashboard/integrations` | ✅ Live | 3 secciones: Logística/Marketplace/Notificaciones. Instructivos inline para Envia, MeLi y Telegram. testTelegram lee token desde DB, feedback por código de error HTTP |
 
 ---
 
@@ -169,8 +169,18 @@ apps/web/app/
 | RLS `tenant_users` + `add_member_to_tenant` | 20260415000000 | ✅ |
 | `get_tenant_team` return confirmed status | 20260415010000 | ✅ |
 | `tenants.nit`, `email_contacto`, `telefono_contacto` | 20260415020000 | ✅ |
+| `tenant_users.role` `agent→operator`, `add_member_to_tenant` con roles renombrados | 20260415030000 | ✅ |
 
 > Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
+
+---
+
+## Artefactos Nuevos — Vuelta 7 (2026-04-15)
+
+| Artefacto | Ruta | Descripción |
+|-----------|------|-------------|
+| Auth Confirm page (Client) | `apps/web/app/auth/confirm/page.tsx` | **Reemplaza route.ts**. Client Component con Suspense. Maneja implicit flow (`#access_token=` via createBrowserClient), PKCE (`?code=`) y OTP (`?token_hash=`). El Route Handler no puede leer el fragment URL. |
+| Migración roles | `supabase/migrations/20260415030000_rename_agent_to_operator.sql` | Renombra `agent→operator` en `tenant_users`. Actualiza `add_member_to_tenant` para aceptar `owner/manager/operator`. **Aplicada en Supabase** |
 
 ---
 
@@ -184,35 +194,32 @@ apps/web/app/
 | Set Password page | `apps/web/app/set-password/page.tsx` | Server Component. Valida sesión activa, form contraseña (min 8 chars, confirmación), Server Action `updateUser`. Redirect a `/dashboard` |
 | Migración identidad | `supabase/migrations/20260415020000_tenant_identity_fields.sql` | Agrega `nit`, `email_contacto`, `telefono_contacto` a tabla `tenants`. **Aplicada en Supabase** |
 
-## Intervenciones Humanas Pendientes — Vuelta 6
+## Intervenciones Humanas Pendientes
 
-### IH-SUPABASE-REDIRECT — Agregar URLs permitidas en Supabase Auth
+### ~~IH-SUPABASE-REDIRECT~~ ✅ RESUELTA
+Site URL cambiado a `https://commerce-ops-web.onrender.com`. Redirect URLs incluyen `/auth/confirm` y `/set-password`. Resuelto 2026-04-15.
+
+### IH-SMTP — SMTP custom con dominio propio (pendiente dominio)
+**RESPONSABLE**: Arquitecto técnico
+**ESTADO**: Supabase default SMTP activo (3 emails/hora). Custom SMTP habilitado temporalmente con Brevo pero revertido — Gmail sender bloqueado por DMARC `p=reject`.
+**CUANDO**: Al tener dominio propio verificado.
+**PASOS**:
+1. Resend.com → Domains → verificar dominio propio
+2. Resend.com → API Keys → crear key con scope `Sending access`
+3. Supabase → Auth → SMTP → Enable Custom SMTP
+4. Host: `smtp.resend.com` | Port: `465` | User: `resend` | Password: API Key
+5. Sender: `noreply@tudominio.com`
+**CRITERIO DE ÉXITO**: Invitación llega en <1 minuto sin rate limit.
+
+### IH-INVITE-VALIDATE — Validar flujo completo de invitación en Render
 **RESPONSABLE**: Arquitecto técnico
 **PASOS**:
-1. Supabase Dashboard → Project Settings → Auth → URL Configuration
-2. En "Redirect URLs" agregar:
-   - `https://commerce-ops-web.onrender.com/auth/confirm`
-   - `https://commerce-ops-web.onrender.com/set-password`
-   - `http://localhost:3000/auth/confirm` (desarrollo)
-   - `http://localhost:3000/set-password` (desarrollo)
-3. Guardar
-
-**CRITERIO DE ÉXITO**: Usuario invitado hace clic en email → llega a `/set-password` → puede crear contraseña → accede al dashboard.
-
-### IH-SMTP — SMTP custom Supabase con Resend (ver también IH-003)
-**RESPONSABLE**: Arquitecto técnico
-**PASOS**:
-1. Resend.com → API Keys → crear key con scope `Sending access`
-2. Supabase Dashboard → Project Settings → Auth → SMTP Settings → Enable Custom SMTP
-3. Host: `smtp.resend.com` | Port: `465` | User: `resend` | Password: API Key de Resend
-4. Sender: `noreply@tudominio.com` (dominio verificado en Resend)
-5. Guardar y enviar email de prueba
-**CRITERIO DE ÉXITO**: Invitación llega en <1 minuto sin error de rate limit.
-
-### IH-TELEGRAM — Configurar bot (ver guía completa en sesión 2026-04-15)
-**RESPONSABLE**: Owner del tenant
-**RESUMEN**: @BotFather → /newbot → token → crear grupo → agregar bot → obtener Chat ID con @RawDataBot → configurar en Integraciones → Probar
-**CRITERIO DE ÉXITO**: Botón "Probar" en Integraciones → mensaje aparece en grupo Telegram.
+1. Desde `/dashboard/team` → invitar nuevo email
+2. Abrir email → clic en enlace (debe apuntar a `commerce-ops-web.onrender.com`)
+3. Browser carga `/auth/confirm#access_token=...`
+4. Client Component lee hash → detecta sesión → redirige a `/set-password`
+5. Usuario crea contraseña → accede a `/dashboard`
+**CRITERIO DE ÉXITO**: Flujo completo sin errores en Render (no localhost).
 
 ---
 
@@ -241,6 +248,12 @@ apps/web/app/
 | ~~Roles con emojis (no renderizan en Linux/algunos browsers)~~ | ✅ Resuelto Vuelta 6 — íconos Lucide (Crown, Briefcase, Headphones) |
 | ~~Roles con nombres genéricos (Owner/Manager/Operador)~~ | ✅ Resuelto Vuelta 6 — Administrador/Supervisor/Gestor (valores DB sin cambio) |
 | ~~Flujo invitación sin página set-password~~ | ✅ Resuelto Vuelta 6 — /auth/confirm route + /set-password page |
+| ~~Roles DB: valor 'agent' obsoleto~~ | ✅ Resuelto Vuelta 7 — migración 20260415030000 renombra agent→operator en tenant_users y add_member_to_tenant |
+| ~~14 archivos frontend con fallback `?? 'agent'`~~ | ✅ Resuelto Vuelta 7 — todos actualizados a `?? 'operator'` |
+| ~~JWT stale claims tras cambio de rol~~ | ✅ Resuelto Vuelta 7 — changeRole llama admin.signOut(userId,'global') para invalidar JWT activo |
+| ~~`/auth/confirm` Route Handler no recibe `#access_token=`~~ | ✅ Resuelto Vuelta 7 — route.ts eliminado; page.tsx Client Component con createBrowserClient lee hash automáticamente |
+| SMTP Supabase Free (3 emails/hora) → configurar SMTP propio con Resend | Alta — requiere dominio propio. Gmail bloqueado por DMARC p=reject |
+| Validar flujo de invite completo en Render | Alta — IH-INVITE-VALIDATE pendiente |
 
 ---
 
@@ -249,8 +262,8 @@ apps/web/app/
 | Bloqueante | Tipo | Impacto |
 |---|---|---|
 | OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea Fase 12 — sin impacto en Tenant Console |
-| IH-SMTP — SMTP custom Supabase con Resend | Intervención humana pendiente | Rate limit 3 emails/hora en Free bloquea invitaciones. Ver IH-003. |
-| Supabase Redirect URLs — agregar `/auth/confirm` y `/set-password` | Intervención humana pendiente | Sin esto el flujo de invitación falla al hacer click en el email |
+| IH-SMTP — SMTP custom con Resend (requiere dominio propio) | Intervención humana pendiente | Rate limit 3 emails/hora en Free. Gmail sender rechazado por DMARC. Pendiente hasta tener dominio. |
+| IH-INVITE-VALIDATE — Validar flujo invitación completo en Render | Intervención humana pendiente | Confirmar que page.tsx Client Component lee #access_token= correctamente en producción |
 
 ---
 
