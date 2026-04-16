@@ -5,7 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import {
   MessageSquare, User, Bot, Phone, Clock, AlertCircle, Send,
   Search, X, ChevronLeft, Filter, Info, CheckCheck, Check,
-  Circle, Wifi,
+  Circle, Wifi, Lock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -421,16 +421,16 @@ export default function InboxPage() {
                     {sending ? <span className="text-xs animate-pulse">…</span> : <Send className="h-4 w-4" />}
                   </Button>
                 </div>
-                <p className="text-[11px] text-amber-400/70 text-center">
-                  👤 Modo agente — el bot no responderá
+                <p className="text-[11px] text-amber-400/70 text-center flex items-center justify-center gap-1">
+                  <User className="h-3 w-3" /> Modo agente — el bot no responderá
                 </p>
               </div>
             ) : (
               <div className="p-3 border-t border-border bg-card/50">
-                <p className="text-xs text-muted-foreground text-center">
+                <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-1">
                   {selectedConv.status === 'bot_active'
-                    ? '🤖 El bot está respondiendo automáticamente'
-                    : '🔒 Conversación cerrada'}
+                    ? <><Bot className="h-3.5 w-3.5" /> El bot está respondiendo automáticamente</>
+                    : <><Lock className="h-3.5 w-3.5" /> Conversación cerrada</>}
                 </p>
               </div>
             )}

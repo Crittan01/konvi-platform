@@ -24,7 +24,7 @@ Un módulo se considera **certificado** cuando:
 | # | Módulo | Ruta | Razón de orden | Estado |
 |---|--------|------|----------------|--------|
 | 1 | **Dashboard** | `/dashboard` | Primera pantalla post-login. Read-only. Base para validar queries paralelas y umbral dinámico. | ✅ Certificado |
-| 2 | **Inbox** | `/dashboard/inbox` | Canal principal del negocio. WhatsApp es el producto. Bloquea toda operación real. | 🔲 Pendiente |
+| 2 | **Inbox** | `/dashboard/inbox` | Canal principal del negocio. WhatsApp es el producto. Bloquea toda operación real. | ✅ Certificado |
 | 3 | **Contactos** | `/dashboard/contacts` | CRM base. Pedidos e Inbox dependen de contactos. Consent Habeas Data crítico. | 🔲 Pendiente |
 | 4 | **Pedidos** | `/dashboard/orders` | Transacción central del tenant. Depende de Catálogo + Contactos. | 🔲 Pendiente |
 | 5 | **Catálogo** | `/dashboard/catalog` | Maestro de producto. Pedidos, Inventario y MeLi dependen de él. | 🔲 Pendiente |
