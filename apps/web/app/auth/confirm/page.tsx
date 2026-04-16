@@ -52,7 +52,13 @@ function AuthConfirmInner() {
         }
 
         // Implicit flow (invite) — createBrowserClient parsea #access_token automáticamente.
-        // onAuthStateChange dispara SIGNED_IN cuando la sesión queda establecida.
+        // onAuthStateChange dispara SIGNED_IN cuando la sesión del invitado queda establecida.
+        //
+        // IMPORTANTE: NO usar getSession() como atajo cuando hay #access_token en la URL.
+        // Si el admin está logueado, getSession() devuelve su sesión antes de que el cliente
+        // procese el hash del invitado → set-password mostraría la cuenta del admin.
+        const hasHashToken = typeof window !== 'undefined' && window.location.hash.includes('access_token')
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
           if (event === 'SIGNED_IN' && session) {
             subscription.unsubscribe()
@@ -60,12 +66,14 @@ function AuthConfirmInner() {
           }
         })
 
-        // Dispara la lectura del fragment; si ya hay sesión activa, resolves inmediato
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session) {
-          subscription.unsubscribe()
-          router.replace(next)
-          return
+        // Solo usar sesión existente si NO hay token nuevo en el hash
+        if (!hasHashToken) {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session) {
+            subscription.unsubscribe()
+            router.replace(next)
+            return
+          }
         }
 
         // Si en 5s no hubo SIGNED_IN → el token expiró o fue inválido
