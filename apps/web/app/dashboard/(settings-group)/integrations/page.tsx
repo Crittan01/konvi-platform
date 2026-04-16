@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
-  Bot, SendHorizonal, ShieldCheck, Package, Store,
+  Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
 } from 'lucide-react'
 
 export const metadata = {
@@ -205,7 +205,7 @@ export default async function IntegrationsPage({
   // ── UI ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-5 max-w-5xl">
+    <div className="space-y-5">
 
       {/* Header */}
       <div>
@@ -264,6 +264,9 @@ export default async function IntegrationsPage({
           </div>
         </div>
       )}
+
+      {/* ── Grid 2×2: Logística + Marketplace ─────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
       {/* ── Sección: Logística ─────────────────────────────────────────────── */}
       <div className="space-y-3">
@@ -436,6 +439,11 @@ export default async function IntegrationsPage({
         </div>
       </div>
 
+      </div>{/* ── /grid Logística+Marketplace ───────────────────────────────────── */}
+
+      {/* ── Grid 2×2: Notificaciones + Próximamente ───────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
       {/* ── Sección: Notificaciones ────────────────────────────────────────── */}
       <div className="space-y-3">
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -581,8 +589,13 @@ export default async function IntegrationsPage({
       </div>
 
       {/* Próximas integraciones */}
-      <div className="rounded-xl border border-dashed border-border p-5">
-        <p className="text-sm font-medium text-muted-foreground mb-3">🔜 Próximamente</p>
+      <div className="rounded-xl border border-dashed border-border p-5 flex flex-col justify-between">
+        <div>
+          <p className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" /> Próximamente
+          </p>
+          <p className="text-xs text-muted-foreground/70 mb-3">Nuevos conectores en desarrollo.</p>
+        </div>
         <div className="flex flex-wrap gap-2">
           {['Shopify', 'WooCommerce', 'Zapier / Make', 'Stripe'].map(name => (
             <span key={name} className="px-3 py-1 rounded-lg border border-border text-xs text-muted-foreground">
@@ -591,6 +604,8 @@ export default async function IntegrationsPage({
           ))}
         </div>
       </div>
+
+      </div>{/* ── /grid Notificaciones+Próximamente ─────────────────────────────── */}
     </div>
   )
 }

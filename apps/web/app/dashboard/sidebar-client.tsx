@@ -9,7 +9,7 @@ import {
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
   Tag, Wallet, DollarSign, AlertCircle, Bot,
-  Store,
+  Store, Crown, Briefcase, Headphones,
 } from 'lucide-react'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -129,10 +129,10 @@ function hasAccess(roles: string[], role: string): boolean {
   return roles.length === 0 || roles.includes(role)
 }
 
-const ROLE_BADGE: Record<string, { label: string; color: string }> = {
-  owner:    { label: '👑 Owner',    color: 'bg-amber-400/20 text-amber-200 border border-amber-400/30' },
-  manager:  { label: '🛠️ Manager',  color: 'bg-white/15 text-white/80 border border-white/20' },
-  operator: { label: '🎧 Operador', color: 'bg-white/10 text-white/60 border border-white/15' },
+const ROLE_BADGE: Record<string, { label: string; icon: React.ElementType; color: string }> = {
+  owner:    { label: 'Administrador', icon: Crown,      color: 'bg-amber-400/20 text-amber-200 border border-amber-400/30' },
+  manager:  { label: 'Supervisor',    icon: Briefcase,  color: 'bg-white/15 text-white/80 border border-white/20' },
+  operator: { label: 'Gestor',        icon: Headphones, color: 'bg-white/10 text-white/60 border border-white/15' },
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -325,7 +325,8 @@ export default function SidebarClient({
         {/* ── Footer: usuario + rol + logout ─────────────────────────────── */}
         <div className="shrink-0 border-t border-border/40 p-3 space-y-2">
           <div className="px-1">
-            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
+            <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
+              <badge.icon className="h-3 w-3 shrink-0" />
               {badge.label}
             </span>
           </div>

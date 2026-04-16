@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2, Package, ChevronDown, ChevronUp, Check } from 'lucide-react'
+import { Loader2, Package, ChevronDown, ChevronUp, Check, MapPin, Box } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,12 +36,12 @@ function AddressFields({
   prefix, title, defaults = {},
 }: {
   prefix: string
-  title: string
+  title: React.ReactNode
   defaults?: Record<string, string>
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="text-sm font-medium text-foreground flex items-center gap-1.5">{title}</p>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label className="text-xs">Nombre</Label>
@@ -230,18 +230,18 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Origen */}
-            <AddressFields prefix="origin" title="📦 Origen (desde dónde envías)" defaults={originDefaults} />
+            <AddressFields prefix="origin" title={<><Package className="h-4 w-4 shrink-0" /> Origen — desde dónde envías</>} defaults={originDefaults} />
 
             <hr className="border-border" />
 
             {/* Destino */}
-            <AddressFields prefix="dest" title="📍 Destino (a dónde envías)" />
+            <AddressFields prefix="dest" title={<><MapPin className="h-4 w-4 shrink-0" /> Destino — a dónde envías</>} />
 
             <hr className="border-border" />
 
             {/* Paquete */}
             <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">📐 Paquete</p>
+              <p className="text-sm font-medium text-foreground flex items-center gap-1.5"><Box className="h-4 w-4 shrink-0" /> Paquete</p>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <Label className="text-xs">Peso (kg)</Label>
