@@ -9,9 +9,14 @@
  *   nunca lo recibe. Solo el browser puede leer window.location.hash.
  *
  * Flujos manejados:
- *   1. Implicit (invite):  #access_token=... → createBrowserClient lo parsea automáticamente
+ *   1. Implicit (invite):  #access_token=... → parseado explícitamente con setSession()
  *   2. PKCE:               ?code=...         → exchangeCodeForSession
  *   3. OTP / magic link:   ?token_hash=...   → verifyOtp
+ *
+ * Por qué setSession() y no detectSessionInUrl/onAuthStateChange:
+ *   createBrowserClient puede disparar SIGNED_IN durante su inicialización,
+ *   antes de que onAuthStateChange esté suscrito → race condition → timeout falso.
+ *   setSession() es explícito y síncrono: no depende de eventos ni de timing.
  */
 
 import { Suspense, useEffect, useState } from 'react'
@@ -35,57 +40,43 @@ function AuthConfirmInner() {
 
     async function confirm() {
       try {
+        // ── 1. PKCE flow (password reset, etc.) ──────────────────────────
         if (code) {
-          // PKCE flow (password reset, otros)
           const { error } = await supabase.auth.exchangeCodeForSession(code)
           if (error) throw error
           router.replace(next)
           return
         }
 
+        // ── 2. OTP / magic link ───────────────────────────────────────────
         if (tokenHash && type) {
-          // OTP / magic link
           const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
           if (error) throw error
           router.replace(next)
           return
         }
 
-        // Implicit flow (invite) — createBrowserClient parsea #access_token automáticamente.
-        // onAuthStateChange dispara SIGNED_IN cuando la sesión del invitado queda establecida.
-        //
-        // IMPORTANTE: NO usar getSession() como atajo cuando hay #access_token en la URL.
-        // Si el admin está logueado, getSession() devuelve su sesión antes de que el cliente
-        // procese el hash del invitado → set-password mostraría la cuenta del admin.
-        const hasHashToken = typeof window !== 'undefined' && window.location.hash.includes('access_token')
+        // ── 3. Implicit flow (invite) ─────────────────────────────────────
+        // Parseamos el hash explícitamente y llamamos setSession().
+        // NO usamos onAuthStateChange ni detectSessionInUrl porque createBrowserClient
+        // puede disparar SIGNED_IN antes de que suscribamos → race condition.
+        const hash = typeof window !== 'undefined' ? window.location.hash : ''
+        if (hash.includes('access_token=')) {
+          const params       = new URLSearchParams(hash.substring(1)) // quitar '#'
+          const accessToken  = params.get('access_token')
+          const refreshToken = params.get('refresh_token')
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-          if (event === 'SIGNED_IN' && session) {
-            subscription.unsubscribe()
-            router.replace(next)
-          }
-        })
-
-        // Solo usar sesión existente si NO hay token nuevo en el hash
-        if (!hasHashToken) {
-          const { data: { session } } = await supabase.auth.getSession()
-          if (session) {
-            subscription.unsubscribe()
+          if (accessToken && refreshToken) {
+            const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+            if (error) throw error
             router.replace(next)
             return
           }
         }
 
-        // Si en 5s no hubo SIGNED_IN → el token expiró o fue inválido
-        const timeout = setTimeout(() => {
-          subscription.unsubscribe()
-          setError('El enlace ha expirado o ya fue utilizado. Solicita una nueva invitación al Administrador.')
-        }, 5000)
+        // ── 4. Sin parámetros válidos ─────────────────────────────────────
+        setError('El enlace ha expirado o ya fue utilizado. Solicita una nueva invitación al Administrador.')
 
-        return () => {
-          clearTimeout(timeout)
-          subscription.unsubscribe()
-        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Error desconocido'
         setError(msg)
