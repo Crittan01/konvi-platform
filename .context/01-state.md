@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-15 (rev. 20 — Vuelta 7: Configuración CERTIFICADA con 2 pendientes, flujo invite corregido implicit flow, agent→operator, JWT invalidación en changeRole)
+**Última actualización**: 2026-04-15 (rev. 21 — Vuelta 8: flujo invite VALIDADO en Render ✅, setSession() explícito para implicit flow, UX polish emojis→Lucide, sidebar Administrador/Supervisor/Gestor, Integraciones 2×2)
 **Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
 **Tree funcional vigente**: `.context/00-product.md`
 
@@ -53,7 +53,7 @@
 | Deploy Render | ✅ 4 servicios live |
 | Envia / Shipping | 🟡 Fase Inicial — quote + historial live. Label/tracking: Fase 2 |
 | MeLi | 🟡 Fase Inicial — OAuth + webhook + listings operativos. Sync bidireccional: pendiente |
-| Configuración | 🟡 Certificado (2 pendientes) | General ✅ Equipo ✅ Integraciones ✅ — pendiente: validar invite flow en Render + SMTP propio |
+| Configuración | ✅ Certificado | General ✅ Equipo ✅ Integraciones ✅ — flujo invite validado en Render. Pendiente solo: SMTP propio cuando haya dominio |
 
 ---
 
@@ -78,7 +78,7 @@
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
 | Configuración (General) | `/dashboard/settings` | ✅ Live | Identidad: Nombre+Email+Celular obligatorios, NIT opcional, `+57` fijo, pattern `3[0-9]{9}`. Dirección origen: País bloqueado Colombia, select dpto→municipio DANE sin buscador libre |
-| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Administrador/Supervisor/Gestor (Lucide icons). Invite→/auth/confirm→/set-password. changeRole invalida JWT via admin.signOut(). Guard owner único. DB: agent→operator migrado |
+| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Administrador/Supervisor/Gestor (Lucide icons). Invite→/auth/confirm→/set-password **validado en Render**. changeRole invalida JWT via admin.signOut(). Guard owner único. DB: agent→operator migrado |
 | Integraciones | `/dashboard/integrations` | ✅ Live | 3 secciones: Logística/Marketplace/Notificaciones. Instructivos inline para Envia, MeLi y Telegram. testTelegram lee token desde DB, feedback por código de error HTTP |
 
 ---
@@ -175,11 +175,17 @@ apps/web/app/
 
 ---
 
+## Artefactos Nuevos — Vuelta 8 (2026-04-15)
+
+| Artefacto | Ruta | Descripción |
+|-----------|------|-------------|
+| Auth Confirm (fix final) | `apps/web/app/auth/confirm/page.tsx` | Hash capturado ANTES de `createClient()`. Implicit flow usa `setSession({access_token, refresh_token})` explícito — sin race condition con `onAuthStateChange`/`SIGNED_IN`. **Flujo validado en Render con usuario real.** |
+
 ## Artefactos Nuevos — Vuelta 7 (2026-04-15)
 
 | Artefacto | Ruta | Descripción |
 |-----------|------|-------------|
-| Auth Confirm page (Client) | `apps/web/app/auth/confirm/page.tsx` | **Reemplaza route.ts**. Client Component con Suspense. Maneja implicit flow (`#access_token=` via createBrowserClient), PKCE (`?code=`) y OTP (`?token_hash=`). El Route Handler no puede leer el fragment URL. |
+| Auth Confirm page (Client) | `apps/web/app/auth/confirm/page.tsx` | **Reemplaza route.ts**. Client Component con Suspense. PKCE (`?code=`), OTP (`?token_hash=`), Implicit (`#access_token=` → `setSession()`). |
 | Migración roles | `supabase/migrations/20260415030000_rename_agent_to_operator.sql` | Renombra `agent→operator` en `tenant_users`. Actualiza `add_member_to_tenant` para aceptar `owner/manager/operator`. **Aplicada en Supabase** |
 
 ---
@@ -190,7 +196,7 @@ apps/web/app/
 |-----------|------|-------------|
 | Dataset DANE | `apps/web/lib/dane-colombia.ts` | 33 departamentos + 1.103 municipios DIVIPOLA. Función `getMunicipiosByDpto(codigo)` |
 | ShippingOriginForm | `apps/web/app/dashboard/(settings-group)/settings/shipping-origin-form.tsx` | Client Component con select dependiente dpto→municipio. Guarda nombre (no código DANE) para compatibilidad Envia |
-| Auth Confirm route | `apps/web/app/auth/confirm/route.ts` | Route handler GET. Maneja `token_hash` (OTP) y `code` (PKCE). Param `?next=/ruta` para redirect post-verificación |
+| ~~Auth Confirm route~~ | ~~`apps/web/app/auth/confirm/route.ts`~~ | **ELIMINADO en Vuelta 7** — Route Handler no recibe URL fragments. Reemplazado por `page.tsx` Client Component |
 | Set Password page | `apps/web/app/set-password/page.tsx` | Server Component. Valida sesión activa, form contraseña (min 8 chars, confirmación), Server Action `updateUser`. Redirect a `/dashboard` |
 | Migración identidad | `supabase/migrations/20260415020000_tenant_identity_fields.sql` | Agrega `nit`, `email_contacto`, `telefono_contacto` a tabla `tenants`. **Aplicada en Supabase** |
 
@@ -211,15 +217,10 @@ Site URL cambiado a `https://commerce-ops-web.onrender.com`. Redirect URLs inclu
 5. Sender: `noreply@tudominio.com`
 **CRITERIO DE ÉXITO**: Invitación llega en <1 minuto sin rate limit.
 
-### IH-INVITE-VALIDATE — Validar flujo completo de invitación en Render
-**RESPONSABLE**: Arquitecto técnico
-**PASOS**:
-1. Desde `/dashboard/team` → invitar nuevo email
-2. Abrir email → clic en enlace (debe apuntar a `commerce-ops-web.onrender.com`)
-3. Browser carga `/auth/confirm#access_token=...`
-4. Client Component lee hash → detecta sesión → redirige a `/set-password`
-5. Usuario crea contraseña → accede a `/dashboard`
-**CRITERIO DE ÉXITO**: Flujo completo sin errores en Render (no localhost).
+### ~~IH-INVITE-VALIDATE~~ ✅ RESUELTA — 2026-04-15
+Flujo completo validado en Render con usuario real (`crittan01@gmail.com`):
+- Invite enviado → email recibido → clic → `/auth/confirm#access_token=...` → `setSession()` → `/set-password` → contraseña creada → `/dashboard`.
+- Fix clave: hash leído ANTES de `createClient()` + `setSession()` explícito (sin race condition con `onAuthStateChange`).
 
 ---
 
@@ -251,9 +252,10 @@ Site URL cambiado a `https://commerce-ops-web.onrender.com`. Redirect URLs inclu
 | ~~Roles DB: valor 'agent' obsoleto~~ | ✅ Resuelto Vuelta 7 — migración 20260415030000 renombra agent→operator en tenant_users y add_member_to_tenant |
 | ~~14 archivos frontend con fallback `?? 'agent'`~~ | ✅ Resuelto Vuelta 7 — todos actualizados a `?? 'operator'` |
 | ~~JWT stale claims tras cambio de rol~~ | ✅ Resuelto Vuelta 7 — changeRole llama admin.signOut(userId,'global') para invalidar JWT activo |
-| ~~`/auth/confirm` Route Handler no recibe `#access_token=`~~ | ✅ Resuelto Vuelta 7 — route.ts eliminado; page.tsx Client Component con createBrowserClient lee hash automáticamente |
-| SMTP Supabase Free (3 emails/hora) → configurar SMTP propio con Resend | Alta — requiere dominio propio. Gmail bloqueado por DMARC p=reject |
-| Validar flujo de invite completo en Render | Alta — IH-INVITE-VALIDATE pendiente |
+| ~~`/auth/confirm` Route Handler no recibe `#access_token=`~~ | ✅ Resuelto Vuelta 7/8 — route.ts eliminado; page.tsx captura hash antes de createClient(), usa setSession() explícito. Validado en Render. |
+| ~~Validar flujo de invite completo en Render~~ | ✅ Resuelto Vuelta 8 — validado con usuario real. Ver IH-INVITE-VALIDATE resuelta. |
+| ~~Emojis en UI no renderizan en Linux/algunos browsers~~ | ✅ Resuelto Vuelta 8 — todos reemplazados por iconos Lucide (sidebar, shipping, inventory, settings, integrations) |
+| SMTP Supabase Free (3 emails/hora) → configurar SMTP propio con Resend | Media — requiere dominio propio. Gmail bloqueado por DMARC p=reject. No bloquea operación actual. |
 
 ---
 
@@ -262,8 +264,7 @@ Site URL cambiado a `https://commerce-ops-web.onrender.com`. Redirect URLs inclu
 | Bloqueante | Tipo | Impacto |
 |---|---|---|
 | OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea Fase 12 — sin impacto en Tenant Console |
-| IH-SMTP — SMTP custom con Resend (requiere dominio propio) | Intervención humana pendiente | Rate limit 3 emails/hora en Free. Gmail sender rechazado por DMARC. Pendiente hasta tener dominio. |
-| IH-INVITE-VALIDATE — Validar flujo invitación completo en Render | Intervención humana pendiente | Confirmar que page.tsx Client Component lee #access_token= correctamente en producción |
+| IH-SMTP — SMTP custom con Resend (requiere dominio propio) | Intervención humana pendiente | Rate limit 3 emails/hora en Free. Gmail sender rechazado por DMARC. Pendiente hasta tener dominio. No bloquea operación actual. |
 
 ---
 
