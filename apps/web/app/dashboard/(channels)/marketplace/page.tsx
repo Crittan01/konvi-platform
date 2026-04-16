@@ -93,7 +93,7 @@ export default async function MarketplacePage() {
     }).filter(Boolean) as VariationOption[]
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto flex-1 h-full overflow-auto">
+    <div className="space-y-6 max-w-7xl flex-1 h-full overflow-auto">
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight text-primary">Mercado Libre</h1>
         <p className="text-muted-foreground max-w-3xl">

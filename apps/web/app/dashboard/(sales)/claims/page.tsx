@@ -46,7 +46,7 @@ export default async function ClaimsPage() {
   }))
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto flex-1 h-full overflow-hidden flex flex-col">
+    <div className="space-y-6 max-w-7xl flex-1 h-full overflow-hidden flex flex-col">
       <div className="flex flex-col gap-2 flex-none">
         <h1 className="text-3xl font-bold tracking-tight text-red-600">Centro de Reclamos</h1>
         <p className="text-muted-foreground w-full max-w-3xl">

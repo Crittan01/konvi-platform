@@ -204,7 +204,7 @@ export default async function CatalogPage() {
   // ── UI ──────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 max-w-[1400px]">
+    <div className="space-y-6 max-w-7xl">
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
