@@ -10,6 +10,7 @@ export default async function MarketplacePage() {
 
   if (!user) redirect('/login')
 
+  // getUser() ya validó el usuario. getSession() solo extrae el token para llamar la API interna.
   const { data: { session } } = await supabase.auth.getSession()
   const meta     = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
@@ -95,7 +96,7 @@ export default async function MarketplacePage() {
   return (
     <div className="space-y-6 max-w-7xl flex-1 h-full overflow-auto">
       <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight text-primary">Mercado Libre</h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">Mercado Libre</h1>
         <p className="text-muted-foreground max-w-3xl">
           Gestión de tus publicaciones en Mercado Libre. Los datos vienen directamente de tu cuenta MeLi.
           Vincula cada publicación con una variante de tu catálogo para mantener el stock sincronizado automáticamente.

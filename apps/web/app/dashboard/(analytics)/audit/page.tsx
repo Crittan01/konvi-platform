@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Download, ClipboardList } from 'lucide-react'
@@ -48,6 +49,7 @@ export default async function AuditPage({
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'

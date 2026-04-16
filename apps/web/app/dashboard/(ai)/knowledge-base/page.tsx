@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,6 +38,7 @@ export default async function KnowledgeBasePage({
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'

@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
+import { AlertCircle } from 'lucide-react'
 import ClaimsManager from './_components/claims-manager'
 
 export default async function ClaimsPage() {
@@ -20,15 +21,16 @@ export default async function ClaimsPage() {
     .from('claims')
     .select(`
       id, status, reason, requested_amount, resolution_notes, created_at,
-      orders ( id, display_id, total_amount ),
-      contacts ( id, first_name, last_name, email )
+      orders ( id, total_amount ),
+      contacts ( id, name, phone )
     `)
+    .eq('tenant_id', tenantId ?? '')
     .order('created_at', { ascending: false })
 
   // Fetch recent orders for the "New Claim" selector
   const { data: ordersData } = await supabase
     .from('orders')
-    .select('id, display_id, status, total_amount, contact_id')
+    .select('id, status, total_amount, contact_id')
     .eq('tenant_id', tenantId ?? '')
     .order('created_at', { ascending: false })
     .limit(100)
@@ -48,7 +50,9 @@ export default async function ClaimsPage() {
   return (
     <div className="space-y-6 max-w-7xl flex-1 h-full overflow-hidden flex flex-col">
       <div className="flex flex-col gap-2 flex-none">
-        <h1 className="text-3xl font-bold tracking-tight text-red-600">Centro de Reclamos</h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+          <AlertCircle className="h-5 w-5 text-primary" /> Centro de Reclamos
+        </h1>
         <p className="text-muted-foreground w-full max-w-3xl">
           Visualiza, investiga y resuelve disputas, devoluciones y solicitudes de garantías ligadas a pedidos existentes.
         </p>

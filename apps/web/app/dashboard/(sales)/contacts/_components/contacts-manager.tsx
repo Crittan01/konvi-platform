@@ -91,8 +91,8 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {[
             { value: 'all', label: 'Todos' },
-            { value: 'yes', label: '✅ Con consent.' },
-            { value: 'no',  label: '⚠️ Sin consent.' },
+            { value: 'yes', label: 'Con consent.' },
+            { value: 'no',  label: 'Sin consent.' },
           ].map(opt => (
             <button
               key={opt.value}

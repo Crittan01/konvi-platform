@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Bot, Save, ShieldAlert, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -9,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 export default async function AiAgentsPage() {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const canWrite = ['owner', 'manager'].includes(meta.role ?? '')
@@ -34,7 +36,7 @@ export default async function AiAgentsPage() {
 
     const name = (formData.get('name') as string).trim() || 'Bot Asistente'
     const role_description = (formData.get('role_description') as string).trim() || 'Asistente de ventas.'
-    const strict_guardrails = formData.get('strict_guardrails') === 'true'
+    const strict_guardrails = formData.get('strict_guardrails') !== null
 
     await sb.from('ai_agents').upsert({
       tenant_id: m.tenant_id,
@@ -59,7 +61,7 @@ export default async function AiAgentsPage() {
           </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          Ajusta la personalidad, rol y los límites estrcitos de tu asistente virtual de WhatsApp.
+          Ajusta la personalidad, rol y los límites estrictos de tu asistente virtual de WhatsApp.
         </p>
       </div>
 
@@ -119,21 +121,13 @@ export default async function AiAgentsPage() {
             </div>
             <div className="flex items-center gap-2">
                <Label htmlFor="strict_guardrails" className="text-sm">Activado</Label>
-               <input 
-                 type="hidden" 
-                 name="strict_guardrails" 
-                 value={canWrite ? "true" : agent.strict_guardrails ? "true" : "false"}
-               />
                <input
                  type="checkbox"
-                 id="strict_guardrails_ui"
+                 id="strict_guardrails"
+                 name="strict_guardrails"
                  defaultChecked={agent.strict_guardrails}
                  disabled={!canWrite}
-                 onChange={(e) => {
-                   const hiddenInput = e.target.previousElementSibling as HTMLInputElement;
-                   hiddenInput.value = e.target.checked ? "true" : "false";
-                 }}
-                 className="h-4 w-4 accent-primary" 
+                 className="h-4 w-4 accent-primary"
                />
             </div>
           </div>
