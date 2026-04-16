@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-15 (rev. 20)
+# Handoff — Estado del Proyecto al 2026-04-15 (rev. 21)
 
 Este documento es el punto de entrada para retomar trabajo en infra y operación.
 **Leer `.context/00-product.md` y `.context/01-state.md` antes si el foco es funcional o de código.**
@@ -42,7 +42,7 @@ El LLM (Gemini) es asistencia controlada, nunca fuente de verdad de datos operac
 
 Ver tabla completa → `.context/01-state.md`
 
-Resumen: 18 módulos live. Configuración certificada con 2 pendientes: validar invite flow en Render + SMTP propio cuando haya dominio.
+Resumen: 18 módulos live. Configuración ✅ certificada. Flujo invite validado en Render con usuario real. Pendiente solo SMTP propio cuando haya dominio.
 
 ---
 
@@ -85,7 +85,20 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 ---
 
-## Trabajo de la última sesión (2026-04-15) — rev. 20
+## Trabajo de la última sesión (2026-04-15) — rev. 21
+
+### Vuelta 8 — Flujo Invite Validado + UX Polish
+
+| Área | Cambio | Archivos |
+|---|---|---|
+| Auth | Hash leído ANTES de `createClient()` — evita borrado por `detectSessionInUrl` | `auth/confirm/page.tsx` |
+| Auth | Implicit flow usa `setSession({access_token, refresh_token})` explícito — sin race condition | `auth/confirm/page.tsx` |
+| Auth | **Flujo completo validado en Render con usuario real** — invite → email → setSession → /set-password → dashboard | — |
+| UX Sidebar | `ROLE_BADGE`: emojis 👑🛠️🎧 → Crown/Briefcase/Headphones. Labels: Administrador/Supervisor/Gestor | `sidebar-client.tsx` |
+| UX General | `max-w-5xl` removido, `🎨` → Palette icon | `settings/page.tsx` |
+| UX Integrations | `max-w-5xl` removido, grid 2×2 (Envia\|MeLi / Telegram\|Próximamente), `🔜` → Clock | `integrations/page.tsx` |
+| UX Shipping | `📦📍📐` → Package/MapPin/Box icons, title prop cambiado a ReactNode | `shipping-quote-form.tsx` |
+| UX Inventory | `⚙️` → SlidersHorizontal icon | `inventory-manager.tsx` |
 
 ### Vuelta 7 — Configuración Certificada + Fix Flujo Invite
 
@@ -133,15 +146,8 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 | **INSUMOS** | URL: `https://commerce-ops-web.onrender.com` |
 | **CRITERIO DE ÉXITO** | No aparecen errores CORS en producción |
 
-### IH-INVITE-VALIDATE — Validar flujo completo de invitación en Render
-
-**INTERVENCION HUMANA REQUERIDA**
-
-| Campo | Detalle |
-|---|---|
-| **RESPONSABLE** | Arquitecto técnico |
-| **PASOS** | 1. `/dashboard/team` → invitar nuevo email <br> 2. Abrir email → clic en enlace (apunta a Render) <br> 3. `/auth/confirm#access_token=...` carga — Client Component lee hash <br> 4. Redirige a `/set-password` → usuario crea contraseña <br> 5. Accede a `/dashboard` |
-| **CRITERIO DE ÉXITO** | Flujo completo sin "Enlace inválido" ni redirección a localhost |
+### ~~IH-INVITE-VALIDATE~~ ✅ RESUELTA — 2026-04-15
+Validado con `crittan01@gmail.com` en Render. Flujo completo: invite → email → `/auth/confirm#access_token=` → `setSession()` → `/set-password` → dashboard. Fix clave: hash capturado antes de `createClient()` + `setSession()` explícito.
 
 ### IH-SMTP — SMTP custom con Resend (requiere dominio propio)
 
@@ -161,8 +167,7 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 | Ítem | Prioridad |
 |---|---|
-| IH-INVITE-VALIDATE — Confirmar flujo invite en Render | **Alta** — pendiente de ejecución |
-| IH-SMTP — SMTP custom con Resend (requiere dominio propio; Gmail bloqueado por DMARC) | Alta — rate limit 3/hora en Free |
+| IH-SMTP — SMTP custom con Resend (requiere dominio propio; Gmail bloqueado por DMARC p=reject) | Media — rate limit 3/hora en Free. No bloquea operación actual. |
 | Envia Fase 2: label, tracking, pickup | Media |
 | Sync bidireccional catálogo ↔ MeLi listings | Media |
 | IH-002: `ALLOWED_ORIGINS` en FastAPI (CORS producción) | Media — intervención humana |
@@ -205,6 +210,7 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 10. Trigger `tenant_users`: usar `NEW.user_id`, no `NEW.id`
 11. `adminClient` (Service Role) bypasea RLS — usar solo en Server Actions con guard de rol explícito antes de llamarlo
 12. `inviteUserByEmail` requiere `NEXT_PUBLIC_APP_URL` configurada en Render para que el `redirectTo` del email apunte al dominio correcto
-13. `inviteUserByEmail` usa **implicit flow** → sesión en `#access_token=` (URL fragment). Los Route Handlers (server) nunca reciben el fragment — usar Client Component con `createBrowserClient` que tiene `detectSessionInUrl: true`
-14. Tras cambio de rol: el JWT activo retiene claims viejos hasta 1 hora — invalidar con `admin.signOut(userId, 'global')` para forzar re-login inmediato
+13. `inviteUserByEmail` usa **implicit flow** → sesión en `#access_token=` (URL fragment). Los Route Handlers nunca reciben el fragment — usar Client Component
+14. Tras cambio de rol: JWT activo retiene claims hasta 1 hora — invalidar con `admin.signOut(userId, 'global')` para forzar re-login
 15. Gmail como SMTP sender falla DMARC `p=reject` — usar dominio propio con Resend cuando disponible
+16. `createBrowserClient` con `detectSessionInUrl: true` dispara `SIGNED_IN` async (`setTimeout(0)`) y puede borrar el hash via `history.replaceState`. Solución probada: leer `window.location.hash` **antes** de `createClient()`, luego usar `supabase.auth.setSession({access_token, refresh_token})` explícito — patrón recomendado en supabase/discussions#21097
