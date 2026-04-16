@@ -55,7 +55,7 @@ export default async function PurchasesPage() {
   const products = prods || []
 
   return (
-    <div className="flex-1 w-full space-y-6">
+    <div className="space-y-6 max-w-7xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
            Compras y Proveedores

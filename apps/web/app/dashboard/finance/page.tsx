@@ -38,7 +38,7 @@ export default async function FinancePage() {
   const expenses = eRes || []
 
   return (
-    <div className="flex-1 w-full space-y-6 max-w-7xl">
+    <div className="space-y-6 max-w-7xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
            <Landmark className="h-6 w-6 text-primary" /> Analítica Financiera (Unit Economics)
