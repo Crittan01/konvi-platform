@@ -2,8 +2,7 @@
 
 import { useState, useMemo, useEffect, useTransition } from 'react'
 import { useFormStatus } from 'react-dom'
-import { Boxes, AlertTriangle, Package, Search, X, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react'
-import { Card } from '@/components/ui/card'
+import { Boxes, AlertTriangle, Package, Search, X, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal, XCircle, CheckCircle2, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -208,10 +207,12 @@ export default function InventoryManager({
                               <p className={`text-2xl font-bold tracking-tight ${isZero ? 'text-red-400' : isLow ? 'text-yellow-400' : 'text-primary'}`}>
                                 {variation.stock_quantity}
                               </p>
-                              <p className="text-[10px] font-semibold mt-0.5">
-                                {isZero ? <span className="text-red-400">❌ CERO</span>
-                                  : isLow ? <span className="text-yellow-500">⚠️ BAJO</span>
-                                  : <span className="text-emerald-500">✓ OK</span>}
+                              <p className="text-[10px] font-semibold mt-0.5 flex items-center justify-end gap-0.5">
+                                {isZero
+                                  ? <><XCircle className="h-3 w-3 text-red-400" /><span className="text-red-400">Cero</span></>
+                                  : isLow
+                                  ? <><AlertTriangle className="h-3 w-3 text-yellow-500" /><span className="text-yellow-500">Bajo</span></>
+                                  : <><CheckCircle2 className="h-3 w-3 text-emerald-500" /><span className="text-emerald-500">OK</span></>}
                               </p>
                             </div>
                           </div>
@@ -266,7 +267,7 @@ export default function InventoryManager({
 
           {/* Historial de movimientos */}
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-col h-[500px]">
-            <p className="font-semibold text-sm mb-3 flex-shrink-0 text-foreground">📋 Últimos movimientos</p>
+            <p className="font-semibold text-sm mb-3 flex-shrink-0 text-foreground flex items-center gap-1.5"><History className="h-3.5 w-3.5" /> Últimos movimientos</p>
             {movements.length === 0 ? (
               <p className="text-sm text-muted-foreground flex-1 flex items-center justify-center border-t border-border/40 mt-1">Sin historial reciente.</p>
             ) : (

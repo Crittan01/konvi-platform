@@ -25,19 +25,19 @@ Un módulo se considera **certificado** cuando:
 |---|--------|------|----------------|--------|
 | 1 | **Dashboard** | `/dashboard` | Primera pantalla post-login. Read-only. Base para validar queries paralelas y umbral dinámico. | ✅ Certificado |
 | 2 | **Inbox** | `/dashboard/inbox` | Canal principal del negocio. WhatsApp es el producto. Bloquea toda operación real. | ✅ Certificado |
-| 3 | **Contactos** | `/dashboard/contacts` | CRM base. Pedidos e Inbox dependen de contactos. Consent Habeas Data crítico. | 🔲 Pendiente |
-| 4 | **Pedidos** | `/dashboard/orders` | Transacción central del tenant. Depende de Catálogo + Contactos. | 🔲 Pendiente |
-| 5 | **Catálogo** | `/dashboard/catalog` | Maestro de producto. Pedidos, Inventario y MeLi dependen de él. | 🔲 Pendiente |
-| 6 | **Inventario** | `/dashboard/inventory` | Depende de Catálogo (variantes). Umbral dinámico ya implementado. | 🔲 Pendiente |
-| 7 | **Despachos** | `/dashboard/shipping` | Post-pedido confirmado. Envia API. Fase 2 (label/tracking) pendiente. | 🔲 Pendiente |
-| 8 | **Reclamos** | `/dashboard/claims` | Post-venta. Depende de Pedidos. `resolution_notes` editable pendiente. | 🔲 Pendiente |
-| 9 | **Mercado Libre** | `/dashboard/marketplace` | Canal externo. Depende de Catálogo. Sync bidireccional pendiente. | 🔲 Pendiente |
-| 10 | **Compras** | `/dashboard/purchases` | Reposición de inventario. Depende de que haya stock real. | 🔲 Pendiente |
-| 11 | **Finanzas** | `/dashboard/finance` | Reportería P&L. Depende de datos operacionales reales. | 🔲 Pendiente |
-| 12 | **Base de Conocimiento** | `/dashboard/knowledge-base` | Soporte al Orchestrator. No bloquea operación comercial. | 🔲 Pendiente |
-| 13 | **Agentes IA** | `/dashboard/ai-agents` | Directrices del bot. Depende de KB funcional. | 🔲 Pendiente |
-| 14 | **Métricas** | `/dashboard/metrics` | KPIs de negocio. Depende de datos reales acumulados. | 🔲 Pendiente |
-| 15 | **Auditoría** | `/dashboard/audit` | Log de accesos y cambios. Última capa analítica. | 🔲 Pendiente |
+| 3 | **Contactos** | `/dashboard/contacts` | CRM base. Pedidos e Inbox dependen de contactos. Consent Habeas Data crítico. | ✅ Certificado |
+| 4 | **Pedidos** | `/dashboard/orders` | Transacción central del tenant. Depende de Catálogo + Contactos. | ✅ Certificado |
+| 5 | **Catálogo** | `/dashboard/catalog` | Maestro de producto. Pedidos, Inventario y MeLi dependen de él. | ✅ Certificado |
+| 6 | **Inventario** | `/dashboard/inventory` | Depende de Catálogo (variantes). Umbral dinámico ya implementado. | ✅ Certificado |
+| 7 | **Despachos** | `/dashboard/shipping` | Post-pedido confirmado. Envia API. Fase 2 (label/tracking) pendiente. | ✅ Certificado |
+| 8 | **Reclamos** | `/dashboard/claims` | Post-venta. Depende de Pedidos. `resolution_notes` editable pendiente. | ✅ Certificado |
+| 9 | **Mercado Libre** | `/dashboard/marketplace` | Canal externo. Depende de Catálogo. Sync bidireccional pendiente. | ✅ Certificado |
+| 10 | **Compras** | `/dashboard/purchases` | Reposición de inventario. Depende de que haya stock real. | ✅ Certificado |
+| 11 | **Finanzas** | `/dashboard/finance` | Reportería P&L. Depende de datos operacionales reales. | ✅ Certificado |
+| 12 | **Base de Conocimiento** | `/dashboard/knowledge-base` | Soporte al Orchestrator. No bloquea operación comercial. | ✅ Certificado |
+| 13 | **Agentes IA** | `/dashboard/ai-agents` | Directrices del bot. Depende de KB funcional. | ✅ Certificado |
+| 14 | **Métricas** | `/dashboard/metrics` | KPIs de negocio. Depende de datos reales acumulados. | ✅ Certificado |
+| 15 | **Auditoría** | `/dashboard/audit` | Log de accesos y cambios. Última capa analítica. | ✅ Certificado |
 
 ---
 

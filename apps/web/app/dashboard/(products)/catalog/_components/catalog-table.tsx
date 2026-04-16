@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  Search, LayoutGrid, List as ListIcon,
+  Search, LayoutGrid, List as ListIcon, Check,
   ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2,
 } from 'lucide-react'
 import type { Product, Variation } from '../types'
@@ -83,7 +83,7 @@ const VariantRow = memo(function VariantRow({
               <input type="hidden" name="variation_id" value={v.id} />
               <input type="hidden" name="price" value={v.price} />
               <Input name="stock" type="number" defaultValue={v.stock_quantity} min="0" className="h-7 w-20 text-xs text-center font-mono" />
-              <Button type="submit" size="sm" className="h-7 px-2 text-xs">✓</Button>
+              <Button type="submit" size="sm" className="h-7 px-2 text-xs"><Check className="h-3 w-3" /></Button>
             </form>
           ) : (
             <button onClick={() => canWrite && setEditing(true)} className={`font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive font-bold' : v.stock_quantity <= 5 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'} ${canWrite ? 'hover:opacity-70 cursor-pointer' : 'cursor-default'}`}>

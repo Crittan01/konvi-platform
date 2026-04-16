@@ -115,8 +115,9 @@ export async function receivePurchaseOrder(poId: string) {
   for (const item of items) {
     const { data: varData } = await supabase
       .from('product_variations')
-      .select('stock_quantity, cost_price')
+      .select('stock_quantity, cost_price, product_id')
       .eq('id', item.variation_id)
+      .eq('tenant_id', m.tenant_id)
       .single()
     
     if (varData) {
@@ -135,12 +136,13 @@ export async function receivePurchaseOrder(poId: string) {
       await supabase.from('product_variations').update({
         stock_quantity: newStock,
         cost_price: wac
-      }).eq('id', item.variation_id)
+      }).eq('id', item.variation_id).eq('tenant_id', m.tenant_id)
 
       // Audit movement
       await supabase.from('stock_movements').insert({
         tenant_id: m.tenant_id,
         variation_id: item.variation_id,
+        product_id: varData.product_id,
         delta: item.quantity,
         new_stock: newStock,
         reason: 'purchase_restock'

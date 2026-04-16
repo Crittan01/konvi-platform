@@ -71,6 +71,12 @@ const STATUS_ICONS: Record<string, React.ElementType> = {
   cancelled:  X,
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  owner:    'Administrador',
+  manager:  'Supervisor',
+  operator: 'Gestor',
+}
+
 const TAB_FILTERS = ['all', 'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
 const ITEMS_PER_PAGE = 20
 
@@ -210,8 +216,8 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
               </button>
             )}
           </div>
-          <Badge variant="outline" className="text-xs capitalize self-start sm:self-auto h-9">
-            {role}
+          <Badge variant="outline" className="text-xs self-start sm:self-auto h-9">
+            {ROLE_LABELS[role] ?? role}
           </Badge>
         </div>
       </div>

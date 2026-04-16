@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
 import { BarChart2, MessageSquare, ShoppingCart, Users, Package, TrendingUp, CheckCircle2, XCircle, ArrowDownToLine } from 'lucide-react'
 import MetricsFilters from './metrics-filters'
 import { MessagesBarChart, OrdersPieChart } from './metrics-charts'
@@ -40,8 +41,11 @@ export default async function MetricsPage({
   const period = searchParams?.period ?? '30'
   const days   = getPeriodDays(period)
 
+  const ROLE_LABELS: Record<string, string> = { owner: 'Administrador', manager: 'Supervisor', operator: 'Gestor' }
+
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'
@@ -123,7 +127,7 @@ export default async function MetricsPage({
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
             <BarChart2 className="h-5 w-5 text-primary" /> Métricas
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{periodLabel} · {role}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{periodLabel} · {ROLE_LABELS[role] ?? role}</p>
         </div>
         <Suspense>
           <MetricsFilters current={period} />

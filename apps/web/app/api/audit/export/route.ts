@@ -3,8 +3,8 @@ import { createClient } from '@/utils/supabase/server'
 
 export async function GET(request: NextRequest) {
   const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  const { data: { user } } = await supabase.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
 
   if (!meta.tenant_id || meta.role !== 'owner') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })

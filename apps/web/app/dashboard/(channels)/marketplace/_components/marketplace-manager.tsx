@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import Image from 'next/image'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -69,19 +69,21 @@ const STATUS_CONFIG = {
 export default function MarketplaceManager({ connected, items, paging, variations, categories, canWrite }: Props) {
   const [search, setSearch] = useState('')
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
-  // Panel de acción por fila: null | { meliId, mode: 'link' | 'import' }
   const [activePanel, setActivePanel] = useState<{ meliId: string; mode: 'link' | 'import' } | null>(null)
   const [selectedVariationId, setSelectedVariationId] = useState('')
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [importResult, setImportResult] = useState<{ meliId: string; title: string } | null>(null)
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({})
+  const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null)
 
-  const setLoading = (id: string, on: boolean) => {
-    setLoadingIds(prev => {
-      const next = new Set(prev)
-      on ? next.add(id) : next.delete(id)
-      return next
-    })
-  }
+  const setLoading = (id: string, on: boolean) =>
+    setLoadingIds(prev => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n })
+
+  const setError = (id: string, msg: string) =>
+    setActionErrors(prev => ({ ...prev, [id]: msg }))
+
+  const clearError = (id: string) =>
+    setActionErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
   const filtered = items.filter(i =>
     i.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -93,27 +95,30 @@ export default function MarketplaceManager({ connected, items, paging, variation
 
   const handleStatusChange = async (item: MeliItem, newStatus: 'active' | 'paused') => {
     if (!item.listing_id) return
+    clearError(item.meli_id)
     setLoading(item.meli_id, true)
     const resp = await changeListingStatus(item.listing_id, newStatus)
-    if (resp?.error) alert(`Error: ${resp.error}`)
+    if (resp?.error) setError(item.meli_id, resp.error)
     setLoading(item.meli_id, false)
   }
 
   const handleSyncStock = async (item: MeliItem) => {
     if (!item.listing_id) return
+    clearError(item.meli_id)
     setLoading(item.meli_id, true)
     const resp = await syncStockFromSupabase(item.listing_id)
-    if (resp?.error) alert(`Error: ${resp.error}`)
+    if (resp?.error) setError(item.meli_id, resp.error)
     setLoading(item.meli_id, false)
   }
 
   const handleUnlink = async (item: MeliItem) => {
     if (!item.listing_id) return
-    if (!confirm(`¿Desvincular "${item.title}" de Supabase? El item en MeLi quedará intacto pero el stock dejará de sincronizarse.`)) return
+    clearError(item.meli_id)
     setLoading(item.meli_id, true)
     const resp = await unlinkListing(item.listing_id)
-    if (resp?.error) alert(`Error: ${resp.error}`)
+    if (resp?.error) setError(item.meli_id, resp.error)
     setLoading(item.meli_id, false)
+    setConfirmUnlinkId(null)
   }
 
   const closePanel = () => {
@@ -124,22 +129,20 @@ export default function MarketplaceManager({ connected, items, paging, variation
 
   const handleLink = async (meliId: string) => {
     if (!selectedVariationId) return
+    clearError(meliId)
     setLoading(meliId, true)
     const resp = await linkListing(meliId, selectedVariationId)
-    if (resp?.error) alert(`Error: ${resp.error}`)
+    if (resp?.error) setError(meliId, resp.error)
     else closePanel()
     setLoading(meliId, false)
   }
 
   const handleImport = async (meliId: string, meliTitle: string) => {
+    clearError(meliId)
     setLoading(meliId, true)
     const resp = await importFromMeli(meliId, selectedCategoryId || undefined)
-    if (resp?.error) {
-      alert(`Error: ${resp.error}`)
-    } else {
-      setImportResult({ meliId, title: meliTitle })
-      closePanel()
-    }
+    if (resp?.error) setError(meliId, resp.error)
+    else { setImportResult({ meliId, title: meliTitle }); closePanel() }
     setLoading(meliId, false)
   }
 
@@ -209,17 +212,15 @@ export default function MarketplaceManager({ connected, items, paging, variation
             <tbody className="divide-y divide-border/50">
               {filtered.map(item => {
                 const isLoading = loadingIds.has(item.meli_id)
+                const rowError  = actionErrors[item.meli_id]
                 const stockDiff = item.is_linked && item.supabase_stock !== null
                   ? item.supabase_stock - item.available_quantity
                   : null
                 const stockOutOfSync = stockDiff !== null && stockDiff !== 0
 
                 return (
-                  <>
-                    <tr
-                      key={item.meli_id}
-                      className={`hover:bg-muted/30 transition-colors ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
-                    >
+                  <Fragment key={item.meli_id}>
+                    <tr className={`hover:bg-muted/30 transition-colors ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                       {/* Publicación */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
@@ -339,15 +340,24 @@ export default function MarketplaceManager({ connected, items, paging, variation
                           {/* Vincular / Desvincular */}
                           {canWrite && (
                             item.is_linked ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-destructive"
-                                onClick={() => handleUnlink(item)}
-                                title="Desvincular de Supabase"
-                              >
-                                <Link2Off className="h-3 w-3" />
-                              </Button>
+                              confirmUnlinkId === item.meli_id ? (
+                                <div className="flex items-center gap-1">
+                                  <Button size="sm" variant="destructive" className="h-7 text-xs"
+                                    onClick={() => handleUnlink(item)}>Confirmar</Button>
+                                  <Button size="sm" variant="ghost" className="h-7 text-xs"
+                                    onClick={() => setConfirmUnlinkId(null)}>Cancelar</Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-destructive"
+                                  onClick={() => setConfirmUnlinkId(item.meli_id)}
+                                  title="Desvincular de Supabase"
+                                >
+                                  <Link2Off className="h-3 w-3" />
+                                </Button>
+                              )
                             ) : (
                               <Button
                                 variant="outline"
@@ -366,9 +376,21 @@ export default function MarketplaceManager({ connected, items, paging, variation
                       </td>
                     </tr>
 
+                    {/* Fila de error inline */}
+                    {rowError && (
+                      <tr className="bg-red-500/5">
+                        <td colSpan={6} className="px-4 py-2">
+                          <p className="text-xs text-red-400 flex items-center gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {rowError}
+                            <button onClick={() => clearError(item.meli_id)} className="ml-auto text-muted-foreground hover:text-foreground"><span className="sr-only">Cerrar</span>×</button>
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+
                     {/* Panel de vinculación inline */}
                     {activePanel?.meliId === item.meli_id && (
-                      <tr key={`panel-${item.meli_id}`} className="bg-muted/20 border-b border-primary/20">
+                      <tr className="bg-muted/20 border-b border-primary/20">
                         <td colSpan={6} className="px-4 py-4">
                           {/* Tabs de modo */}
                           <div className="flex gap-1 mb-4">
@@ -484,7 +506,7 @@ export default function MarketplaceManager({ connected, items, paging, variation
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
 

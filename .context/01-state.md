@@ -170,6 +170,7 @@ apps/web/app/
 | `get_tenant_team` return confirmed status | 20260415010000 | ✅ |
 | `tenants.nit`, `email_contacto`, `telefono_contacto` | 20260415020000 | ✅ |
 | `tenant_users.role` `agent→operator`, `add_member_to_tenant` con roles renombrados | 20260415030000 | ✅ |
+| `claims` RLS fix — políticas reemplazadas para usar `app_current_tenant()` | 20260416000000 | ✅ |
 
 > Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
 
