@@ -43,6 +43,12 @@ const ICON_MAP: Record<string, React.ElementType> = {
   MessageSquare, Package, Users, ShoppingCart, Boxes, BarChart2, Plug,
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  owner:    'Administrador',
+  manager:  'Supervisor',
+  operator: 'Gestor',
+}
+
 const ORDER_STATUS_COLORS: Record<string, string> = {
   pending:    '#D4A843',
   confirmed:  '#38A875',
@@ -103,7 +109,7 @@ export default function DashboardClient({
             <span className="text-gradient">{tenantName}</span>
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {userEmail} · <span className="capitalize">{role}</span>
+            {userEmail} · {ROLE_LABELS[role] ?? role}
           </p>
         </div>
         {totalOpsAlerts > 0 && (
