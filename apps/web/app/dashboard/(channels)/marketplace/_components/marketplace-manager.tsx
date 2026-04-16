@@ -77,7 +77,7 @@ export default function MarketplaceManager({ connected, items, paging, variation
   const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null)
 
   const setLoading = (id: string, on: boolean) =>
-    setLoadingIds(prev => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n })
+    setLoadingIds(prev => { const n = new Set(prev); if (on) { n.add(id) } else { n.delete(id) } return n })
 
   const setError = (id: string, msg: string) =>
     setActionErrors(prev => ({ ...prev, [id]: msg }))
@@ -365,7 +365,7 @@ export default function MarketplaceManager({ connected, items, paging, variation
                                 className="h-8 text-xs gap-1.5"
                                 onClick={() => {
                                   const isOpen = activePanel?.meliId === item.meli_id
-                                  isOpen ? closePanel() : setActivePanel({ meliId: item.meli_id, mode: 'link' })
+                                  if (isOpen) { closePanel() } else { setActivePanel({ meliId: item.meli_id, mode: 'link' }) }
                                 }}
                               >
                                 <Link2 className="h-3 w-3" /> Vincular

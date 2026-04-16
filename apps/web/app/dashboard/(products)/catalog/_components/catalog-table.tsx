@@ -457,7 +457,7 @@ export default function CatalogTable({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   const toggle = useCallback((id: string) =>
-    setExpandedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n }), [])
+    setExpandedIds(prev => { const n = new Set(prev); if (n.has(id)) { n.delete(id) } else { n.add(id) } return n }), [])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
