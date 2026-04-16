@@ -36,6 +36,10 @@ function AuthConfirmInner() {
   const type      = searchParams.get('type') as EmailOtpType | null
 
   useEffect(() => {
+    // Capturar hash ANTES de createClient() para evitar que detectSessionInUrl
+    // lo borre via history.replaceState durante su inicialización async.
+    const hash = typeof window !== 'undefined' ? window.location.hash : ''
+
     const supabase = createClient()
 
     async function confirm() {
@@ -57,12 +61,12 @@ function AuthConfirmInner() {
         }
 
         // ── 3. Implicit flow (invite) ─────────────────────────────────────
-        // Parseamos el hash explícitamente y llamamos setSession().
-        // NO usamos onAuthStateChange ni detectSessionInUrl porque createBrowserClient
-        // puede disparar SIGNED_IN antes de que suscribamos → race condition.
-        const hash = typeof window !== 'undefined' ? window.location.hash : ''
+        // setSession() explícito con tokens del hash — patrón recomendado por Supabase
+        // (ver github.com/orgs/supabase/discussions/21097).
+        // NO usamos onAuthStateChange: GoTrueClient despacha SIGNED_IN con setTimeout(0)
+        // y no hay garantía de recibirlo si nos suscribimos después de initialize().
         if (hash.includes('access_token=')) {
-          const params       = new URLSearchParams(hash.substring(1)) // quitar '#'
+          const params       = new URLSearchParams(hash.substring(1))
           const accessToken  = params.get('access_token')
           const refreshToken = params.get('refresh_token')
 
