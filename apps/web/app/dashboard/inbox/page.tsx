@@ -176,7 +176,7 @@ export default function InboxPage() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     try {
       const ctrl = new AbortController()
-      const timeout = setTimeout(() => ctrl.abort(), 60000) // Render Cold Start fix
+      const timeout = setTimeout(() => ctrl.abort(), 90000) // Render cold start puede tomar ~60-90s
       const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -190,8 +190,12 @@ export default function InboxPage() {
       } else {
         setReplyText('')
       }
-    } catch {
-      setSendError('Error de red.')
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        setSendError('El servicio tardó demasiado en responder (cold start). Intenta de nuevo en unos segundos.')
+      } else {
+        setSendError('Error de red. Verifica tu conexión e intenta de nuevo.')
+      }
     } finally {
       setSending(false)
       replyInputRef.current?.focus()
