@@ -48,8 +48,8 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       // Fuentes
       "font-src 'self' https://fonts.gstatic.com",
-      // Imágenes: mismo origen + Supabase Storage + data URIs
-      "img-src 'self' data: blob: https://xmelwnhhphksbpdjmbbp.supabase.co",
+      // Imágenes: mismo origen + Supabase Storage + MeLi CDN + data URIs
+      "img-src 'self' data: blob: https://xmelwnhhphksbpdjmbbp.supabase.co https://http2.mlstatic.com https://mlstatic.com",
       // Conexiones API: mismo origen + Supabase + Render services
       // IMPORTANTE: actualizar si los nombres de servicio de Render cambian
       "connect-src 'self' https://xmelwnhhphksbpdjmbbp.supabase.co wss://xmelwnhhphksbpdjmbbp.supabase.co https://commerce-ops-web.onrender.com https://commerce-ops-api.onrender.com https://commerce-ops-orchestrator.onrender.com https://commerce-ops-connector.onrender.com",
@@ -67,6 +67,14 @@ const nextConfig = {
         hostname: 'xmelwnhhphksbpdjmbbp.supabase.co',
         port: '',
         pathname: '/storage/v1/object/public/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'http2.mlstatic.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'mlstatic.com',
       },
     ],
   },

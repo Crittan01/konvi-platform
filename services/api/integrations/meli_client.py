@@ -372,3 +372,41 @@ async def update_item_price(item_id: str, price: float, access_token: str) -> di
         )
         resp.raise_for_status()
         return resp.json()
+
+
+async def update_item_listing(
+    item_id: str,
+    quantity: int,
+    price: float,
+    original_price: float | None,
+    access_token: str,
+) -> dict:
+    """
+    Sincroniza stock + precio + precio tachado en un solo PUT.
+
+    MeLi mapeo:
+      price          → precio de venta (lo que paga el cliente)
+      original_price → precio tachado / precio antes del descuento (opcional)
+                       Cuando se envía, MeLi muestra automáticamente el % de descuento.
+
+    PUT /items/{item_id}
+    """
+    body: dict = {
+        "available_quantity": max(0, quantity),
+        "price": price,
+    }
+    if original_price and original_price > price:
+        body["original_price"] = original_price
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.put(
+            f"{MELI_API_URL}/items/{item_id}",
+            json=body,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
