@@ -45,6 +45,7 @@ supabase db query --linked "SELECT * FROM tenants;"
 ```
 
 Verificación realizada:
+
 ```
 column_name    | data_type                   | column_default
 processed      | boolean                     | false
@@ -65,11 +66,19 @@ Esto NO es un bug — el Supavisor usa IPv6 para routing interno y esta VM usa I
 **Tenant**: `Matriz Commerce Dev` (id: `0fb0777e-f3e4-48c7-89bf-a25aa201c0c9`)
 
 Verificado vía REST API:
+
 ```json
-[{"id":"0fb0777e-...","name":"Matriz Commerce Dev","meta_waba_id":"2159052118202272"}]
+[
+  {
+    "id": "0fb0777e-...",
+    "name": "Matriz Commerce Dev",
+    "meta_waba_id": "2159052118202272"
+  }
+]
 ```
 
 Para futuras consultas:
+
 ```bash
 supabase db query --linked "SELECT id, name, meta_waba_id FROM tenants;"
 ```
@@ -86,7 +95,7 @@ Después del fix del tenant resolver, si el `meta_waba_id` del tenant en la base
 
 1. Ve a [Meta Business Suite](https://business.facebook.com/) → **WhatsApp** → **Cuentas de WhatsApp**.
 2. El número que aparece como **"WhatsApp Business Account ID"** es el WABA ID.  
-   *(Formato: número largo, ej: `102938475628374`)*
+   _(Formato: número largo, ej: `102938475628374`)_
 3. O bien: en [Meta Developers](https://developers.facebook.com/), ve a tu App → **WhatsApp** → **API Setup**. El campo `"WhatsApp Business Account ID"` es lo que necesitas.
 
 **PASO 2 — Actualizar el tenant en Supabase**
@@ -151,6 +160,7 @@ Según la [documentación oficial de Meta](https://developers.facebook.com/docs/
 
 **Estado**: 🟡 PASOS 1-5 COMPLETADOS — PASOS 6-7 pendientes (ver abajo)  
 **Completado**:
+
 - ✅ `GEMINI_API_KEY` configurada en `.env` y en Render
 - ✅ `render.yaml` v5 con 4 servicios (web + connector + api + orchestrator)
 - ✅ Guía paso a paso `FASE7_RENDER_DEPLOY.md` creada
@@ -159,6 +169,7 @@ Según la [documentación oficial de Meta](https://developers.facebook.com/docs/
 - ✅ TailwindCSS fix: `postcss.config.js` + `--include=dev` + clear build cache
 
 **Pendiente (requiere acción humana)**:
+
 - ⚠️ PASO 6: Actualizar Callback URL del webhook en Meta Developers:
   - Callback URL: `https://commerce-ops-connector.onrender.com/api/v1/whatsapp/webhook`
   - Verify Token: `***META_VERIFY_TOKEN_LEGACY_REDACTED***`
@@ -188,6 +199,7 @@ Según la [documentación oficial de Meta](https://developers.facebook.com/docs/
 **Usuario del sistema creado**: `commerce-ops` (nombre ajustado por política de Meta — sin guiones múltiples)  
 **Token**: Permanente (sin expiración), configurado en Render (connector + orchestrator) y en `.env` local  
 **Verificación**:
+
 ```
 curl https://commerce-ops-connector.onrender.com/health  → {"status":"ok","service":"connector-whatsapp"}
 curl https://commerce-ops-api.onrender.com/health        → {"status":"ok"}
@@ -240,8 +252,8 @@ Envia usa Bearer token per-tenant. El tenant (owner) debe obtener su token desde
 
 ### Pasos
 
-1. Ve a [app.envia.com](https://app.envia.com) → inicia sesión con tu cuenta Envia
-2. Menú → **Configuración** → **API** → **Generar token** (o copiar el existente)
+1. Ve a [https://ship.envia.com](https://ship.envia.com) → inicia sesión con tu cuenta Envia
+2. Menú → **Desarrolladores** → **Acceso a API** → **Acceso de API** (o copiar el existente)
 3. En la plataforma: `/dashboard/integrations` → sección **Envia** → pegar el token → **Conectar Envia**
 4. Si no tienes cuenta Envia: regístrala en [envia.com](https://envia.com) (acepta cuentas de prueba/sandbox)
 
