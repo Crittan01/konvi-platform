@@ -1,6 +1,6 @@
 # Hitos del Producto — Commerce Ops Platform
 
-Última actualización: 2026-04-09 (rev. 7 — re-baseline)
+Última actualización: 2026-04-16 (rev. 8 — sincronización post Fase 11.5 completa)
 
 ---
 
@@ -10,49 +10,48 @@
 
 ---
 
-## Alpha Interno ✅ EN CIERRE (Bloqueado en intervención humana)
+## Alpha Interno ✅ COMPLETADO — 2026-04-09
 
 **Criterio**: El ciclo conversacional completo funcionando en ambiente de producción con test E2E real.
 
-**Estado**: Casi completo. Bloqueado en acciones humanas de Meta.
+**Estado**: Completado. Todos los bloqueantes resueltos.
 
 | Item | Estado | Notas |
 |------|--------|-------|
-| Supabase provisionado con esquema multi-tenant (6 migraciones) | ✅ | — |
-| Frontend con Auth, Dashboard y Catálogo CRUD | ✅ | Parcial — catálogo sin edición/variantes |
+| Supabase provisionado con esquema multi-tenant (25 migraciones) | ✅ | — |
+| Frontend completo — 18 módulos, Route Groups, RBAC, flujo invite | ✅ | Vuelta 8 — 2026-04-15 |
 | Webhook WhatsApp recibiendo y persistiendo mensajes (HMAC-SHA256) | ✅ | — |
 | Tenant resolver por `meta_waba_id` real | ✅ | Fix 2026-04-07 |
-| AI Orchestrator (Gemini → WhatsApp, guardrails, Pydantic output) | ✅ | gemini-2.5-flash |
+| AI Orchestrator (Gemini → WhatsApp, guardrails, Pydantic, KB) | ✅ | gemini-2.5-flash, pgvector |
 | Inbox AI en Dashboard (Realtime, Human Takeover, hilo visual) | ✅ | — |
-| API Gateway real (JWT, CRUD básico) | ✅ | RBAC pendiente |
-| Deploy en Render operativo (4 servicios live) | ✅ | PASOS 1-5 completados |
-| META_ACCESS_TOKEN permanente (System User Token) | ⚠️ | **IH-006 — PENDIENTE HUMANO** |
-| Meta Webhook Callback URL configurado en Meta Developers | ⚠️ | **PASO 6 — PENDIENTE HUMANO** |
-| Test E2E: mensaje WhatsApp → Gemini → respuesta automática | ⚠️ | **PASO 7 — PENDIENTE HUMANO + AGENTE** |
-
-**Bloqueante único restante**: Acción humana en Meta Developers y Meta Business Suite (IH-006, PASO 6, PASO 7).
+| API Gateway real (JWT, RBAC, 9 routers) | ✅ | — |
+| Deploy en Render operativo (4 servicios live) | ✅ | — |
+| META_ACCESS_TOKEN permanente (System User Token `commerce-ops`) | ✅ | IH-006 resuelto |
+| Meta Webhook Callback URL configurado en Meta Developers | ✅ | PASO 6 completado |
+| Test E2E: mensaje WhatsApp → Gemini → respuesta automática | ✅ | PASO 7 completado |
 
 ---
 
-## Beta Controlada (Objetivo: Agosto-Septiembre 2026)
+## Beta Controlada (Objetivo: Q2-Q3 2026)
 
 **Criterio**: Primer tenant real operando en producción con ciclo conversacional + catálogo + pedidos funcionales.
 
-> **Ajuste de timeline (rev. 7)**: El prerequisito ahora incluye Fase 9 (schema core + Pedidos + Configuración)
-> antes de poder hacer MeLi. Si Fases 8+9 se completan en ~2-3 meses, Beta apunta a agosto 2026.
-
-| Item | Estado | Depende de |
-|------|--------|-----------|
-| Alpha Interno cerrado (E2E funcional) | ⚠️ | IH-006 + PASO 6+7 |
-| Catálogo completo: edición, variantes, RBAC básico | ❌ | Fase 8 |
-| Schema core: orders, contacts, tenant_integrations | ❌ | Fase 9 |
-| Módulo Pedidos UI funcional | ❌ | Fase 9 |
-| Configuración de equipo + RBAC completo | ❌ | Fase 9 |
-| RBAC completo en API Gateway (owner/manager/agent) | ❌ | Fase 8+9 |
-| META_ACCESS_TOKEN permanente | ⚠️ | IH-006 |
-| Deploy estable en Render (plan Starter para evitar cold starts) | ❌ | Decisión económica |
-| Monitoreo básico (logs Render + alertas Telegram) | ❌ | Fase 11 o antes |
-| Al menos 1 tenant real usando el sistema | ❌ | Todo lo anterior |
+| Item | Estado | Notas |
+|------|--------|-------|
+| Alpha Interno cerrado (E2E funcional) | ✅ | Completado 2026-04-09 |
+| Catálogo completo: edición, variantes, RBAC | ✅ | Fase 8 completada |
+| Schema core: orders, contacts, tenant_integrations | ✅ | Fase 9 completada |
+| Módulo Pedidos UI funcional | ✅ | Live en `/dashboard/orders` |
+| Configuración de equipo + RBAC completo | ✅ | Flujo invite validado en Render |
+| RBAC en API Gateway | ✅ | JWT + role extraction activo |
+| META_ACCESS_TOKEN permanente (System User `commerce-ops`) | ✅ | IH-006 resuelto |
+| Integraciones MeLi + Envia live | ✅ | Fase 10 completada |
+| Módulos restantes: Métricas, Auditoría, Knowledge Base, AI Agents | ✅ | Fase 11 completada |
+| Reclamos, Compras, Finanzas, Marketplace | ✅ | Fase 11.5 completada |
+| Certificación funcional v2 (18 módulos) | 🔄 | En progreso — ver `.context/04-next-steps.md` |
+| Deploy estable en Render Starter (sin cold starts) | ❌ | Pendiente decisión económica — ver `docs/deployment/render-upgrade-path.md` |
+| SMTP propio con Resend (requiere dominio propio) | ❌ | Pendiente dominio — IH-SMTP |
+| Al menos 1 tenant real usando el sistema | ❌ | Depende de certificación + upgrade Render |
 
 ---
 

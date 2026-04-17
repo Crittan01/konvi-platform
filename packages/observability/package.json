@@ -1,0 +1,6 @@
+{
+  "name": "@commerce/observability",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Observabilidad compartida (logging, tracing, alertas) — DEFERRED. Actualmente: logs de Render + audit_log en Supabase."
+}

@@ -20,7 +20,7 @@
 | 9 | Schema core + Pedidos + Configuración + Equipo | ✅ Completa | COMPLETADO 2026-04-09 |
 | 10 | Integraciones — MeLi + Envia/Shipping | ✅ Completa | COMPLETADO 2026-04-09 — MeLi OAuth + Envia Sandbox conectados |
 | 11 | Módulos restantes Tenant Console + UI Redesign | ✅ Completa | COMPLETADO 2026-04-09 |
-| 11.5 | Tenant Console "Enterprise Super App" (Módulos pendientes) | ❌ Pendiente | PENDIENTE (Reclamos, Compras, Finanzas, Pubs) |
+| 11.5 | Tenant Console "Enterprise Super App" (Módulos pendientes) | ✅ Completa | COMPLETADO 2026-04-15 — Reclamos, Compras, Finanzas, Marketplace live |
 | 12 | Platform Console | ❌ Pendiente | PENDIENTE (prerequisito: OQ-P01 + Fase 9+ completa) |
 | 13 | Shopify / Tienda custom | ❌ Futuro | FUTURO |
 
@@ -302,17 +302,17 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 
 ---
 
-### Fase 11.5 — Profundización Tenant Console (Enterprise Super App) 🟡 EN PROGRESO
+### Fase 11.5 — Profundización Tenant Console (Enterprise Super App) ✅ COMPLETADO — 2026-04-15
 
-**Objetivo**: Completar al 100% todos los módulos que actualmente figuran como "Pronto" (Stubs) en la barra de navegación para que la consola alcance el estado de "Super App" con las mejores prácticas.
+**Objetivo**: Completar al 100% todos los módulos pendientes de la Tenant Console.
 
-**Módulos a construir / expandir:**
-1. **Reclamos (`/dashboard/claims`)**: ❌ Pendiente. Gestión de disputas y quejas formales de clientes.
-2. **Publicaciones (`/dashboard/marketplace`)**: ✅ COMPLETADO (2026-04-13). Framework arquitectónico maestro-esclavo y mock endpoint validado para escalado futuro a mapeador de subcategorías MeLi. (Central Ofertas = Locked).
+**Módulos completados:**
+1. **Reclamos (`/dashboard/claims`)**: ✅ COMPLETADO (Vuelta 3, 2026-04-15). Crear reclamo, cambiar estado, vincular pedido. Fix: getUser + tenant_id. RLS fix migración 20260416000000.
+2. **Publicaciones (`/dashboard/marketplace`)**: ✅ COMPLETADO (2026-04-13). Listings MeLi, sync stock, vinculación variation↔listing.
 3. **Compras (`/dashboard/purchases`)**: ✅ COMPLETADO (2026-04-13). Órdenes de compra a proveedores, WAC y abastecimiento.
-4. **Finanzas (`/dashboard/finance`)**: ✅ COMPLETADO (2026-04-13). Control de Ingresos, Gastos (OPEX) y Rentabilidad neta (Gross/Net Profit) usando histórico WAC congelado.
+4. **Finanzas (`/dashboard/finance`)**: ✅ COMPLETADO (2026-04-13). P&L Dashboard, Registro OPEX, rentabilidad neta (Gross/Net Profit) usando WAC congelado.
 
-**Estado Actual:** El "Eje Comercial" (Publicaciones) y el "Eje de Rentabilidad" (Compras + Finanzas) fueron implementados con éxito bajo estándares arquitectónicos SaaS. Queda pendiente el módulo de Reclamos en Fase 11.5 antes de saltar a Fase 12.
+**Estado Actual:** Fase 11.5 completada. Los 18 módulos del Tenant Console están live. Certificación v2 en progreso (ver `.context/04-next-steps.md`). Próximo: Fase 12 (bloqueada por OQ-P01).
 
 ---
 
@@ -340,7 +340,7 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 - `/platform/flags` — Feature Flags
 - `/platform/support` — Soporte Operativo
 
-Ver `docs/product/personas-and-consoles.md` y `docs/architecture/front-back-separation.md` sección B.
+Ver `docs/risks/open-questions.md` (OQ-P01) y `docs/architecture/front-back-separation.md` sección B.
 
 ---
 

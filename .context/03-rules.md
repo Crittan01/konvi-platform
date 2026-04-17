@@ -23,7 +23,7 @@ Si faltan datos → solicitar al usuario o escalar a humano. No inventar.
 ## Código seguro
 
 - `getUser()` en Server Components — nunca `getSession()` (inseguro JWT)
-- Python 3.9.25: `Optional[X]` — no `X | None` (sintaxis 3.10+)
+- Python 3.11.13: tanto `Optional[X]` como `X | None` son válidos. El código existente usa `Optional[X]` — mantener consistencia salvo refactors explícitos.
 - Funciones `() => {}` no son serializables como props de RSC — usar props opcionales con default interno
 - `.env` nunca al repositorio
 

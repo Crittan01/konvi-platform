@@ -13,17 +13,17 @@
 - El tenant opera su negocio desde la **Tenant Console**
 - La **Platform Console** (administración SaaS) es frontera futura — no implementada
 
-## Estado (2026-04-14 — rev. 17)
+## Estado (2026-04-16 — rev. 23)
 
-**Fases 1-11.2 completadas.** Fase 12 (Platform Console) bloqueada por OQ-P01.
+**Fases 1-11.5 completadas** (incl. Reclamos, Compras, Finanzas, Marketplace). Fase 12 (Platform Console) bloqueada por OQ-P01.
 
 | Componente | Estado |
 |---|---|
-| Tenant Console (Tenant Console) | ✅ Live — 17 módulos, Route Groups, RBAC |
+| Tenant Console | ✅ Live — 18 módulos, Route Groups, RBAC, flujo invite validado |
 | WhatsApp Connector | ✅ Live — HMAC validado, tenant resolver real |
-| AI Orchestrator | ✅ Live — polling 3s, gemini-2.5-flash, KB inyectada |
+| AI Orchestrator | ✅ Live — polling 3s, gemini-2.5-flash, KB + pgvector inyectada |
 | API Gateway | ✅ Live — JWT, RBAC, 9 routers |
-| Supabase Cloud | ✅ Activo — 20 migraciones aplicadas, RLS activo |
+| Supabase Cloud | ✅ Activo — 25 migraciones aplicadas, RLS activo |
 | Platform Console | ❌ No implementada — Fase 12, bloqueante OQ-P01 |
 
 > Ver estado completo por módulo → `.context/01-state.md`
@@ -34,7 +34,7 @@
 | Capa | Versión real |
 |---|---|
 | Frontend | **Next.js 14.2.35**, React ^18, TypeScript ^5 |
-| UI | TailwindCSS ^3.3.0, shadcn/ui (5 componentes) — Dark Warm Theme |
+| UI | TailwindCSS ^3.3.0, shadcn/ui (11 componentes) — Dark Warm Theme |
 | Backend | **Python 3.11.13**, FastAPI 0.128.8 |
 | DB / Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
 | IA | `gemini-2.5-flash` via `google-genai==1.47.0` |
@@ -55,8 +55,8 @@ services/
   api/                     # REST API Gateway ✅ LIVE
 packages/
   auth/                    # Wrappers SSR Supabase Auth (parcial)
-  db/                      # Mirrors iniciales de migraciones (fuente real: supabase/migrations/)
-supabase/migrations/       # 20 migraciones SQL — FUENTE CANÓNICA del esquema
+  db/                      # Mirrors parciales de migraciones (fuente real: supabase/migrations/)
+supabase/migrations/       # 25 migraciones SQL — FUENTE CANÓNICA del esquema
 .context/                  # Contexto activo del sistema — leer primero
 .agents/                   # Reglas y workflows para AI agents
 docs/                      # Documentación técnica detallada

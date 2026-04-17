@@ -13,7 +13,7 @@ Cada empresa (tenant) opera con aislamiento total de datos.
 WhatsApp Cloud API (Meta oficial) es el canal de ventas.
 La IA (Gemini) es asistencia, nunca fuente de verdad de datos operacionales.
 
-**Estado**: Fases 1-11.2 completadas. Live en Render. Fase 12 (Platform Console) bloqueada por OQ-P01 — fuera de alcance.
+**Estado**: Fases 1-11.5 completadas (incl. Reclamos, Compras, Finanzas, Marketplace). Live en Render. Fase 12 (Platform Console) bloqueada por OQ-P01 — fuera de alcance.
 
 ---
 
@@ -22,9 +22,9 @@ La IA (Gemini) es asistencia, nunca fuente de verdad de datos operacionales.
 | Capa        | Versión                                     | Notas                          |
 | ----------- | ------------------------------------------- | ------------------------------ |
 | Frontend    | Next.js 14.2.35 + React 18 + TypeScript 5   | App Router + Route Groups      |
-| UI          | TailwindCSS 3.3 + shadcn/ui                 | Dark Warm Theme — HSL tokens   |
+| UI          | TailwindCSS 3.3 + shadcn/ui (11 componentes) | Dark Warm Theme — HSL tokens  |
 | Backend     | Python 3.11.13 + FastAPI 0.128.8            | Sin venv — paquetes en sistema |
-| DB/Auth     | Supabase PostgreSQL + RLS + Auth + Realtime | 20 migraciones aplicadas       |
+| DB/Auth     | Supabase PostgreSQL + RLS + Auth + Realtime | 25 migraciones aplicadas       |
 | IA          | `google-genai==1.47.0` — `gemini-2.5-flash` | SDK oficial                    |
 | WhatsApp    | WhatsApp Cloud API v21.0                    | Solo oficial Meta              |
 | Shipping    | Envia API                                   | Fase Inicial live              |
@@ -54,7 +54,7 @@ services/
   connector-whatsapp/ → Webhook Meta
   ai-orchestrator/    → Polling Gemini
 
-supabase/migrations/  → Fuente canónica de esquema DB (20 migraciones)
+supabase/migrations/  → Fuente canónica de esquema DB (25 migraciones)
 ```
 
 > Route Groups `(nombre)` no modifican URLs. `(sales)/orders/page.tsx` → `/dashboard/orders`.
