@@ -13,22 +13,29 @@ _ENV_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
 REQUEST_TIMEOUT_SECONDS = 10
 
 
-def _get_tenant_wa_credentials(tenant_id: str, supabase: Client) -> tuple[str, str]:
-    """Returns (phone_number_id, access_token) from tenant_integrations. Falls back to ("","")."""
+def _get_tenant_wa_credentials(tenant_id: str, supabase: Client) -> tuple[str, str, bool]:
+    """
+    Returns (phone_number_id, access_token, explicitly_disconnected).
+    explicitly_disconnected=True means the tenant has a record but chose to disconnect —
+    env var fallback must be blocked in that case.
+    """
     try:
         res = (
             supabase.table("tenant_integrations")
-            .select("credentials")
+            .select("credentials, status")
             .eq("tenant_id", tenant_id)
             .eq("provider", "whatsapp")
-            .eq("status", "connected")
             .single()
             .execute()
         )
-        creds = res.data.get("credentials", {}) if res.data else {}
-        return creds.get("phone_number_id", ""), creds.get("access_token", "")
+        if not res.data:
+            return "", "", False  # never configured — fallback allowed
+        if res.data.get("status") != "connected":
+            return "", "", True   # explicitly disconnected — block fallback
+        creds = res.data.get("credentials", {})
+        return creds.get("phone_number_id", ""), creds.get("access_token", ""), False
     except Exception:
-        return "", ""
+        return "", "", False
 
 
 async def send_whatsapp_message(
@@ -37,7 +44,11 @@ async def send_whatsapp_message(
     to_phone: str,
     text: str,
 ) -> bool:
-    phone_id, access_token = _get_tenant_wa_credentials(tenant_id, supabase)
+    phone_id, access_token, explicitly_disconnected = _get_tenant_wa_credentials(tenant_id, supabase)
+
+    if explicitly_disconnected:
+        logger.warning("[META API] Tenant %s desconectó WhatsApp — envío bloqueado.", tenant_id)
+        return False
 
     if not phone_id or not access_token:
         phone_id = _ENV_PHONE_ID
