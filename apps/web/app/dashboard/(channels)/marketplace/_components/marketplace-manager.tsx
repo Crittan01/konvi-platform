@@ -213,12 +213,11 @@ export default function MarketplaceManager({ items, paging, variations, categori
                       <div className="flex items-center gap-3">
                         {item.thumbnail && (
                           <Image
-                            src={item.thumbnail}
+                            src={item.thumbnail.replace(/^http:/, 'https:')}
                             alt={item.title ?? ''}
                             width={40}
                             height={40}
                             className="rounded object-cover flex-shrink-0 bg-muted"
-                            unoptimized
                           />
                         )}
                         <div className="min-w-0">
@@ -301,6 +300,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                             size="sm"
                             className="h-8 text-xs gap-1.5 text-blue-600 border-blue-500/30"
                             onClick={() => handleSyncStock(item)}
+                            title="Sincronizar stock y precio desde el Catálogo a MeLi"
                           >
                             <RefreshCw className="h-3 w-3" /> Sync
                           </Button>

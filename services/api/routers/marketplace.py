@@ -27,6 +27,7 @@ from integrations.meli_client import (
     get_item,
     update_item_quantity,
     update_item_status,
+    update_item_listing,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,7 @@ router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
 
 async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
     """
-    Empuja el nuevo stock de una variante a MeLi si tiene un listing activo vinculado.
-
-    Llamar después de cualquier operación que cambie stock_quantity en product_variations:
-      - orders.py: _decrement_stock_on_confirm()
-      - products.py: patch_variation() cuando stock_quantity cambia
+    Empuja stock + precio + precio tachado de una variante a MeLi si tiene listing activo.
 
     Falla silenciosa: un error en MeLi no debe romper la operación principal.
     """
@@ -55,22 +52,36 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
             .execute()
         )
         if not listing_res.data:
-            return  # No hay listing vinculado activo
+            return
 
-        listing = listing_res.data[0]
-        tenant_id = listing["tenant_id"]
+        listing     = listing_res.data[0]
+        tenant_id   = listing["tenant_id"]
         external_id = listing["external_id"]
+
+        # Leer precio actual de la variante
+        var_res = (
+            supabase.table("product_variations")
+            .select("price, compare_at_price")
+            .eq("id", variation_id)
+            .single()
+            .execute()
+        )
+        price          = float(var_res.data["price"])          if var_res.data else None
+        original_price = float(var_res.data["compare_at_price"]) if var_res.data and var_res.data.get("compare_at_price") else None
 
         access_token = await get_valid_token(supabase, tenant_id)
         if not access_token:
             logger.warning("MeLi no conectado para tenant %s — sync omitido", tenant_id)
             return
 
-        await update_item_quantity(external_id, new_qty, access_token)
-        logger.info("MeLi stock sync: item %s → %d unidades (variation %s)", external_id, new_qty, variation_id)
+        if price is not None:
+            await update_item_listing(external_id, new_qty, price, original_price, access_token)
+        else:
+            await update_item_quantity(external_id, new_qty, access_token)
+
+        logger.info("MeLi sync: item %s → %d u. / $%.0f (variation %s)", external_id, new_qty, price or 0, variation_id)
 
     except Exception as e:
-        # No propagar: el sync es best-effort, no debe romper la operación principal
         logger.error("Error en sync_meli_stock para variation %s: %s", variation_id, e)
 
 
@@ -327,8 +338,8 @@ async def sync_stock_from_supabase(
     tenant_id: str = Depends(get_current_tenant),
 ):
     """
-    Fuerza la sincronización de stock desde Supabase hacia MeLi para un listing.
-    Útil cuando se necesita alinear manualmente después de un ajuste.
+    Fuerza la sincronización de stock + precio + precio tachado desde Supabase hacia MeLi.
+    Útil para alinear manualmente después de un ajuste o cambio de precio.
     """
     supabase = _get_service_client()
 
@@ -351,10 +362,10 @@ async def sync_stock_from_supabase(
     if not variation_id:
         raise HTTPException(status_code=400, detail="Este listing no tiene variante de Supabase vinculada")
 
-    # Obtener stock actual de Supabase
+    # Obtener stock + precio actuales de Supabase
     var_res = (
         supabase.table("product_variations")
-        .select("stock_quantity")
+        .select("stock_quantity, price, compare_at_price")
         .eq("id", variation_id)
         .eq("tenant_id", tenant_id)
         .single()
@@ -363,17 +374,25 @@ async def sync_stock_from_supabase(
     if not var_res.data:
         raise HTTPException(status_code=404, detail="Variante no encontrada")
 
-    current_stock = var_res.data["stock_quantity"]
+    current_stock  = var_res.data["stock_quantity"]
+    price          = float(var_res.data["price"])
+    original_price = float(var_res.data["compare_at_price"]) if var_res.data.get("compare_at_price") else None
 
     access_token = await get_valid_token(supabase, tenant_id)
     if not access_token:
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
 
     try:
-        await update_item_quantity(external_id, current_stock, access_token)
-        return {"ok": True, "meli_id": external_id, "synced_quantity": current_stock}
+        await update_item_listing(external_id, current_stock, price, original_price, access_token)
+        return {
+            "ok": True,
+            "meli_id": external_id,
+            "synced_quantity": current_stock,
+            "synced_price": price,
+            "synced_original_price": original_price,
+        }
     except Exception as e:
-        logger.error("Error en sync-stock MeLi item %s: %s", external_id, e)
+        logger.error("Error en sync MeLi item %s: %s", external_id, e)
         raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
 
 
