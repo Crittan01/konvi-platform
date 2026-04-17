@@ -80,9 +80,51 @@ supabase db query --linked -f supabase/migrations/archivo.sql
 
 | Token | Estado |
 |---|---|
-| `META_ACCESS_TOKEN` | ✅ Permanente — System User `commerce-ops`, sin expiración |
+| WhatsApp `META_ACCESS_TOKEN` | ✅ Permanente — System User, sin expiración. Almacenado en `tenant_integrations` (provider: `whatsapp`), **no en env vars**. Configurable desde `/dashboard/integrations`. |
 | `GEMINI_API_KEY` | ✅ Configurada, billing activo |
 | `SUPABASE_JWT_SECRET` | ✅ Presente |
+
+---
+
+## Configuración de App Mercado Libre (Plataforma — se hace UNA vez)
+
+La plataforma usa una sola App MeLi registrada en DevCenter. Cada tenant autoriza su cuenta vendedor a través de OAuth usando esta app. Los tenants **nunca** tocan DevCenter.
+
+### Cómo recrear la app si es necesario
+
+1. Ir a [https://developers.mercadolibre.com.co/devcenter](https://developers.mercadolibre.com.co/devcenter) → **Crear nueva aplicación**
+
+2. **Información básica**
+   - Nombre, nombre corto, descripción del negocio
+   - Propósito: `Negocios`
+   - Usuarios estimados: `1 a 10` (ajustar según escala)
+   - Logo de la plataforma
+
+3. **Configuración y scopes**
+   - Redirect URI: `https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback`
+   - Flujos OAuth: `Authorization Code`, `Client Credentials`, `Refresh Token`
+   - PKCE: vacío
+   - Unidad de negocio: `Mercado Libre` (no VIS)
+   - Permisos:
+     - Usuarios: **Lectura y escritura**
+     - Publicación y sincronización: **Lectura y escritura**
+     - Venta y envíos: **Lectura y escritura**
+     - Métricas del negocio: **Lectura**
+     - Resto: Sin acceso
+   - Tópicos de notificación:
+     - `orders_v2` (órdenes nuevas → módulo Pedidos)
+     - `items` (cambios en listings)
+     - `shipments` (actualizaciones de envío)
+   - Callback URL notificaciones: `https://commerce-ops-api.onrender.com/api/v1/meli/webhook`
+   - Aceptar Términos y Condiciones
+
+4. **Obtener credenciales** → `App ID` y `Client Secret`
+
+5. **Configurar en Render** (servicios `commerce-ops-web` y `commerce-ops-api`):
+   - `MELI_CLIENT_ID` = App ID
+   - `MELI_CLIENT_SECRET` = Client Secret
+   - `MELI_REDIRECT_URI` = `https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback`
+   - `MELI_AUTH_URL` = `https://auth.mercadolibre.com.co/authorization`
 
 ---
 
