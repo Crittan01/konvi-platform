@@ -553,38 +553,30 @@ export default async function IntegrationsPage({
             ) : isOwner ? (
               <div className="space-y-3">
                 <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 space-y-2.5">
-                  <p className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wider">Requisitos previos</p>
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Debes usar la <strong className="text-foreground font-medium">cuenta principal del vendedor</strong> en Mercado Libre — no una cuenta de operador ni colaborador. La cuenta debe tener verificación KYC completa y no estar bloqueada por políticas de MeLi.
-                    </p>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      MeLi solicitará autorización para: <span className="text-yellow-300/90 font-medium">leer y modificar tus publicaciones, gestionar órdenes y mensajes postventa</span>. Esto es necesario para sincronizar catálogo y recibir pedidos en la plataforma.
-                    </p>
-                  </div>
-                  <div className="border-t border-yellow-500/15 pt-2 space-y-1.5">
-                    <p className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wider">Pasos</p>
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">Presiona <strong className="text-foreground font-medium">Conectar con Mercado Libre</strong> — serás redirigido a la pantalla de autorización de MeLi.</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">Inicia sesión con tu cuenta vendedor principal, revisa los permisos solicitados y presiona <strong className="text-foreground font-medium">Permitir</strong>.</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">Serás redirigido de vuelta automáticamente. La card mostrará tu <strong className="text-foreground font-medium">Usuario MeLi ID</strong> y el estado cambiará a Conectado.</p>
-                      </div>
+                  <p className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wider">Requisito</p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Necesitas la <strong className="text-foreground font-medium">cuenta principal vendedor</strong> de Mercado Libre Colombia — no una cuenta de operador ni colaborador. La cuenta debe tener verificación de identidad completa.
+                  </p>
+                  <div className="border-t border-yellow-500/15 pt-2 space-y-2">
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Presiona <strong className="text-foreground font-medium">Conectar con Mercado Libre</strong> — serás redirigido a MeLi.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Inicia sesión con tu cuenta vendedor, revisa los permisos solicitados (publicaciones, órdenes y envíos) y presiona <strong className="text-foreground font-medium">Permitir</strong>.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-yellow-500/25 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Serás redirigido de vuelta. La card mostrará tu <strong className="text-foreground font-medium">Usuario MeLi ID</strong> y el estado cambiará a Conectado.</p>
                     </div>
                   </div>
                   <div className="border-t border-yellow-500/15 pt-2 space-y-1">
                     <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                      <span className="text-yellow-400/80 font-medium">Vigencia:</span> la autorización dura <strong className="text-foreground/70">6 meses</strong>. Pasado ese tiempo necesitarás reconectar tu cuenta.
+                      <span className="text-yellow-400/80 font-medium">Vigencia:</span> la autorización dura 6 meses. Pasado ese tiempo verás el estado como Desconectado y deberás reconectar.
                     </p>
                     <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                      <span className="text-yellow-400/80 font-medium">Error frecuente:</span> si MeLi muestra "la aplicación no puede conectarse a tu cuenta", asegúrate de usar la cuenta principal (no operador) y que tu verificación de identidad esté completa.
+                      <span className="text-yellow-400/80 font-medium">Error "la aplicación no puede conectarse":</span> estás usando una cuenta de operador o la verificación de identidad en MeLi está incompleta.
                     </p>
                   </div>
                 </div>
