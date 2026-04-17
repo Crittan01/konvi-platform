@@ -27,7 +27,7 @@ import os
 import httpx
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,76 @@ def is_configured() -> bool:
 
 
 # ─── Token por tenant ─────────────────────────────────────────────────────────
+
+async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
+    """
+    Retorna un access_token válido para el tenant.
+    Refresca automáticamente si expires_at < now + 1h.
+    Guarda el token nuevo en DB tras un refresh exitoso.
+    """
+    try:
+        result = (
+            supabase.table("tenant_integrations")
+            .select("credentials")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "mercadolibre")
+            .eq("status", "connected")
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return None
+
+        creds        = result.data.get("credentials") or {}
+        access_token = creds.get("access_token")
+        refresh_tok  = creds.get("refresh_token")
+        expires_at_s = creds.get("expires_at")
+
+        if not access_token:
+            return None
+
+        # Decidir si refrescar
+        needs_refresh = False
+        if refresh_tok:
+            if not expires_at_s:
+                needs_refresh = True
+            else:
+                try:
+                    exp = datetime.fromisoformat(expires_at_s)
+                    if exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=timezone.utc)
+                    needs_refresh = exp < datetime.now(timezone.utc) + timedelta(hours=1)
+                except Exception:
+                    needs_refresh = True
+
+        if needs_refresh and refresh_tok:
+            try:
+                token_data  = await refresh_token(refresh_tok)
+                new_access  = token_data.get("access_token")
+                new_refresh = token_data.get("refresh_token", refresh_tok)
+                new_exp_in  = token_data.get("expires_in", 21600)
+                new_exp_at  = (datetime.now(timezone.utc) + timedelta(seconds=new_exp_in)).isoformat()
+
+                supabase.table("tenant_integrations").update({
+                    "credentials": {
+                        "access_token":  new_access,
+                        "refresh_token": new_refresh,
+                        "expires_in":    new_exp_in,
+                        "expires_at":    new_exp_at,
+                    },
+                }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
+
+                logger.info("Token MeLi renovado tenant %s, expira %s", tenant_id, new_exp_at)
+                return new_access
+            except Exception as e:
+                logger.warning("No se pudo renovar token MeLi tenant %s: %s — usando token existente", tenant_id, e)
+
+        return access_token
+
+    except Exception as e:
+        logger.warning("Error obteniendo token MeLi tenant %s: %s", tenant_id, e)
+        return None
+
 
 def get_tenant_meli_credentials(supabase, tenant_id: str) -> Optional[dict]:
     """

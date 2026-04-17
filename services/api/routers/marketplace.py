@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from dependencies.auth import get_current_tenant, _get_service_client
 from integrations.meli_client import (
     get_tenant_meli_credentials,
+    get_valid_token,
     get_user_items,
     get_items_details,
     get_item,
@@ -60,12 +61,12 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
         tenant_id = listing["tenant_id"]
         external_id = listing["external_id"]
 
-        creds = get_tenant_meli_credentials(supabase, tenant_id)
-        if not creds or not creds.get("access_token"):
+        access_token = await get_valid_token(supabase, tenant_id)
+        if not access_token:
             logger.warning("MeLi no conectado para tenant %s — sync omitido", tenant_id)
             return
 
-        await update_item_quantity(external_id, new_qty, creds["access_token"])
+        await update_item_quantity(external_id, new_qty, access_token)
         logger.info("MeLi stock sync: item %s → %d unidades (variation %s)", external_id, new_qty, variation_id)
 
     except Exception as e:
@@ -88,10 +89,13 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
 
     # Verificar conexión MeLi
     creds = get_tenant_meli_credentials(supabase, tenant_id)
-    if not creds or not creds.get("access_token") or not creds.get("user_id"):
+    if not creds or not creds.get("user_id"):
         return {"connected": False, "items": [], "paging": {"total": 0}}
 
-    access_token = creds["access_token"]
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
+        return {"connected": False, "items": [], "paging": {"total": 0}}
+
     user_id = str(creds["user_id"])
 
     try:
@@ -209,9 +213,9 @@ async def link_listing(
     if not var_check.data:
         raise HTTPException(status_code=404, detail="Variante no encontrada en Supabase")
 
-    # Verificar conexión MeLi y que el item existe
-    creds = get_tenant_meli_credentials(supabase, tenant_id)
-    if not creds or not creds.get("access_token"):
+    # Verificar conexión MeLi
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado para este tenant")
 
     # Construir URL del item
@@ -294,13 +298,13 @@ async def update_listing_status(
 
     external_id = listing_res.data["external_id"]
 
-    creds = get_tenant_meli_credentials(supabase, tenant_id)
-    if not creds or not creds.get("access_token"):
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
 
     try:
         # 1. Actualizar en MeLi
-        await update_item_status(external_id, new_status, creds["access_token"])
+        await update_item_status(external_id, new_status, access_token)
 
         # 2. Actualizar estado local
         res = (
@@ -361,12 +365,12 @@ async def sync_stock_from_supabase(
 
     current_stock = var_res.data["stock_quantity"]
 
-    creds = get_tenant_meli_credentials(supabase, tenant_id)
-    if not creds or not creds.get("access_token"):
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
 
     try:
-        await update_item_quantity(external_id, current_stock, creds["access_token"])
+        await update_item_quantity(external_id, current_stock, access_token)
         return {"ok": True, "meli_id": external_id, "synced_quantity": current_stock}
     except Exception as e:
         logger.error("Error en sync-stock MeLi item %s: %s", external_id, e)
@@ -401,8 +405,8 @@ async def import_from_meli(
         raise HTTPException(status_code=400, detail="meli_id es requerido")
 
     # Verificar credenciales MeLi
-    creds = get_tenant_meli_credentials(supabase, tenant_id)
-    if not creds or not creds.get("access_token"):
+    access_token = await get_valid_token(supabase, tenant_id)
+    if not access_token:
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
 
     # Verificar que no exista ya un listing para este meli_id
@@ -419,7 +423,7 @@ async def import_from_meli(
 
     # 1. Obtener datos del item desde MeLi
     try:
-        meli_item = await get_item(meli_id, creds["access_token"])
+        meli_item = await get_item(meli_id, access_token)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"No se pudo obtener el item de Mercado Libre: {str(e)}")
 
