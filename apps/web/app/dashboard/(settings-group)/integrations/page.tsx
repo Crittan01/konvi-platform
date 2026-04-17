@@ -475,7 +475,7 @@ export default async function IntegrationsPage({
                   <div className="space-y-2">
                     <div className="flex gap-2">
                       <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">Ve a <span className="font-mono text-foreground">https://ship.envia.com</span> → crea una cuenta o inicia sesión con tu cuenta de vendedor.</p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Ve a <span className="font-mono text-foreground">https://ship.envia.com</span> o <span className="font-mono text-foreground">https://shipping-test.envia.com/</span> → crea una cuenta o inicia sesión con tu cuenta de vendedor.</p>
                     </div>
                     <div className="flex gap-2">
                       <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
