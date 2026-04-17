@@ -173,6 +173,7 @@ apps/web/app/
 | `tenants.nit`, `email_contacto`, `telefono_contacto` | 20260415020000 | ✅ |
 | `tenant_users.role` `agent→operator`, `add_member_to_tenant` con roles renombrados | 20260415030000 | ✅ |
 | `claims` RLS fix — políticas reemplazadas para usar `app_current_tenant()` | 20260416000000 | ✅ |
+| Realtime habilitado — `conversations` y `messages` en `supabase_realtime` publication | 20260417000000 | ✅ |
 
 > Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
 
