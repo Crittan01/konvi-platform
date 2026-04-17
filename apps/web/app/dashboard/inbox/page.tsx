@@ -5,7 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import {
   MessageSquare, User, Bot, Phone, Clock, AlertCircle, Send,
   Search, X, ChevronLeft, Filter, Info, CheckCheck, Check,
-  Circle, Wifi, Lock,
+  Circle, Wifi, Lock, WifiOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -70,6 +70,8 @@ export default function InboxPage() {
   // mobile: 'list' | 'chat'
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list')
 
+  const [waConnected, setWaConnected] = useState<boolean | null>(null)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const replyInputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -97,7 +99,18 @@ export default function InboxPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { loadConversations() }, [loadConversations])
+  useEffect(() => {
+    loadConversations()
+    supabase
+      .from('tenant_integrations')
+      .select('status')
+      .eq('provider', 'whatsapp')
+      .single()
+      .then(({ data }) => {
+        setWaConnected(data?.status === 'connected')
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadConversations])
 
   // ── Cargar mensajes ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -192,7 +205,20 @@ export default function InboxPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)] overflow-hidden rounded-xl border border-border shadow-sm">
+    <div className="flex flex-col h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)] gap-2">
+
+      {/* Banner WhatsApp desconectado */}
+      {waConnected === false && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-400 shrink-0">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span className="flex-1">WhatsApp no está conectado — no llegarán mensajes nuevos ni se podrán enviar respuestas.</span>
+          <a href="/dashboard/integrations" className="text-xs font-medium underline underline-offset-2 whitespace-nowrap hover:text-amber-300">
+            Configurar
+          </a>
+        </div>
+      )}
+
+    <div className="flex flex-1 overflow-hidden rounded-xl border border-border shadow-sm">
 
       {/* ── Panel Lista — oculto en mobile cuando hay chat seleccionado ──── */}
       <div className={`
@@ -437,6 +463,7 @@ export default function InboxPage() {
           </>
         )}
       </div>
+    </div>
     </div>
   )
 }
