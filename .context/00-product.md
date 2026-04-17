@@ -19,9 +19,9 @@ Los tenants (empresas B2B2C) venden por WhatsApp. El sistema centraliza catálog
 
 ---
 
-## 2. Tree Funcional Vigente — Tenant Console (Rev. 4 — Cierre Definitivo)
+## 2. Tree Funcional Vigente — Tenant Console (Rev. 5 — 2026-04-17)
 
-Esta es la estructura funcional aprobada y cerrada semánticamente (rev. 4, 2026-04-14).
+Esta es la estructura funcional aprobada y cerrada semánticamente (rev. 5, 2026-04-17).
 La navegación visible debe calzar exactamente en este árbol. No agregar nada sin decisión formal.
 
 ```text
@@ -36,12 +36,13 @@ Tenant Console
 │   ├── Despachos          ← cotizaciones Envia post-pedido (logística comercial)
 │   └── Reclamos           ← post-venta: tickets, devoluciones, disputas
 │
-├── PRODUCTOS
-│   ├── Catálogo           ← maestro de producto: info, variantes, precios, imágenes
-│   └── Inventario         ← stock por variante, ajustes, alertas por umbral
+├── PRODUCTOS              ← hoja directa → /dashboard/catalog
+│                            Catálogo + Inventario unificados en una sola pantalla.
+│                            KPI bar (total/bajo/sin stock), ajuste delta inline por variante,
+│                            historial de movimientos colapsable. Inventario ya NO es módulo separado.
 │
 ├── CANALES
-│   └── Mercado Libre      ← listings, sync catálogo/stock, órdenes MeLi
+│   └── Mercado Libre      ← listings, sync catálogo/stock/precio, órdenes MeLi
 │
 ├── COMPRAS            ← repositorio de órdenes de compra a proveedores
 │
@@ -55,7 +56,7 @@ Tenant Console
 │   ├── Métricas           ← KPIs de negocio
 │   └── Auditoría          ← log de acceso/cambios, exportación CSV
 │
-└── CONFIGURACIÓN (🟡 En Certificación)
+└── CONFIGURACIÓN
     ├── General            ← /settings: nombre, logo, threshold, dirección origen
     ├── Usuarios y Acceso  ← /team: invite email, changeRole, removeMember
     └── Integraciones      ← /integrations: Envia (API key), MeLi (OAuth), Telegram (Bot Token + Chat ID)
@@ -73,7 +74,7 @@ No tiene implementación. Bloqueante OQ-P01 sin resolver.
 |---|---|---|
 | **INICIO** | Capa de operación inmediata. No es "misc". | Sin cambio |
 | **VENTAS** | Flujo comercial completo: pedido → despachar → resolver. Despachos es un paso del ciclo, no dominio independiente. | Despachos movido a Ventas |
-| **PRODUCTOS** | Core maestro del producto. Media es biblioteca de assets del catálogo, no operativa independiente. | Media oculta del menú |
+| **PRODUCTOS** | Core maestro del producto. Catálogo + Inventario fusionados en una sola hoja `/dashboard/catalog`. Media oculta del menú. | Rev.5: Inventario eliminado como módulo separado |
 | **CANALES** | Proyección del catálogo hacia marketplaces externos. Aunque hoy solo hay MeLi, el grupo existe para que no flote suelto. | Restaurado como grupo |
 | **COMPRAS** | Reposición de inventario. Dominio distinto a Ventas. | Sin cambio |
 | **FINANZAS** | Reportería financiera. No incluye operación ni estado transaccional. | Sin cambio |
@@ -101,7 +102,8 @@ commerce-ops-platform/
 ├── apps/web/                    # Next.js 14.2.35 — Tenant Console
 │   └── app/dashboard/
 │       ├── (sales)/             # Route Group → /dashboard/{orders,contacts,shipping,claims}
-│       ├── (products)/          # Route Group → /dashboard/{catalog,inventory,media}
+│       ├── (products)/          # Route Group → /dashboard/catalog  (inventory eliminado)
+│       │   └── catalog/         # Productos unificado: catálogo + stock + ajustes
 │       ├── (channels)/          # Route Group → /dashboard/marketplace
 │       ├── (ai)/                # Route Group → /dashboard/{knowledge-base,ai-agents}
 │       ├── (analytics)/         # Route Group → /dashboard/{metrics,audit}
@@ -115,7 +117,7 @@ commerce-ops-platform/
 │   └── ai-orchestrator/         # Polling Gemini — daemon thread en Render Free
 ├── packages/
 │   └── auth/                    # Wrappers Supabase SSR (parcial — 2 archivos)
-└── supabase/migrations/         # 20 migraciones — FUENTE CANÓNICA de esquema DB
+└── supabase/migrations/         # 27 migraciones — FUENTE CANÓNICA de esquema DB
 ```
 
 **Nota crítica sobre Route Groups:** Las carpetas `(nombre)` en Next.js no cambian las URLs.
