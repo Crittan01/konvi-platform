@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  Settings, Truck, ShieldCheck, Building2, AlertCircle, SlidersHorizontal, Palette,
+  Settings, Truck, ShieldCheck, Building2, SlidersHorizontal, Palette,
 } from 'lucide-react'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
@@ -21,7 +21,7 @@ type ShippingOrigin = {
   state?: string; postal_code?: string; country?: string; phone?: string
 }
 type Tenant = {
-  id: string; name: string; meta_waba_id: string | null; status: string
+  id: string; name: string; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
   low_stock_threshold?: number | null
   nit?: string | null
@@ -70,7 +70,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, meta_waba_id, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto')
+      .select('id, name, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -209,21 +209,6 @@ export default async function SettingsPage() {
                       <p className="text-[10px] text-muted-foreground">10 dígitos, ej: 3121234567</p>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium">WABA ID (Meta)</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={tenant?.meta_waba_id ?? 'No configurado'}
-                        readOnly
-                        className="h-9 bg-muted text-muted-foreground font-mono text-xs flex-1"
-                      />
-                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">Solo lectura</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3 shrink-0" />
-                      Para cambiar el WABA ID contacta a soporte.
-                    </p>
-                  </div>
                   <Button type="submit" size="sm">Guardar cambios</Button>
                 </form>
               </div>
@@ -233,7 +218,6 @@ export default async function SettingsPage() {
                 <ReadOnlyField label="NIT" value={tenant?.nit ?? '—'} />
                 <ReadOnlyField label="Email" value={tenant?.email_contacto ?? '—'} />
                 <ReadOnlyField label="Celular" value={tenant?.telefono_contacto ? `+57 ${tenant.telefono_contacto}` : '—'} />
-                <ReadOnlyField label="WABA ID" value={tenant?.meta_waba_id ?? 'No configurado'} />
               </div>
             )}
           </FormSection>
@@ -273,12 +257,6 @@ export default async function SettingsPage() {
               <div className="flex justify-between items-center">
                 <span className="text-xs text-muted-foreground">Stock bajo en</span>
                 <span className="text-xs font-mono font-medium">≤ {tenant?.low_stock_threshold ?? 5} uds</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">WABA ID</span>
-                <span className="text-xs font-mono text-muted-foreground truncate max-w-[100px]">
-                  {tenant?.meta_waba_id ? `${tenant.meta_waba_id.slice(0, 8)}…` : '—'}
-                </span>
               </div>
             </div>
           </div>

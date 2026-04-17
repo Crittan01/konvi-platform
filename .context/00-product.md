@@ -56,9 +56,9 @@ Tenant Console
 │   └── Auditoría          ← log de acceso/cambios, exportación CSV
 │
 └── CONFIGURACIÓN (🟡 En Certificación)
-    ├── General            ← /settings: nombre, logo, WABA, threshold, dirección origen
+    ├── General            ← /settings: nombre, logo, threshold, dirección origen
     ├── Usuarios y Acceso  ← /team: invite email, changeRole, removeMember
-    └── Integraciones      ← /integrations: MeLi OAuth, Envia API key
+    └── Integraciones      ← /integrations: Envia (API key), MeLi (OAuth), Telegram (Bot Token + Chat ID)
 ```
 
 **Platform Console — Fuera de alcance absoluto en esta iniciativa:**

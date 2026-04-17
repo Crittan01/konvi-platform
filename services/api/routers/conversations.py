@@ -279,6 +279,8 @@ async def send_agent_message(
         meta_message_id = await send_whatsapp_text(
             to_phone=conv["customer_phone"],
             text=text,
+            tenant_id=tenant_id,
+            supabase=supabase,
         )
         if meta_message_id is None:
             raise HTTPException(

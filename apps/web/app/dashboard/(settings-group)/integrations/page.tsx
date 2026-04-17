@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
-  Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
+  Bot, SendHorizonal, ShieldCheck, Package, Store, Clock, MessageCircle,
 } from 'lucide-react'
 
 export const metadata = {
@@ -46,20 +46,22 @@ export default async function IntegrationsPage({
     notifications = (notifRes.data as NotifSetting[]) || []
   }
 
-  const providers = ['envia', 'mercadolibre']
+  const providers = ['envia', 'mercadolibre', 'whatsapp']
   const fullList: Integration[] = providers.map(p =>
     integrations.find(i => i.provider === p) ?? { provider: p, status: 'disconnected', meta: {} }
   )
 
   const enviaInt  = fullList.find(i => i.provider === 'envia')!
   const meliInt   = fullList.find(i => i.provider === 'mercadolibre')!
+  const waInt     = fullList.find(i => i.provider === 'whatsapp')!
   const tgConfig  = notifications.find(n => n.channel === 'telegram')
 
   const enviaConnected = enviaInt.status === 'connected'
   const meliConnected  = meliInt.status === 'connected'
+  const waConnected    = waInt.status === 'connected'
   const tgConnected    = !!(tgConfig?.enabled && tgConfig?.config?.bot_token && tgConfig?.config?.chat_id)
 
-  const connectedCount = [enviaConnected, meliConnected, tgConnected].filter(Boolean).length
+  const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected].filter(Boolean).length
 
   const meliState   = tenantId ? Buffer.from(tenantId).toString('base64url') : ''
   const meliAuthUrl = MELI_CLIENT_ID && meliState
@@ -202,6 +204,42 @@ export default async function IntegrationsPage({
     redirect('/dashboard/integrations?tg_test=success')
   }
 
+  async function saveWhatsApp(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+    const wabaId  = (formData.get('waba_id') as string)?.trim()
+    const phoneId = (formData.get('phone_number_id') as string)?.trim()
+    const token   = (formData.get('access_token') as string)?.trim()
+    await sb.from('tenant_integrations').upsert({
+      tenant_id:   m.tenant_id,
+      provider:    'whatsapp',
+      status:      'connected',
+      credentials: { access_token: token, phone_number_id: phoneId },
+      meta: {
+        waba_id:          wabaId,
+        phone_id_preview: `${phoneId.slice(0, 6)}...${phoneId.slice(-4)}`,
+        token_preview:    token.length > 12 ? `${token.slice(0, 8)}...${token.slice(-4)}` : '●●●●',
+      },
+    }, { onConflict: 'tenant_id,provider' })
+    await sb.from('tenants').update({ meta_waba_id: wabaId }).eq('id', m.tenant_id)
+    revalidatePath('/dashboard/integrations')
+  }
+
+  async function disconnectWhatsApp() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+    await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {}, meta: {} })
+      .eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp')
+    await sb.from('tenants').update({ meta_waba_id: null }).eq('id', m.tenant_id)
+    revalidatePath('/dashboard/integrations')
+  }
+
   // ── UI ────────────────────────────────────────────────────────────────────
 
   return (
@@ -213,7 +251,7 @@ export default async function IntegrationsPage({
           <Plug className="h-5 w-5 text-primary" /> Integraciones
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Conectores activos para tu negocio · {connectedCount}/3 conectados
+          Conectores activos para tu negocio · {connectedCount}/4 conectados
         </p>
       </div>
 
@@ -264,6 +302,118 @@ export default async function IntegrationsPage({
           </div>
         </div>
       )}
+
+      {/* ── Canal Principal: WhatsApp ─────────────────────────────────────── */}
+      <div className="space-y-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <MessageCircle className="h-3.5 w-3.5" /> Canal Principal
+        </p>
+        <div className={`rounded-xl border bg-card overflow-hidden ${waConnected ? 'border-emerald-500/30' : 'border-border'}`}>
+          <div className={`px-5 py-4 border-b ${waConnected ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-muted/20'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-green-500/15 border border-green-500/20 flex items-center justify-center">
+                  <MessageCircle className="h-5 w-5 text-green-400" />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm">WhatsApp</p>
+                  <p className="text-xs text-muted-foreground">Canal de Ventas — WhatsApp Cloud API</p>
+                </div>
+              </div>
+              <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
+                waConnected ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-muted text-muted-foreground border-border'
+              }`}>
+                {waConnected ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                {waConnected ? 'Conectado' : 'Desconectado'}
+              </div>
+            </div>
+          </div>
+          <div className="px-5 py-4 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Conecta tu cuenta oficial de WhatsApp Business para recibir y enviar mensajes con tus clientes.
+            </p>
+            {waConnected ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-lg bg-muted px-3 py-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">WABA ID</p>
+                    <p className="text-xs font-mono font-medium mt-0.5 truncate">{waInt.meta?.waba_id ?? '—'}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted px-3 py-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">Phone Number ID</p>
+                    <p className="text-xs font-mono font-medium mt-0.5">{waInt.meta?.phone_id_preview ?? '—'}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted px-3 py-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">Token</p>
+                    <p className="text-xs font-mono font-medium mt-0.5">{waInt.meta?.token_preview ?? '●●●●'}</p>
+                  </div>
+                </div>
+                {isOwner && (
+                  <form action={disconnectWhatsApp}>
+                    <Button type="submit" size="sm" variant="outline"
+                      className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
+                      Desconectar WhatsApp
+                    </Button>
+                  </form>
+                )}
+              </div>
+            ) : isOwner ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-green-400 uppercase tracking-wider">Pasos de configuración</p>
+                  <div className="space-y-2.5">
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Ve a <span className="font-mono text-foreground">developers.facebook.com</span> → My Apps → selecciona tu app de tipo <strong className="text-foreground font-medium">Business</strong> (o crea una nueva).
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        En el menú izquierdo → <strong className="text-foreground font-medium">WhatsApp → Configuración API</strong> → copia el <strong className="text-foreground font-medium">WABA ID</strong> (ID de cuenta de WhatsApp Business) y el <strong className="text-foreground font-medium">Phone Number ID</strong>.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        En <strong className="text-foreground font-medium">Meta Business Suite → Configuración → Usuarios del sistema</strong> → crea un System User con rol Admin → <strong className="text-foreground font-medium">Generar token</strong> → selecciona tu App → activa los permisos <span className="font-mono text-green-400 text-[10px]">whatsapp_business_messaging</span> y <span className="font-mono text-green-400 text-[10px]">whatsapp_business_management</span> → copia el token generado.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="h-4 w-4 rounded-full bg-green-500/25 text-green-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">4</span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Ingresa los tres valores abajo y presiona <strong className="text-foreground font-medium">Conectar WhatsApp</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <form action={saveWhatsApp} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">WABA ID</Label>
+                      <Input name="waba_id" type="text" placeholder="123456789012345" required className="h-8 text-xs font-mono" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Phone Number ID</Label>
+                      <Input name="phone_number_id" type="text" placeholder="123456789012345" required className="h-8 text-xs font-mono" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Token de Acceso (System User)</Label>
+                    <Input name="access_token" type="text" placeholder="EAABs..." required className="h-8 text-xs font-mono" />
+                  </div>
+                  <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-500 text-white">
+                    <MessageCircle className="h-3.5 w-3.5" /> Conectar WhatsApp
+                  </Button>
+                </form>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ── Grid 2×2: Logística + Marketplace ─────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
