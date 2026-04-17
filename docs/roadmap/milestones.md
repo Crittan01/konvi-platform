@@ -62,7 +62,7 @@
 | Item | Estado | Depende de |
 |------|--------|-----------|
 | Beta Controlada completa | ❌ | Ver arriba |
-| Integración MeLi funcional (catálogo + pedidos) | ❌ | Fase 10 |
+| Integración MeLi — OAuth + IPN + listings + stock sync | 🔄 Live. Pendiente para RC: sync catálogo completo MeLi→Supabase (precios/descripciones automático) y tracking shipments | Fase 10–11.5 |
 | Shipping / Courier (Envia) — cotización y labels | ❌ | Fase 10 + PV-03 validado |
 | Panel de Inbox con Human Takeover en producción real | ✅ / ⚠️ | Funciona — necesita E2E real |
 | RBAC completo enforceado | ❌ | Fase 8-9 |

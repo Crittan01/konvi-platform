@@ -1,6 +1,6 @@
 # Fases de Implementación — Commerce Ops Platform
 
-Última actualización: 2026-04-10 (rev. 15 — Fases 1-11 completadas)
+Última actualización: 2026-04-16 (rev. 16 — Fases 1-11.5 completadas)
 
 ---
 
@@ -249,11 +249,24 @@ Las Fases en este documento son la agrupación estratégica de esos BLOQUEs.
 3. PV-03 validado: ¿cuenta Envia global o por tenant? (ver `docs/research/pending-validations.md`)
 4. PV-06 validado: OAuth scopes de MeLi
 
-**MeLi (`services/connector-mercadolibre`):**
-- OAuth 2.0 por tenant → credenciales en `tenant_integrations`
-- Sync de catálogo ML → `products` + `product_variations`
-- Pedidos via IPN webhooks → `orders` + `order_items`
-- Actualización de stock bidireccional
+**MeLi — implementación real (en `services/api/`, no en `services/connector-mercadolibre/`):**
+
+> ⚠️ `services/connector-mercadolibre/` está vacío — placeholder sin código.
+> La integración vive dentro de `services/api/`:
+> - `routers/marketplace.py` — CRUD listings, link, import, sync-stock
+> - `routers/meli_webhook.py` — IPN endpoint
+> - `routers/integrations.py` — OAuth flow
+> - `integrations/meli_client.py` — cliente HTTP MeLi API
+>
+> Estado real completo: ver `docs/integrations/mercadolibre.md`.
+
+Implementado (Fases 10–11.5):
+- ✅ OAuth 2.0 por tenant → tokens en `tenant_integrations`
+- ✅ IPN Webhooks (orders_v2, items) → pedidos + estado de publicaciones
+- ✅ Listings CRUD, vinculación variation↔listing, import
+- ✅ Sync stock Supabase→MeLi (automático, bidireccional)
+
+Pendiente: sync catálogo completo MeLi→Supabase (precios/descripciones automático) y tracking shipments.
 
 **Envia (`services/connector-envia`):**
 - Shipping API: quotes (rates), labels, tracking, pickups

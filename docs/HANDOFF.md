@@ -18,7 +18,7 @@ El LLM (Gemini) es asistencia controlada, nunca fuente de verdad de datos operac
 |---|---|
 | Frontend | Next.js **14.2.35**, React ^18, TailwindCSS ^3.3.0 |
 | Backend | Python **3.11.13** (dnf, sin venv), FastAPI 0.128.8, google-genai 1.47.0 |
-| DB / Auth | Supabase — 22 migraciones aplicadas, RLS + JWT Claims |
+| DB / Auth | Supabase — 25 migraciones aplicadas, RLS + JWT Claims |
 | IA | `gemini-2.5-flash` via `google-genai==1.47.0` |
 | Hosting | Render — 4 servicios live (Free plan) |
 
@@ -35,6 +35,7 @@ El LLM (Gemini) es asistencia controlada, nunca fuente de verdad de datos operac
 | 10 | Integraciones MeLi + Envia/Shipping | ✅ |
 | 11 | Módulos restantes Tenant Console + UI Enterprise | ✅ |
 | 11.1 | UI Plus Total + Route Groups + linting hardening | ✅ 2026-04-14 |
+| 11.5 | Reclamos + Compras + Finanzas + Marketplace (Fase Enterprise completa) | ✅ 2026-04-15 |
 
 ---
 
@@ -169,7 +170,7 @@ Validado con `crittan01@gmail.com` en Render. Flujo completo: invite → email �
 |---|---|
 | IH-SMTP — SMTP custom con Resend (requiere dominio propio; Gmail bloqueado por DMARC p=reject) | Media — rate limit 3/hora en Free. No bloquea operación actual. |
 | Envia Fase 2: label, tracking, pickup | Media |
-| Sync bidireccional catálogo ↔ MeLi listings | Media |
+| Sync catálogo completo MeLi (precios/descripciones MeLi→Supabase automático) | Media |
 | IH-002: `ALLOWED_ORIGINS` en FastAPI (CORS producción) | Media — intervención humana |
 
 ---

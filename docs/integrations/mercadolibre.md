@@ -1,81 +1,111 @@
 # Integración Mercado Libre
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-16 (rev. 2 — actualizado a estado real post Fase 11.5)
 
 ---
 
 ## Estado
 
-❌ **Pendiente — Fase 8**
+✅ **Live — Fase Avanzada** (implementado en Fases 10–11.5)
 
-El directorio `services/connector-mercadolibre/` existe pero está vacío. No hay implementación.
-
----
-
-## Propósito
-
-Sincronizar el catálogo y los pedidos de Mercado Libre con la plataforma para que los tenants puedan operar sus publicaciones de MeLi desde la Tenant Console.
-
----
-
-## Capacidades planeadas
-
-| Capacidad | Descripción | Prioridad |
-|-----------|-------------|-----------|
-| Sync catálogo MeLi → plataforma | Importar publicaciones activas como `products` + `product_variations` | Alta |
-| Sync stock bidireccional | Actualizar stock en MeLi cuando cambia en la plataforma | Media |
-| Recepción de pedidos MeLi | Recibir órdenes via IPN webhooks y crear `orders` | Alta |
-| Actualización de estado de pedido | Sincronizar estado de la orden en MeLi | Media |
-| OAuth por tenant | Cada tenant conecta su propia cuenta MeLi | Alta |
+> ⚠️ Nota arquitectónica: el código de MeLi NO vive en `services/connector-mercadolibre/` (ese directorio está vacío).
+> La integración está implementada directamente en `services/api/`:
+> - `services/api/routers/marketplace.py` — endpoints REST
+> - `services/api/routers/meli_webhook.py` — IPN webhook
+> - `services/api/routers/integrations.py` — OAuth flow
+> - `services/api/integrations/meli_client.py` — cliente HTTP MeLi API
 
 ---
 
-## Autenticación
+## Capacidades implementadas
 
-- **Protocolo**: OAuth 2.0 con refresh token
-- **Modelo**: **Por tenant** — cada cliente de la plataforma conecta su propia app/cuenta de Mercado Libre
-- **Storage**: Tokens de OAuth almacenados encriptados en tabla `tenant_integrations` (tabla a crear)
-- **Refresh automático**: El conector debe manejar el refresh del token antes de que expire
+| Capacidad | Estado | Implementación |
+|-----------|--------|----------------|
+| OAuth 2.0 por tenant (connect/disconnect) | ✅ Live | `integrations.py` → `/meli/auth-url` + `/meli/callback` |
+| Listar publicaciones reales de MeLi | ✅ Live | `GET /marketplace/listings` → MeLi API real (user items + multiget) |
+| Vincular publicación MeLi ↔ variante Supabase | ✅ Live | `POST /marketplace/link` |
+| Desvincular publicación | ✅ Live | `DELETE /marketplace/link/{id}` |
+| Importar publicación MeLi → catálogo Supabase | ✅ Live | `POST /marketplace/import` — crea product + variation + listing |
+| Pausar / activar publicación en MeLi | ✅ Live | `PATCH /marketplace/{id}/status` |
+| Stock sync Supabase → MeLi (automático) | ✅ Live | `sync_meli_stock()` — llamado desde `orders.py` y `products.py` |
+| Stock sync manual Supabase → MeLi | ✅ Live | `PATCH /marketplace/{id}/sync-stock` |
+| IPN Webhook `orders_v2` (pedidos) | ✅ Live | `meli_webhook.py` → crea/actualiza `orders` en Supabase |
+| IPN Webhook `items` (status de publicación) | ✅ Live | `meli_webhook.py` → actualiza `marketplace_listings.status` |
+| Auto-refresh de access_token | ✅ Live | `_get_valid_token()` en webhook — usa refresh_token automáticamente |
+| UI de gestión de publicaciones | ✅ Live | `/dashboard/marketplace` + `MarketplaceManager` component |
 
-> ⚠️ Validar scopes y flujo OAuth actualizado en la documentación oficial de MeLi antes de implementar:
-> `https://developers.mercadolibre.com.ar/`
+## Capacidades pendientes (genuinamente)
+
+| Capacidad | Estado | Notas |
+|-----------|--------|-------|
+| Sync catálogo completo MeLi→Supabase (precios, descripciones automático) | ❌ Pendiente | Import manual disponible; sync batch/automático no implementado |
+| Tracking de envíos desde MeLi | ❌ Pendiente | Handler en webhook dice "Fase 12" |
+| Validación HMAC de webhooks MeLi | ❌ No implementado | MeLi IPN no firma los requests — verificación de origen por user_id |
 
 ---
 
-## Modelo de sincronización
+## Modelo de autenticación
+
+- **Protocolo**: OAuth 2.0 con refresh token (válido 180 días)
+- **Modelo**: **Por tenant** — cada tenant conecta su propia cuenta de Mercado Libre
+- **App credentials** (`MELI_CLIENT_ID`, `MELI_CLIENT_SECRET`): globales de plataforma — env vars en Render
+- **Tokens por tenant**: almacenados en `tenant_integrations.credentials` → `{ access_token, refresh_token, user_id, expires_in }`
+- **Refresh automático**: implementado en `_get_valid_token()` dentro de `meli_webhook.py`
+
+---
+
+## Modelo de datos
 
 ```
-MeLi Publicación → products (id, title, description, status)
-MeLi Variante    → product_variations (price, stock_quantity, attributes JSONB)
-MeLi Orden       → orders (status, customer, items, total)
+MeLi Publicación → marketplace_listings (external_id, variation_id, status, external_price, external_url)
+MeLi Orden       → orders (status, total_amount, notes con meli_order_id) + order_items
+MeLi Variante    → vinculada a product_variations vía marketplace_listings.variation_id
 ```
 
-- `products.external_reference_id` se usa para mapear con el ID de publicación de MeLi
-- La plataforma es la fuente de verdad de stock cuando hay sincronización bidireccional
+Migración: `supabase/migrations/20260413000002_marketplace_listings.sql`
 
 ---
 
-## IPN (Webhooks de Mercado Libre)
+## Flujo de stock bidireccional
 
-Mercado Libre usa IPN (Instant Payment Notifications) para notificar eventos:
-- Nueva orden
-- Cambio de estado de orden
-- Cambio en publicación
+```
+Supabase → MeLi (automático):
+  - orders.py: al confirmar pedido → _decrement_stock_on_confirm() → sync_meli_stock()
+  - products.py: al ajustar variante con nuevo stock_quantity → sync_meli_stock()
+  - marketplace.py: PATCH /{id}/sync-stock → fuerza sync manual
 
-El conector debe:
-1. Exponer un endpoint para IPN de MeLi
-2. Validar la autenticidad del IPN
-3. Procesar el evento y actualizar las tablas correspondientes
-4. Responder HTTP 200 rápidamente (patrón fire-and-forget, igual que WhatsApp)
+MeLi → Supabase (via IPN webhook):
+  - topic=orders_v2 → _process_order() → INSERT/UPDATE orders + order_items
+  - topic=items → UPDATE marketplace_listings.status
+```
 
 ---
 
-## Variables de entorno requeridas
+## Arquitectura de servicios
+
+**El MeLi integration NO es un servicio separado.** Vive dentro de `services/api/` como módulos:
 
 ```
-MELI_APP_ID=...           ← ID de la app de MeLi (por plataforma)
-MELI_CLIENT_SECRET=...    ← Secret de la app
-MELI_REDIRECT_URI=...     ← URI de callback OAuth
+services/api/
+├── routers/
+│   ├── marketplace.py      ← CRUD listings, link, import, sync-stock
+│   ├── meli_webhook.py     ← IPN endpoint /webhook
+│   └── integrations.py     ← OAuth flow /meli/auth-url + /meli/callback
+└── integrations/
+    └── meli_client.py      ← cliente HTTP: oauth, items API, update stock/status
+```
+
+`services/connector-mercadolibre/` existe pero está **vacío** — es un placeholder para una eventual extracción como servicio independiente. No tiene implementación y no está en `render.yaml`.
+
+---
+
+## Variables de entorno
+
+```bash
+MELI_CLIENT_ID=...        # ID de la app MeLi (global de plataforma)
+MELI_CLIENT_SECRET=...    # Secret de la app
+MELI_REDIRECT_URI=...     # https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback
+MELI_AUTH_URL=...         # https://auth.mercadolibre.com.co/authorization (Colombia)
 ```
 
 Tokens de acceso por tenant se almacenan en DB, no en env vars.
@@ -84,25 +114,17 @@ Tokens de acceso por tenant se almacenan en DB, no en env vars.
 
 ## Reglas de implementación
 
-1. Nunca exponer tokens de MeLi al frontend
-2. El LLM nunca consulta directamente a MeLi — solo el conector
-3. Toda operación debe incluir `tenant_id`
-4. Documentar rate limits de MeLi antes de implementar sync masiva
-5. Revisar documentación oficial vigente de MeLi antes de cualquier cambio
-
----
-
-## Orden de implementación sugerido (Fase 8)
-
-1. Setup OAuth 2.0 (connect/disconnect de cuenta MeLi por tenant)
-2. Sync inicial de catálogo (publicaciones activas → `products`)
-3. Webhook IPN para pedidos nuevos → `orders`
-4. Actualización de stock bidireccional
+1. Nunca exponer tokens MeLi al frontend
+2. El LLM nunca consulta directamente a MeLi
+3. Toda operación incluye `tenant_id` y valida pertenencia
+4. `sync_meli_stock()` falla silenciosa — un error en MeLi no rompe la operación principal de Supabase
+5. El webhook MeLi siempre responde 200 inmediatamente (BackgroundTask)
+6. Verificar documentación oficial antes de cambios en API: https://developers.mercadolibre.com.ar/
 
 ---
 
 ## Documentos relacionados
 
-- `docs/architecture/connector-framework.md` — Framework de conectores
-- `docs/data/schema.md` — Tablas `products`, `product_variations`, `orders`
-- `docs/roadmap/implementation-phases.md` — Fase 8
+- `docs/integrations/whatsapp.md` — canal conversacional
+- `docs/risks/open-questions.md` — OQ-03 (modelo OAuth por tenant vs intermediario)
+- `supabase/migrations/20260413000002_marketplace_listings.sql` — schema
