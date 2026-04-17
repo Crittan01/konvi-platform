@@ -10,6 +10,7 @@ Endpoints:
   DELETE /api/v1/integrations/meli          — desconectar MeLi            [owner]
 """
 import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -182,6 +183,9 @@ async def meli_oauth_callback(
 
     try:
         supabase = _get_service_client()
+        expires_in = token_data.get("expires_in", 21600)
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+
         supabase.table("tenant_integrations").upsert({
             "tenant_id": tenant_id,
             "provider": "mercadolibre",
@@ -189,7 +193,8 @@ async def meli_oauth_callback(
             "credentials": {
                 "access_token":  token_data.get("access_token"),
                 "refresh_token": token_data.get("refresh_token"),
-                "expires_in":    token_data.get("expires_in"),
+                "expires_in":    expires_in,
+                "expires_at":    expires_at,
             },
             "meta": {
                 "user_id":     str(token_data.get("user_id", "")),
