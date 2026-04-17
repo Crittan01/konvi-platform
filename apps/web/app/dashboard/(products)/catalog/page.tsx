@@ -28,9 +28,10 @@ export default async function CatalogPage() {
   let archivedProducts: Product[] = []
   let movements: { id: string; delta: number; new_stock: number; reason: string | null; created_at: string }[] = []
   let threshold = DEFAULT_THRESHOLD
+  let linkedVariationIds: string[] = []
 
   if (tenantId) {
-    const [activeRes, archivedRes, movementsRes, tenantRes] = await Promise.all([
+    const [activeRes, archivedRes, movementsRes, tenantRes, listingsRes] = await Promise.all([
       supabase
         .from('products')
         .select(`id, title, description, cover_image_url, platform_category_id,
@@ -56,11 +57,18 @@ export default async function CatalogPage() {
         .select('low_stock_threshold')
         .eq('id', tenantId)
         .single(),
+      supabase
+        .from('marketplace_listings')
+        .select('variation_id')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'mercadolibre')
+        .not('variation_id', 'is', null),
     ])
-    products        = (activeRes.data as Product[]) ?? []
-    archivedProducts = (archivedRes.data as Product[]) ?? []
-    movements       = movementsRes.data ?? []
-    threshold       = (tenantRes.data as { low_stock_threshold?: number } | null)?.low_stock_threshold ?? DEFAULT_THRESHOLD
+    products          = (activeRes.data as Product[]) ?? []
+    archivedProducts  = (archivedRes.data as Product[]) ?? []
+    movements         = movementsRes.data ?? []
+    threshold         = (tenantRes.data as { low_stock_threshold?: number } | null)?.low_stock_threshold ?? DEFAULT_THRESHOLD
+    linkedVariationIds = (listingsRes.data ?? []).map((l: { variation_id: string }) => l.variation_id).filter(Boolean)
   }
 
   // ── Server Actions ──────────────────────────────────────────────────────────
@@ -251,6 +259,7 @@ export default async function CatalogPage() {
         deleteProductAction={deleteProduct}
         adjustStockAction={adjustStock}
         saveThresholdAction={saveThreshold}
+        linkedVariationIds={linkedVariationIds}
       />
     </div>
   )

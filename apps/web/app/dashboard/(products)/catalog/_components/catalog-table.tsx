@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Search, LayoutGrid, List as ListIcon, Check,
-  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2, Minus,
+  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2, Minus, Store,
 } from 'lucide-react'
 import type { Product, Variation } from '../types'
 
@@ -25,6 +25,7 @@ type Props = {
   restoreProductAction: (fd: FormData) => Promise<void>
   deleteProductAction: (fd: FormData) => Promise<void>
   adjustStockAction?: (fd: FormData) => Promise<void>
+  linkedVariationIds?: string[]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -46,16 +47,23 @@ function fmtPrice(vars: Variation[]): string {
 // ── VariantRow — memoizado para evitar re-renders en edición inline ──────────
 
 const VariantRow = memo(function VariantRow({
-  v, canWrite, editVariationAction
-}: { v: Variation; canWrite: boolean; editVariationAction: (fd: FormData) => Promise<void> }) {
+  v, canWrite, editVariationAction, isLinked,
+}: { v: Variation; canWrite: boolean; editVariationAction: (fd: FormData) => Promise<void>; isLinked?: boolean }) {
   const [editing, setEditing] = useState(false)
   return (
     <>
       {/* Desktop table row */}
       <tr className="hidden sm:table-row bg-background hover:bg-muted/10 transition-colors">
         <td className="px-3 py-2">
-          <span className="font-medium">{fmtAttrs(v.attributes)}</span>
-          {v.sku && <span className="ml-2 text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{v.sku}</span>}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-medium">{fmtAttrs(v.attributes)}</span>
+            {v.sku && <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{v.sku}</span>}
+            {isLinked && (
+              <span title="Sincronizado con Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-500/20">
+                <Store className="h-2.5 w-2.5" /> MeLi
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-2 py-2 text-center">
           {editing ? (
@@ -104,7 +112,14 @@ const VariantRow = memo(function VariantRow({
       {/* Mobile card row */}
       <div className="sm:hidden flex items-center justify-between py-2 px-3 border-b border-border/20 last:border-0">
         <div>
-          <p className="text-xs font-medium">{fmtAttrs(v.attributes)}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-xs font-medium">{fmtAttrs(v.attributes)}</p>
+            {isLinked && (
+              <span title="Sincronizado con Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-500/20">
+                <Store className="h-2.5 w-2.5" /> MeLi
+              </span>
+            )}
+          </div>
           {v.sku && <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{v.sku}</p>}
         </div>
         <div className="text-right flex items-center gap-3">
@@ -160,7 +175,7 @@ const VariantRow = memo(function VariantRow({
 // ── ExpandedPanel — memoizado ─────────────────────────────────────────────────
 
 const ExpandedPanel = memo(function ExpandedPanel({
-  p, canWrite, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction
+  p, canWrite, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
   p: Product; canWrite: boolean;
   editProductAction: (fd: FormData) => Promise<void>
@@ -168,6 +183,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
   addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
   adjustStockAction?: (fd: FormData) => Promise<void>
+  linkedVariationIds?: string[]
 }) {
   const [editingProduct, setEditingProduct] = useState(false)
   const [showAddVar, setShowAddVar] = useState(false)
@@ -196,7 +212,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
             </thead>
             <tbody className="divide-y divide-border/20">
               {vars.map(v => (
-                <VariantRow key={v.id} v={v} canWrite={canWrite} editVariationAction={editVariationAction} />
+                <VariantRow key={v.id} v={v} canWrite={canWrite} editVariationAction={editVariationAction} isLinked={linkedVariationIds?.includes(v.id)} />
               ))}
             </tbody>
           </table>
@@ -205,7 +221,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
         {/* Mobile: stacked cards */}
         <div className="sm:hidden rounded-lg border border-border overflow-hidden divide-y divide-border/20 bg-background">
           {vars.map(v => (
-            <VariantRow key={v.id} v={v} canWrite={canWrite} editVariationAction={editVariationAction} />
+            <VariantRow key={v.id} v={v} canWrite={canWrite} editVariationAction={editVariationAction} isLinked={linkedVariationIds?.includes(v.id)} />
           ))}
         </div>
       </div>
@@ -347,7 +363,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
 
 const ProductMobileCard = memo(function ProductMobileCard({
   p, catName, isExpanded, onToggle, canWrite,
-  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction
+  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
   p: Product; catName: string | null; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
   editProductAction: (fd: FormData) => Promise<void>
@@ -355,6 +371,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
   addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
   adjustStockAction?: (fd: FormData) => Promise<void>
+  linkedVariationIds?: string[]
 }) {
   const vars = p.product_variations ?? []
   const totalStock = vars.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
@@ -406,6 +423,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
           addVariationAction={addVariationAction}
           deactivateProductAction={deactivateProductAction}
           adjustStockAction={adjustStockAction}
+          linkedVariationIds={linkedVariationIds}
         />
       )}
     </div>
@@ -488,7 +506,7 @@ const ArchivedSection = memo(function ArchivedSection({
 export default function CatalogTable({
   products, archivedProducts, catMap, canWrite,
   editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
-  adjustStockAction,
+  adjustStockAction, linkedVariationIds,
 }: Props) {
   const [search, setSearch]           = useState('')
   const [viewMode, setViewMode]       = useState<'list' | 'grid'>('list')
@@ -603,6 +621,7 @@ export default function CatalogTable({
               addVariationAction={addVariationAction}
               deactivateProductAction={deactivateProductAction}
               adjustStockAction={adjustStockAction}
+              linkedVariationIds={linkedVariationIds}
             />
           ))}
         </div>
@@ -683,6 +702,7 @@ export default function CatalogTable({
                           addVariationAction={addVariationAction}
                           deactivateProductAction={deactivateProductAction}
                           adjustStockAction={adjustStockAction}
+                          linkedVariationIds={linkedVariationIds}
                         />
                       </td>
                     </tr>
@@ -792,6 +812,7 @@ export default function CatalogTable({
                       addVariationAction={addVariationAction}
                       deactivateProductAction={deactivateProductAction}
                       adjustStockAction={adjustStockAction}
+                      linkedVariationIds={linkedVariationIds}
                     />
                   </div>
                 )}

@@ -62,13 +62,7 @@ const NAV_ITEMS: NavItem[] = [
   },
 
   // ── Productos ✅ ──────────────────────────────────────────────────────────
-  // Inventario fusionado en Catálogo — una sola página unificada
-  {
-    kind: 'group', id: 'productos', label: 'Productos', icon: Tag, roles: ['owner', 'manager'],
-    children: [
-      { kind: 'leaf', href: '/dashboard/catalog', label: 'Productos', icon: Boxes, roles: ['owner', 'manager'] },
-    ],
-  },
+  { kind: 'leaf', href: '/dashboard/catalog', label: 'Productos', icon: Boxes, roles: ['owner', 'manager'] },
 
   // ── Canales ✅ ────────────────────────────────────────────────────────────
   // Restaurado como grupo — Shopify, tienda custom entrarán aquí en fases futuras
