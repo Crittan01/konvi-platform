@@ -30,6 +30,21 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+
+def _raise_for_meli_status(resp: httpx.Response) -> None:
+    """Propaga errores HTTP incluyendo el body de respuesta de MeLi en el mensaje."""
+    if resp.is_error:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        logger.error("MeLi API error %s — %s %s — body: %s", resp.status_code, resp.request.method, resp.request.url, detail)
+        raise httpx.HTTPStatusError(
+            f"{resp.status_code} — {detail}",
+            request=resp.request,
+            response=resp,
+        )
+
 logger = logging.getLogger(__name__)
 
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
@@ -325,7 +340,7 @@ async def update_item_quantity(item_id: str, quantity: int, access_token: str) -
                 "Accept": "application/json",
             },
         )
-        resp.raise_for_status()
+        _raise_for_meli_status(resp)
         return resp.json()
 
 
@@ -351,7 +366,7 @@ async def update_item_status(item_id: str, status: str, access_token: str) -> di
                 "Accept": "application/json",
             },
         )
-        resp.raise_for_status()
+        _raise_for_meli_status(resp)
         return resp.json()
 
 
@@ -370,7 +385,7 @@ async def update_item_price(item_id: str, price: float, access_token: str) -> di
                 "Accept": "application/json",
             },
         )
-        resp.raise_for_status()
+        _raise_for_meli_status(resp)
         return resp.json()
 
 
@@ -408,5 +423,5 @@ async def update_item_listing(
                 "Accept": "application/json",
             },
         )
-        resp.raise_for_status()
+        _raise_for_meli_status(resp)
         return resp.json()
