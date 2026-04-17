@@ -1,0 +1,6 @@
+{
+  "name": "@commerce/test-utils",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Utilidades de testing compartidas — DEFERRED. No hay suite de tests automatizados en este momento."
+}

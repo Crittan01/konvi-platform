@@ -54,13 +54,13 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 | Capa | Versión real |
 |---|---|
 | Frontend | Next.js **14.2.35** + React ^18 + TypeScript ^5 |
-| UI | TailwindCSS ^3.3.0 + shadcn/ui (5 componentes en `apps/web/components/ui/`) |
+| UI | TailwindCSS ^3.3.0 + shadcn/ui (11 componentes en `apps/web/components/ui/`) |
 | Backend | Python **3.11.13** + FastAPI 0.128.8 |
 | DB / Auth | Supabase (PostgreSQL + RLS + Auth + Realtime) |
 | IA | `google-genai==1.47.0` — modelo `gemini-2.5-flash` |
 | Mensajería | WhatsApp Cloud API (Meta oficial v21.0) |
 | Shipping | Envia API (Fase Inicial — quote + historial live) |
-| Hosting | Render — Free plan (4 servicios live) |
+| Hosting | Render — Free plan (4 servicios live) — ver upgrade path en `docs/deployment/render-upgrade-path.md` |
 
 ---
 

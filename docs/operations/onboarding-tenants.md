@@ -54,20 +54,24 @@ El nuevo operador debe poder:
 
 ---
 
-## Proceso de onboarding objetivo (self-serve)
+## Proceso de onboarding objetivo (self-serve — Embedded Signup)
 
-El objetivo a largo plazo es un onboarding self-serve sin intervención manual:
+El objetivo es un onboarding self-serve sin intervención manual, habilitado por Meta Embedded Signup:
 
-1. El futuro cliente se registra en la plataforma
-2. Completa el formulario de configuración (nombre, email, WABA ID)
-3. La plataforma crea automáticamente el tenant, el usuario y las asociaciones
-4. Se envía un email de confirmación con credenciales
-5. El cliente conecta su cuenta de WhatsApp Business siguiendo el flujo guiado
+1. El futuro cliente accede al registro en la Platform Console
+2. Completa datos básicos del negocio (nombre, email, celular)
+3. La plataforma crea el tenant + usuario + rol `owner` automáticamente
+4. El cliente es redirigido a **Integraciones** → tarjeta **"Meta Suite"**
+5. Hace clic en **"Conectar WhatsApp"** → flujo Embedded Signup de Meta
+6. Meta guía al cliente: autenticación, selección de WABA, verificación del número de teléfono (OTP), autorización de permisos
+7. La plataforma recibe el token y los IDs automáticamente → guarda en `tenant_integrations`
+8. El cliente puede opcionalmente activar Messenger e Instagram desde la misma tarjeta
 
-**Prerrequisitos**:
-- Platform Console implementada (Fase 11)
-- API de onboarding en `services/api`
-- Flujo de verificación de WABA (requiere integración Meta Business Management API)
+**Prerrequisitos para implementar este flujo:**
+- IH-META-01 completado (plataforma registrada como Tech Provider de Meta)
+- Platform Console implementada (Fase 12)
+- Endpoint `GET /api/v1/integrations/meta/callback` en FastAPI
+- Ver detalle completo: `docs/integrations/meta-suite.md`
 
 ---
 

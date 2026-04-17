@@ -57,6 +57,26 @@
 
 ---
 
+## Intervenciones Humanas Pendientes (para escalar)
+
+### IH-META-01 — Convertirse en Meta Tech Provider
+**RESPONSABLE:** Operador de plataforma
+**DURACIÓN:** 3-10 días hábiles (revisión Meta)
+**BLOQUEA:** Embedded Signup self-serve, onboarding automatizado de tenants
+**GUÍA COMPLETA:** `docs/integrations/meta-suite.md` → sección IH-META-01
+
+Resumen de pasos:
+1. Verificar Meta Business Account con documentos legales
+2. Crear Meta App tipo "Business" con productos WhatsApp + Messenger + Instagram
+3. Configurar Embedded Signup con redirect URL de la plataforma
+4. Solicitar App Review → Advanced Access para `whatsapp_business_management` + `whatsapp_business_messaging` + `pages_messaging` + `instagram_manage_messages`
+5. Registrar webhook unificado
+6. Crear System User Token permanente
+
+**Hasta completar IH-META-01:** el onboarding de tenants es manual (ver `docs/operations/onboarding-tenants.md`).
+
+---
+
 ## DESPUÉS — Fase 12 Platform Console (Bloqueada OQ-P01)
 
 Fuera de alcance hasta completar certificación Tenant Console y resolver:

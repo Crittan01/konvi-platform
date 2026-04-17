@@ -1,6 +1,11 @@
 # Integración WhatsApp Cloud API (Meta)
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-16
+
+> **NOTA ARQUITECTÓNICA:** Este documento cubre el conector WhatsApp actual (modelo legacy con `tenants.meta_waba_id`).
+> La arquitectura objetivo — Meta Embedded Signup unificado para WhatsApp + Messenger + Instagram — está documentada en:
+> **`docs/integrations/meta-suite.md`**
+> Este documento se mantiene como referencia del estado operativo actual hasta completar la migración.
 
 ---
 
