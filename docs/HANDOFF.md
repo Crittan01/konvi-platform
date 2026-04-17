@@ -1,4 +1,4 @@
-# Handoff — Estado del Proyecto al 2026-04-15 (rev. 21)
+# Handoff — Estado del Proyecto al 2026-04-17 (rev. 22)
 
 Este documento es el punto de entrada para retomar trabajo en infra y operación.
 **Leer `.context/00-product.md` y `.context/01-state.md` antes si el foco es funcional o de código.**
@@ -36,6 +36,7 @@ El LLM (Gemini) es asistencia controlada, nunca fuente de verdad de datos operac
 | 11 | Módulos restantes Tenant Console + UI Enterprise | ✅ |
 | 11.1 | UI Plus Total + Route Groups + linting hardening | ✅ 2026-04-14 |
 | 11.5 | Reclamos + Compras + Finanzas + Marketplace (Fase Enterprise completa) | ✅ 2026-04-15 |
+| 11.6 | Integraciones modulares por tenant + Realtime Inbox + UX no-conectado | ✅ 2026-04-17 |
 
 ---
 
@@ -43,7 +44,7 @@ El LLM (Gemini) es asistencia controlada, nunca fuente de verdad de datos operac
 
 Ver tabla completa → `.context/01-state.md`
 
-Resumen: 18 módulos live. Configuración ✅ certificada. Flujo invite validado en Render con usuario real. Pendiente solo SMTP propio cuando haya dominio.
+Resumen: 18 módulos live. Configuración ✅ certificada. Flujo invite validado en Render con usuario real. Integraciones 4/4 (WhatsApp, MeLi, Envia, Telegram) completamente modulares por tenant. Pendiente solo SMTP propio cuando haya dominio.
 
 ---
 
@@ -51,7 +52,39 @@ Resumen: 18 módulos live. Configuración ✅ certificada. Flujo invite validado
 
 **Estado**: ❌ No existe. Cero rutas, cero layout, cero auth de plataforma.
 **Prerrequisito bloqueante**: OQ-P01 — ¿misma app Next.js (`/platform/*`) vs app separada?
-**No se toca en la iniciativa actual.** Solo aparece como frontera futura.
+**No se toca en la iniciativa actual.**
+
+### Qué debe gestionar Platform Console cuando se construya
+
+#### Gestión de tenants
+- Crear, suspender y eliminar tenants
+- Asignar plan/tier (features habilitados por tenant)
+- Ver estado de integraciones por tenant (conectado/desconectado, última actividad)
+- Billing y consumo por tenant
+
+#### Integraciones — responsabilidades de plataforma vs tenant
+
+| Integración | Responsabilidad Plataforma | Responsabilidad Tenant |
+|---|---|---|
+| **WhatsApp** | Registrar Meta App, gestionar `META_APP_SECRET` y `META_VERIFY_TOKEN` en Render. En el futuro: BSP con Embedded Signup. | Configurar WABA ID, Phone Number ID y Access Token desde `/integrations` |
+| **Mercado Libre** | Registrar App en MeLi DevCenter, gestionar `MELI_CLIENT_ID` y `MELI_CLIENT_SECRET` en Render. Ver vencimiento de tokens por tenant (6 meses). | Conectar su cuenta vendedor vía OAuth desde `/integrations` |
+| **Envia** | Sin responsabilidad de plataforma hoy. Futuro: cuenta partner/reseller Envia. | Configurar su propia API key desde `/integrations` |
+| **Telegram** | Sin responsabilidad de plataforma. | Configurar su Bot Token y Chat ID desde `/integrations` |
+
+#### Gestión de credenciales de plataforma (no de tenants)
+- Rotar `META_APP_SECRET` cuando Meta lo requiera
+- Rotar `MELI_CLIENT_SECRET` cuando venza o se comprometa
+- `META_VERIFY_TOKEN` — token de verificación del webhook WhatsApp
+- Futuros: Stripe (billing), Resend (SMTP), otros servicios de plataforma
+
+#### Alertas operativas de plataforma
+- Tokens MeLi próximos a vencer (tenant no reconectó en +5 meses)
+- Tenants con WhatsApp desconectado hace N días
+- Errores recurrentes en webhooks por tenant
+
+#### Arquitectura recomendada para Platform Console (cuando se decida OQ-P01)
+- **Opción A** (recomendada): misma app Next.js en ruta `/platform/*` con layout y auth separados. Auth de plataforma con tabla `platform_users` propia (no `tenant_users`). RLS con `platform_user_id` en lugar de `tenant_id`.
+- **Opción B**: app Next.js completamente separada (`platform.commerce-ops.com`). Más aislamiento, más infraestructura.
 
 ---
 
@@ -66,7 +99,18 @@ Resumen: 18 módulos live. Configuración ✅ certificada. Flujo invite validado
 
 - **Supabase**: `***SUPABASE_PROJECT_REF_REDACTED***` (us-east-1)
 - **Tenant dev**: `Matriz Commerce Dev` — `0fb0777e-f3e4-48c7-89bf-a25aa201c0c9`
-- **meta_waba_id**: `2159052118202272`
+- **WABA ID del tenant dev**: configurado en `tenant_integrations` (provider: `whatsapp`) — ya no en HANDOFF
+
+### Env vars por servicio (estado actual)
+
+| Servicio | Env vars de integración |
+|---|---|
+| `commerce-ops-connector` | `META_APP_SECRET`, `META_VERIFY_TOKEN` ← solo plataforma |
+| `commerce-ops-api` | `MELI_CLIENT_ID`, `MELI_CLIENT_SECRET`, `MELI_REDIRECT_URI`, `MELI_AUTH_URL` |
+| `commerce-ops-web` | `MELI_CLIENT_ID`, `MELI_REDIRECT_URI`, `MELI_AUTH_URL` |
+| `commerce-ops-orchestrator` | sin vars de integración — lee de DB por tenant |
+
+> `META_ACCESS_TOKEN` y `WHATSAPP_PHONE_ID` fueron **eliminados** de todos los servicios. Las credenciales WhatsApp viven en `tenant_integrations` por tenant.
 
 Para ejecutar SQL:
 ```bash
@@ -125,6 +169,67 @@ La plataforma usa una sola App MeLi registrada en DevCenter. Cada tenant autoriz
    - `MELI_CLIENT_SECRET` = Client Secret
    - `MELI_REDIRECT_URI` = `https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback`
    - `MELI_AUTH_URL` = `https://auth.mercadolibre.com.co/authorization`
+
+---
+
+## Trabajo de la última sesión (2026-04-17) — rev. 22
+
+### Fase 11.6 — Integraciones modulares por tenant + Realtime Inbox + UX
+
+#### Arquitectura de integraciones — modelo final
+
+Cada integración es **completamente por tenant**. La plataforma no tiene credenciales de canal de ningún tenant. La separación es:
+
+- **Plataforma** → registra apps en proveedores externos (Meta DevCenter, MeLi DevCenter), gestiona env vars de plataforma (`META_APP_SECRET`, `META_VERIFY_TOKEN`, `MELI_CLIENT_ID`, `MELI_CLIENT_SECRET`)
+- **Tenant** → conecta sus propias cuentas desde `/dashboard/integrations`. Credenciales en `tenant_integrations` por `tenant_id`, aisladas por RLS.
+
+#### WhatsApp — credenciales movidas a DB por tenant
+
+| Área | Cambio | Archivos |
+|---|---|---|
+| Arquitectura | `META_ACCESS_TOKEN` y `WHATSAPP_PHONE_ID` eliminados de todos los servicios Render | Render env vars |
+| Arquitectura | Conector solo necesita `META_APP_SECRET` + `META_VERIFY_TOKEN` — nunca envía mensajes | — |
+| Backend | `whatsapp_sender.py` (api + orchestrator): lee `phone_number_id` + `access_token` desde `tenant_integrations` por `tenant_id`. Fallback a env vars solo si tenant no tiene registro en DB. | `services/api/integrations/whatsapp_sender.py`, `services/ai-orchestrator/whatsapp_sender.py` |
+| Backend | Disconnect explícito bloquea envíos — `status='disconnected'` ≠ "no configurado". El fallback a env vars solo aplica si nunca se configuró. | ambos `whatsapp_sender.py` |
+| Backend | `conversations.py`: pasa `tenant_id` + `supabase` al sender | `services/api/routers/conversations.py` |
+| UI | WhatsApp movido de `General` → `Integraciones` como sección "Canal Principal" | `integrations/page.tsx`, `settings/page.tsx` |
+| UI | `tenants.meta_waba_id` sigue siendo la clave de routing del conector — se actualiza al guardar/desconectar WhatsApp desde Integraciones | `integrations/page.tsx` |
+| UI | Instructivo inline WhatsApp: 4 pasos para obtener WABA ID, Phone Number ID y System User token desde Meta for Developers | `integrations/page.tsx` |
+| DB | `meta_waba_id` removido del form y resumen de `/settings`. Solo se muestra en Integraciones. | `settings/page.tsx` |
+
+#### MeLi — documentación y UX
+
+| Área | Cambio | Archivos |
+|---|---|---|
+| Documentación | App MeLi en DevCenter documentada en HANDOFF (scopes, tópicos, URLs, credenciales) | `docs/HANDOFF.md` |
+| UX | Instructivo MeLi mejorado con datos reales: OAuth flow, cuenta principal requerida, vigencia 6 meses, error frecuente | `integrations/page.tsx` |
+| Clarificación | El tenant NO toca DevCenter — solo clic OAuth. DevCenter es configuración de plataforma (una vez). | — |
+
+#### Telegram — confirmado live
+
+| Área | Detalle |
+|---|---|
+| Estado | Integración Telegram ya existía y funciona. Documentada en tree y estado. |
+| Funcionalidad | Bot Token + Chat ID por tenant en `notification_settings`. Instructivo 4 pasos inline. Test desde UI lee token de DB (no expone en HTML). |
+
+#### Integraciones page — 4 secciones
+
+| Sección | Integración | Tipo |
+|---|---|---|
+| Canal Principal | WhatsApp | Manual (WABA ID + Phone ID + Token) |
+| Logística | Envia | Manual (API Key) |
+| Marketplace | Mercado Libre | OAuth (clic en botón) |
+| Notificaciones | Telegram | Manual (Bot Token + Chat ID) |
+
+Contador de conectados: 3 → 4.
+
+#### Inbox — UX y Realtime
+
+| Área | Cambio | Archivos |
+|---|---|---|
+| UX | Si WhatsApp no está conectado → card centrada "no conectado" (mismo patrón que MeLi en Marketplace). No muestra el inbox. | `inbox/page.tsx` |
+| Realtime | Migración `20260417000000`: habilita `postgres_changes` para `conversations` y `messages` en publicación `supabase_realtime`. Sin esto los mensajes no aparecían sin refrescar. | migración aplicada |
+| Timeout | Send message: 60s → 90s. Error distingue cold start de error de red real. | `inbox/page.tsx` |
 
 ---
 
@@ -256,4 +361,9 @@ Validado con `crittan01@gmail.com` en Render. Flujo completo: invite → email �
 13. `inviteUserByEmail` usa **implicit flow** → sesión en `#access_token=` (URL fragment). Los Route Handlers nunca reciben el fragment — usar Client Component
 14. Tras cambio de rol: JWT activo retiene claims hasta 1 hora — invalidar con `admin.signOut(userId, 'global')` para forzar re-login
 15. Gmail como SMTP sender falla DMARC `p=reject` — usar dominio propio con Resend cuando disponible
-16. `createBrowserClient` con `detectSessionInUrl: true` dispara `SIGNED_IN` async (`setTimeout(0)`) y puede borrar el hash via `history.replaceState`. Solución probada: leer `window.location.hash` **antes** de `createClient()`, luego usar `supabase.auth.setSession({access_token, refresh_token})` explícito — patrón recomendado en supabase/discussions#21097
+16. `createBrowserClient` con `detectSessionInUrl: true` dispara `SIGNED_IN` async
+17. El conector WhatsApp **nunca** necesita `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` — solo recibe webhooks. Esas vars son del sender (api + orchestrator) y ahora viven en DB por tenant.
+18. Fallback de credenciales en senders: distinguir `status='disconnected'` (bloquear envío) de "sin registro" (permitir fallback a env vars durante migración). Son estados diferentes.
+19. Supabase Realtime requiere `ALTER PUBLICATION supabase_realtime ADD TABLE` explícito — las tablas nuevas NO se agregan automáticamente. Sin esto, `postgres_changes` no emite eventos aunque el canal esté suscrito.
+20. MeLi token de acceso expira cada 6 horas pero el refresh token dura 6 meses. La plataforma renueva automáticamente. A los 6 meses el tenant debe reconectar desde Integraciones.
+21. El tenant de MeLi NUNCA crea una app en DevCenter — eso es responsabilidad de plataforma. El tenant solo autoriza su cuenta vendedor via OAuth con la app de la plataforma. (`setTimeout(0)`) y puede borrar el hash via `history.replaceState`. Solución probada: leer `window.location.hash` **antes** de `createClient()`, luego usar `supabase.auth.setSession({access_token, refresh_token})` explícito — patrón recomendado en supabase/discussions#21097
