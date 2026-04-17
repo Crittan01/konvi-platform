@@ -77,9 +77,9 @@
 | Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
 | Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
 | Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
-| Configuración (General) | `/dashboard/settings` | ✅ Live | Identidad: Nombre+Email+Celular obligatorios, NIT opcional, `+57` fijo, pattern `3[0-9]{9}`. Dirección origen: País bloqueado Colombia, select dpto→municipio DANE sin buscador libre |
+| Configuración (General) | `/dashboard/settings` | ✅ Live | Identidad: Nombre+Email+Celular obligatorios, NIT opcional, `+57` fijo, pattern `3[0-9]{9}`. Dirección origen: País bloqueado Colombia, select dpto→municipio DANE sin buscador libre. WABA ID movido a Integraciones. |
 | Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Administrador/Supervisor/Gestor (Lucide icons). Invite→/auth/confirm→/set-password **validado en Render**. changeRole invalida JWT via admin.signOut(). Guard owner único. DB: agent→operator migrado |
-| Integraciones | `/dashboard/integrations` | ✅ Live | 3 secciones: Logística/Marketplace/Notificaciones. Instructivos inline para Envia, MeLi y Telegram. testTelegram lee token desde DB, feedback por código de error HTTP |
+| Integraciones | `/dashboard/integrations` | ✅ Live | 4 secciones: Canal Principal/Logística/Marketplace/Notificaciones. WhatsApp: WABA ID + Phone Number ID + Access Token en `tenant_integrations`. Instructivos inline para todos. Backends leen credenciales por tenant desde DB con fallback a env vars. |
 
 ---
 
@@ -233,7 +233,7 @@ Flujo completo validado en Render con usuario real (`crittan01@gmail.com`):
 |---|---|
 | Sync catálogo completo MeLi (precios, descripciones MeLi→Supabase automático) | Media — stock sync ya implementado en ambas direcciones |
 | Envia Fase 2: label, tracking, pickup | Media |
-| WhatsApp Config centralizada (templates aprobados, WABA management) | Media |
+| ~~WhatsApp Config — WABA ID, Phone ID, Token por tenant~~ | ✅ Resuelto — movido a Integraciones, credenciales en `tenant_integrations`, senders leen por tenant con fallback env vars |
 | Invite de miembros via formulario UI | Media — IH-001 requerida (APP_URL en Render) + IH-SMTP (SMTP custom Supabase con Resend, ver IH-003) |
 | SMTP Supabase Free (3 emails/hora) → configura SMTP propio con Resend | Alta — bloquea invitaciones en producción con volumen |
 | ~~Reclamos — acciones reales~~ | ✅ Resuelto Vuelta 3 |
