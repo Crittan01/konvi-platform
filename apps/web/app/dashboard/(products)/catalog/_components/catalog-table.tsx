@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Search, LayoutGrid, List as ListIcon, Check,
-  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2,
+  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2, Minus,
 } from 'lucide-react'
 import type { Product, Variation } from '../types'
 
@@ -24,6 +24,7 @@ type Props = {
   deactivateProductAction: (fd: FormData) => Promise<void>
   restoreProductAction: (fd: FormData) => Promise<void>
   deleteProductAction: (fd: FormData) => Promise<void>
+  adjustStockAction?: (fd: FormData) => Promise<void>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -159,16 +160,18 @@ const VariantRow = memo(function VariantRow({
 // ── ExpandedPanel — memoizado ─────────────────────────────────────────────────
 
 const ExpandedPanel = memo(function ExpandedPanel({
-  p, canWrite, editProductAction, editVariationAction, addVariationAction, deactivateProductAction
+  p, canWrite, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction
 }: {
   p: Product; canWrite: boolean;
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
+  adjustStockAction?: (fd: FormData) => Promise<void>
 }) {
   const [editingProduct, setEditingProduct] = useState(false)
   const [showAddVar, setShowAddVar] = useState(false)
+  const [showAdjust, setShowAdjust] = useState(false)
   const vars = p.product_variations ?? []
 
   return (
@@ -260,6 +263,38 @@ const ExpandedPanel = memo(function ExpandedPanel({
         </div>
       )}
 
+      {/* Adjust stock (delta) */}
+      {canWrite && adjustStockAction && (
+        <div className="pt-2 border-t border-border/20 space-y-2">
+          {!showAdjust ? (
+            <button
+              onClick={() => setShowAdjust(true)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary font-medium transition-colors"
+            >
+              <Minus className="h-3 w-3" /> Ajustar stock (±delta)
+            </button>
+          ) : (
+            <div className="p-3 bg-muted/20 rounded-lg border border-border/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase">Ajuste de stock por variante</p>
+                <button onClick={() => setShowAdjust(false)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+              </div>
+              {vars.map(v => (
+                <form key={v.id} action={adjustStockAction} className="flex items-center gap-2 flex-wrap">
+                  <input type="hidden" name="variation_id" value={v.id} />
+                  <input type="hidden" name="product_id" value={p.id} />
+                  <span className="text-xs font-medium w-28 truncate">{fmtAttrs(v.attributes)}</span>
+                  <span className="text-xs text-muted-foreground font-mono w-12 text-right">{v.stock_quantity} u.</span>
+                  <Input name="delta" type="number" placeholder="±" className="h-7 w-16 text-xs font-mono" required />
+                  <Input name="reason" placeholder="Motivo" className="h-7 flex-1 text-xs min-w-24" />
+                  <Button type="submit" size="sm" className="h-7 text-xs px-2">OK</Button>
+                </form>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Edit product info */}
       {canWrite && (
         <div className="pt-2 border-t border-border/20 space-y-2">
@@ -312,13 +347,14 @@ const ExpandedPanel = memo(function ExpandedPanel({
 
 const ProductMobileCard = memo(function ProductMobileCard({
   p, catName, isExpanded, onToggle, canWrite,
-  editProductAction, editVariationAction, addVariationAction, deactivateProductAction
+  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction
 }: {
   p: Product; catName: string | null; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
   deactivateProductAction: (fd: FormData) => Promise<void>
+  adjustStockAction?: (fd: FormData) => Promise<void>
 }) {
   const vars = p.product_variations ?? []
   const totalStock = vars.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
@@ -369,6 +405,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
           editVariationAction={editVariationAction}
           addVariationAction={addVariationAction}
           deactivateProductAction={deactivateProductAction}
+          adjustStockAction={adjustStockAction}
         />
       )}
     </div>
@@ -451,6 +488,7 @@ const ArchivedSection = memo(function ArchivedSection({
 export default function CatalogTable({
   products, archivedProducts, catMap, canWrite,
   editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
+  adjustStockAction,
 }: Props) {
   const [search, setSearch]           = useState('')
   const [viewMode, setViewMode]       = useState<'list' | 'grid'>('list')
@@ -564,6 +602,7 @@ export default function CatalogTable({
               editVariationAction={editVariationAction}
               addVariationAction={addVariationAction}
               deactivateProductAction={deactivateProductAction}
+              adjustStockAction={adjustStockAction}
             />
           ))}
         </div>
@@ -643,6 +682,7 @@ export default function CatalogTable({
                           editVariationAction={editVariationAction}
                           addVariationAction={addVariationAction}
                           deactivateProductAction={deactivateProductAction}
+                          adjustStockAction={adjustStockAction}
                         />
                       </td>
                     </tr>
@@ -751,6 +791,7 @@ export default function CatalogTable({
                       editVariationAction={editVariationAction}
                       addVariationAction={addVariationAction}
                       deactivateProductAction={deactivateProductAction}
+                      adjustStockAction={adjustStockAction}
                     />
                   </div>
                 )}

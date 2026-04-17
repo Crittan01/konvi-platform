@@ -62,12 +62,11 @@ const NAV_ITEMS: NavItem[] = [
   },
 
   // ── Productos ✅ ──────────────────────────────────────────────────────────
-  // Media ocultada del menú — no tiene valor operativo independiente del catálogo
+  // Inventario fusionado en Catálogo — una sola página unificada
   {
     kind: 'group', id: 'productos', label: 'Productos', icon: Tag, roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/catalog',   label: 'Catálogo',   icon: ShoppingCart, roles: ['owner', 'manager'] },
-      { kind: 'leaf', href: '/dashboard/inventory', label: 'Inventario', icon: Boxes,        roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/catalog', label: 'Productos', icon: Boxes, roles: ['owner', 'manager'] },
     ],
   },
 
