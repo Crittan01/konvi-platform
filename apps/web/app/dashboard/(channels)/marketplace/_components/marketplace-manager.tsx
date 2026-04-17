@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
   ExternalLink, Pause, Play, Link2, Link2Off, RefreshCw,
-  Search, AlertTriangle, CheckCircle2, WifiOff
+  Search, AlertTriangle, CheckCircle2,
 } from 'lucide-react'
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue
@@ -52,7 +52,6 @@ type Category = {
 }
 
 type Props = {
-  connected: boolean
   items: MeliItem[]
   paging: { total: number }
   variations: Variation[]
@@ -66,7 +65,7 @@ const STATUS_CONFIG = {
   closed:  { label: 'Cerrado', className: 'bg-red-500/15 text-red-500' },
 }
 
-export default function MarketplaceManager({ connected, items, paging, variations, categories, canWrite }: Props) {
+export default function MarketplaceManager({ items, paging, variations, categories, canWrite }: Props) {
   const [search, setSearch] = useState('')
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
   const [activePanel, setActivePanel] = useState<{ meliId: string; mode: 'link' | 'import' } | null>(null)
@@ -144,22 +143,6 @@ export default function MarketplaceManager({ connected, items, paging, variation
     if (resp?.error) setError(meliId, resp.error)
     else { setImportResult({ meliId, title: meliTitle }); closePanel() }
     setLoading(meliId, false)
-  }
-
-  // ── Sin conexión ──────────────────────────────────────────────────────────
-
-  if (!connected) {
-    return (
-      <Card className="border-border/50">
-        <CardContent className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <WifiOff className="h-10 w-10 text-muted-foreground" />
-          <p className="text-muted-foreground max-w-sm">
-            Tu cuenta de Mercado Libre no está conectada.
-            Ve a <strong>Configuración → Integraciones</strong> para vincularla.
-          </p>
-        </CardContent>
-      </Card>
-    )
   }
 
   // ── Sin publicaciones ─────────────────────────────────────────────────────

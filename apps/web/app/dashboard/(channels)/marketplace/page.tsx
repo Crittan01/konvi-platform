@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
+import { Store, ExternalLink } from 'lucide-react'
 import MarketplaceManager from './_components/marketplace-manager'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
@@ -93,18 +94,42 @@ export default async function MarketplacePage() {
       }
     }).filter(Boolean) as VariationOption[]
 
+  if (!connected) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm px-4">
+          <div className="h-14 w-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center">
+            <Store className="h-7 w-7 text-yellow-500" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-base font-semibold">Mercado Libre no conectado</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Conecta tu cuenta vendedor de Mercado Libre para gestionar tus publicaciones y sincronizar stock automáticamente.
+            </p>
+          </div>
+          <a
+            href="/dashboard/integrations"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-sm font-medium transition-colors"
+          >
+            <ExternalLink className="h-4 w-4" /> Configurar integración
+          </a>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6 max-w-7xl flex-1 h-full overflow-auto">
       <div className="flex flex-col gap-2">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">Mercado Libre</h1>
-        <p className="text-muted-foreground max-w-3xl">
-          Gestión de tus publicaciones en Mercado Libre. Los datos vienen directamente de tu cuenta MeLi.
-          Vincula cada publicación con una variante de tu catálogo para mantener el stock sincronizado automáticamente.
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+          <Store className="h-5 w-5 text-yellow-500" /> Mercado Libre
+        </h1>
+        <p className="text-muted-foreground max-w-3xl text-sm">
+          Tus publicaciones en MeLi. Vincula manualmente cada item al producto de tu catálogo para activar el sync de stock — solo los items vinculados se sincronizan.
         </p>
       </div>
 
       <MarketplaceManager
-        connected={connected}
         items={items}
         paging={paging}
         variations={variations}
