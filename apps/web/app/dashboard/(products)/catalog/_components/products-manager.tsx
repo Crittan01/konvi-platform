@@ -44,6 +44,7 @@ type Props = {
   deleteProductAction: (fd: FormData) => Promise<void>
   adjustStockAction: (fd: FormData) => Promise<void>
   saveThresholdAction: (fd: FormData) => Promise<void>
+  linkedVariationIds: string[]
 }
 
 function SaveThresholdButton() {
@@ -61,7 +62,7 @@ export default function ProductsManager({
   movements, threshold,
   editProductAction, editVariationAction, addVariationAction,
   deactivateProductAction, restoreProductAction, deleteProductAction,
-  adjustStockAction, saveThresholdAction,
+  adjustStockAction, saveThresholdAction, linkedVariationIds,
 }: Props) {
   const [dialogOpen, setDialogOpen]   = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -137,6 +138,7 @@ export default function ProductsManager({
         restoreProductAction={restoreProductAction}
         deleteProductAction={deleteProductAction}
         adjustStockAction={adjustStockAction}
+        linkedVariationIds={linkedVariationIds}
       />
 
       {/* Bottom: Threshold + Movements */}
