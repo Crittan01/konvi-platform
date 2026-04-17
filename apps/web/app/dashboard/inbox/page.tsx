@@ -203,22 +203,30 @@ export default function InboxPage() {
     setMobileView('chat')
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-  return (
-    <div className="flex flex-col h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)] gap-2">
-
-      {/* Banner WhatsApp desconectado */}
-      {waConnected === false && (
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-400 shrink-0">
-          <WifiOff className="h-4 w-4 shrink-0" />
-          <span className="flex-1">WhatsApp no está conectado — no llegarán mensajes nuevos ni se podrán enviar respuestas.</span>
-          <a href="/dashboard/integrations" className="text-xs font-medium underline underline-offset-2 whitespace-nowrap hover:text-amber-300">
-            Configurar
+  // ── Sin integración WhatsApp ───────────────────────────────────────────────
+  if (waConnected === false) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)]">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm px-4">
+          <WifiOff className="h-10 w-10 text-muted-foreground" />
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            WhatsApp no está conectado — no llegarán mensajes nuevos ni podrás responder.
+            Ve a <strong className="text-foreground">Configuración → Integraciones</strong> para conectarlo.
+          </p>
+          <a
+            href="/dashboard/integrations"
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+          >
+            Configurar WhatsApp
           </a>
         </div>
-      )}
+      </div>
+    )
+  }
 
-    <div className="flex flex-1 overflow-hidden rounded-xl border border-border shadow-sm">
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)] overflow-hidden rounded-xl border border-border shadow-sm">
 
       {/* ── Panel Lista — oculto en mobile cuando hay chat seleccionado ──── */}
       <div className={`
@@ -463,7 +471,6 @@ export default function InboxPage() {
           </>
         )}
       </div>
-    </div>
     </div>
   )
 }
