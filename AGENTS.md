@@ -29,7 +29,7 @@ El LLM (Gemini) es asistencia controlada — nunca fuente de verdad de datos tra
 
 ## Estado Actual del Sistema
 
-**Fases 1-11.2 ✅ completadas.** Fase 12 ❌ pendiente (bloqueante: OQ-P01).
+**Fases 1-11.5 ✅ completadas** (incl. Reclamos, Compras, Finanzas, Marketplace). Fase 12 ❌ pendiente (bloqueante: OQ-P01).
 
 Ver estado detallado por módulo → `.context/01-state.md`
 Ver servicios live e infra → `docs/HANDOFF.md`
@@ -68,7 +68,7 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 
 | Fases | Estado |
 |---|---|
-| 1-11.2 | ✅ Completadas |
+| 1-11.5 | ✅ Completadas |
 | 12 (Platform Console) | ❌ Bloqueada — OQ-P01 sin resolver — fuera de alcance actual |
 | 13 (Shopify) | ❌ Futuro lejano |
 

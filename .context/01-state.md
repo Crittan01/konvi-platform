@@ -49,10 +49,10 @@
 | Navegación Sidebar | ✅ Reestructurada con Route Groups + grupos expandibles RBAC |
 | Platform Console | ❌ No existe — bloqueante OQ-P01 no resuelto |
 | Backend API | ✅ 3 servicios live + 9 routers |
-| Base de datos | ✅ 22 migraciones aplicadas |
+| Base de datos | ✅ 25 migraciones aplicadas |
 | Deploy Render | ✅ 4 servicios live |
 | Envia / Shipping | 🟡 Fase Inicial — quote + historial live. Label/tracking: Fase 2 |
-| MeLi | 🟡 Fase Inicial — OAuth + webhook + listings operativos. Sync bidireccional: pendiente |
+| MeLi | ✅ Fase Avanzada — OAuth + IPN webhook (orders_v2, items) + listings + vinculación + import + sync stock Supabase→MeLi (automático). Pendiente: sync catálogo completo (precios/descripción MeLi→Supabase) y tracking shipments. |
 | Configuración | ✅ Certificado | General ✅ Equipo ✅ Integraciones ✅ — flujo invite validado en Render. Pendiente solo: SMTP propio cuando haya dominio |
 
 ---
@@ -144,7 +144,7 @@ apps/web/app/
 
 ---
 
-## Base de Datos — Migraciones (20 aplicadas)
+## Base de Datos — Migraciones (25 aplicadas)
 
 | Tabla principal | Migración | Estado |
 |---|---|---|
@@ -152,6 +152,8 @@ apps/web/app/
 | `products`, `product_variations` | 20260406181236 | ✅ |
 | `conversations`, `messages` | 20260406181237 | ✅ |
 | `rls_policies` | 20260406181238 | ✅ |
+| `app_current_tenant()`, JWT trigger | 20260406181239 | ✅ |
+| `messages.processed` flag | 20260407200700 | ✅ |
 | `contacts`, `orders`, `order_items`, `tenant_integrations`, `notification_settings` | 20260409220000 | ✅ |
 | `shipments` | 20260409230000 | ✅ |
 | `stock_movements` | 20260409240000 | ✅ |
@@ -229,7 +231,7 @@ Flujo completo validado en Render con usuario real (`crittan01@gmail.com`):
 
 | Ítem | Prioridad |
 |---|---|
-| Sync bidireccional catálogo ↔ MeLi listings | Media |
+| Sync catálogo completo MeLi (precios, descripciones MeLi→Supabase automático) | Media — stock sync ya implementado en ambas direcciones |
 | Envia Fase 2: label, tracking, pickup | Media |
 | WhatsApp Config centralizada (templates aprobados, WABA management) | Media |
 | Invite de miembros via formulario UI | Media — IH-001 requerida (APP_URL en Render) + IH-SMTP (SMTP custom Supabase con Resend, ver IH-003) |
