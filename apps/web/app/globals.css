@@ -11,33 +11,37 @@
        Objetivo: operadores no-técnicos que usan la plataforma todo el dia.
     ─────────────────────────────────────────────────────────────────── */
 
-    /* Canvas — fondo cálido medio claro (contrasta con cards blancas) */
-    --background:  40 10% 90%;    /* #E8E4E0 — warm gray, cards blancas se notan */
-    --card:         0  0% 100%;   /* #FFFFFF — cards puras, sombra las eleva */
-    --popover:      0  0% 100%;
-    --secondary:   40  8% 85%;    /* #DAD5D1 — hover states, badges */
-    --muted:       40  8% 85%;
-    --accent:      40  8% 85%;
+@layer base {
+  :root {
+    /* Canvas — fondo crema muy suave */
+    --background:  42 20% 96%;    /* #F6F4ED — crema vainilla pálido */
+    
+    /* Cards — verde-grisáceo pálido (Sage) para que combine con el sidebar y el crema */
+    --card:        160  8% 92%;   /* #E6ECE9 — light sage, más oscuro que el fondo para destacar */
+    --popover:     160  8% 92%;
+    --secondary:   160 10% 86%;   /* #D3DDD8 — hover states */
+    --muted:       160 10% 86%;
+    --accent:      160 10% 86%;
 
-    /* Texto — oscuro cálido (no negro puro, no azul frío) */
-    --foreground:           168 25% 11%;   /* #141F1E — casi negro cálido */
-    --card-foreground:      168 25% 11%;
-    --popover-foreground:   168 25% 11%;
-    --secondary-foreground: 168 12% 28%;
-    --muted-foreground:     168  8% 46%;   /* #617D7A — gris verdoso medio */
-    --accent-foreground:    168 25% 11%;
+    /* Texto — verde-negro muy oscuro (mucho más oscuro que antes) */
+    --foreground:           168 30% 10%;   /* #12211F — casi negro, máxima legibilidad */
+    --card-foreground:      168 30% 10%;
+    --popover-foreground:   168 30% 10%;
+    --secondary-foreground: 168 20% 25%;   /* Texto secundario fuerte */
+    --muted-foreground:     168 15% 42%;   /* Gris-verde medio/oscuro (antes era muy claro) */
+    --accent-foreground:    168 30% 10%;
 
-    /* Primary — verde ligeramente oscurecido para contraste en claro */
-    --primary:             155 48% 36%;   /* #2E9966 — verde bosque, AA en blanco */
+    /* Primary — verde corporativo */
+    --primary:             155 48% 36%;
     --primary-foreground:  0 0% 100%;
 
     /* Destructive */
     --destructive:         0 65% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Bordes — visibles sobre el fondo medio claro */
-    --border: 40 10% 80%;    /* #D4CEC9 — warm border, claramente visible */
-    --input:  40 10% 80%;
+    /* Bordes — sutil verde-grisáceo oscuro para demarcar *bien* las cards */
+    --border: 160 12% 82%;    /* #C9D4CE — borde claramente visible, combina con card */
+    --input:  160 12% 82%;
     --ring:   155 48% 36%;
 
     /* Radio */
@@ -49,21 +53,22 @@
   }
 }
 
-/* ── Sidebar token overrides ────────────────────────────────────────────────
-   El sidebar usa .sidebar-gradient (fondo oscuro #131A19).
-   Los tokens globales ahora son para light mode.
-   Esta regla CSS-scoped restaura los colores de texto apropiados
-   para contexto oscuro, sin tocar sidebar-client.tsx.
-   Tailwind lee los custom properties de cada elemento —
-   al estar dentro de .sidebar-gradient, los tokens locales tienen precedencia.
-────────────────────────────────────────────────────────────────────────── */
+/* ── Custom Theme Components ────────────────────────────────────────────── */
 @layer base {
+  /* Sidebar mantiene tokens oscuros para forzar texto blanco interno */
   .sidebar-gradient {
-    --foreground:           0   0% 93%;    /* blanco cálido para texto principal */
+    --foreground:           0   0% 93%;
     --card-foreground:      0   0% 93%;
-    --muted-foreground:     168 10% 58%;   /* gris-verde medio — nav items inactivos */
-    --border:               168 10% 20%;   /* bordes oscuros para contexto sidebar */
-    --primary:              155 52% 46%;   /* verde más brillante en oscuro */
+    --muted-foreground:     168 10% 58%;
+    --border:               168 10% 20%;
+    --primary:              155 52% 46%;
+  }
+
+  /* Barra superior: Un verde más claro que el sidebar, para hacer contraste */
+  .topbar-bg {
+    background-color: hsl(168 12% 16%); /* #242E2C — un poco más claro que #131A19 del sidebar */
+    color: hsl(0 0% 95%);              /* Letras blancas aquí */
+    border-color: hsl(168 12% 20%);
   }
 }
 

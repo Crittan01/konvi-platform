@@ -64,11 +64,11 @@ export default async function DashboardLayout({
       {/* ── Main content ─────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto min-w-0">
         {/* Top bar */}
-        <div className="sticky top-0 z-10 h-12 border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-4 sm:px-8">
+        <div className="sticky top-0 z-10 h-12 border-b topbar-bg flex items-center px-4 sm:px-8">
           {/* Espacio para el hamburger en mobile */}
           <div className="w-10 lg:hidden" />
           <div className="flex-1" />
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs opacity-90">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="hidden sm:inline">Live</span>
           </div>
