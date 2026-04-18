@@ -11,13 +11,13 @@
        Objetivo: operadores no-técnicos que usan la plataforma todo el dia.
     ─────────────────────────────────────────────────────────────────── */
 
-    /* Canvas — fondo cálido casi blanco */
-    --background:  40 20% 97%;    /* #F9F7F4 — warm off-white, no frío */
-    --card:         0  0% 100%;   /* #FFFFFF — cards puras, máximo contraste */
+    /* Canvas — fondo cálido medio claro (contrasta con cards blancas) */
+    --background:  40 10% 90%;    /* #E8E4E0 — warm gray, cards blancas se notan */
+    --card:         0  0% 100%;   /* #FFFFFF — cards puras, sombra las eleva */
     --popover:      0  0% 100%;
-    --secondary:   40 15% 94%;    /* #EEE9E4 — hover states, badges suaves */
-    --muted:       40 15% 94%;
-    --accent:      40 15% 94%;
+    --secondary:   40  8% 85%;    /* #DAD5D1 — hover states, badges */
+    --muted:       40  8% 85%;
+    --accent:      40  8% 85%;
 
     /* Texto — oscuro cálido (no negro puro, no azul frío) */
     --foreground:           168 25% 11%;   /* #141F1E — casi negro cálido */
@@ -35,9 +35,9 @@
     --destructive:         0 65% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Bordes — muy sutiles sobre blanco */
-    --border: 40 15% 88%;    /* #E5DDD7 — warm light border */
-    --input:  40 15% 88%;
+    /* Bordes — visibles sobre el fondo medio claro */
+    --border: 40 10% 80%;    /* #D4CEC9 — warm border, claramente visible */
+    --input:  40 10% 80%;
     --ring:   155 48% 36%;
 
     /* Radio */
