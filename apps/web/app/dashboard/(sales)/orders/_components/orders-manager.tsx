@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Package, Clock, ChevronRight, Plus, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2 } from 'lucide-react'
+import { Package, Clock, ChevronRight, Plus, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2, Truck } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,7 +32,6 @@ type Props = {
   contacts: Contact[]
   role: string
   canWrite: boolean
-  apiUrl: string
   updateStatusAction: (fd: FormData) => Promise<void>
 }
 
@@ -135,7 +134,7 @@ function ActionButton({
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
-export default function OrdersManager({ initialOrders, products, contacts, role, canWrite, apiUrl, updateStatusAction }: Props) {
+export default function OrdersManager({ initialOrders, products, contacts, role, canWrite, updateStatusAction }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
@@ -262,7 +261,7 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
         {/* Formulario nuevo pedido */}
         {canWrite && (
           <div className="xl:col-span-1">
-            <OrdersNewForm products={products} contacts={contacts} apiUrl={apiUrl} onCreated={() => router.refresh()} />
+            <OrdersNewForm products={products} contacts={contacts} onCreated={() => router.refresh()} />
           </div>
         )}
 
@@ -339,9 +338,19 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                       )}
                     </div>
 
-                    {canWrite && nextStatus && (
-                      <ActionButton orderId={o.id} originalStatus={o.status} nextStatus={nextStatus} updateStatusAction={updateStatusAction} />
-                    )}
+                    <div className="flex items-center gap-2 mt-3">
+                      {canWrite && nextStatus && (
+                        <ActionButton orderId={o.id} originalStatus={o.status} nextStatus={nextStatus} updateStatusAction={updateStatusAction} />
+                      )}
+                      {['confirmed', 'processing', 'shipped'].includes(o.status) && (
+                        <Link
+                          href={`/dashboard/shipping?order=${o.id}`}
+                          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary border border-border hover:border-primary/40 rounded-lg px-3 py-1.5 transition-all"
+                        >
+                          <Truck className="h-3 w-3" /> Cotizar envío
+                        </Link>
+                      )}
+                    </div>
                   </div>
                 )
               })}

@@ -62,10 +62,12 @@ export default function ClaimsManager({
   claims,
   recentOrders,
   canWrite,
+  canResolve,
 }: {
   claims: Claim[]
   recentOrders: RecentOrder[]
   canWrite: boolean
+  canResolve: boolean
 }) {
   const [searchTerm, setSearchTerm]     = useState('')
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -219,7 +221,7 @@ export default function ClaimsManager({
                   </div>
                 </div>
 
-                {canWrite && selectedClaim.status !== 'refunded' && selectedClaim.status !== 'rejected' && (
+                {canResolve && selectedClaim.status !== 'refunded' && selectedClaim.status !== 'rejected' && (
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
                       size="sm" variant={selectedClaim.status === 'investigating' ? 'default' : 'outline'}

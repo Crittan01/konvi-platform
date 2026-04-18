@@ -39,10 +39,12 @@ export async function createClaim(data: {
 
 export async function updateClaimStatus(claimId: string, status: string, notes?: string) {
   const supabase = createClient()
-  
+
   const { data: userData, error: userError } = await supabase.auth.getUser()
   if (userError || !userData.user) return { error: 'Unauthorized' }
-  const tenantId = userData.user.app_metadata.tenant_id
+  const meta = userData.user.app_metadata as { tenant_id?: string; role?: string }
+  if (!['owner', 'manager'].includes(meta.role ?? '')) return { error: 'Sin permisos para resolver reclamos' }
+  const tenantId = meta.tenant_id
 
   const updatePayload: any = { status }
   if (notes !== undefined) updatePayload.resolution_notes = notes

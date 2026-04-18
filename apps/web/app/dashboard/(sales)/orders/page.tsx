@@ -58,7 +58,7 @@ const STATUS_ICONS: Record<string, React.ElementType> = {
   cancelled:  X,
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
+const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
 
 export default async function OrdersPage({
   searchParams,
@@ -166,7 +166,6 @@ export default async function OrdersPage({
       contacts={contacts}
       role={role}
       canWrite={canWrite}
-      apiUrl={API_URL}
       updateStatusAction={updateOrderStatus}
     />
   )

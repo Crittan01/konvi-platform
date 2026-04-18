@@ -14,7 +14,8 @@ export default async function ClaimsPage() {
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role || 'operator'
-  const canWrite = ['owner', 'manager', 'operator'].includes(role)
+  const canWrite   = ['owner', 'manager', 'operator'].includes(role)
+  const canResolve = ['owner', 'manager'].includes(role)
 
   // Fetch claims with relationships — filtrado por tenant (defensa en profundidad + RLS)
   const { data: claimsData } = await supabase
@@ -60,7 +61,7 @@ export default async function ClaimsPage() {
       </div>
 
       <div className="flex-1 min-h-0">
-        <ClaimsManager claims={claims} recentOrders={ordersData || []} canWrite={canWrite} />
+        <ClaimsManager claims={claims} recentOrders={ordersData || []} canWrite={canWrite} canResolve={canResolve} />
       </div>
     </div>
   )
