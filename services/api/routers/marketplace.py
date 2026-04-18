@@ -78,9 +78,11 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
 
         # Verificar status real en MeLi antes de mutar
         # MeLi rechaza PUT sobre items 'closed' con 400 Bad Request
+        # También leemos variaciones para evitar 400 en items con variaciones MeLi
         try:
             meli_item = await get_item(external_id, access_token)
             meli_status = meli_item.get("status")
+            meli_variations = meli_item.get("variations") or []
             if meli_status == "closed":
                 logger.warning(
                     "MeLi sync omitido: item %s está 'closed' (estado final). "
@@ -94,9 +96,10 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
                 return
         except Exception as check_err:
             logger.warning("No se pudo verificar status MeLi para %s: %s — intentando sync igual", external_id, check_err)
+            meli_variations = []
 
         if price is not None:
-            await update_item_listing(external_id, new_qty, price, original_price, access_token)
+            await update_item_listing(external_id, new_qty, price, original_price, access_token, meli_variations or None)
         else:
             await update_item_quantity(external_id, new_qty, access_token)
 
@@ -406,6 +409,8 @@ async def sync_stock_from_supabase(
     try:
         # Verificar status real en MeLi antes de mutar
         # MeLi rechaza PUT sobre items 'closed' con 400 Bad Request (estado final)
+        # También leemos variaciones — if item has MeLi-side variations,
+        # available_quantity a nivel item también causa 400.
         meli_item = await get_item(external_id, access_token)
         meli_status = meli_item.get("status")
         if meli_status == "closed":
@@ -421,7 +426,10 @@ async def sync_stock_from_supabase(
                 )
             )
 
-        await update_item_listing(external_id, current_stock, price, original_price, access_token)
+        # Pasar variaciones MeLi para manejo correcto (evita 400 en items con variaciones)
+        meli_variations = meli_item.get("variations") or []
+
+        await update_item_listing(external_id, current_stock, price, original_price, access_token, meli_variations or None)
         return {
             "ok": True,
             "meli_id": external_id,
