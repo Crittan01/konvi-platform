@@ -30,9 +30,9 @@ type FilterStatus = 'all' | 'bot_active' | 'human_takeover' | 'closed'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
-  bot_active:     { label: 'Bot activo',    color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', dot: 'bg-emerald-400' },
-  human_takeover: { label: 'Agente humano', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30',       dot: 'bg-amber-400' },
-  closed:         { label: 'Cerrada',       color: 'bg-slate-500/15 text-slate-400 border-slate-500/30',       dot: 'bg-slate-400' },
+  bot_active:     { label: 'Bot activo',    color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20', dot: 'bg-emerald-500' },
+  human_takeover: { label: 'Agente humano', color: 'bg-amber-500/10 text-amber-700 border-amber-500/20',       dot: 'bg-amber-500' },
+  closed:         { label: 'Cerrada',       color: 'bg-slate-500/10 text-slate-700 border-slate-500/20',       dot: 'bg-slate-500' },
 }
 
 const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
@@ -229,8 +229,9 @@ export default function InboxPage() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // height exacto al viewport menos padding y header, evita doble scrollbar en layout global.
   return (
-    <div className="flex h-[calc(100dvh-7rem)] sm:h-[calc(100vh-4rem)] overflow-hidden rounded-xl border border-border shadow-sm">
+    <div className="flex h-[calc(100vh-8rem)] min-h-[500px] overflow-hidden rounded-[1.25rem] border border-border shadow-sm">
 
       {/* ── Panel Lista — oculto en mobile cuando hay chat seleccionado ──── */}
       <div className={`
@@ -276,7 +277,7 @@ export default function InboxPage() {
                 onClick={() => setFilterStatus(opt.value)}
                 className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
                   filterStatus === opt.value
-                    ? 'bg-primary/15 text-primary border-primary/40'
+                    ? 'bg-primary/10 text-primary border-primary/30 font-medium'
                     : 'border-border text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -311,8 +312,8 @@ export default function InboxPage() {
                 <button
                   key={conv.id}
                   onClick={() => handleSelectConv(conv.id)}
-                  className={`w-full text-left p-3.5 border-b border-border/60 transition-colors hover:bg-accent/40 ${
-                    isSelected ? 'bg-accent border-l-2 border-l-primary' : ''
+                  className={`w-full text-left p-3.5 border-b border-border transition-colors hover:bg-secondary/50 ${
+                    isSelected ? 'bg-secondary border-l-2 border-l-primary' : ''
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
@@ -352,7 +353,7 @@ export default function InboxPage() {
         ) : (
           <>
             {/* Header chat */}
-            <div className="px-4 py-3 border-b border-border flex items-center gap-3 bg-card">
+            <div className="px-4 py-3 border-b border-border flex items-center gap-3 bg-card/80 backdrop-blur-md">
               {/* Botón volver en mobile */}
               <button
                 onClick={() => setMobileView('list')}
@@ -376,13 +377,13 @@ export default function InboxPage() {
               <div className="flex gap-2 shrink-0">
                 {selectedConv.status === 'bot_active' && (
                   <Button size="sm" variant="outline" onClick={() => updateStatus('human_takeover')} disabled={takingOver}
-                    className="text-amber-500 border-amber-500/30 hover:bg-amber-500/10 text-xs h-8">
+                    className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-xs h-8">
                     <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
                   </Button>
                 )}
                 {selectedConv.status === 'human_takeover' && (
                   <Button size="sm" variant="outline" onClick={() => updateStatus('bot_active')} disabled={takingOver}
-                    className="text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 text-xs h-8">
+                    className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 text-xs h-8">
                     <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
                   </Button>
                 )}
@@ -405,10 +406,10 @@ export default function InboxPage() {
                         <User className="h-3.5 w-3.5 text-muted-foreground" />
                       </div>
                     )}
-                    <div className={`max-w-[75%] sm:max-w-[65%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                    <div className={`max-w-[75%] sm:max-w-[65%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm border border-border/50 ${
                       isInbound
-                        ? 'bg-muted text-foreground rounded-tl-sm'
-                        : 'bg-primary text-primary-foreground rounded-tr-sm'
+                        ? 'bg-card text-foreground rounded-tl-sm'
+                        : 'bg-primary text-primary-foreground rounded-tr-sm border-transparent'
                     }`}>
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       <p className={`text-[11px] mt-1 flex items-center gap-1 ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
@@ -433,7 +434,7 @@ export default function InboxPage() {
 
             {/* Footer */}
             {selectedConv.status === 'human_takeover' ? (
-              <div className="p-3 border-t border-border bg-card/50 space-y-2">
+              <div className="p-3 border-t border-border bg-card space-y-2">
                 {sendError && (
                   <p className="text-xs text-red-400 text-center">{sendError}</p>
                 )}
@@ -459,12 +460,12 @@ export default function InboxPage() {
                     {sending ? <span className="text-xs animate-pulse">…</span> : <Send className="h-4 w-4" />}
                   </Button>
                 </div>
-                <p className="text-[11px] text-amber-400/70 text-center flex items-center justify-center gap-1">
-                  <User className="h-3 w-3" /> Modo agente — el bot no responderá
+                <p className="text-[11px] text-amber-600 font-medium text-center flex items-center justify-center gap-1">
+                  <User className="h-3 w-3" /> Modo agente humano (bot silenciado)
                 </p>
               </div>
             ) : (
-              <div className="p-3 border-t border-border bg-card/50">
+              <div className="p-3 border-t border-border bg-card">
                 <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-1">
                   {selectedConv.status === 'bot_active'
                     ? <><Bot className="h-3.5 w-3.5" /> El bot está respondiendo automáticamente</>

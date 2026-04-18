@@ -35,7 +35,7 @@ export default async function LoginPage({
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background">
+    <div className="flex h-screen w-full items-center justify-center sidebar-gradient">
       <Card className="w-[400px]">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Commerce Ops</CardTitle>
