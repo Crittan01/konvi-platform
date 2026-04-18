@@ -41,6 +41,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
     Empuja stock + precio + precio tachado de una variante a MeLi si tiene listing activo.
 
     Falla silenciosa: un error en MeLi no debe romper la operación principal.
+    Items con status 'closed' en MeLi son ignorados (estado final — PUT rechazado por API).
     """
     try:
         listing_res = (
@@ -57,6 +58,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
         listing     = listing_res.data[0]
         tenant_id   = listing["tenant_id"]
         external_id = listing["external_id"]
+        listing_id  = listing["id"]
 
         # Leer precio actual de la variante
         var_res = (
@@ -73,6 +75,25 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
         if not access_token:
             logger.warning("MeLi no conectado para tenant %s — sync omitido", tenant_id)
             return
+
+        # Verificar status real en MeLi antes de mutar
+        # MeLi rechaza PUT sobre items 'closed' con 400 Bad Request
+        try:
+            meli_item = await get_item(external_id, access_token)
+            meli_status = meli_item.get("status")
+            if meli_status == "closed":
+                logger.warning(
+                    "MeLi sync omitido: item %s está 'closed' (estado final). "
+                    "Desvincular listing %s para evitar errores recurrentes.",
+                    external_id, listing_id
+                )
+                # Marcar listing local como cerrado para no intentar sync futuro
+                supabase.table("marketplace_listings").update(
+                    {"status": "closed"}
+                ).eq("id", listing_id).execute()
+                return
+        except Exception as check_err:
+            logger.warning("No se pudo verificar status MeLi para %s: %s — intentando sync igual", external_id, check_err)
 
         if price is not None:
             await update_item_listing(external_id, new_qty, price, original_price, access_token)
@@ -383,6 +404,23 @@ async def sync_stock_from_supabase(
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
 
     try:
+        # Verificar status real en MeLi antes de mutar
+        # MeLi rechaza PUT sobre items 'closed' con 400 Bad Request (estado final)
+        meli_item = await get_item(external_id, access_token)
+        meli_status = meli_item.get("status")
+        if meli_status == "closed":
+            # Actualizar estado local para reflejar realidad
+            supabase.table("marketplace_listings").update(
+                {"status": "closed"}
+            ).eq("id", listing_id).eq("tenant_id", tenant_id).execute()
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"La publicación {external_id} está cerrada en Mercado Libre (estado final). "
+                    "No es posible modificarla. Crea una nueva publicación en MeLi y vincúlala."
+                )
+            )
+
         await update_item_listing(external_id, current_stock, price, original_price, access_token)
         return {
             "ok": True,
@@ -391,6 +429,8 @@ async def sync_stock_from_supabase(
             "synced_price": price,
             "synced_original_price": original_price,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error en sync MeLi item %s: %s", external_id, e)
         raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
