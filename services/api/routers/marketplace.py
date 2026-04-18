@@ -407,14 +407,23 @@ async def sync_stock_from_supabase(
         raise HTTPException(status_code=400, detail="Mercado Libre no está conectado")
 
     try:
-        # Verificar status real en MeLi antes de mutar
-        # MeLi rechaza PUT sobre items 'closed' con 400 Bad Request (estado final)
-        # También leemos variaciones — if item has MeLi-side variations,
-        # available_quantity a nivel item también causa 400.
-        meli_item = await get_item(external_id, access_token)
+        # GET previo: verificar status + leer variaciones para evitar 400
+        try:
+            meli_item = await get_item(external_id, access_token)
+        except Exception as get_err:
+            # Loguear response body real del error GET para diagnóstico
+            get_body = getattr(getattr(get_err, "response", None), "text", str(get_err))
+            logger.error("Error GET /items/%s: %s | response: %s", external_id, get_err, get_body)
+            raise HTTPException(
+                status_code=502,
+                detail=f"No se pudo leer el item de Mercado Libre: {get_body}"
+            )
+
         meli_status = meli_item.get("status")
+        logger.info("MeLi item %s status=%s buying_mode=%s variations_count=%d",
+                    external_id, meli_status, meli_item.get("buying_mode"), len(meli_item.get("variations") or []))
+
         if meli_status == "closed":
-            # Actualizar estado local para reflejar realidad
             supabase.table("marketplace_listings").update(
                 {"status": "closed"}
             ).eq("id", listing_id).eq("tenant_id", tenant_id).execute()
@@ -426,10 +435,19 @@ async def sync_stock_from_supabase(
                 )
             )
 
-        # Pasar variaciones MeLi para manejo correcto (evita 400 en items con variaciones)
         meli_variations = meli_item.get("variations") or []
 
-        await update_item_listing(external_id, current_stock, price, original_price, access_token, meli_variations or None)
+        try:
+            await update_item_listing(external_id, current_stock, price, original_price, access_token, meli_variations or None)
+        except Exception as put_err:
+            # Loguear response body real del error PUT para diagnóstico exacto
+            put_body = getattr(getattr(put_err, "response", None), "text", str(put_err))
+            logger.error("Error PUT /items/%s: %s | response: %s", external_id, put_err, put_body)
+            raise HTTPException(
+                status_code=502,
+                detail=f"MeLi rechazó la actualización: {put_body}"
+            )
+
         return {
             "ok": True,
             "meli_id": external_id,
@@ -440,7 +458,7 @@ async def sync_stock_from_supabase(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error en sync MeLi item %s: %s", external_id, e)
+        logger.error("Error inesperado sync MeLi item %s: %s", external_id, e)
         raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
 
 
