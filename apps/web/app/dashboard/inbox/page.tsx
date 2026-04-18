@@ -312,8 +312,10 @@ export default function InboxPage() {
                 <button
                   key={conv.id}
                   onClick={() => handleSelectConv(conv.id)}
-                  className={`w-full text-left p-3.5 border-b border-border transition-colors hover:bg-secondary/50 ${
-                    isSelected ? 'bg-secondary border-l-2 border-l-primary' : ''
+                  className={`w-full text-left p-3.5 border-b border-border transition-all ${
+                    isSelected 
+                      ? 'bg-background border-l-4 border-l-primary shadow-sm relative z-10' 
+                      : 'hover:bg-primary/5 opacity-80 hover:opacity-100'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
@@ -377,13 +379,13 @@ export default function InboxPage() {
               <div className="flex gap-2 shrink-0">
                 {selectedConv.status === 'bot_active' && (
                   <Button size="sm" variant="outline" onClick={() => updateStatus('human_takeover')} disabled={takingOver}
-                    className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-xs h-8">
+                    className="text-amber-700 bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 font-medium text-xs h-8 shadow-sm">
                     <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
                   </Button>
                 )}
                 {selectedConv.status === 'human_takeover' && (
                   <Button size="sm" variant="outline" onClick={() => updateStatus('bot_active')} disabled={takingOver}
-                    className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 text-xs h-8">
+                    className="text-emerald-700 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 font-medium text-xs h-8 shadow-sm">
                     <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
                   </Button>
                 )}
@@ -449,7 +451,7 @@ export default function InboxPage() {
                     placeholder="Escribe tu respuesta... (Enter para enviar)"
                     disabled={sending}
                     rows={2}
-                    className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                    className="flex-1 resize-none rounded-xl border border-border bg-white shadow-sm px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
                   />
                   <Button
                     size="sm"
