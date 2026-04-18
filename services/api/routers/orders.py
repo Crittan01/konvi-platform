@@ -39,6 +39,7 @@ class OrderCreate(BaseModel):
     contact_id: Optional[str] = None
     conversation_id: Optional[str] = None
     notes: Optional[str] = None
+    shipping_cost: float = Field(default=0.0, ge=0.0)
     items: List[OrderItemCreate] = Field(..., min_length=1)
 
 
@@ -61,7 +62,7 @@ async def list_orders(
     try:
         query = (
             supabase.table("orders")
-            .select("id, status, total_amount, notes, created_at, contact_id, contacts(phone, name)")
+            .select("id, status, total_amount, shipping_cost, notes, created_at, contact_id, contacts(phone, name)")
             .eq("tenant_id", tenant_id)
             .order("created_at", desc=True)
             .limit(limit)
@@ -85,7 +86,7 @@ async def create_order(
 ):
     """Crea pedido con ítems. Calcula total automáticamente. Solo owner/manager."""
     try:
-        total = sum(item.unit_price * item.quantity for item in order.items)
+        total = sum(item.unit_price * item.quantity for item in order.items) + order.shipping_cost
 
         order_result = supabase.table("orders").insert({
             "tenant_id": tenant_id,
@@ -93,6 +94,7 @@ async def create_order(
             "conversation_id": order.conversation_id,
             "status": "pending",
             "total_amount": total,
+            "shipping_cost": order.shipping_cost,
             "notes": order.notes,
         }).execute()
 

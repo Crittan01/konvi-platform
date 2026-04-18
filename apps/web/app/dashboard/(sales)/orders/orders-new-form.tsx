@@ -55,11 +55,13 @@ function variationLabel(v: Variation): string {
 export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = () => {} }: Props) {
   const [contactId, setContactId] = useState('')
   const [notes, setNotes] = useState('')
+  const [shippingCost, setShippingCost] = useState(0)
   const [items, setItems] = useState<LineItem[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const total = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
+  const subtotal = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
+  const grandTotal = subtotal + shippingCost
 
   // ── Añadir línea vacía ──────────────────────────────────────────────────────
   const addLine = () => {
@@ -129,6 +131,7 @@ export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = 
     const payload = {
       contact_id: contactId || null,
       notes: notes || null,
+      shipping_cost: shippingCost,
       items: items.map(it => ({
         product_id: it.productId,
         variation_id: it.variationId,
@@ -155,6 +158,7 @@ export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = 
         setItems([])
         setContactId('')
         setNotes('')
+        setShippingCost(0)
         onCreated()
       }
     } catch {
@@ -281,9 +285,29 @@ export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = 
 
           {/* Total */}
           {items.length > 0 && (
-            <div className="flex justify-between items-center pt-2 border-t border-border">
-              <span className="text-sm font-medium">Total</span>
-              <span className="text-lg font-bold text-primary">${total.toFixed(2)}</span>
+            <div className="space-y-3 pt-3 border-t border-border">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Subtotal ítems</span>
+                <span>${subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground flex items-center">
+                  Costo de Envío ($)
+                </span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={shippingCost === 0 ? '' : shippingCost}
+                  placeholder="0.00"
+                  onChange={e => setShippingCost(parseFloat(e.target.value) || 0)}
+                  className="h-8 w-28 text-right text-xs"
+                />
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-border">
+                <span className="text-sm font-medium">Total</span>
+                <span className="text-xl font-bold text-primary">${grandTotal.toFixed(2)}</span>
+              </div>
             </div>
           )}
         </div>
