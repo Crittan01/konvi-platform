@@ -113,7 +113,7 @@ export default function DashboardClient({
           </p>
         </div>
         {totalOpsAlerts > 0 && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-400/10 border border-amber-400/30 text-amber-300 text-sm font-medium">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 text-sm font-medium shadow-sm">
             <Zap className="h-4 w-4 shrink-0" />
             <span>{totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
           </div>
