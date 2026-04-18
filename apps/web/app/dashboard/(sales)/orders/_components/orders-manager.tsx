@@ -19,6 +19,7 @@ type Order = {
   id: string
   status: string
   total_amount: number
+  shipping_cost: number | null
   notes: string | null
   created_at: string
   contacts: Contact | Contact[] | null
@@ -285,7 +286,9 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                 const nextStatus = STATUS_NEXT[o.status]
                 const colorClass = STATUS_COLORS[o.status] || 'bg-gray-500/15 text-gray-400'
                 const contact = Array.isArray(o.contacts) ? o.contacts[0] : o.contacts
-                const revenue = o.total_amount ?? o.order_items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
+                const subtotal  = o.order_items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
+                const shipping  = o.shipping_cost ?? 0
+                const revenue   = o.total_amount ?? (subtotal + shipping)
                 
                 return (
                   <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all focus-within:border-primary/50">
@@ -323,6 +326,12 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                           <span className="font-mono tabular-nums shrink-0">${it.unit_price.toLocaleString('es-CO')}</span>
                         </div>
                       ))}
+                      {shipping > 0 && (
+                        <div className="flex justify-between items-center gap-2 pt-1.5 mt-1 border-t border-border/40">
+                          <span className="text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" /> Envío</span>
+                          <span className="font-mono tabular-nums shrink-0">${shipping.toLocaleString('es-CO')}</span>
+                        </div>
+                      )}
                       {o.notes && (
                         <div className="pt-2 mt-2 border-t border-border/50 text-muted-foreground italic line-clamp-2">
                           &quot;{o.notes}&quot;

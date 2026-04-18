@@ -20,7 +20,7 @@ export default async function ClaimsPage() {
   const { data: claimsData } = await supabase
     .from('claims')
     .select(`
-      id, status, reason, requested_amount, resolution_notes, created_at,
+      id, ticket_number, status, reason, requested_amount, resolution_notes, created_at,
       orders ( id, total_amount ),
       contacts ( id, name, phone )
     `)
@@ -38,6 +38,7 @@ export default async function ClaimsPage() {
   // Map to flat structures
   const claims = (claimsData || []).map(c => ({
     id: c.id,
+    ticket_number: (c as { ticket_number?: number | null }).ticket_number ?? null,
     order:    Array.isArray(c.orders)   ? (c.orders[0]   ?? null) : (c.orders   ?? null),
     customer: Array.isArray(c.contacts) ? (c.contacts[0] ?? null) : (c.contacts ?? null),
     status: c.status,

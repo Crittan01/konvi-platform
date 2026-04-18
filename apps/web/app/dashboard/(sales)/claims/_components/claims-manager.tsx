@@ -17,6 +17,7 @@ type ClaimCustomer = { id: string; name: string | null; phone: string | null } |
 
 type Claim = {
   id: string
+  ticket_number: number | null
   order: ClaimOrder
   customer: ClaimCustomer
   status: string
@@ -176,7 +177,7 @@ export default function ClaimsManager({
               >
                 <div className="flex justify-between items-start gap-2">
                   <span className="font-medium text-sm text-foreground truncate">
-                    Pedido #{claim.order?.id?.slice(-8).toUpperCase() ?? '—'}
+                    Ticket #{claim.ticket_number != null ? String(claim.ticket_number).padStart(3, '0') : '—'}
                   </span>
                   <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${st.color}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
@@ -205,7 +206,12 @@ export default function ClaimsManager({
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-foreground truncate">
-                      Pedido #{selectedClaim.order?.id?.slice(-8).toUpperCase() ?? '—'}
+                      Ticket #{selectedClaim.ticket_number != null ? String(selectedClaim.ticket_number).padStart(3, '0') : '—'}
+                      {selectedClaim.order && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground font-mono">
+                          Pedido {selectedClaim.order.id.split('-')[0].toUpperCase()}
+                        </span>
+                      )}
                     </p>
                     <p className="text-sm text-muted-foreground">
                       Cliente: {customerLabel(selectedClaim.customer)}

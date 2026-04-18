@@ -82,7 +82,7 @@ export default async function OrdersPage({
     const [ordersRes, productsRes, contactsRes, allOrdersRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, status, total_amount, notes, created_at, contacts(id, phone, name), order_items(title, quantity, unit_price)')
+        .select('id, status, total_amount, shipping_cost, notes, created_at, contacts(id, phone, name), order_items(title, quantity, unit_price)')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(100),
