@@ -16,6 +16,7 @@ type Order = {
   id: string
   status: string
   total_amount: number
+  shipping_cost: number | null
   notes: string | null
   created_at: string
   contacts: Contact | Contact[] | null
