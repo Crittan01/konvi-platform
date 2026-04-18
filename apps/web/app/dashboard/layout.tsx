@@ -36,8 +36,7 @@ export default async function DashboardLayout({
       .from('conversations')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', meta.tenant_id)
-      .eq('human_takeover', true)
-      .eq('status', 'open')
+      .eq('status', 'human_takeover')
     inboxBadge = count ?? 0
   }
 
@@ -47,6 +46,9 @@ export default async function DashboardLayout({
     await supabase.auth.signOut()
     redirect('/login')
   }
+
+  // TODO: Query real de Mercado Libre (ej. listings con error)
+  const meliBadge = 1 
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -58,6 +60,7 @@ export default async function DashboardLayout({
         tenantName={tenantName}
         tenantLogoUrl={tenantLogoUrl}
         inboxBadge={inboxBadge}
+        meliBadge={meliBadge}
         logoutAction={logoutAction}
       />
 
