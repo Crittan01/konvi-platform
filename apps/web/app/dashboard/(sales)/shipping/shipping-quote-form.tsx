@@ -42,11 +42,14 @@ function AddressFields({
   defaults?: Record<string, string>
 }) {
   const defaultDpto = DEPARTAMENTOS.find(d => d.nombre === defaults.state) ?? null
-  const [dptoCode, setDptoCode] = useState(defaultDpto?.codigo ?? '')
-  const [city, setCity]         = useState(defaults.city ?? '')
+  const [dptoCode, setDptoCode]           = useState(defaultDpto?.codigo ?? '')
+  const [city, setCity]                   = useState(defaults.city ?? '')
+  const [municipioCodigo, setMuniCodigo]  = useState('')
 
   const municipios = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
+  // Código DANE 8 dígitos: código municipio (5) + "000"
+  const daneCode = municipioCodigo ? `${municipioCodigo}000` : ''
 
   return (
     <div className="space-y-3">
@@ -73,10 +76,7 @@ function AddressFields({
           <Input name={`${prefix}_number`} defaultValue={defaults.number ?? ''} placeholder="Apto 201" className="h-8 text-xs" />
         </div>
 
-        <div className="space-y-1">
-          <Label className="text-xs">Código postal</Label>
-          <Input name={`${prefix}_postalCode`} defaultValue={defaults.postalCode ?? ''} placeholder="110111" className="h-8 text-xs" required />
-        </div>
+        {/* postalCode se deriva del código DANE al seleccionar municipio */}
 
         {/* Departamento — select DANE */}
         <div className="space-y-1">
@@ -98,7 +98,16 @@ function AddressFields({
         <div className="space-y-1">
           <Label className="text-xs">Ciudad / Municipio</Label>
           <input type="hidden" name={`${prefix}_city`} value={city} />
-          <Select value={city} onValueChange={setCity} disabled={!dptoCode}>
+          <input type="hidden" name={`${prefix}_dane_code`} value={daneCode} />
+          <Select
+            value={city}
+            onValueChange={(v) => {
+              const muni = municipios.find(m => m.nombre === v)
+              setCity(v)
+              setMuniCodigo(muni?.codigo ?? '')
+            }}
+            disabled={!dptoCode}
+          >
             <SelectTrigger className="h-8 text-xs">
               <SelectValue placeholder={dptoCode ? 'Seleccionar...' : 'Elige dpto. primero'} />
             </SelectTrigger>
@@ -110,7 +119,12 @@ function AddressFields({
           </Select>
         </div>
 
-        <div className="col-span-2 space-y-1">
+        <div className="space-y-1">
+          <Label className="text-xs">Código DANE</Label>
+          <Input readOnly value={daneCode} placeholder="Auto desde municipio" className="h-8 text-xs text-muted-foreground bg-muted cursor-default" />
+        </div>
+
+        <div className="space-y-1">
           <Label className="text-xs">País</Label>
           <input type="hidden" name={`${prefix}_country`} value="CO" />
           <Input readOnly value="Colombia" className="h-8 text-xs text-muted-foreground bg-muted cursor-default" />
@@ -122,16 +136,18 @@ function AddressFields({
 }
 
 function readAddress(formData: FormData, prefix: string) {
+  const daneCode = formData.get(`${prefix}_dane_code`) as string
   return {
-    name:       formData.get(`${prefix}_name`)       as string,
-    phone:      formData.get(`${prefix}_phone`)      as string,
-    street:     formData.get(`${prefix}_street`)     as string,
-    number:     formData.get(`${prefix}_number`)     as string,
-    city:       formData.get(`${prefix}_city`)       as string,
-    state:      formData.get(`${prefix}_state`)      as string,
-    country:    formData.get(`${prefix}_country`)    as string,
-    postalCode: formData.get(`${prefix}_postalCode`) as string,
-    company:    formData.get(`${prefix}_company`)    as string || undefined,
+    name:       formData.get(`${prefix}_name`)    as string,
+    phone:      formData.get(`${prefix}_phone`)   as string,
+    street:     formData.get(`${prefix}_street`)  as string,
+    number:     formData.get(`${prefix}_number`)  as string,
+    city:       formData.get(`${prefix}_city`)    as string,
+    state:      formData.get(`${prefix}_state`)   as string,
+    country:    formData.get(`${prefix}_country`) as string,
+    postalCode: daneCode,  // Para CO: código DANE (ej. "11001000")
+    dane_code:  daneCode,
+    company:    formData.get(`${prefix}_company`) as string || undefined,
   }
 }
 
