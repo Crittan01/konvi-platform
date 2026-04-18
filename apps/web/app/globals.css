@@ -4,67 +4,67 @@
 
 @layer base {
   :root {
-    /* ── Commerce Ops Design System — Cream Background / Sage Cards ───────
-       Filosofía: Contraste natural relajante (Crema) + Tarjetas verde pálido (Sage).
-       Texto oscuro casi negro para legibilidad óptima. Topbar coordina con Sidebar.
-       Objetivo: No cansar la vista en usos de 8+ horas.
+    /* ── Commerce Ops Design System — Kaiu Organic Style ──────────────────
+       Filosofía: Diseño orgánico, natural y elegante.
+       - Fondo: Crema cálido (lienzos naturales).
+       - Cards: Ligeramente más claras que el fondo (efecto de elevación natural).
+       - Tipografía: Verde bosque muy oscuro (contraste AAA sin la fatiga del negro).
     ─────────────────────────────────────────────────────────────────── */
-    /* Canvas — fondo crema muy suave */
-    --background:  42 20% 96%;    /* #F6F4ED — crema vainilla pálido */
     
-    /* Cards — verde-grisáceo pálido (Sage) para que combine con el sidebar y el crema */
-    --card:        160  8% 92%;   /* #E6ECE9 — light sage, más oscuro que el fondo para destacar */
-    --popover:     160  8% 92%;
-    --secondary:   160 10% 86%;   /* #D3DDD8 — hover states */
-    --muted:       160 10% 86%;
-    --accent:      160 10% 86%;
+    /* Backgrounds — Crema cálido relajante */
+    --background:  30 25% 96%;    /* #F8F5F1 — Kaiu Cream */
+    --card:        30 20% 98%;    /* #FBFAF6 — Ligeramente más brillante, sobresale limpio */
+    --popover:     30 20% 98%;
+    --secondary:   30 35% 92%;    /* #EFE9E2 — Hover states, off-buttons */
+    --muted:       30 25% 90%;
+    --accent:      43 65% 53%;
 
-    /* Texto — verde-negro muy oscuro (mucho más oscuro que antes) */
-    --foreground:           168 30% 10%;   /* #12211F — casi negro, máxima legibilidad */
-    --card-foreground:      168 30% 10%;
-    --popover-foreground:   168 30% 10%;
-    --secondary-foreground: 168 20% 25%;   /* Texto secundario fuerte */
-    --muted-foreground:     168 15% 42%;   /* Gris-verde medio/oscuro (antes era muy claro) */
-    --accent-foreground:    168 30% 10%;
+    /* Texto — Verde bosque muy profundo (esencial para este look) */
+    --foreground:           156 33% 20%;   /* #224438 — Elegancia total, cero fatiga */
+    --card-foreground:      156 33% 20%;
+    --popover-foreground:   156 33% 20%;
+    --secondary-foreground: 156 33% 20%;   
+    --muted-foreground:     156 20% 40%;   /* #527A68 — Gris-Verde legible */
+    --accent-foreground:    156 33% 15%;
 
-    /* Primary — verde corporativo */
-    --primary:             155 48% 36%;
-    --primary-foreground:  0 0% 100%;
+    /* Primary — Verde corporativo Kaiu */
+    --primary:             156 33% 27%;    /* #2E5C4A — Verde vibrante pero serio */
+    --primary-foreground:  30 20% 98%;     /* Letras crema claro */
 
     /* Destructive */
-    --destructive:         0 65% 48%;
+    --destructive:         0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Bordes — sutil verde-grisáceo oscuro para demarcar *bien* las cards */
-    --border: 160 12% 82%;    /* #C9D4CE — borde claramente visible, combina con card */
-    --input:  160 12% 82%;
-    --ring:   155 48% 36%;
+    /* Bordes — Arena/Beige (definen sutilmente sin cajas fuertes) */
+    --border: 30 25% 85%;    /* #DCD6CD — Armonía con el crema */
+    --input:  30 25% 85%;
+    --ring:   156 33% 27%;
 
     /* Radio */
-    --radius: 0.625rem;
+    --radius: 0.75rem;
 
     /* Custom */
-    --amber:      42 75% 52%;
-    --sidebar-bg: 168 14%  8%;   /* #131A19 — sidebar sin cambio */
+    --amber:      43 65% 53%;    /* Kaiu Gold */
+    --sidebar-bg: 168 14%  8%;   /* Sidebar estructurado oscuro */
   }
 }
 
 /* ── Custom Theme Components ────────────────────────────────────────────── */
 @layer base {
-  /* Sidebar mantiene tokens oscuros para forzar texto blanco interno */
+  /* Sidebar mantiene tokens oscuros para forzar texto interior claro */
   .sidebar-gradient {
     --foreground:           0   0% 93%;
     --card-foreground:      0   0% 93%;
-    --muted-foreground:     168 10% 58%;
-    --border:               168 10% 20%;
-    --primary:              155 52% 46%;
+    --muted-foreground:     156 20% 65%;
+    --border:               156 30% 20%;
+    --primary:              156 33% 40%;
   }
 
-  /* Barra superior: Un verde más claro que el sidebar, para hacer contraste */
+  /* Barra superior: Verde intermedio, visualmente entre el sidebar profundo y el cream canvas */
   .topbar-bg {
-    background-color: hsl(168 12% 16%); /* #242E2C — un poco más claro que #131A19 del sidebar */
-    color: hsl(0 0% 95%);              /* Letras blancas aquí */
-    border-color: hsl(168 12% 20%);
+    background-color: hsl(168 13% 15%); /* #212B2A — Elegantemente más claro que el fondo del sidebar */
+    color: hsl(30 20% 98%);             /* Letras color cream claro */
+    border-color: hsl(156 30% 20%);
   }
 }
 
@@ -115,9 +115,38 @@
     background-clip: text;
   }
 
-  /* Card hover sutil */
+  .card-hover {
+    transition: all 0.3s ease;
+  }
+
   .card-hover:hover {
-    border-color: hsl(var(--primary) / 0.30);
-    box-shadow: 0 2px 16px hsl(var(--primary) / 0.08);
+    border-color: hsl(var(--primary) / 0.20);
+    box-shadow: 0 8px 30px rgba(34, 68, 56, 0.08); /* Sombra elegante estilo Kaiu */
+    transform: translateY(-2px);
+  }
+
+  /* ── Animaciones Base (UI Fluida) ─────────────────────────────────────── */
+  .animate-fade-in {
+    animation: fadeIn 0.4s ease-out forwards;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { 
+      opacity: 0;
+      transform: translateY(15px);
+    }
+    to { 
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
