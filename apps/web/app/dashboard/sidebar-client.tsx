@@ -135,13 +135,14 @@ interface SidebarProps {
   userEmail: string
   tenantName: string | null
   tenantLogoUrl: string | null
+  inboxBadge: number
   logoutAction: () => Promise<void>
 }
 
 // ── Componente Principal ──────────────────────────────────────────────────────
 
 export default function SidebarClient({
-  role, userEmail, tenantName, tenantLogoUrl, logoutAction,
+  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, logoutAction,
 }: SidebarProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -242,6 +243,7 @@ export default function SidebarClient({
               const isActive = item.href === '/dashboard'
                 ? pathname === '/dashboard'
                 : pathname === item.href || pathname.startsWith(item.href + '/')
+              const isInbox = item.href === '/dashboard/inbox'
               return (
                 <Link
                   key={item.href}
@@ -255,7 +257,12 @@ export default function SidebarClient({
                   `}
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  <span className="flex-1">{item.label}</span>
+                  {isInbox && inboxBadge > 0 && (
+                    <span className="inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold tabular-nums">
+                      {inboxBadge > 99 ? '99+' : inboxBadge}
+                    </span>
+                  )}
                 </Link>
               )
             }

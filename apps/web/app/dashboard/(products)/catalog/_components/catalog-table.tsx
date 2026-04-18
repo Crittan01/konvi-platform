@@ -70,8 +70,8 @@ const VariantRow = memo(function VariantRow({
             <form action={editVariationAction} onSubmit={() => setEditing(false)} className="flex flex-col gap-1 items-center">
               <input type="hidden" name="variation_id" value={v.id} />
               <input type="hidden" name="stock" value={v.stock_quantity} />
-              <Input name="price" type="number" defaultValue={v.price} step="1" min="1" placeholder="Precio" className="h-7 w-24 text-xs text-center font-mono" autoFocus title="Precio Final" />
-              <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="1" min="1" placeholder="Tachado..." className="h-6 w-24 text-[10px] text-center font-mono border-dashed bg-muted/30" title="Precio Normal Tachado (Op)" />
+              <Input name="price" type="number" defaultValue={v.price} step="50" min="50" placeholder="Precio" className="h-7 w-24 text-xs text-center font-mono" autoFocus title="Precio Final" />
+              <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="50" min="50" placeholder="Tachado..." className="h-6 w-24 text-[10px] text-center font-mono border-dashed bg-muted/30" title="Precio Normal Tachado (Op)" />
               <div className="flex gap-1 w-24">
                 <Button type="submit" size="sm" className="h-6 flex-1 px-1 text-[10px]">Guardar</Button>
                 <button type="button" onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground p-1"><X className="h-3 w-3" /></button>
@@ -146,15 +146,15 @@ const VariantRow = memo(function VariantRow({
               <input type="hidden" name="variation_id" value={v.id} />
               <div>
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio</label>
-                <Input name="price" type="number" defaultValue={v.price} step="1" min="1" className="h-8 text-xs font-mono mt-1" />
+                <Input name="price" type="number" defaultValue={v.price} step="50" min="50" className="h-8 text-xs font-mono mt-1" />
               </div>
               <div>
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Tachado (Promo)</label>
-                <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="1" min="1" className="h-8 text-xs font-mono mt-1" placeholder="Opcional" />
+                <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="50" min="50" className="h-8 text-xs font-mono mt-1" placeholder="Opcional" />
               </div>
               <div>
                 <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
-                <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="1" min="0" className="h-8 text-xs font-mono mt-1 border-amber-500/30" placeholder="0" />
+                <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="50" min="0" className="h-8 text-xs font-mono mt-1 border-amber-500/30" placeholder="0" />
               </div>
               <div>
                 <label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock</label>
@@ -255,15 +255,15 @@ const ExpandedPanel = memo(function ExpandedPanel({
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Normal *</label>
-                  <Input name="price" type="number" min="1" step="1" placeholder="0" className="h-8 text-xs font-mono" required />
+                  <Input name="price" type="number" min="50" step="50" placeholder="0" className="h-8 text-xs font-mono" required />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Tachado</label>
-                  <Input name="compare_at_price" type="number" min="1" step="1" placeholder="Opcional" className="h-8 text-xs font-mono border-dashed bg-muted/30" />
+                  <Input name="compare_at_price" type="number" min="50" step="50" placeholder="Opcional" className="h-8 text-xs font-mono border-dashed bg-muted/30" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-amber-600/90 uppercase">Costo Base ($)</label>
-                  <Input name="cost_price" type="number" min="0" step="1" placeholder="0" className="h-8 text-xs font-mono border-amber-500/30" />
+                  <Input name="cost_price" type="number" min="0" step="50" placeholder="0" className="h-8 text-xs font-mono border-amber-500/30" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Stock *</label>
@@ -395,7 +395,14 @@ const ProductMobileCard = memo(function ProductMobileCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm leading-tight truncate">{p.title}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="font-semibold text-sm leading-tight truncate">{p.title}</p>
+            {linkedVariationIds && vars.some(v => linkedVariationIds.includes(v.id)) && (
+              <span title="Vinculado a Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-500/20 shrink-0">
+                <Store className="h-2.5 w-2.5" /> MeLi
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             {catName && (
               <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
@@ -665,7 +672,14 @@ export default function CatalogTable({
                       </div>
                     </td>
                     <td className="px-3 py-3">
-                      <p className="font-semibold leading-tight line-clamp-1">{p.title}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-semibold leading-tight line-clamp-1">{p.title}</p>
+                        {linkedVariationIds && vars.some(v => linkedVariationIds.includes(v.id)) && (
+                          <span title="Vinculado a Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-500/20 shrink-0">
+                            <Store className="h-2.5 w-2.5" /> MeLi
+                          </span>
+                        )}
+                      </div>
                       {p.description && (
                         <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{p.description}</p>
                       )}

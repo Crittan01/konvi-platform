@@ -5,27 +5,27 @@
 @layer base {
   :root {
     /* ── Commerce Ops Design System — Dark Warm ───────────────────────────
-       Paleta: Carbón cálido con tinte verde + Verde brillante + Dorado ámbar
-       Filosofía: oscuro CÓMODO — sin azul frío, sin negro puro.
-       El sidebar actual (verde bosque oscuro) aplicado a toda la interfaz.
-       Referencia: Notion dark, GitHub dark dimmed, Bear App
+       Paleta: Split theme — sidebar oscuro profundo / canvas de contenido más claro
+       Filosofía: El sidebar mantiene el verde bosque oscuro (#131A19).
+                  El canvas sube de 10% a 17% lightness → contraste visual fuerte.
+       Referencia: Supabase dashboard, Vercel dark dimmed, Linear
     ─────────────────────────────────────────────────────────────────── */
 
-    /* Backgrounds — carbón cálido con tinte verde */
-    --background:  168 10% 10%;    /* #181E1D — carbón oscuro con alma verde */
-    --card:        168 10% 13%;    /* #1E2624 — levemente elevado sobre el fondo */
-    --popover:     168 10% 13%;
-    --secondary:   168  9% 17%;    /* #242E2C — hover states, inputs */
-    --muted:       168  9% 17%;
-    --accent:      168  9% 17%;
+    /* Backgrounds — canvas notablemente más claro que el sidebar */
+    --background:  168  8% 17%;    /* #263130 — canvas aireado, contrasta con sidebar */
+    --card:        168  8% 21%;    /* #2E3B39 — cards elevadas sobre el canvas */
+    --popover:     168  8% 21%;
+    --secondary:   168  7% 25%;    /* #363F3E — hover states, inputs */
+    --muted:       168  7% 25%;
+    --accent:      168  7% 25%;
 
     /* Texto — blanco cálido, nunca frío */
-    --foreground:           36 25% 92%;    /* #F0EDE8 — crema muy claro */
-    --card-foreground:      36 25% 92%;
-    --popover-foreground:   36 25% 92%;
-    --secondary-foreground: 36 15% 82%;
-    --muted-foreground:     168 10% 52%;   /* #7A9490 — gris verdoso medio */
-    --accent-foreground:    36 25% 92%;
+    --foreground:           36 20% 93%;    /* #EEE9E3 — crema muy claro */
+    --card-foreground:      36 20% 93%;
+    --popover-foreground:   36 20% 93%;
+    --secondary-foreground: 36 12% 83%;
+    --muted-foreground:     168  8% 62%;   /* #8FA8A4 — gris verdoso legible */
+    --accent-foreground:    36 20% 93%;
 
     /* Primary — verde brillante (contrasta bien en oscuro) */
     --primary:             155 52% 46%;   /* #38A875 — verde bosque luminoso */
@@ -35,17 +35,17 @@
     --destructive:         0 65% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Bordes e inputs — sutil, no agresivo */
-    --border: 168 10% 20%;    /* #2A3533 */
-    --input:  168 10% 20%;
+    /* Bordes e inputs — más visibles para mejor claridad estructural */
+    --border: 168  8% 28%;    /* #3D4F4C — bordes definidos */
+    --input:  168  8% 28%;
     --ring:   155 52% 46%;
 
     /* Radio */
     --radius: 0.625rem;
 
-    /* Custom */
+    /* Custom — sidebar conserva el mismo verde muy oscuro */
     --amber:      42 75% 52%;    /* #D4A843 — dorado ámbar */
-    --sidebar-bg: 168 14%  8%;   /* #131A19 — más oscuro que el canvas */
+    --sidebar-bg: 168 14%  8%;   /* #131A19 — sidebar oscuro profundo (sin cambio) */
   }
 }
 
