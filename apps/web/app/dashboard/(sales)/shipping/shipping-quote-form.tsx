@@ -40,9 +40,9 @@ function AddressFields({
   title: React.ReactNode
   defaults?: Record<string, string>
 }) {
-  const defaultDpto = DEPARTAMENTOS.find(d => d.nombre === defaults.state) ?? null
-  const [dptoCode, setDptoCode]          = useState(defaultDpto?.codigo ?? '')
-  const [city, setCity]                  = useState(defaults.city ?? '')
+  // Departamento y ciudad siempre inician en blanco — selección obligatoria
+  const [dptoCode, setDptoCode]          = useState('')
+  const [city, setCity]                  = useState('')
   const [municipioCodigo, setMuniCodigo] = useState('')
 
   const municipios = dptoCode ? getMunicipiosByDpto(dptoCode) : []
@@ -371,67 +371,103 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
             </div>
           )}
 
-          {result && result.rates.length > 0 && (
-            <div className="mt-5 space-y-3">
-              <p className="text-sm font-medium text-foreground">
-                {result.rates.length} opciones — ordenadas de menor a mayor precio
-                {saved && <span className="ml-2 text-xs text-primary">✓ Guardada</span>}
-              </p>
-              {result.rates.map((rate, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => handleSelectRate(idx)}
-                  className={`rounded-lg border p-3 cursor-pointer transition-all ${
-                    selectedIdx === idx
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border hover:border-primary/40'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
-                        {idx === 0 && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            <DollarSign className="h-2.5 w-2.5" /> Más económico
-                          </span>
-                        )}
-                        {idx === fastestIdx && fastestIdx !== 0 && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                            <Zap className="h-2.5 w-2.5" /> Más rápido
-                          </span>
-                        )}
-                        {idx === 0 && idx === fastestIdx && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                            <Zap className="h-2.5 w-2.5" /> Más rápido
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{String(rate.service ?? 'Servicio estándar')}</p>
-                      {rate.delivery_date && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Entrega est.: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
-                        </p>
-                      )}
-                    </div>
-                    <div className="text-right shrink-0">
-                      {rate.total_price != null && (
-                        <p className="text-lg font-bold text-primary">
-                          ${Number(rate.total_price).toLocaleString('es-CO')}{' '}
-                          <span className="text-xs font-normal text-muted-foreground">{String(rate.currency ?? '')}</span>
-                        </p>
-                      )}
-                      {selectedIdx === idx && (
-                        saving
-                          ? <Loader2 className="h-4 w-4 animate-spin text-primary ml-auto mt-1" />
-                          : saved ? <Check className="h-4 w-4 text-primary ml-auto mt-1" /> : null
-                      )}
-                    </div>
+          {result && result.rates.length > 0 && (() => {
+            const cheapest = result.rates[0]
+            const fastest  = fastestIdx >= 0 ? result.rates[fastestIdx] : null
+            const showFastestSeparate = fastestIdx > 0
+
+            const RateCard = ({ rate, idx, accent, label, icon }: {
+              rate: Rate; idx: number
+              accent?: 'green' | 'blue'
+              label?: string
+              icon?: React.ReactNode
+            }) => (
+              <div
+                onClick={() => handleSelectRate(idx)}
+                className={`rounded-lg border p-3 cursor-pointer transition-all ${
+                  selectedIdx === idx
+                    ? 'border-primary bg-primary/10'
+                    : accent === 'green'
+                    ? 'border-emerald-500/40 bg-emerald-500/5 hover:border-emerald-500/60'
+                    : accent === 'blue'
+                    ? 'border-blue-500/40 bg-blue-500/5 hover:border-blue-500/60'
+                    : 'border-border hover:border-primary/40'
+                }`}
+              >
+                {label && (
+                  <div className="flex items-center gap-1 mb-1.5">
+                    <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
+                      accent === 'green'
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                    }`}>
+                      {icon} {label}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
+                    <p className="text-xs text-muted-foreground">{String(rate.service ?? 'Servicio estándar')}</p>
+                    {rate.delivery_date && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Entrega: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {rate.total_price != null && (
+                      <p className="text-lg font-bold text-primary">
+                        ${Number(rate.total_price).toLocaleString('es-CO')}{' '}
+                        <span className="text-xs font-normal text-muted-foreground">{String(rate.currency ?? '')}</span>
+                      </p>
+                    )}
+                    {selectedIdx === idx && (
+                      saving
+                        ? <Loader2 className="h-4 w-4 animate-spin text-primary ml-auto mt-1" />
+                        : saved ? <Check className="h-4 w-4 text-primary ml-auto mt-1" /> : null
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            )
+
+            return (
+              <div className="mt-5 space-y-4">
+                {/* Destacados */}
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">Destacados</p>
+                  <div className={`grid gap-2 ${showFastestSeparate ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    <RateCard
+                      rate={cheapest} idx={0}
+                      accent="green" label="Más económico"
+                      icon={<DollarSign className="h-2.5 w-2.5" />}
+                    />
+                    {showFastestSeparate && fastest && (
+                      <RateCard
+                        rate={fastest} idx={fastestIdx}
+                        accent="blue" label="Más rápido"
+                        icon={<Zap className="h-2.5 w-2.5" />}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Lista completa */}
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">
+                    Todas las opciones ({result.rates.length})
+                    {saved && <span className="ml-2 normal-case text-primary">✓ Guardada</span>}
+                  </p>
+                  <div className="space-y-2">
+                    {result.rates.map((rate, idx) => (
+                      <RateCard key={idx} rate={rate} idx={idx} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </CardContent>
       )}
     </Card>
