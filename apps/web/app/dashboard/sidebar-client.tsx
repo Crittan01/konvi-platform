@@ -56,7 +56,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,     roles: [] },
       { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,       roles: [] },
-      { kind: 'leaf', href: '/dashboard/shipping', label: 'Envíos',    icon: Truck,       roles: [] },
+      { kind: 'leaf', href: '/dashboard/shipping', label: 'Cotizador', icon: Truck,       roles: [] },
       { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle, roles: [] },
     ],
   },
