@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { createClient } from '@/utils/supabase/client'
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
