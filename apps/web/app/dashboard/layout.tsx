@@ -29,6 +29,18 @@ export default async function DashboardLayout({
     tenantLogoUrl = tenantData?.logo_url ?? null
   }
 
+  // Conversaciones con agente humano requerido — badge en sidebar
+  let inboxBadge = 0
+  if (meta.tenant_id) {
+    const { count } = await supabase
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', meta.tenant_id)
+      .eq('human_takeover', true)
+      .eq('status', 'open')
+    inboxBadge = count ?? 0
+  }
+
   const logoutAction = async () => {
     'use server'
     const supabase = createClient()
@@ -45,6 +57,7 @@ export default async function DashboardLayout({
         userEmail={user?.email ?? ''}
         tenantName={tenantName}
         tenantLogoUrl={tenantLogoUrl}
+        inboxBadge={inboxBadge}
         logoutAction={logoutAction}
       />
 

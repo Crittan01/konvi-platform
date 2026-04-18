@@ -362,7 +362,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Normal ($) *</label>
                   <Input
-                    type="number" step="1" min="1"
+                    type="number" step="50" min="50"
                     value={v.price === 0 ? '' : v.price}
                     onChange={e => updateVariantField(vIdx, 'price', parseFloat(e.target.value) || 0)}
                     className="h-8 text-xs font-mono"
@@ -371,7 +371,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Promo ($)</label>
                   <Input
-                    type="number" step="1" min="1"
+                    type="number" step="50" min="50"
                     value={v.compare_at_price}
                     onChange={e => updateVariantField(vIdx, 'compare_at_price', parseFloat(e.target.value) || '')}
                     className="h-8 text-xs font-mono placeholder:text-muted-foreground/50"
@@ -381,7 +381,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground text-amber-600/90 uppercase">Costo Proveedor ($)</label>
                   <Input
-                    type="number" step="1" min="0"
+                    type="number" step="50" min="0"
                     value={v.cost_price}
                     onChange={e => updateVariantField(vIdx, 'cost_price', parseFloat(e.target.value) || '')}
                     className="h-8 text-xs font-mono border-amber-500/30"
