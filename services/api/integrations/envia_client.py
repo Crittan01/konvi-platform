@@ -55,7 +55,7 @@ class EnviaClient:
         anidadas bajo "dimensions". carrier: "all" no funciona para CO —
         especificar carrier explícito.
         """
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(
                 f"{self.base_url}/ship/rate/",
                 headers=self.headers,
