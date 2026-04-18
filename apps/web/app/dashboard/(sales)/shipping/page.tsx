@@ -91,7 +91,7 @@ export default async function ShippingPage({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Truck className="h-5 w-5 text-primary" /> Despachos
+            <Truck className="h-5 w-5 text-primary" /> Envíos
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {shipments.length} envíos · {inTransitCount} en tránsito · {deliveredCount} entregados

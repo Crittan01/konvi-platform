@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2, Package, ChevronDown, ChevronUp, Check, MapPin, Box } from 'lucide-react'
+import { Loader2, Package, ChevronDown, ChevronUp, Check, MapPin, Box, Zap, DollarSign } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,33 +41,69 @@ function AddressFields({
   defaults?: Record<string, string>
 }) {
   const defaultDpto = DEPARTAMENTOS.find(d => d.nombre === defaults.state) ?? null
-  const [dptoCode, setDptoCode]           = useState(defaultDpto?.codigo ?? '')
-  const [city, setCity]                   = useState(defaults.city ?? '')
-  const [municipioCodigo, setMuniCodigo]  = useState('')
+  const [dptoCode, setDptoCode]          = useState(defaultDpto?.codigo ?? '')
+  const [city, setCity]                  = useState(defaults.city ?? '')
+  const [municipioCodigo, setMuniCodigo] = useState('')
 
   const municipios = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
-  // Código DANE 8 dígitos: código municipio (5) + "000"
-  const daneCode = municipioCodigo ? `${municipioCodigo}000` : ''
+  const daneCode   = municipioCodigo ? `${municipioCodigo}000` : ''
+
+  // Limpia el teléfono guardado (quita +57 si ya trae prefijo)
+  const defaultPhone = (defaults.phone ?? '').replace(/^\+57\s?/, '').replace(/\D/g, '').slice(0, 10)
 
   return (
     <div className="space-y-3">
       <p className="text-sm font-medium text-foreground flex items-center gap-1.5">{title}</p>
       <div className="grid grid-cols-2 gap-2">
 
-        <div className="space-y-1">
-          <Label className="text-xs">Nombre</Label>
-          <Input name={`${prefix}_name`} defaultValue={defaults.name ?? ''} placeholder="Juan Pérez" className="h-8 text-xs" required />
-        </div>
-
-        <div className="space-y-1">
-          <Label className="text-xs">Teléfono</Label>
-          <Input name={`${prefix}_phone`} defaultValue={defaults.phone ?? ''} placeholder="+573000000000" className="h-8 text-xs" required />
-        </div>
-
+        {/* 1. Nombre y apellido — col completa */}
         <div className="col-span-2 space-y-1">
-          <Label className="text-xs">Dirección (Calle/Cra)</Label>
-          <Input name={`${prefix}_street`} defaultValue={defaults.street ?? ''} placeholder="Cra 15 # 100-20" className="h-8 text-xs" required />
+          <Label className="text-xs">Nombre y apellido <span className="text-muted-foreground">(máx. 5 palabras)</span></Label>
+          <Input
+            name={`${prefix}_name`}
+            defaultValue={defaults.name ?? ''}
+            placeholder="Juan Pérez García"
+            className="h-8 text-xs"
+            required
+            maxLength={60}
+          />
+        </div>
+
+        {/* 3. Teléfono con prefijo +57, solo números, máx 10 dígitos */}
+        <div className="col-span-2 space-y-1">
+          <Label className="text-xs">Teléfono Colombia</Label>
+          <div className="flex">
+            <span className="inline-flex items-center px-2.5 h-8 border border-r-0 border-input rounded-l-md text-xs text-muted-foreground bg-muted select-none shrink-0">
+              +57
+            </span>
+            <Input
+              name={`${prefix}_phone`}
+              type="tel"
+              inputMode="numeric"
+              maxLength={10}
+              defaultValue={defaultPhone}
+              placeholder="3001234567"
+              className="h-8 text-xs rounded-l-none"
+              required
+              onInput={(e) => {
+                const el = e.currentTarget
+                el.value = el.value.replace(/\D/g, '').slice(0, 10)
+              }}
+            />
+          </div>
+        </div>
+
+        {/* 4. Dirección con formato colombiano */}
+        <div className="col-span-2 space-y-1">
+          <Label className="text-xs">Dirección</Label>
+          <Input
+            name={`${prefix}_street`}
+            defaultValue={defaults.street ?? ''}
+            placeholder="Calle 15 # 100-20 / Cra 7 # 32-18"
+            className="h-8 text-xs"
+            required
+          />
         </div>
 
         <div className="space-y-1">
@@ -75,13 +111,14 @@ function AddressFields({
           <Input name={`${prefix}_number`} defaultValue={defaults.number ?? ''} placeholder="Apto 201" className="h-8 text-xs" />
         </div>
 
-        {/* postalCode se deriva del código DANE al seleccionar municipio */}
-
-        {/* Departamento — select DANE */}
+        {/* 2. Departamento — inicia en blanco, obligatorio */}
         <div className="space-y-1">
           <Label className="text-xs">Departamento</Label>
           <input type="hidden" name={`${prefix}_state`} value={dptoNombre} />
-          <Select value={dptoCode} onValueChange={(v) => { setDptoCode(v); setCity('') }}>
+          <Select
+            value={dptoCode || undefined}
+            onValueChange={(v) => { setDptoCode(v); setCity(''); setMuniCodigo('') }}
+          >
             <SelectTrigger className="h-8 text-xs">
               <SelectValue placeholder="Seleccionar..." />
             </SelectTrigger>
@@ -93,13 +130,13 @@ function AddressFields({
           </Select>
         </div>
 
-        {/* Ciudad / Municipio — select DANE dependiente */}
+        {/* 2. Ciudad / Municipio — inicia en blanco, obligatorio */}
         <div className="space-y-1">
           <Label className="text-xs">Ciudad / Municipio</Label>
           <input type="hidden" name={`${prefix}_city`} value={city} />
           <input type="hidden" name={`${prefix}_dane_code`} value={daneCode} />
           <Select
-            value={city}
+            value={city || undefined}
             onValueChange={(v) => {
               const muni = municipios.find(m => m.nombre === v)
               setCity(v)
@@ -123,10 +160,18 @@ function AddressFields({
           <Input readOnly value={daneCode} placeholder="Auto desde municipio" className="h-8 text-xs text-muted-foreground bg-muted cursor-default" />
         </div>
 
+        {/* 5. País — select con solo Colombia */}
         <div className="space-y-1">
           <Label className="text-xs">País</Label>
           <input type="hidden" name={`${prefix}_country`} value="CO" />
-          <Input readOnly value="Colombia" className="h-8 text-xs text-muted-foreground bg-muted cursor-default" />
+          <Select defaultValue="CO" disabled>
+            <SelectTrigger className="h-8 text-xs bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="CO">Colombia</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
       </div>
@@ -136,15 +181,16 @@ function AddressFields({
 
 function readAddress(formData: FormData, prefix: string) {
   const daneCode = formData.get(`${prefix}_dane_code`) as string
+  const rawPhone = formData.get(`${prefix}_phone`) as string
   return {
     name:       formData.get(`${prefix}_name`)    as string,
-    phone:      formData.get(`${prefix}_phone`)   as string,
+    phone:      rawPhone.replace(/\D/g, ''),  // solo dígitos, sin +57
     street:     formData.get(`${prefix}_street`)  as string,
     number:     formData.get(`${prefix}_number`)  as string,
     city:       formData.get(`${prefix}_city`)    as string,
     state:      formData.get(`${prefix}_state`)   as string,
     country:    formData.get(`${prefix}_country`) as string,
-    postalCode: daneCode,  // Para CO: código DANE (ej. "11001000")
+    postalCode: daneCode,
     dane_code:  daneCode,
     company:    formData.get(`${prefix}_company`) as string || undefined,
   }
@@ -153,13 +199,13 @@ function readAddress(formData: FormData, prefix: string) {
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} }: Props) {
-  const [open, setOpen]           = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]         = useState<string | null>(null)
-  const [result, setResult]       = useState<{ shipmentId: string; rates: Rate[] } | null>(null)
+  const [open, setOpen]               = useState(false)
+  const [submitting, setSubmitting]   = useState(false)
+  const [error, setError]             = useState<string | null>(null)
+  const [result, setResult]           = useState<{ shipmentId: string; rates: Rate[] } | null>(null)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
-  const [saving, setSaving]       = useState(false)
-  const [saved, setSaved]         = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [saved, setSaved]             = useState(false)
 
   const originDefaults: Record<string, string> = shippingOrigin ? {
     name:       shippingOrigin.name        ?? '',
@@ -181,12 +227,13 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
     setSaved(false)
 
     const formData = new FormData(e.currentTarget)
+    const origin   = readAddress(formData, 'origin')
+    const dest     = readAddress(formData, 'dest')
 
-    const origin = readAddress(formData, 'origin')
-    const dest   = readAddress(formData, 'dest')
-
-    if (!origin.state || !origin.city) { setError('Completa el departamento y ciudad de origen.'); setSubmitting(false); return }
-    if (!dest.state   || !dest.city)   { setError('Completa el departamento y ciudad de destino.'); setSubmitting(false); return }
+    if (!origin.state || !origin.city) { setError('Selecciona el departamento y ciudad de origen.'); setSubmitting(false); return }
+    if (!dest.state   || !dest.city)   { setError('Selecciona el departamento y ciudad de destino.'); setSubmitting(false); return }
+    if (origin.phone.length !== 10)    { setError('El teléfono de origen debe tener exactamente 10 dígitos.'); setSubmitting(false); return }
+    if (dest.phone.length !== 10)      { setError('El teléfono de destino debe tener exactamente 10 dígitos.'); setSubmitting(false); return }
 
     const payload = {
       origin,
@@ -207,7 +254,6 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
         body:    JSON.stringify(payload),
         signal:  AbortSignal.timeout(35000),
       })
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         setError(err.detail || 'No se pudo obtener la cotización')
@@ -221,10 +267,12 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
           const nested = (rawRates as Record<string, unknown>).data
           ratesList = Array.isArray(nested) ? nested as Rate[] : []
         }
+        // 7. Ordenar por precio ascendente (más económico primero)
+        ratesList.sort((a, b) => (Number(a.total_price) || 999999) - (Number(b.total_price) || 999999))
         setResult({ shipmentId: data.shipment_id, rates: ratesList })
       }
     } catch {
-      setError('Error de red. Verifica la conexión.')
+      setError('Tiempo de espera agotado o error de red. Intenta de nuevo.')
     } finally {
       setSubmitting(false)
     }
@@ -235,28 +283,31 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
     setSelectedIdx(idx)
     setSaving(true)
     setSaved(false)
-
     const rate     = result.rates[idx]
     const supabase = createClient()
-
     await supabase.from('shipments').update({
       selected_rate:      rate,
       carrier:            String(rate.carrier  ?? ''),
       service:            String(rate.service  ?? ''),
       estimated_delivery: rate.delivery_date ? String(rate.delivery_date) : null,
     }).eq('id', result.shipmentId)
-
     setSaving(false)
     setSaved(true)
     onQuoted()
   }
 
+  // Índice del más rápido (fecha de entrega más próxima, ignorando nulls)
+  const fastestIdx = result
+    ? result.rates.reduce((best, r, i) => {
+        if (!r.delivery_date) return best
+        if (best === -1) return i
+        return r.delivery_date < result.rates[best].delivery_date! ? i : best
+      }, -1)
+    : -1
+
   return (
     <Card>
-      <CardHeader
-        className="cursor-pointer select-none"
-        onClick={() => setOpen(o => !o)}
-      >
+      <CardHeader className="cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Cotizar Envío</CardTitle>
@@ -276,13 +327,10 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
             </div>
           )}
 
-<form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <AddressFields prefix="origin" title={<><Package className="h-4 w-4 shrink-0" /> Origen — desde dónde envías</>} defaults={originDefaults} />
-
             <hr className="border-border" />
-
             <AddressFields prefix="dest" title={<><MapPin className="h-4 w-4 shrink-0" /> Destino — a dónde envías</>} />
-
             <hr className="border-border" />
 
             <div className="space-y-3">
@@ -310,11 +358,10 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
             {error && <p className="text-xs text-red-400">{error}</p>}
 
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Cotizando...</>
-              ) : (
-                <><Package className="h-4 w-4 mr-2" /> Obtener tarifas</>
-              )}
+              {submitting
+                ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Cotizando...</>
+                : <><Package className="h-4 w-4 mr-2" /> Obtener tarifas</>
+              }
             </Button>
           </form>
 
@@ -327,30 +374,47 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
           {result && result.rates.length > 0 && (
             <div className="mt-5 space-y-3">
               <p className="text-sm font-medium text-foreground">
-                {result.rates.length} opciones disponibles
-                {saved && <span className="ml-2 text-xs text-primary">✓ Tarifa seleccionada guardada</span>}
+                {result.rates.length} opciones — ordenadas de menor a mayor precio
+                {saved && <span className="ml-2 text-xs text-primary">✓ Guardada</span>}
               </p>
               {result.rates.map((rate, idx) => (
                 <div
                   key={idx}
+                  onClick={() => handleSelectRate(idx)}
                   className={`rounded-lg border p-3 cursor-pointer transition-all ${
                     selectedIdx === idx
                       ? 'border-primary bg-primary/10'
                       : 'border-border hover:border-primary/40'
                   }`}
-                  onClick={() => handleSelectRate(idx)}
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
+                        {idx === 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            <DollarSign className="h-2.5 w-2.5" /> Más económico
+                          </span>
+                        )}
+                        {idx === fastestIdx && fastestIdx !== 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                            <Zap className="h-2.5 w-2.5" /> Más rápido
+                          </span>
+                        )}
+                        {idx === 0 && idx === fastestIdx && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                            <Zap className="h-2.5 w-2.5" /> Más rápido
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">{String(rate.service ?? 'Servicio estándar')}</p>
                       {rate.delivery_date && (
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Entrega est.: {String(rate.delivery_date)}
+                          Entrega est.: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </p>
                       )}
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       {rate.total_price != null && (
                         <p className="text-lg font-bold text-primary">
                           ${Number(rate.total_price).toLocaleString('es-CO')}{' '}
@@ -358,11 +422,9 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
                         </p>
                       )}
                       {selectedIdx === idx && (
-                        saving ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-primary ml-auto mt-1" />
-                        ) : saved ? (
-                          <Check className="h-4 w-4 text-primary ml-auto mt-1" />
-                        ) : null
+                        saving
+                          ? <Loader2 className="h-4 w-4 animate-spin text-primary ml-auto mt-1" />
+                          : saved ? <Check className="h-4 w-4 text-primary ml-auto mt-1" /> : null
                       )}
                     </div>
                   </div>
