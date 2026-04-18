@@ -172,12 +172,17 @@ async def quote_shipment(
 
     async def _fetch_carrier(carrier: str):
         payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
-        try:
-            resp = await client.get_rates(payload)
-            return resp.get("data") if isinstance(resp, dict) else resp
-        except Exception as exc:
-            logger.warning("Envia carrier %s falló (tenant %s): %s", carrier, tenant_id, exc)
-            return []
+        for attempt in range(2):
+            try:
+                resp = await client.get_rates(payload)
+                return resp.get("data") if isinstance(resp, dict) else resp
+            except Exception as exc:
+                if attempt == 0:
+                    logger.warning("Envia carrier %s reintentando... (tenant %s): %s", carrier, tenant_id, exc)
+                    await asyncio.sleep(1)
+                else:
+                    logger.warning("Envia carrier %s falló definitivamente (tenant %s): %s", carrier, tenant_id, exc)
+        return []
 
     try:
         results = await asyncio.wait_for(

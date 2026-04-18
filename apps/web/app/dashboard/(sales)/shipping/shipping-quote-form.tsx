@@ -353,7 +353,7 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
                     <div className="text-right">
                       {rate.total_price != null && (
                         <p className="text-lg font-bold text-primary">
-                          ${Number(rate.total_price).toFixed(2)}{' '}
+                          ${Number(rate.total_price).toLocaleString('es-CO')}{' '}
                           <span className="text-xs font-normal text-muted-foreground">{String(rate.currency ?? '')}</span>
                         </p>
                       )}
