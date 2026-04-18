@@ -1,4 +1,4 @@
-# Próximos Pasos — Estado 2026-04-16
+# Próximos Pasos — Estado 2026-04-17
 
 ---
 
@@ -19,20 +19,19 @@
 | 2 | **Inbox** | `/dashboard/inbox` | 🔄 En validación |
 | 3 | **Contactos** | `/dashboard/contacts` | 🔄 En validación |
 | 4 | **Pedidos** | `/dashboard/orders` | 🔄 En validación |
-| 5 | **Catálogo** | `/dashboard/catalog` | 🔄 En validación |
-| 6 | **Inventario** | `/dashboard/inventory` | 🔄 En validación |
-| 7 | **Despachos** | `/dashboard/shipping` | 🔄 En validación |
-| 8 | **Reclamos** | `/dashboard/claims` | 🔄 En validación |
-| 9 | **Mercado Libre** | `/dashboard/marketplace` | 🔄 En validación |
-| 10 | **Compras** | `/dashboard/purchases` | 🔄 En validación |
-| 11 | **Finanzas** | `/dashboard/finance` | 🔄 En validación |
-| 12 | **Base de Conocimiento** | `/dashboard/knowledge-base` | 🔄 En validación |
-| 13 | **Agentes IA** | `/dashboard/ai-agents` | 🔄 En validación |
-| 14 | **Métricas** | `/dashboard/metrics` | 🔄 En validación |
-| 15 | **Auditoría** | `/dashboard/audit` | 🔄 En validación |
-| C1 | **Config — General** | `/dashboard/settings` | 🔄 En validación |
-| C2 | **Config — Integraciones** | `/dashboard/integrations` | 🔄 En validación |
-| C3 | **Config — Equipo** | `/dashboard/team` | 🔄 En validación |
+| 5 | **Productos** (Catálogo+Inventario) | `/dashboard/catalog` | 🔄 En validación |
+| 6 | **Despachos** | `/dashboard/shipping` | 🔄 En validación |
+| 7 | **Reclamos** | `/dashboard/claims` | 🔄 En validación |
+| 8 | **Mercado Libre** | `/dashboard/marketplace` | 🔄 En validación |
+| 9 | **Compras** | `/dashboard/purchases` | 🔄 En validación |
+| 10 | **Finanzas** | `/dashboard/finance` | 🔄 En validación |
+| 11 | **Base de Conocimiento** | `/dashboard/knowledge-base` | 🔄 En validación |
+| 12 | **Agentes IA** | `/dashboard/ai-agents` | 🔄 En validación |
+| 13 | **Métricas** | `/dashboard/metrics` | 🔄 En validación |
+| 14 | **Auditoría** | `/dashboard/audit` | 🔄 En validación |
+| C1 | **Config — General** | `/dashboard/settings` | ✅ Certificado 2026-04-15 |
+| C2 | **Config — Integraciones** | `/dashboard/integrations` | ✅ Certificado 2026-04-15 |
+| C3 | **Config — Equipo** | `/dashboard/team` | ✅ Certificado 2026-04-15 |
 
 ---
 
@@ -43,6 +42,8 @@
 | Configuración — General | ✅ 2026-04-15 | Identidad, operativa, dirección origen DANE |
 | Configuración — Usuarios y Acceso | ✅ 2026-04-15 | Flujo invite validado en Render con usuario real |
 | Configuración — Integraciones | ✅ 2026-04-15 | Envia, MeLi OAuth, Telegram. testTelegram desde DB |
+
+**Nota arquitectónica:** "Inventario" ya no existe como módulo separado (fusionado en `/dashboard/catalog` — Vuelta 10, 2026-04-17).
 
 **Pendiente solo en Configuración:** IH-SMTP — SMTP custom con Resend (requiere dominio propio).
 

@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-15 (rev. 21 — Vuelta 8: flujo invite VALIDADO en Render ✅, setSession() explícito para implicit flow, UX polish emojis→Lucide, sidebar Administrador/Supervisor/Gestor, Integraciones 2×2)
+**Última actualización**: 2026-04-17 (rev. 24 — Vuelta 10: Catálogo+Inventario fusionados → `/dashboard/catalog`, Marketplace Sheet+precio tachado+CSP+RLS fix, 27 migraciones aplicadas)
 **Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
 **Tree funcional vigente**: `.context/00-product.md`
 
@@ -49,10 +49,10 @@
 | Navegación Sidebar | ✅ Reestructurada con Route Groups + grupos expandibles RBAC |
 | Platform Console | ❌ No existe — bloqueante OQ-P01 no resuelto |
 | Backend API | ✅ 3 servicios live + 9 routers |
-| Base de datos | ✅ 25 migraciones aplicadas |
+| Base de datos | ✅ 27 migraciones aplicadas |
 | Deploy Render | ✅ 4 servicios live |
 | Envia / Shipping | 🟡 Fase Inicial — quote + historial live. Label/tracking: Fase 2 |
-| MeLi | ✅ Fase Avanzada — OAuth + IPN webhook (orders_v2, items) + listings + vinculación + import + sync stock Supabase→MeLi (automático). Pendiente: sync catálogo completo (precios/descripción MeLi→Supabase) y tracking shipments. |
+| MeLi | ✅ Fase Avanzada — OAuth + IPN webhook + listings + vinculación + import + sync stock+precio+precio_tachado (automático, un PUT). Panel Sheet lateral. Badge MeLi en variantes vinculadas. Pendiente: sync completo MeLi→Supabase y tracking shipments. |
 | Configuración | ✅ Certificado | General ✅ Equipo ✅ Integraciones ✅ — flujo invite validado en Render. Pendiente solo: SMTP propio cuando haya dominio |
 
 ---
@@ -66,10 +66,9 @@
 | Pedidos | `/dashboard/orders` | ✅ Live | Listado, detalle, estados, stock decrementado al confirmar |
 | Contactos | `/dashboard/contacts` | ✅ Live | Listado, perfil, consent Habeas Data |
 | Reclamos | `/dashboard/claims` | ✅ Live | Crear reclamo, cambiar estado, vincular pedido. Fix: getUser + tenant_id |
-| Catálogo | `/dashboard/catalog` | ✅ Live | CRUD, multi-variante, archivados, auto-refresh |
-| Inventario | `/dashboard/inventory` | ✅ Live | Stock por variante, umbral configurable, ajuste con motivo |
+| Productos (Catálogo+Inventario) | `/dashboard/catalog` | ✅ Live | CRUD, multi-variante, archivados, KPI bar, ajuste delta inline por variante, historial movimientos colapsable, badge MeLi en variantes vinculadas. Inventario eliminado como módulo separado. |
 | Media | `/dashboard/media` | ✅ Live | Upload/delete/URL via Supabase Storage `tenant-media` |
-| Mercado Libre | `/dashboard/marketplace` | ✅ Live | Listings MeLi, sync stock, vinculación variation↔listing |
+| Mercado Libre | `/dashboard/marketplace` | ✅ Live | Listings MeLi, sync stock+precio+precio_tachado, vinculación variation↔listing, Sheet lateral, thumbnails HTTPS, estado vacío si no conectado |
 | Despachos (Envia) | `/dashboard/shipping` | ✅ Live | Cotizaciones + historial — renombrado de "Envíos" |
 | Órdenes de Compra | `/dashboard/purchases` | ✅ Live | POs, proveedores, WAC |
 | P&L / Finanzas | `/dashboard/finance` | ✅ Live | P&L Dashboard, Registro OPEX |
@@ -174,10 +173,27 @@ apps/web/app/
 | `tenant_users.role` `agent→operator`, `add_member_to_tenant` con roles renombrados | 20260415030000 | ✅ |
 | `claims` RLS fix — políticas reemplazadas para usar `app_current_tenant()` | 20260416000000 | ✅ |
 | Realtime habilitado — `conversations` y `messages` en `supabase_realtime` publication | 20260417000000 | ✅ |
+| `stock_movements.product_id` nullable + columna `order_id` para idempotencia IPN | 20260417000001 | ✅ |
+| Fix RLS `marketplace_listings` — `auth.uid()` → `app_metadata.tenant_id` | 20260417000002 | ✅ |
 
 > Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
 
 ---
+
+## Artefactos Nuevos — Vuelta 10 (2026-04-17)
+
+| Artefacto | Ruta | Descripción |
+|-----------|------|-------------|
+| Productos unificado (Server Component) | `apps/web/app/dashboard/(products)/catalog/page.tsx` | Fusión Catálogo+Inventario. 7 server actions. Fetcha `marketplace_listings` para badge. Revalida `/dashboard/catalog`. |
+| ProductsManager (Client Component) | `apps/web/app/dashboard/(products)/catalog/_components/products-manager.tsx` | KPI bar, Dialog nuevo producto, ajuste delta, historial colapsable, threshold form. |
+| CatalogTable — badge MeLi + ajuste delta | `apps/web/app/dashboard/(products)/catalog/_components/catalog-table.tsx` | Props `linkedVariationIds` + `adjustStockAction`. Badge amarillo MeLi en variantes vinculadas. |
+| MarketplaceManager — Sheet lateral | `apps/web/app/dashboard/(channels)/marketplace/_components/marketplace-manager.tsx` | Reescrito. Sheet reemplaza expansion inline. Thumbnails HTTPS forzado. Error inline. |
+| Sidebar — Inventario eliminado | `apps/web/app/dashboard/sidebar-client.tsx` | Inventario eliminado del menú. Productos como hoja directa (sin accordión). |
+| CSP + remotePatterns MeLi CDN | `apps/web/next.config.js` | `img-src` y `remotePatterns` actualizados para `http2.mlstatic.com` y `mlstatic.com`. |
+| `update_item_listing()` — sync stock+precio+tachado | `services/api/integrations/meli_client.py` | Un solo PUT con `available_quantity`, `price`, `original_price` condicional. |
+| `sync_meli_stock` usa `update_item_listing` | `services/api/routers/marketplace.py` | Lee `price` + `compare_at_price` de variante. Reemplaza llamada a `update_item_quantity`. |
+| Fix RLS `marketplace_listings` | `supabase/migrations/20260417000002_fix_marketplace_listings_rls.sql` | Política corregida: `auth.uid()` → `app_metadata.tenant_id`. **Aplicada.** |
+| Fix `stock_movements` nullable + `order_id` | `supabase/migrations/20260417000001_stock_movements_fix.sql` | `product_id` nullable. Columna `order_id` con índice para idempotencia IPN. **Aplicada.** |
 
 ## Artefactos Nuevos — Vuelta 8 (2026-04-15)
 
@@ -232,7 +248,7 @@ Flujo completo validado en Render con usuario real (`crittan01@gmail.com`):
 
 | Ítem | Prioridad |
 |---|---|
-| Sync catálogo completo MeLi (precios, descripciones MeLi→Supabase automático) | Media — stock sync ya implementado en ambas direcciones |
+| Sync catálogo completo MeLi (precios/descripción MeLi→Supabase, hoy solo push Supabase→MeLi) | Media |
 | Envia Fase 2: label, tracking, pickup | Media |
 | ~~WhatsApp Config — WABA ID, Phone ID, Token por tenant~~ | ✅ Resuelto — movido a Integraciones, credenciales en `tenant_integrations`, senders leen por tenant con fallback env vars |
 | Invite de miembros via formulario UI | Media — IH-001 requerida (APP_URL en Render) + IH-SMTP (SMTP custom Supabase con Resend, ver IH-003) |
@@ -259,6 +275,10 @@ Flujo completo validado en Render con usuario real (`crittan01@gmail.com`):
 | ~~`/auth/confirm` Route Handler no recibe `#access_token=`~~ | ✅ Resuelto Vuelta 7/8 — route.ts eliminado; page.tsx captura hash antes de createClient(), usa setSession() explícito. Validado en Render. |
 | ~~Validar flujo de invite completo en Render~~ | ✅ Resuelto Vuelta 8 — validado con usuario real. Ver IH-INVITE-VALIDATE resuelta. |
 | ~~Emojis en UI no renderizan en Linux/algunos browsers~~ | ✅ Resuelto Vuelta 8 — todos reemplazados por iconos Lucide (sidebar, shipping, inventory, settings, integrations) |
+| ~~RLS `marketplace_listings` usaba `auth.uid()` como tenant_id~~ | ✅ Resuelto Vuelta 10 — migración 20260417000002. Badge MeLi y queries frontend ahora retornan datos. |
+| ~~MeLi thumbnails bloqueados por CSP + HTTP~~ | ✅ Resuelto Vuelta 10 — CSP + remotePatterns + `.replace(/^http:/, 'https:')` |
+| ~~Sync MeLi solo enviaba stock, no precio~~ | ✅ Resuelto Vuelta 10 — `update_item_listing()` envía stock+precio+precio_tachado en un PUT |
+| ~~Catálogo e Inventario como módulos separados~~ | ✅ Resuelto Vuelta 10 — fusionados en `/dashboard/catalog`. Menú simplificado. |
 | SMTP Supabase Free (3 emails/hora) → configurar SMTP propio con Resend | Media — requiere dominio propio. Gmail bloqueado por DMARC p=reject. No bloquea operación actual. |
 
 ---

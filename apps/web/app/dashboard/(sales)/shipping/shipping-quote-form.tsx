@@ -49,31 +49,31 @@ function AddressFields({
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Teléfono</Label>
-          <Input name={`${prefix}_phone`} defaultValue={defaults.phone ?? ''} placeholder="+5255..." className="h-8 text-xs" required />
+          <Input name={`${prefix}_phone`} defaultValue={defaults.phone ?? ''} placeholder="+573000000000" className="h-8 text-xs" required />
         </div>
         <div className="col-span-2 space-y-1">
-          <Label className="text-xs">Calle</Label>
-          <Input name={`${prefix}_street`} defaultValue={defaults.street ?? ''} placeholder="Av. Insurgentes" className="h-8 text-xs" required />
+          <Label className="text-xs">Dirección (Calle/Cra)</Label>
+          <Input name={`${prefix}_street`} defaultValue={defaults.street ?? ''} placeholder="Cra 15 # 100" className="h-8 text-xs" required />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Número</Label>
-          <Input name={`${prefix}_number`} defaultValue={defaults.number ?? ''} placeholder="123" className="h-8 text-xs" required />
+          <Label className="text-xs">Número / Apto</Label>
+          <Input name={`${prefix}_number`} defaultValue={defaults.number ?? ''} placeholder="Apto 201" className="h-8 text-xs" required />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Código postal</Label>
-          <Input name={`${prefix}_postalCode`} defaultValue={defaults.postalCode ?? ''} placeholder="06600" className="h-8 text-xs" required />
+          <Input name={`${prefix}_postalCode`} defaultValue={defaults.postalCode ?? ''} placeholder="110111" className="h-8 text-xs" required />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Ciudad</Label>
-          <Input name={`${prefix}_city`} defaultValue={defaults.city ?? ''} placeholder="Ciudad de México" className="h-8 text-xs" required />
+          <Label className="text-xs">Ciudad / Municipio</Label>
+          <Input name={`${prefix}_city`} defaultValue={defaults.city ?? ''} placeholder="Bogotá" className="h-8 text-xs" required />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Estado</Label>
-          <Input name={`${prefix}_state`} defaultValue={defaults.state ?? ''} placeholder="CDMX" className="h-8 text-xs" required />
+          <Label className="text-xs">Departamento</Label>
+          <Input name={`${prefix}_state`} defaultValue={defaults.state ?? ''} placeholder="Cundinamarca" className="h-8 text-xs" required />
         </div>
         <div className="col-span-2 space-y-1">
-          <Label className="text-xs">País (ISO)</Label>
-          <Input name={`${prefix}_country`} defaultValue={defaults.country ?? 'MX'} placeholder="MX" maxLength={2} className="h-8 text-xs" required />
+          <Label className="text-xs">País (ISO código)</Label>
+          <Input name={`${prefix}_country`} defaultValue={defaults.country ?? 'CO'} readOnly placeholder="CO" maxLength={2} className="h-8 text-xs text-muted-foreground bg-muted" required />
         </div>
       </div>
     </div>
@@ -112,7 +112,7 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
     city: shippingOrigin.city ?? '',
     state: shippingOrigin.state ?? '',
     postalCode: shippingOrigin.postal_code ?? '',
-    country: shippingOrigin.country ?? 'MX',
+    country: shippingOrigin.country ?? 'CO',
     company: shippingOrigin.company ?? '',
   } : {}
 
