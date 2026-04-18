@@ -2,8 +2,10 @@
 Router de Shipping — Cotizaciones de envío via Envia.
 
 Endpoints:
-  POST /api/v1/shipping/quote    — cotizar envío via Envia   [owner, manager]
-  GET  /api/v1/shipping/history  — historial de cotizaciones
+  POST /api/v1/shipping/quote          — cotizar envío via Envia          [owner, manager]
+  PATCH /api/v1/shipping/{id}/rate     — confirmar tarifa seleccionada     [owner, manager]
+  DELETE /api/v1/shipping/orphans      — purgar cotizaciones huérfanas     [owner, manager]
+  GET  /api/v1/shipping/history        — historial de cotizaciones
 
 Prerequisito: tenant debe tener Envia conectado (status=connected en tenant_integrations).
 Referencia de diseño: docs/integrations/courier-envia.md
@@ -221,7 +223,7 @@ async def quote_shipment(
             "service_code":       r.get("service"),
         })
 
-    # Guardar cotización en shipments
+    # Guardar cotización en shipments — quote_response no se persiste (tarifas son efímeras)
     shipment_result = supabase.table("shipments").insert({
         "tenant_id":           tenant_id,
         "order_id":            req.order_id,
@@ -229,7 +231,6 @@ async def quote_shipment(
         "origin_address":      req.origin.model_dump(exclude_none=True),
         "destination_address": req.destination.model_dump(exclude_none=True),
         "parcels":             [p.model_dump() for p in req.parcels],
-        "quote_response":      {"data": raw_rates},
     }).execute()
 
     shipment_id = shipment_result.data[0]["id"] if shipment_result.data else None
@@ -259,3 +260,82 @@ async def get_shipping_history(
     except Exception as e:
         logger.error("Error obteniendo historial shipping tenant %s: %s", tenant_id, e)
         raise HTTPException(status_code=500, detail="Error al obtener historial")
+
+
+class RateSelection(BaseModel):
+    carrier:           str
+    service:           str
+    total_price:       float
+    currency:          str = "COP"
+    delivery_date:     Optional[str] = None
+    carrierId:         Optional[str] = None
+    serviceId:         Optional[str] = None
+    carrier_code:      Optional[str] = None
+    service_code:      Optional[str] = None
+
+
+@router.patch("/{shipment_id}/rate", response_model=dict)
+async def confirm_rate(
+    shipment_id: str,
+    rate: RateSelection,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """
+    Confirma la tarifa seleccionada para un envío ya cotizado.
+    Actualiza selected_rate, carrier, service, estimated_delivery.
+    Si el envío tiene order_id, sincroniza shipping_cost en la orden.
+    """
+    result = (
+        supabase.table("shipments")
+        .select("id, order_id, status")
+        .eq("id", shipment_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Envío no encontrado")
+    if result.data["status"] != "quoted":
+        raise HTTPException(status_code=400, detail="Solo se puede confirmar tarifa en estado 'quoted'")
+
+    update = {
+        "selected_rate":      rate.model_dump(exclude_none=True),
+        "carrier":            rate.carrier,
+        "service":            rate.service,
+        "estimated_delivery": rate.delivery_date,
+    }
+    supabase.table("shipments").update(update).eq("id", shipment_id).execute()
+
+    order_id = result.data.get("order_id")
+    if order_id:
+        supabase.table("orders").update({"shipping_cost": rate.total_price}).eq("id", order_id).execute()
+
+    return {"ok": True}
+
+
+@router.delete("/orphans", response_model=dict)
+async def purge_orphan_quotes(
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """
+    Elimina cotizaciones con status='quoted' sin tarifa seleccionada
+    creadas hace más de 30 días. Libera espacio en DB.
+    """
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    result = (
+        supabase.table("shipments")
+        .delete()
+        .eq("tenant_id", tenant_id)
+        .eq("status", "quoted")
+        .is_("selected_rate", "null")
+        .lt("created_at", cutoff)
+        .execute()
+    )
+    deleted = len(result.data) if result.data else 0
+    logger.info("Purged %d orphan quotes for tenant %s", deleted, tenant_id)
+    return {"deleted": deleted}

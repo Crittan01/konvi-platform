@@ -102,6 +102,19 @@ export default async function ContactsPage({
     revalidatePath('/dashboard/contacts')
   }
 
+  async function deleteContact(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    await sb.from('contacts')
+      .delete()
+      .eq('id', formData.get('contact_id') as string)
+      .eq('tenant_id', m.tenant_id)
+    revalidatePath('/dashboard/contacts')
+  }
+
   // ── UI ─────────────────────────────────────────────────────────────────────
 
   return (
@@ -139,6 +152,7 @@ export default async function ContactsPage({
         canWrite={canWrite}
         addAction={addContact}
         editAction={editContact}
+        deleteAction={deleteContact}
       />
     </div>
   )

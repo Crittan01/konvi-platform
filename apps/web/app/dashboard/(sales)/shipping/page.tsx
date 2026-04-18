@@ -134,7 +134,7 @@ export default async function ShippingPage({
 
       {/* Formulario de cotización */}
       {enviaConnected && canWrite && (
-        <ShippingQuoteForm shippingOrigin={shippingOrigin} />
+        <ShippingQuoteForm shippingOrigin={shippingOrigin} orderId={searchParams?.order ?? null} />
       )}
 
       {/* Historial */}

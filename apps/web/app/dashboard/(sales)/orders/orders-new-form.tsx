@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { createClient } from '@/utils/supabase/client'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -39,7 +38,6 @@ interface LineItem {
 interface Props {
   products: Product[]
   contacts: Contact[]
-  apiUrl: string
   onCreated?: () => void
 }
 
@@ -52,7 +50,7 @@ function variationLabel(v: Variation): string {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = () => {} }: Props) {
+export default function OrdersNewForm({ products, contacts, onCreated = () => {} }: Props) {
   const [contactId, setContactId] = useState('')
   const [notes, setNotes] = useState('')
   const [shippingCost, setShippingCost] = useState(0)
@@ -123,11 +121,6 @@ export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = 
     setSubmitting(true)
     setError(null)
 
-    const supabase = createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    const token = session?.access_token
-    if (!token) { setError('Sesión expirada. Recarga la página.'); setSubmitting(false); return }
-
     const payload = {
       contact_id: contactId || null,
       notes: notes || null,
@@ -142,13 +135,11 @@ export default function OrdersNewForm({ products, contacts, apiUrl, onCreated = 
     }
 
     try {
-      const res = await fetch(`${apiUrl}/api/v1/orders/`, {
+      const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15000),
       })
 
       if (!res.ok) {

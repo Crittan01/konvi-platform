@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createClient } from '@/utils/supabase/client'
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -28,7 +27,8 @@ interface Rate {
 
 interface Props {
   shippingOrigin: ShippingOrigin | null
-  onQuoted?: () => void
+  orderId?:       string | null
+  onQuoted?:      () => void
 }
 
 // ─── AddressFields ────────────────────────────────────────────────────────────
@@ -198,8 +198,8 @@ function readAddress(formData: FormData, prefix: string) {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} }: Props) {
-  const [open, setOpen]               = useState(false)
+export default function ShippingQuoteForm({ shippingOrigin, orderId = null, onQuoted = () => {} }: Props) {
+  const [open, setOpen]               = useState(!!orderId)
   const [submitting, setSubmitting]   = useState(false)
   const [error, setError]             = useState<string | null>(null)
   const [result, setResult]           = useState<{ shipmentId: string; rates: Rate[] } | null>(null)
@@ -236,6 +236,7 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
     if (dest.phone.length !== 10)      { setError('El teléfono de destino debe tener exactamente 10 dígitos.'); setSubmitting(false); return }
 
     const payload = {
+      order_id:    orderId,
       origin,
       destination: dest,
       parcels: [{
@@ -283,17 +284,18 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
     setSelectedIdx(idx)
     setSaving(true)
     setSaved(false)
-    const rate     = result.rates[idx]
-    const supabase = createClient()
-    await supabase.from('shipments').update({
-      selected_rate:      rate,
-      carrier:            String(rate.carrier  ?? ''),
-      service:            String(rate.service  ?? ''),
-      estimated_delivery: rate.delivery_date ? String(rate.delivery_date) : null,
-    }).eq('id', result.shipmentId)
-    setSaving(false)
-    setSaved(true)
-    onQuoted()
+    const rate = result.rates[idx]
+    try {
+      const res = await fetch(`/api/shipping/${result.shipmentId}/rate`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(rate),
+        signal:  AbortSignal.timeout(10000),
+      })
+      if (res.ok) { setSaved(true); onQuoted() }
+    } finally {
+      setSaving(false)
+    }
   }
 
   // Índice del más rápido (fecha de entrega más próxima, ignorando nulls)
@@ -310,7 +312,14 @@ export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} 
       <CardHeader className="cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Cotizar Envío</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Cotizar Envío
+              {orderId && (
+                <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
+                  Pedido #{orderId.slice(-8)}
+                </span>
+              )}
+            </CardTitle>
             <CardDescription>Origen, destino, paquete → tarifas de carriers</CardDescription>
           </div>
           {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
