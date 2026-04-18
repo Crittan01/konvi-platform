@@ -363,7 +363,7 @@ async def update_item_price(item_id: str, price: float, access_token: str) -> di
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.put(
             f"{MELI_API_URL}/items/{item_id}",
-            json={"price": price},
+            json={"price": int(round(price))},
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
@@ -398,7 +398,9 @@ async def update_item_listing(
     PUT /items/{item_id}
     Docs: https://developers.mercadolibre.com.ar/devsite/sync-and-modify-listings-gs
     """
-    body: dict = {"price": price}
+    # COP no soporta decimales — MeLi rechaza con 400 si se envía precio con decimales.
+    # round() + int() garantiza entero independiente de la moneda del tenant.
+    body: dict = {"price": int(round(price))}
 
     if meli_variations:
         variations_body = []
