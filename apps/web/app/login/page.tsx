@@ -35,16 +35,22 @@ export default async function LoginPage({
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center sidebar-gradient">
-      <Card className="w-[400px]">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Commerce Ops</CardTitle>
-          <CardDescription>
-            Ingresa a tu Tenant Administrativo de Comercio
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={loginAction} className="space-y-4">
+    <div className="flex h-screen w-full items-center justify-center bg-[#131A19]">
+      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 mix-blend-overlay pointer-events-none"></div>
+      
+      <div className="relative w-full max-w-[420px] p-6 sm:p-8">
+        <div className="flex flex-col items-center mb-8">
+          {/* Logo mock / Brand */}
+          <div className="h-12 w-12 rounded-xl bg-primary/20 text-primary flex items-center justify-center mb-4 shadow-lg ring-1 ring-white/10">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Commerce Ops</h1>
+          <p className="text-emerald-500/80 mt-2 text-sm text-center font-medium">Tenant Administrativo de Comercio</p>
+        </div>
+
+        <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+          <CardContent className="pt-6">
+            <form action={loginAction} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="email">Correo Corporativo</Label>
               <Input
@@ -68,6 +74,7 @@ export default async function LoginPage({
           </form>
         </CardContent>
       </Card>
+      </div>
     </div>
   )
 }
