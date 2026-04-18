@@ -383,33 +383,24 @@ async def update_item_listing(
     meli_variations: list | None = None,
 ) -> dict:
     """
-    Sincroniza stock + precio + precio tachado en un solo PUT.
+    Sincroniza stock + precio en un solo PUT.
 
-    MeLi mapeo:
-      price          → precio de venta (lo que paga el cliente)
-      original_price → precio tachado / precio antes del descuento (opcional)
-                       Cuando se envía, MeLi muestra automáticamente el % de descuento.
+    NOTA: original_price (precio tachado) NO se envía en el sync automático.
+    MeLi rechaza modificarlo con 400 cuando el item tiene has_bids:true.
+    Si el item no tuviera bids, se podría incluir, pero el riesgo de 400 no
+    justifica la diferencia cosmética. El precio tachado se gestiona manualmente en MeLi.
 
     Items CON variaciones en MeLi:
       La API rechaza 400 si se envía available_quantity a nivel item.
       Se debe enviar { "variations": [{ "id": X, "available_quantity": N }, ...] }
-      con TODAS las variaciones existentes (las no incluidas quedan en 0).
-      Se pasa meli_variations=[{"id": X}, ...] pre-leídas del GET /items/{id}
-      para evitar un round-trip extra.
+      con TODAS las variaciones existentes.
 
     PUT /items/{item_id}
     Docs: https://developers.mercadolibre.com.ar/devsite/sync-and-modify-listings-gs
     """
     body: dict = {"price": price}
-    if original_price and original_price > price:
-        body["original_price"] = original_price
 
     if meli_variations:
-        # Item con variaciones: distribuir quantity en todas las variaciones.
-        # Estrategia: asignar todo el stock a la primera variación (la vinculada);
-        # las demás en 0. Esto refleja la realidad cuando hay 1 variante Supabase
-        # vinculada a 1 listing MeLi multi-variante.
-        # TODO: soporte completo multi-variante cuando haya mapping 1:1 por talla/color.
         variations_body = []
         for i, v in enumerate(meli_variations):
             vid = v.get("id")
