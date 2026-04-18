@@ -380,6 +380,7 @@ async def update_item_listing(
     price: float,
     original_price: float | None,
     access_token: str,
+    meli_variations: list | None = None,
 ) -> dict:
     """
     Sincroniza stock + precio + precio tachado en un solo PUT.
@@ -389,14 +390,38 @@ async def update_item_listing(
       original_price → precio tachado / precio antes del descuento (opcional)
                        Cuando se envía, MeLi muestra automáticamente el % de descuento.
 
+    Items CON variaciones en MeLi:
+      La API rechaza 400 si se envía available_quantity a nivel item.
+      Se debe enviar { "variations": [{ "id": X, "available_quantity": N }, ...] }
+      con TODAS las variaciones existentes (las no incluidas quedan en 0).
+      Se pasa meli_variations=[{"id": X}, ...] pre-leídas del GET /items/{id}
+      para evitar un round-trip extra.
+
     PUT /items/{item_id}
+    Docs: https://developers.mercadolibre.com.ar/devsite/sync-and-modify-listings-gs
     """
-    body: dict = {
-        "available_quantity": max(0, quantity),
-        "price": price,
-    }
+    body: dict = {"price": price}
     if original_price and original_price > price:
         body["original_price"] = original_price
+
+    if meli_variations:
+        # Item con variaciones: distribuir quantity en todas las variaciones.
+        # Estrategia: asignar todo el stock a la primera variación (la vinculada);
+        # las demás en 0. Esto refleja la realidad cuando hay 1 variante Supabase
+        # vinculada a 1 listing MeLi multi-variante.
+        # TODO: soporte completo multi-variante cuando haya mapping 1:1 por talla/color.
+        variations_body = []
+        for i, v in enumerate(meli_variations):
+            vid = v.get("id")
+            if vid:
+                variations_body.append({
+                    "id": vid,
+                    "available_quantity": max(0, quantity) if i == 0 else 0,
+                })
+        if variations_body:
+            body["variations"] = variations_body
+    else:
+        body["available_quantity"] = max(0, quantity)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.put(
