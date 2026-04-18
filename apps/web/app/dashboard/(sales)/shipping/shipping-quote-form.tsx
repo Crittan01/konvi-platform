@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createClient } from '@/utils/supabase/client'
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -28,7 +27,6 @@ interface Rate {
 
 interface Props {
   shippingOrigin: ShippingOrigin | null
-  apiUrl: string
   onQuoted?: () => void
 }
 
@@ -153,7 +151,7 @@ function readAddress(formData: FormData, prefix: string) {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = () => {} }: Props) {
+export default function ShippingQuoteForm({ shippingOrigin, onQuoted = () => {} }: Props) {
   const [open, setOpen]           = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]         = useState<string | null>(null)
@@ -181,11 +179,6 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
     setSelectedIdx(null)
     setSaved(false)
 
-    const supabase = createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    const token = session?.access_token
-    if (!token) { setError('Sesión expirada. Recarga la página.'); setSubmitting(false); return }
-
     const formData = new FormData(e.currentTarget)
 
     const origin = readAddress(formData, 'origin')
@@ -207,18 +200,12 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
     }
 
     try {
-      const ctrl    = new AbortController()
-      const timeout = setTimeout(() => ctrl.abort(), 35000)
-      const res = await fetch(`${apiUrl}/api/v1/shipping/quote`, {
+      const res = await fetch('/api/shipping/quote', {
         method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body:   JSON.stringify(payload),
-        signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+        signal:  AbortSignal.timeout(35000),
       })
-      clearTimeout(timeout)
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -288,8 +275,7 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
             </div>
           )}
 
-          <p className="text-[10px] text-muted-foreground/50 font-mono">API: {apiUrl}</p>
-          <form onSubmit={handleSubmit} className="space-y-5">
+<form onSubmit={handleSubmit} className="space-y-5">
             <AddressFields prefix="origin" title={<><Package className="h-4 w-4 shrink-0" /> Origen — desde dónde envías</>} defaults={originDefaults} />
 
             <hr className="border-border" />

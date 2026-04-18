@@ -37,8 +37,6 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled:  'Cancelado',
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
-
 export default async function ShippingPage({
   searchParams,
 }: {
@@ -136,7 +134,7 @@ export default async function ShippingPage({
 
       {/* Formulario de cotización */}
       {enviaConnected && canWrite && (
-        <ShippingQuoteForm shippingOrigin={shippingOrigin} apiUrl={API_URL} />
+        <ShippingQuoteForm shippingOrigin={shippingOrigin} />
       )}
 
       {/* Historial */}
