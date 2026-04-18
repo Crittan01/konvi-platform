@@ -15,6 +15,7 @@ type Contact = {
   consent_given: boolean
   consent_date: string | null
   created_at: string
+  address: Record<string, string> | null
 }
 
 export default async function ContactsPage({
@@ -37,7 +38,7 @@ export default async function ContactsPage({
   if (tenantId) {
     let query = supabase
       .from('contacts')
-      .select('id, phone, name, notes, consent_given, consent_date, created_at')
+      .select('id, phone, name, notes, consent_given, consent_date, created_at, address')
       .eq('tenant_id', tenantId)
       .order('name', { ascending: true, nullsFirst: false })
 
@@ -63,13 +64,25 @@ export default async function ContactsPage({
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const consentGiven = formData.get('consent_given') === 'on'
+    const street   = (formData.get('addr_street') as string) || null
+    const addrCity = (formData.get('addr_city')   as string) || null
+    const address  = street ? {
+      street,
+      number:    (formData.get('addr_number')   as string) || undefined,
+      city:      addrCity,
+      state:     (formData.get('addr_state')    as string) || undefined,
+      country:   'CO',
+      dane_code: (formData.get('addr_dane_code') as string) || undefined,
+    } : null
+    const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 10)
     await sb.from('contacts').insert({
       tenant_id:     m.tenant_id,
-      phone:         formData.get('phone') as string,
+      phone:         `+57${digits}`,
       name:          (formData.get('name') as string) || null,
       notes:         (formData.get('notes') as string) || null,
       consent_given: consentGiven,
       consent_date:  consentGiven ? new Date().toISOString() : null,
+      address,
     })
     revalidatePath('/dashboard/contacts')
   }
@@ -87,9 +100,20 @@ export default async function ContactsPage({
       .eq('tenant_id', m.tenant_id)
       .single()
     const prev = (existing as { consent_given?: boolean; consent_date?: string | null } | null)
+    const street   = (formData.get('addr_street') as string) || null
+    const addrCity = (formData.get('addr_city')   as string) || null
+    const address  = street ? {
+      street,
+      number:    (formData.get('addr_number')    as string) || undefined,
+      city:      addrCity,
+      state:     (formData.get('addr_state')     as string) || undefined,
+      country:   'CO',
+      dane_code: (formData.get('addr_dane_code') as string) || undefined,
+    } : null
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
       notes:         (formData.get('notes') as string) || null,
+      address,
       consent_given: consentGiven,
       consent_date:  consentGiven && !prev?.consent_given
         ? new Date().toISOString()

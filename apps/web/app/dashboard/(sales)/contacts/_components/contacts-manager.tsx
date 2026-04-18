@@ -1,10 +1,16 @@
 'use client'
 
 import { useState, useMemo, useTransition } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2 } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import AddressSelector from '@/components/address-selector'
+
+type ContactAddress = {
+  street?: string; number?: string; city?: string
+  state?: string; country?: string; dane_code?: string
+}
 
 type Contact = {
   id: string
@@ -14,6 +20,7 @@ type Contact = {
   consent_given: boolean
   consent_date: string | null
   created_at: string
+  address: ContactAddress | null
 }
 
 type Props = {
@@ -126,7 +133,19 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
               <form action={handleAdd} className="space-y-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Teléfono *</Label>
-                  <Input name="phone" placeholder="+52 55 1234 5678" required />
+                  <div className="flex">
+                    <span className="inline-flex items-center px-2.5 h-9 border border-r-0 border-input rounded-l-md text-xs text-muted-foreground bg-muted select-none shrink-0">+57</span>
+                    <Input
+                      name="phone"
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      placeholder="3001234567"
+                      className="rounded-l-none"
+                      required
+                      onInput={e => { const el = e.currentTarget; el.value = el.value.replace(/\D/g, '').slice(0, 10) }}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Nombre</Label>
@@ -135,6 +154,10 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                 <div className="space-y-1">
                   <Label className="text-xs">Notas</Label>
                   <Input name="notes" placeholder="Cliente frecuente..." />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
+                  <AddressSelector fieldPrefix="addr" />
                 </div>
                 <label className="flex items-start gap-2 cursor-pointer">
                   <input type="checkbox" name="consent_given" className="h-4 w-4 mt-0.5 rounded" />
@@ -182,8 +205,16 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                             </span>
                           )}
                         </div>
-                        <p className="text-xs font-mono text-muted-foreground">{c.phone}</p>
+                        <p className="text-xs font-mono text-muted-foreground">
+                          {c.phone.startsWith('+57') ? <><span className="text-muted-foreground/60">+57 </span>{c.phone.slice(3)}</> : c.phone}
+                        </p>
                         {c.notes && <p className="text-xs text-muted-foreground mt-0.5 italic">{c.notes}</p>}
+                        {c.address?.street && (
+                          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                            <MapPin className="h-3 w-3 shrink-0" />
+                            {c.address.street}{c.address.city ? `, ${c.address.city}` : ''}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground shrink-0">
@@ -207,6 +238,10 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                             <Label className="text-xs">Notas</Label>
                             <Input name="notes" defaultValue={c.notes ?? ''} className="h-8 text-xs" />
                           </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
+                          <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} />
                         </div>
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" name="consent_given" defaultChecked={c.consent_given} className="h-3.5 w-3.5 rounded" />

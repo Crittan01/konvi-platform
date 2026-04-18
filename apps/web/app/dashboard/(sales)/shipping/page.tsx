@@ -52,13 +52,14 @@ export default async function ShippingPage({
   let shipments: Shipment[] = []
   let enviaConnected = false
   let shippingOrigin: ShippingOrigin | null = null
+  let destDefaults: Record<string, string> | null = null
 
   // KPI counters
   let inTransitCount = 0
   let deliveredCount = 0
 
   if (tenantId) {
-    const [shipmentsRes, integrationRes, tenantRes] = await Promise.all([
+    const baseQueries = Promise.all([
       supabase
         .from('shipments')
         .select('id, status, carrier, service, tracking_number, estimated_delivery, created_at, order_id')
@@ -77,11 +78,40 @@ export default async function ShippingPage({
         .eq('id', tenantId)
         .single(),
     ])
-    shipments       = (shipmentsRes.data as Shipment[]) || []
-    enviaConnected  = integrationRes.data?.status === 'connected'
-    shippingOrigin  = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
-    inTransitCount  = shipments.filter(s => s.status === 'in_transit').length
-    deliveredCount  = shipments.filter(s => s.status === 'delivered').length
+
+    const [shipmentsRes, integrationRes, tenantRes] = await baseQueries
+
+    shipments      = (shipmentsRes.data as Shipment[]) || []
+    enviaConnected = integrationRes.data?.status === 'connected'
+    shippingOrigin = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
+    inTransitCount = shipments.filter(s => s.status === 'in_transit').length
+    deliveredCount = shipments.filter(s => s.status === 'delivered').length
+
+    // Si viene de un pedido, buscar la dirección del contacto
+    if (searchParams?.order) {
+      const orderRes = await supabase
+        .from('orders')
+        .select('contacts(name, phone, address)')
+        .eq('id', searchParams.order)
+        .eq('tenant_id', tenantId)
+        .single()
+      const raw     = orderRes.data as { contacts: unknown } | null
+      const contact = raw?.contacts
+        ? (Array.isArray(raw.contacts) ? raw.contacts[0] : raw.contacts) as { name?: string; phone?: string; address?: Record<string, string> }
+        : null
+      if (contact?.address?.street) {
+        destDefaults = {
+          name:      contact.name               ?? '',
+          phone:     contact.phone              ?? '',
+          street:    contact.address.street     ?? '',
+          number:    contact.address.number     ?? '',
+          city:      contact.address.city       ?? '',
+          state:     contact.address.state      ?? '',
+          dane_code: contact.address.dane_code  ?? '',
+          country:   'CO',
+        }
+      }
+    }
   }
 
   return (
@@ -91,10 +121,10 @@ export default async function ShippingPage({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Truck className="h-5 w-5 text-primary" /> Envíos
+            <Truck className="h-5 w-5 text-primary" /> Cotizador de envíos
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {shipments.length} envíos · {inTransitCount} en tránsito · {deliveredCount} entregados
+            {shipments.length} cotizaciones · {inTransitCount} en tránsito · {deliveredCount} entregados
           </p>
         </div>
       </div>
@@ -134,7 +164,11 @@ export default async function ShippingPage({
 
       {/* Formulario de cotización */}
       {enviaConnected && canWrite && (
-        <ShippingQuoteForm shippingOrigin={shippingOrigin} orderId={searchParams?.order ?? null} />
+        <ShippingQuoteForm
+          shippingOrigin={shippingOrigin}
+          orderId={searchParams?.order ?? null}
+          destDefaults={destDefaults}
+        />
       )}
 
       {/* Historial */}

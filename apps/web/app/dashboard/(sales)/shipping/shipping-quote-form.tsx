@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+// Label e Input se usan en la sección de paquete
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -28,177 +29,92 @@ interface Rate {
 interface Props {
   shippingOrigin: ShippingOrigin | null
   orderId?:       string | null
+  destDefaults?:  Record<string, string> | null
   onQuoted?:      () => void
 }
 
-// ─── AddressFields ────────────────────────────────────────────────────────────
+// ─── GeoSelector — solo departamento + ciudad (mínimo para cotizar) ──────────
 
-function AddressFields({
-  prefix, title, defaults = {},
+function GeoSelector({
+  prefix, defaults = {},
 }: {
   prefix: string
-  title: React.ReactNode
   defaults?: Record<string, string>
 }) {
-  // Departamento y ciudad siempre inician en blanco — selección obligatoria
-  const [dptoCode, setDptoCode]          = useState('')
-  const [city, setCity]                  = useState('')
+  const initDpto = DEPARTAMENTOS.find(d => d.nombre === defaults.state)?.codigo ?? ''
+  const [dptoCode, setDptoCode]          = useState(initDpto)
+  const [city, setCity]                  = useState(defaults.city ?? '')
   const [municipioCodigo, setMuniCodigo] = useState('')
 
   const municipios = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
-  const daneCode   = municipioCodigo ? `${municipioCodigo}000` : ''
-
-  // Limpia el teléfono guardado (quita +57 si ya trae prefijo)
-  const defaultPhone = (defaults.phone ?? '').replace(/^\+57\s?/, '').replace(/\D/g, '').slice(0, 10)
+  const daneCode   = municipioCodigo
+    ? `${municipioCodigo}000`
+    : (defaults.dane_code ?? '')
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm font-medium text-foreground flex items-center gap-1.5">{title}</p>
-      <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-2">
+      <input type="hidden" name={`${prefix}_state`}     value={dptoNombre} />
+      <input type="hidden" name={`${prefix}_city`}      value={city} />
+      <input type="hidden" name={`${prefix}_dane_code`} value={daneCode} />
+      <input type="hidden" name={`${prefix}_country`}   value="CO" />
 
-        {/* 1. Nombre y apellido — col completa */}
-        <div className="col-span-2 space-y-1">
-          <Label className="text-xs">Nombre y apellido <span className="text-muted-foreground">(máx. 5 palabras)</span></Label>
-          <Input
-            name={`${prefix}_name`}
-            defaultValue={defaults.name ?? ''}
-            placeholder="Juan Pérez García"
-            className="h-8 text-xs"
-            required
-            maxLength={60}
-          />
-        </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Departamento</Label>
+        <Select
+          value={dptoCode || undefined}
+          onValueChange={v => { setDptoCode(v); setCity(''); setMuniCodigo('') }}
+        >
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder="Seleccionar..." />
+          </SelectTrigger>
+          <SelectContent>
+            {DEPARTAMENTOS.map(d => (
+              <SelectItem key={d.codigo} value={d.codigo}>{d.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        {/* 3. Teléfono con prefijo +57, solo números, máx 10 dígitos */}
-        <div className="col-span-2 space-y-1">
-          <Label className="text-xs">Teléfono Colombia</Label>
-          <div className="flex">
-            <span className="inline-flex items-center px-2.5 h-8 border border-r-0 border-input rounded-l-md text-xs text-muted-foreground bg-muted select-none shrink-0">
-              +57
-            </span>
-            <Input
-              name={`${prefix}_phone`}
-              type="tel"
-              inputMode="numeric"
-              maxLength={10}
-              defaultValue={defaultPhone}
-              placeholder="3001234567"
-              className="h-8 text-xs rounded-l-none"
-              required
-              onInput={(e) => {
-                const el = e.currentTarget
-                el.value = el.value.replace(/\D/g, '').slice(0, 10)
-              }}
-            />
-          </div>
-        </div>
-
-        {/* 4. Dirección con formato colombiano */}
-        <div className="col-span-2 space-y-1">
-          <Label className="text-xs">Dirección</Label>
-          <Input
-            name={`${prefix}_street`}
-            defaultValue={defaults.street ?? ''}
-            placeholder="Calle 15 # 100-20 / Cra 7 # 32-18"
-            className="h-8 text-xs"
-            required
-          />
-        </div>
-
-        <div className="space-y-1">
-          <Label className="text-xs">Número / Apto</Label>
-          <Input name={`${prefix}_number`} defaultValue={defaults.number ?? ''} placeholder="Apto 201" className="h-8 text-xs" />
-        </div>
-
-        {/* 2. Departamento — inicia en blanco, obligatorio */}
-        <div className="space-y-1">
-          <Label className="text-xs">Departamento</Label>
-          <input type="hidden" name={`${prefix}_state`} value={dptoNombre} />
-          <Select
-            value={dptoCode || undefined}
-            onValueChange={(v) => { setDptoCode(v); setCity(''); setMuniCodigo('') }}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder="Seleccionar..." />
-            </SelectTrigger>
-            <SelectContent>
-              {DEPARTAMENTOS.map(d => (
-                <SelectItem key={d.codigo} value={d.codigo}>{d.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* 2. Ciudad / Municipio — inicia en blanco, obligatorio */}
-        <div className="space-y-1">
-          <Label className="text-xs">Ciudad / Municipio</Label>
-          <input type="hidden" name={`${prefix}_city`} value={city} />
-          <input type="hidden" name={`${prefix}_dane_code`} value={daneCode} />
-          <Select
-            value={city || undefined}
-            onValueChange={(v) => {
-              const muni = municipios.find(m => m.nombre === v)
-              setCity(v)
-              setMuniCodigo(muni?.codigo ?? '')
-            }}
-            disabled={!dptoCode}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder={dptoCode ? 'Seleccionar...' : 'Elige dpto. primero'} />
-            </SelectTrigger>
-            <SelectContent>
-              {municipios.map(m => (
-                <SelectItem key={m.codigo} value={m.nombre}>{m.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-1">
-          <Label className="text-xs">Código DANE</Label>
-          <Input readOnly value={daneCode} placeholder="Auto desde municipio" className="h-8 text-xs text-muted-foreground bg-muted cursor-default" />
-        </div>
-
-        {/* 5. País — select con solo Colombia */}
-        <div className="space-y-1">
-          <Label className="text-xs">País</Label>
-          <input type="hidden" name={`${prefix}_country`} value="CO" />
-          <Select defaultValue="CO" disabled>
-            <SelectTrigger className="h-8 text-xs bg-muted">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CO">Colombia</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
+      <div className="space-y-1">
+        <Label className="text-xs">Ciudad / Municipio</Label>
+        <Select
+          value={city || undefined}
+          onValueChange={v => {
+            const muni = municipios.find(m => m.nombre === v)
+            setCity(v)
+            setMuniCodigo(muni?.codigo ?? '')
+          }}
+          disabled={!dptoCode}
+        >
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder={dptoCode ? 'Seleccionar...' : 'Elige dpto.'} />
+          </SelectTrigger>
+          <SelectContent>
+            {municipios.map(m => (
+              <SelectItem key={m.codigo} value={m.nombre}>{m.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     </div>
   )
 }
 
-function readAddress(formData: FormData, prefix: string) {
+function readGeo(formData: FormData, prefix: string) {
   const daneCode = formData.get(`${prefix}_dane_code`) as string
-  const rawPhone = formData.get(`${prefix}_phone`) as string
   return {
-    name:       formData.get(`${prefix}_name`)    as string,
-    phone:      rawPhone.replace(/\D/g, ''),  // solo dígitos, sin +57
-    street:     formData.get(`${prefix}_street`)  as string,
-    number:     formData.get(`${prefix}_number`)  as string,
     city:       formData.get(`${prefix}_city`)    as string,
     state:      formData.get(`${prefix}_state`)   as string,
-    country:    formData.get(`${prefix}_country`) as string,
+    country:    formData.get(`${prefix}_country`) as string || 'CO',
     postalCode: daneCode,
     dane_code:  daneCode,
-    company:    formData.get(`${prefix}_company`) as string || undefined,
   }
 }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export default function ShippingQuoteForm({ shippingOrigin, orderId = null, onQuoted = () => {} }: Props) {
+export default function ShippingQuoteForm({ shippingOrigin, orderId = null, destDefaults = null, onQuoted = () => {} }: Props) {
   const [open, setOpen]               = useState(!!orderId)
   const [submitting, setSubmitting]   = useState(false)
   const [error, setError]             = useState<string | null>(null)
@@ -207,15 +123,11 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, onQu
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
 
-  const originDefaults: Record<string, string> = shippingOrigin ? {
-    name:       shippingOrigin.name        ?? '',
-    phone:      shippingOrigin.phone       ?? '',
-    street:     shippingOrigin.street      ?? '',
-    city:       shippingOrigin.city        ?? '',
-    state:      shippingOrigin.state       ?? '',
-    postalCode: shippingOrigin.postal_code ?? '',
-    country:    shippingOrigin.country     ?? 'CO',
-    company:    shippingOrigin.company     ?? '',
+  const originGeo: Record<string, string> = shippingOrigin ? {
+    city:      shippingOrigin.city        ?? '',
+    state:     shippingOrigin.state       ?? '',
+    dane_code: shippingOrigin.postal_code ?? '',
+    country:   shippingOrigin.country     ?? 'CO',
   } : {}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -227,13 +139,11 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, onQu
     setSaved(false)
 
     const formData = new FormData(e.currentTarget)
-    const origin   = readAddress(formData, 'origin')
-    const dest     = readAddress(formData, 'dest')
+    const origin   = readGeo(formData, 'origin')
+    const dest     = readGeo(formData, 'dest')
 
-    if (!origin.state || !origin.city) { setError('Selecciona el departamento y ciudad de origen.'); setSubmitting(false); return }
-    if (!dest.state   || !dest.city)   { setError('Selecciona el departamento y ciudad de destino.'); setSubmitting(false); return }
-    if (origin.phone.length !== 10)    { setError('El teléfono de origen debe tener exactamente 10 dígitos.'); setSubmitting(false); return }
-    if (dest.phone.length !== 10)      { setError('El teléfono de destino debe tener exactamente 10 dígitos.'); setSubmitting(false); return }
+    if (!origin.state || !origin.city) { setError('Selecciona departamento y ciudad de origen.'); setSubmitting(false); return }
+    if (!dest.state   || !dest.city)   { setError('Selecciona departamento y ciudad de destino.'); setSubmitting(false); return }
 
     const payload = {
       order_id:    orderId,
@@ -337,9 +247,31 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, onQu
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <AddressFields prefix="origin" title={<><Package className="h-4 w-4 shrink-0" /> Origen — desde dónde envías</>} defaults={originDefaults} />
+
+            {/* Origen — resumen del tenant, selector geográfico */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                <Package className="h-4 w-4 shrink-0" /> Origen
+              </p>
+              {shippingOrigin?.city ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  {shippingOrigin.city}{shippingOrigin.state ? `, ${shippingOrigin.state}` : ''} — Colombia
+                </div>
+              ) : null}
+              <GeoSelector prefix="origin" defaults={originGeo} />
+            </div>
+
             <hr className="border-border" />
-            <AddressFields prefix="dest" title={<><MapPin className="h-4 w-4 shrink-0" /> Destino — a dónde envías</>} />
+
+            {/* Destino — solo geográfico */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 shrink-0" /> Destino
+              </p>
+              <GeoSelector prefix="dest" defaults={destDefaults ?? {}} />
+            </div>
+
             <hr className="border-border" />
 
             <div className="space-y-3">

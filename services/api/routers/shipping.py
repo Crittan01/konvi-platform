@@ -53,20 +53,20 @@ def _normalize_state(state: str, country: str) -> str:
 # ─── Modelos ─────────────────────────────────────────────────────────────────
 
 class Address(BaseModel):
-    name: str
-    company: Optional[str] = None
-    phone: str
-    email: Optional[str] = None
-    street: str
-    number: Optional[str] = None
-    district: Optional[str] = None
-    city: str
-    state: str
-    country: str = "CO"
-    postalCode: str
-    reference: Optional[str] = None
-    # Para Colombia: código DANE 8 dígitos (ej. "11001000") — no se envía a Envia, se usa internamente
-    dane_code: Optional[str] = None
+    # Campos requeridos solo para label — para cotización se usan valores por defecto
+    name:       str            = "Remitente"
+    company:    Optional[str]  = None
+    phone:      str            = "3000000000"
+    email:      Optional[str]  = None
+    street:     str            = "Dirección por confirmar"
+    number:     Optional[str]  = None
+    district:   Optional[str]  = None
+    city:       str            = ""
+    state:      str            = ""
+    country:    str            = "CO"
+    postalCode: str            = ""
+    reference:  Optional[str]  = None
+    dane_code:  Optional[str]  = None
 
 
 class Parcel(BaseModel):

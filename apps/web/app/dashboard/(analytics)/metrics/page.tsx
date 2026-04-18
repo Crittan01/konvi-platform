@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
-import { BarChart2, MessageSquare, ShoppingCart, Users, Package, TrendingUp, CheckCircle2, XCircle, ArrowDownToLine } from 'lucide-react'
+import { BarChart2, MessageSquare, ShoppingCart, Users, Package, TrendingUp, CheckCircle2, XCircle, ArrowDownToLine, AlertCircle } from 'lucide-react'
 import MetricsFilters from './metrics-filters'
 import { MessagesBarChart, OrdersPieChart } from './metrics-charts'
 import AiInsightPanel from '@/components/ai-insight-panel'
@@ -58,13 +58,14 @@ export default async function MetricsPage({
     ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
     : new Date(0).toISOString()
 
-  const [messagesRes, conversationsRes, ordersRes, orderItemsRes, contactsRes, productsRes] = await Promise.all([
+  const [messagesRes, conversationsRes, ordersRes, orderItemsRes, contactsRes, productsRes, claimsRes] = await Promise.all([
     supabase.from('messages').select('id, direction, created_at').eq('tenant_id', tenantId).gte('created_at', since),
     supabase.from('conversations').select('id, status').eq('tenant_id', tenantId),
     supabase.from('orders').select('id, status, total_amount, created_at').eq('tenant_id', tenantId).gte('created_at', since),
     supabase.from('order_items').select('title, quantity, unit_price').eq('tenant_id', tenantId),
     supabase.from('contacts').select('id').eq('tenant_id', tenantId),
     supabase.from('products').select('id, status').eq('tenant_id', tenantId),
+    supabase.from('claims').select('id, status, reason, requested_amount, created_at').eq('tenant_id', tenantId).gte('created_at', since),
   ])
 
   const messages      = messagesRes.data ?? []
@@ -73,6 +74,7 @@ export default async function MetricsPage({
   const orderItems    = orderItemsRes.data ?? []
   const contacts      = contactsRes.data ?? []
   const products      = productsRes.data ?? []
+  const claims        = (claimsRes.data ?? []) as { id: string; status: string; reason: string; requested_amount: number | null; created_at: string }[]
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const inboundMessages  = messages.filter(m => m.direction === 'inbound').length
@@ -115,6 +117,23 @@ export default async function MetricsPage({
   const barData = DAY_LABELS.map(d => ({ day: d, mensajes: msgsPerDay[d] ?? 0 }))
   const pieData = Object.entries(ordersByStatus).map(([status, count]) => ({ name: status, value: count }))
   const periodLabel = days ? `Últimos ${days} días` : 'Todo el tiempo'
+
+  // ── Reclamos ───────────────────────────────────────────────────────────────
+  const REASON_LABELS: Record<string, string> = {
+    defective:     'Producto defectuoso',
+    wrong_item:    'Ítem incorrecto',
+    delayed:       'Envío retrasado',
+    missing_parts: 'Partes faltantes',
+    other:         'Otro',
+  }
+  const openClaims      = claims.filter(c => !['resolved', 'refunded', 'rejected'].includes(c.status)).length
+  const refundedClaims  = claims.filter(c => c.status === 'refunded')
+  const totalRefunded   = refundedClaims.reduce((s, c) => s + (Number(c.requested_amount) || 0), 0)
+  const claimRate       = orders.length > 0 ? ((claims.length / orders.length) * 100).toFixed(1) : '0'
+  const claimsByReason: Record<string, number> = {}
+  for (const c of claims) {
+    claimsByReason[c.reason] = (claimsByReason[c.reason] ?? 0) + 1
+  }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
 
@@ -267,6 +286,59 @@ export default async function MetricsPage({
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Reclamos ── */}
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <AlertCircle className="h-4 w-4 text-red-400" />
+          <p className="text-sm font-medium">Reclamos</p>
+          <span className="ml-auto text-xs text-muted-foreground">{claims.length} en período</span>
+        </div>
+
+        {claims.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Sin reclamos en el período.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+            {[
+              { label: 'Total reclamos',   value: claims.length,         color: 'text-red-400' },
+              { label: 'Abiertos',         value: openClaims,            color: 'text-amber-400' },
+              { label: 'Reembolsados',     value: refundedClaims.length, color: 'text-emerald-400' },
+              { label: 'Tasa reclamo/pedido', value: `${claimRate}%`,   color: 'text-primary' },
+            ].map(k => (
+              <div key={k.label} className="rounded-lg border border-border p-3 text-center">
+                <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{k.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {totalRefunded > 0 && (
+          <p className="text-xs text-muted-foreground mb-4">
+            Total reembolsado:{' '}
+            <span className="font-semibold text-emerald-400">
+              ${totalRefunded.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+            </span>
+          </p>
+        )}
+
+        {Object.keys(claimsByReason).length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Por motivo</p>
+            {Object.entries(claimsByReason).sort((a, b) => b[1] - a[1]).map(([reason, count]) => (
+              <div key={reason} className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">{REASON_LABELS[reason] ?? reason}</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-20 h-1.5 rounded-full bg-border overflow-hidden hidden sm:block">
+                    <div className="h-full bg-red-400/60 rounded-full" style={{ width: `${Math.round((count / claims.length) * 100)}%` }} />
+                  </div>
+                  <span className="text-xs font-semibold w-4 text-right">{count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
