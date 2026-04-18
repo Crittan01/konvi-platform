@@ -4,15 +4,11 @@
 
 @layer base {
   :root {
-    /* ── Commerce Ops Design System — Light Canvas / Dark Sidebar ─────────
-       Filosofía: Split theme estilo Shopify Admin / Intercom / Freshdesk.
-       - Sidebar: verde bosque oscuro profundo (#131A19) — identidad de marca
-       - Canvas:  blanco cálido con sombra sutil — limpio, aireado, cómodo
-       Objetivo: operadores no-técnicos que usan la plataforma todo el dia.
+    /* ── Commerce Ops Design System — Cream Background / Sage Cards ───────
+       Filosofía: Contraste natural relajante (Crema) + Tarjetas verde pálido (Sage).
+       Texto oscuro casi negro para legibilidad óptima. Topbar coordina con Sidebar.
+       Objetivo: No cansar la vista en usos de 8+ horas.
     ─────────────────────────────────────────────────────────────────── */
-
-@layer base {
-  :root {
     /* Canvas — fondo crema muy suave */
     --background:  42 20% 96%;    /* #F6F4ED — crema vainilla pálido */
     
