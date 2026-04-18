@@ -20,6 +20,12 @@ import {
   linkListing, unlinkListing, changeListingStatus, syncStockFromSupabase, importFromMeli
 } from '../actions'
 
+type MeliVariation = {
+  id: number
+  attributes: { id: string; value_name: string }[]
+  available_quantity: number
+}
+
 type MeliItem = {
   meli_id: string
   title: string
@@ -28,8 +34,10 @@ type MeliItem = {
   available_quantity: number
   thumbnail: string | null
   permalink: string | null
+  meli_variations: MeliVariation[]   // lista vacía si item sin variaciones propias
   listing_id: string | null
   variation_id: string | null
+  meli_variation_id: number | null   // ID de variación MeLi ya mapeada
   sku: string | null
   product_name: string | null
   supabase_stock: number | null
@@ -72,8 +80,9 @@ export default function MarketplaceManager({ items, paging, variations, categori
   const [loadingIds, setLoadingIds]           = useState<Set<string>>(new Set())
   const [sheetItem, setSheetItem]             = useState<MeliItem | null>(null)
   const [sheetMode, setSheetMode]             = useState<'link' | 'import'>('link')
-  const [selectedVariationId, setSelectedVariationId] = useState('')
-  const [selectedCategoryId, setSelectedCategoryId]   = useState('')
+  const [selectedVariationId, setSelectedVariationId]       = useState('')
+  const [selectedCategoryId, setSelectedCategoryId]         = useState('')
+  const [selectedMeliVariationId, setSelectedMeliVariationId] = useState<number | null>(null)
   const [actionErrors, setActionErrors]       = useState<Record<string, string>>({})
   const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null)
 
@@ -90,6 +99,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
     setSheetItem(null)
     setSelectedVariationId('')
     setSelectedCategoryId('')
+    setSelectedMeliVariationId(null)
   }
 
   const filtered = items.filter(i =>
@@ -132,7 +142,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
     if (!selectedVariationId) return
     clearError(meliId)
     setLoading(meliId, true)
-    const resp = await linkListing(meliId, selectedVariationId)
+    const resp = await linkListing(meliId, selectedVariationId, undefined, selectedMeliVariationId ?? undefined)
     if (resp?.error) setError(meliId, resp.error)
     else closeSheet()
     setLoading(meliId, false)
@@ -416,6 +426,40 @@ export default function MarketplaceManager({ items, paging, variations, categori
                 <p className="text-xs text-muted-foreground">
                   Selecciona la variante del catálogo que representa esta publicación. Solo se sincronizará el stock de variantes vinculadas.
                 </p>
+
+                {/* Selector variación MeLi — solo si el item tiene variaciones propias */}
+                {(sheetItem?.meli_variations?.length ?? 0) > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-foreground">
+                      Variación de Mercado Libre
+                      <span className="ml-1 text-muted-foreground font-normal">(requerido — este item tiene variaciones)</span>
+                    </p>
+                    <Select
+                      value={selectedMeliVariationId?.toString() ?? ''}
+                      onValueChange={v => setSelectedMeliVariationId(Number(v))}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Selecciona la variación de MeLi..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60">
+                        {sheetItem?.meli_variations.map(mv => {
+                          const label = mv.attributes.map(a => a.value_name).join(' / ') || `ID ${mv.id}`
+                          return (
+                            <SelectItem key={mv.id} value={mv.id.toString()}>
+                              {label}
+                              <span className="text-muted-foreground text-xs ml-1">· {mv.available_quantity} u.</span>
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      El stock se sincronizará exactamente a esta variación. Las demás quedarán en 0.
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground">Variante del catálogo interno:</p>
                 <Select value={selectedVariationId} onValueChange={setSelectedVariationId}>
                   <SelectTrigger className="h-9 text-sm">
                     <SelectValue placeholder="Categoría → Producto → Variante..." />

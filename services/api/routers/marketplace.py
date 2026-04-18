@@ -46,7 +46,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
     try:
         listing_res = (
             supabase.table("marketplace_listings")
-            .select("id, external_id, tenant_id")
+            .select("id, external_id, tenant_id, meli_variation_id")
             .eq("variation_id", variation_id)
             .eq("provider", "mercadolibre")
             .eq("status", "active")
@@ -59,6 +59,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
         tenant_id   = listing["tenant_id"]
         external_id = listing["external_id"]
         listing_id  = listing["id"]
+        meli_variation_id = listing.get("meli_variation_id")  # bigint o None
 
         # Leer precio actual de la variante
         var_res = (
@@ -99,11 +100,25 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
             meli_variations = []
 
         if price is not None:
-            await update_item_listing(external_id, new_qty, price, original_price, access_token, meli_variations or None)
+            # Construir payload de variaciones para el PUT:
+            # - Si hay meli_variation_id mapeado → stock exactamente a esa variación
+            # - Si no → usar variaciones del GET (fallback: primera variación)
+            variations_for_put: list | None = None
+            if meli_variations:
+                if meli_variation_id:
+                    variations_for_put = [
+                        {"id": v["id"], "available_quantity": new_qty if v["id"] == meli_variation_id else 0}
+                        for v in meli_variations if v.get("id")
+                    ]
+                else:
+                    variations_for_put = meli_variations
+
+            await update_item_listing(external_id, new_qty, price, original_price, access_token, variations_for_put)
         else:
             await update_item_quantity(external_id, new_qty, access_token)
 
-        logger.info("MeLi sync: item %s → %d u. / $%.0f (variation %s)", external_id, new_qty, price or 0, variation_id)
+        logger.info("MeLi sync: item %s → %d u. / $%.0f (variation %s, meli_var %s)",
+                    external_id, new_qty, price or 0, variation_id, meli_variation_id)
 
     except Exception as e:
         logger.error("Error en sync_meli_stock para variation %s: %s", variation_id, e)
@@ -191,6 +206,17 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
             variation_id = link["variation_id"] if link else None
             var_info = variation_names.get(variation_id, {}) if variation_id else {}
 
+            # Variaciones MeLi del item (para selector en UI al vincular)
+            raw_variations = item.get("variations") or []
+            meli_variations = [
+                {
+                    "id": v.get("id"),
+                    "attributes": v.get("attribute_combinations") or [],
+                    "available_quantity": v.get("available_quantity", 0),
+                }
+                for v in raw_variations if v.get("id")
+            ]
+
             items.append({
                 "meli_id": meli_id,
                 "title": item.get("title"),
@@ -199,9 +225,12 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
                 "available_quantity": item.get("available_quantity"),
                 "thumbnail": item.get("thumbnail"),
                 "permalink": item.get("permalink"),
+                # Variaciones del item en MeLi (lista vacía si item simple)
+                "meli_variations": meli_variations,
                 # Vinculación con Supabase
                 "listing_id": link["id"] if link else None,
                 "variation_id": variation_id,
+                "meli_variation_id": link.get("meli_variation_id") if link else None,
                 "sku": var_info.get("sku"),
                 "product_name": var_info.get("product_name"),
                 "supabase_stock": var_info.get("supabase_stock"),
@@ -223,16 +252,21 @@ async def link_listing(
     """
     Vincula un item existente de MeLi con una variante de Supabase.
 
-    Body: { meli_id: "MLA123456", variation_id: "uuid", meli_price: 15000 }
+    Body:
+      meli_id:           "MCO123456"  (requerido)
+      variation_id:      "uuid"        (requerido — variante Supabase)
+      meli_price:        15000         (opcional)
+      meli_variation_id: 12345678      (opcional — ID de variación MeLi cuando el item tiene variaciones propias)
 
-    Una vez vinculado, cualquier cambio de stock en Supabase se propaga a MeLi
-    automáticamente vía sync_meli_stock().
+    Si meli_variation_id está presente, el sync de stock apunta exactamente a esa variación.
+    Si no, el sync usa available_quantity a nivel item (item sin variaciones) o la primera variación (fallback).
     """
     supabase = _get_service_client()
 
-    meli_id = payload.get("meli_id", "").strip().upper()
-    variation_id = payload.get("variation_id")
-    meli_price = payload.get("meli_price")
+    meli_id           = payload.get("meli_id", "").strip().upper()
+    variation_id      = payload.get("variation_id")
+    meli_price        = payload.get("meli_price")
+    meli_variation_id = payload.get("meli_variation_id")  # bigint — variación MeLi específica (opcional)
 
     if not meli_id or not variation_id:
         raise HTTPException(status_code=400, detail="meli_id y variation_id son requeridos")
@@ -257,15 +291,19 @@ async def link_listing(
     external_url = f"https://articulo.mercadolibre.com/{meli_id}"
 
     try:
-        res = supabase.table("marketplace_listings").insert({
-            "tenant_id": tenant_id,
+        insert_data = {
+            "tenant_id":    tenant_id,
             "variation_id": variation_id,
-            "external_id": meli_id,
-            "provider": "mercadolibre",
-            "status": "active",
+            "external_id":  meli_id,
+            "provider":     "mercadolibre",
+            "status":       "active",
             "external_price": meli_price,
             "external_url": external_url,
-        }).execute()
+        }
+        if meli_variation_id is not None:
+            insert_data["meli_variation_id"] = int(meli_variation_id)
+
+        res = supabase.table("marketplace_listings").insert(insert_data).execute()
 
         return res.data[0] if res.data else {"ok": True}
 
@@ -370,7 +408,7 @@ async def sync_stock_from_supabase(
     # Obtener listing + variation
     listing_res = (
         supabase.table("marketplace_listings")
-        .select("id, external_id, variation_id")
+        .select("id, external_id, variation_id, meli_variation_id")
         .eq("id", listing_id)
         .eq("tenant_id", tenant_id)
         .single()
@@ -380,8 +418,9 @@ async def sync_stock_from_supabase(
         raise HTTPException(status_code=404, detail="Listing no encontrado")
 
     listing = listing_res.data
-    variation_id = listing.get("variation_id")
-    external_id = listing["external_id"]
+    variation_id      = listing.get("variation_id")
+    external_id       = listing["external_id"]
+    meli_variation_id = listing.get("meli_variation_id")  # bigint o None
 
     if not variation_id:
         raise HTTPException(status_code=400, detail="Este listing no tiene variante de Supabase vinculada")
@@ -437,8 +476,19 @@ async def sync_stock_from_supabase(
 
         meli_variations = meli_item.get("variations") or []
 
+        # Construir payload de variaciones con mapping exacto si está disponible
+        variations_for_put: list | None = None
+        if meli_variations:
+            if meli_variation_id:
+                variations_for_put = [
+                    {"id": v["id"], "available_quantity": current_stock if v["id"] == meli_variation_id else 0}
+                    for v in meli_variations if v.get("id")
+                ]
+            else:
+                variations_for_put = meli_variations
+
         try:
-            await update_item_listing(external_id, current_stock, price, original_price, access_token, meli_variations or None)
+            await update_item_listing(external_id, current_stock, price, original_price, access_token, variations_for_put)
         except Exception as put_err:
             # Loguear response body real del error PUT para diagnóstico exacto
             put_body = getattr(getattr(put_err, "response", None), "text", str(put_err))

@@ -11,13 +11,16 @@ async function getToken(): Promise<string> {
   return session?.access_token ?? ''
 }
 
-export async function linkListing(meliId: string, variationId: string, meliPrice?: number) {
+export async function linkListing(meliId: string, variationId: string, meliPrice?: number, meliVariationId?: number) {
   const token = await getToken()
   try {
+    const body: Record<string, unknown> = { meli_id: meliId, variation_id: variationId, meli_price: meliPrice }
+    if (meliVariationId != null) body.meli_variation_id = meliVariationId
+
     const res = await fetch(`${API_URL}/api/v1/marketplace/link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ meli_id: meliId, variation_id: variationId, meli_price: meliPrice })
+      body: JSON.stringify(body)
     })
     if (!res.ok) {
       const detail = await res.text()
