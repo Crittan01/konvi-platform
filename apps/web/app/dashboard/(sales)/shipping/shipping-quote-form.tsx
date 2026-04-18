@@ -208,7 +208,7 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
 
     try {
       const ctrl    = new AbortController()
-      const timeout = setTimeout(() => ctrl.abort(), 20000)
+      const timeout = setTimeout(() => ctrl.abort(), 35000)
       const res = await fetch(`${apiUrl}/api/v1/shipping/quote`, {
         method:  'POST',
         headers: {
@@ -288,6 +288,7 @@ export default function ShippingQuoteForm({ shippingOrigin, apiUrl, onQuoted = (
             </div>
           )}
 
+          <p className="text-[10px] text-muted-foreground/50 font-mono">API: {apiUrl}</p>
           <form onSubmit={handleSubmit} className="space-y-5">
             <AddressFields prefix="origin" title={<><Package className="h-4 w-4 shrink-0" /> Origen — desde dónde envías</>} defaults={originDefaults} />
 

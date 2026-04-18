@@ -179,7 +179,14 @@ async def quote_shipment(
             logger.warning("Envia carrier %s falló (tenant %s): %s", carrier, tenant_id, exc)
             return []
 
-    results = await asyncio.gather(*[_fetch_carrier(c) for c in _CO_CARRIERS])
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*[_fetch_carrier(c) for c in _CO_CARRIERS]),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout global cotizando carriers Envia para tenant %s", tenant_id)
+        raise HTTPException(status_code=502, detail="Timeout al consultar carriers de Envia.")
 
     raw_rates: list = []
     for chunk in results:
@@ -217,7 +224,7 @@ async def quote_shipment(
         "origin_address":      req.origin.model_dump(exclude_none=True),
         "destination_address": req.destination.model_dump(exclude_none=True),
         "parcels":             [p.model_dump() for p in req.parcels],
-        "quote_response":      quote_response,
+        "quote_response":      {"data": raw_rates},
     }).execute()
 
     shipment_id = shipment_result.data[0]["id"] if shipment_result.data else None
