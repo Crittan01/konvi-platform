@@ -4,50 +4,69 @@
 
 @layer base {
   :root {
-    /* ── Commerce Ops Design System — Dark Warm ───────────────────────────
-       Paleta: Split theme — sidebar oscuro profundo / canvas de contenido más claro
-       Filosofía: El sidebar mantiene el verde bosque oscuro (#131A19).
-                  El canvas sube de 10% a 17% lightness → contraste visual fuerte.
-       Referencia: Supabase dashboard, Vercel dark dimmed, Linear
+    /* ── Commerce Ops Design System — Light Canvas / Dark Sidebar ─────────
+       Filosofía: Split theme estilo Shopify Admin / Intercom / Freshdesk.
+       - Sidebar: verde bosque oscuro profundo (#131A19) — identidad de marca
+       - Canvas:  blanco cálido con sombra sutil — limpio, aireado, cómodo
+       Objetivo: operadores no-técnicos que usan la plataforma todo el dia.
     ─────────────────────────────────────────────────────────────────── */
 
-    /* Backgrounds — canvas notablemente más claro que el sidebar */
-    --background:  168  8% 17%;    /* #263130 — canvas aireado, contrasta con sidebar */
-    --card:        168  8% 21%;    /* #2E3B39 — cards elevadas sobre el canvas */
-    --popover:     168  8% 21%;
-    --secondary:   168  7% 25%;    /* #363F3E — hover states, inputs */
-    --muted:       168  7% 25%;
-    --accent:      168  7% 25%;
+    /* Canvas — fondo cálido casi blanco */
+    --background:  40 20% 97%;    /* #F9F7F4 — warm off-white, no frío */
+    --card:         0  0% 100%;   /* #FFFFFF — cards puras, máximo contraste */
+    --popover:      0  0% 100%;
+    --secondary:   40 15% 94%;    /* #EEE9E4 — hover states, badges suaves */
+    --muted:       40 15% 94%;
+    --accent:      40 15% 94%;
 
-    /* Texto — blanco cálido, nunca frío */
-    --foreground:           36 20% 93%;    /* #EEE9E3 — crema muy claro */
-    --card-foreground:      36 20% 93%;
-    --popover-foreground:   36 20% 93%;
-    --secondary-foreground: 36 12% 83%;
-    --muted-foreground:     168  8% 62%;   /* #8FA8A4 — gris verdoso legible */
-    --accent-foreground:    36 20% 93%;
+    /* Texto — oscuro cálido (no negro puro, no azul frío) */
+    --foreground:           168 25% 11%;   /* #141F1E — casi negro cálido */
+    --card-foreground:      168 25% 11%;
+    --popover-foreground:   168 25% 11%;
+    --secondary-foreground: 168 12% 28%;
+    --muted-foreground:     168  8% 46%;   /* #617D7A — gris verdoso medio */
+    --accent-foreground:    168 25% 11%;
 
-    /* Primary — verde brillante (contrasta bien en oscuro) */
-    --primary:             155 52% 46%;   /* #38A875 — verde bosque luminoso */
+    /* Primary — verde ligeramente oscurecido para contraste en claro */
+    --primary:             155 48% 36%;   /* #2E9966 — verde bosque, AA en blanco */
     --primary-foreground:  0 0% 100%;
 
     /* Destructive */
     --destructive:         0 65% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Bordes e inputs — más visibles para mejor claridad estructural */
-    --border: 168  8% 28%;    /* #3D4F4C — bordes definidos */
-    --input:  168  8% 28%;
-    --ring:   155 52% 46%;
+    /* Bordes — muy sutiles sobre blanco */
+    --border: 40 15% 88%;    /* #E5DDD7 — warm light border */
+    --input:  40 15% 88%;
+    --ring:   155 48% 36%;
 
     /* Radio */
     --radius: 0.625rem;
 
-    /* Custom — sidebar conserva el mismo verde muy oscuro */
-    --amber:      42 75% 52%;    /* #D4A843 — dorado ámbar */
-    --sidebar-bg: 168 14%  8%;   /* #131A19 — sidebar oscuro profundo (sin cambio) */
+    /* Custom */
+    --amber:      42 75% 52%;
+    --sidebar-bg: 168 14%  8%;   /* #131A19 — sidebar sin cambio */
   }
 }
+
+/* ── Sidebar token overrides ────────────────────────────────────────────────
+   El sidebar usa .sidebar-gradient (fondo oscuro #131A19).
+   Los tokens globales ahora son para light mode.
+   Esta regla CSS-scoped restaura los colores de texto apropiados
+   para contexto oscuro, sin tocar sidebar-client.tsx.
+   Tailwind lee los custom properties de cada elemento —
+   al estar dentro de .sidebar-gradient, los tokens locales tienen precedencia.
+────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  .sidebar-gradient {
+    --foreground:           0   0% 93%;    /* blanco cálido para texto principal */
+    --card-foreground:      0   0% 93%;
+    --muted-foreground:     168 10% 58%;   /* gris-verde medio — nav items inactivos */
+    --border:               168 10% 20%;   /* bordes oscuros para contexto sidebar */
+    --primary:              155 52% 46%;   /* verde más brillante en oscuro */
+  }
+}
+
 
 @layer base {
   * {
