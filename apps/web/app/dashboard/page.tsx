@@ -129,6 +129,7 @@ export default async function DashboardPage() {
 
   return (
     <DashboardClient
+      tenantId={tenantId ?? ''}
       tenantName={tenantName}
       userEmail={user.email ?? ''}
       role={role}

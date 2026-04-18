@@ -1,7 +1,7 @@
-'use client'
-
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/utils/supabase/client'
 import {
   MessageSquare, Package, Users, ShoppingCart,
   Boxes, BarChart2, Plug, ArrowRight,
@@ -17,6 +17,7 @@ import {
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface DashboardProps {
+  tenantId: string
   tenantName: string
   userEmail: string
   role: string
@@ -90,11 +91,27 @@ const CustomTooltip = ({ active, payload, label }: {
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
 export default function DashboardClient({
-  tenantName, userEmail, role, stats, ops,
+  tenantId, tenantName, userEmail, role, stats, ops,
   messagesPerDay, ordersByStatus, quickLinks,
 }: DashboardProps) {
   const [tab, setTab] = useState<'operaciones' | 'negocio'>('operaciones')
   const canWrite = role === 'owner' || role === 'manager'
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!tenantId) return
+    const supabase = createClient()
+    const channel = supabase.channel(`dashboard_ops_${tenantId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, () => {
+        router.refresh()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${tenantId}` }, () => {
+        router.refresh()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [tenantId, router])
+
 
   const totalOpsAlerts = ops.humanTakeovers + ops.pendingOrders + ops.lowStockCount
 
