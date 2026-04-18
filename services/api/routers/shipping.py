@@ -8,6 +8,7 @@ Endpoints:
 Prerequisito: tenant debe tener Envia conectado (status=connected en tenant_integrations).
 Referencia de diseño: docs/integrations/courier-envia.md
 """
+import asyncio
 import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +21,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Shipping"])
 
 
+# ─── Mapeo departamentos Colombia → ISO 3166-2:CO ────────────────────────────
+# Envia valida state con códigos ISO. Confirmado: Bogotá = "DC" (no "BOG").
+# La UI envía el nombre completo del departamento; aquí se normaliza.
+_CO_STATE_CODES: dict[str, str] = {
+    "Amazonas": "AMA", "Antioquia": "ANT", "Arauca": "ARA",
+    "Atlántico": "ATL",
+    "Bogotá D.C.": "DC", "Bogota D.C.": "DC",
+    "Bolívar": "BOL", "Boyacá": "BOY", "Caldas": "CAL",
+    "Caquetá": "CAQ", "Casanare": "CAS", "Cauca": "CAU",
+    "Cesar": "CES", "Chocó": "CHO", "Córdoba": "COR",
+    "Cundinamarca": "CUN", "Guainía": "GUA", "Guaviare": "GUV",
+    "Huila": "HUI", "La Guajira": "LAG", "Magdalena": "MAG",
+    "Meta": "MET", "Nariño": "NAR", "Norte de Santander": "NSA",
+    "Putumayo": "PUT", "Quindío": "QUI", "Risaralda": "RIS",
+    "San Andrés y Providencia": "SAP", "Santander": "SAN",
+    "Sucre": "SUC", "Tolima": "TOL", "Valle del Cauca": "VAC",
+    "Vaupés": "VAU", "Vichada": "VID",
+}
+
+
+def _normalize_state(state: str, country: str) -> str:
+    """Convierte nombre largo de departamento al código corto que Envia acepta."""
+    if country != "CO" or len(state) <= 3:
+        return state
+    return _CO_STATE_CODES.get(state, state[:3].upper())
+
+
 # ─── Modelos ─────────────────────────────────────────────────────────────────
 
 class Address(BaseModel):
@@ -28,13 +56,15 @@ class Address(BaseModel):
     phone: str
     email: Optional[str] = None
     street: str
-    number: str
+    number: Optional[str] = None
     district: Optional[str] = None
     city: str
     state: str
-    country: str = "MX"
+    country: str = "CO"
     postalCode: str
     reference: Optional[str] = None
+    # Para Colombia: código DANE 8 dígitos (ej. "11001000") — no se envía a Envia, se usa internamente
+    dane_code: Optional[str] = None
 
 
 class Parcel(BaseModel):
@@ -43,6 +73,8 @@ class Parcel(BaseModel):
     width: float = Field(..., gt=0, description="Ancho en cm")
     height: float = Field(..., gt=0, description="Alto en cm")
     insuranceAmount: float = Field(default=0, ge=0)
+    content: str = Field(default="Mercancía general")
+    amount: int = Field(default=1, ge=1)
 
 
 class QuoteRequest(BaseModel):
@@ -96,38 +128,103 @@ async def quote_shipment(
     """
     client = _get_envia_client(tenant_id, supabase)
 
-    payload = {
-        "origin": req.origin.model_dump(exclude_none=True),
-        "destination": req.destination.model_dump(exclude_none=True),
-        "parcels": [p.model_dump() for p in req.parcels],
-        "shipment": {"carrier": "all", "type": 1},
+    # Construir packages con estructura real de Envia (validada sandbox 2026-04-17):
+    # dimensiones anidadas, campos content/amount/type requeridos, carrier != "all" en CO.
+    packages = [
+        {
+            "weight":         p.weight,
+            "dimensions":     {"length": p.length, "width": p.width, "height": p.height},
+            "content":        p.content,
+            "amount":         p.amount,
+            "type":           "box",
+            "declaredValue":  0,
+            "lengthUnit":     "CM",
+            "weightUnit":     "KG",
+        }
+        for p in req.parcels
+    ]
+
+    def _addr(a: Address) -> dict:
+        d = a.model_dump(exclude_none=True)
+        d.pop("dane_code", None)  # campo interno — no va a Envia
+        d["state"] = _normalize_state(a.state, a.country)
+        if a.country == "CO" and a.dane_code:
+            # Para Colombia: city y postalCode deben ser el código DANE 8 dígitos
+            d["city_to_display"] = a.city
+            d["city"]            = a.dane_code
+            d["postalCode"]      = a.dane_code
+        return d
+
+    base_payload = {
+        "origin":      _addr(req.origin),
+        "destination": _addr(req.destination),
+        "packages":    packages,
+        "settings":    {"currency": "COP"},
     }
 
-    try:
-        quote_response = await client.get_rates(payload)
-    except Exception as e:
-        logger.error("Error obteniendo rates de Envia tenant %s: %s", tenant_id, e)
+    # Carriers activos en la cuenta (confirmado en panel Envia 2026-04-17).
+    # Nombres exactos según GET /available-carrier/CO/0.
+    _CO_CARRIERS = [
+        "tcc", "serviEntrega", "coordinadora", "interRapidisimo",
+        "deprisa", "mensajerosUrbanos", "noventa9Minutos",
+        "fedex", "dhl", "envia",
+    ]
+
+    async def _fetch_carrier(carrier: str):
+        payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
+        try:
+            resp = await client.get_rates(payload)
+            return resp.get("data") if isinstance(resp, dict) else resp
+        except Exception as exc:
+            logger.warning("Envia carrier %s falló (tenant %s): %s", carrier, tenant_id, exc)
+            return []
+
+    results = await asyncio.gather(*[_fetch_carrier(c) for c in _CO_CARRIERS])
+
+    raw_rates: list = []
+    for chunk in results:
+        if isinstance(chunk, list):
+            raw_rates.extend(chunk)
+
+    if not raw_rates:
         raise HTTPException(
             status_code=502,
-            detail="Error al contactar Envia. Verifica que la API key sea válida."
+            detail="Envia no retornó tarifas. Verifica la API key y que el account tenga carriers activos para Colombia."
         )
+
+    normalized_rates = []
+    for r in raw_rates:
+        dd = r.get("deliveryDate")
+        normalized_rates.append({
+            "carrier":            r.get("carrierDescription") or r.get("carrier", ""),
+            "service":            r.get("serviceDescription") or r.get("service", ""),
+            "total_price":        r.get("totalPrice"),
+            "currency":           r.get("currency", "COP"),
+            "delivery_date":      dd.get("date") if isinstance(dd, dict) else dd,
+            "delivery_estimate":  r.get("deliveryEstimate"),
+            # Campos para label en Fase 2
+            "carrierId":          r.get("carrierId"),
+            "serviceId":          r.get("serviceId"),
+            "carrier_code":       r.get("carrier"),
+            "service_code":       r.get("service"),
+        })
 
     # Guardar cotización en shipments
     shipment_result = supabase.table("shipments").insert({
-        "tenant_id": tenant_id,
-        "order_id": req.order_id,
-        "status": "quoted",
-        "origin_address": req.origin.model_dump(exclude_none=True),
+        "tenant_id":           tenant_id,
+        "order_id":            req.order_id,
+        "status":              "quoted",
+        "origin_address":      req.origin.model_dump(exclude_none=True),
         "destination_address": req.destination.model_dump(exclude_none=True),
-        "parcels": [p.model_dump() for p in req.parcels],
-        "quote_response": quote_response,
+        "parcels":             [p.model_dump() for p in req.parcels],
+        "quote_response":      quote_response,
     }).execute()
 
     shipment_id = shipment_result.data[0]["id"] if shipment_result.data else None
 
     return {
         "shipment_id": shipment_id,
-        "rates": quote_response,
+        "rates":       normalized_rates,
     }
 
 
