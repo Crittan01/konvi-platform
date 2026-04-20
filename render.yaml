@@ -1,12 +1,12 @@
 # render.yaml — Commerce Ops Platform
 # Infraestructura como código para Render.com
 # Referencia oficial: https://render.com/docs/blueprint-spec
-# Última actualización: 2026-04-09 (v5 — fix OOM Next.js en Free plan)
+# Última actualización: 2026-04-19 (v6 — cierre correctivo contratos + OAuth state)
 #
 # USO:
 #   1. Render detecta este archivo automáticamente desde el repo
 #   2. Configurar las env vars (sync: false) manualmente en Render Dashboard
-#   3. Ver guía detallada: docs/deployment/FASE7_RENDER_DEPLOY.md
+#   3. Ver contexto operativo actualizado en docs/HANDOFF.md
 #
 # HISTORIAL:
 #   v1: servicios iniciales
@@ -17,6 +17,7 @@
 #   v5: Next.js build: NODE_OPTIONS max-old-space-size=460 + NEXT_TELEMETRY_DISABLED
 #       Razón: Render Free plan (512MB) — edge-server compiler recibe SIGTERM por OOM
 #       Referencia: https://nextjs.org/docs/messages/node-module-load-failure
+#   v6: WhatsApp sender por tenant_integrations (sin env fallback) + MeLi OAuth state firmado
 
 services:
 
@@ -52,12 +53,6 @@ services:
         sync: false
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
-      - key: MELI_CLIENT_ID
-        sync: false
-      - key: MELI_REDIRECT_URI
-        sync: false
-      - key: MELI_AUTH_URL
-        sync: false
     healthCheckPath: /
     autoDeploy: true
 
@@ -82,10 +77,6 @@ services:
       - key: META_APP_SECRET
         sync: false
       - key: META_VERIFY_TOKEN
-        sync: false
-      - key: META_ACCESS_TOKEN
-        sync: false
-      - key: WHATSAPP_PHONE_ID
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
@@ -127,6 +118,10 @@ services:
         # CO: https://auth.mercadolibre.com.co/authorization (default)
         # MX: https://auth.mercadolibre.com.mx/authorization
         # AR: https://auth.mercadolibre.com.ar/authorization
+      - key: MELI_OAUTH_STATE_SECRET
+        sync: false
+      - key: MELI_OAUTH_STATE_TTL_SECONDS
+        value: "600"
     healthCheckPath: /health
     autoDeploy: true
 
@@ -150,15 +145,13 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: META_ACCESS_TOKEN
-        sync: false
-      - key: WHATSAPP_PHONE_ID
-        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: POLL_INTERVAL_SECONDS
+        value: "3"
+      - key: MAX_PROCESSING_ATTEMPTS
         value: "3"
       - key: CONVERSATION_HISTORY_LIMIT
         value: "10"

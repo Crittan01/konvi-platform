@@ -20,7 +20,7 @@ from dependencies.auth import get_current_tenant, get_service_client, require_ow
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Settings"])
 
-VALID_ROLES = {"owner", "manager", "agent"}
+VALID_ROLES = {"owner", "manager", "operator"}
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ class TenantPatch(BaseModel):
 
 
 class TeamRolePatch(BaseModel):
-    role: str = Field(..., pattern="^(owner|manager|agent)$")
+    role: str = Field(..., pattern="^(owner|manager|operator)$")
 
 
 class NotificationConfig(BaseModel):
@@ -135,6 +135,11 @@ async def patch_team_member(
     _role: str = Depends(require_owner_role),
 ):
     """Cambia el rol de un miembro. Solo owner."""
+    if patch.role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Rol inválido. Valores permitidos: {sorted(VALID_ROLES)}",
+        )
     try:
         result = (
             supabase.table("tenant_users")

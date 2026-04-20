@@ -11,11 +11,12 @@ Endpoints:
 """
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from supabase import Client
-from dependencies.auth import get_current_tenant, get_service_client, get_current_role
+from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, get_current_role
 from integrations import meli_client
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ async def disconnect_envia(
 @router.get("/meli/auth-url")
 async def get_meli_auth_url(
     tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
 ):
     """Retorna la URL de autorización OAuth de MeLi. Solo owner."""
@@ -153,7 +155,7 @@ async def get_meli_auth_url(
             detail="MeLi no configurado en la plataforma. Se requiere IH-007 (registrar app MeLi)."
         )
     try:
-        url = meli_client.get_auth_url(tenant_id)
+        url = meli_client.get_auth_url(tenant_id, supabase)
         return {"auth_url": url}
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -162,16 +164,19 @@ async def get_meli_auth_url(
 @router.get("/meli/callback")
 async def meli_oauth_callback(
     code: str = Query(...),
-    state: str = Query(...),
+    state: Optional[str] = Query(default=None),
 ):
     """
     Callback OAuth de MeLi. Llamado directamente por el browser después de la autorización.
-    NO requiere JWT — el tenant_id se obtiene del state parameter.
-    Intercambia el code por tokens y los almacena en tenant_integrations.
+    NO requiere JWT — el tenant_id se obtiene de un state firmado y de un solo uso.
+    Solo si state es válido, no expirado y no reutilizado, intercambia code por tokens
+    y los almacena en tenant_integrations.
     """
-    from dependencies.auth import _get_service_client
+    if not state:
+        return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?error=missing_state")
 
-    tenant_id = meli_client.decode_state(state)
+    supabase = _get_service_client()
+    tenant_id = meli_client.validate_and_consume_oauth_state(supabase, state)
     if not tenant_id:
         return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?error=invalid_state")
 
@@ -182,7 +187,6 @@ async def meli_oauth_callback(
         return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?error=token_exchange_failed")
 
     try:
-        supabase = _get_service_client()
         expires_in = token_data.get("expires_in", 21600)
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
 

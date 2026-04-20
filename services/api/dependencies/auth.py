@@ -2,7 +2,13 @@
 Dependencia de autenticación y contexto de tenant.
 
 Valida el JWT de Supabase, extrae tenant_id y role del custom claim app_metadata,
-y registra el contexto en el cliente de Supabase para que RLS aplique.
+y entrega un cliente service_role para operaciones de backend.
+
+IMPORTANTE:
+- service_role puede bypassar RLS.
+- El aislamiento multi-tenant en runtime depende de filtros explícitos por tenant_id
+  en cada query sensible (defensa en profundidad).
+- app.current_tenant_id se mantiene para funciones SQL que lo utilizan.
 
 Referencia oficial Supabase JWT:
   https://supabase.com/docs/guides/auth/jwts
@@ -19,6 +25,9 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+
+# Roles runtime
+RUNTIME_ROLES = {"owner", "manager", "operator"}
 
 # Roles con permiso de escritura
 WRITE_ROLES = {"owner", "manager"}
@@ -99,19 +108,21 @@ async def get_current_tenant(request: Request) -> str:
 async def get_current_role(request: Request) -> str:
     """
     Dependencia FastAPI que extrae el role del JWT.
-    Roles válidos: owner, manager, agent.
-    Si no hay role en app_metadata, retorna 'agent' (mínimo privilegio).
+    Roles runtime válidos: owner, manager, operator.
+    Si no hay role o es inválido, retorna 'operator' (mínimo privilegio runtime).
     """
     payload = _extract_jwt_payload(request)
     app_metadata = payload.get("app_metadata") or {}
-    role: str = app_metadata.get("role", "agent")
+    role = app_metadata.get("role", "operator")
+    if role not in RUNTIME_ROLES:
+        role = "operator"
     return role
 
 
 async def require_write_role(role: str = Depends(get_current_role)) -> str:
     """
     Dependencia que exige role owner o manager.
-    Lanza 403 si el role es agent.
+    Lanza 403 si el role es operator.
     """
     if role not in WRITE_ROLES:
         raise HTTPException(
@@ -125,7 +136,7 @@ async def require_owner_role(role: str = Depends(get_current_role)) -> str:
     """
     Dependencia que exige role owner exclusivamente.
     Usar para operaciones de configuración crítica: editar tenant, gestionar equipo.
-    Lanza 403 si el role es manager o agent.
+    Lanza 403 si el role es manager u operator.
     """
     if role != "owner":
         raise HTTPException(
@@ -138,7 +149,9 @@ async def require_owner_role(role: str = Depends(get_current_role)) -> str:
 async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Client:
     """
     Retorna un cliente Supabase con service_role autenticado.
-    Setea app.current_tenant_id para que RLS opere via app_current_tenant().
+    Setea app.current_tenant_id para funciones SQL que dependen de app_current_tenant().
+    Nota: service_role puede bypassar RLS; por eso todas las queries deben filtrar
+    tenant_id explícitamente en runtime.
     """
     client = _get_service_client()
     try:

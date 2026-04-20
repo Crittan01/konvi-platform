@@ -2,10 +2,11 @@
 
 ## Multi-tenant
 
-- Toda operación atada a `tenant_id` y filtrada por RLS en Postgres
+- Toda operación atada a `tenant_id` con filtro explícito en queries sensibles
 - `app_current_tenant()` resuelve desde JWT (`app_metadata.tenant_id`) o session config
 - Workers usan `service_role` + `SET app.current_tenant_id = '<uuid>'`
-- RLS es la última barrera. El API Gateway es la barrera previa. El frontend no es seguridad.
+- `service_role` puede bypassar RLS; por eso el aislamiento runtime depende de filtros de aplicación + RLS donde aplique.
+- El frontend no es seguridad.
 
 ## LLM (Gemini)
 

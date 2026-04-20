@@ -10,8 +10,8 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
     contexto al prompt de Gemini.
 
     EL LLM NUNCA es fuente de verdad de precios o stock.
-    Estos datos se leen de Supabase (con RLS garantizando aislamiento por tenant)
-    y se inyectan en el system prompt ANTES de llamar a Gemini.
+    Estos datos se leen de Supabase con filtro explícito por tenant_id.
+    Nota: el Orchestrator usa service_role, que puede bypassar RLS.
 
     Retorna lista de dicts con: title, description, price, stock
     """

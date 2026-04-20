@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   const ENTITY_LABELS: Record<string, string> = {
     order: 'Pedido', product: 'Producto', contact: 'Contacto',
     kb_document: 'Knowledge Base', integration: 'Integración',
-    settings: 'Configuración', inventory: 'Inventario',
+    settings: 'Configuración', inventory: 'Productos (Stock)',
   }
 
   const header = ['Fecha', 'Usuario', 'Acción', 'Entidad', 'ID', 'Detalle']

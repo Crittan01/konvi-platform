@@ -3,6 +3,33 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_message_content(msg: Dict[str, Any], msg_type: str) -> str:
+    """Retorna contenido legible para Inbox, incluso en mensajes no-texto."""
+    if msg_type == "text":
+        return msg.get("text", {}).get("body", "")
+    if msg_type == "image":
+        caption = (msg.get("image", {}) or {}).get("caption", "").strip()
+        return f"[Imagen recibida] {caption}".strip()
+    if msg_type == "audio":
+        return "[Audio recibido]"
+    if msg_type == "video":
+        caption = (msg.get("video", {}) or {}).get("caption", "").strip()
+        return f"[Video recibido] {caption}".strip()
+    if msg_type == "document":
+        filename = (msg.get("document", {}) or {}).get("filename", "").strip()
+        return f"[Documento recibido] {filename}".strip()
+    if msg_type == "sticker":
+        return "[Sticker recibido]"
+    if msg_type == "location":
+        return "[Ubicación recibida]"
+    if msg_type == "interactive":
+        return "[Mensaje interactivo recibido]"
+    if msg_type == "button":
+        return "[Respuesta de botón recibida]"
+    return f"[Mensaje {msg_type} recibido]"
+
+
 def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Desempaca el infame y anidado JSON de WhatsApp Cloud API de forma defensiva.
@@ -43,13 +70,8 @@ def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         message_id = msg.get("id")
         msg_type = msg.get("type", "text")
         
-        # Extracción segura cruda del texto si existe
-        content = ""
-        if msg_type == "text":
-            content = msg.get("text", {}).get("body", "")
-        # Podremos agregar imágenes aquí después
-        elif msg_type == "image":
-            content = "[Imagen recibida]"
+        # Contenido normalizado para almacenar en Inbox
+        content = _extract_message_content(msg, msg_type)
             
         return {
             "meta_waba_id": waba_account_id,

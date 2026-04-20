@@ -1,69 +1,56 @@
-# AI Orchestrator: Tool Contracts
+# AI Orchestrator — Contrato de Herramientas (estado real)
 
-Las Tool Calls que genera Gemini serán procesadas mediante validadores de esquema Pydantic antes de tocar cualquier fuente de datos (Base de datos o APIs externas).
+Última actualización: 2026-04-19
 
-## Regla de Oro Multi-Tenant
-**Ninguna herramienta** tiene un argumento `tenant_id` en el esquema presentado al modelo. El `tenant_id` es insertado mediante Closures o Dependency Injection durante el *Tool Binding* en la ejecución de la función Python.
+Este documento describe el contrato vigente de herramientas/capacidades usadas por el orquestador.
 
-## 1. Tool: CatalogMatch
-Permite buscar si el cliente tiene un producto y traer sus variaciones y stock disponible.
+---
 
-**JSON Schema / Pydantic Model:**
-```json
-{
-  "name": "catalog_match",
-  "description": "Busca un producto por termino de usuario. Devuelve nombre real, precio y boolean de existencia. Nunca confirmes stock real sin usar stock_verify.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "query": { "type": "string", "description": "Término que usa el cliente" },
-      "filters": {
-        "type": "object",
-        "properties": {
-          "color": { "type": "string" },
-          "size": { "type": "string" }
-        }
-      }
-    },
-    "required": ["query"]
-  }
-}
-```
+## Principio multi-tenant
 
-## 2. Tool: StockVerify & Lock
-Verifica el stock a tiempo real basado en la sincro actual (Postgres desde Webhooks de ML) y congela ese stock lógicamente por X minutos para la transacción.
+Ninguna herramienta expone `tenant_id` al modelo.
+El `tenant_id` se inyecta en backend antes de ejecutar accesos a datos.
 
-**JSON Schema / Pydantic Model:**
-```json
-{
-  "name": "stock_verify_lock",
-  "description": "Invocado justo y únicamente cuando el cliente dice SI QUIERO COMPRAR. Bloquea el stock de un item y retorna un token virtual que debe pasarse al checkout link.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "internal_variation_id": { "type": "string", "description": "ID que devuelve catalog_match." },
-      "quantity": { "type": "integer", "description": "Validado previamente en el chat" }
-    },
-    "required": ["internal_variation_id", "quantity"]
-  }
-}
-```
+---
 
-## 3. Tool: HandoffRequest
-Delega toda la sesión actual al Telegram del Tenant.
+## Capacidades activas en runtime
 
-**JSON Schema / Pydantic Model:**
-```json
-{
-  "name": "request_human_handoff",
-  "description": "Si el cliente pide soporte, está quejoso, o el LLM no sabe resolver el intent. Redirige el control al humano.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "reason": { "type": "string", "description": "Corto resumen para el humano." },
-      "priority": { "type": "string", "enum": ["low", "high", "critical"] }
-    },
-    "required": ["reason"]
-  }
-}
-```
+### 1) Consulta de catálogo del tenant
+- Fuente: tablas del catálogo por `tenant_id`
+- Propósito: responder con datos reales (sin inventar stock/precio)
+
+### 2) RAG de base de conocimiento
+- Fuente: `kb_documents` + pgvector
+- Propósito: enriquecer respuesta con contexto documental del tenant
+
+### 3) Escalación a humano
+No existe tool-call pública para takeover.
+El runtime aplica takeover cuando:
+- conversación ya está en `human_takeover`
+- conversación está `closed` (sin auto-respuesta)
+- mensaje no-texto (`skip_reason=non_text_requires_human`)
+- salida rechazada por guardrails (mensaje se omite)
+
+---
+
+## Contratos canónicos vinculados
+
+### Estado de conversación
+- `bot_active`
+- `human_takeover`
+- `closed`
+
+### Estado de procesamiento inbound
+- `pending`
+- `processed`
+- `skipped`
+- `failed`
+
+---
+
+## Referencias
+
+- `services/ai-orchestrator/orchestrator.py`
+- `services/ai-orchestrator/conversation_contract.py`
+- `services/ai-orchestrator/tools/catalog_tool.py`
+- `services/ai-orchestrator/tools/kb_tool.py`

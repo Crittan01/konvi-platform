@@ -1,17 +1,34 @@
-# AI Orchestrator: Guardrails y Seguridad de Contexto
+# AI Orchestrator — Guardrails (estado real)
 
-Los Guardrails son aserciones evaluadas post-output del modelo o pre-envío a WhatsApp. Si fallan, el mensaje no se entrega y se fuerza la ejecución de `request_human_handoff` o en su defecto un *Safe Fallback Message*.
+Última actualización: 2026-04-19
 
-## 1. Reglas Pre-Meta (Anti-Spam / Regulación)
-WhatsApp prohibe flujos en bucle infinito o spam explícito.
-- **Rate-Limit Guardrail:** Un bot tiene prohibido por el backend responder más de X veces en un slide temporal.
-- **Opt-in Guardrail:** Si no hay un `opt_in=True` en la base de datos de marketing para ese cliente, el LLM no puede generar calls-to-action proactivos no relacionados con la compra en curso.
-- **Template Mismatch:** Solo podemos usar *Template Messages* para abrir 24h Windows. La orquestación IA en crudo no puede hacerlo.
+Los guardrails validan la salida antes de enviar respuesta automática.
+Si fallan, el inbound se marca `skipped` con `skip_reason=guardrail_rejected`.
 
-## 2. Reglas Transaccionales (E-Commerce)
-### 2.1 "No Alucinarás Inventario"
-- Si el LLM escribe o confirma la existencia de un producto PERO la Tool `stock_verify_lock` NO fue llamada en su array de Tool Calls del Turno anterior, la respuesta del LLM **se descarta** y se inyecta un *System Message Correctivo* devolviéndola al modelo para regeneración.
+---
 
-### 2.2 Promesa de Facturación Segura
-- El Orquestador no tiene acceso directo a procesamiento de pagos (Stripe, Mercado Pago).
-- Consecuentemente, el bot **no puede confirmar un pago existoso**. Esa confirmación ocurre Out-Of-Band de una capa asíncrona dedicada que lee el webhook del pasarela. El LLM, vía system prompt y guardrails, debe limitarse a facilitar el Payment Link.
+## Reglas vigentes
+
+1. No inventar datos transaccionales
+- No confirmar stock, precio, pagos o estados sin datos reales del backend.
+
+2. Respuesta segura y corta para canal WhatsApp
+- Mensajes breves y sin comportamiento spam.
+
+3. Escalación cuando falta certeza operativa
+- Si el caso no es resoluble de forma segura, se evita auto-respuesta y se deriva a manejo humano.
+
+---
+
+## Interacción con takeover
+
+- Si la conversación está en `human_takeover` o `closed`, no se ejecuta auto-respuesta.
+- Si el inbound es no-texto, se fuerza `human_takeover` y se omite respuesta automática.
+
+---
+
+## Referencias
+
+- `services/ai-orchestrator/orchestrator.py`
+- `services/ai-orchestrator/guardrails.py`
+- `services/ai-orchestrator/conversation_contract.py`

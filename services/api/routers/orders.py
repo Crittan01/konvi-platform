@@ -107,7 +107,13 @@ async def create_order(
         variation_ids = [str(item.variation_id) for item in order.items if item.variation_id]
         variation_costs = {}
         if variation_ids:
-            var_res = supabase.table("product_variations").select("id, cost_price").in_("id", variation_ids).execute()
+            var_res = (
+                supabase.table("product_variations")
+                .select("id, cost_price")
+                .eq("tenant_id", tenant_id)
+                .in_("id", variation_ids)
+                .execute()
+            )
             variation_costs = {v["id"]: float(v["cost_price"] or 0) for v in (var_res.data or [])}
 
         items_data = [
@@ -250,6 +256,7 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
                 supabase.table("product_variations")
                 .select("id, stock_quantity")
                 .eq("id", variation_id)
+                .eq("tenant_id", tenant_id)
                 .single()
                 .execute()
             )
@@ -262,7 +269,7 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
             # Actualizar stock
             supabase.table("product_variations").update(
                 {"stock_quantity": new_stock}
-            ).eq("id", variation_id).execute()
+            ).eq("id", variation_id).eq("tenant_id", tenant_id).execute()
 
             # Registrar movimiento
             supabase.table("stock_movements").insert({

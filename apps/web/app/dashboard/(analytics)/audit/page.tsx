@@ -11,7 +11,7 @@ const ENTITY_LABELS: Record<string, string> = {
   kb_document: 'Knowledge Base',
   integration: 'Integración',
   settings:    'Configuración',
-  inventory:   'Inventario',
+  inventory:   'Productos (Stock)',
 }
 
 const ACTION_COLORS: Record<string, string> = {

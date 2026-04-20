@@ -5,13 +5,14 @@ Endpoints:
   GET  /api/v1/conversations/                     — listar conversaciones del tenant
   GET  /api/v1/conversations/{id}                 — detalle de conversación + mensajes
   GET  /api/v1/conversations/{id}/messages        — mensajes paginados de una conversación
-  PATCH /api/v1/conversations/{id}/status         — cambiar status (human_takeover / bot)
+  PATCH /api/v1/conversations/{id}/status         — cambiar status canónico
   POST /api/v1/conversations/{id}/send            — enviar mensaje de agente humano (solo human_takeover)
   GET  /api/v1/conversations/stats                — métricas básicas del inbox
 
 Seguridad:
-  - Filtra por tenant_id en cada query (defensa en profundidad)
-  - RLS en Supabase es la barrera final
+  - Filtra por tenant_id en cada query (defensa en profundidad obligatoria)
+  - Este router opera con service_role, que puede bypassar RLS.
+    El aislamiento depende de filtros explícitos + RLS donde aplique.
 """
 import logging
 from typing import Optional, List
@@ -19,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client
+from domain.conversation_contract import CONVERSATION_STATUSES
 from integrations.whatsapp_sender import send_whatsapp_text
 
 logger = logging.getLogger(__name__)
@@ -28,13 +30,7 @@ router = APIRouter(tags=["Conversations"])
 # ─── Modelos ──────────────────────────────────────────────────────────────────
 
 class ConversationStatusUpdate(BaseModel):
-    status: str  # "active" | "human_takeover" | "resolved" | "bot"
-
-    def validate_status(self) -> str:
-        allowed = {"active", "human_takeover", "resolved", "bot"}
-        if self.status not in allowed:
-            raise ValueError(f"Status debe ser uno de: {allowed}")
-        return self.status
+    status: str  # bot_active | human_takeover | closed
 
 
 class AgentMessageRequest(BaseModel):
@@ -48,7 +44,7 @@ async def get_inbox_stats(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    """Métricas básicas del inbox: total, activas, human_takeover, resueltas."""
+    """Métricas básicas del inbox con contrato canónico de estados."""
     try:
         result = (
             supabase.table("conversations")
@@ -59,9 +55,9 @@ async def get_inbox_stats(
         conversations = result.data or []
         stats = {
             "total": len(conversations),
-            "active": sum(1 for c in conversations if c["status"] == "active"),
+            "bot_active": sum(1 for c in conversations if c["status"] == "bot_active"),
             "human_takeover": sum(1 for c in conversations if c["status"] == "human_takeover"),
-            "resolved": sum(1 for c in conversations if c["status"] == "resolved"),
+            "closed": sum(1 for c in conversations if c["status"] == "closed"),
         }
         return stats
     except Exception as e:
@@ -82,6 +78,11 @@ async def list_conversations(
     Ordenadas por updated_at DESC (más reciente primero).
     """
     try:
+        if status and status not in CONVERSATION_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Status inválido. Valores permitidos: {sorted(CONVERSATION_STATUSES)}",
+            )
         query = (
             supabase.table("conversations")
             .select(
@@ -126,7 +127,10 @@ async def get_conversation(
     try:
         result = (
             supabase.table("conversations")
-            .select("*, messages(id, direction, content, content_type, created_at, processed)")
+            .select(
+                "*, messages(id, direction, content, content_type, created_at, "
+                "processed, processing_status, skip_reason)"
+            )
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -175,7 +179,10 @@ async def get_conversation_messages(
 
         result = (
             supabase.table("messages")
-            .select("id, direction, content, content_type, payload, created_at, processed")
+            .select(
+                "id, direction, content, content_type, payload, created_at, processed, "
+                "processing_status, skip_reason"
+            )
             .eq("conversation_id", conversation_id)
             .eq("tenant_id", tenant_id)
             .order("created_at", desc=False)
@@ -202,17 +209,15 @@ async def update_conversation_status(
     Cambia el status de una conversación.
 
     - `human_takeover` → el bot deja de responder, operador toma control
-    - `bot` / `active` → el Orchestrator vuelve a procesar mensajes
-    - `resolved` → conversación cerrada
+    - `bot_active` → el Orchestrator puede responder automáticamente
+    - `closed` → conversación cerrada (sin respuesta automática)
 
-    El AI Orchestrator consulta el status antes de procesar — si es
-    `human_takeover`, omite el mensaje sin marcar processed=True.
+    El AI Orchestrator consulta el status antes de procesar inbound.
     """
-    allowed = {"active", "human_takeover", "resolved", "bot"}
-    if body.status not in allowed:
+    if body.status not in CONVERSATION_STATUSES:
         raise HTTPException(
             status_code=422,
-            detail=f"Status inválido. Valores permitidos: {allowed}",
+            detail=f"Status inválido. Valores permitidos: {sorted(CONVERSATION_STATUSES)}",
         )
     try:
         result = (
@@ -244,7 +249,7 @@ async def send_agent_message(
 
     Reglas:
     - La conversación debe estar en status 'human_takeover'.
-    - Todos los roles (owner, manager, agent) pueden enviar.
+    - Todos los roles runtime (owner, manager, operator) pueden enviar.
     - El mensaje se persiste en la tabla 'messages' con direction='outbound'.
     - El Orchestrator omite mensajes outbound en su loop (solo procesa inbound).
     """
@@ -286,7 +291,7 @@ async def send_agent_message(
             raise HTTPException(
                 status_code=502,
                 detail="No se pudo enviar el mensaje vía WhatsApp. "
-                       "Verifica la configuración de META_ACCESS_TOKEN y WHATSAPP_PHONE_ID.",
+                       "Verifica la configuración WhatsApp del tenant en Integraciones.",
             )
 
         # 3. Persistir el mensaje outbound en la tabla messages
@@ -299,7 +304,8 @@ async def send_agent_message(
                 "content_type": "text",
                 "content": text,
                 "meta_message_id": meta_message_id,
-                "processed": True,  # outbound no necesita ser procesado por el Orchestrator
+                "processed": True,  # outbound no entra al loop de orquestación inbound
+                "processing_status": "processed",
             })
             .execute()
         )

@@ -1,311 +1,114 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-17 (rev. 24 — Vuelta 10: Catálogo+Inventario fusionados → `/dashboard/catalog`, Marketplace Sheet+precio tachado+CSP+RLS fix, 27 migraciones aplicadas)
-**Fuente de verdad**: código en el repo, no documentación previa ni intenciones.
-**Tree funcional vigente**: `.context/00-product.md`
+**Última actualización**: 2026-04-19 (rev. 26)
+**Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
+**Tree funcional vigente**: `.context/00-product.md`.
 
 ---
 
-## Stack Real Vigente
+## Estado Ejecutivo
 
-### Frontend — `apps/web`
-
-| Elemento | Versión real | Notas |
-|---|---|---|
-| Next.js | **14.2.35** | CVE patch aplicado (14.1.0 → 14.2.35) |
-| React | ^18 | — |
-| TypeScript | ^5 | strict + strictNullChecks + noImplicitAny |
-| TailwindCSS | ^3.3.0 | `postcss.config.js` + `autoprefixer` en devDeps (fix Render) |
-| shadcn/ui components | 11 componentes | En `apps/web/components/ui/` (accordion, badge, button, card, dialog, input, label, select, sheet, tabs, textarea) |
-| `@supabase/ssr` | ^0.10.0 | — |
-| Patrón routing | App Router + Route Groups | `(sales)`, `(products)`, `(channels)`, `(ai)`, `(analytics)`, `(settings-group)` |
-| Server Actions | Sí | catalog, knowledge-base, inventory, orders, contacts |
-| Font | Inter via `next/font/google` | CSS variable `--font-inter` |
-| Prettier | `.prettierrc.json` | Formato estándar — singleQuote, trailing comma |
-| ESLint | `eslint@8` + `@typescript-eslint/recommended` | `.eslintrc.json` — next/core-web-vitals base |
-
-> `packages/ui` está vacío. Componentes en `apps/web/components/ui/`.
-
-### Backend — Python
-
-| Elemento | Versión real | Notas |
-|---|---|---|
-| Python | **3.11.13** | Oracle Linux 9, instalado vía dnf, sin venv |
-| FastAPI | 0.128.8 | Todos los servicios |
-| Pydantic | 2.12.5 | — |
-| google-genai | 1.47.0 | SDK oficial — `google-generativeai` DESINSTALADO |
-| supabase-py | 2.28.3 | — |
-| PyJWT | 2.10.1 | Solo en `services/api` |
-| httpx | 0.28.1 | Estandarizado en todos los servicios Python (Render v4) |
-| Ruff | `pyproject.toml` | Linter — E, F, W, I, B, C — line-length 100 |
+- **Tenant Console**: ✅ Live (fases 1–11.5 completas)
+- **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
+- **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
+- **DB**: ✅ contrato endurecido (35 migraciones)
 
 ---
 
-## Resumen Ejecutivo de Implementación
+## Contratos Canónicos (runtime)
 
-| Capa | Estado |
-|---|---|
-| Tenant Console — Módulos | ✅ Live (ver tabla abajo) |
-| Navegación Sidebar | ✅ Reestructurada con Route Groups + grupos expandibles RBAC |
-| Platform Console | ❌ No existe — bloqueante OQ-P01 no resuelto |
-| Backend API | ✅ 3 servicios live + 9 routers |
-| Base de datos | ✅ 27 migraciones aplicadas |
-| Deploy Render | ✅ 4 servicios live |
-| Envia / Shipping | 🟡 Fase Inicial — quote + historial live. Label/tracking: Fase 2 |
-| MeLi | ✅ Fase Avanzada — OAuth + IPN webhook + listings + vinculación + import + sync stock+precio+precio_tachado (automático, un PUT). Panel Sheet lateral. Badge MeLi en variantes vinculadas. Pendiente: sync completo MeLi→Supabase y tracking shipments. |
-| Configuración | ✅ Certificado | General ✅ Equipo ✅ Integraciones ✅ — flujo invite validado en Render. Pendiente solo: SMTP propio cuando haya dominio |
+### 1) Conversaciones
 
----
+Contrato único en runtime y DB:
+- `bot_active`
+- `human_takeover`
+- `closed`
 
-## Estado por Módulo — Tenant Console
+Aplicado en:
+- `supabase` (normalización + constraint)
+- API (`services/api/routers/conversations.py`)
+- Frontend Inbox (`apps/web/app/dashboard/inbox/page.tsx`)
+- Connector/Worker/Orchestrator
 
-| Módulo | Ruta | Estado | Notas |
-|---|---|---|---|
-| Dashboard | `/dashboard` | ✅ Live | Tabs Ops/Negocio — 11 queries paralelas — umbral dinámico por tenant |
-| Inbox | `/dashboard/inbox` | ✅ Live | Realtime, human takeover, envío como agente |
-| Pedidos | `/dashboard/orders` | ✅ Live | Listado, detalle, estados, stock decrementado al confirmar |
-| Contactos | `/dashboard/contacts` | ✅ Live | Listado, perfil, consent Habeas Data |
-| Reclamos | `/dashboard/claims` | ✅ Live | Crear reclamo, cambiar estado, vincular pedido. Fix: getUser + tenant_id |
-| Productos (Catálogo+Inventario) | `/dashboard/catalog` | ✅ Live | CRUD, multi-variante, archivados, KPI bar, ajuste delta inline por variante, historial movimientos colapsable, badge MeLi en variantes vinculadas. Inventario eliminado como módulo separado. |
-| Media | `/dashboard/media` | ✅ Live | Upload/delete/URL via Supabase Storage `tenant-media` |
-| Mercado Libre | `/dashboard/marketplace` | ✅ Live | Listings MeLi, sync stock+precio+precio_tachado, vinculación variation↔listing, Sheet lateral, thumbnails HTTPS, estado vacío si no conectado |
-| Despachos (Envia) | `/dashboard/shipping` | ✅ Live | Cotizaciones + historial — renombrado de "Envíos" |
-| Órdenes de Compra | `/dashboard/purchases` | ✅ Live | POs, proveedores, WAC |
-| P&L / Finanzas | `/dashboard/finance` | ✅ Live | P&L Dashboard, Registro OPEX |
-| Base de Conocimiento | `/dashboard/knowledge-base` | ✅ Live | CRUD, categorías, toggle activo, inyectada en Orchestrator |
-| Agentes IA | `/dashboard/ai-agents` | ✅ Live | Directrices, roles, RAG parameters — **desbloqueado en sidebar** |
-| Métricas | `/dashboard/metrics` | ✅ Live | 4 KPIs, filtros período, BarChart + PieChart |
-| Auditoría | `/dashboard/audit` | ✅ Live | Filtros fecha/usuario, paginación, exportación CSV |
-| Configuración (General) | `/dashboard/settings` | ✅ Live | Identidad: Nombre+Email+Celular obligatorios, NIT opcional, `+57` fijo, pattern `3[0-9]{9}`. Dirección origen: País bloqueado Colombia, select dpto→municipio DANE sin buscador libre. WABA ID movido a Integraciones. |
-| Usuarios y Acceso | `/dashboard/team` | ✅ Live | Roles: Administrador/Supervisor/Gestor (Lucide icons). Invite→/auth/confirm→/set-password **validado en Render**. changeRole invalida JWT via admin.signOut(). Guard owner único. DB: agent→operator migrado |
-| Integraciones | `/dashboard/integrations` | ✅ Live | 4 secciones: Canal Principal/Logística/Marketplace/Notificaciones. WhatsApp: WABA ID + Phone Number ID + Access Token en `tenant_integrations`. Instructivos inline para todos. Backends leen credenciales por tenant desde DB con fallback a env vars. |
+### 2) Procesamiento de mensajes inbound
 
----
+`messages` ahora usa outcome explícito:
+- `processing_status`: `pending | processed | skipped | failed`
+- `skip_reason`
+- `last_error`
+- `processing_attempts`
 
-## Estructura de Directorios Frontend (Real)
+`processed` se mantiene por compatibilidad, pero el loop usa `processing_status='pending'`.
 
-```
-apps/web/app/
-├── page.tsx                       ✅ Landing / redirect
-├── layout.tsx                     ✅ Root layout (Inter font, globals.css)
-├── globals.css                    ✅ Dark Warm Theme — HSL tokens
-├── login/page.tsx                 ✅ Auth Supabase SSR
-└── dashboard/
-    ├── layout.tsx                 ✅ Shell: Sidebar + Main + top bar
-    ├── page.tsx                   ✅ Dashboard RSC — 11 queries paralelas
-    ├── dashboard-client.tsx       ✅ Tabs Ops/Negocio + recharts
-    ├── sidebar-client.tsx         ✅ NAV_ITEMS — árbol de navegación
-    ├── error.tsx                  ✅ Error boundary
-    ├── inbox/                     ✅ Realtime WhatsApp
-    ├── finance/                   ✅ P&L
-    ├── purchases/                 ✅ Compras
-    ├── (sales)/                   Route Group — /orders, /contacts, /shipping, /claims
-    ├── (products)/                Route Group — /catalog, /inventory, /media
-    ├── (channels)/                Route Group — /marketplace
-    ├── (ai)/                      Route Group — /knowledge-base, /ai-agents
-    ├── (analytics)/               Route Group — /metrics, /audit
-    └── (settings-group)/          Route Group — /settings, /integrations
-```
+### 3) Human takeover / closed
 
----
+Comportamiento efectivo:
+- Si conversación está en `human_takeover`: el bot no responde.
+- Si conversación está en `closed`: el bot no responde y no reabre automáticamente.
+- Mensajes no-texto: no respuesta automática, se escalan a `human_takeover` y quedan visibles en Inbox.
 
-## Backend Services — Estado Real
+### 4) RBAC runtime
 
-| Servicio | URL Render | Estado |
-|---|---|---|
-| `commerce-ops-web` | `https://commerce-ops-web.onrender.com` | ✅ Live |
-| `commerce-ops-connector` | `https://commerce-ops-connector.onrender.com` | ✅ Live |
-| `commerce-ops-api` | `https://commerce-ops-api.onrender.com` | ✅ Live |
-| `commerce-ops-orchestrator` | (no URL pública — /health interno) | ✅ Live, polling 3s |
+Roles vivos en runtime:
+- `owner`
+- `manager`
+- `operator`
 
-### Routers Activos en `services/api`
+`agent` no existe en runtime; queda únicamente en migraciones históricas.
 
-| Router | Endpoints clave | Estado |
-|---|---|---|
-| `products.py` | `GET/POST /products`, `PUT/DELETE /products/{id}`, `PATCH/POST/DELETE /variations/{id}` | ✅ |
-| `orders.py` | `GET/POST /orders`, `PATCH /orders/{id}` | ✅ |
-| `contacts.py` | `GET/POST /contacts` | ✅ |
-| `settings.py` | `GET/PUT /settings`, `GET/POST/DELETE /team` | ✅ |
-| `integrations.py` | `/integrations/envia`, `/integrations/meli`, OAuth callback | ✅ |
-| `shipping.py` | `POST /shipping/quote`, `GET /shipping/history` | ✅ |
-| `meli_webhook.py` | `POST /meli/webhook` | ✅ |
-| `conversations.py` | `GET /conversations` | ✅ |
-| `marketplace.py` | `GET/POST /marketplace`, `PATCH /marketplace/{id}/status` | ✅ |
+### 5) OAuth Mercado Libre
 
-### Endpoints Pendientes
+`state` OAuth endurecido:
+- firmado (HMAC)
+- con expiración
+- nonce one-time persistido en DB (anti-replay)
+- callback rechaza `state` faltante/inválido/expirado/reutilizado antes de persistir tokens
 
-| Endpoint | Fase | Estado |
-|---|---|---|
-| `POST /shipping/label` | Envia Fase 2 | 🔒 Pendiente |
-| `GET /shipping/tracking/{id}` | Envia Fase 2 | 🔒 Pendiente |
-| `POST /shipping/pickup` | Envia Fase 2 | 🔒 Pendiente |
-| Endpoints platform-only | Fase 12 | ❌ Fuera de alcance actual |
+### 6) Credenciales WhatsApp
+
+Fuente única runtime:
+- `tenant_integrations` por `tenant_id`
+
+No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en senders (API/Orchestrator).
+El connector solo recibe webhooks; no envía mensajes.
+
+### 7) Seguridad multi-tenant (service_role)
+
+El backend usa `service_role` en varios paths, por lo que:
+- RLS **no** es barrera suficiente por sí sola en esos paths
+- aislamiento runtime depende de filtros explícitos `tenant_id` + RLS donde aplique
+
+Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `marketplace`, `meli_webhook`).
 
 ---
 
-## Base de Datos — Migraciones (25 aplicadas)
+## Frontend — ajustes estructurales
 
-| Tabla principal | Migración | Estado |
-|---|---|---|
-| `tenants`, `tenant_users` | 20260406181235 | ✅ |
-| `products`, `product_variations` | 20260406181236 | ✅ |
-| `conversations`, `messages` | 20260406181237 | ✅ |
-| `rls_policies` | 20260406181238 | ✅ |
-| `app_current_tenant()`, JWT trigger | 20260406181239 | ✅ |
-| `messages.processed` flag | 20260407200700 | ✅ |
-| `contacts`, `orders`, `order_items`, `tenant_integrations`, `notification_settings` | 20260409220000 | ✅ |
-| `shipments` | 20260409230000 | ✅ |
-| `stock_movements` | 20260409240000 | ✅ |
-| `kb_documents` | 20260409250000 | ✅ |
-| `audit_log` | 20260409260000 | ✅ |
-| `tenant_shipping_origin` | 20260409270000 | ✅ |
-| `tenants.low_stock_threshold` | 20260410010000 | ✅ |
-| `contacts.consent_given/consent_date` | 20260410020000 | ✅ |
-| Catalog enterprise fields | 20260411162042 | ✅ |
-| `ai_agents`, `ai_agent_documents` (pgvector) | 20260412000000 | ✅ |
-| `purchase_orders`, `suppliers`, `finance_entries` | 20260413000000 | ✅ |
-| Finance polish | 20260413000001 | ✅ |
-| `marketplace_listings` | 20260413000002 | ✅ |
-| `claims` | 20260413150000 | ✅ |
-| RLS `tenant_users` + `add_member_to_tenant` | 20260415000000 | ✅ |
-| `get_tenant_team` return confirmed status | 20260415010000 | ✅ |
-| `tenants.nit`, `email_contacto`, `telefono_contacto` | 20260415020000 | ✅ |
-| `tenant_users.role` `agent→operator`, `add_member_to_tenant` con roles renombrados | 20260415030000 | ✅ |
-| `claims` RLS fix — políticas reemplazadas para usar `app_current_tenant()` | 20260416000000 | ✅ |
-| Realtime habilitado — `conversations` y `messages` en `supabase_realtime` publication | 20260417000000 | ✅ |
-| `stock_movements.product_id` nullable + columna `order_id` para idempotencia IPN | 20260417000001 | ✅ |
-| Fix RLS `marketplace_listings` — `auth.uid()` → `app_metadata.tenant_id` | 20260417000002 | ✅ |
-
-> Fuente canónica: `supabase/migrations/`. `packages/db/migrations/` es copia parcial desincronizada — ignorar.
+- `meliBadge` ya no está hardcodeado; se calcula desde `marketplace_listings`.
+- Badge MeLi renderiza correctamente también cuando `Mercado Libre` es child item dentro de grupo sidebar.
+- `/dashboard/inventory` legacy quedó como redirección explícita a `/dashboard/catalog`.
+- Se eliminaron links operativos residuales que trataban Inventory como módulo standalone.
 
 ---
 
-## Artefactos Nuevos — Vuelta 10 (2026-04-17)
+## Migraciones recientes (2026-04-19)
 
-| Artefacto | Ruta | Descripción |
-|-----------|------|-------------|
-| Productos unificado (Server Component) | `apps/web/app/dashboard/(products)/catalog/page.tsx` | Fusión Catálogo+Inventario. 7 server actions. Fetcha `marketplace_listings` para badge. Revalida `/dashboard/catalog`. |
-| ProductsManager (Client Component) | `apps/web/app/dashboard/(products)/catalog/_components/products-manager.tsx` | KPI bar, Dialog nuevo producto, ajuste delta, historial colapsable, threshold form. |
-| CatalogTable — badge MeLi + ajuste delta | `apps/web/app/dashboard/(products)/catalog/_components/catalog-table.tsx` | Props `linkedVariationIds` + `adjustStockAction`. Badge amarillo MeLi en variantes vinculadas. |
-| MarketplaceManager — Sheet lateral | `apps/web/app/dashboard/(channels)/marketplace/_components/marketplace-manager.tsx` | Reescrito. Sheet reemplaza expansion inline. Thumbnails HTTPS forzado. Error inline. |
-| Sidebar — Inventario eliminado | `apps/web/app/dashboard/sidebar-client.tsx` | Inventario eliminado del menú. Productos como hoja directa (sin accordión). |
-| CSP + remotePatterns MeLi CDN | `apps/web/next.config.js` | `img-src` y `remotePatterns` actualizados para `http2.mlstatic.com` y `mlstatic.com`. |
-| `update_item_listing()` — sync stock+precio+tachado | `services/api/integrations/meli_client.py` | Un solo PUT con `available_quantity`, `price`, `original_price` condicional. |
-| `sync_meli_stock` usa `update_item_listing` | `services/api/routers/marketplace.py` | Lee `price` + `compare_at_price` de variante. Reemplaza llamada a `update_item_quantity`. |
-| Fix RLS `marketplace_listings` | `supabase/migrations/20260417000002_fix_marketplace_listings_rls.sql` | Política corregida: `auth.uid()` → `app_metadata.tenant_id`. **Aplicada.** |
-| Fix `stock_movements` nullable + `order_id` | `supabase/migrations/20260417000001_stock_movements_fix.sql` | `product_id` nullable. Columna `order_id` con índice para idempotencia IPN. **Aplicada.** |
+- `20260419000000_conversation_processing_contract.sql`
+  - backfill de estados legacy conversación
+  - constraint canónico de conversación
+  - contrato explícito de procesamiento de mensajes
 
-## Artefactos Nuevos — Vuelta 8 (2026-04-15)
+- `20260419000001_rbac_operator_runtime_only.sql`
+  - backfill `agent -> operator`
+  - constraint de roles runtime
 
-| Artefacto | Ruta | Descripción |
-|-----------|------|-------------|
-| Auth Confirm (fix final) | `apps/web/app/auth/confirm/page.tsx` | Hash capturado ANTES de `createClient()`. Implicit flow usa `setSession({access_token, refresh_token})` explícito — sin race condition con `onAuthStateChange`/`SIGNED_IN`. **Flujo validado en Render con usuario real.** |
-
-## Artefactos Nuevos — Vuelta 7 (2026-04-15)
-
-| Artefacto | Ruta | Descripción |
-|-----------|------|-------------|
-| Auth Confirm page (Client) | `apps/web/app/auth/confirm/page.tsx` | **Reemplaza route.ts**. Client Component con Suspense. PKCE (`?code=`), OTP (`?token_hash=`), Implicit (`#access_token=` → `setSession()`). |
-| Migración roles | `supabase/migrations/20260415030000_rename_agent_to_operator.sql` | Renombra `agent→operator` en `tenant_users`. Actualiza `add_member_to_tenant` para aceptar `owner/manager/operator`. **Aplicada en Supabase** |
+- `20260419000002_meli_oauth_state_store.sql`
+  - tabla `integration_oauth_states` para nonce one-time de OAuth MeLi
 
 ---
 
-## Artefactos Nuevos — Vuelta 6 (2026-04-15)
+## Validación ejecutada en esta sesión
 
-| Artefacto | Ruta | Descripción |
-|-----------|------|-------------|
-| Dataset DANE | `apps/web/lib/dane-colombia.ts` | 33 departamentos + 1.103 municipios DIVIPOLA. Función `getMunicipiosByDpto(codigo)` |
-| ShippingOriginForm | `apps/web/app/dashboard/(settings-group)/settings/shipping-origin-form.tsx` | Client Component con select dependiente dpto→municipio. Guarda nombre (no código DANE) para compatibilidad Envia |
-| ~~Auth Confirm route~~ | ~~`apps/web/app/auth/confirm/route.ts`~~ | **ELIMINADO en Vuelta 7** — Route Handler no recibe URL fragments. Reemplazado por `page.tsx` Client Component |
-| Set Password page | `apps/web/app/set-password/page.tsx` | Server Component. Valida sesión activa, form contraseña (min 8 chars, confirmación), Server Action `updateUser`. Redirect a `/dashboard` |
-| Migración identidad | `supabase/migrations/20260415020000_tenant_identity_fields.sql` | Agrega `nit`, `email_contacto`, `telefono_contacto` a tabla `tenants`. **Aplicada en Supabase** |
-
-## Intervenciones Humanas Pendientes
-
-### ~~IH-SUPABASE-REDIRECT~~ ✅ RESUELTA
-Site URL cambiado a `https://commerce-ops-web.onrender.com`. Redirect URLs incluyen `/auth/confirm` y `/set-password`. Resuelto 2026-04-15.
-
-### IH-SMTP — SMTP custom con dominio propio (pendiente dominio)
-**RESPONSABLE**: Arquitecto técnico
-**ESTADO**: Supabase default SMTP activo (3 emails/hora). Custom SMTP habilitado temporalmente con Brevo pero revertido — Gmail sender bloqueado por DMARC `p=reject`.
-**CUANDO**: Al tener dominio propio verificado.
-**PASOS**:
-1. Resend.com → Domains → verificar dominio propio
-2. Resend.com → API Keys → crear key con scope `Sending access`
-3. Supabase → Auth → SMTP → Enable Custom SMTP
-4. Host: `smtp.resend.com` | Port: `465` | User: `resend` | Password: API Key
-5. Sender: `noreply@tudominio.com`
-**CRITERIO DE ÉXITO**: Invitación llega en <1 minuto sin rate limit.
-
-### ~~IH-INVITE-VALIDATE~~ ✅ RESUELTA — 2026-04-15
-Flujo completo validado en Render con usuario real (`crittan01@gmail.com`):
-- Invite enviado → email recibido → clic → `/auth/confirm#access_token=...` → `setSession()` → `/set-password` → contraseña creada → `/dashboard`.
-- Fix clave: hash leído ANTES de `createClient()` + `setSession()` explícito (sin race condition con `onAuthStateChange`).
-
----
-
-## Deuda Técnica Activa
-
-| Ítem | Prioridad |
-|---|---|
-| Sync catálogo completo MeLi (precios/descripción MeLi→Supabase, hoy solo push Supabase→MeLi) | Media |
-| Envia Fase 2: label, tracking, pickup | Media |
-| ~~WhatsApp Config — WABA ID, Phone ID, Token por tenant~~ | ✅ Resuelto — movido a Integraciones, credenciales en `tenant_integrations`, senders leen por tenant con fallback env vars |
-| Invite de miembros via formulario UI | Media — IH-001 requerida (APP_URL en Render) + IH-SMTP (SMTP custom Supabase con Resend, ver IH-003) |
-| SMTP Supabase Free (3 emails/hora) → configura SMTP propio con Resend | Alta — bloquea invitaciones en producción con volumen |
-| ~~Reclamos — acciones reales~~ | ✅ Resuelto Vuelta 3 |
-| ~~Agentes IA — desbloquear en sidebar~~ | ✅ Resuelto Vuelta 3 |
-| ~~Dashboard — usar `tenants.low_stock_threshold` dinámico~~ | ✅ Resuelto Vuelta 3 |
-| ~~Dashboard KPIs — eliminar trends hardcodeados~~ | ✅ Resuelto Vuelta 3 |
-| ~~`tenant_users` sin RLS~~ | ✅ Resuelto Vuelta 5 — migración 20260415000000 |
-| ~~`logo-upload.tsx` `getSession()` inseguro~~ | ✅ Resuelto Vuelta 5 — `getUser()` |
-| ~~Security Headers ausentes en Next.js~~ | ✅ Resuelto Vuelta 5 — `next.config.js` |
-| ~~`low_stock_threshold` sin UI editable~~ | ✅ Resuelto Vuelta 5 — en General |
-| ~~Configuración: sección Identidad sin NIT/email/teléfono~~ | ✅ Resuelto Vuelta 6 — migración 20260415020000 |
-| ~~Dirección de origen: ciudad/dpto texto libre~~ | ✅ Resuelto Vuelta 6 — selects DANE DIVIPOLA (33 dptos, 1.103 municipios) |
-| ~~Umbral stock bajo en sección incorrecta (Identidad)~~ | ✅ Resuelto Vuelta 6 — movido a sección "Configuración Operativa" |
-| ~~Telegram en General Settings~~ | ✅ Resuelto Vuelta 6 — movido a Integraciones como card propia |
-| ~~testTelegram silencioso (catch null, token en DOM)~~ | ✅ Resuelto Vuelta 6 — lee token desde DB, feedback explícito con código de error Telegram |
-| ~~Roles con emojis (no renderizan en Linux/algunos browsers)~~ | ✅ Resuelto Vuelta 6 — íconos Lucide (Crown, Briefcase, Headphones) |
-| ~~Roles con nombres genéricos (Owner/Manager/Operador)~~ | ✅ Resuelto Vuelta 6 — Administrador/Supervisor/Gestor (valores DB sin cambio) |
-| ~~Flujo invitación sin página set-password~~ | ✅ Resuelto Vuelta 6 — /auth/confirm route + /set-password page |
-| ~~Roles DB: valor 'agent' obsoleto~~ | ✅ Resuelto Vuelta 7 — migración 20260415030000 renombra agent→operator en tenant_users y add_member_to_tenant |
-| ~~14 archivos frontend con fallback `?? 'agent'`~~ | ✅ Resuelto Vuelta 7 — todos actualizados a `?? 'operator'` |
-| ~~JWT stale claims tras cambio de rol~~ | ✅ Resuelto Vuelta 7 — changeRole llama admin.signOut(userId,'global') para invalidar JWT activo |
-| ~~`/auth/confirm` Route Handler no recibe `#access_token=`~~ | ✅ Resuelto Vuelta 7/8 — route.ts eliminado; page.tsx captura hash antes de createClient(), usa setSession() explícito. Validado en Render. |
-| ~~Validar flujo de invite completo en Render~~ | ✅ Resuelto Vuelta 8 — validado con usuario real. Ver IH-INVITE-VALIDATE resuelta. |
-| ~~Emojis en UI no renderizan en Linux/algunos browsers~~ | ✅ Resuelto Vuelta 8 — todos reemplazados por iconos Lucide (sidebar, shipping, inventory, settings, integrations) |
-| ~~RLS `marketplace_listings` usaba `auth.uid()` como tenant_id~~ | ✅ Resuelto Vuelta 10 — migración 20260417000002. Badge MeLi y queries frontend ahora retornan datos. |
-| ~~MeLi thumbnails bloqueados por CSP + HTTP~~ | ✅ Resuelto Vuelta 10 — CSP + remotePatterns + `.replace(/^http:/, 'https:')` |
-| ~~Sync MeLi solo enviaba stock, no precio~~ | ✅ Resuelto Vuelta 10 — `update_item_listing()` envía stock+precio+precio_tachado en un PUT |
-| ~~Catálogo e Inventario como módulos separados~~ | ✅ Resuelto Vuelta 10 — fusionados en `/dashboard/catalog`. Menú simplificado. |
-| SMTP Supabase Free (3 emails/hora) → configurar SMTP propio con Resend | Media — requiere dominio propio. Gmail bloqueado por DMARC p=reject. No bloquea operación actual. |
-
----
-
-## Bloqueos Activos
-
-| Bloqueante | Tipo | Impacto |
-|---|---|---|
-| OQ-P01 sin decidir (arquitectura Platform Console) | Decisión pendiente | Bloquea Fase 12 — sin impacto en Tenant Console |
-| IH-SMTP — SMTP custom con Resend (requiere dominio propio) | Intervención humana pendiente | Rate limit 3 emails/hora en Free. Gmail sender rechazado por DMARC. Pendiente hasta tener dominio. No bloquea operación actual. |
-
----
-
-## Seguridad y Cumplimiento (Verificado)
-
-| Capa | Estado | Notas |
-|---|---|---|
-| **RLS** | ✅ Activo | Todas las tablas del esquema `public` tienen RLS habilitado y políticas por `tenant_id`. |
-| **CORS** | ✅ Activo | Configurado en `services/api/main.py` restringido a `ALLOWED_ORIGINS`. |
-| **Security Headers** | ✅ Activo | Implementado en `next.config.js` (CSP, HSTS, X-Frame-Options, X-Content-Type-Options). |
-| **Audit Log** | ✅ Activo | Captura de cambios críticos en DB vía triggers/funciones. |
-
----
-
-## Política de Actualización
-
-- Actualizar este archivo al cierre de cada sesión de trabajo.
-- No duplicar estado en múltiples archivos. Este es el único lugar.
-- No incluir aquí intenciones ni roadmap — eso es `docs/roadmap/` y `.context/04-next-steps.md`.
-- Los docs eliminados en sesiones previas no deben reaparecer en referencias.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (27 tests)
+- `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
+- `pnpm --filter web lint` ✅ (con warnings preexistentes, sin errores)

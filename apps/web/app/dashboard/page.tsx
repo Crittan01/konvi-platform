@@ -122,7 +122,6 @@ export default async function DashboardPage() {
     { href: '/dashboard/orders',         label: 'Pedidos',       icon: 'Package',       desc: 'Gestionar pedidos',       show: true },
     { href: '/dashboard/contacts',       label: 'Contactos',     icon: 'Users',         desc: 'Base de clientes',        show: true },
     { href: '/dashboard/catalog',        label: 'Catálogo',      icon: 'ShoppingCart',  desc: 'Productos activos',       show: canWrite },
-    { href: '/dashboard/inventory',      label: 'Inventario',    icon: 'Boxes',         desc: 'Control de stock',        show: canWrite },
     { href: '/dashboard/metrics',        label: 'Métricas',      icon: 'BarChart2',     desc: 'KPIs del negocio',        show: canWrite },
     { href: '/dashboard/integrations',   label: 'Integraciones', icon: 'Plug',          desc: 'MeLi · Envia',           show: role === 'owner' },
   ].filter(l => l.show).map(({ show: _show, ...rest }) => rest)

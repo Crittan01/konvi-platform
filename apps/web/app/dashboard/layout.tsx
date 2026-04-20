@@ -1,6 +1,7 @@
 import * as React from "react"
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import SidebarClient from './sidebar-client'
 
 export default async function DashboardLayout({
@@ -47,8 +48,15 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  // TODO: Query real de Mercado Libre (ej. listings con error)
-  const meliBadge = 1 
+  let meliBadge = 0
+  if (meta.tenant_id) {
+    const { data: listings } = await supabase
+      .from('marketplace_listings')
+      .select('status')
+      .eq('tenant_id', meta.tenant_id)
+      .eq('provider', 'mercadolibre')
+    meliBadge = getMarketplaceBadgeCount(listings ?? [])
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
