@@ -80,6 +80,31 @@ def _extract_city_code(entry: dict) -> str:
     return ""
 
 
+def _extract_state_code(entry: dict) -> str:
+    """
+    Extrae código/state token en distintos formatos de respuesta Envia.
+    """
+    for key in ("state_code", "stateCode", "state", "province_code", "provinceCode", "province"):
+        value = entry.get(key)
+        if value is None:
+            continue
+        raw = str(value).strip()
+        if not raw:
+            continue
+        if len(raw) <= 3:
+            return raw.upper()
+        return _normalize_state(raw, "CO")
+    return ""
+
+
+def _extract_city_name(entry: dict) -> str:
+    for key in ("name", "city", "description", "label"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 async def _validate_co_address_with_envia(client: EnviaClient, addr: "Address", label: str) -> None:
     """
     Valida dirección de Colombia contra APIs oficiales de Envia antes de cotizar.
@@ -101,57 +126,37 @@ async def _validate_co_address_with_envia(client: EnviaClient, addr: "Address", 
     addr.dane_code = normalized_dane
     addr.postalCode = normalized_dane
 
-    geocodes_verified = False
-    geocodes_state = ""
-    geocodes_city = ""
-    geocodes_error: Optional[str] = None
-    try:
-        zip_validation = await client.validate_zip_code("CO", normalized_dane)
-        if zip_validation.get("success") is True:
-            data = zip_validation.get("data") if isinstance(zip_validation.get("data"), dict) else {}
-            geocodes_state = str(data.get("state") or "").strip().upper()
-            geocodes_city = str(data.get("city") or "").strip()
-            geocodes_verified = True
-        else:
-            geocodes_error = str(zip_validation.get("message") or "Zip code not found")
-    except Exception as exc:
-        geocodes_error = str(exc)
-
-    # Fallback de verificación con Queries API (cities by state), por si Geocodes no
-    # resuelve el DANE en alguna cuenta/ambiente.
+    # Validación principal para CO: Queries API city-by-code.
+    # Para Colombia, Quote usa DANE (5 dígitos) en city/postalCode.
     queries_verified = False
+    resolved_state = ""
+    resolved_city = ""
     queries_error: Optional[str] = None
-    state_code = _normalize_state(addr.state or "", "CO")
-    if state_code:
-        try:
-            cities = await client.get_cities_by_state(country_code="CO", state_code=state_code)
-            for city_entry in cities:
-                if not isinstance(city_entry, dict):
-                    continue
-                if _extract_city_code(city_entry) == normalized_dane:
-                    queries_verified = True
-                    break
-        except Exception as exc:
-            queries_error = str(exc)
-    else:
-        queries_error = "state vacío o inválido para CO"
+    try:
+        city_data = await client.get_city_by_code(normalized_dane)
+        candidate_code = _extract_city_code(city_data)
+        if candidate_code == normalized_dane:
+            queries_verified = True
+            resolved_state = _extract_state_code(city_data)
+            resolved_city = _extract_city_name(city_data)
+        else:
+            queries_error = f"city/{normalized_dane} respondió sin code esperado"
+    except Exception as exc:
+        queries_error = str(exc)
 
-    if not geocodes_verified and not queries_verified:
+    if not queries_verified:
         # Best-effort: no bloqueamos por fallas/ambigüedades de endpoints de validación.
         # El contrato duro permanece en DANE canónico (5 dígitos) + payload CO correcto.
         logger.warning(
             "No fue posible validar dirección %s en Envia (DANE=%s). "
-            "Se continúa con validación local. Geocodes=%s | Queries=%s",
-            label, normalized_dane, geocodes_error or "n/a", queries_error or "n/a"
+            "Se continúa con validación local. Queries city-by-code=%s",
+            label, normalized_dane, queries_error or "n/a"
         )
 
-    # Si Geocodes devuelve state canónico, preferirlo para reducir errores de carrier.
-    if geocodes_state:
-        addr.state = geocodes_state
-    else:
-        addr.state = state_code or addr.state
-    if geocodes_city:
-        addr.city = geocodes_city
+    # Completa datos de presentación/normalización si Envia responde city/state.
+    addr.state = resolved_state or _normalize_state(addr.state or "", "CO") or addr.state
+    if resolved_city:
+        addr.city = resolved_city
 
 
 def _extract_carrier_name(item: dict) -> str:
@@ -319,7 +324,6 @@ async def quote_shipment(
         d["state"] = _normalize_state(a.state, a.country)
         if a.country == "CO" and a.dane_code:
             # Para Colombia: city y postalCode deben ser el código DANE DIVIPOLA 5 dígitos (ej. 11001)
-            d["city_to_display"] = a.city
             d["city"]            = a.dane_code
             d["postalCode"]      = a.dane_code
         return d
@@ -347,10 +351,18 @@ async def quote_shipment(
         )
 
     carrier_errors: dict[str, str] = {}
-    logger.info("Envia quote payload base (tenant %s): origin_city=%s dest_city=%s",
-                tenant_id,
-                base_payload.get("origin", {}).get("city"),
-                base_payload.get("destination", {}).get("city"))
+    logger.info(
+        "Envia quote payload base (tenant %s): "
+        "origin_state=%s origin_city=%s origin_postal=%s | "
+        "dest_state=%s dest_city=%s dest_postal=%s",
+        tenant_id,
+        base_payload.get("origin", {}).get("state"),
+        base_payload.get("origin", {}).get("city"),
+        base_payload.get("origin", {}).get("postalCode"),
+        base_payload.get("destination", {}).get("state"),
+        base_payload.get("destination", {}).get("city"),
+        base_payload.get("destination", {}).get("postalCode"),
+    )
 
     async def _fetch_carrier(carrier: str):
         payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
