@@ -136,7 +136,7 @@ class EnviaClient:
     async def get_cities_by_state(self, country_code: str, state_code: str) -> list:
         """
         Obtiene ciudades por estado y país (Queries API).
-        Según docs: GET /city con country_code + state_code.
+        Endpoint documentado: GET /city con country_code + state_code.
         """
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
@@ -148,6 +148,24 @@ class EnviaClient:
             body = resp.json()
             data = self._extract_data(body)
             return data if isinstance(data, list) else []
+
+    async def get_city_by_code(self, city_code: str) -> dict:
+        """
+        Obtiene ciudad por código (Queries API):
+        GET /city/{city_code}
+        """
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.queries_base_url}/city/{city_code}",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            data = self._extract_data(body)
+            if isinstance(data, list):
+                first = data[0] if data else {}
+                return first if isinstance(first, dict) else {}
+            return data if isinstance(data, dict) else {}
 
     async def get_address_structure(self, country_code: str) -> dict:
         """

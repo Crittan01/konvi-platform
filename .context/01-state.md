@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 29)
+**Última actualización**: 2026-04-20 (rev. 30)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -83,13 +83,13 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 
 ### 8) Shipping Envia (CO) — contrato de dirección endurecido
 
-- `shipping/quote` intenta validar CO contra APIs oficiales de Envia antes de cotizar:
-  - Geocodes `GET /zipcode/{country}/{zipcode}`
-  - Queries `GET /city` (fallback por estado)
+- Para Colombia, `shipping/quote` valida por Queries API con `GET /city/{city_code}` (DANE como city_code).
+- Se retiró la validación previa por `zipcode` para CO (ese endpoint valida código postal, no DANE).
 - `dane_code` se normaliza y exige en formato canónico de 5 dígitos.
 - Para CO, payload de Shipping API mantiene contrato:
   - `city = dane_code`
   - `postalCode = dane_code`
+- Se eliminó campo no documentado `city_to_display` del payload hacia Envia.
 - Descubrimiento de carriers prioriza Queries API (`available-carrier`) con fallback operativo si Queries falla.
 
 ---
