@@ -52,7 +52,7 @@ MELI_OAUTH_STATE_SECRET = os.getenv("MELI_OAUTH_STATE_SECRET", "")
 MELI_OAUTH_STATE_TTL_SECONDS = int(os.getenv("MELI_OAUTH_STATE_TTL_SECONDS", "600"))
 
 # Atributos que se traen en el multiget para no pagar ancho de banda innecesario
-ITEM_ATTRIBUTES = "id,title,status,price,available_quantity,permalink,thumbnail,variations"
+ITEM_ATTRIBUTES = "id,title,status,price,available_quantity,permalink,thumbnail,variations,condition,category_id"
 
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
@@ -426,6 +426,21 @@ async def get_item(item_id: str, access_token: str) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"{MELI_API_URL}/items/{item_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_shipment(shipment_id: str, access_token: str) -> dict:
+    """
+    Detalle de un envío MeLi.
+    GET /shipments/{shipment_id}
+    Retorna tracking_number, carrier (shipping_option.name), estimated_delivery_final, receiver_address, etc.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{MELI_API_URL}/shipments/{shipment_id}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()

@@ -42,7 +42,11 @@ type MeliItem = {
   product_name: string | null
   supabase_stock: number | null
   is_linked: boolean
+  meli_condition: string | null      // 'new' | 'used' | 'not_specified'
+  synced_at: string | null
 }
+
+type StatusFilter = 'all' | 'active' | 'paused' | 'closed' | 'unlinked'
 
 type Variation = {
   id: string
@@ -75,8 +79,14 @@ const STATUS_CONFIG = {
   closed:  { label: 'Cerrado', className: 'bg-red-500/15 text-red-500' },
 }
 
+const CONDITION_LABEL: Record<string, string> = {
+  new: 'Nuevo',
+  used: 'Usado',
+}
+
 export default function MarketplaceManager({ items, paging, variations, categories, canWrite }: Props) {
   const [search, setSearch]                   = useState('')
+  const [statusFilter, setStatusFilter]       = useState<StatusFilter>('all')
   const [loadingIds, setLoadingIds]           = useState<Set<string>>(new Set())
   const [sheetItem, setSheetItem]             = useState<MeliItem | null>(null)
   const [sheetMode, setSheetMode]             = useState<'link' | 'import'>('link')
@@ -102,11 +112,27 @@ export default function MarketplaceManager({ items, paging, variations, categori
     setSelectedMeliVariationId(null)
   }
 
-  const filtered = items.filter(i =>
-    i.title?.toLowerCase().includes(search.toLowerCase()) ||
-    i.meli_id?.toLowerCase().includes(search.toLowerCase()) ||
-    i.sku?.toLowerCase().includes(search.toLowerCase())
-  )
+  const STATUS_FILTERS: { key: StatusFilter; label: string; count: number }[] = [
+    { key: 'all',      label: 'Todos',        count: items.length },
+    { key: 'active',   label: 'Activos',      count: items.filter(i => i.status === 'active').length },
+    { key: 'paused',   label: 'Pausados',     count: items.filter(i => i.status === 'paused').length },
+    { key: 'closed',   label: 'Cerrados',     count: items.filter(i => i.status === 'closed').length },
+    { key: 'unlinked', label: 'Sin vincular', count: items.filter(i => !i.is_linked).length },
+  ]
+
+  const filtered = items
+    .filter(i => {
+      if (statusFilter === 'active')   return i.status === 'active'
+      if (statusFilter === 'paused')   return i.status === 'paused'
+      if (statusFilter === 'closed')   return i.status === 'closed'
+      if (statusFilter === 'unlinked') return !i.is_linked
+      return true
+    })
+    .filter(i =>
+      i.title?.toLowerCase().includes(search.toLowerCase()) ||
+      i.meli_id?.toLowerCase().includes(search.toLowerCase()) ||
+      i.sku?.toLowerCase().includes(search.toLowerCase())
+    )
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -173,12 +199,27 @@ export default function MarketplaceManager({ items, paging, variations, categori
 
   return (
     <div className="space-y-4">
-      {/* Header stats */}
+      {/* Filtros por estado */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="flex gap-4 text-sm text-muted-foreground">
-          <span><strong className="text-foreground">{paging.total}</strong> publicaciones</span>
-          <span><strong className="text-green-600">{items.filter(i => i.status === 'active').length}</strong> activas</span>
-          <span><strong className="text-amber-600">{items.filter(i => i.is_linked).length}</strong> vinculadas</span>
+        <div className="flex gap-1 flex-wrap">
+          {STATUS_FILTERS.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setStatusFilter(f.key)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                statusFilter === f.key
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              {f.label}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                statusFilter === f.key ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}>
+                {f.count}
+              </span>
+            </button>
+          ))}
         </div>
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -232,7 +273,14 @@ export default function MarketplaceManager({ items, paging, variations, categori
                         )}
                         <div className="min-w-0">
                           <p className="font-medium text-foreground truncate max-w-[240px]">{item.title}</p>
-                          <p className="text-xs text-muted-foreground">{item.meli_id}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <p className="text-xs text-muted-foreground">{item.meli_id}</p>
+                            {item.meli_condition && item.meli_condition !== 'not_specified' && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                {CONDITION_LABEL[item.meli_condition] ?? item.meli_condition}
+                              </span>
+                            )}
+                          </div>
                           {rowError && (
                             <p className="text-xs text-red-400 flex items-center gap-1 mt-0.5">
                               <AlertTriangle className="h-3 w-3 shrink-0" /> {rowError}

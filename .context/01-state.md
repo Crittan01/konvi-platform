@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 27)
+**Última actualización**: 2026-04-20 (rev. 28)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -94,7 +94,40 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 
 ---
 
-## Migraciones recientes (2026-04-19)
+## Migraciones recientes (2026-04-20)
+
+- `20260420000000_marketplace_listings_meli_fields.sql`
+  - Agrega a `marketplace_listings`: `meli_title`, `meli_thumbnail`, `meli_condition`, `meli_category_id`, `meli_attributes`, `synced_at`
+  - Habilita sync pull MeLi → Supabase
+
+- `20260420000001_order_tracking.sql`
+  - Nueva tabla `order_tracking` con RLS
+  - Centraliza tracking de envíos multi-proveedor (`mercadolibre`, `envia`)
+  - Alimentada desde webhook `shipments` MeLi; Envia Fase 2 también escribirá aquí
+
+---
+
+## Contratos MeLi (2026-04-20)
+
+### Sync pull MeLi → Supabase
+Campos en `marketplace_listings` actualizados por tres vías:
+- Webhook `items`: actualización reactiva ante cambios en MeLi
+- `sync_meli_stock()` (sync manual / post-orden): aprovecha el GET previo
+- `link_listing()` y `import_from_meli()`: pull inmediato al vincular o importar
+
+### Shipment tracking
+- Webhook `shipments`: avanza estado de orden **y** persiste en `order_tracking`
+- `order_tracking` es multi-proveedor: `provider = 'mercadolibre' | 'envia'`
+- Select/insert-or-update idempotente por `(tenant_id, provider, external_id)`
+
+### Contactos desde órdenes MeLi
+- `_process_order()` intenta crear contacto si `buyer.billing_info.phone` está disponible
+- Upsert idempotente por `(tenant_id, phone)` — no crea datos fake si no hay teléfono
+- `contact_id` se enlaza en la orden al crearse
+
+---
+
+## Migraciones anteriores (2026-04-19)
 
 - `20260419000000_conversation_processing_contract.sql`
   - backfill de estados legacy conversación
@@ -110,8 +143,18 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 
 ---
 
+## UX Mercado Libre (2026-04-20)
+
+- `marketplace-manager.tsx`: filtros por estado (Todos / Activos / Pausados / Cerrados / Sin vincular)
+- Badge de condición (`Nuevo` / `Usado`) en columna de publicación
+- Filtrado combinado: tab de estado + búsqueda por texto
+
+---
+
 ## Validación ejecutada en esta sesión
 
 - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (27 tests)
 - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
 - `pnpm --filter web lint` ✅ (con warnings preexistentes, sin errores)
+- Sintaxis Python verificada (meli_webhook.py, marketplace.py, meli_client.py) ✅
+- Balance de llaves TSX marketplace-manager.tsx ✅

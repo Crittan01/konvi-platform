@@ -17,6 +17,7 @@ Referencia oficial:
 import logging
 import asyncio
 import httpx
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from dependencies.auth import _get_service_client
@@ -172,11 +173,41 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
         logger.error("Error decrementando stock para orden MeLi %s: %s", order_id, e)
 
 
+def _upsert_meli_contact(buyer: dict, tenant_id: str, supabase) -> str | None:
+    """
+    Crea o actualiza un contacto desde los datos del comprador MeLi.
+    Retorna contact_id si hay teléfono disponible; None si no hay datos suficientes.
+    MeLi expone phone en billing_info para vendedores verificados.
+    """
+    phone = (
+        (buyer.get("billing_info") or {}).get("phone")
+        or buyer.get("phone")
+        or None
+    )
+    if not phone:
+        return None
+
+    buyer_name = (
+        f"{buyer.get('first_name', '')} {buyer.get('last_name', '')}".strip()
+        or buyer.get("nickname")
+        or None
+    )
+    try:
+        result = supabase.table("contacts").upsert(
+            {"tenant_id": tenant_id, "phone": str(phone).strip(), "name": buyer_name},
+            on_conflict="tenant_id,phone",
+        ).execute()
+        return result.data[0]["id"] if result.data else None
+    except Exception as e:
+        logger.warning("No se pudo crear/actualizar contacto MeLi (phone=%s): %s", phone, e)
+        return None
+
+
 async def _process_order(resource: str, tenant_id: str, access_token: str, supabase):
     """
     Crea o actualiza un pedido MeLi en nuestra tabla orders.
-    Al crear, vincula variation_id en order_items y decrementa stock si el pedido
-    ya viene confirmado/pagado desde MeLi.
+    Al crear, vincula variation_id en order_items, crea contacto si hay teléfono
+    y decrementa stock si el pedido llega confirmado/pagado desde MeLi.
     """
     order_data = await _fetch_meli_resource(resource, access_token)
     if not order_data:
@@ -208,17 +239,24 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
             }).eq("id", existing.data["id"]).eq("tenant_id", tenant_id).execute()
             logger.info("Orden MeLi %s → status %s (tenant %s)", meli_order_id, internal_status, tenant_id)
     else:
+        # Crear contacto si hay teléfono disponible
+        contact_id = _upsert_meli_contact(buyer, tenant_id, supabase)
+
         # Resolver variation_id para cada item del pedido
         meli_order_items = order_data.get("order_items", [])
         meli_item_ids    = [item.get("item", {}).get("id", "") for item in meli_order_items if item.get("item", {}).get("id")]
         variation_map    = _resolve_variation_ids(meli_item_ids, tenant_id, supabase)
 
-        order_result = supabase.table("orders").insert({
+        order_payload = {
             "tenant_id":    tenant_id,
             "status":       internal_status,
             "total_amount": total_amount,
             "notes":        notes,
-        }).execute()
+        }
+        if contact_id:
+            order_payload["contact_id"] = contact_id
+
+        order_result = supabase.table("orders").insert(order_payload).execute()
 
         if order_result.data:
             new_order_id = order_result.data[0]["id"]
@@ -241,18 +279,20 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
             if internal_status == "confirmed":
                 _decrement_stock_for_meli_order(new_order_id, tenant_id, supabase)
 
-            logger.info("Orden MeLi %s creada → id %s, status=%s (tenant %s)",
-                        meli_order_id, new_order_id, internal_status, tenant_id)
+            logger.info("Orden MeLi %s creada → id %s, status=%s, contact=%s (tenant %s)",
+                        meli_order_id, new_order_id, internal_status, contact_id, tenant_id)
 
 
 async def _process_shipment(resource: str, tenant_id: str, access_token: str, supabase):
     """
-    Actualiza el estado de la orden asociada al envío.
+    Actualiza el estado de la orden asociada al envío y persiste el tracking.
 
     MeLi envía el shipment_id en el recurso. El shipment contiene order_id,
     que usamos para buscar la orden en Supabase por su campo notes.
 
     Solo avanza el estado — nunca retrocede (shipped no vuelve a processing).
+    El tracking (tracking_number, carrier, estimated_delivery) se persiste en
+    order_tracking independientemente del avance de estado de la orden.
     """
     shipment_data = await _fetch_meli_resource(resource, access_token)
     if not shipment_data:
@@ -262,9 +302,8 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
     shipment_status = shipment_data.get("status", "")
     meli_order_id   = str(shipment_data.get("order_id", ""))
 
-    new_order_status = MELI_SHIPMENT_ORDER_STATUS_MAP.get(shipment_status)
-    if not new_order_status or not meli_order_id:
-        logger.info("Shipment MeLi %s status=%s — sin acción", shipment_id, shipment_status)
+    if not meli_order_id:
+        logger.info("Shipment MeLi %s sin order_id — sin acción", shipment_id)
         return
 
     # Buscar la orden por el MeLi order ID almacenado en notes
@@ -278,30 +317,71 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
         .execute()
     )
 
-    if not existing.data:
+    order_id = existing.data["id"] if existing.data else None
+
+    # Actualizar estado de la orden si el shipment implica un avance
+    new_order_status = MELI_SHIPMENT_ORDER_STATUS_MAP.get(shipment_status)
+    if order_id and new_order_status:
+        current_status = existing.data["status"]
+        STATUS_RANK = {"pending": 0, "confirmed": 1, "processing": 2, "shipped": 3, "delivered": 4, "cancelled": 5}
+        if STATUS_RANK.get(new_order_status, 0) > STATUS_RANK.get(current_status, 0):
+            supabase.table("orders").update({
+                "status": new_order_status,
+            }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
+            logger.info("Orden MeLi %s → status %s (vía shipment %s, tenant %s)",
+                        meli_order_id, new_order_status, shipment_id, tenant_id)
+        else:
+            logger.info("Shipment MeLi %s: estado %s no avanza sobre %s — omitido",
+                        shipment_id, new_order_status, current_status)
+    elif not existing.data:
         logger.warning("Shipment MeLi %s: no se encontró orden con notes like '%s%%' (tenant %s)",
                        shipment_id, notes_prefix, tenant_id)
-        return
 
-    current_status = existing.data["status"]
-    order_id       = existing.data["id"]
+    # Persistir tracking en order_tracking (aunque la orden no haya avanzado de estado)
+    if order_id and shipment_id:
+        tracking_number = shipment_data.get("tracking_number")
+        carrier         = (shipment_data.get("shipping_option") or {}).get("name")
+        tracking_url    = shipment_data.get("tracking_url")
 
-    # Definir orden de estados para evitar retrocesos
-    STATUS_RANK = {"pending": 0, "confirmed": 1, "processing": 2, "shipped": 3, "delivered": 4, "cancelled": 5}
-    current_rank = STATUS_RANK.get(current_status, 0)
-    new_rank     = STATUS_RANK.get(new_order_status, 0)
+        estimated_delivery = None
+        est_final = shipment_data.get("estimated_delivery_final") or {}
+        if est_final.get("date"):
+            try:
+                estimated_delivery = str(est_final["date"])[:10]   # YYYY-MM-DD
+            except Exception:
+                pass
 
-    if new_rank <= current_rank:
-        logger.info("Shipment MeLi %s: estado %s no avanza sobre %s — omitido",
-                    shipment_id, new_order_status, current_status)
-        return
-
-    supabase.table("orders").update({
-        "status": new_order_status,
-    }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
-
-    logger.info("Orden MeLi %s → status %s (vía shipment %s, tenant %s)",
-                meli_order_id, new_order_status, shipment_id, tenant_id)
+        try:
+            existing_tracking = (
+                supabase.table("order_tracking")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("provider", "mercadolibre")
+                .eq("external_id", shipment_id)
+                .maybe_single()
+                .execute()
+            )
+            tracking_payload = {
+                "tenant_id":          tenant_id,
+                "order_id":           order_id,
+                "provider":           "mercadolibre",
+                "external_id":        shipment_id,
+                "status":             shipment_status,
+                "tracking_number":    tracking_number,
+                "tracking_url":       tracking_url,
+                "carrier":            carrier,
+                "estimated_delivery": estimated_delivery,
+                "raw":                shipment_data,
+            }
+            if existing_tracking.data:
+                supabase.table("order_tracking").update(tracking_payload).eq(
+                    "id", existing_tracking.data["id"]
+                ).execute()
+            else:
+                supabase.table("order_tracking").insert(tracking_payload).execute()
+            logger.info("Tracking MeLi shipment %s → %s (orden %s)", shipment_id, shipment_status, order_id)
+        except Exception as track_err:
+            logger.warning("No se pudo persistir tracking MeLi shipment %s: %s", shipment_id, track_err)
 
 
 async def _process_notification(topic: str, resource: str, meli_user_id: str):
@@ -324,10 +404,16 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
         item_data = await _fetch_meli_resource(resource, access_token)
         if item_data:
             supabase.table("marketplace_listings").update({
-                "status":         item_data.get("status", "active"),
-                "external_price": item_data.get("price"),
+                "status":          item_data.get("status", "active"),
+                "external_price":  item_data.get("price"),
+                "meli_title":      item_data.get("title"),
+                "meli_thumbnail":  item_data.get("thumbnail"),
+                "meli_condition":  item_data.get("condition"),
+                "meli_category_id": item_data.get("category_id"),
+                "meli_attributes": item_data.get("attributes"),
+                "synced_at":       datetime.now(timezone.utc).isoformat(),
             }).eq("tenant_id", tenant_id).eq("external_id", item_data.get("id")).execute()
-            logger.info("Listing MeLi %s → status %s (tenant %s)",
+            logger.info("Listing MeLi %s → status %s (pull completo, tenant %s)",
                         item_data.get("id"), item_data.get("status"), tenant_id)
     elif topic == "shipments":
         await _process_shipment(resource, tenant_id, access_token, supabase)
