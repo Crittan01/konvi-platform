@@ -17,6 +17,7 @@ Flujo de sync automático (llamado desde orders.py y products.py):
 """
 import logging
 import asyncio
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Body
 from dependencies.auth import get_current_tenant, _get_service_client
 from integrations.meli_client import (
@@ -117,6 +118,20 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
             await update_item_listing(external_id, new_qty, price, original_price, access_token, variations_for_put)
         else:
             await update_item_quantity(external_id, new_qty, access_token)
+
+        # Actualizar campos pull desde el GET que ya hicimos (meli_item está disponible)
+        try:
+            supabase.table("marketplace_listings").update({
+                "synced_at":       datetime.now(timezone.utc).isoformat(),
+                "status":          meli_status,
+                "meli_title":      meli_item.get("title"),
+                "meli_thumbnail":  meli_item.get("thumbnail"),
+                "meli_condition":  meli_item.get("condition"),
+                "meli_category_id": meli_item.get("category_id"),
+                "meli_attributes": meli_item.get("attributes"),
+            }).eq("id", listing_id).execute()
+        except Exception as pull_err:
+            logger.warning("No se pudo actualizar pull fields listing %s: %s", listing_id, pull_err)
 
         logger.info("MeLi sync: item %s → %d u. / $%.0f (variation %s, meli_var %s)",
                     external_id, new_qty, price or 0, variation_id, meli_variation_id)
@@ -306,6 +321,24 @@ async def link_listing(
             insert_data["meli_variation_id"] = int(meli_variation_id)
 
         res = supabase.table("marketplace_listings").insert(insert_data).execute()
+
+        # Enriquecer inmediatamente con datos pull desde MeLi
+        if res.data:
+            listing_id = res.data[0]["id"]
+            try:
+                item_details = await get_item(meli_id, access_token)
+                supabase.table("marketplace_listings").update({
+                    "meli_title":      item_details.get("title"),
+                    "meli_thumbnail":  item_details.get("thumbnail"),
+                    "meli_condition":  item_details.get("condition"),
+                    "meli_category_id": item_details.get("category_id"),
+                    "meli_attributes": item_details.get("attributes"),
+                    "status":          item_details.get("status", "active"),
+                    "external_price":  item_details.get("price") or meli_price,
+                    "synced_at":       datetime.now(timezone.utc).isoformat(),
+                }).eq("id", listing_id).execute()
+            except Exception as enrich_err:
+                logger.warning("No se pudo enriquecer listing MeLi %s al vincular: %s", meli_id, enrich_err)
 
         return res.data[0] if res.data else {"ok": True}
 
@@ -629,15 +662,21 @@ async def import_from_meli(
 
     variation_id = var_res.data[0]["id"]
 
-    # 4. Crear vínculo en marketplace_listings
+    # 4. Crear vínculo en marketplace_listings (con pull fields incluidos)
     link_res = supabase.table("marketplace_listings").insert({
-        "tenant_id":    tenant_id,
-        "variation_id": variation_id,
-        "external_id":  meli_id,
-        "provider":     "mercadolibre",
-        "status":       meli_item.get("status", "active"),
-        "external_price": price,
-        "external_url": permalink,
+        "tenant_id":       tenant_id,
+        "variation_id":    variation_id,
+        "external_id":     meli_id,
+        "provider":        "mercadolibre",
+        "status":          meli_item.get("status", "active"),
+        "external_price":  price,
+        "external_url":    permalink,
+        "meli_title":      title,
+        "meli_thumbnail":  meli_item.get("thumbnail"),
+        "meli_condition":  meli_item.get("condition"),
+        "meli_category_id": meli_item.get("category_id"),
+        "meli_attributes": meli_item.get("attributes"),
+        "synced_at":       datetime.now(timezone.utc).isoformat(),
     }).execute()
 
     if not link_res.data:
