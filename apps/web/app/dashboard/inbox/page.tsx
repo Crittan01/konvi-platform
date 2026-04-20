@@ -15,6 +15,11 @@ interface Conversation {
   customer_phone: string
   status: 'bot_active' | 'human_takeover' | 'closed'
   created_at: string
+  updated_at?: string
+}
+
+interface ConversationRow extends Conversation {
+  messages?: Array<{ id: string; created_at: string }>
 }
 
 interface Message {
@@ -63,6 +68,7 @@ export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
+  const [messagesLoadError, setMessagesLoadError] = useState<string | null>(null)
   const [takingOver, setTakingOver] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
@@ -91,13 +97,24 @@ export default function InboxPage() {
   const loadConversations = useCallback(async () => {
     const { data } = await supabase
       .from('conversations')
-      .select('id, customer_phone, status, created_at')
-      .order('created_at', { ascending: false })
+      .select('id, customer_phone, status, created_at, updated_at, messages(id, created_at)')
+      .order('updated_at', { ascending: false })
       .limit(50)
-    setConversations(data || [])
+
+    const rows: ConversationRow[] = (data as ConversationRow[] | null) ?? []
+    setConversations(rows.map(({ id, customer_phone, status, created_at, updated_at }) => ({
+      id,
+      customer_phone,
+      status,
+      created_at,
+      updated_at,
+    })))
     setLoading(false)
-    if (data && data.length > 0 && !selectedId) {
-      setSelectedId(data[0].id)
+    if (rows.length > 0 && !selectedId) {
+      // Preferimos abrir una conversación que ya tenga historial para evitar
+      // mostrar un chat vacío cuando sí existen mensajes previos en otras conversaciones.
+      const preferred = rows.find((row) => (row.messages?.length ?? 0) > 0) ?? rows[0]
+      setSelectedId(preferred.id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -124,7 +141,13 @@ export default function InboxPage() {
       .eq('conversation_id', selectedId)
       .order('created_at', { ascending: true })
       .limit(100)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          setMessages([])
+          setMessagesLoadError('No se pudieron cargar los mensajes de esta conversación.')
+          return
+        }
+        setMessagesLoadError(null)
         setMessages(data || [])
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       })
@@ -350,7 +373,7 @@ export default function InboxPage() {
                     </div>
                     <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <Clock className="h-2.5 w-2.5" />
-                      {timeAgo(conv.created_at)}
+                      {timeAgo(conv.updated_at ?? conv.created_at)}
                     </span>
                   </div>
                   <div className="ml-4">
@@ -424,7 +447,12 @@ export default function InboxPage() {
 
             {/* Mensajes */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {messages.length === 0 ? (
+              {messagesLoadError ? (
+                <div className="text-center text-red-400 text-sm pt-12">
+                  <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-70" />
+                  {messagesLoadError}
+                </div>
+              ) : messages.length === 0 ? (
                 <div className="text-center text-muted-foreground text-sm pt-12">
                   <Circle className="h-8 w-8 mx-auto mb-2 opacity-20" />
                   Sin mensajes aún.

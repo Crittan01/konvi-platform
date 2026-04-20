@@ -152,7 +152,11 @@ async def get_meli_auth_url(
     if not meli_client.is_configured():
         raise HTTPException(
             status_code=503,
-            detail="MeLi no configurado en la plataforma. Se requiere IH-007 (registrar app MeLi)."
+            detail=(
+                "MeLi no configurado completamente en API. Verifica env vars "
+                "MELI_CLIENT_ID, MELI_CLIENT_SECRET, MELI_REDIRECT_URI, "
+                "MELI_AUTH_URL y MELI_OAUTH_STATE_SECRET."
+            ),
         )
     try:
         url = meli_client.get_auth_url(tenant_id, supabase)
