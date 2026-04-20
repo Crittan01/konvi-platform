@@ -193,6 +193,29 @@ def get_auth_url(tenant_id: str, supabase) -> str:
     return f"{MELI_AUTH_URL}?{params}"
 
 
+async def revoke_token(access_token: str) -> bool:
+    """
+    Revoca el access_token en MeLi para que deje de enviar webhooks al seller.
+    MeLi detiene las notificaciones cuando la autorización es revocada.
+
+    Referencia: https://developers.mercadolibre.com.ar/en_us/authentication-and-authorization
+    Endpoint: DELETE https://api.mercadolibre.com/oauth/token
+              Authorization: Bearer {access_token}
+
+    Retorna True si revocado correctamente. False si falla (no bloquea el disconnect local).
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.delete(
+            MELI_TOKEN_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if resp.status_code in (200, 204):
+            logger.info("Token MeLi revocado correctamente")
+            return True
+        logger.warning("Revocación MeLi respondió %d: %s", resp.status_code, resp.text[:200])
+        return False
+
+
 async def exchange_code(code: str) -> dict:
     """
     Intercambia el authorization code por access_token + refresh_token.
