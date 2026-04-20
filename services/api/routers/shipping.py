@@ -53,10 +53,11 @@ def _normalize_state(state: str, country: str) -> str:
 
 def _sanitize_dane_code(raw: Optional[str]) -> str:
     """
-    Normaliza posibles variantes legacy de DANE:
-    - "11001"                   -> "11001"
-    - "11001-000" / "11001000"  -> "11001"
-    - " 11 001 "                -> "11001"
+    Limpia un DANE dejando únicamente dígitos.
+    Ejemplos:
+    - "11001"        -> "11001"
+    - "11001-000"    -> "11001000"
+    - " 11 001 "     -> "11001"
     """
     if not raw:
         return ""
@@ -74,7 +75,9 @@ def _co_dane_codes(raw: Optional[str]) -> tuple[str, str]:
     if len(digits) == 5:
         return digits, f"{digits}000"
     if len(digits) == 8:
-        return digits[:5], digits
+        # Canoniza cualquier variante de 8 dígitos al patrón municipal stat_8digit.
+        base5 = digits[:5]
+        return base5, f"{base5}000"
     return "", ""
 
 
@@ -316,12 +319,13 @@ async def quote_shipment(
                 data = resp.get("data") if isinstance(resp, dict) else resp
                 return data if isinstance(data, list) else []
             except Exception as exc:
+                err_text = str(exc).strip() or repr(exc)
                 if attempt == 0:
-                    logger.warning("Envia carrier %s reintentando... (tenant %s): %s", carrier, tenant_id, exc)
+                    logger.warning("Envia carrier %s reintentando... (tenant %s): %s", carrier, tenant_id, err_text)
                     await asyncio.sleep(1)
                 else:
-                    carrier_errors[carrier] = str(exc)
-                    logger.warning("Envia carrier %s falló (tenant %s): %s", carrier, tenant_id, exc)
+                    carrier_errors[carrier] = err_text
+                    logger.warning("Envia carrier %s falló (tenant %s): %s", carrier, tenant_id, err_text)
         return []
 
     try:

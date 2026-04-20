@@ -8,6 +8,7 @@
    - Pickup scheduling
    - Reemplazar catálogo DANE estático del frontend por source dinámico desde Envia Queries (`/state`, `/city`) para no depender de snapshot local.
    - Agregar observabilidad específica al mapeo CO `DANE5 -> DANE8` y errores de cobertura por carrier/tenant.
+   - Definir estrategia de resiliencia por carrier ante timeouts upstream (reintentos por carrier + budget de timeout por ambiente).
 
 2. **Mercado Libre — pendientes menores**
    - Exponer tracking de `order_tracking` en detalle de pedido (UI Pedidos)
@@ -39,6 +40,7 @@ supabase db query --linked -f supabase/migrations/20260420000001_order_tracking.
 - Normalización DANE canónica (5 dígitos) en backend + fix del bug frontend `dane_code + "000"`
 - Sidebar con activación por integración para Inbox/Cotizador/Mercado Libre
 - Ajuste UX mobile en Shipping (grillas/cards sin sobreposición)
+- Manejo robusto de errores Envia `200` con `code/message` sin `data` (ahora se tratan como error real por carrier)
 
 ## No pendientes (cerrado en sesión 2026-04-19)
 
