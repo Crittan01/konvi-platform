@@ -390,7 +390,7 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
 
     tenant_id = await _find_tenant_by_meli_user(meli_user_id, supabase)
     if not tenant_id:
-        logger.warning("No se encontró tenant para meli_user_id=%s", meli_user_id)
+        logger.info("Webhook MeLi ignorado: meli_user_id=%s sin tenant asociado", meli_user_id)
         return
 
     access_token = await meli_client.get_valid_token(supabase, tenant_id)
