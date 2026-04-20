@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-19 (rev. 26)
+**Última actualización**: 2026-04-20 (rev. 27)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -63,6 +63,7 @@ Roles vivos en runtime:
 - con expiración
 - nonce one-time persistido en DB (anti-replay)
 - callback rechaza `state` faltante/inválido/expirado/reutilizado antes de persistir tokens
+- `/integrations/meli/auth-url` responde `503` con detalle explícito de env vars faltantes si la app MeLi no quedó configurada completa en API
 
 ### 6) Credenciales WhatsApp
 
@@ -88,6 +89,8 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 - Badge MeLi renderiza correctamente también cuando `Mercado Libre` es child item dentro de grupo sidebar.
 - `/dashboard/inventory` legacy quedó como redirección explícita a `/dashboard/catalog`.
 - Se eliminaron links operativos residuales que trataban Inventory como módulo standalone.
+- Inbox lista conversaciones por `last_interaction_at` y usa `created_at` solo como fallback visual.
+- Inbox muestra estado de error explícito si falla la carga del listado de conversaciones.
 
 ---
 

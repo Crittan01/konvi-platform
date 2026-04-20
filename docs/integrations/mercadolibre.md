@@ -1,6 +1,6 @@
 # Integración Mercado Libre (estado real)
 
-Última actualización: 2026-04-19
+Última actualización: 2026-04-20
 
 ---
 
@@ -32,6 +32,11 @@ La integración vive en `services/api`:
 - rechaza `state` expirado
 - rechaza replay (nonce reutilizado)
 - solo persiste tokens cuando el `state` valida y se consume
+
+`/api/v1/integrations/meli/auth-url`:
+
+- responde `503` si la configuración de plataforma está incompleta
+- detalla qué env vars faltan para habilitar OAuth seguro
 
 ---
 
