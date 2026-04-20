@@ -143,6 +143,7 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
                 supabase.table("product_variations")
                 .select("stock_quantity")
                 .eq("id", variation_id)
+                .eq("tenant_id", tenant_id)
                 .single()
                 .execute()
             )
@@ -153,7 +154,7 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
 
             supabase.table("product_variations").update(
                 {"stock_quantity": new_stock}
-            ).eq("id", variation_id).execute()
+            ).eq("id", variation_id).eq("tenant_id", tenant_id).execute()
 
             supabase.table("stock_movements").insert({
                 "tenant_id":    tenant_id,
@@ -204,7 +205,7 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
         if existing.data["status"] != internal_status:
             supabase.table("orders").update({
                 "status": internal_status,
-            }).eq("id", existing.data["id"]).execute()
+            }).eq("id", existing.data["id"]).eq("tenant_id", tenant_id).execute()
             logger.info("Orden MeLi %s → status %s (tenant %s)", meli_order_id, internal_status, tenant_id)
     else:
         # Resolver variation_id para cada item del pedido
@@ -297,7 +298,7 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
 
     supabase.table("orders").update({
         "status": new_order_status,
-    }).eq("id", order_id).execute()
+    }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
 
     logger.info("Orden MeLi %s → status %s (vía shipment %s, tenant %s)",
                 meli_order_id, new_order_status, shipment_id, tenant_id)

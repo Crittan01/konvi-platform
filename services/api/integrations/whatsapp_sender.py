@@ -1,4 +1,3 @@
-import os
 import logging
 from typing import Optional, Any
 import httpx
@@ -7,17 +6,14 @@ logger = logging.getLogger(__name__)
 
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
-_ENV_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
-_ENV_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
 
 REQUEST_TIMEOUT_SECONDS = 10
 
 
-def _get_tenant_wa_credentials(tenant_id: str, supabase: Any) -> tuple[str, str, bool]:
+def _get_tenant_wa_credentials(tenant_id: str, supabase: Any) -> tuple[str, str]:
     """
-    Returns (phone_number_id, access_token, explicitly_disconnected).
-    explicitly_disconnected=True means the tenant has a record but chose to disconnect —
-    env var fallback must be blocked in that case.
+    Returns (phone_number_id, access_token) only when WhatsApp is connected
+    for the tenant in tenant_integrations.
     """
     try:
         res = (
@@ -29,13 +25,13 @@ def _get_tenant_wa_credentials(tenant_id: str, supabase: Any) -> tuple[str, str,
             .execute()
         )
         if not res.data:
-            return "", "", False  # never configured — fallback allowed
+            return "", ""
         if res.data.get("status") != "connected":
-            return "", "", True   # explicitly disconnected — block fallback
+            return "", ""
         creds = res.data.get("credentials", {})
-        return creds.get("phone_number_id", ""), creds.get("access_token", ""), False
+        return creds.get("phone_number_id", ""), creds.get("access_token", "")
     except Exception:
-        return "", "", False
+        return "", ""
 
 
 async def send_whatsapp_text(
@@ -46,22 +42,12 @@ async def send_whatsapp_text(
 ) -> Optional[str]:
     phone_id = ""
     access_token = ""
-
     if tenant_id and supabase:
-        phone_id, access_token, explicitly_disconnected = _get_tenant_wa_credentials(tenant_id, supabase)
-        if explicitly_disconnected:
-            logger.warning("[META API] Tenant %s desconectó WhatsApp — envío bloqueado.", tenant_id)
-            return None
-    else:
-        explicitly_disconnected = False
-
-    if not phone_id or not access_token:
-        phone_id = _ENV_PHONE_ID
-        access_token = _ENV_ACCESS_TOKEN
+        phone_id, access_token = _get_tenant_wa_credentials(tenant_id, supabase)
 
     if not phone_id or not access_token:
         logger.error(
-            "Faltan credenciales WhatsApp (tenant_integrations y env vars vacíos) para tenant=%s",
+            "Faltan credenciales WhatsApp conectadas en tenant_integrations para tenant=%s",
             tenant_id or "unknown",
         )
         return None

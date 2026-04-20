@@ -13,7 +13,7 @@
 - El tenant opera su negocio desde la **Tenant Console**
 - La **Platform Console** (administración SaaS) es frontera futura — no implementada
 
-## Estado (2026-04-16 — rev. 23)
+## Estado (2026-04-19 — rev. 26)
 
 **Fases 1-11.5 completadas** (incl. Reclamos, Compras, Finanzas, Marketplace). Fase 12 (Platform Console) bloqueada por OQ-P01.
 
@@ -23,7 +23,7 @@
 | WhatsApp Connector | ✅ Live — HMAC validado, tenant resolver real |
 | AI Orchestrator | ✅ Live — polling 3s, gemini-2.5-flash, KB + pgvector inyectada |
 | API Gateway | ✅ Live — JWT, RBAC, 9 routers |
-| Supabase Cloud | ✅ Activo — 25 migraciones aplicadas, RLS activo |
+| Supabase Cloud | ✅ Activo — 35 migraciones aplicadas |
 | Platform Console | ❌ No implementada — Fase 12, bloqueante OQ-P01 |
 
 > Ver estado completo por módulo → `.context/01-state.md`
@@ -56,7 +56,7 @@ services/
 packages/
   auth/                    # Wrappers SSR Supabase Auth (parcial)
   db/                      # Mirrors parciales de migraciones (fuente real: supabase/migrations/)
-supabase/migrations/       # 25 migraciones SQL — FUENTE CANÓNICA del esquema
+supabase/migrations/       # 35 migraciones SQL — FUENTE CANÓNICA del esquema
 .context/                  # Contexto activo del sistema — leer primero
 .agents/                   # Reglas y workflows para AI agents
 docs/                      # Documentación técnica detallada

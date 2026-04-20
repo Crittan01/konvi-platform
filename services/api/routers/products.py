@@ -17,7 +17,7 @@ Endpoints:
 
 RBAC:
   owner / manager → lectura + escritura
-  agent           → solo lectura (403 en escritura)
+  operator        → solo lectura (403 en escritura)
 
 Nota: patch_variation dispara sync_meli_stock si stock_quantity cambia y hay listing activo.
 """

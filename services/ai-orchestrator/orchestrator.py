@@ -10,6 +10,18 @@ from tools.catalog_tool import get_tenant_catalog
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
+from conversation_contract import (
+    CONVERSATION_STATUS_BOT_ACTIVE,
+    CONVERSATION_STATUS_CLOSED,
+    CONVERSATION_STATUS_HUMAN_TAKEOVER,
+    PROCESSING_STATUS_FAILED,
+    PROCESSING_STATUS_PROCESSED,
+    PROCESSING_STATUS_SKIPPED,
+    SKIP_REASON_CLOSED,
+    SKIP_REASON_GUARDRAIL,
+    SKIP_REASON_HUMAN_TAKEOVER,
+    SKIP_REASON_NON_TEXT,
+)
 
 logger = logging.getLogger("orchestrator.core")
 
@@ -72,6 +84,53 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
     )
     # Invertir para orden cronológico
     return list(reversed(result.data or []))
+
+
+def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
+    """Lee el estado actual de la conversación para decidir si el bot puede responder."""
+    conv_res = (
+        supabase.table("conversations")
+        .select("status")
+        .eq("id", conversation_id)
+        .single()
+        .execute()
+    )
+    if not conv_res.data:
+        return CONVERSATION_STATUS_CLOSED
+    status = conv_res.data.get("status")
+    if status in {
+        CONVERSATION_STATUS_BOT_ACTIVE,
+        CONVERSATION_STATUS_HUMAN_TAKEOVER,
+        CONVERSATION_STATUS_CLOSED,
+    }:
+        return status
+    return CONVERSATION_STATUS_CLOSED
+
+
+def _set_conversation_status(supabase: Client, conversation_id: str, status: str) -> None:
+    """Actualiza el estado de conversación en contrato canónico."""
+    supabase.table("conversations").update({"status": status}).eq("id", conversation_id).execute()
+
+
+def _mark_message_processing(
+    supabase: Client,
+    message_id: str,
+    processing_status: str,
+    skip_reason: Optional[str] = None,
+    last_error: Optional[str] = None,
+) -> None:
+    """Registra el outcome explícito del procesamiento del inbound message."""
+    supabase.table("messages").update(
+        {
+            "processing_status": processing_status,
+            "processed": processing_status != "pending",
+            "processed_at": datetime.now(timezone.utc).isoformat()
+            if processing_status != "pending"
+            else None,
+            "skip_reason": skip_reason,
+            "last_error": last_error,
+        }
+    ).eq("id", message_id).execute()
 
 
 async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
@@ -156,18 +215,52 @@ async def build_and_run_orchestration(
       2. Llamar a Gemini con output estructurado Pydantic
       3. Validar con guardrails
       4. Enviar respuesta por WhatsApp (si es válida)
-      5. Persistir mensaje outbound + marcar inbound como processed
+      5. Persistir outbound + registrar processing_status del inbound
     """
-
-    # Ignorar mensajes que no sean texto (audio, imagen, etc.) por ahora
-    if content_type != "text":
-        logger.info(f"Mensaje {message_id} de tipo '{content_type}' ignorado (solo se procesa texto)")
-        _mark_processed(supabase, message_id)
-        return
 
     logger.info(f"[ORCH] Procesando mensaje {message_id} | conv={conversation_id}")
 
     try:
+        # 0) Revisar estado real de la conversación antes de responder
+        conversation_status = _get_conversation_status(supabase, conversation_id)
+        if conversation_status == CONVERSATION_STATUS_HUMAN_TAKEOVER:
+            logger.info("[ORCH] Mensaje %s omitido: conversación en human_takeover", message_id)
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_HUMAN_TAKEOVER,
+            )
+            return
+
+        if conversation_status == CONVERSATION_STATUS_CLOSED:
+            logger.info("[ORCH] Mensaje %s omitido: conversación cerrada", message_id)
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_CLOSED,
+            )
+            return
+
+        # Producto definido: no-text => escalar a humano, sin respuesta automática.
+        if content_type != "text":
+            logger.info(
+                "[ORCH] Mensaje %s no-text (%s): escalado a human_takeover",
+                message_id,
+                content_type,
+            )
+            _set_conversation_status(
+                supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_NON_TEXT,
+            )
+            return
+
         # ── 1. Resolver datos del tenant ──────────────────────────────────────
         tenant_res = supabase.table("tenants").select("name").eq("id", tenant_id).execute()
         tenant_name = tenant_res.data[0]["name"] if tenant_res.data else "Tienda"
@@ -239,7 +332,12 @@ async def build_and_run_orchestration(
         is_safe = validate_orchestrator_output(parsed)
         if not is_safe:
             logger.warning(f"[GUARDRAIL] Mensaje {message_id} rechazado por guardrails")
-            _mark_processed(supabase, message_id)
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_GUARDRAIL,
+            )
             return
 
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
@@ -264,27 +362,29 @@ async def build_and_run_orchestration(
                     "content_type": "text",
                     "content": parsed.response_text,
                     "processed": True,
+                    "processing_status": PROCESSING_STATUS_PROCESSED,
                 }).execute()
                 logger.info(f"[OUTBOUND] Respuesta enviada a {customer_phone}")
 
         # ── 8. Escalar a humano si es necesario ───────────────────────────────
         if parsed.requires_human:
-            supabase.table("conversations").update({
-                "status": "human_takeover"
-            }).eq("id", conversation_id).execute()
+            _set_conversation_status(
+                supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+            )
             logger.info(f"[ESCALATION] Conversación {conversation_id} marcada para agente humano")
 
         # ── 9. Marcar mensaje como procesado ──────────────────────────────────
-        _mark_processed(supabase, message_id)
+        _mark_message_processing(
+            supabase,
+            message_id,
+            processing_status=PROCESSING_STATUS_PROCESSED,
+        )
 
     except Exception as e:
         logger.error(f"[ORCH] Error orquestando mensaje {message_id}: {e}", exc_info=True)
-        # No marcar como processed — el worker reintentará en el próximo ciclo
-
-
-def _mark_processed(supabase: Client, message_id: str) -> None:
-    """Marca el mensaje como procesado con timestamp UTC."""
-    supabase.table("messages").update({
-        "processed": True,
-        "processed_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("id", message_id).execute()
+        _mark_message_processing(
+            supabase,
+            message_id,
+            processing_status=PROCESSING_STATUS_FAILED,
+            last_error=str(e)[:1000],
+        )

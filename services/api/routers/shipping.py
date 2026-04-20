@@ -306,11 +306,13 @@ async def confirm_rate(
         "service":            rate.service,
         "estimated_delivery": rate.delivery_date,
     }
-    supabase.table("shipments").update(update).eq("id", shipment_id).execute()
+    supabase.table("shipments").update(update).eq("id", shipment_id).eq("tenant_id", tenant_id).execute()
 
     order_id = result.data.get("order_id")
     if order_id:
-        supabase.table("orders").update({"shipping_cost": rate.total_price}).eq("id", order_id).execute()
+        supabase.table("orders").update(
+            {"shipping_cost": rate.total_price}
+        ).eq("id", order_id).eq("tenant_id", tenant_id).execute()
 
     return {"ok": True}
 

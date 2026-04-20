@@ -24,6 +24,8 @@ interface Message {
   content_type: string
   created_at: string
   processed: boolean
+  processing_status?: 'pending' | 'processed' | 'skipped' | 'failed'
+  skip_reason?: string | null
 }
 
 type FilterStatus = 'all' | 'bot_active' | 'human_takeover' | 'closed'
@@ -65,6 +67,7 @@ export default function InboxPage() {
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   // mobile: 'list' | 'chat'
@@ -117,7 +120,7 @@ export default function InboxPage() {
     if (!selectedId) return
     supabase
       .from('messages')
-      .select('id, direction, content, content_type, created_at, processed')
+      .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
       .eq('conversation_id', selectedId)
       .order('created_at', { ascending: true })
       .limit(100)
@@ -161,8 +164,32 @@ export default function InboxPage() {
   const updateStatus = async (status: Conversation['status']) => {
     if (!selectedId) return
     setTakingOver(true)
-    await supabase.from('conversations').update({ status }).eq('id', selectedId)
-    setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, status } : c))
+    setStatusError(null)
+
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) {
+      setStatusError('Sesión expirada.')
+      setTakingOver(false)
+      return
+    }
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Error al actualizar estado' }))
+        setStatusError(err.detail || 'Error al actualizar estado')
+      } else {
+        setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, status } : c))
+      }
+    } catch {
+      setStatusError('No se pudo actualizar el estado de la conversación.')
+    }
     setTakingOver(false)
   }
 
@@ -389,6 +416,11 @@ export default function InboxPage() {
                 )}
               </div>
             </div>
+            {statusError && (
+              <div className="px-4 py-2 text-[11px] text-red-400 bg-red-500/5 border-b border-red-500/20">
+                {statusError}
+              </div>
+            )}
 
             {/* Mensajes */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">

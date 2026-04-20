@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { shouldRenderMarketplaceBadge } from '@/lib/marketplace-badges'
 import {
   LayoutDashboard, MessageSquare, LogOut, ShoppingCart,
   Package, Users, Settings, Plug, Truck, BarChart2,
@@ -264,7 +265,7 @@ export default function SidebarClient({
                       {inboxBadge > 99 ? '99+' : inboxBadge}
                     </span>
                   )}
-                  {item.href === '/dashboard/marketplace' && meliBadge > 0 && (
+                  {shouldRenderMarketplaceBadge(item.href, meliBadge) && (
                     <span className="inline-flex items-center justify-center p-[2px] rounded-full bg-amber-100 text-amber-600 border border-amber-200">
                       <AlertCircle className="h-3 w-3" />
                     </span>
@@ -317,7 +318,12 @@ export default function SidebarClient({
                           `}
                         >
                           <child.icon className="h-3.5 w-3.5 shrink-0" />
-                          {child.label}
+                          <span className="flex-1">{child.label}</span>
+                          {shouldRenderMarketplaceBadge(child.href, meliBadge) && (
+                            <span className="inline-flex items-center justify-center p-[2px] rounded-full bg-amber-100 text-amber-600 border border-amber-200">
+                              <AlertCircle className="h-3 w-3" />
+                            </span>
+                          )}
                         </Link>
                       )
                     })}

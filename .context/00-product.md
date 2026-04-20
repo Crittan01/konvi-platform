@@ -117,7 +117,7 @@ commerce-ops-platform/
 │   └── ai-orchestrator/         # Polling Gemini — daemon thread en Render Free
 ├── packages/
 │   └── auth/                    # Wrappers Supabase SSR (parcial — 2 archivos)
-└── supabase/migrations/         # 27 migraciones — FUENTE CANÓNICA de esquema DB
+└── supabase/migrations/         # 35 migraciones — FUENTE CANÓNICA de esquema DB
 ```
 
 **Nota crítica sobre Route Groups:** Las carpetas `(nombre)` en Next.js no cambian las URLs.

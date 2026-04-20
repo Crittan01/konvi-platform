@@ -54,16 +54,22 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
     """
     res = (
         supabase.table("conversations")
-        .select("id")
+        .select("id, status")
         .eq("tenant_id", tenant_id)
         .eq("customer_phone", customer_phone)
         .execute()
     )
 
     if res.data:
-        conversation_id = res.data[0]["id"]
-        # Reactivar si estaba cerrada
-        supabase.table("conversations").update({"status": "bot_active"}).eq("id", conversation_id).execute()
+        conversation = res.data[0]
+        conversation_id = conversation["id"]
+        current_status = conversation.get("status")
+
+        # Si hay un valor fuera del contrato canónico, vuelve al default seguro.
+        if current_status not in {"bot_active", "human_takeover", "closed"}:
+            supabase.table("conversations").update(
+                {"status": "bot_active"}
+            ).eq("id", conversation_id).execute()
         logger.debug(f"Conversación existente reutilizada: {conversation_id}")
     else:
         new_conv = supabase.table("conversations").insert({
@@ -84,10 +90,10 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
     Flujo:
       1. Resuelve el tenant por meta_waba_id (multi-tenant real — sin hardcodes).
       2. Find-or-create de la conversación del cliente.
-      3. Inserta el mensaje como 'inbound' con processed=False para el Orchestrator.
+      3. Inserta el mensaje inbound con processing_status='pending'.
 
-    El campo `processed=False` es la señal que el AI Orchestrator usa para
-    saber qué mensajes procesar en su loop de polling.
+    El AI Orchestrator procesa únicamente mensajes inbound con
+    processing_status='pending'.
     """
     try:
         supabase = get_supabase()
@@ -101,7 +107,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
     content_type: str = data.get("content_type", "text")
     content: str = data.get("content", "")
 
-    if not customer_phone or not content:
+    if not customer_phone or (content_type == "text" and not content):
         logger.warning(f"Mensaje descartado: customer_phone o content vacíos. data={data}")
         return
 
@@ -114,7 +120,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
         # ── 2. Find-or-Create Conversación ───────────────────────────────────
         conversation_id = _upsert_conversation(supabase, tenant_id, customer_phone)
 
-        # ── 3. Insertar Mensaje como Inbound (processed=False) ────────────────
+        # ── 3. Insertar Mensaje inbound (processing_status=pending) ───────────
         supabase.table("messages").insert({
             "conversation_id": conversation_id,
             "tenant_id": tenant_id,
@@ -123,6 +129,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
             "content": content,
             "meta_message_id": meta_message_id,
             "processed": False,
+            "processing_status": "pending",
         }).execute()
 
         logger.info(
@@ -132,4 +139,3 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
 
     except Exception as e:
         logger.error(f"Error fatal en db_persistence: {e}", exc_info=True)
-

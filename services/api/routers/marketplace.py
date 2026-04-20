@@ -66,6 +66,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
             supabase.table("product_variations")
             .select("price, compare_at_price")
             .eq("id", variation_id)
+            .eq("tenant_id", tenant_id)
             .single()
             .execute()
         )
@@ -181,6 +182,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
             var_res = (
                 supabase.table("product_variations")
                 .select("id, sku, stock_quantity, products(title)")
+                .eq("tenant_id", tenant_id)
                 .in_("id", linked_variation_ids)
                 .execute()
             )

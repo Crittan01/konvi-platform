@@ -8,9 +8,10 @@ export const metadata = {
   description: 'Conectores activos para tu negocio.',
 }
 
-const MELI_CLIENT_ID    = process.env.MELI_CLIENT_ID ?? ''
-const MELI_REDIRECT_URI = process.env.MELI_REDIRECT_URI ?? 'https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback'
-const MELI_AUTH_URL     = process.env.MELI_AUTH_URL ?? 'https://auth.mercadolibre.com.co/authorization'
+const API_BASE_URL =
+  process.env.API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'https://commerce-ops-api.onrender.com'
 
 type Integration  = { provider: string; status: string; meta: Record<string, string> }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
@@ -55,11 +56,6 @@ export default async function IntegrationsPage({
   const waConnected    = waInt.status === 'connected'
   const tgConnected    = !!(tgConfig?.enabled && tgConfig?.config?.bot_token && tgConfig?.config?.chat_id)
   const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected].filter(Boolean).length
-
-  const meliState   = tenantId ? Buffer.from(tenantId).toString('base64url') : ''
-  const meliAuthUrl = MELI_CLIENT_ID && meliState
-    ? `${MELI_AUTH_URL}?response_type=code&client_id=${MELI_CLIENT_ID}&redirect_uri=${encodeURIComponent(MELI_REDIRECT_URI)}&state=${meliState}`
-    : null
 
   // ── Server Actions ────────────────────────────────────────────────────────
 
@@ -221,7 +217,7 @@ export default async function IntegrationsPage({
       tgConfig={tgConfig}
       tgConnected={tgConnected}
       connectedCount={connectedCount}
-      meliAuthUrl={meliAuthUrl}
+      apiBaseUrl={API_BASE_URL}
       isOwner={isOwner}
       canWrite={canWrite}
       connectedParam={searchParams.connected}

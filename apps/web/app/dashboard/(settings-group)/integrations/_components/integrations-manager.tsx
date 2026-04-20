@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,7 +25,7 @@ interface Props {
   tgConfig?: NotifSetting
   tgConnected: boolean
   connectedCount: number
-  meliAuthUrl: string | null
+  apiBaseUrl: string
   isOwner: boolean
   canWrite: boolean
   connectedParam?: string
@@ -88,7 +89,7 @@ function MetaPill({ label, value }: { label: string; value: string }) {
 export function IntegrationsManager(props: Props) {
   const {
     waInt, waConnected, enviaInt, enviaConnected, meliInt, meliConnected,
-    tgConfig, tgConnected, connectedCount, meliAuthUrl,
+    tgConfig, tgConnected, connectedCount, apiBaseUrl,
     isOwner, canWrite, connectedParam, errorParam, tgTest, tgMsg,
     saveEnviaKey, disconnectEnvia, disconnectMeli,
     saveTelegram, disconnectTelegram, testTelegram,
@@ -97,7 +98,39 @@ export function IntegrationsManager(props: Props) {
 
   const [activeFilter, setActiveFilter] = useState<Category>('todas')
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [connectingMeli, setConnectingMeli] = useState(false)
+  const [meliStartError, setMeliStartError] = useState<string | null>(null)
   const toggle = (id: string) => setOpen(p => ({ ...p, [id]: !p[id] }))
+  const supabase = createClient()
+
+  const startMeliOAuth = async () => {
+    setMeliStartError(null)
+    setConnectingMeli(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) {
+        setMeliStartError('Sesión expirada. Inicia sesión nuevamente.')
+        return
+      }
+
+      const res = await fetch(`${apiBaseUrl}/api/v1/integrations/meli/auth-url`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const body = await res.json().catch(() => ({} as { detail?: string; auth_url?: string }))
+      if (!res.ok || !body.auth_url) {
+        setMeliStartError(body?.detail || 'No se pudo iniciar OAuth de Mercado Libre.')
+        return
+      }
+
+      window.location.href = body.auth_url
+    } catch {
+      setMeliStartError('No se pudo contactar el API para iniciar OAuth de Mercado Libre.')
+    } finally {
+      setConnectingMeli(false)
+    }
+  }
 
   const cardCategories: Record<string, Category> = {
     whatsapp: 'canal',
@@ -139,6 +172,12 @@ export function IntegrationsManager(props: Props) {
         <div className="flex items-center gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
           <AlertCircle className="h-4 w-4 shrink-0" />
           Error al conectar: {errorParam}. Intenta de nuevo.
+        </div>
+      )}
+      {meliStartError && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {meliStartError}
         </div>
       )}
       {tgTest === 'success' && (
@@ -419,17 +458,15 @@ export function IntegrationsManager(props: Props) {
                           </p>
                         </div>
                       </div>
-                      {meliAuthUrl ? (
-                        <a href={meliAuthUrl} className="block">
-                          <Button size="sm" className="w-full h-8 text-xs gap-1.5 bg-yellow-500 hover:bg-yellow-400 text-black">
-                            <ExternalLink className="h-3.5 w-3.5" /> Conectar con Mercado Libre
-                          </Button>
-                        </a>
-                      ) : (
-                        <Button size="sm" className="w-full h-8 text-xs" disabled>
-                          Conectar con Mercado Libre <span className="ml-2 opacity-60">(configuración pendiente)</span>
-                        </Button>
-                      )}
+                      <Button
+                        size="sm"
+                        className="w-full h-8 text-xs gap-1.5 bg-yellow-500 hover:bg-yellow-400 text-black"
+                        onClick={startMeliOAuth}
+                        disabled={connectingMeli}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        {connectingMeli ? 'Conectando...' : 'Conectar con Mercado Libre'}
+                      </Button>
                     </>
                   )}
                 </div>

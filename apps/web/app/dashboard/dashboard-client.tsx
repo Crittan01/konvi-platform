@@ -198,7 +198,7 @@ export default function DashboardClient({
               urgent={ops.pendingOrders > 0}
             />
             <OpsCard
-              href="/dashboard/inventory"
+              href="/dashboard/catalog"
               label="Bajo stock"
               value={ops.lowStockCount}
               icon={AlertTriangle}

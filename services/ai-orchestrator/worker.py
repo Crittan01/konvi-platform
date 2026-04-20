@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
 
 logger = logging.getLogger("orchestrator.worker")
 
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "3"))
+MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "3"))
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
@@ -41,13 +43,13 @@ class OrchestratorWorker:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def _poll_cycle(self):
-        """Busca mensajes inbound no procesados y los orquesta."""
+        """Busca mensajes inbound pendientes y los orquesta."""
         # Selección de mensajes pendientes — hasta 10 por ciclo para no saturar
         result = (
             self.supabase.table("messages")
-            .select("id, tenant_id, conversation_id, content, content_type")
+            .select("id, tenant_id, conversation_id, content, content_type, processing_attempts")
             .eq("direction", "inbound")
-            .eq("processed", False)
+            .eq("processing_status", "pending")
             .order("created_at", desc=False)
             .limit(10)
             .execute()
@@ -62,6 +64,26 @@ class OrchestratorWorker:
         # Procesar en secuencia para no sobrecargar la API de Gemini
         for msg in pending:
             try:
+                attempts = int(msg.get("processing_attempts") or 0) + 1
+                if attempts > MAX_PROCESSING_ATTEMPTS:
+                    self.supabase.table("messages").update({
+                        "processing_status": "failed",
+                        "processed": True,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                        "last_error": "max_attempts_exceeded",
+                    }).eq("id", msg["id"]).execute()
+                    logger.warning(
+                        "Mensaje %s marcado failed por max_attempts=%s",
+                        msg["id"],
+                        MAX_PROCESSING_ATTEMPTS,
+                    )
+                    continue
+
+                self.supabase.table("messages").update({
+                    "processing_attempts": attempts,
+                    "last_error": None,
+                }).eq("id", msg["id"]).execute()
+
                 await build_and_run_orchestration(
                     supabase=self.supabase,
                     message_id=msg["id"],
@@ -74,4 +96,4 @@ class OrchestratorWorker:
                 logger.error(
                     f"Error procesando mensaje {msg['id']}: {e}", exc_info=True
                 )
-                # No re-lanzar — continuar con el siguiente mensaje
+                # El core orquestador intenta registrar failed. Continuar con el siguiente.

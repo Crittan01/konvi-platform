@@ -27,6 +27,10 @@ import os
 import httpx
 import base64
 import logging
+import hashlib
+import hmac
+import json
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -44,6 +48,8 @@ MELI_AUTH_URL = os.getenv("MELI_AUTH_URL", "https://auth.mercadolibre.com.co/aut
 MELI_CLIENT_ID     = os.getenv("MELI_CLIENT_ID", "")
 MELI_CLIENT_SECRET = os.getenv("MELI_CLIENT_SECRET", "")
 MELI_REDIRECT_URI  = os.getenv("MELI_REDIRECT_URI", "")
+MELI_OAUTH_STATE_SECRET = os.getenv("MELI_OAUTH_STATE_SECRET", "")
+MELI_OAUTH_STATE_TTL_SECONDS = int(os.getenv("MELI_OAUTH_STATE_TTL_SECONDS", "600"))
 
 # Atributos que se traen en el multiget para no pagar ancho de banda innecesario
 ITEM_ATTRIBUTES = "id,title,status,price,available_quantity,permalink,thumbnail,variations"
@@ -51,15 +57,133 @@ ITEM_ATTRIBUTES = "id,title,status,price,available_quantity,permalink,thumbnail,
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
 
-def get_auth_url(tenant_id: str) -> str:
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _b64url_decode(raw: str) -> bytes:
+    padding = "=" * (-len(raw) % 4)
+    return base64.urlsafe_b64decode(f"{raw}{padding}")
+
+
+def _state_secret_bytes() -> bytes:
+    if not MELI_OAUTH_STATE_SECRET:
+        raise ValueError("MELI_OAUTH_STATE_SECRET no configurado")
+    return MELI_OAUTH_STATE_SECRET.encode()
+
+
+def _sign_state_payload(payload_b64: str) -> str:
+    digest = hmac.new(_state_secret_bytes(), payload_b64.encode(), hashlib.sha256).digest()
+    return _b64url_encode(digest)
+
+
+def _hash_nonce(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode()).hexdigest()
+
+
+def _persist_oauth_nonce(supabase, tenant_id: str, nonce: str, expires_at: datetime) -> None:
+    supabase.table("integration_oauth_states").insert(
+        {
+            "tenant_id": tenant_id,
+            "provider": "mercadolibre",
+            "nonce_hash": _hash_nonce(nonce),
+            "expires_at": expires_at.isoformat(),
+        }
+    ).execute()
+
+
+def issue_oauth_state(supabase, tenant_id: str) -> str:
+    """Genera state firmado con expiración y nonce de un solo uso."""
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=MELI_OAUTH_STATE_TTL_SECONDS)
+    nonce = secrets.token_urlsafe(24)
+    payload = {
+        "tid": tenant_id,
+        "nonce": nonce,
+        "iat": int(now.timestamp()),
+        "exp": int(expires_at.timestamp()),
+    }
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
+    signature_b64 = _sign_state_payload(payload_b64)
+    _persist_oauth_nonce(supabase, tenant_id, nonce, expires_at)
+    return f"{payload_b64}.{signature_b64}"
+
+
+def validate_and_consume_oauth_state(supabase, state: str) -> Optional[str]:
+    """
+    Valida state firmado y consume nonce one-time.
+    Retorna tenant_id si es válido; None si está manipulado, expirado o reutilizado.
+    """
+    try:
+        payload_b64, signature_b64 = state.split(".", 1)
+    except ValueError:
+        return None
+
+    expected_sig = _sign_state_payload(payload_b64)
+    if not hmac.compare_digest(signature_b64, expected_sig):
+        return None
+
+    try:
+        payload = json.loads(_b64url_decode(payload_b64))
+        tenant_id = str(payload["tid"])
+        nonce = str(payload["nonce"])
+        exp = int(payload["exp"])
+    except Exception:
+        return None
+
+    now = datetime.now(timezone.utc)
+    if now.timestamp() > exp:
+        return None
+
+    lookup = (
+        supabase.table("integration_oauth_states")
+        .select("id, expires_at, consumed_at")
+        .eq("provider", "mercadolibre")
+        .eq("tenant_id", tenant_id)
+        .eq("nonce_hash", _hash_nonce(nonce))
+        .maybe_single()
+        .execute()
+    )
+    row = lookup.data
+    if not row:
+        return None
+    if row.get("consumed_at") is not None:
+        return None
+
+    try:
+        stored_exp = datetime.fromisoformat(str(row["expires_at"]))
+        if stored_exp.tzinfo is None:
+            stored_exp = stored_exp.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+    if stored_exp < now:
+        return None
+
+    consume = (
+        supabase.table("integration_oauth_states")
+        .update({"consumed_at": now.isoformat()})
+        .eq("id", row["id"])
+        .is_("consumed_at", "null")
+        .execute()
+    )
+    if not consume.data:
+        return None
+
+    return tenant_id
+
+
+def get_auth_url(tenant_id: str, supabase) -> str:
     """
     Genera la URL de autorización OAuth para redirigir al tenant.
-    El state codifica el tenant_id para recuperarlo en el callback.
+    El state es firmado, expira y es one-time (nonce anti-replay).
     """
-    if not MELI_CLIENT_ID or not MELI_REDIRECT_URI:
-        raise ValueError("MELI_CLIENT_ID y MELI_REDIRECT_URI deben estar configurados")
+    if not MELI_CLIENT_ID or not MELI_REDIRECT_URI or not MELI_OAUTH_STATE_SECRET:
+        raise ValueError(
+            "MELI_CLIENT_ID, MELI_REDIRECT_URI y MELI_OAUTH_STATE_SECRET deben estar configurados"
+        )
 
-    state = base64.urlsafe_b64encode(tenant_id.encode()).decode()
+    state = issue_oauth_state(supabase, tenant_id)
     params = (
         f"response_type=code"
         f"&client_id={MELI_CLIENT_ID}"
@@ -67,14 +191,6 @@ def get_auth_url(tenant_id: str) -> str:
         f"&state={state}"
     )
     return f"{MELI_AUTH_URL}?{params}"
-
-
-def decode_state(state: str) -> Optional[str]:
-    """Decodifica el state para recuperar el tenant_id."""
-    try:
-        return base64.urlsafe_b64decode(state.encode()).decode()
-    except Exception:
-        return None
 
 
 async def exchange_code(code: str) -> dict:
@@ -117,7 +233,12 @@ async def refresh_token(refresh_tok: str) -> dict:
 
 def is_configured() -> bool:
     """Verifica si las credenciales de la app MeLi están configuradas."""
-    return bool(MELI_CLIENT_ID and MELI_CLIENT_SECRET and MELI_REDIRECT_URI)
+    return bool(
+        MELI_CLIENT_ID
+        and MELI_CLIENT_SECRET
+        and MELI_REDIRECT_URI
+        and MELI_OAUTH_STATE_SECRET
+    )
 
 
 # ─── Token por tenant ─────────────────────────────────────────────────────────
@@ -378,9 +499,9 @@ async def update_item_listing(
     item_id: str,
     quantity: int,
     price: float,
-    original_price: float | None,
+    original_price: Optional[float],
     access_token: str,
-    meli_variations: list | None = None,
+    meli_variations: Optional[list] = None,
 ) -> dict:
     """
     Sincroniza stock + precio en un solo PUT.
