@@ -61,102 +61,46 @@ def _sanitize_dane_code(raw: Optional[str]) -> str:
     if not raw:
         return ""
     digits = re.sub(r"\D", "", str(raw))
-    if len(digits) == 8 and digits.endswith("000"):
-        return digits[:5]
     return digits
 
 
-def _extract_city_code(entry: dict) -> str:
+def _co_dane_codes(raw: Optional[str]) -> tuple[str, str]:
     """
-    Intenta extraer el código de ciudad desde distintos shapes de Queries/Geocodes.
+    Normaliza DANE para runtime CO:
+    - Entrada UI habitual: 5 dígitos municipio (ej. 11001)
+    - Payload Envia efectivo por carrier: 8 dígitos (stat_8digit, ej. 11001000)
     """
-    for key in ("code", "city_code", "cityCode", "id", "zipcode", "postalCode"):
-        value = entry.get(key)
-        if value is None:
-            continue
-        digits = _sanitize_dane_code(str(value))
-        if len(digits) >= 5:
-            return digits[:5]
-    return ""
+    digits = _sanitize_dane_code(raw)
+    if len(digits) == 5:
+        return digits, f"{digits}000"
+    if len(digits) == 8:
+        return digits[:5], digits
+    return "", ""
 
 
-def _extract_state_code(entry: dict) -> str:
-    """
-    Extrae código/state token en distintos formatos de respuesta Envia.
-    """
-    for key in ("state_code", "stateCode", "state", "province_code", "provinceCode", "province"):
-        value = entry.get(key)
-        if value is None:
-            continue
-        raw = str(value).strip()
-        if not raw:
-            continue
-        if len(raw) <= 3:
-            return raw.upper()
-        return _normalize_state(raw, "CO")
-    return ""
-
-
-def _extract_city_name(entry: dict) -> str:
-    for key in ("name", "city", "description", "label"):
-        value = entry.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-async def _validate_co_address_with_envia(client: EnviaClient, addr: "Address", label: str) -> None:
+async def _validate_co_address_with_envia(_client: EnviaClient, addr: "Address", label: str) -> None:
     """
     Valida dirección de Colombia contra APIs oficiales de Envia antes de cotizar.
     Reglas runtime:
     - country=CO
-    - dane_code obligatorio y de 5 dígitos
-    - city/postalCode enviados a Shipping API como ese DANE
+    - dane_code de entrada aceptado en 5 u 8 dígitos
+    - city/postalCode enviados a Shipping API en DANE 8 dígitos
     """
-    normalized_dane = _sanitize_dane_code(addr.dane_code or addr.postalCode)
-    if len(normalized_dane) != 5:
+    dane5, dane8 = _co_dane_codes(addr.dane_code or addr.postalCode)
+    if not dane5 or not dane8:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"La dirección de {label} requiere código DANE de municipio válido (5 dígitos). "
+                f"La dirección de {label} requiere código DANE válido (5 u 8 dígitos). "
                 "Selecciona departamento y ciudad desde el formulario."
             ),
         )
 
-    addr.dane_code = normalized_dane
-    addr.postalCode = normalized_dane
-
-    # Validación principal para CO: Queries API city-by-code.
-    # Para Colombia, Quote usa DANE (5 dígitos) en city/postalCode.
-    queries_verified = False
-    resolved_state = ""
-    resolved_city = ""
-    queries_error: Optional[str] = None
-    try:
-        city_data = await client.get_city_by_code(normalized_dane)
-        candidate_code = _extract_city_code(city_data)
-        if candidate_code == normalized_dane:
-            queries_verified = True
-            resolved_state = _extract_state_code(city_data)
-            resolved_city = _extract_city_name(city_data)
-        else:
-            queries_error = f"city/{normalized_dane} respondió sin code esperado"
-    except Exception as exc:
-        queries_error = str(exc)
-
-    if not queries_verified:
-        # Best-effort: no bloqueamos por fallas/ambigüedades de endpoints de validación.
-        # El contrato duro permanece en DANE canónico (5 dígitos) + payload CO correcto.
-        logger.warning(
-            "No fue posible validar dirección %s en Envia (DANE=%s). "
-            "Se continúa con validación local. Queries city-by-code=%s",
-            label, normalized_dane, queries_error or "n/a"
-        )
-
-    # Completa datos de presentación/normalización si Envia responde city/state.
-    addr.state = resolved_state or _normalize_state(addr.state or "", "CO") or addr.state
-    if resolved_city:
-        addr.city = resolved_city
+    # Certificado en pruebas locales con token real (2026-04-20):
+    # para varios carriers CO, DANE de 5 dígitos falla; DANE de 8 dígitos funciona.
+    addr.dane_code = dane8
+    addr.postalCode = dane8
+    addr.state = _normalize_state(addr.state or "", "CO") or addr.state
 
 
 def _extract_carrier_name(item: dict) -> str:
@@ -323,7 +267,7 @@ async def quote_shipment(
         d.pop("dane_code", None)  # campo interno — no va a Envia
         d["state"] = _normalize_state(a.state, a.country)
         if a.country == "CO" and a.dane_code:
-            # Para Colombia: city y postalCode deben ser el código DANE DIVIPOLA 5 dígitos (ej. 11001)
+            # Para Colombia: runtime efectivo en Envia usa DANE 8 dígitos (stat_8digit).
             d["city"]            = a.dane_code
             d["postalCode"]      = a.dane_code
         return d
