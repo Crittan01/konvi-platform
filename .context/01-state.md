@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 32)
+**Última actualización**: 2026-04-20 (rev. 33)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -93,6 +93,8 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
   - `postalCode = dane_code` (normalizado a 8 dígitos)
 - Se eliminó campo no documentado `city_to_display` del payload hacia Envia.
 - Descubrimiento de carriers prioriza Queries API (`available-carrier`) con fallback operativo si Queries falla.
+- `EnviaClient.get_rates()` ahora interpreta como error respuestas `200` con `code/message` sin `data` (evita falsos "sin tarifas").
+- Fallas por carrier guardan mensaje robusto (sin strings vacíos) para diagnóstico en `shipping/quote`.
 
 ---
 
@@ -177,7 +179,10 @@ Campos en `marketplace_listings` actualizados por tres vías:
 
 ## Validación ejecutada en esta sesión
 
-- `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (27 tests)
+- `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (36 tests)
 - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
 - `pnpm --filter web lint` ✅ (con warnings preexistentes, sin errores)
 - `python3 -m py_compile services/api/integrations/envia_client.py services/api/routers/shipping.py` ✅
+- Smoke E2E Envia (sandbox/prod, token tenant) ✅:
+  - Sandbox: con DANE8 hubo tarifas en 4 carriers (`fedex`, `serviEntrega`, `dhl`, `tcc`)
+  - Producción: con DANE8 hubo tarifas en 5 carriers (`serviEntrega`, `dhl`, `interRapidisimo`, `deprisa`, `tcc`)

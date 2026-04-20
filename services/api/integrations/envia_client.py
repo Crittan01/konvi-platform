@@ -80,6 +80,14 @@ class EnviaClient:
                 msg = err.get("message") or str(err) if isinstance(err, dict) else str(err)
                 code = err.get("code", "") if isinstance(err, dict) else ""
                 raise ValueError(f"Envia error {code}: {msg}")
+            if isinstance(body, dict):
+                code = body.get("code")
+                message = body.get("message")
+                has_data = "data" in body and body.get("data") not in (None, [], {})
+                # En algunos carriers Envia responde 200 con code/message sin meta=data.
+                # Tratarlo como error explícito evita falsos "sin tarifas".
+                if code is not None and message and not has_data:
+                    raise ValueError(f"Envia error {code}: {message}")
             data = body.get("data") if isinstance(body, dict) else body
             if not data:
                 logger.warning("Envia /ship/rate/ 200 sin tarifas. body=%s", str(body)[:500])
