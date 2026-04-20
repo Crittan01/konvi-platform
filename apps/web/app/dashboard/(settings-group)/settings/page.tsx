@@ -18,7 +18,7 @@ export const metadata = {
 
 type ShippingOrigin = {
   name?: string; company?: string; street?: string; city?: string
-  state?: string; postal_code?: string; country?: string; phone?: string
+  state?: string; postal_code?: string; country?: string; phone?: string; dane_code?: string
 }
 type Tenant = {
   id: string; name: string; status: string
@@ -113,12 +113,15 @@ export default async function SettingsPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
-    const fields = ['name', 'company', 'street', 'city', 'state', 'postal_code', 'country', 'phone']
+    const fields = ['name', 'company', 'street', 'city', 'state', 'postal_code', 'country', 'phone', 'dane_code']
     const origin: Record<string, string> = {}
     for (const f of fields) {
       const val = (formData.get(`origin_${f}`) as string)?.trim()
       if (val) origin[f] = val
     }
+    // CO runtime: mantener postal_code y dane_code alineados para Envia quote.
+    if (origin.dane_code && !origin.postal_code) origin.postal_code = origin.dane_code
+    if (origin.postal_code && !origin.dane_code) origin.dane_code = origin.postal_code
     await sb.from('tenants').update({ shipping_origin: origin }).eq('id', m.tenant_id)
     revalidatePath('/dashboard/settings')
   }

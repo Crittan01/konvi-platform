@@ -12,6 +12,7 @@ Referencia de diseño: docs/integrations/courier-envia.md
 """
 import asyncio
 import logging
+import re
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -48,6 +49,168 @@ def _normalize_state(state: str, country: str) -> str:
     if country != "CO" or len(state) <= 3:
         return state
     return _CO_STATE_CODES.get(state, state[:3].upper())
+
+
+def _sanitize_dane_code(raw: Optional[str]) -> str:
+    """
+    Normaliza posibles variantes legacy de DANE:
+    - "11001"                   -> "11001"
+    - "11001-000" / "11001000"  -> "11001"
+    - " 11 001 "                -> "11001"
+    """
+    if not raw:
+        return ""
+    digits = re.sub(r"\D", "", str(raw))
+    if len(digits) == 8 and digits.endswith("000"):
+        return digits[:5]
+    return digits
+
+
+def _extract_city_code(entry: dict) -> str:
+    """
+    Intenta extraer el código de ciudad desde distintos shapes de Queries/Geocodes.
+    """
+    for key in ("code", "city_code", "cityCode", "id", "zipcode", "postalCode"):
+        value = entry.get(key)
+        if value is None:
+            continue
+        digits = _sanitize_dane_code(str(value))
+        if len(digits) >= 5:
+            return digits[:5]
+    return ""
+
+
+async def _validate_co_address_with_envia(client: EnviaClient, addr: "Address", label: str) -> None:
+    """
+    Valida dirección de Colombia contra APIs oficiales de Envia antes de cotizar.
+    Reglas runtime:
+    - country=CO
+    - dane_code obligatorio y de 5 dígitos
+    - city/postalCode enviados a Shipping API como ese DANE
+    """
+    normalized_dane = _sanitize_dane_code(addr.dane_code or addr.postalCode)
+    if len(normalized_dane) != 5:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"La dirección de {label} requiere código DANE de municipio válido (5 dígitos). "
+                "Selecciona departamento y ciudad desde el formulario."
+            ),
+        )
+
+    addr.dane_code = normalized_dane
+    addr.postalCode = normalized_dane
+
+    geocodes_verified = False
+    geocodes_state = ""
+    geocodes_city = ""
+    geocodes_error: Optional[str] = None
+    try:
+        zip_validation = await client.validate_zip_code("CO", normalized_dane)
+        if zip_validation.get("success") is True:
+            data = zip_validation.get("data") if isinstance(zip_validation.get("data"), dict) else {}
+            geocodes_state = str(data.get("state") or "").strip().upper()
+            geocodes_city = str(data.get("city") or "").strip()
+            geocodes_verified = True
+        else:
+            geocodes_error = str(zip_validation.get("message") or "Zip code not found")
+    except Exception as exc:
+        geocodes_error = str(exc)
+
+    # Fallback de verificación con Queries API (cities by state), por si Geocodes no
+    # resuelve el DANE en alguna cuenta/ambiente.
+    queries_verified = False
+    queries_error: Optional[str] = None
+    state_code = _normalize_state(addr.state or "", "CO")
+    if state_code:
+        try:
+            cities = await client.get_cities_by_state(country_code="CO", state_code=state_code)
+            for city_entry in cities:
+                if not isinstance(city_entry, dict):
+                    continue
+                if _extract_city_code(city_entry) == normalized_dane:
+                    queries_verified = True
+                    break
+        except Exception as exc:
+            queries_error = str(exc)
+    else:
+        queries_error = "state vacío o inválido para CO"
+
+    if not geocodes_verified and not queries_verified:
+        # Best-effort: no bloqueamos por fallas/ambigüedades de endpoints de validación.
+        # El contrato duro permanece en DANE canónico (5 dígitos) + payload CO correcto.
+        logger.warning(
+            "No fue posible validar dirección %s en Envia (DANE=%s). "
+            "Se continúa con validación local. Geocodes=%s | Queries=%s",
+            label, normalized_dane, geocodes_error or "n/a", queries_error or "n/a"
+        )
+
+    # Si Geocodes devuelve state canónico, preferirlo para reducir errores de carrier.
+    if geocodes_state:
+        addr.state = geocodes_state
+    else:
+        addr.state = state_code or addr.state
+    if geocodes_city:
+        addr.city = geocodes_city
+
+
+def _extract_carrier_name(item: dict) -> str:
+    for key in ("name", "carrier", "code", "slug"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+async def _resolve_carriers_for_quote(client: EnviaClient, country_code: str) -> list[str]:
+    """
+    Prioriza Queries API para resolver carriers activos; si falla, usa fallback estable.
+    """
+    carriers: list[str] = []
+    try:
+        dynamic = await client.get_available_carriers_with_shipment_type(
+            country=country_code,
+            international=0,
+            shipment_type_id=1,
+        )
+        for row in dynamic:
+            if not isinstance(row, dict):
+                continue
+            name = _extract_carrier_name(row)
+            if name:
+                carriers.append(name)
+    except Exception as exc:
+        logger.warning("No se pudo resolver carriers con Queries API (v2): %s", exc)
+
+    if not carriers:
+        try:
+            legacy = await client.get_available_carriers(country=country_code, shipment_type=0)
+            for row in legacy:
+                if not isinstance(row, dict):
+                    continue
+                name = _extract_carrier_name(row)
+                if name:
+                    carriers.append(name)
+        except Exception as exc:
+            logger.warning("No se pudo resolver carriers con Queries API (legacy): %s", exc)
+
+    # Fallback operativo conocido para CO (evita downtime si Queries API falla).
+    if country_code == "CO" and not carriers:
+        carriers = [
+            "tcc", "serviEntrega", "coordinadora", "interRapidisimo",
+            "deprisa", "mensajerosUrbanos", "noventa9Minutos",
+            "fedex", "dhl", "envia",
+        ]
+
+    # dedupe preservando orden
+    seen: set[str] = set()
+    unique: list[str] = []
+    for carrier in carriers:
+        token = carrier.lower()
+        if token not in seen:
+            unique.append(carrier)
+            seen.add(token)
+    return unique
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -130,6 +293,10 @@ async def quote_shipment(
     """
     client = _get_envia_client(tenant_id, supabase)
 
+    # Normalización mínima de país
+    req.origin.country = (req.origin.country or "CO").upper()
+    req.destination.country = (req.destination.country or "CO").upper()
+
     # Construir packages con estructura real de Envia (validada sandbox 2026-04-17):
     # dimensiones anidadas, campos content/amount/type requeridos, carrier != "all" en CO.
     packages = [
@@ -157,13 +324,11 @@ async def quote_shipment(
             d["postalCode"]      = a.dane_code
         return d
 
-    # Validar que CO tenga código DANE (5 dígitos, obligatorio para Envia)
+    # Validación de direcciones CO contra APIs oficiales de Envia.
+    # Mantiene alineación con contrato "city/postalCode = DANE".
     for label, addr in [("origen", req.origin), ("destino", req.destination)]:
-        if addr.country == "CO" and (not addr.dane_code or len(addr.dane_code) < 5):
-            raise HTTPException(
-                status_code=400,
-                detail=f"La dirección de {label} requiere un código DANE de municipio (5 dígitos). Selecciona el departamento y ciudad en el formulario."
-            )
+        if addr.country == "CO":
+            await _validate_co_address_with_envia(client, addr, label)
 
     base_payload = {
         "origin":      _addr(req.origin),
@@ -172,13 +337,14 @@ async def quote_shipment(
         "settings":    {"currency": "COP"},
     }
 
-    # Carriers activos en la cuenta (confirmado en panel Envia 2026-04-17).
-    # Nombres exactos según GET /available-carrier/CO/0.
-    _CO_CARRIERS = [
-        "tcc", "serviEntrega", "coordinadora", "interRapidisimo",
-        "deprisa", "mensajerosUrbanos", "noventa9Minutos",
-        "fedex", "dhl", "envia",
-    ]
+    # Carriers activos: resolver desde Queries API; fallback seguro si el endpoint falla.
+    quote_country = req.origin.country if req.origin.country == req.destination.country else "CO"
+    carriers = await _resolve_carriers_for_quote(client, quote_country)
+    if not carriers:
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudieron obtener carriers disponibles desde Envia Queries API.",
+        )
 
     carrier_errors: dict[str, str] = {}
     logger.info("Envia quote payload base (tenant %s): origin_city=%s dest_city=%s",
@@ -204,7 +370,7 @@ async def quote_shipment(
 
     try:
         results = await asyncio.wait_for(
-            asyncio.gather(*[_fetch_carrier(c) for c in _CO_CARRIERS]),
+            asyncio.gather(*[_fetch_carrier(c) for c in carriers]),
             timeout=20.0,
         )
     except asyncio.TimeoutError:

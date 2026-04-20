@@ -9,7 +9,7 @@ import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 type ShippingOrigin = {
   name?: string; company?: string; street?: string; city?: string
-  state?: string; postal_code?: string; country?: string; phone?: string
+  state?: string; postal_code?: string; country?: string; phone?: string; dane_code?: string
 }
 
 interface Props {
@@ -18,15 +18,27 @@ interface Props {
 }
 
 export default function ShippingOriginForm({ initialData, action }: Props) {
+  const normalizeDaneCode = (raw?: string) => {
+    const digits = String(raw ?? '').replace(/\D/g, '')
+    if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
+    return digits.slice(0, 5)
+  }
+
   const initialDpto = DEPARTAMENTOS.find(
     (d) => d.nombre === initialData?.state
   )?.codigo ?? ''
+  const initialDane = normalizeDaneCode(initialData?.dane_code ?? initialData?.postal_code)
+  const initialMunis = initialDpto ? getMunicipiosByDpto(initialDpto) : []
+  const initialMuniCode = initialMunis.find(m => m.codigo === initialDane || m.nombre === initialData?.city)?.codigo ?? ''
 
   const [codigoDpto, setCodigoDpto] = useState<string>(initialDpto)
+  const [city, setCity] = useState<string>(initialData?.city ?? '')
+  const [municipioCodigo, setMunicipioCodigo] = useState<string>(initialMuniCode)
 
   const municipios = useMemo(() => getMunicipiosByDpto(codigoDpto), [codigoDpto])
 
   const nombreDpto = DEPARTAMENTOS.find((d) => d.codigo === codigoDpto)?.nombre ?? ''
+  const daneCode = municipioCodigo || (city ? initialDane : '')
 
   return (
     <form action={action} className="space-y-4">
@@ -64,7 +76,11 @@ export default function ShippingOriginForm({ initialData, action }: Props) {
           <select
             id="origin-state"
             value={codigoDpto}
-            onChange={(e) => setCodigoDpto(e.target.value)}
+            onChange={(e) => {
+              setCodigoDpto(e.target.value)
+              setCity('')
+              setMunicipioCodigo('')
+            }}
             className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="">Seleccionar…</option>
@@ -76,10 +92,18 @@ export default function ShippingOriginForm({ initialData, action }: Props) {
 
         <div className="space-y-1.5">
           <Label className="text-xs font-medium" htmlFor="origin-city">Municipio / Ciudad</Label>
+          <input type="hidden" name="origin_city" value={city} />
+          <input type="hidden" name="origin_postal_code" value={daneCode} />
+          <input type="hidden" name="origin_dane_code" value={daneCode} />
           <select
             id="origin-city"
-            name="origin_city"
-            defaultValue={initialData?.city ?? ''}
+            value={city}
+            onChange={(e) => {
+              const value = e.target.value
+              setCity(value)
+              const muni = municipios.find(m => m.nombre === value)
+              setMunicipioCodigo(muni?.codigo ?? '')
+            }}
             disabled={!codigoDpto}
             className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -94,10 +118,10 @@ export default function ShippingOriginForm({ initialData, action }: Props) {
       {/* Código postal + País (fijo Colombia) + Celular */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium" htmlFor="origin-cp">Código postal</Label>
-          <Input id="origin-cp" name="origin_postal_code"
-            defaultValue={initialData?.postal_code ?? ''}
-            placeholder="110111" className="h-8 text-sm" />
+          <Label className="text-xs font-medium">Código DANE</Label>
+          <div className="h-8 rounded-md border border-input bg-muted/50 px-3 flex items-center text-sm text-muted-foreground">
+            {daneCode || 'Se completa al elegir municipio'}
+          </div>
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs font-medium">País</Label>

@@ -1,17 +1,18 @@
 """
-Cliente HTTP para Envia Shipping API.
+Cliente HTTP para Envia Shipping + Queries + Geocodes APIs.
 
 Auth: Bearer token POR TENANT (almacenado en tenant_integrations.credentials.api_token).
 Validado: PV-03 — 2026-04-09.
 Referencia: https://docs.envia.com/docs/getting-started
 
 Ambientes:
-  Producción: https://api.envia.com
-  Sandbox:    https://api-test.envia.com
+  Shipping producción: https://api.envia.com
+  Shipping sandbox:    https://api-test.envia.com
+  Geocodes:            https://geocodes.envia.com (sin sandbox)
 """
 import httpx
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,16 +20,25 @@ ENVIA_PROD_URL          = "https://api.envia.com"
 ENVIA_SANDBOX_URL       = "https://api-test.envia.com"
 ENVIA_QUERIES_PROD_URL  = "https://queries.envia.com"
 ENVIA_QUERIES_TEST_URL  = "https://queries-test.envia.com"
+ENVIA_GEOCODES_URL      = "https://geocodes.envia.com"
 
 
 class EnviaClient:
     def __init__(self, api_token: str, sandbox: bool = False):
         self.base_url         = ENVIA_SANDBOX_URL      if sandbox else ENVIA_PROD_URL
         self.queries_base_url = ENVIA_QUERIES_TEST_URL if sandbox else ENVIA_QUERIES_PROD_URL
+        self.geocodes_base_url = ENVIA_GEOCODES_URL
         self.headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _extract_data(body: Any) -> Any:
+        """Normaliza payloads Envia que pueden venir como {"data": ...} o valor directo."""
+        if isinstance(body, dict):
+            return body.get("data")
+        return body
 
     async def get_rates(self, payload: dict) -> dict:
         """
@@ -89,3 +99,83 @@ class EnviaClient:
             resp.raise_for_status()
             data = resp.json()
             return data.get("data", []) if isinstance(data, dict) else []
+
+    async def get_available_carriers_with_shipment_type(
+        self,
+        country: str = "CO",
+        international: int = 0,
+        shipment_type_id: int = 1,
+    ) -> list:
+        """
+        Lista carriers disponibles usando el endpoint actual de Queries API:
+        GET /available-carrier/{country}/{international}/{shipment_type_id}
+        """
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.queries_base_url}/available-carrier/{country}/{international}/{shipment_type_id}",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            data = self._extract_data(body)
+            return data if isinstance(data, list) else []
+
+    async def get_states_by_country(self, country_code: str) -> list:
+        """Obtiene estados/provincias por país (Queries API)."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.queries_base_url}/state",
+                headers=self.headers,
+                params={"country_code": country_code},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            data = self._extract_data(body)
+            return data if isinstance(data, list) else []
+
+    async def get_cities_by_state(self, country_code: str, state_code: str) -> list:
+        """
+        Obtiene ciudades por estado y país (Queries API).
+        Según docs: GET /city con country_code + state_code.
+        """
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.queries_base_url}/city",
+                headers=self.headers,
+                params={"country_code": country_code, "state_code": state_code},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            data = self._extract_data(body)
+            return data if isinstance(data, list) else []
+
+    async def get_address_structure(self, country_code: str) -> dict:
+        """
+        Consulta estructura de dirección por país (Queries API):
+        GET /generic-form?country_code={ISO2}
+        """
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.queries_base_url}/generic-form",
+                headers=self.headers,
+                params={"country_code": country_code},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            data = self._extract_data(body)
+            return data if isinstance(data, dict) else {}
+
+    async def validate_zip_code(self, country_code: str, zipcode: str) -> dict:
+        """
+        Valida CP/código geográfico en Geocodes API (sin auth).
+        Endpoint: GET /zipcode/{country}/{zipcode}
+        """
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.geocodes_base_url}/zipcode/{country_code}/{zipcode}",
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            if not isinstance(body, dict):
+                return {"success": False, "message": "Respuesta inválida de Geocodes"}
+            return body

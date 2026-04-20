@@ -16,7 +16,7 @@ type Shipment = {
 
 type ShippingOrigin = {
   name?: string; company?: string; street?: string; city?: string
-  state?: string; postal_code?: string; country?: string; phone?: string
+  state?: string; postal_code?: string; country?: string; phone?: string; dane_code?: string
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -42,6 +42,12 @@ export default async function ShippingPage({
 }: {
   searchParams?: { order?: string }
 }) {
+  const normalizeDaneCode = (raw?: string | null) => {
+    const digits = String(raw ?? '').replace(/\D/g, '')
+    if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
+    return digits.slice(0, 5)
+  }
+
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
@@ -107,7 +113,7 @@ export default async function ShippingPage({
           number:    contact.address.number     ?? '',
           city:      contact.address.city       ?? '',
           state:     contact.address.state      ?? '',
-          dane_code: contact.address.dane_code  ?? '',
+          dane_code: normalizeDaneCode(contact.address.dane_code),
           country:   'CO',
         }
       }

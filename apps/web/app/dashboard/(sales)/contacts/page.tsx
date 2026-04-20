@@ -23,6 +23,12 @@ export default async function ContactsPage({
 }: {
   searchParams?: { q?: string; consent?: string }
 }) {
+  const normalizeDaneCode = (raw?: string | null) => {
+    const digits = String(raw ?? '').replace(/\D/g, '')
+    if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
+    return digits.slice(0, 5)
+  }
+
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
@@ -66,13 +72,14 @@ export default async function ContactsPage({
     const consentGiven = formData.get('consent_given') === 'on'
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
+    const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
     const address  = street ? {
       street,
       number:    (formData.get('addr_number')   as string) || undefined,
       city:      addrCity,
       state:     (formData.get('addr_state')    as string) || undefined,
       country:   'CO',
-      dane_code: (formData.get('addr_dane_code') as string) || undefined,
+      dane_code: daneCode || undefined,
     } : null
     const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 10)
     await sb.from('contacts').insert({
@@ -102,13 +109,14 @@ export default async function ContactsPage({
     const prev = (existing as { consent_given?: boolean; consent_date?: string | null } | null)
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
+    const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
     const address  = street ? {
       street,
       number:    (formData.get('addr_number')    as string) || undefined,
       city:      addrCity,
       state:     (formData.get('addr_state')     as string) || undefined,
       country:   'CO',
-      dane_code: (formData.get('addr_dane_code') as string) || undefined,
+      dane_code: daneCode || undefined,
     } : null
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
