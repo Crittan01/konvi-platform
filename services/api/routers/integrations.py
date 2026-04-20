@@ -221,11 +221,36 @@ async def disconnect_meli(
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
 ):
-    """Desconecta MeLi revocando tokens locales. Solo owner."""
+    """
+    Desconecta MeLi: revoca el token en MeLi (detiene webhooks) y limpia localmente.
+    El disconnect local ocurre aunque la revocación falle — nunca queda bloqueado.
+    Solo owner.
+    """
     if role != "owner":
         raise HTTPException(status_code=403, detail="Solo el owner puede desconectar integraciones")
+
+    # Leer access_token antes de borrar para poder revocarlo en MeLi
+    creds_res = (
+        supabase.table("tenant_integrations")
+        .select("credentials")
+        .eq("tenant_id", tenant_id)
+        .eq("provider", "mercadolibre")
+        .maybe_single()
+        .execute()
+    )
+    access_token = (creds_res.data or {}).get("credentials", {}).get("access_token")
+
+    # Revocar en MeLi — fallo silencioso (token puede ya estar expirado)
+    if access_token:
+        try:
+            await meli_client.revoke_token(access_token)
+        except Exception as e:
+            logger.warning("No se pudo revocar token MeLi tenant %s: %s — se limpia localmente de todas formas", tenant_id, e)
+
+    # Limpiar localmente siempre
     supabase.table("tenant_integrations").update({
         "status": "disconnected",
         "credentials": {},
         "meta": {},
     }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
+    logger.info("MeLi desconectado para tenant %s", tenant_id)
