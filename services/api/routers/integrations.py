@@ -150,13 +150,11 @@ async def get_meli_auth_url(
     if role != "owner":
         raise HTTPException(status_code=403, detail="Solo el owner puede conectar integraciones")
     if not meli_client.is_configured():
+        missing = meli_client.missing_required_config()
+        missing_text = ", ".join(missing) if missing else "credenciales incompletas"
         raise HTTPException(
             status_code=503,
-            detail=(
-                "MeLi no configurado completamente en API. Verifica env vars "
-                "MELI_CLIENT_ID, MELI_CLIENT_SECRET, MELI_REDIRECT_URI, "
-                "MELI_AUTH_URL y MELI_OAUTH_STATE_SECRET."
-            ),
+            detail=f"MeLi no configurado completamente en API. Faltan: {missing_text}.",
         )
     try:
         url = meli_client.get_auth_url(tenant_id, supabase)

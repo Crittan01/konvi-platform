@@ -233,12 +233,21 @@ async def refresh_token(refresh_tok: str) -> dict:
 
 def is_configured() -> bool:
     """Verifica si las credenciales de la app MeLi están configuradas."""
-    return bool(
-        MELI_CLIENT_ID
-        and MELI_CLIENT_SECRET
-        and MELI_REDIRECT_URI
-        and MELI_OAUTH_STATE_SECRET
-    )
+    return len(missing_required_config()) == 0
+
+
+def missing_required_config() -> list[str]:
+    """
+    Lista env vars requeridas faltantes para habilitar OAuth MeLi seguro.
+    """
+    required = {
+        "MELI_CLIENT_ID": MELI_CLIENT_ID,
+        "MELI_CLIENT_SECRET": MELI_CLIENT_SECRET,
+        "MELI_REDIRECT_URI": MELI_REDIRECT_URI,
+        "MELI_AUTH_URL": MELI_AUTH_URL,
+        "MELI_OAUTH_STATE_SECRET": MELI_OAUTH_STATE_SECRET,
+    }
+    return [key for key, value in required.items() if not value]
 
 
 # ─── Token por tenant ─────────────────────────────────────────────────────────
