@@ -6,6 +6,8 @@
    - Label generation
    - Tracking (escribir en `order_tracking` con `provider='envia'`)
    - Pickup scheduling
+   - Reemplazar catálogo DANE estático del frontend por source dinámico desde Envia Queries (`/state`, `/city`) para no depender de snapshot local.
+   - Agregar observabilidad específica a validación previa de direcciones (Geocodes/Queries) con alertas de falla por carrier/tenant.
 
 2. **Mercado Libre — pendientes menores**
    - Exponer tracking de `order_tracking` en detalle de pedido (UI Pedidos)
@@ -33,6 +35,9 @@ supabase db query --linked -f supabase/migrations/20260420000001_order_tracking.
 - `get_shipment()` en meli_client + `ITEM_ATTRIBUTES` ampliados
 - UX Mercado Libre: filtros por estado (Todos/Activos/Pausados/Cerrados/Sin vincular)
 - Badge de condición (Nuevo/Usado) en tabla de publicaciones
+- Shipping CO endurecido: validación oficial Envia (Geocodes + Queries fallback, best-effort) previa a quote
+- Normalización DANE canónica (5 dígitos) en backend + fix del bug frontend `dane_code + "000"`
+- Sidebar con activación por integración para Inbox/Cotizador/Mercado Libre
 
 ## No pendientes (cerrado en sesión 2026-04-19)
 

@@ -14,7 +14,7 @@ import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 interface ShippingOrigin {
   name?: string; company?: string; street?: string; city?: string
-  state?: string; postal_code?: string; country?: string; phone?: string
+  state?: string; postal_code?: string; country?: string; phone?: string; dane_code?: string
 }
 
 interface Rate {
@@ -33,6 +33,12 @@ interface Props {
   onQuoted?:      () => void
 }
 
+function normalizeDaneCode(raw?: string): string {
+  const digits = String(raw ?? '').replace(/\D/g, '')
+  if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
+  return digits.slice(0, 5)
+}
+
 // ─── GeoSelector — solo departamento + ciudad (mínimo para cotizar) ──────────
 
 function GeoSelector({
@@ -41,9 +47,10 @@ function GeoSelector({
   prefix: string
   defaults?: Record<string, string>
 }) {
+  const initDane     = normalizeDaneCode(defaults.dane_code)
   const initDpto     = DEPARTAMENTOS.find(d => d.nombre === defaults.state)?.codigo ?? ''
   const initMunis    = initDpto ? getMunicipiosByDpto(initDpto) : []
-  const initMuniCode = initMunis.find(m => m.nombre === defaults.city)?.codigo ?? ''
+  const initMuniCode = initMunis.find(m => m.codigo === initDane || m.nombre === defaults.city)?.codigo ?? ''
 
   const [dptoCode, setDptoCode]          = useState(initDpto)
   const [city, setCity]                  = useState(defaults.city ?? '')
@@ -51,7 +58,7 @@ function GeoSelector({
 
   const municipios = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
-  const daneCode   = municipioCodigo || (defaults.dane_code ?? '')
+  const daneCode   = municipioCodigo || (city ? initDane : '')
 
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -103,7 +110,7 @@ function GeoSelector({
 }
 
 function readGeo(formData: FormData, prefix: string) {
-  const daneCode = formData.get(`${prefix}_dane_code`) as string
+  const daneCode = normalizeDaneCode(formData.get(`${prefix}_dane_code`) as string)
   return {
     city:       formData.get(`${prefix}_city`)    as string,
     state:      formData.get(`${prefix}_state`)   as string,
@@ -127,7 +134,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
   const originGeo: Record<string, string> = shippingOrigin ? {
     city:      shippingOrigin.city        ?? '',
     state:     shippingOrigin.state       ?? '',
-    dane_code: shippingOrigin.postal_code ?? '',
+    dane_code: normalizeDaneCode(shippingOrigin.dane_code ?? shippingOrigin.postal_code),
     country:   shippingOrigin.country     ?? 'CO',
   } : {}
 
@@ -145,6 +152,8 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
 
     if (!origin.state || !origin.city) { setError('Selecciona departamento y ciudad de origen.'); setSubmitting(false); return }
     if (!dest.state   || !dest.city)   { setError('Selecciona departamento y ciudad de destino.'); setSubmitting(false); return }
+    if (!origin.dane_code || origin.dane_code.length !== 5) { setError('Origen inválido: selecciona una ciudad con código DANE válido.'); setSubmitting(false); return }
+    if (!dest.dane_code   || dest.dane_code.length !== 5)   { setError('Destino inválido: selecciona una ciudad con código DANE válido.'); setSubmitting(false); return }
 
     const payload = {
       order_id:    orderId,

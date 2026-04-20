@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 28)
+**Última actualización**: 2026-04-20 (rev. 29)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -81,6 +81,17 @@ El backend usa `service_role` en varios paths, por lo que:
 
 Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `marketplace`, `meli_webhook`).
 
+### 8) Shipping Envia (CO) — contrato de dirección endurecido
+
+- `shipping/quote` intenta validar CO contra APIs oficiales de Envia antes de cotizar:
+  - Geocodes `GET /zipcode/{country}/{zipcode}`
+  - Queries `GET /city` (fallback por estado)
+- `dane_code` se normaliza y exige en formato canónico de 5 dígitos.
+- Para CO, payload de Shipping API mantiene contrato:
+  - `city = dane_code`
+  - `postalCode = dane_code`
+- Descubrimiento de carriers prioriza Queries API (`available-carrier`) con fallback operativo si Queries falla.
+
 ---
 
 ## Frontend — ajustes estructurales
@@ -91,6 +102,12 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 - Se eliminaron links operativos residuales que trataban Inventory como módulo standalone.
 - Inbox lista conversaciones por `last_interaction_at` y usa `created_at` solo como fallback visual.
 - Inbox muestra estado de error explícito si falla la carga del listado de conversaciones.
+- Sidebar ahora bloquea módulos dependientes de integración cuando están desconectados:
+  - `Inbox` (requiere `whatsapp`)
+  - `Cotizador` (requiere `envia`)
+  - `Mercado Libre` (requiere `mercadolibre`)
+- Se corrigió bug legacy que construía `dane_code` inválido (`+000`) en selector de direcciones.
+- `settings.shipping_origin` ahora preserva `dane_code` explícito y mantiene `postal_code`/`dane_code` alineados para Envia.
 
 ---
 
@@ -156,5 +173,4 @@ Campos en `marketplace_listings` actualizados por tres vías:
 - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (27 tests)
 - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
 - `pnpm --filter web lint` ✅ (con warnings preexistentes, sin errores)
-- Sintaxis Python verificada (meli_webhook.py, marketplace.py, meli_client.py) ✅
-- Balance de llaves TSX marketplace-manager.tsx ✅
+- `python3 -m py_compile services/api/integrations/envia_client.py services/api/routers/shipping.py` ✅

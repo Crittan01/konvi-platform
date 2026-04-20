@@ -22,15 +22,16 @@ interface Props {
 
 export default function AddressSelector({ defaultValue = {}, fieldPrefix = 'addr' }: Props) {
   const initDpto = DEPARTAMENTOS.find(d => d.nombre === defaultValue.state)?.codigo ?? ''
+  const initDane = String(defaultValue.dane_code ?? '').replace(/\D/g, '').slice(0, 5)
+  const initMunis = initDpto ? getMunicipiosByDpto(initDpto) : []
+  const initMuniCode = initMunis.find(m => m.codigo === initDane || m.nombre === defaultValue.city)?.codigo ?? ''
   const [dptoCode, setDptoCode]          = useState(initDpto)
   const [city, setCity]                  = useState(defaultValue.city ?? '')
-  const [municipioCodigo, setMuniCodigo] = useState('')
+  const [municipioCodigo, setMuniCodigo] = useState(initMuniCode)
 
   const municipios  = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre  = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
-  const daneCode    = municipioCodigo
-    ? `${municipioCodigo}000`
-    : (defaultValue.dane_code ?? '')
+  const daneCode    = municipioCodigo || (city ? initDane : '')
 
   return (
     <div className="space-y-2">

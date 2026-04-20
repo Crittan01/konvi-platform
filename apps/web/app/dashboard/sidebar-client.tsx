@@ -9,7 +9,7 @@ import {
   Package, Users, Settings, Plug, Truck, BarChart2,
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
-  Tag, Wallet, DollarSign, AlertCircle, Bot,
+  Wallet, DollarSign, AlertCircle, Bot, Lock,
   Store, Crown, Briefcase, Headphones,
 } from 'lucide-react'
 
@@ -21,6 +21,7 @@ type NavLeaf = {
   label: string
   icon: React.ElementType
   roles: string[]
+  integration?: 'whatsapp' | 'envia' | 'mercadolibre'
 }
 
 type NavGroup = {
@@ -49,7 +50,7 @@ type NavItem = NavLeaf | NavGroup
 const NAV_ITEMS: NavItem[] = [
   // ── Inicio ───────────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard',       label: 'Dashboard', icon: LayoutDashboard, roles: [] },
-  { kind: 'leaf', href: '/dashboard/inbox', label: 'Inbox',     icon: MessageSquare,   roles: [] },
+  { kind: 'leaf', href: '/dashboard/inbox', label: 'Inbox',     icon: MessageSquare,   roles: [], integration: 'whatsapp' },
 
   // ── Ventas ✅ ─────────────────────────────────────────────────────────────
   {
@@ -57,7 +58,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,     roles: [] },
       { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,       roles: [] },
-      { kind: 'leaf', href: '/dashboard/shipping', label: 'Cotizador', icon: Truck,       roles: [] },
+      { kind: 'leaf', href: '/dashboard/shipping', label: 'Cotizador', icon: Truck,       roles: [], integration: 'envia' },
       { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle, roles: [] },
     ],
   },
@@ -70,7 +71,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     kind: 'group', id: 'canales', label: 'Canales', icon: Store, roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre', icon: Store, roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre', icon: Store, roles: ['owner', 'manager'], integration: 'mercadolibre' },
     ],
   },
 
@@ -138,13 +139,18 @@ interface SidebarProps {
   tenantLogoUrl: string | null
   inboxBadge: number
   meliBadge: number
+  integrations: {
+    whatsapp: boolean
+    envia: boolean
+    mercadolibre: boolean
+  }
   logoutAction: () => Promise<void>
 }
 
 // ── Componente Principal ──────────────────────────────────────────────────────
 
 export default function SidebarClient({
-  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, logoutAction,
+  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, integrations, logoutAction,
 }: SidebarProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -176,6 +182,8 @@ export default function SidebarClient({
   }
 
   const badge = ROLE_BADGE[role] ?? ROLE_BADGE.operator
+  const isIntegrationEnabled = (integration?: NavLeaf['integration']) =>
+    !integration || integrations[integration] === true
 
   return (
     <>
@@ -242,10 +250,24 @@ export default function SidebarClient({
             if (!hasAccess(item.roles, role)) return null
 
             if (item.kind === 'leaf') {
+              const isEnabled = isIntegrationEnabled(item.integration)
               const isActive = item.href === '/dashboard'
                 ? pathname === '/dashboard'
                 : pathname === item.href || pathname.startsWith(item.href + '/')
               const isInbox = item.href === '/dashboard/inbox'
+              if (!isEnabled) {
+                return (
+                  <div
+                    key={item.href}
+                    title="Requiere integración activa en Configuración → Integraciones"
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground/50 bg-white/[0.02] cursor-not-allowed"
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1">{item.label}</span>
+                    <Lock className="h-3.5 w-3.5 shrink-0" />
+                  </div>
+                )
+              }
               return (
                 <Link
                   key={item.href}
@@ -260,12 +282,12 @@ export default function SidebarClient({
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1">{item.label}</span>
-                  {isInbox && inboxBadge > 0 && (
+                    {isInbox && inboxBadge > 0 && (
                     <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-red-100 text-red-600 border border-red-200 text-[10px] font-bold tabular-nums">
                       {inboxBadge > 99 ? '99+' : inboxBadge}
                     </span>
                   )}
-                  {shouldRenderMarketplaceBadge(item.href, meliBadge) && (
+                    {shouldRenderMarketplaceBadge(item.href, meliBadge) && (
                     <span className="inline-flex items-center justify-center p-[2px] rounded-full bg-amber-100 text-amber-600 border border-amber-200">
                       <AlertCircle className="h-3 w-3" />
                     </span>
@@ -304,7 +326,21 @@ export default function SidebarClient({
                 {isOpen && (
                   <div className="mt-0.5 ml-4 pl-2.5 border-l border-border/40 space-y-0.5 pb-1">
                     {visibleChildren.map(child => {
+                      const isEnabled = isIntegrationEnabled(child.integration)
                       const isActive = pathname === child.href || pathname.startsWith(child.href + '/')
+                      if (!isEnabled) {
+                        return (
+                          <div
+                            key={child.href}
+                            title="Requiere integración activa en Configuración → Integraciones"
+                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground/50 bg-white/[0.02] cursor-not-allowed"
+                          >
+                            <child.icon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="flex-1">{child.label}</span>
+                            <Lock className="h-3 w-3 shrink-0" />
+                          </div>
+                        )
+                      }
                       return (
                         <Link
                           key={child.href}

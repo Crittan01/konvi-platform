@@ -49,6 +49,11 @@ export default async function DashboardLayout({
   }
 
   let meliBadge = 0
+  const integrations = {
+    whatsapp: false,
+    envia: false,
+    mercadolibre: false,
+  }
   if (meta.tenant_id) {
     const { data: listings } = await supabase
       .from('marketplace_listings')
@@ -56,6 +61,20 @@ export default async function DashboardLayout({
       .eq('tenant_id', meta.tenant_id)
       .eq('provider', 'mercadolibre')
     meliBadge = getMarketplaceBadgeCount(listings ?? [])
+
+    const { data: integrationRows } = await supabase
+      .from('tenant_integrations')
+      .select('provider, status')
+      .eq('tenant_id', meta.tenant_id)
+      .in('provider', ['whatsapp', 'envia', 'mercadolibre'])
+
+    for (const row of integrationRows ?? []) {
+      const provider = (row as { provider?: string }).provider
+      const connected = (row as { status?: string }).status === 'connected'
+      if (provider === 'whatsapp') integrations.whatsapp = connected
+      if (provider === 'envia') integrations.envia = connected
+      if (provider === 'mercadolibre') integrations.mercadolibre = connected
+    }
   }
 
   return (
@@ -69,6 +88,7 @@ export default async function DashboardLayout({
         tenantLogoUrl={tenantLogoUrl}
         inboxBadge={inboxBadge}
         meliBadge={meliBadge}
+        integrations={integrations}
         logoutAction={logoutAction}
       />
 
