@@ -151,11 +151,19 @@ async def quote_shipment(
         d.pop("dane_code", None)  # campo interno — no va a Envia
         d["state"] = _normalize_state(a.state, a.country)
         if a.country == "CO" and a.dane_code:
-            # Para Colombia: city y postalCode deben ser el código DANE 8 dígitos
+            # Para Colombia: city y postalCode deben ser el código DANE DIVIPOLA 5 dígitos (ej. 11001)
             d["city_to_display"] = a.city
             d["city"]            = a.dane_code
             d["postalCode"]      = a.dane_code
         return d
+
+    # Validar que CO tenga código DANE (5 dígitos, obligatorio para Envia)
+    for label, addr in [("origen", req.origin), ("destino", req.destination)]:
+        if addr.country == "CO" and (not addr.dane_code or len(addr.dane_code) < 5):
+            raise HTTPException(
+                status_code=400,
+                detail=f"La dirección de {label} requiere un código DANE de municipio (5 dígitos). Selecciona el departamento y ciudad en el formulario."
+            )
 
     base_payload = {
         "origin":      _addr(req.origin),

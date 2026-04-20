@@ -41,16 +41,17 @@ function GeoSelector({
   prefix: string
   defaults?: Record<string, string>
 }) {
-  const initDpto = DEPARTAMENTOS.find(d => d.nombre === defaults.state)?.codigo ?? ''
+  const initDpto     = DEPARTAMENTOS.find(d => d.nombre === defaults.state)?.codigo ?? ''
+  const initMunis    = initDpto ? getMunicipiosByDpto(initDpto) : []
+  const initMuniCode = initMunis.find(m => m.nombre === defaults.city)?.codigo ?? ''
+
   const [dptoCode, setDptoCode]          = useState(initDpto)
   const [city, setCity]                  = useState(defaults.city ?? '')
-  const [municipioCodigo, setMuniCodigo] = useState('')
+  const [municipioCodigo, setMuniCodigo] = useState(initMuniCode)
 
   const municipios = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
-  const daneCode   = municipioCodigo
-    ? `${municipioCodigo}000`
-    : (defaults.dane_code ?? '')
+  const daneCode   = municipioCodigo || (defaults.dane_code ?? '')
 
   return (
     <div className="grid grid-cols-2 gap-2">

@@ -65,6 +65,11 @@ class EnviaClient:
                 logger.error("Envia /ship/rate/ %d: %s", resp.status_code, resp.text[:500])
             resp.raise_for_status()
             body = resp.json()
+            if isinstance(body, dict) and body.get("meta") == "error":
+                err = body.get("error", {})
+                msg = err.get("message") or str(err) if isinstance(err, dict) else str(err)
+                code = err.get("code", "") if isinstance(err, dict) else ""
+                raise ValueError(f"Envia error {code}: {msg}")
             data = body.get("data") if isinstance(body, dict) else body
             if not data:
                 logger.warning("Envia /ship/rate/ 200 sin tarifas. body=%s", str(body)[:500])
