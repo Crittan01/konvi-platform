@@ -15,7 +15,7 @@ interface Conversation {
   customer_phone: string
   status: 'bot_active' | 'human_takeover' | 'closed'
   created_at: string
-  updated_at?: string
+  last_interaction_at?: string
 }
 
 interface ConversationRow extends Conversation {
@@ -68,6 +68,7 @@ export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
+  const [conversationsLoadError, setConversationsLoadError] = useState<string | null>(null)
   const [messagesLoadError, setMessagesLoadError] = useState<string | null>(null)
   const [takingOver, setTakingOver] = useState(false)
   const [replyText, setReplyText] = useState('')
@@ -95,19 +96,27 @@ export default function InboxPage() {
 
   // ── Cargar conversaciones ──────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
-      .select('id, customer_phone, status, created_at, updated_at, messages(id, created_at)')
-      .order('updated_at', { ascending: false })
+      .select('id, customer_phone, status, created_at, last_interaction_at, messages(id, created_at)')
+      .order('last_interaction_at', { ascending: false })
       .limit(50)
 
+    if (error) {
+      setConversations([])
+      setConversationsLoadError('No se pudieron cargar las conversaciones.')
+      setLoading(false)
+      return
+    }
+
+    setConversationsLoadError(null)
     const rows: ConversationRow[] = (data as ConversationRow[] | null) ?? []
-    setConversations(rows.map(({ id, customer_phone, status, created_at, updated_at }) => ({
+    setConversations(rows.map(({ id, customer_phone, status, created_at, last_interaction_at }) => ({
       id,
       customer_phone,
       status,
       created_at,
-      updated_at,
+      last_interaction_at,
     })))
     setLoading(false)
     if (rows.length > 0 && !selectedId) {
@@ -349,6 +358,11 @@ export default function InboxPage() {
                 <div key={i} className="h-16 rounded-lg bg-border/40 animate-pulse" />
               ))}
             </div>
+          ) : conversationsLoadError ? (
+            <div className="p-8 text-center text-red-400 text-sm">
+              <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-70" />
+              <p>{conversationsLoadError}</p>
+            </div>
           ) : filteredConvs.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground text-sm">
               <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-20" />
@@ -373,7 +387,7 @@ export default function InboxPage() {
                     </div>
                     <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <Clock className="h-2.5 w-2.5" />
-                      {timeAgo(conv.updated_at ?? conv.created_at)}
+                      {timeAgo(conv.last_interaction_at ?? conv.created_at)}
                     </span>
                   </div>
                   <div className="ml-4">
