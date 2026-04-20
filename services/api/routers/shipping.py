@@ -173,13 +173,18 @@ async def quote_shipment(
     ]
 
     carrier_errors: dict[str, str] = {}
+    logger.info("Envia quote payload base (tenant %s): origin_city=%s dest_city=%s",
+                tenant_id,
+                base_payload.get("origin", {}).get("city"),
+                base_payload.get("destination", {}).get("city"))
 
     async def _fetch_carrier(carrier: str):
         payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
         for attempt in range(2):
             try:
                 resp = await client.get_rates(payload)
-                return resp.get("data") if isinstance(resp, dict) else resp
+                data = resp.get("data") if isinstance(resp, dict) else resp
+                return data if isinstance(data, list) else []
             except Exception as exc:
                 if attempt == 0:
                     logger.warning("Envia carrier %s reintentando... (tenant %s): %s", carrier, tenant_id, exc)

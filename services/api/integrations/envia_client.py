@@ -61,8 +61,14 @@ class EnviaClient:
                 headers=self.headers,
                 json=payload,
             )
+            if resp.status_code >= 400:
+                logger.error("Envia /ship/rate/ %d: %s", resp.status_code, resp.text[:500])
             resp.raise_for_status()
-            return resp.json()
+            body = resp.json()
+            data = body.get("data") if isinstance(body, dict) else body
+            if not data:
+                logger.warning("Envia /ship/rate/ 200 sin tarifas. body=%s", str(body)[:500])
+            return body
 
     async def get_available_carriers(self, country: str = "CO", shipment_type: int = 0) -> list:
         """
