@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 31)
+**Última actualización**: 2026-04-20 (rev. 32)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -110,6 +110,11 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
   - `Mercado Libre` (requiere `mercadolibre`)
 - Se corrigió bug legacy que construía `dane_code` inválido (`+000`) en selector de direcciones.
 - `settings.shipping_origin` ahora preserva `dane_code` explícito y mantiene `postal_code`/`dane_code` alineados para Envia.
+- UX móvil en `/dashboard/shipping` ajustada para evitar sobreposición visual:
+  - KPIs en una columna en mobile (`sm+` mantiene 3 columnas)
+  - Selectores geográficos y bloque de paquete apilados en mobile
+  - Tarjetas destacadas de tarifas apiladas en mobile
+  - Card de tarifa con layout vertical en mobile (precio/metadata sin montarse)
 
 ---
 

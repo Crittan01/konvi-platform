@@ -38,6 +38,7 @@ supabase db query --linked -f supabase/migrations/20260420000001_order_tracking.
 - Shipping CO endurecido: normalización runtime `DANE5/8 -> DANE8` para payload de quote en Envia
 - Normalización DANE canónica (5 dígitos) en backend + fix del bug frontend `dane_code + "000"`
 - Sidebar con activación por integración para Inbox/Cotizador/Mercado Libre
+- Ajuste UX mobile en Shipping (grillas/cards sin sobreposición)
 
 ## No pendientes (cerrado en sesión 2026-04-19)
 
