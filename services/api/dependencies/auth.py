@@ -148,18 +148,7 @@ async def require_owner_role(role: str = Depends(get_current_role)) -> str:
 
 async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Client:
     """
-    Retorna un cliente Supabase con service_role autenticado.
-    Setea app.current_tenant_id para funciones SQL que dependen de app_current_tenant().
-    Nota: service_role puede bypassar RLS; por eso todas las queries deben filtrar
-    tenant_id explícitamente en runtime.
+    Retorna un cliente Supabase con service_role para el tenant autenticado.
+    service_role bypasa RLS — toda query debe filtrar tenant_id explícitamente.
     """
-    client = _get_service_client()
-    try:
-        client.rpc("set_config", {
-            "parameter": "app.current_tenant_id",
-            "value": tenant_id,
-            "is_local": True,
-        }).execute()
-    except Exception as e:
-        logger.warning("No se pudo setear app.current_tenant_id: %s", e)
-    return client
+    return _get_service_client()
