@@ -172,6 +172,8 @@ async def quote_shipment(
         "fedex", "dhl", "envia",
     ]
 
+    carrier_errors: dict[str, str] = {}
+
     async def _fetch_carrier(carrier: str):
         payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
         for attempt in range(2):
@@ -183,7 +185,8 @@ async def quote_shipment(
                     logger.warning("Envia carrier %s reintentando... (tenant %s): %s", carrier, tenant_id, exc)
                     await asyncio.sleep(1)
                 else:
-                    logger.warning("Envia carrier %s falló definitivamente (tenant %s): %s", carrier, tenant_id, exc)
+                    carrier_errors[carrier] = str(exc)
+                    logger.warning("Envia carrier %s falló (tenant %s): %s", carrier, tenant_id, exc)
         return []
 
     try:
@@ -201,10 +204,11 @@ async def quote_shipment(
             raw_rates.extend(chunk)
 
     if not raw_rates:
-        raise HTTPException(
-            status_code=502,
-            detail="Envia no retornó tarifas. Verifica la API key y que el account tenga carriers activos para Colombia."
-        )
+        error_sample = next(iter(carrier_errors.values()), None) if carrier_errors else None
+        detail = "Envia no retornó tarifas. Verifica la API key y que el account tenga carriers activos para Colombia."
+        if error_sample:
+            detail += f" Detalle: {error_sample}"
+        raise HTTPException(status_code=502, detail=detail)
 
     normalized_rates = []
     for r in raw_rates:
