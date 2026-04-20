@@ -61,7 +61,7 @@ function GeoSelector({
   const daneCode   = municipioCodigo || (city ? initDane : '')
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <input type="hidden" name={`${prefix}_state`}     value={dptoNombre} />
       <input type="hidden" name={`${prefix}_city`}      value={city} />
       <input type="hidden" name={`${prefix}_dane_code`} value={daneCode} />
@@ -232,7 +232,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
       <CardHeader className="cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex flex-wrap items-center gap-2">
               Cotizar Envío
               {orderId && (
                 <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
@@ -286,7 +286,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
 
             <div className="space-y-3">
               <p className="text-sm font-medium text-foreground flex items-center gap-1.5"><Box className="h-4 w-4 shrink-0" /> Paquete</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <Label className="text-xs">Peso (kg)</Label>
                   <Input name="weight" type="number" step="0.1" min="0.1" defaultValue="1" className="h-8 text-xs" required />
@@ -356,7 +356,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                     </span>
                   </div>
                 )}
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
                     <p className="text-xs text-muted-foreground">{String(rate.service ?? 'Servicio estándar')}</p>
@@ -366,7 +366,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                       </p>
                     )}
                   </div>
-                  <div className="text-right shrink-0">
+                  <div className="text-left sm:text-right shrink-0">
                     {rate.total_price != null && (
                       <p className="text-lg font-bold text-primary">
                         ${Number(rate.total_price).toLocaleString('es-CO')}{' '}
@@ -388,7 +388,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                 {/* Destacados */}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">Destacados</p>
-                  <div className={`grid gap-2 ${showFastestSeparate ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <div className={`grid gap-2 ${showFastestSeparate ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                     <RateCard
                       rate={cheapest} idx={0}
                       accent="green" label="Más económico"

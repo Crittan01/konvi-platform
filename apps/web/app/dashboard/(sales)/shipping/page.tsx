@@ -152,7 +152,7 @@ export default async function ShippingPage({
 
       {/* KPIs rápidas */}
       {shipments.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="rounded-xl border border-border bg-card p-4 text-center">
             <p className="text-2xl font-bold text-primary">{shipments.length}</p>
             <p className="text-xs text-muted-foreground mt-1">Total envíos</p>
@@ -220,7 +220,7 @@ export default async function ShippingPage({
                       )}
                     </div>
                     {/* Status + fecha estimada */}
-                    <div className="shrink-0 text-right sm:text-right space-y-1">
+                    <div className="text-left sm:text-right space-y-1">
                       <span className={`inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full border ${colorClass}`}>
                         {STATUS_LABELS[s.status] ?? s.status}
                       </span>
