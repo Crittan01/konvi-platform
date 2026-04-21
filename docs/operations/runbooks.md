@@ -45,3 +45,9 @@ supabase db query --linked -f supabase/migrations/<archivo>.sql
 3. Registrar resultado por intent (`auto`, `humano`, `fallo`).
 4. Validar que intents de Fase A/B cumplen porcentaje objetivo.
 5. Documentar evidencias y decidir `GO/NO-GO` de fase siguiente.
+
+Fallback en Render Free (cold starts/congelamiento):
+
+```bash
+./scripts/uat/fase_a_free_fallback.sh
+```
