@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 33)
+**Última actualización**: 2026-04-20 (rev. 40)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -11,7 +11,7 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **DB**: ✅ contrato endurecido (35 migraciones)
+- **DB**: ✅ contrato endurecido (42 migraciones)
 
 ---
 
@@ -46,8 +46,22 @@ Comportamiento efectivo:
 - Si conversación está en `human_takeover`: el bot no responde.
 - Si conversación está en `closed`: el bot no responde y no reabre automáticamente.
 - Mensajes no-texto: no respuesta automática, se escalan a `human_takeover` y quedan visibles en Inbox.
+- Escalamiento a `human_takeover` ahora publica evento a cola durable Supabase Queues (`pgmq`) vía trigger DB sobre `conversations`.
+- AI Orchestrator consume la cola y despacha notificaciones por tenant:
+  - `telegram` activo
+  - `email` preparado (placeholder no bloqueante hasta SMTP productivo)
 
-### 4) RBAC runtime
+### 4) Outbound humano Inbox -> Queue -> WhatsApp
+
+Comportamiento efectivo:
+- `POST /api/v1/conversations/{id}/send` ya no llama Meta directo; encola evento durable (`pgmq`) para envío async.
+- El endpoint persiste primero el outbound en `messages` (`processing_status='pending'`) y luego encola payload con `tenant_id`.
+- El AI Orchestrator consume `whatsapp_outbound_messages`, envía a Meta y actualiza `messages`:
+  - éxito -> `processing_status='processed'`, `processed=true`, `meta_message_id`
+  - fallo transitorio -> retry por visibilidad de cola (`vt`)
+  - fallo definitivo -> `processing_status='failed'` al llegar a `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
+
+### 5) RBAC runtime
 
 Roles vivos en runtime:
 - `owner`
@@ -56,7 +70,7 @@ Roles vivos en runtime:
 
 `agent` no existe en runtime; queda únicamente en migraciones históricas.
 
-### 5) OAuth Mercado Libre
+### 6) OAuth Mercado Libre
 
 `state` OAuth endurecido:
 - firmado (HMAC)
@@ -65,7 +79,7 @@ Roles vivos en runtime:
 - callback rechaza `state` faltante/inválido/expirado/reutilizado antes de persistir tokens
 - `/integrations/meli/auth-url` responde `503` con detalle explícito de env vars faltantes si la app MeLi no quedó configurada completa en API
 
-### 6) Credenciales WhatsApp
+### 7) Credenciales WhatsApp
 
 Fuente única runtime:
 - `tenant_integrations` por `tenant_id`
@@ -73,7 +87,7 @@ Fuente única runtime:
 No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en senders (API/Orchestrator).
 El connector solo recibe webhooks; no envía mensajes.
 
-### 7) Seguridad multi-tenant (service_role)
+### 8) Seguridad multi-tenant (service_role)
 
 El backend usa `service_role` en varios paths, por lo que:
 - RLS **no** es barrera suficiente por sí sola en esos paths
@@ -81,7 +95,7 @@ El backend usa `service_role` en varios paths, por lo que:
 
 Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `marketplace`, `meli_webhook`).
 
-### 8) Shipping Envia (CO) — contrato de dirección endurecido
+### 9) Shipping Envia (CO) — contrato de dirección endurecido
 
 - En runtime CO, el backend acepta DANE de 5 u 8 dígitos y normaliza a `stat_8digit` para cotizar (ej. `11001 -> 11001000`).
 - Para Colombia, payload de Shipping API usa:
@@ -95,6 +109,57 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 - Descubrimiento de carriers prioriza Queries API (`available-carrier`) con fallback operativo si Queries falla.
 - `EnviaClient.get_rates()` ahora interpreta como error respuestas `200` con `code/message` sin `data` (evita falsos "sin tarifas").
 - Fallas por carrier guardan mensaje robusto (sin strings vacíos) para diagnóstico en `shipping/quote`.
+- Fase 2 parcial implementada en API (feature-flagged):
+  - `POST /api/v1/shipping/{shipment_id}/label`
+  - `POST /api/v1/shipping/tracking`
+  - `POST /api/v1/shipping/pickup`
+  - `POST /api/v1/shipping/cancel`
+  - activación por env var `ENVIA_PHASE2_ENABLED=true` (default `false`)
+- `/dashboard/shipping` ahora consume Fase 2 end-to-end desde frontend:
+  - proxies Next server-side:
+    - `POST /api/shipping/{shipmentId}/label`
+    - `POST /api/shipping/tracking`
+    - `POST /api/shipping/pickup`
+    - `POST /api/shipping/cancel`
+  - bloque UI post-cotización con acciones:
+    - generar label
+    - consultar tracking
+    - agendar pickup
+    - cancelar envío
+  - manejo explícito de feature flag deshabilitado (`503`): guía operativa para activar `ENVIA_PHASE2_ENABLED=true` en API
+
+### 10) Tiering runtime (Basic / Pro / Enterprise)
+
+Comportamiento efectivo:
+- Se implementó catálogo canónico de planes y capabilities en DB (`billing_plans`, `plan_capabilities`, `tenant_subscriptions`).
+- API Gateway aplica enforcement backend real por capability + cuota con RPC:
+  - `orders.create`
+  - `shipping.quote`
+  - `shipping.confirm_rate`
+  - `conversations.send`
+  - `integrations.mercadolibre`
+- Se expone snapshot operativo por tenant en `GET /api/v1/settings/plan-capabilities`.
+- Sidebar refleja bloqueo UX por plan en módulos capability-gated (sin confiar seguridad al frontend).
+- Telemetría de uso por tenant/capability:
+  - `tenant_usage_counters`
+  - `tenant_usage_events`
+
+### 11) Observabilidad API + mantenimiento idempotency
+
+Comportamiento efectivo:
+- API registra eventos operativos de hardening en `api_security_events`:
+  - `rate_limit.exceeded`
+  - `idempotency.replay`
+  - `idempotency.payload_mismatch`
+  - `idempotency.in_flight_conflict`
+  - `idempotency.duplicate_conflict`
+- Limpieza de llaves expiradas disponible por dos vías:
+  - RPC DB `cleanup_expired_idempotency_keys(...)`
+  - endpoint owner-only `POST /api/v1/settings/maintenance/idempotency-cleanup`
+- AI Orchestrator ejecuta cleanup periódico automático (configurable por env vars):
+  - `IDEMPOTENCY_CLEANUP_ENABLED`
+  - `IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS`
+  - `IDEMPOTENCY_CLEANUP_BATCH`
 
 ---
 
@@ -102,6 +167,7 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 
 - `meliBadge` ya no está hardcodeado; se calcula desde `marketplace_listings`.
 - Badge MeLi renderiza correctamente también cuando `Mercado Libre` es child item dentro de grupo sidebar.
+- Badge MeLi en sidebar ahora muestra conteo numérico (no solo ícono), consistente con Inbox.
 - `/dashboard/inventory` legacy quedó como redirección explícita a `/dashboard/catalog`.
 - Se eliminaron links operativos residuales que trataban Inventory como módulo standalone.
 - Inbox lista conversaciones por `last_interaction_at` y usa `created_at` solo como fallback visual.
@@ -112,11 +178,27 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
   - `Mercado Libre` (requiere `mercadolibre`)
 - Se corrigió bug legacy que construía `dane_code` inválido (`+000`) en selector de direcciones.
 - `settings.shipping_origin` ahora preserva `dane_code` explícito y mantiene `postal_code`/`dane_code` alineados para Envia.
+- `/dashboard/marketplace` ahora distingue explícitamente tres estados:
+  - integración desconectada en DB
+  - error/timeout cargando publicaciones desde API
+  - reconexión requerida cuando DB está conectada pero API no valida sesión MeLi
+- `Knowledge Base` reemplaza banner técnico de RAG por copy orientado a operación de negocio.
 - UX móvil en `/dashboard/shipping` ajustada para evitar sobreposición visual:
   - KPIs en una columna en mobile (`sm+` mantiene 3 columnas)
   - Selectores geográficos y bloque de paquete apilados en mobile
   - Tarjetas destacadas de tarifas apiladas en mobile
   - Card de tarifa con layout vertical en mobile (precio/metadata sin montarse)
+- Flujos críticos UI ahora generan y envían `Idempotency-Key`:
+  - Crear pedido (`/api/orders`)
+  - Cotizar envío (`/api/shipping/quote`)
+  - Confirmar tarifa (`/api/shipping/{id}/rate`)
+  - Enviar mensaje humano Inbox (`/api/v1/conversations/{id}/send`)
+- Contactos UI amplió captura legal:
+  - fuente de consentimiento
+  - versión de aviso/política
+  - evidencia (nota)
+  - motivo de revocatoria
+  - visualización de estado revocado y metadata de consentimiento
 
 ---
 
@@ -130,6 +212,76 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
   - Nueva tabla `order_tracking` con RLS
   - Centraliza tracking de envíos multi-proveedor (`mercadolibre`, `envia`)
   - Alimentada desde webhook `shipments` MeLi; Envia Fase 2 también escribirá aquí
+
+- `20260420000002_api_hardening_and_contacts_legal.sql`
+  - Nueva tabla `idempotency_keys` con RLS tenant-aware
+  - Extensión legal de `contacts` para evidencia y revocatoria de consentimiento
+  - Índices para operación (`tenant/created`, `expires_at`, `consent_revoked_at`)
+
+- `20260420000003_human_takeover_notifications_queue.sql`
+  - Habilita extensión `pgmq` (Supabase Queues)
+  - Trigger DB `conversations_human_takeover_queue_trigger` para encolar eventos de takeover
+  - Funciones wrapper para backend:
+    - `dequeue_human_takeover_notifications(...)`
+    - `ack_human_takeover_notification(...)`
+
+- `20260420000004_whatsapp_outbound_queue.sql`
+  - Crea cola durable `whatsapp_outbound_messages` (Supabase Queues / `pgmq`)
+  - Funciones wrapper para backend:
+    - `enqueue_whatsapp_outbound_message(...)`
+    - `dequeue_whatsapp_outbound_messages(...)`
+    - `ack_whatsapp_outbound_message(...)`
+
+- `20260420000005_plan_tiering_foundation.sql`
+  - Crea base de tiering multi-tenant:
+    - `billing_plans`
+    - `plan_capabilities`
+    - `tenant_subscriptions`
+    - `tenant_usage_counters`
+    - `tenant_usage_events`
+  - Seed de capabilities por plan (`basic`, `pro`, `enterprise`)
+  - RPCs de enforcement/consulta:
+    - `consume_tenant_capability(...)`
+    - `get_tenant_plan_capabilities(...)`
+  - Existing tenants bootstrap a `enterprise` para evitar regresión inmediata
+
+- `20260420000006_api_security_observability.sql`
+  - Crea tabla `api_security_events` con RLS
+  - Crea RPC `cleanup_expired_idempotency_keys(...)`
+
+---
+
+## Hardening API (2026-04-20)
+
+- `services/api/dependencies/security.py`:
+  - rate limit por tenant + IP en buckets `write.default` y `conversation.send`
+- `services/api/dependencies/idempotency.py`:
+  - contrato de idempotencia con replay persistido por tenant
+  - observabilidad de conflictos/replays vía `api_security_events`
+- Endpoints write endurecidos con RL + idempotencia:
+  - `orders.create`
+  - `contacts.create`
+  - `contacts.patch`
+  - `shipping.quote`
+  - `shipping.confirm_rate`
+  - `conversations.send`
+- `services/api/main.py`:
+  - CORS habilita header `Idempotency-Key`
+  - headers de seguridad de respuesta: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
+- Matriz técnica de hardening/validaciones documentada en:
+  - `docs/tech/api-hardening-matrix.md`
+
+---
+
+## Notificaciones operacionales (2026-04-20)
+
+- Integración Telegram actualizada a estado operativo:
+  - `docs/integrations/telegram.md`
+- Pipeline de notificación desacoplado por cola:
+  - `conversations.status -> trigger DB -> pgmq -> ai-orchestrator worker`
+- Worker implementa manejo de errores transitorios/permanentes en Telegram:
+  - errores permanentes de config (`400/401/403/404`) se marcan manejados
+  - errores de red/5xx quedan para retry por visibilidad de cola
 
 ---
 
@@ -179,10 +331,65 @@ Campos en `marketplace_listings` actualizados por tres vías:
 
 ## Validación ejecutada en esta sesión
 
-- `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (36 tests)
+- `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
 - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
 - `pnpm --filter web lint` ✅ (con warnings preexistentes, sin errores)
 - `python3 -m py_compile services/api/integrations/envia_client.py services/api/routers/shipping.py` ✅
+- Re-validación post-ajustes UX (2026-04-20): `node --test apps/web/tests/marketplace-badges.test.mjs` ✅ y `pnpm --filter web lint` ✅ (solo warnings preexistentes)
+- Validación hardening/contactos (2026-04-20):
+  - `python3 -m py_compile services/api/main.py services/api/routers/orders.py services/api/routers/shipping.py services/api/routers/conversations.py services/api/routers/contacts.py services/api/dependencies/security.py services/api/dependencies/idempotency.py` ✅
+  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
+- Validación queue/notifications (2026-04-20):
+  - `python3 -m py_compile services/ai-orchestrator/worker.py services/ai-orchestrator/notifications.py` ✅
+  - Migraciones ejecutadas en Supabase linked:
+    - `20260420000000_marketplace_listings_meli_fields.sql` ✅
+    - `20260420000002_api_hardening_and_contacts_legal.sql` ✅
+    - `20260420000003_human_takeover_notifications_queue.sql` ✅
+    - `20260420000004_whatsapp_outbound_queue.sql` ✅
+    - `20260420000001_order_tracking.sql` ya aplicada (DB respondió `relation "order_tracking" already exists`)
+  - Certificación SQL remota (`supabase db query --linked`) ✅:
+    - `has_meli_title=true`
+    - `has_order_tracking=true`
+    - `has_idempotency_keys=true`
+    - `has_contacts_legal=true`
+    - `has_pgmq_extension=true`
+    - `has_dequeue_fn=true`
+    - `has_ack_fn=true`
+    - `has_takeover_trigger=true`
+    - `has_queue_table=true`
+    - `has_enqueue_wa_fn=true`
+    - `has_dequeue_wa_fn=true`
+    - `has_ack_wa_fn=true`
+    - `has_wa_queue_table=true`
+  - Tests dedicados queue outbound:
+    - `python3 -m unittest tests/test_conversations_outbound_queue.py tests/test_worker_whatsapp_outbound_queue.py` ✅
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (39 tests)
+  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
+  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
+- Validación tiering foundation (2026-04-20):
+  - Migración aplicada en Supabase linked:
+    - `20260420000005_plan_tiering_foundation.sql` ✅
+  - Certificación SQL remota (`supabase db query --linked`) ✅:
+    - `has_billing_plans=true`
+    - `has_plan_capabilities=true`
+    - `has_tenant_subscriptions=true`
+    - `has_usage_counters=true`
+    - `has_consume_fn=true`
+    - `has_get_caps_fn=true`
+    - distribución inicial de subscriptions: `enterprise=1 tenant`
+  - `python3 -m unittest tests/test_plan_capability_dependency.py` ✅
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
+  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
+  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
+- Validación observabilidad + Envia Fase 2 parcial (2026-04-20):
+  - `supabase db query --linked -f supabase/migrations/20260420000006_api_security_observability.sql` ✅
+  - Certificación SQL remota (`supabase db query --linked`) ✅:
+    - `has_api_security_events=true`
+    - `has_cleanup_fn=true`
+  - `python3 -m py_compile services/api/integrations/envia_client.py services/api/routers/shipping.py services/api/routers/settings.py services/api/dependencies/idempotency.py services/ai-orchestrator/worker.py services/ai-orchestrator/server.py` ✅
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
+  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
+  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
 - Smoke E2E Envia (sandbox/prod, token tenant) ✅:
   - Sandbox: con DANE8 hubo tarifas en 4 carriers (`fedex`, `serviEntrega`, `dhl`, `tcc`)
   - Producción: con DANE8 hubo tarifas en 5 carriers (`serviEntrega`, `dhl`, `interRapidisimo`, `deprisa`, `tcc`)

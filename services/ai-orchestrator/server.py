@@ -36,6 +36,7 @@ app = FastAPI(
 
 # Estado global del worker (para /status)
 _worker_status = {"running": False, "started_at": None, "error": None}
+_worker_ref = {"instance": None}
 
 
 @app.get("/health")
@@ -47,7 +48,14 @@ def health():
 @app.get("/status")
 def status():
     """Estado detallado del worker de IA."""
-    return JSONResponse(content=_worker_status)
+    payload = dict(_worker_status)
+    instance = _worker_ref.get("instance")
+    if instance is not None and hasattr(instance, "metrics_snapshot"):
+        try:
+            payload["metrics"] = instance.metrics_snapshot()
+        except Exception:
+            payload["metrics"] = {}
+    return JSONResponse(content=payload)
 
 
 # ─── Worker thread ─────────────────────────────────────────────────────────────
@@ -67,6 +75,7 @@ def _run_worker_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         worker = OrchestratorWorker()
+        _worker_ref["instance"] = worker
         loop.run_until_complete(worker.run())
     except Exception as exc:
         logger.error("❌ Worker terminó con error: %s", exc, exc_info=True)

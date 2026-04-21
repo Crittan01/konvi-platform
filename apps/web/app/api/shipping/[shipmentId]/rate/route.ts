@@ -19,9 +19,15 @@ export async function PATCH(
   try { body = await req.json() }
   catch { return NextResponse.json({ detail: 'Payload inválido' }, { status: 400 }) }
 
+  const idempotencyKey = req.headers.get('Idempotency-Key')
+
   const upstream = await fetch(`${API_URL}/api/v1/shipping/${params.shipmentId}/rate`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(10000),
   })

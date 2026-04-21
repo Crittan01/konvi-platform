@@ -1,14 +1,14 @@
 # Integración Courier / Shipping — Envia
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-20
 
 ---
 
 ## Estado
 
-🟡 **Fase Inicial implementada — Fases 2 y 3 pendientes**
+🟡 **Fase Inicial + Fase 2 parcial implementadas — UI conectada, webhooks pendientes**
 
-Última actualización: 2026-04-09 (rev. 2 — Fase 10 completada)
+Última actualización: 2026-04-20 (rev. 3)
 
 ### Qué está implementado (Fase Inicial — ✅)
 
@@ -22,19 +22,19 @@
 | Gestión de credenciales | `services/api/routers/integrations.py` | ✅ Envia connect/disconnect por tenant |
 | Sandbox conectado | Empresa #5017 en Envia Sandbox | ✅ Token en `tenant_integrations` |
 | PV-03 resuelto | Bearer per-tenant (no global) | ✅ Validado 2026-04-09 |
+| Label endpoint backend | `services/api/routers/shipping.py` → `POST /api/v1/shipping/{shipment_id}/label` | ✅ Fase 2 parcial (flag) |
+| Tracking endpoint backend | `services/api/routers/shipping.py` → `POST /api/v1/shipping/tracking` | ✅ Fase 2 parcial (flag) |
+| Pickup endpoint backend | `services/api/routers/shipping.py` → `POST /api/v1/shipping/pickup` | ✅ Fase 2 parcial (flag) |
+| Cancel endpoint backend | `services/api/routers/shipping.py` → `POST /api/v1/shipping/cancel` | ✅ Fase 2 parcial (flag) |
+| UI Fase 2 `/dashboard/shipping` | `apps/web/app/dashboard/(sales)/shipping/shipping-quote-form.tsx` | ✅ Acciones label/tracking/pickup/cancel + control de feature flag |
 
 ### Qué falta (Fase 2 y 3 — ❌ Pendiente)
 
 | Capacidad | Fase | Endpoint Envia |
 |-----------|------|----------------|
-| Formulario UI interactivo de cotización | Inmediato (deuda) | — (backend existe) |
-| Generación de label | Fase 2 | `POST /ship/` |
-| Tracking de envío | Fase 2 | `GET /track/` |
-| Programar pickup | Fase 2 | `POST /pickup/` |
-| Cancelar envío | Fase 2 | `DELETE /ship/{id}` |
-| Manifest | Fase 3 | `POST /manifest/` |
+| Manifest | Fase 3 | `POST /ship/manifest` |
 | Webhooks de estado | Fase 3 | Configuración en Envia portal |
-| Queries API (carriers/services/country) | Fase 2 | `GET /carrier/`, `GET /service/` |
+| Queries API (carriers/services/country) | Fase 2 | `GET /carrier`, `GET /service` |
 
 Este documento establece el diseño funcional, arquitectónico y de contrato para la integración completa de Envia dentro de la Commerce Ops Platform.
 
@@ -190,16 +190,20 @@ services/api/routers/
 |----------|--------|
 | `POST /api/v1/shipping/quote` | ✅ Llama Envia `POST /ship/rate/`, persiste en `shipments` |
 | `GET /api/v1/shipping/history` | ✅ Lista `shipments` del tenant |
+| `POST /api/v1/shipping/{shipment_id}/label` | ✅ (flag `ENVIA_PHASE2_ENABLED`) |
+| `POST /api/v1/shipping/tracking` | ✅ (flag `ENVIA_PHASE2_ENABLED`) |
+| `POST /api/v1/shipping/pickup` | ✅ (flag `ENVIA_PHASE2_ENABLED`) |
+| `POST /api/v1/shipping/cancel` | ✅ (flag `ENVIA_PHASE2_ENABLED`) |
 
 ### Endpoints internos diseñados (Fases 2-3)
 
 ```
 POST /api/v1/shipping/quote      ← ✅ IMPLEMENTADO — cotización de envío
 GET  /api/v1/shipping/history    ← ✅ IMPLEMENTADO — historial del tenant
-POST /api/v1/shipping/label      ← ❌ Fase 2 — generación de label
-GET  /api/v1/shipping/tracking/{id} ← ❌ Fase 2 — estado de envío
-POST /api/v1/shipping/pickup     ← ❌ Fase 2 — programar recogida
-DELETE /api/v1/shipping/{id}     ← ❌ Fase 2 — cancelar envío
+POST /api/v1/shipping/{shipment_id}/label ← ✅ PARCIAL — generación de label (`POST /ship/generate/`)
+POST /api/v1/shipping/tracking   ← ✅ PARCIAL — estado de envío (`POST /ship/generaltrack/`)
+POST /api/v1/shipping/pickup     ← ✅ PARCIAL — programar recogida
+POST /api/v1/shipping/cancel     ← ✅ PARCIAL — cancelar envío (`POST /ship/cancel/`)
 GET  /api/v1/shipping/carriers   ← ❌ Fase 2 — carriers disponibles (Queries API)
 GET  /api/v1/shipping/services   ← ❌ Fase 2 — servicios por carrier (Queries API)
 ```
@@ -261,6 +265,9 @@ CREATE POLICY "Tenant Isolation" ON public.shipments
 - Producción: `https://api.envia.com` / Sandbox: `https://api-test.envia.com`
 
 > No hay variables de entorno globales de Envia en el backend — el token se extrae por tenant desde la DB en cada request.
+
+Feature flag fase 2 parcial:
+- `ENVIA_PHASE2_ENABLED` (`false` por defecto en Render)
 
 **Sandox activo**: Empresa #5017 conectada en el tenant dev `Matriz Commerce Dev`.
 

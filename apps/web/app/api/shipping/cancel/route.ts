@@ -6,19 +6,25 @@ const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
 export async function POST(req: NextRequest) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ detail: 'No autenticado' }, { status: 401 })
+  if (!user) {
+    return NextResponse.json({ detail: 'No autenticado' }, { status: 401 })
+  }
 
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
-  if (!token) return NextResponse.json({ detail: 'Sesión expirada' }, { status: 401 })
+  if (!token) {
+    return NextResponse.json({ detail: 'Sesión expirada' }, { status: 401 })
+  }
 
   let body: unknown
-  try { body = await req.json() }
-  catch { return NextResponse.json({ detail: 'Payload inválido' }, { status: 400 }) }
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ detail: 'Payload inválido' }, { status: 400 })
+  }
 
   const idempotencyKey = req.headers.get('Idempotency-Key')
-
-  const upstream = await fetch(`${API_URL}/api/v1/orders/`, {
+  const upstream = await fetch(`${API_URL}/api/v1/shipping/cancel`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -26,7 +32,7 @@ export async function POST(req: NextRequest) {
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(20000),
   })
 
   const data = await upstream.json().catch(() => ({ detail: 'Error del servidor' }))

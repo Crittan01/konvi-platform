@@ -15,13 +15,23 @@ Seguridad:
     El aislamiento depende de filtros explícitos + RLS donde aplique.
 """
 import logging
+from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from uuid import uuid4
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client
+from dependencies.idempotency import (
+    abort_idempotency,
+    begin_idempotency,
+    finalize_idempotency,
+    payload_fingerprint,
+)
+from dependencies.plans import PLAN_CONVERSATIONS_SEND
+from dependencies.security import RL_SEND_MESSAGE, RL_WRITE_DEFAULT
 from domain.conversation_contract import CONVERSATION_STATUSES
-from integrations.whatsapp_sender import send_whatsapp_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Conversations"])
@@ -204,6 +214,7 @@ async def update_conversation_status(
     body: ConversationStatusUpdate,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """
     Cambia el status de una conversación.
@@ -241,17 +252,20 @@ async def update_conversation_status(
 async def send_agent_message(
     conversation_id: str,
     body: AgentMessageRequest,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
+    _plan: object = Depends(PLAN_CONVERSATIONS_SEND),
+    _rl: None = Depends(RL_SEND_MESSAGE),
 ):
     """
-    Envía un mensaje de texto desde el agente humano al cliente vía WhatsApp.
+    Encola un mensaje de texto outbound desde agente humano para envío async.
 
     Reglas:
     - La conversación debe estar en status 'human_takeover'.
     - Todos los roles runtime (owner, manager, operator) pueden enviar.
-    - El mensaje se persiste en la tabla 'messages' con direction='outbound'.
-    - El Orchestrator omite mensajes outbound en su loop (solo procesa inbound).
+    - El mensaje se persiste en 'messages' como outbound pendiente.
+    - El envío real lo hace el worker consumiendo Supabase Queues.
     """
     text = body.text.strip()
     if not text:
@@ -259,7 +273,22 @@ async def send_agent_message(
     if len(text) > 4096:
         raise HTTPException(status_code=422, detail="El mensaje excede el límite de 4096 caracteres")
 
+    idem_session = None
     try:
+        request_hash = payload_fingerprint({"conversation_id": conversation_id, "text": text})
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
         # 1. Verificar que la conversación pertenece al tenant y está en takeover
         conv_result = (
             supabase.table("conversations")
@@ -280,21 +309,8 @@ async def send_agent_message(
                        "Toma el control antes de responder.",
             )
 
-        # 2. Enviar vía Meta API
-        meta_message_id = await send_whatsapp_text(
-            to_phone=conv["customer_phone"],
-            text=text,
-            tenant_id=tenant_id,
-            supabase=supabase,
-        )
-        if meta_message_id is None:
-            raise HTTPException(
-                status_code=502,
-                detail="No se pudo enviar el mensaje vía WhatsApp. "
-                       "Verifica la configuración WhatsApp del tenant en Integraciones.",
-            )
-
-        # 3. Persistir el mensaje outbound en la tabla messages
+        # 2. Persistir mensaje outbound pendiente en DB
+        client_message_id = str(uuid4())
         msg_insert = (
             supabase.table("messages")
             .insert({
@@ -303,39 +319,84 @@ async def send_agent_message(
                 "direction": "outbound",
                 "content_type": "text",
                 "content": text,
-                "meta_message_id": meta_message_id,
-                "processed": True,  # outbound no entra al loop de orquestación inbound
-                "processing_status": "processed",
+                "processed": False,
+                "processing_status": "pending",
+                "last_error": None,
+                "skip_reason": None,
             })
             .execute()
         )
 
         if not msg_insert.data:
-            # El mensaje ya fue enviado — solo falta persistencia. Loggear pero no fallar.
-            logger.error(
-                "Mensaje enviado a Meta pero no persistido en DB | conv=%s",
-                conversation_id,
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo persistir el mensaje outbound.",
             )
-            return {
-                "sent": True,
-                "meta_message_id": meta_message_id,
-                "persisted": False,
-            }
 
         new_msg = msg_insert.data[0]
+        queue_payload = {
+            "event_type": "whatsapp.outbound.send",
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+            "message_id": new_msg["id"],
+            "customer_phone": conv["customer_phone"],
+            "text": text,
+            "client_message_id": client_message_id,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        }
+        queue_res = supabase.rpc(
+            "enqueue_whatsapp_outbound_message",
+            {"p_message": queue_payload, "p_delay": 0},
+        ).execute()
+        queue_data = queue_res.data
+        if isinstance(queue_data, list):
+            raw_queue_msg_id = queue_data[0] if queue_data else 0
+            if isinstance(raw_queue_msg_id, dict):
+                raw_queue_msg_id = next(iter(raw_queue_msg_id.values()), 0)
+            queue_msg_id = int(raw_queue_msg_id or 0)
+        else:
+            queue_msg_id = int(queue_data or 0)
+        if queue_msg_id <= 0:
+            # Dejamos trazabilidad del fallo de enqueue en el mensaje outbound.
+            (
+                supabase.table("messages")
+                .update({
+                    "processing_status": "failed",
+                    "processed": True,
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": "queue_enqueue_failed",
+                })
+                .eq("id", new_msg["id"])
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            raise HTTPException(status_code=502, detail="No se pudo encolar el mensaje para envío.")
+
         logger.info(
-            "Mensaje de agente enviado y persistido | conv=%s | meta_id=%s",
-            conversation_id, meta_message_id,
+            "Mensaje humano encolado | conv=%s | msg_id=%s | q_msg_id=%s",
+            conversation_id,
+            new_msg["id"],
+            queue_msg_id,
         )
-        return {
-            "sent": True,
-            "meta_message_id": meta_message_id,
-            "persisted": True,
+        response_body = {
+            "sent": False,
+            "queued": True,
+            "queue_message_id": queue_msg_id,
             "message": new_msg,
         }
+        finalize_idempotency(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            session=idem_session,
+            status_code=200,
+            body=response_body,
+        )
+        return response_body
 
     except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
     except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error enviando mensaje de agente en conversación %s: %s", conversation_id, e)
         raise HTTPException(status_code=500, detail="Error al enviar el mensaje")

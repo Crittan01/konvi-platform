@@ -1,9 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { ShieldCheck, ShieldOff, Users, Phone, Search } from 'lucide-react'
+import { ShieldCheck, Users } from 'lucide-react'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
 
@@ -14,6 +11,12 @@ type Contact = {
   notes: string | null
   consent_given: boolean
   consent_date: string | null
+  consent_source: string | null
+  consent_notice_version: string | null
+  consent_evidence: Record<string, unknown> | null
+  consent_actor_email: string | null
+  consent_revoked_at: string | null
+  consent_revoked_reason: string | null
   created_at: string
   address: Record<string, string> | null
 }
@@ -36,15 +39,18 @@ export default async function ContactsPage({
   const role = meta.role ?? 'operator'
   const canWrite = role === 'owner' || role === 'manager'
 
-  const q = searchParams?.q ?? ''
   const consentFilter = searchParams?.consent ?? 'all'
+  const CONSENT_SOURCES = new Set(['manual_console', 'whatsapp', 'web_form', 'phone_call', 'in_person', 'import', 'other'])
 
   let contacts: Contact[] = []
 
   if (tenantId) {
     let query = supabase
       .from('contacts')
-      .select('id, phone, name, notes, consent_given, consent_date, created_at, address')
+      .select(
+        'id, phone, name, notes, consent_given, consent_date, consent_source, consent_notice_version, ' +
+        'consent_evidence, consent_actor_email, consent_revoked_at, consent_revoked_reason, created_at, address'
+      )
       .eq('tenant_id', tenantId)
       .order('name', { ascending: true, nullsFirst: false })
 
@@ -60,6 +66,7 @@ export default async function ContactsPage({
   // Solo la búsqueda full server haría falta si la DB crece mucho, pero por ahora en memoria es Nivel Pro.
 
   const consentCount = contacts.filter(c => c.consent_given).length
+  const revokedCount = contacts.filter(c => !c.consent_given && !!c.consent_revoked_at).length
 
   // ── Server Actions ─────────────────────────────────────────────────────────
 
@@ -69,7 +76,13 @@ export default async function ContactsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const nowIso = new Date().toISOString()
     const consentGiven = formData.get('consent_given') === 'on'
+    const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
+    const consentSource = sourceRaw && CONSENT_SOURCES.has(sourceRaw) ? sourceRaw : (consentGiven ? 'manual_console' : '')
+    const consentNoticeVersion = ((formData.get('consent_notice_version') as string) || '').trim()
+    const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
+    const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
@@ -82,13 +95,25 @@ export default async function ContactsPage({
       dane_code: daneCode || undefined,
     } : null
     const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 10)
+    if (digits.length !== 10) return
     await sb.from('contacts').insert({
       tenant_id:     m.tenant_id,
       phone:         `+57${digits}`,
       name:          (formData.get('name') as string) || null,
       notes:         (formData.get('notes') as string) || null,
       consent_given: consentGiven,
-      consent_date:  consentGiven ? new Date().toISOString() : null,
+      consent_date:  consentGiven ? nowIso : null,
+      consent_source: consentGiven ? consentSource : null,
+      consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
+      consent_evidence: {
+        created_via: 'dashboard_contacts',
+        note: consentEvidenceNote || null,
+        actor_email: u?.email ?? null,
+        captured_at: nowIso,
+      },
+      consent_actor_email: u?.email ?? null,
+      consent_revoked_at: !consentGiven && revocationReason ? nowIso : null,
+      consent_revoked_reason: !consentGiven ? (revocationReason || null) : null,
       address,
     })
     revalidatePath('/dashboard/contacts')
@@ -100,13 +125,26 @@ export default async function ContactsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const nowIso = new Date().toISOString()
     const consentGiven = formData.get('consent_given') === 'on'
+    const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
+    const consentSource = sourceRaw && CONSENT_SOURCES.has(sourceRaw) ? sourceRaw : ''
+    const consentNoticeVersion = ((formData.get('consent_notice_version') as string) || '').trim()
+    const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
+    const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     const { data: existing } = await sb.from('contacts')
-      .select('consent_given, consent_date')
+      .select('consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
       .eq('id', formData.get('contact_id') as string)
       .eq('tenant_id', m.tenant_id)
       .single()
-    const prev = (existing as { consent_given?: boolean; consent_date?: string | null } | null)
+    const prev = (existing as {
+      consent_given?: boolean
+      consent_date?: string | null
+      consent_source?: string | null
+      consent_notice_version?: string | null
+      consent_evidence?: Record<string, unknown> | null
+      consent_revoked_at?: string | null
+    } | null)
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
@@ -118,16 +156,32 @@ export default async function ContactsPage({
       country:   'CO',
       dane_code: daneCode || undefined,
     } : null
+    const mergedEvidence = {
+      ...((prev?.consent_evidence ?? {}) as Record<string, unknown>),
+      last_update: {
+        source: consentSource || prev?.consent_source || null,
+        notice_version: consentNoticeVersion || prev?.consent_notice_version || null,
+        note: consentEvidenceNote || null,
+        actor_email: u?.email ?? null,
+        at: nowIso,
+      },
+    }
+    const shouldMarkRevoked = !consentGiven && !!prev?.consent_given
+    const effectiveConsentDate = consentGiven
+      ? (prev?.consent_date ?? nowIso)
+      : (prev?.consent_date ?? null)
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
       notes:         (formData.get('notes') as string) || null,
       address,
       consent_given: consentGiven,
-      consent_date:  consentGiven && !prev?.consent_given
-        ? new Date().toISOString()
-        : consentGiven
-          ? (prev?.consent_date ?? new Date().toISOString())
-          : null,
+      consent_date: effectiveConsentDate,
+      consent_source: consentSource || prev?.consent_source || null,
+      consent_notice_version: consentNoticeVersion || prev?.consent_notice_version || null,
+      consent_evidence: mergedEvidence,
+      consent_actor_email: u?.email ?? null,
+      consent_revoked_at: consentGiven ? null : (shouldMarkRevoked ? nowIso : (prev?.consent_revoked_at ?? null)),
+      consent_revoked_reason: consentGiven ? null : (revocationReason || null),
     })
       .eq('id', formData.get('contact_id') as string)
       .eq('tenant_id', m.tenant_id)
@@ -159,7 +213,7 @@ export default async function ContactsPage({
             <Users className="h-5 w-5 text-primary" /> Contactos
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {contacts.length} contactos · {consentCount} con consentimiento Habeas Data
+            {contacts.length} contactos · {consentCount} con consentimiento Habeas Data · {revokedCount} revocados
           </p>
         </div>
       </div>
@@ -180,7 +234,6 @@ export default async function ContactsPage({
 
       <ContactsManager 
         initialContacts={contacts}
-        role={role}
         canWrite={canWrite}
         addAction={addContact}
         editAction={editContact}

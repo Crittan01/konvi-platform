@@ -49,6 +49,8 @@ export default async function DashboardLayout({
   }
 
   let meliBadge = 0
+  let planCode = 'enterprise'
+  const planCapabilities: Record<string, boolean> = {}
   const integrations = {
     whatsapp: false,
     envia: false,
@@ -75,6 +77,30 @@ export default async function DashboardLayout({
       if (provider === 'envia') integrations.envia = connected
       if (provider === 'mercadolibre') integrations.mercadolibre = connected
     }
+
+    try {
+      const { data: sub } = await supabase
+        .from('tenant_subscriptions')
+        .select('plan_code')
+        .eq('tenant_id', meta.tenant_id)
+        .maybeSingle()
+
+      planCode = sub?.plan_code ?? 'enterprise'
+
+      const { data: caps } = await supabase
+        .from('plan_capabilities')
+        .select('capability_key, enabled')
+        .eq('plan_code', planCode)
+
+      for (const row of caps ?? []) {
+        const key = (row as { capability_key?: string }).capability_key
+        if (!key) continue
+        planCapabilities[key] = (row as { enabled?: boolean }).enabled !== false
+      }
+    } catch {
+      // Fail-open UX: si plan tables no están disponibles temporalmente, no bloquear navegación.
+      planCode = 'enterprise'
+    }
   }
 
   return (
@@ -89,6 +115,8 @@ export default async function DashboardLayout({
         inboxBadge={inboxBadge}
         meliBadge={meliBadge}
         integrations={integrations}
+        planCode={planCode}
+        planCapabilities={planCapabilities}
         logoutAction={logoutAction}
       />
 

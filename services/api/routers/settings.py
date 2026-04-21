@@ -4,6 +4,8 @@ Router de Configuración — Tenant info, equipo y notificaciones.
 Endpoints:
   GET    /api/v1/settings/tenant              — datos del tenant
   PATCH  /api/v1/settings/tenant              — editar nombre/waba_id  [owner]
+  GET    /api/v1/settings/plan-capabilities   — plan + capabilities + cuotas
+  POST   /api/v1/settings/maintenance/idempotency-cleanup — limpieza de llaves expiradas [owner]
   GET    /api/v1/settings/team                — listar equipo con emails
   PATCH  /api/v1/settings/team/{user_id}      — cambiar rol             [owner]
   DELETE /api/v1/settings/team/{user_id}      — eliminar miembro        [owner]
@@ -49,6 +51,10 @@ class TeamRolePatch(BaseModel):
 class NotificationConfig(BaseModel):
     enabled: bool
     config: dict = Field(default_factory=dict)
+
+
+class IdempotencyCleanupRequest(BaseModel):
+    limit: int = Field(default=5000, ge=1, le=50000)
 
 
 # ─── Tenant ───────────────────────────────────────────────────────────────────
@@ -234,3 +240,50 @@ async def upsert_notification(
     except Exception as e:
         logger.error("Error guardando notificación canal %s tenant %s: %s", channel, tenant_id, e)
         raise HTTPException(status_code=500, detail="Error al guardar notificación")
+
+
+@router.get("/plan-capabilities", response_model=dict)
+async def get_plan_capabilities(
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """
+    Retorna snapshot del plan activo del tenant con capabilities y cuotas/uso actual.
+    """
+    try:
+        res = supabase.rpc("get_tenant_plan_capabilities", {"p_tenant_id": tenant_id}).execute()
+        rows = res.data or []
+        if not rows:
+            return {"plan_code": "basic", "capabilities": []}
+        plan_code = rows[0].get("plan_code", "basic")
+        return {"plan_code": plan_code, "capabilities": rows}
+    except Exception as e:
+        logger.error("Error obteniendo plan capabilities tenant %s: %s", tenant_id, e)
+        raise HTTPException(status_code=500, detail="Error al obtener plan capabilities")
+
+
+@router.post("/maintenance/idempotency-cleanup", response_model=dict)
+async def cleanup_idempotency(
+    body: IdempotencyCleanupRequest,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),
+):
+    """
+    Ejecuta limpieza de idempotency keys expiradas.
+    Operación de mantenimiento global (owner del tenant autenticado).
+    """
+    try:
+        res = supabase.rpc("cleanup_expired_idempotency_keys", {"p_limit": body.limit}).execute()
+        raw = res.data
+        if isinstance(raw, list):
+            value = raw[0] if raw else 0
+            if isinstance(value, dict):
+                value = next(iter(value.values()), 0)
+            deleted = int(value or 0)
+        else:
+            deleted = int(raw or 0)
+        return {"ok": True, "deleted": deleted, "limit": body.limit}
+    except Exception as e:
+        logger.error("Error ejecutando cleanup idempotency tenant %s: %s", tenant_id, e)
+        raise HTTPException(status_code=500, detail="Error ejecutando limpieza de idempotencia")

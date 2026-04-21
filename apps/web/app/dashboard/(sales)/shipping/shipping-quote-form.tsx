@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 // Label e Input se usan en la sección de paquete
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
+import { createIdempotencyKey } from '@/lib/idempotency'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,12 @@ interface Rate {
   currency?: string
   delivery_date?: string
   [key: string]: unknown
+}
+
+interface LabelResult {
+  tracking_number?: string | null
+  tracking_url?: string | null
+  label_url?: string | null
 }
 
 interface Props {
@@ -130,6 +137,17 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
+  const [phase2Loading, setPhase2Loading] = useState<'label' | 'tracking' | 'pickup' | 'cancel' | null>(null)
+  const [phase2Error, setPhase2Error] = useState<string | null>(null)
+  const [phase2Notice, setPhase2Notice] = useState<string | null>(null)
+  const [phase2Disabled, setPhase2Disabled] = useState(false)
+  const [labelResult, setLabelResult] = useState<LabelResult | null>(null)
+  const [trackingEvents, setTrackingEvents] = useState<Record<string, unknown>[]>([])
+  const [pickupDate, setPickupDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [pickupFrom, setPickupFrom] = useState('09:00')
+  const [pickupTo, setPickupTo] = useState('18:00')
+  const [pickupWeight, setPickupWeight] = useState('1')
+  const [pickupInstructions, setPickupInstructions] = useState('')
 
   const originGeo: Record<string, string> = shippingOrigin ? {
     city:      shippingOrigin.city        ?? '',
@@ -145,6 +163,11 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
     setResult(null)
     setSelectedIdx(null)
     setSaved(false)
+    setPhase2Error(null)
+    setPhase2Notice(null)
+    setPhase2Disabled(false)
+    setLabelResult(null)
+    setTrackingEvents([])
 
     const formData = new FormData(e.currentTarget)
     const origin   = readGeo(formData, 'origin')
@@ -169,9 +192,13 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
     }
 
     try {
+      const quoteKey = createIdempotencyKey('shipping.quote')
       const res = await fetch('/api/shipping/quote', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': quoteKey,
+        },
         body:    JSON.stringify(payload),
         signal:  AbortSignal.timeout(35000),
       })
@@ -204,17 +231,173 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
     setSelectedIdx(idx)
     setSaving(true)
     setSaved(false)
+    setPhase2Error(null)
+    setPhase2Notice(null)
+    setPhase2Disabled(false)
+    setLabelResult(null)
+    setTrackingEvents([])
     const rate = result.rates[idx]
     try {
+      const rateKey = createIdempotencyKey('shipping.rate.confirm')
       const res = await fetch(`/api/shipping/${result.shipmentId}/rate`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': rateKey,
+        },
         body:    JSON.stringify(rate),
         signal:  AbortSignal.timeout(10000),
       })
       if (res.ok) { setSaved(true); onQuoted() }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const getErrorDetail = async (res: Response, fallback: string) => {
+    const payload = await res.json().catch(() => ({} as Record<string, unknown>))
+    const detail = typeof payload.detail === 'string' ? payload.detail : fallback
+    if (res.status === 503 && detail.includes('ENVIA_PHASE2_ENABLED')) {
+      setPhase2Disabled(true)
+    }
+    return detail
+  }
+
+  const handleGenerateLabel = async () => {
+    if (!result) return
+    setPhase2Loading('label')
+    setPhase2Error(null)
+    setPhase2Notice(null)
+    try {
+      const labelKey = createIdempotencyKey('shipping.label')
+      const res = await fetch(`/api/shipping/${result.shipmentId}/label`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': labelKey,
+        },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) {
+        setPhase2Error(await getErrorDetail(res, 'No se pudo generar la label'))
+        return
+      }
+      const data = await res.json()
+      setLabelResult({
+        tracking_number: data.tracking_number ?? null,
+        tracking_url: data.tracking_url ?? null,
+        label_url: data.label_url ?? null,
+      })
+      setPhase2Notice('Label generada correctamente.')
+      onQuoted()
+    } catch {
+      setPhase2Error('No se pudo generar la label por timeout o red.')
+    } finally {
+      setPhase2Loading(null)
+    }
+  }
+
+  const handleTracking = async () => {
+    if (!result) return
+    setPhase2Loading('tracking')
+    setPhase2Error(null)
+    setPhase2Notice(null)
+    try {
+      const trackingNumbers = labelResult?.tracking_number ? [labelResult.tracking_number] : []
+      const res = await fetch('/api/shipping/tracking', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          shipment_id: result.shipmentId,
+          tracking_numbers: trackingNumbers,
+        }),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) {
+        setPhase2Error(await getErrorDetail(res, 'No se pudo consultar tracking'))
+        return
+      }
+      const data = await res.json()
+      const events = Array.isArray(data.events) ? data.events.filter((row: unknown) => typeof row === 'object' && row !== null) : []
+      setTrackingEvents(events)
+      setPhase2Notice(`Tracking consultado (${events.length} evento${events.length === 1 ? '' : 's'}).`)
+      onQuoted()
+    } catch {
+      setPhase2Error('No se pudo consultar tracking por timeout o red.')
+    } finally {
+      setPhase2Loading(null)
+    }
+  }
+
+  const handlePickup = async () => {
+    if (!result) return
+    const parsedWeight = Number(pickupWeight)
+    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
+      setPhase2Error('Peso total inválido para pickup.')
+      return
+    }
+    setPhase2Loading('pickup')
+    setPhase2Error(null)
+    setPhase2Notice(null)
+    try {
+      const pickupKey = createIdempotencyKey('shipping.pickup')
+      const res = await fetch('/api/shipping/pickup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': pickupKey,
+        },
+        body: JSON.stringify({
+          shipment_id: result.shipmentId,
+          date: pickupDate,
+          time_from: pickupFrom,
+          time_to: pickupTo,
+          total_weight: parsedWeight,
+          instructions: pickupInstructions || undefined,
+        }),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) {
+        setPhase2Error(await getErrorDetail(res, 'No se pudo agendar pickup'))
+        return
+      }
+      setPhase2Notice('Pickup agendado correctamente.')
+    } catch {
+      setPhase2Error('No se pudo agendar pickup por timeout o red.')
+    } finally {
+      setPhase2Loading(null)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!result) return
+    setPhase2Loading('cancel')
+    setPhase2Error(null)
+    setPhase2Notice(null)
+    try {
+      const cancelKey = createIdempotencyKey('shipping.cancel')
+      const res = await fetch('/api/shipping/cancel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': cancelKey,
+        },
+        body: JSON.stringify({ shipment_id: result.shipmentId }),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) {
+        setPhase2Error(await getErrorDetail(res, 'No se pudo cancelar el envío'))
+        return
+      }
+      setPhase2Notice('Envío cancelado correctamente.')
+      onQuoted()
+    } catch {
+      setPhase2Error('No se pudo cancelar el envío por timeout o red.')
+    } finally {
+      setPhase2Loading(null)
     }
   }
 
@@ -416,6 +599,93 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                     ))}
                   </div>
                 </div>
+
+                {saved && selectedIdx !== null && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Operaciones post-cotización</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Genera etiqueta, consulta tracking, agenda pickup o cancela. Estas acciones usan endpoints Fase 2 de Envia.
+                      </p>
+                    </div>
+
+                    {phase2Disabled && (
+                      <p className="text-xs text-amber-400">
+                        Fase 2 está deshabilitada en backend. Activa `ENVIA_PHASE2_ENABLED=true` en API para habilitar estas acciones.
+                      </p>
+                    )}
+                    {phase2Error && <p className="text-xs text-red-400">{phase2Error}</p>}
+                    {phase2Notice && <p className="text-xs text-primary">{phase2Notice}</p>}
+
+                    {labelResult && (
+                      <div className="rounded-md border border-border bg-background/60 p-2 text-xs space-y-1">
+                        {labelResult.tracking_number && <p>Tracking: <span className="font-mono">{labelResult.tracking_number}</span></p>}
+                        {labelResult.tracking_url && <p><a href={labelResult.tracking_url} className="underline" target="_blank" rel="noreferrer">Abrir tracking</a></p>}
+                        {labelResult.label_url && <p><a href={labelResult.label_url} className="underline" target="_blank" rel="noreferrer">Abrir etiqueta (label)</a></p>}
+                      </div>
+                    )}
+
+                    {trackingEvents.length > 0 && (
+                      <div className="rounded-md border border-border bg-background/60 p-2 text-xs space-y-1 max-h-40 overflow-auto">
+                        {trackingEvents.map((event, idx) => {
+                          const status = String(event.statusDescription ?? event.status ?? 'Actualización')
+                          const date = String(event.date ?? event.updatedAt ?? event.createdAt ?? '')
+                          const city = String(event.city ?? event.location ?? event.state ?? '')
+                          return (
+                            <p key={`${status}-${idx}`}>
+                              {status}{date ? ` · ${date}` : ''}{city ? ` · ${city}` : ''}
+                            </p>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <Button type="button" onClick={handleGenerateLabel} disabled={phase2Loading !== null}>
+                        {phase2Loading === 'label' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                        Generar label
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={handleTracking} disabled={phase2Loading !== null}>
+                        {phase2Loading === 'tracking' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                        Consultar tracking
+                      </Button>
+                      <Button type="button" variant="outline" onClick={handleCancel} disabled={phase2Loading !== null}>
+                        {phase2Loading === 'cancel' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                        Cancelar envío
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2 rounded-md border border-border p-2">
+                      <p className="text-xs font-medium text-foreground">Agendar pickup</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Fecha</Label>
+                          <Input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} className="h-8 text-xs" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Peso total (kg)</Label>
+                          <Input type="number" min="0.1" step="0.1" value={pickupWeight} onChange={(e) => setPickupWeight(e.target.value)} className="h-8 text-xs" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Desde</Label>
+                          <Input type="time" value={pickupFrom} onChange={(e) => setPickupFrom(e.target.value)} className="h-8 text-xs" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Hasta</Label>
+                          <Input type="time" value={pickupTo} onChange={(e) => setPickupTo(e.target.value)} className="h-8 text-xs" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Instrucciones (opcional)</Label>
+                        <Input value={pickupInstructions} onChange={(e) => setPickupInstructions(e.target.value)} className="h-8 text-xs" placeholder="Ej: porteria, timbre 302" />
+                      </div>
+                      <Button type="button" variant="outline" onClick={handlePickup} disabled={phase2Loading !== null}>
+                        {phase2Loading === 'pickup' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                        Agendar pickup
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}

@@ -8,6 +8,7 @@ import {
   Circle, Wifi, Lock, WifiOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { createIdempotencyKey } from '@/lib/idempotency'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Conversation {
@@ -236,9 +237,14 @@ export default function InboxPage() {
     try {
       const ctrl = new AbortController()
       const timeout = setTimeout(() => ctrl.abort(), 90000) // Render cold start puede tomar ~60-90s
+      const idempotencyKey = createIdempotencyKey('conversations.send')
       const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/send`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({ text: replyText.trim() }),
         signal: ctrl.signal,
       })

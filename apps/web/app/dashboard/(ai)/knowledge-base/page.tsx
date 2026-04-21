@@ -160,8 +160,8 @@ export default async function KnowledgeBasePage({
       <div className="flex items-start gap-3 rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-green-400">
         <BrainCircuit className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          <span className="font-semibold">Modo RAG Estricto Activado (PgVector).</span>{' '}
-          Los documentos se convierten en Vectores de IA (&quot;Embeddings&quot;) ocultos y se suministran a Gemini dinámicamente frente a cada pregunta del cliente para lograr cero alucinaciones.
+          <span className="font-semibold">Base de Conocimiento activa en respuestas.</span>{' '}
+          Cuando el cliente pregunta por WhatsApp, el asistente prioriza estos documentos antes de responder para mantener consistencia con tus políticas, productos y operación.
         </span>
       </div>
 

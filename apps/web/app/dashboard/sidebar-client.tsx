@@ -22,6 +22,7 @@ type NavLeaf = {
   icon: React.ElementType
   roles: string[]
   integration?: 'whatsapp' | 'envia' | 'mercadolibre'
+  capability?: string
 }
 
 type NavGroup = {
@@ -71,7 +72,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     kind: 'group', id: 'canales', label: 'Canales', icon: Store, roles: ['owner', 'manager'],
     children: [
-      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre', icon: Store, roles: ['owner', 'manager'], integration: 'mercadolibre' },
+      { kind: 'leaf', href: '/dashboard/marketplace', label: 'Mercado Libre', icon: Store, roles: ['owner', 'manager'], integration: 'mercadolibre', capability: 'integrations.mercadolibre' },
     ],
   },
 
@@ -87,7 +88,7 @@ const NAV_ITEMS: NavItem[] = [
     kind: 'group', id: 'ia', label: 'IA y Conocimiento', icon: BrainCircuit, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/knowledge-base', label: 'Base de Conocimiento', icon: BookOpen, roles: ['owner', 'manager'] },
-      { kind: 'leaf', href: '/dashboard/ai-agents',      label: 'Agentes IA',           icon: Bot,      roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/ai-agents',      label: 'Agentes IA',           icon: Bot,      roles: ['owner'], capability: 'ai.agents.configure' },
     ],
   },
 
@@ -96,7 +97,7 @@ const NAV_ITEMS: NavItem[] = [
     kind: 'group', id: 'analitica', label: 'Analítica', icon: BarChart2, roles: ['owner', 'manager'],
     children: [
       { kind: 'leaf', href: '/dashboard/metrics', label: 'Métricas',  icon: TrendingUp,    roles: ['owner', 'manager'] },
-      { kind: 'leaf', href: '/dashboard/audit',   label: 'Auditoría', icon: ClipboardList, roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/audit',   label: 'Auditoría', icon: ClipboardList, roles: ['owner'], capability: 'analytics.audit.export' },
     ],
   },
 
@@ -139,6 +140,8 @@ interface SidebarProps {
   tenantLogoUrl: string | null
   inboxBadge: number
   meliBadge: number
+  planCode: string
+  planCapabilities: Record<string, boolean>
   integrations: {
     whatsapp: boolean
     envia: boolean
@@ -150,7 +153,7 @@ interface SidebarProps {
 // ── Componente Principal ──────────────────────────────────────────────────────
 
 export default function SidebarClient({
-  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, integrations, logoutAction,
+  role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, planCode, planCapabilities, integrations, logoutAction,
 }: SidebarProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -184,6 +187,13 @@ export default function SidebarClient({
   const badge = ROLE_BADGE[role] ?? ROLE_BADGE.operator
   const isIntegrationEnabled = (integration?: NavLeaf['integration']) =>
     !integration || integrations[integration] === true
+  const isCapabilityEnabled = (capability?: string) =>
+    !capability || planCapabilities[capability] !== false
+  const planLabel =
+    planCode === 'basic' ? 'Basic' :
+    planCode === 'pro' ? 'Pro' :
+    planCode === 'enterprise' ? 'Enterprise' :
+    planCode
 
   return (
     <>
@@ -250,16 +260,21 @@ export default function SidebarClient({
             if (!hasAccess(item.roles, role)) return null
 
             if (item.kind === 'leaf') {
-              const isEnabled = isIntegrationEnabled(item.integration)
+              const integrationOk = isIntegrationEnabled(item.integration)
+              const capabilityOk = isCapabilityEnabled(item.capability)
+              const isEnabled = integrationOk && capabilityOk
               const isActive = item.href === '/dashboard'
                 ? pathname === '/dashboard'
                 : pathname === item.href || pathname.startsWith(item.href + '/')
               const isInbox = item.href === '/dashboard/inbox'
               if (!isEnabled) {
+                const lockReason = !capabilityOk
+                  ? `Requiere upgrade de plan (${planLabel})`
+                  : 'Requiere integración activa en Configuración → Integraciones'
                 return (
                   <div
                     key={item.href}
-                    title="Requiere integración activa en Configuración → Integraciones"
+                    title={lockReason}
                     className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground/50 bg-white/[0.02] cursor-not-allowed"
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -288,8 +303,8 @@ export default function SidebarClient({
                     </span>
                   )}
                     {shouldRenderMarketplaceBadge(item.href, meliBadge) && (
-                    <span className="inline-flex items-center justify-center p-[2px] rounded-full bg-amber-100 text-amber-600 border border-amber-200">
-                      <AlertCircle className="h-3 w-3" />
+                    <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[10px] font-bold tabular-nums">
+                      {meliBadge > 99 ? '99+' : meliBadge}
                     </span>
                   )}
                 </Link>
@@ -326,13 +341,18 @@ export default function SidebarClient({
                 {isOpen && (
                   <div className="mt-0.5 ml-4 pl-2.5 border-l border-border/40 space-y-0.5 pb-1">
                     {visibleChildren.map(child => {
-                      const isEnabled = isIntegrationEnabled(child.integration)
+                      const integrationOk = isIntegrationEnabled(child.integration)
+                      const capabilityOk = isCapabilityEnabled(child.capability)
+                      const isEnabled = integrationOk && capabilityOk
                       const isActive = pathname === child.href || pathname.startsWith(child.href + '/')
                       if (!isEnabled) {
+                        const lockReason = !capabilityOk
+                          ? `Requiere upgrade de plan (${planLabel})`
+                          : 'Requiere integración activa en Configuración → Integraciones'
                         return (
                           <div
                             key={child.href}
-                            title="Requiere integración activa en Configuración → Integraciones"
+                            title={lockReason}
                             className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground/50 bg-white/[0.02] cursor-not-allowed"
                           >
                             <child.icon className="h-3.5 w-3.5 shrink-0" />
@@ -356,8 +376,8 @@ export default function SidebarClient({
                           <child.icon className="h-3.5 w-3.5 shrink-0" />
                           <span className="flex-1">{child.label}</span>
                           {shouldRenderMarketplaceBadge(child.href, meliBadge) && (
-                            <span className="inline-flex items-center justify-center p-[2px] rounded-full bg-amber-100 text-amber-600 border border-amber-200">
-                              <AlertCircle className="h-3 w-3" />
+                            <span className="inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[10px] font-bold tabular-nums">
+                              {meliBadge > 99 ? '99+' : meliBadge}
                             </span>
                           )}
                         </Link>
@@ -376,6 +396,9 @@ export default function SidebarClient({
             <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
               <badge.icon className="h-3 w-3 shrink-0" />
               {badge.label}
+            </span>
+            <span className="ml-1 inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
+              {planLabel}
             </span>
           </div>
           <div className="px-1">

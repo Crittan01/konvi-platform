@@ -1,6 +1,6 @@
 # Integración WhatsApp Cloud API (estado real)
 
-Última actualización: 2026-04-19
+Última actualización: 2026-04-20
 
 ---
 
@@ -16,7 +16,7 @@ La integración WhatsApp está separada en dos piezas:
 - No envía mensajes
 
 2. `services/api` + `services/ai-orchestrator`
-- Envían mensajes outbound a Meta Graph API
+- API encola outbound humano; Orchestrator ejecuta envío real a Meta Graph API
 - Usan credenciales por tenant desde `tenant_integrations`
 
 Fuente única de credenciales de envío:
@@ -40,13 +40,23 @@ El mensaje queda visible en Inbox aunque sea no-text.
 
 ---
 
-## Flujo outbound (API/Orchestrator -> Meta)
+## Flujo outbound (Inbox/API -> Queue -> Worker -> Meta)
 
-Los senders (`services/api/integrations/whatsapp_sender.py` y `services/ai-orchestrator/whatsapp_sender.py`):
+1. API recibe `POST /api/v1/conversations/{id}/send` (solo `human_takeover`)
+2. API persiste outbound en `messages` como `processing_status='pending'`
+3. API encola payload en `pgmq` (`whatsapp_outbound_messages`)
+4. AI Orchestrator consume cola y ejecuta envío real a Meta
+5. Worker actualiza `messages`:
+- éxito -> `processing_status='processed'`, `meta_message_id`
+- fallo definitivo -> `processing_status='failed'` (tras max intentos)
 
-- leen `phone_number_id` y `access_token` desde `tenant_integrations`
-- exigen `status='connected'`
-- si faltan credenciales válidas, no envían
+El sender efectivo de outbound humano es:
+- `services/ai-orchestrator/whatsapp_sender.py`
+
+Reglas de credenciales:
+- lee `phone_number_id` y `access_token` desde `tenant_integrations`
+- exige `status='connected'`
+- si faltan credenciales válidas, no envía
 
 Endpoint Meta:
 - `POST /v21.0/{phone_number_id}/messages`
@@ -79,6 +89,12 @@ Comportamiento:
 No requieren `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en env.
 Usan credenciales por tenant en DB.
 
+### Orchestrator queue runtime
+- `WHATSAPP_OUTBOUND_QUEUE_ENABLED`
+- `WHATSAPP_OUTBOUND_QUEUE_POLL_BATCH`
+- `WHATSAPP_OUTBOUND_QUEUE_VT_SECONDS`
+- `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
+
 ---
 
 ## Seguridad y cumplimiento
@@ -96,6 +112,7 @@ Usan credenciales por tenant en DB.
 - `services/connector-whatsapp/routers/webhook.py`
 - `services/connector-whatsapp/services/parser.py`
 - `services/connector-whatsapp/services/db_persistence.py`
-- `services/api/integrations/whatsapp_sender.py`
+- `services/api/routers/conversations.py`
 - `services/ai-orchestrator/whatsapp_sender.py`
+- `services/ai-orchestrator/worker.py`
 - `services/ai-orchestrator/orchestrator.py`

@@ -7,27 +7,56 @@ Endpoints:
   PATCH  /api/v1/contacts/{id}    — editar nombre / notas      [owner, manager]
 """
 import logging
+from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.idempotency import (
+    abort_idempotency,
+    begin_idempotency,
+    finalize_idempotency,
+    payload_fingerprint,
+)
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Contacts"])
+
+CONSENT_SOURCES = {
+    "manual_console",
+    "whatsapp",
+    "web_form",
+    "phone_call",
+    "in_person",
+    "import",
+    "other",
+}
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
 
 class ContactCreate(BaseModel):
-    phone: str = Field(..., min_length=5, max_length=30)
-    name: Optional[str] = None
-    notes: Optional[str] = None
+    phone: str = Field(..., min_length=8, max_length=20, pattern=r"^\+?[1-9]\d{7,19}$")
+    name: Optional[str] = Field(default=None, max_length=120)
+    notes: Optional[str] = Field(default=None, max_length=1200)
+    consent_given: bool = False
+    consent_source: Optional[str] = None
+    consent_notice_version: Optional[str] = Field(default=None, max_length=80)
+    consent_evidence: dict = Field(default_factory=dict)
+    consent_revoked_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class ContactPatch(BaseModel):
-    name: Optional[str] = None
-    notes: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=120)
+    notes: Optional[str] = Field(default=None, max_length=1200)
+    consent_given: Optional[bool] = None
+    consent_source: Optional[str] = None
+    consent_notice_version: Optional[str] = Field(default=None, max_length=80)
+    consent_evidence: Optional[dict] = None
+    consent_revoked_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -44,7 +73,11 @@ async def list_contacts(
     try:
         query = (
             supabase.table("contacts")
-            .select("id, phone, name, notes, created_at")
+            .select(
+                "id, phone, name, notes, consent_given, consent_date, consent_source, "
+                "consent_notice_version, consent_evidence, consent_actor_email, "
+                "consent_revoked_at, consent_revoked_reason, created_at"
+            )
             .eq("tenant_id", tenant_id)
             .order("name", desc=False, nullsfirst=False)
             .limit(limit)
@@ -67,25 +100,74 @@ async def list_contacts(
 @router.post("/", response_model=dict, status_code=201)
 async def create_contact(
     contact: ContactCreate,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """Crea contacto. El teléfono debe ser único por tenant. Solo owner/manager."""
+    idem_session = None
     try:
-        result = supabase.table("contacts").insert({
+        if contact.consent_source and contact.consent_source not in CONSENT_SOURCES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"consent_source inválido. Permitidos: {sorted(CONSENT_SOURCES)}",
+            )
+        if contact.consent_given and not contact.consent_source:
+            raise HTTPException(status_code=422, detail="consent_source es requerido cuando consent_given=true")
+
+        request_hash = payload_fingerprint(contact.model_dump(mode="json"))
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
+        evidence = dict(contact.consent_evidence or {})
+        if contact.consent_given:
+            evidence.setdefault("captured_via", "api")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        payload = {
             "tenant_id": tenant_id,
             "phone": contact.phone,
             "name": contact.name,
             "notes": contact.notes,
-        }).execute()
+            "consent_given": contact.consent_given,
+            "consent_date": now_iso if contact.consent_given else None,
+            "consent_source": contact.consent_source if contact.consent_given else None,
+            "consent_notice_version": contact.consent_notice_version if contact.consent_given else None,
+            "consent_evidence": evidence,
+            "consent_revoked_reason": contact.consent_revoked_reason if not contact.consent_given else None,
+            "consent_revoked_at": now_iso if not contact.consent_given and contact.consent_revoked_reason else None,
+        }
+
+        result = supabase.table("contacts").insert(payload).execute()
 
         if not result.data:
             raise HTTPException(status_code=500, detail="Error al crear contacto")
-        return result.data[0]
+        response_body = result.data[0]
+        finalize_idempotency(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            session=idem_session,
+            status_code=201,
+            body=response_body,
+        )
+        return response_body
     except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
     except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         # Violación de UNIQUE(tenant_id, phone)
         if "unique" in str(e).lower():
             raise HTTPException(status_code=409, detail="Ya existe un contacto con ese teléfono")
@@ -97,15 +179,69 @@ async def create_contact(
 async def patch_contact(
     contact_id: str,
     patch: ContactPatch,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """Edita nombre y/o notas del contacto. Solo owner/manager."""
+    idem_session = None
     try:
+        if patch.consent_source and patch.consent_source not in CONSENT_SOURCES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"consent_source inválido. Permitidos: {sorted(CONSENT_SOURCES)}",
+            )
+
+        request_hash = payload_fingerprint(patch.model_dump(mode="json"))
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
         data = {k: v for k, v in patch.model_dump().items() if v is not None}
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
+
+        current_res = (
+            supabase.table("contacts")
+            .select("id, consent_given, consent_date")
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not current_res.data:
+            raise HTTPException(status_code=404, detail="Contacto no encontrado")
+
+        current = current_res.data
+        now_iso = datetime.now(timezone.utc).isoformat()
+        consent_given = data.get("consent_given")
+        if consent_given is not None:
+            if consent_given and not data.get("consent_source") and not current.get("consent_given"):
+                raise HTTPException(
+                    status_code=422,
+                    detail="consent_source es requerido al activar consentimiento.",
+                )
+            if consent_given and not current.get("consent_given"):
+                data["consent_date"] = current.get("consent_date") or now_iso
+                data["consent_revoked_at"] = None
+                data["consent_revoked_reason"] = None
+            elif consent_given and current.get("consent_given"):
+                data.pop("consent_revoked_reason", None)
+                data["consent_revoked_at"] = None
+            elif not consent_given and current.get("consent_given"):
+                data["consent_date"] = current.get("consent_date")
+                data["consent_revoked_at"] = now_iso
 
         result = (
             supabase.table("contacts")
@@ -116,9 +252,19 @@ async def patch_contact(
         )
         if not result.data:
             raise HTTPException(status_code=404, detail="Contacto no encontrado")
-        return result.data[0]
+        response_body = result.data[0]
+        finalize_idempotency(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            session=idem_session,
+            status_code=200,
+            body=response_body,
+        )
+        return response_body
     except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
     except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error actualizando contacto %s: %s", contact_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar contacto")

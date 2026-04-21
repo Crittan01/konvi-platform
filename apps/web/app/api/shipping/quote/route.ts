@@ -24,11 +24,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'Payload inválido' }, { status: 400 })
   }
 
+  const idempotencyKey = req.headers.get('Idempotency-Key')
+
   const upstream = await fetch(`${API_URL}/api/v1/shipping/quote`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30000),
