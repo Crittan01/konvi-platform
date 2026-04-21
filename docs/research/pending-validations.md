@@ -9,3 +9,4 @@
 | PV-03 | Rate limits Envia por carrier/endpoint | resiliencia shipping |
 | PV-04 | Capacidad real Supabase para volumen objetivo | planificación de escala |
 | PV-05 | Pricing/umbrales de pago en proveedor de email sender elegido | alertas y notificaciones productivas |
+| PV-06 | Contrato oficial Wompi (eventos, checksum, tokens de aceptacion) para integracion conversacional | fase de pagos |

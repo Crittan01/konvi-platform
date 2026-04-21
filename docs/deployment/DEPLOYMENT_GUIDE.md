@@ -51,6 +51,11 @@ Criterio mínimo recomendado:
 1. certificación funcional cerrada
 2. tenant real listo para operar
 3. o evidencia de cold starts/limitaciones afectando operación
+4. cierre por fases de Inbox (A: catalogo variantes, B: pedidos/shipping, C: pagos)
+
+Referencias de criterio funcional:
+- `docs/operations/inbox-intents-matrix.md`
+- `docs/integrations/wompi-prep.md` (pagos en fase posterior)
 
 Detalle y riesgos: `docs/deployment/render-upgrade-path.md`.
 Gate formal de aprobación: `docs/deployment/production-readiness-gate.md`.

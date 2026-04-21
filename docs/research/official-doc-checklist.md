@@ -11,6 +11,7 @@ Antes de cambios en integraciones o infraestructura productiva, validar en docum
 - Rate limits actuales de Envia por plan.
 - Límites Realtime/Queues de Supabase para escala objetivo.
 - Límites/costos del proveedor SMTP sender para alertas productivas.
+- Contrato oficial Wompi (ambientes/llaves, eventos por ambiente, tokens de aceptacion).
 
 ## Validaciones ya aplicadas en código
 
