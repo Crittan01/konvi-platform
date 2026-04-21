@@ -1,6 +1,6 @@
 # Integración WhatsApp Cloud API (estado real)
 
-Última actualización: 2026-04-20
+Última actualización: 2026-04-21
 
 ---
 
@@ -30,11 +30,15 @@ No existe fallback runtime a `META_ACCESS_TOKEN` / `WHATSAPP_PHONE_ID`.
 
 1. Meta POSTea a `/api/v1/whatsapp/webhook`
 2. Se valida firma con `META_APP_SECRET`
-3. Se parsea payload (texto y no-text)
+3. Se parsea payload (arrays `entry/changes/messages`, no solo primer elemento), incluyendo señales de contexto:
+- `context.id` (reply a mensaje previo)
+- `context.from`
+- detalles de interacción (`interactive.button_reply`, `interactive.list_reply`, `button`)
 4. Se resuelve tenant por `tenants.meta_waba_id`
 5. Se inserta mensaje inbound con:
 - `processing_status='pending'`
 - `processed=false` (compatibilidad)
+- `payload` JSONB (contexto webhook normalizado)
 
 El mensaje queda visible en Inbox aunque sea no-text.
 
@@ -116,3 +120,6 @@ Usan credenciales por tenant en DB.
 - `services/ai-orchestrator/whatsapp_sender.py`
 - `services/ai-orchestrator/worker.py`
 - `services/ai-orchestrator/orchestrator.py`
+- Docs oficiales Meta (validación):
+  - https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/payload-examples
+  - https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages

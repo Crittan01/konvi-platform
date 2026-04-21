@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -31,6 +33,25 @@ CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
 
 # Cliente global del nuevo SDK
 _genai_client: Optional[genai.Client] = None
+
+VARIANT_KEYWORDS = {
+    "color",
+    "colores",
+    "talla",
+    "tallas",
+    "modelo",
+    "version",
+    "referencia",
+    "sku",
+}
+SIZE_TOKENS = {"xs", "s", "m", "l", "xl", "xxl", "xxxl"}
+QUERY_STOPWORDS = {
+    "de", "la", "el", "los", "las", "un", "una", "unos", "unas",
+    "por", "para", "con", "sin", "que", "cuanto", "cuesta", "cuestan",
+    "tienes", "tiene", "hay", "en", "del", "al", "me", "puedes", "podrias",
+    "quisiera", "quiero", "disponible", "disponibles", "precio", "stock",
+    "favor", "hola", "buenas", "buenos", "dias", "dia", "tarde", "noches",
+}
 
 def _get_genai_client() -> genai.Client:
     """Singleton lazy del cliente Gemini (nuevo SDK google-genai)."""
@@ -145,18 +166,230 @@ async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
         "strict_guardrails": True
     }
 
-def _build_system_prompt(catalog: list, tenant_name: str, kb_text: str, ai_agent: dict) -> str:
+
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower()
+    return " ".join(normalized.split())
+
+
+def _tokenize_text(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", _normalize_text(text))
+
+
+def _is_variant_query(query_text: str) -> bool:
+    normalized = _normalize_text(query_text)
+    tokens = set(_tokenize_text(query_text))
+    if tokens & VARIANT_KEYWORDS:
+        return True
+    if tokens & SIZE_TOKENS:
+        return True
+    # SKU suele venir con patrón alfanumérico-guiones.
+    if "sku" in normalized:
+        return True
+    # Follow-ups cortos típicos de contexto ("y en azul?", "en talla m?").
+    if (normalized.startswith("y ") or normalized.startswith("en ")) and len(tokens) <= 5:
+        return True
+    return False
+
+
+def _extract_query_specific_tokens(query_text: str) -> set[str]:
+    tokens = set()
+    for token in _tokenize_text(query_text):
+        if token in QUERY_STOPWORDS:
+            continue
+        if len(token) == 1 and token not in SIZE_TOKENS:
+            continue
+        tokens.add(token)
+    return tokens
+
+
+def _product_title_tokens(title: str) -> set[str]:
+    return {
+        token
+        for token in _tokenize_text(title)
+        if token not in QUERY_STOPWORDS and len(token) > 1
+    }
+
+
+def _find_context_product_from_history(catalog: list, history: list[dict]) -> Optional[dict]:
+    if not history:
+        return None
+
+    best_score = 0
+    best_product = None
+    for product in catalog:
+        title = str(product.get("title", ""))
+        title_tokens = _product_title_tokens(title)
+        if not title_tokens:
+            continue
+
+        normalized_title = _normalize_text(title)
+        product_score = 0
+        for msg in reversed(history):
+            content = str(msg.get("content", ""))
+            if not content:
+                continue
+            normalized_content = _normalize_text(content)
+            content_tokens = set(_tokenize_text(content))
+            overlap = len(title_tokens & content_tokens)
+            if overlap > product_score:
+                product_score = overlap
+            if normalized_title and normalized_title in normalized_content:
+                product_score = max(product_score, len(title_tokens) + 1)
+                break
+
+        if product_score > best_score:
+            best_score = product_score
+            best_product = product
+
+    if best_score <= 0:
+        return None
+    return best_product
+
+
+def _query_mentions_any_product(catalog: list, query_tokens: set[str]) -> bool:
+    if not query_tokens:
+        return False
+    for product in catalog:
+        if _product_title_tokens(str(product.get("title", ""))) & query_tokens:
+            return True
+    return False
+
+
+def _variant_tokens(product_title: str, variant: dict) -> set[str]:
+    attrs = variant.get("attributes")
+    attrs_text = ""
+    if isinstance(attrs, dict):
+        attrs_text = " ".join([f"{k} {v}" for k, v in attrs.items()])
+    searchable = " ".join(
+        [
+            str(product_title),
+            str(variant.get("label", "")),
+            str(variant.get("sku") or ""),
+            attrs_text,
+        ]
+    )
+    return set(_tokenize_text(searchable))
+
+
+def _build_variant_match_section(catalog: list, query_text: str, history: list[dict]) -> str:
+    if not _is_variant_query(query_text):
+        return ""
+
+    required_tokens = _extract_query_specific_tokens(query_text)
+    context_product = _find_context_product_from_history(catalog, history)
+    mentions_product_now = _query_mentions_any_product(catalog, required_tokens)
+
+    if not required_tokens:
+        return """
+
+ANÁLISIS DE VARIANTE (QUERY ACTUAL):
+- Consulta de variante detectada, pero faltan datos específicos.
+- Pide precisión de variante (por ejemplo color/talla/SKU) antes de confirmar precio o stock.
+"""
+
+    exact_matches: list[dict] = []
+    products_to_scan = catalog
+    if context_product and not mentions_product_now:
+        products_to_scan = [context_product]
+
+    for product in products_to_scan:
+        title = product.get("title", "")
+        for variant in product.get("variants") or []:
+            searchable_tokens = _variant_tokens(str(title), variant)
+            if required_tokens.issubset(searchable_tokens):
+                exact_matches.append(
+                    {
+                        "title": title,
+                        "label": variant.get("label", "variante"),
+                        "price": variant.get("price", 0),
+                        "stock": variant.get("stock", 0),
+                    }
+                )
+
+    if exact_matches:
+        lines = ["", "ANÁLISIS DE VARIANTE (QUERY ACTUAL):", "- Coincidencias exactas detectadas:"]
+        if context_product and not mentions_product_now:
+            lines.append(
+                f"- Producto en contexto detectado por historial: {context_product.get('title', 'N/A')}"
+            )
+        for match in exact_matches[:3]:
+            lines.append(
+                f"  - {match['title']} | {match['label']} | "
+                f"precio: {match['price']} | stock: {match['stock']}"
+            )
+        if len(exact_matches) > 3:
+            lines.append(f"  - ... y {len(exact_matches) - 3} coincidencia(s) adicional(es)")
+        lines.append("- Si hay más de una coincidencia exacta, pide confirmación breve antes de cerrar la respuesta.")
+        return "\n".join(lines)
+
+    no_match_lines = [
+        "",
+        "ANÁLISIS DE VARIANTE (QUERY ACTUAL):",
+    ]
+    if context_product and not mentions_product_now:
+        no_match_lines.append(
+            f"- Producto en contexto detectado por historial: {context_product.get('title', 'N/A')}"
+        )
+    no_match_lines.extend(
+        [
+            "- No se encontraron coincidencias exactas para la variante solicitada en el catálogo disponible.",
+            "- No inventes disponibilidad/precio. Solicita precisión o escala a humano (requires_human=true).",
+        ]
+    )
+    return "\n".join(no_match_lines)
+
+
+def _build_system_prompt(
+    catalog: list,
+    tenant_name: str,
+    kb_text: str,
+    ai_agent: dict,
+    query_text: str = "",
+    history: Optional[list[dict]] = None,
+) -> str:
     """Construye el system prompt con RAG dinámico, catálogo, y Anti-Spam estricto."""
-    catalog_text = "\n".join([
-        f"- {p['title']}: ${p['price']} (stock: {p['stock']})"
-        for p in catalog
-    ])
+    if history is None:
+        history = []
+    def _format_money(value: float | int | str | None) -> str:
+        try:
+            return f"{float(value or 0):.2f}"
+        except (TypeError, ValueError):
+            return "0.00"
+
+    def _format_product_for_prompt(product: dict) -> str:
+        title = product.get("title", "Sin nombre")
+        variants = product.get("variants") or []
+        if variants:
+            price_min = _format_money(product.get("price_min"))
+            price_max = _format_money(product.get("price_max"))
+            stock_total = product.get("stock_total", product.get("stock", 0))
+            lines = [
+                f"- {title}: precio {price_min}-{price_max} (stock total: {stock_total})"
+            ]
+            for variant in variants[:3]:
+                lines.append(
+                    f"  - {variant.get('label', 'variante')}: "
+                    f"${_format_money(variant.get('price'))} "
+                    f"(stock: {variant.get('stock', 0)})"
+                )
+            remaining = len(variants) - 3
+            if remaining > 0:
+                lines.append(f"  - ... y {remaining} variante(s) adicional(es)")
+            return "\n".join(lines)
+        # Compatibilidad con estructura legacy.
+        return f"- {title}: ${_format_money(product.get('price'))} (stock: {product.get('stock', 0)})"
+
+    catalog_text = "\n".join([_format_product_for_prompt(p) for p in catalog])
     if not catalog_text:
         catalog_text = "(No hay productos disponibles en este momento)"
 
     kb_section = ""
     if kb_text:
         kb_section = f"\n\nINFORMACIÓN EXTRAÍDA DE LA BASE DE CONOCIMIENTOS (ÚSALA PARA RESPONDER):\n{kb_text}"
+    variant_section = _build_variant_match_section(catalog, query_text, history)
 
     # Reglas dinámicas inyectadas desde UI del Tenant
     strict_rules = ""
@@ -176,7 +409,7 @@ REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
 - NUNCA envíes promociones crudas no solicitadas o texto masivo (Evita el bloqueo de la línea WABA).
 {strict_rules}
 CATÁLOGO ACTUAL ({tenant_name}):
-{catalog_text}{kb_section}
+{catalog_text}{variant_section}{kb_section}
 
 Responde SIEMPRE en JSON puro con este esquema exacto:
 {{
@@ -300,7 +533,14 @@ async def build_and_run_orchestration(
         kb_text = format_kb_for_prompt(kb_docs)
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
-        system_prompt = _build_system_prompt(catalog, tenant_name, kb_text, ai_agent)
+        system_prompt = _build_system_prompt(
+            catalog=catalog,
+            tenant_name=tenant_name,
+            kb_text=kb_text,
+            ai_agent=ai_agent,
+            query_text=content,
+            history=history[:-1] if history else [],
+        )
         user_context = _build_user_context(history, content)
 
         # ── 4. Llamar a Gemini (nuevo SDK google-genai) ───────────────────────

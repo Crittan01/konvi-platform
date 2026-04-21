@@ -106,6 +106,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
     meta_message_id: str = data.get("meta_message_id", "")
     content_type: str = data.get("content_type", "text")
     content: str = data.get("content", "")
+    payload: Dict[str, Any] = data.get("payload", {}) or {}
 
     if not customer_phone or (content_type == "text" and not content):
         logger.warning(f"Mensaje descartado: customer_phone o content vacíos. data={data}")
@@ -127,6 +128,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
             "direction": "inbound",
             "content_type": content_type,
             "content": content,
+            "payload": payload,
             "meta_message_id": meta_message_id,
             "processed": False,
             "processing_status": "pending",

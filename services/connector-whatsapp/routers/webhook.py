@@ -31,7 +31,7 @@ async def verify_webhook(
             raise HTTPException(status_code=403, detail="Forbidden")
     raise HTTPException(status_code=400, detail="Bad Request")
 
-from services.parser import parse_webhook_payload
+from services.parser import parse_webhook_payloads
 from services.db_persistence import persist_whatsapp_message
 
 async def decouple_and_enqueue(body_dict: dict):
@@ -42,10 +42,10 @@ async def decouple_and_enqueue(body_dict: dict):
     3. Serializa y empuja a Postgres/Supabase ('conversations', 'messages').
     """
     try:
-        parsed_data = parse_webhook_payload(body_dict)
-        if parsed_data:
-            # Si parsed_data no es nulo, significa que genuinamente extrajo un mensaje util
-            persist_whatsapp_message(parsed_data)
+        parsed_messages = parse_webhook_payloads(body_dict)
+        if parsed_messages:
+            for parsed_data in parsed_messages:
+                persist_whatsapp_message(parsed_data)
         else:
             logger.debug("Webhook recibido crudio asincrono no contenía un mensaje puro o malformado.")
     except Exception as e:
@@ -76,4 +76,3 @@ async def receive_message(
     
     # OBLIGATORIO POLÍTICA DE META: Responder 200 de inmediato
     return {"status": "received"}
-

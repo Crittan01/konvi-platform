@@ -49,9 +49,9 @@ Implementar por fases:
 |---|---|---|---|---|
 | Saludo/contexto basico | Implementado | Auto | Mantener | A |
 | Consulta de producto (titulo) | Implementado | Auto | Mantener | A |
-| Precio de producto | Implementado parcial | Auto | Mejorar precision por variante | A |
-| Stock disponible | Implementado parcial | Auto | Mejorar precision por variante | A |
-| Consulta por variante (color/talla/modelo) | Gap | Humano/Auto ambiguo | Resolver por tool estructurada de variantes | A |
+| Precio de producto | Implementado parcial mejorado | Auto | Cerrar precision por variante | A |
+| Stock disponible | Implementado parcial mejorado | Auto | Cerrar precision por variante | A |
+| Consulta por variante (color/talla/modelo) | Implementado mejorado (match exacto asistido) | Auto/Humano | Cerrar UAT y ajuste fino de ambiguedad | A |
 | Politicas del negocio (FAQ) | Dependiente de KB | Auto/Humano | Garantizar cobertura minima por KB activa | A |
 | Estado de pedido | Gap | Humano | Responder con datos transaccionales reales | B |
 | Cotizacion de envio | Gap | Humano | Cotizar via backend shipping tool | B |
@@ -67,6 +67,24 @@ Implementar por fases:
 2. Resolver producto + variante con consulta estructurada backend.
 3. Escalar a humano cuando no exista coincidencia confiable.
 4. Pruebas UAT sugeridas: minimo 30 casos, exito >= 95% en intents de catalogo.
+
+### Avance tecnico actual (2026-04-21)
+
+1. Contexto de catalogo en orquestador ahora incluye:
+   - rango de precio (`price_min/price_max`)
+   - stock total por producto
+   - desglose de variantes legibles (atributos/SKU) con limite operativo
+2. Prompt del orquestador muestra variantes explicitas para mejorar respuestas.
+3. Analisis de variante en query:
+   - detecta consultas de variante (color/talla/SKU)
+   - inyecta coincidencias exactas cuando existen
+   - fuerza instruccion de no inventar y escalar cuando no hay match exacto
+4. Memoria deterministica corta para ambiguedad:
+   - en follow-ups de variante, detecta producto en contexto desde historial reciente
+   - usa ese contexto para resolver variante o pedir precision sin inventar
+5. Evidencia tecnica:
+   - `python3.11 -m unittest tests/test_catalog_tool_variants.py tests/test_orchestrator_catalog_prompt.py tests/test_orchestrator_takeover.py tests/test_whatsapp_parser_context.py` -> OK (15 tests)
+6. Estado: implementacion tecnica cerrada para match asistido + memoria corta; pendiente cierre funcional UAT.
 
 ### Fase B - Shipping y pedidos
 
