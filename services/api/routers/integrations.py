@@ -17,6 +17,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, get_current_role
+from dependencies.plans import PLAN_INTEGRATIONS_MELI
 from integrations import meli_client
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ async def get_meli_auth_url(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
+    _plan: object = Depends(PLAN_INTEGRATIONS_MELI),
 ):
     """Retorna la URL de autorización OAuth de MeLi. Solo owner."""
     if role != "owner":

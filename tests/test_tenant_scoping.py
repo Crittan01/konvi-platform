@@ -69,9 +69,15 @@ class TenantScopingTests(unittest.IsolatedAsyncioTestCase):
                 )
             ]
         )
+        fake_request = types.SimpleNamespace(
+            headers={},
+            method="POST",
+            url=types.SimpleNamespace(path="/api/v1/orders/"),
+        )
 
         await orders.create_order(
             order=payload,
+            request=fake_request,
             tenant_id="tenant-abc",
             supabase=supabase,
             _role="manager",

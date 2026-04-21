@@ -1,70 +1,63 @@
 # Integración Telegram Bot
 
-Última actualización: 2026-04-09
+Última actualización: 2026-04-20
 
 ---
 
 ## Estado
 
-❌ **Pendiente — Fase 8+**
+✅ **Implementado (fase operativa inicial)**
 
-No existe implementación. Canal reservado para uso interno operacional.
+- Configuración por tenant en `notification_settings` (`channel='telegram'`).
+- Trigger DB encola evento cuando una conversación pasa a `human_takeover`.
+- AI Orchestrator consume cola Supabase Queues (`pgmq`) y despacha a Telegram.
 
 ---
 
 ## Propósito
 
-Telegram como **canal interno de la plataforma** para:
-- Alertas operacionales del sistema (errores, health, cold starts)
-- Notificaciones a operadores de un tenant (nuevo pedido, conversación escalada, etc.)
-- Comandos internos para soporte técnico (no exposición al cliente final)
+Telegram como **canal interno del tenant** para alertas de operación.
 
-**Telegram NO es un canal de atención al cliente** en este producto.
-El canal de atención al cliente es WhatsApp.
+Caso activo:
+- Notificar al equipo del tenant cuando una conversación entra en `human_takeover`.
 
----
-
-## Casos de uso previstos
-
-| Caso | Destinatario | Trigger |
-|------|-------------|---------|
-| Error crítico en AI Orchestrator | DevOps/Superadmin | Exception en worker loop |
-| Nuevo mensaje pendiente de human takeover | Agente del tenant | `conversations.status = human_takeover` |
-| Token Meta próximo a expirar | Superadmin | Verificación periódica |
-| Cold start detectado en servicio | DevOps | Health check fallido |
-| Nueva orden recibida de MeLi | Manager del tenant | IPN de MeLi procesado |
-| Error de sincronización de catálogo | Manager del tenant | Error en connector MeLi |
+**Telegram NO es canal de atención al cliente.**
+Atención cliente final: WhatsApp Cloud API.
 
 ---
 
-## Diseño técnico (pendiente)
+## Arquitectura runtime
 
-- Bot de Telegram por plataforma (no por tenant en la versión inicial)
-- Posiblemente un bot por tenant en versiones avanzadas
-- API: Telegram Bot API oficial (`https://core.telegram.org/bots/api`)
-- Canal de alertas configurado como chat ID en env vars
+1. Cambio de estado en `conversations.status` a `human_takeover`.
+2. Trigger SQL encola evento en `human_takeover_notifications` (Supabase Queues/pgmq).
+3. Worker (`services/ai-orchestrator`) hace `dequeue`.
+4. Se consulta `notification_settings` del tenant y se envía notificación Telegram.
+5. ACK del mensaje en cola si se maneja correctamente.
 
 ---
 
-## Variables de entorno requeridas (diseño)
+## Configuración por tenant
 
-```
-TELEGRAM_BOT_TOKEN=...    ← Token del bot (BotFather)
-TELEGRAM_ALERT_CHAT_ID=...  ← Chat ID del canal de alertas internos
-```
+Tabla: `notification_settings`
+
+Valores de `config` para Telegram:
+- `bot_token`
+- `chat_id`
+
+UI de configuración:
+- `/dashboard/integrations` (sección Telegram)
+
+---
+
+## Canal Email (preparado)
+
+El pipeline de eventos ya contempla canal `email` en `notification_settings`.
+Actualmente está como placeholder no bloqueante en el worker (pendiente SMTP productivo).
 
 ---
 
 ## Reglas
 
-- No enviar datos confidenciales de tenants por Telegram (solo alertas y resúmenes)
-- No usar Telegram como canal de atención al cliente
-- No implementar antes de tener el ciclo WhatsApp completamente estable
-
----
-
-## Documentos relacionados
-
-- `docs/architecture/connector-framework.md` — Framework de conectores
-- `docs/operations/support-model.md` — Modelo de soporte interno
-- `docs/roadmap/implementation-phases.md` — Roadmap
+- No enviar secretos ni PII sensible extensa por Telegram.
+- Mantener mensajes orientados a acción operacional (resumen + link operativo).
+- Todo envío se resuelve por tenant (`tenant_id`) sin configuración global compartida.

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useTransition } from 'react'
+import { useState, useMemo, useTransition, useEffect } from 'react'
 import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,13 +19,18 @@ type Contact = {
   notes: string | null
   consent_given: boolean
   consent_date: string | null
+  consent_source?: string | null
+  consent_notice_version?: string | null
+  consent_evidence?: Record<string, unknown> | null
+  consent_actor_email?: string | null
+  consent_revoked_at?: string | null
+  consent_revoked_reason?: string | null
   created_at: string
   address: ContactAddress | null
 }
 
 type Props = {
   initialContacts: Contact[]
-  role: string
   canWrite: boolean
   addAction:    (fd: FormData) => Promise<void>
   editAction:   (fd: FormData) => Promise<void>
@@ -34,7 +39,7 @@ type Props = {
 
 const ITEMS_PER_PAGE = 30
 
-export default function ContactsManager({ initialContacts, role, canWrite, addAction, editAction, deleteAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -59,8 +64,8 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
     return result
   }, [initialContacts, search, consentFilter])
 
-  // Reset pagina al tipear
-  useMemo(() => { setCurrentPage(1) }, [search, consentFilter])
+  // Reset página cuando cambian filtros
+  useEffect(() => { setCurrentPage(1) }, [search, consentFilter])
 
   const totalPages = Math.ceil(filteredContacts.length / ITEMS_PER_PAGE) || 1
   const paginatedContacts = filteredContacts.slice(
@@ -85,6 +90,22 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
     startTransition(async () => {
       await deleteAction(fd)
     })
+  }
+
+  const handleDeleteById = (contactId: string) => {
+    const fd = new FormData()
+    fd.set('contact_id', contactId)
+    handleDelete(fd)
+  }
+
+  const extractEvidenceNote = (evidence: Contact['consent_evidence']): string | null => {
+    if (!evidence || typeof evidence !== 'object') return null
+    const rootNote = evidence.note
+    if (typeof rootNote === 'string' && rootNote.trim()) return rootNote.trim()
+    const lastUpdate = evidence.last_update as Record<string, unknown> | undefined
+    const nestedNote = lastUpdate?.note
+    if (typeof nestedNote === 'string' && nestedNote.trim()) return nestedNote.trim()
+    return null
   }
 
   return (
@@ -159,6 +180,36 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                   <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
                   <AddressSelector fieldPrefix="addr" />
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Canal de consentimiento</Label>
+                    <select
+                      name="consent_source"
+                      className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                      defaultValue="manual_console"
+                    >
+                      <option value="manual_console">Consola</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="web_form">Formulario web</option>
+                      <option value="phone_call">Llamada</option>
+                      <option value="in_person">Presencial</option>
+                      <option value="import">Importación</option>
+                      <option value="other">Otro</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Versión aviso/política</Label>
+                    <Input name="consent_notice_version" placeholder="v2026-04" className="h-8 text-xs" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Evidencia (nota interna)</Label>
+                  <Input name="consent_evidence_note" placeholder="Ej: autorizó por chat y aceptó política" className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Razón de revocatoria (si aplica)</Label>
+                  <Input name="consent_revoked_reason" placeholder="Ej: solicitó eliminación de datos" className="h-8 text-xs" />
+                </div>
                 <label className="flex items-start gap-2 cursor-pointer">
                   <input type="checkbox" name="consent_given" className="h-4 w-4 mt-0.5 rounded" />
                   <span className="text-xs text-muted-foreground leading-snug">
@@ -201,7 +252,8 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                              <ShieldOff className="h-3 w-3" /> Sin consent.
+                              <ShieldOff className="h-3 w-3" />
+                              {c.consent_revoked_at ? 'Revocado' : 'Sin consent.'}
                             </span>
                           )}
                         </div>
@@ -209,6 +261,24 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                           {c.phone.startsWith('+57') ? <><span className="text-muted-foreground/60">+57 </span>{c.phone.slice(3)}</> : c.phone}
                         </p>
                         {c.notes && <p className="text-xs text-muted-foreground mt-0.5 italic">{c.notes}</p>}
+                        {(c.consent_source || c.consent_notice_version) && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {c.consent_source ? `Canal: ${c.consent_source}` : ''}
+                            {c.consent_source && c.consent_notice_version ? ' · ' : ''}
+                            {c.consent_notice_version ? `Aviso: ${c.consent_notice_version}` : ''}
+                          </p>
+                        )}
+                        {c.consent_revoked_at && (
+                          <p className="text-xs text-amber-400 mt-0.5">
+                            Revocado: {new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}
+                            {c.consent_revoked_reason ? ` · ${c.consent_revoked_reason}` : ''}
+                          </p>
+                        )}
+                        {extractEvidenceNote(c.consent_evidence) && (
+                          <p className="text-xs text-muted-foreground/80 mt-0.5">
+                            Evidencia: {extractEvidenceNote(c.consent_evidence)}
+                          </p>
+                        )}
                         {c.address?.street && (
                           <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                             <MapPin className="h-3 w-3 shrink-0" />
@@ -243,6 +313,48 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                           <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
                           <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} />
                         </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Canal de consentimiento</Label>
+                            <select
+                              name="consent_source"
+                              defaultValue={c.consent_source ?? 'manual_console'}
+                              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                            >
+                              <option value="manual_console">Consola</option>
+                              <option value="whatsapp">WhatsApp</option>
+                              <option value="web_form">Formulario web</option>
+                              <option value="phone_call">Llamada</option>
+                              <option value="in_person">Presencial</option>
+                              <option value="import">Importación</option>
+                              <option value="other">Otro</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Versión aviso/política</Label>
+                            <Input
+                              name="consent_notice_version"
+                              defaultValue={c.consent_notice_version ?? ''}
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Evidencia (nota interna)</Label>
+                          <Input
+                            name="consent_evidence_note"
+                            defaultValue={extractEvidenceNote(c.consent_evidence) ?? ''}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Razón de revocatoria (si aplica)</Label>
+                          <Input
+                            name="consent_revoked_reason"
+                            defaultValue={c.consent_revoked_reason ?? ''}
+                            className="h-8 text-xs"
+                          />
+                        </div>
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" name="consent_given" defaultChecked={c.consent_given} className="h-3.5 w-3.5 rounded" />
                           <span className="text-xs text-muted-foreground">Consentimiento Habeas Data</span>
@@ -251,12 +363,16 @@ export default function ContactsManager({ initialContacts, role, canWrite, addAc
                           <Button type="submit" disabled={isPending} size="sm" variant="outline" className="h-7 text-xs">
                             {isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null} Guardar cambios
                           </Button>
-                          <form action={handleDelete}>
-                            <input type="hidden" name="contact_id" value={c.id} />
-                            <Button type="submit" disabled={isPending} size="sm" variant="ghost" className="h-7 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10">
-                              <Trash2 className="h-3 w-3 mr-1" /> Eliminar
-                            </Button>
-                          </form>
+                          <Button
+                            type="button"
+                            disabled={isPending}
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                            onClick={() => handleDeleteById(c.id)}
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" /> Eliminar
+                          </Button>
                         </div>
                       </form>
                     </details>

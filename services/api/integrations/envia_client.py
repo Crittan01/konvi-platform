@@ -93,6 +93,87 @@ class EnviaClient:
                 logger.warning("Envia /ship/rate/ 200 sin tarifas. body=%s", str(body)[:500])
             return body
 
+    async def generate_label(self, payload: dict) -> dict:
+        """
+        Genera etiqueta de envío (Shipping API).
+        Endpoint: POST /ship/generate/
+        """
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/ship/generate/",
+                headers=self.headers,
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                logger.error("Envia /ship/generate/ %d: %s", resp.status_code, resp.text[:500])
+            resp.raise_for_status()
+            return resp.json()
+
+    async def track_shipments(self, tracking_numbers: list[str]) -> dict:
+        """
+        Consulta tracking de uno o más números.
+        Endpoint: POST /ship/generaltrack/
+        """
+        payload = {"trackingNumbers": tracking_numbers}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/ship/generaltrack/",
+                headers=self.headers,
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                logger.error("Envia /ship/generaltrack/ %d: %s", resp.status_code, resp.text[:500])
+            resp.raise_for_status()
+            return resp.json()
+
+    async def schedule_pickup(self, payload: dict) -> dict:
+        """
+        Agenda pickup en carrier.
+        Endpoint: POST /ship/pickup/
+        """
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/ship/pickup/",
+                headers=self.headers,
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                logger.error("Envia /ship/pickup/ %d: %s", resp.status_code, resp.text[:500])
+            resp.raise_for_status()
+            return resp.json()
+
+    async def cancel_shipment(
+        self,
+        *,
+        carrier: str,
+        tracking_number: str,
+        folio: Optional[str] = None,
+        ecommerce: Optional[int] = None,
+    ) -> dict:
+        """
+        Cancela un envío (void label).
+        Endpoint: POST /ship/cancel/
+        """
+        payload: dict[str, Any] = {
+            "carrier": carrier,
+            "trackingNumber": tracking_number,
+        }
+        if folio:
+            payload["folio"] = folio
+        if ecommerce is not None:
+            payload["ecommerce"] = ecommerce
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/ship/cancel/",
+                headers=self.headers,
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                logger.error("Envia /ship/cancel/ %d: %s", resp.status_code, resp.text[:500])
+            resp.raise_for_status()
+            return resp.json()
+
     async def get_available_carriers(self, country: str = "CO", shipment_type: int = 0) -> list:
         """
         Lista carriers disponibles para un país via Queries API.

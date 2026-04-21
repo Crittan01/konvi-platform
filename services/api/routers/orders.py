@@ -12,10 +12,19 @@ Estados válidos: pending → confirmed → processing → shipped → delivered
 import logging
 import asyncio
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.idempotency import (
+    abort_idempotency,
+    begin_idempotency,
+    finalize_idempotency,
+    payload_fingerprint,
+)
+from dependencies.plans import PLAN_ORDERS_CREATE
+from dependencies.security import RL_WRITE_DEFAULT
 from routers.marketplace import sync_meli_stock
 
 logger = logging.getLogger(__name__)
@@ -29,7 +38,7 @@ VALID_STATUSES = {"pending", "confirmed", "processing", "shipped", "delivered", 
 class OrderItemCreate(BaseModel):
     product_id: Optional[str] = None
     variation_id: Optional[str] = None
-    title: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1, max_length=180)
     unit_price: float = Field(..., gt=0)
     unit_cost: Optional[float] = None
     quantity: int = Field(default=1, ge=1)
@@ -38,14 +47,14 @@ class OrderItemCreate(BaseModel):
 class OrderCreate(BaseModel):
     contact_id: Optional[str] = None
     conversation_id: Optional[str] = None
-    notes: Optional[str] = None
-    shipping_cost: float = Field(default=0.0, ge=0.0)
+    notes: Optional[str] = Field(default=None, max_length=1200)
+    shipping_cost: float = Field(default=0.0, ge=0.0, le=999999999.0)
     items: List[OrderItemCreate] = Field(..., min_length=1)
 
 
 class OrderPatch(BaseModel):
     status: Optional[str] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=1200)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -60,6 +69,11 @@ async def list_orders(
 ):
     """Lista pedidos del tenant con datos del contacto. Filtra por status opcional."""
     try:
+        if status and status not in VALID_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Status inválido. Valores permitidos: {', '.join(sorted(VALID_STATUSES))}",
+            )
         query = (
             supabase.table("orders")
             .select("id, status, total_amount, shipping_cost, notes, created_at, contact_id, contacts(phone, name)")
@@ -80,12 +94,30 @@ async def list_orders(
 @router.post("/", response_model=dict, status_code=201)
 async def create_order(
     order: OrderCreate,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
+    _plan: object = Depends(PLAN_ORDERS_CREATE),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """Crea pedido con ítems. Calcula total automáticamente. Solo owner/manager."""
+    idem_session = None
     try:
+        request_hash = payload_fingerprint(order.model_dump(mode="json"))
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
         total = sum(item.unit_price * item.quantity for item in order.items) + order.shipping_cost
 
         order_result = supabase.table("orders").insert({
@@ -131,10 +163,20 @@ async def create_order(
         ]
         supabase.table("order_items").insert(items_data).execute()
 
-        return {**order_result.data[0], "items": items_data}
+        response_body = {**order_result.data[0], "items": items_data}
+        finalize_idempotency(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            session=idem_session,
+            status_code=201,
+            body=response_body,
+        )
+        return response_body
     except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
     except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error creando pedido tenant %s: %s", tenant_id, e)
         raise HTTPException(status_code=500, detail="Error al crear pedido")
 
@@ -172,6 +214,7 @@ async def patch_order(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """
     Cambia estado y/o notas del pedido. Solo owner/manager.

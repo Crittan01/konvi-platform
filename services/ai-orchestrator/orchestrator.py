@@ -346,14 +346,14 @@ async def build_and_run_orchestration(
             conv_res = supabase.table("conversations").select("customer_phone").eq("id", conversation_id).execute()
             customer_phone = conv_res.data[0]["customer_phone"]
 
-            success = await send_whatsapp_message(
+            meta_message_id = await send_whatsapp_message(
                 tenant_id=tenant_id,
                 supabase=supabase,
                 to_phone=customer_phone,
                 text=parsed.response_text,
             )
 
-            if success:
+            if meta_message_id:
                 # Persistir mensaje outbound en el historial
                 supabase.table("messages").insert({
                     "conversation_id": conversation_id,
@@ -361,6 +361,7 @@ async def build_and_run_orchestration(
                     "direction": "outbound",
                     "content_type": "text",
                     "content": parsed.response_text,
+                    "meta_message_id": meta_message_id,
                     "processed": True,
                     "processing_status": PROCESSING_STATUS_PROCESSED,
                 }).execute()

@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 import httpx
 from supabase import Client
 
@@ -39,7 +40,7 @@ async def send_whatsapp_message(
     supabase: Client,
     to_phone: str,
     text: str,
-) -> bool:
+) -> Optional[str]:
     phone_id, access_token = _get_tenant_wa_credentials(tenant_id, supabase)
 
     if not phone_id or not access_token:
@@ -47,7 +48,7 @@ async def send_whatsapp_message(
             "Faltan credenciales WhatsApp conectadas en tenant_integrations para tenant=%s",
             tenant_id,
         )
-        return False
+        return None
 
     clean_phone = to_phone.lstrip("+").replace(" ", "").replace("-", "")
     payload = {
@@ -70,14 +71,14 @@ async def send_whatsapp_message(
         if response.status_code == 200:
             message_id = response.json().get("messages", [{}])[0].get("id", "unknown")
             logger.info("[META API] Mensaje enviado | to=%s | meta_message_id=%s", clean_phone, message_id)
-            return True
+            return message_id
         else:
             logger.error("[META API] Error | status=%s | body=%s", response.status_code, response.text)
-            return False
+            return None
 
     except httpx.TimeoutException:
         logger.error("[META API] Timeout al enviar a %s", clean_phone)
-        return False
+        return None
     except Exception as e:
         logger.error("[META API] Error inesperado: %s", e, exc_info=True)
-        return False
+        return None
