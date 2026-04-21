@@ -148,6 +148,89 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         send_msg.assert_awaited_once()
         self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
 
+    async def test_shipping_quote_short_circuits_llm(self):
+        supabase = MagicMock()
+
+        def table_side_effect(name):
+            if name == "conversations":
+                return _Query([{"customer_phone": "573001112233"}])
+            if name == "messages":
+                return _Query([{"id": "out-2"}])
+            return _Query([])
+
+        supabase.table.side_effect = table_side_effect
+
+        with (
+            patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(
+                orchestrator,
+                "handle_shipping_quote_if_applicable",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(
+                    handled=True,
+                    response_text="Desde Bogota te cotizo...",
+                    requires_human=False,
+                ),
+            ) as shipping_tool,
+            patch.object(orchestrator, "_get_genai_client") as genai_client,
+            patch.object(orchestrator, "_mark_message_processing") as mark_processing,
+            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock, return_value=True) as send_msg,
+        ):
+            await orchestrator.build_and_run_orchestration(
+                supabase=supabase,
+                message_id="m-5",
+                tenant_id="t-1",
+                conversation_id="c-1",
+                content="Cuanto vale el envio?",
+                content_type="text",
+            )
+
+        shipping_tool.assert_awaited_once()
+        genai_client.assert_not_called()
+        send_msg.assert_awaited_once()
+        self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
+
+    async def test_shipping_quote_can_escalate_human_takeover(self):
+        supabase = MagicMock()
+
+        def table_side_effect(name):
+            if name == "conversations":
+                return _Query([{"customer_phone": "573001112233"}])
+            if name == "messages":
+                return _Query([{"id": "out-3"}])
+            return _Query([])
+
+        supabase.table.side_effect = table_side_effect
+
+        with (
+            patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(
+                orchestrator,
+                "handle_shipping_quote_if_applicable",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(
+                    handled=True,
+                    response_text="No pude cotizar envio",
+                    requires_human=True,
+                ),
+            ),
+            patch.object(orchestrator, "_set_conversation_status") as set_status,
+            patch.object(orchestrator, "_mark_message_processing") as mark_processing,
+            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock, return_value=True) as send_msg,
+        ):
+            await orchestrator.build_and_run_orchestration(
+                supabase=supabase,
+                message_id="m-6",
+                tenant_id="t-1",
+                conversation_id="c-1",
+                content="cotizar envio",
+                content_type="text",
+            )
+
+        send_msg.assert_awaited_once()
+        set_status.assert_called_once_with(ANY, "c-1", "human_takeover")
+        self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
+
 
 if __name__ == "__main__":
     unittest.main()

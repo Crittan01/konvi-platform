@@ -61,6 +61,12 @@
   - `highlights.fastest` (menor tiempo por `delivery_date` o `delivery_estimate` parseable)
   - contrato documentado en `docs/integrations/courier-envia.md`
   - cobertura de regresión añadida en `tests/test_shipping_rate_highlights.py`
+- Inbox Fase B1 avanzó en runtime con cotización determinística:
+  - nuevo tool `shipping_quote_tool` en orquestador (sin depender del LLM para este intent)
+  - usa Core API `POST /api/v1/shipping/quote` con JWT interno de tenant (`SUPABASE_JWT_SECRET`)
+  - responde al cliente con `más económica + más rápida` cuando hay datos suficientes
+  - si falta destino/origen, solicita precisión y escala a humano cuando corresponde
+  - cobertura de regresión añadida en `tests/test_shipping_quote_tool.py` y `test_orchestrator_takeover.py`
 
 ---
 

@@ -10,6 +10,7 @@ from google.genai import types as genai_types
 from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
+from tools.shipping_quote_tool import handle_shipping_quote_if_applicable
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
 from conversation_contract import (
@@ -152,6 +153,47 @@ def _mark_message_processing(
             "last_error": last_error,
         }
     ).eq("id", message_id).execute()
+
+
+async def _send_outbound_text(
+    supabase: Client,
+    conversation_id: str,
+    tenant_id: str,
+    text: str,
+) -> bool:
+    conv_res = (
+        supabase.table("conversations")
+        .select("customer_phone")
+        .eq("id", conversation_id)
+        .execute()
+    )
+    customer_phone = conv_res.data[0]["customer_phone"] if conv_res.data else None
+    if not customer_phone:
+        logger.error("[OUTBOUND] No customer_phone for conversation_id=%s", conversation_id)
+        return False
+
+    meta_message_id = await send_whatsapp_message(
+        tenant_id=tenant_id,
+        supabase=supabase,
+        to_phone=customer_phone,
+        text=text,
+    )
+
+    if not meta_message_id:
+        return False
+
+    supabase.table("messages").insert({
+        "conversation_id": conversation_id,
+        "tenant_id": tenant_id,
+        "direction": "outbound",
+        "content_type": "text",
+        "content": text,
+        "meta_message_id": meta_message_id,
+        "processed": True,
+        "processing_status": PROCESSING_STATUS_PROCESSED,
+    }).execute()
+    logger.info("[OUTBOUND] Respuesta enviada a %s", customer_phone)
+    return True
 
 
 async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
@@ -494,6 +536,31 @@ async def build_and_run_orchestration(
             )
             return
 
+        shipping_result = await handle_shipping_quote_if_applicable(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            query_text=content,
+        )
+        if shipping_result.handled:
+            if shipping_result.response_text:
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=shipping_result.response_text,
+                )
+            if shipping_result.requires_human:
+                _set_conversation_status(
+                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+                )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            return
+
         # ── 1. Resolver datos del tenant ──────────────────────────────────────
         tenant_res = supabase.table("tenants").select("name").eq("id", tenant_id).execute()
         tenant_name = tenant_res.data[0]["name"] if tenant_res.data else "Tienda"
@@ -582,30 +649,12 @@ async def build_and_run_orchestration(
 
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
         if parsed.should_respond and parsed.response_text:
-            # Obtener el teléfono del cliente desde la conversación
-            conv_res = supabase.table("conversations").select("customer_phone").eq("id", conversation_id).execute()
-            customer_phone = conv_res.data[0]["customer_phone"]
-
-            meta_message_id = await send_whatsapp_message(
-                tenant_id=tenant_id,
+            await _send_outbound_text(
                 supabase=supabase,
-                to_phone=customer_phone,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
                 text=parsed.response_text,
             )
-
-            if meta_message_id:
-                # Persistir mensaje outbound en el historial
-                supabase.table("messages").insert({
-                    "conversation_id": conversation_id,
-                    "tenant_id": tenant_id,
-                    "direction": "outbound",
-                    "content_type": "text",
-                    "content": parsed.response_text,
-                    "meta_message_id": meta_message_id,
-                    "processed": True,
-                    "processing_status": PROCESSING_STATUS_PROCESSED,
-                }).execute()
-                logger.info(f"[OUTBOUND] Respuesta enviada a {customer_phone}")
 
         # ── 8. Escalar a humano si es necesario ───────────────────────────────
         if parsed.requires_human:

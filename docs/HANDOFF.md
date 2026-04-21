@@ -121,6 +121,12 @@ No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en senders.
   - bloque post-cotización para generar label, consultar tracking, agendar pickup y cancelar envío
   - mensaje explícito cuando backend responde `503` por feature flag desactivado
 
+### Inbox shipping quote (Fase B1 inicial)
+- Orchestrator aplica ruta determinística para consultas de envío (sin delegar verdad al LLM).
+- Construye quote vía Core API `POST /api/v1/shipping/quote` con JWT interno de tenant.
+- Responde con `highlights` (`más económica` + `más rápida`) cuando hay datos suficientes.
+- Si falta destino/origen, solicita precisión y puede escalar a `human_takeover`.
+
 ---
 
 ## Infra activa (Render)
@@ -164,8 +170,15 @@ Supabase proyecto: `***SUPABASE_PROJECT_REF_REDACTED***`
 ### `commerce-ops-orchestrator`
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_JWT_SECRET`
+- `API_URL`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
+- `INBOX_SHIPPING_DEFAULT_WEIGHT_KG`
+- `INBOX_SHIPPING_DEFAULT_LENGTH_CM`
+- `INBOX_SHIPPING_DEFAULT_WIDTH_CM`
+- `INBOX_SHIPPING_DEFAULT_HEIGHT_CM`
+- `INBOX_SHIPPING_TIMEOUT_SECONDS`
 - `POLL_INTERVAL_SECONDS`
 - `MAX_PROCESSING_ATTEMPTS`
 - `CONVERSATION_HISTORY_LIMIT`

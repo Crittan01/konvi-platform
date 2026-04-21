@@ -13,6 +13,8 @@
      - Pendiente: cierre UAT funcional de precision por variante.
    - Fase B: cubrir estado de pedido + cotizacion/seguimiento de envio desde backend.
      - Avance: `POST /api/v1/shipping/quote` ya retorna `highlights` (`cheapest` + `fastest`) para respuesta corta en Inbox sin inferencias.
+     - Avance: orquestador ya consume `shipping/quote` en ruta determinística y responde cotización en chat cuando hay dirección guardada.
+     - Pendiente: completar captura conversacional de destino cuando el contacto no tiene dirección y cerrar estado de pedido desde tool transaccional.
    - Fase C (despues): pagos Wompi con sandbox primero (`docs/integrations/wompi-prep.md`).
    - No abrir fase de pagos sin cierre formal de A y B.
 

@@ -1,6 +1,6 @@
 # AI Orchestrator — Arquitectura Runtime
 
-Última actualización: 2026-04-19
+Última actualización: 2026-04-21
 
 ---
 
@@ -62,17 +62,23 @@ Mensajes no-texto:
 1. Lee estado de conversación
 2. Si aplica, omite por takeover/closed/no-text
 3. Carga contexto (catálogo, KB, historial, configuración del agente IA)
-4. Llama Gemini (`gemini-2.5-flash`)
-5. Ejecuta guardrails
-6. Si corresponde, envía WhatsApp (credenciales del tenant en DB)
-7. Persiste outbound
-8. Marca `processing_status` final
+4. Ruta determinística para shipping quote (si el intent aplica):
+   - usa API transaccional `POST /api/v1/shipping/quote`
+   - responde con `highlights` (`más económica` + `más rápida`)
+   - si faltan datos (destino/origen), solicita precisión o escala a humano
+5. Si no aplica ruta determinística, llama Gemini (`gemini-2.5-flash`)
+6. Ejecuta guardrails
+7. Si corresponde, envía WhatsApp (credenciales del tenant en DB)
+8. Persiste outbound
+9. Marca `processing_status` final
 
 ---
 
 ## Dependencias de credenciales
 
 - `GEMINI_API_KEY` en env
+- `SUPABASE_JWT_SECRET` en env (firma JWT interno para API Gateway)
+- `API_URL` en env (URL base de Core API)
 - Credenciales WhatsApp por tenant en `tenant_integrations`
 
 No usa fallback a `META_ACCESS_TOKEN`/`WHATSAPP_PHONE_ID`.
