@@ -42,6 +42,10 @@
    - Validar estrategia de build/deploy que permita `workspace:*` sin romper Render.
    - Mantener `@commerce/ui` y `@commerce/test-utils` en estado deferred hasta trigger real.
 
+7. **Higiene final de entorno**
+   - Retirar fallback legacy `NEXT_PUBLIC_API_URL` del código server-side cuando se cierre refactor de rutas restantes.
+   - Mantener una sola vía canónica (`API_URL`) para evitar ambigüedad de configuración.
+
 ## Migraciones pendientes de aplicar en Supabase
 
 - Ninguna del bloque 2026-04-20 en entorno linked (`***SUPABASE_PROJECT_REF_REDACTED***`), incluyendo:
