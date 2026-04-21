@@ -22,6 +22,9 @@ Esto coincide con el criterio del proyecto: no gastar antes de tiempo, pero tamp
 3. Se requiere worker nativo para orchestrator.
 4. Se necesita soporte/SLA superior al plan Free.
 
+Gate formal operativo:
+- `docs/deployment/production-readiness-gate.md`
+
 ## Cambios técnicos esperados al migrar
 
 1. Ajustar `plan` por servicio en `render.yaml`.

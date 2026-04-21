@@ -53,3 +53,4 @@ Criterio mínimo recomendado:
 3. o evidencia de cold starts/limitaciones afectando operación
 
 Detalle y riesgos: `docs/deployment/render-upgrade-path.md`.
+Gate formal de aprobación: `docs/deployment/production-readiness-gate.md`.

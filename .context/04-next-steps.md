@@ -18,6 +18,7 @@
   - Monitoreo operativo (alertas centralizadas por fallos de integración)
   - Completar canal Email real para alertas de takeover (hoy está preparado como placeholder en worker)
   - Agregar observabilidad operativa de cola outbound WhatsApp (lag, retries, failed por tenant)
+  - Ejecutar scorecard del gate formal Free->Pago y cerrar `OQ-INFRA-01` con evidencia (`docs/deployment/production-readiness-gate.md`)
 
 4. **Cierre producción — hallazgos transversales de sesión (2026-04-20)**
    - Extender capacidades transaccionales del Orchestrator con herramientas backend seguras (cotización/envío, estado de pedido, generación de links de pago) sin delegar verdad al LLM.

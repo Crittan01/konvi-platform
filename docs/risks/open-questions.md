@@ -6,7 +6,7 @@
 |---|---|---|---|
 | OQ-P01 | Arquitectura Platform Console (misma app o app separada) | Pendiente crítico | Fase 12 completa |
 | OQ-PRICING-01 | Modelo comercial final por plan/capability | Pendiente | salida productiva comercial |
-| OQ-INFRA-01 | Trigger exacto de upgrade pago (fecha/tenant objetivo/SLA) | Pendiente | readiness productiva |
+| OQ-INFRA-01 | Trigger exacto de upgrade pago (fecha/tenant objetivo/SLA) | En ejecución (gate formal documentado) | readiness productiva |
 | OQ-ENVIA-01 | Estrategia final de webhooks y reconciliación Envia | Pendiente | cierre funcional shipping |
 
 ## Regla de cierre
