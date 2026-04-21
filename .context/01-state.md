@@ -28,6 +28,10 @@
   - `observability` preparado con contrato mínimo
   - `ui` y `test-utils` deferred explícitos
   - `db` marcado snapshot legacy no canónico
+- Se congeló contrato de entorno:
+  - `.env.example` alineado con variables realmente consumidas por código fuente
+  - `render.yaml` alineado con límites API explícitos (`API_RATE_LIMIT_*`)
+  - docs de deployment/handoff alineados (requeridas, opcionales y local-only)
 - Se resolvió bloqueo de `next build` en VM/local:
   - causa: dependencia de `next/font/google` en build sin salida de red estable
   - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`

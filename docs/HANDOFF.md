@@ -22,6 +22,7 @@ tienen prioridad.
 - `origin` local saneado sin token embebido en URL.
 - Inbox (`status` y `send`) consolidado vía proxies Next server-side (`/api/conversations/...`).
 - Arquitectura `packages/` normalizada en estado mínimo/deferred (ver `packages/README.md` y `docs/tech/monorepo-packages.md`).
+- Contrato de entorno congelado y alineado entre `.env.example`, `render.yaml` y docs de deployment.
 
 ---
 
@@ -157,6 +158,8 @@ Supabase proyecto: `xmelwnhhphksbpdjmbbp`
 - `MELI_OAUTH_STATE_TTL_SECONDS`
 - `PLAN_ENFORCEMENT_ENABLED`
 - `ENVIA_PHASE2_ENABLED`
+- `API_RATE_LIMIT_WRITE_PER_MINUTE`
+- `API_RATE_LIMIT_SEND_PER_MINUTE`
 
 ### `commerce-ops-orchestrator`
 - `NEXT_PUBLIC_SUPABASE_URL`
@@ -183,6 +186,7 @@ Supabase proyecto: `xmelwnhhphksbpdjmbbp`
 - `APP_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `API_URL`
+- `NEXT_PUBLIC_API_URL` (compat legacy, opcional y deprecada)
 
 Notas:
 - `META_ACCESS_TOKEN` y `WHATSAPP_PHONE_ID` no viven en env vars de servicios.
