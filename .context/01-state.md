@@ -28,6 +28,9 @@
   - `observability` preparado con contrato mínimo
   - `ui` y `test-utils` deferred explícitos
   - `db` marcado snapshot legacy no canónico
+- Se resolvió bloqueo de `next build` en VM/local:
+  - causa: dependencia de `next/font/google` en build sin salida de red estable
+  - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`
 
 ---
 
@@ -376,7 +379,7 @@ Campos en `marketplace_listings` actualizados por tres vías:
     - tablas clave presentes (`api_security_events`, `idempotency_keys`, `integration_oauth_states`, `order_tracking`, `tenant_usage_events`)
     - extensiones `pgmq` y `vector` activas
     - funciones críticas de colas/capabilities/idempotency presentes
-  - `pnpm --filter web build` ❌ falla con mensaje genérico `Build failed because of webpack errors` (sin traza detallada en esta VM).
+  - `pnpm --filter web build` ✅ (build completo, rutas generadas)
 
 - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
 - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅

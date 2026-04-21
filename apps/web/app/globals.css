@@ -4,6 +4,8 @@
 
 @layer base {
   :root {
+    --font-inter: 'Inter';
+
     /* ── Commerce Ops Design System — Kaiu Organic Style ──────────────────
        Filosofía: Diseño orgánico, natural y elegante.
        - Fondo: Crema cálido (lienzos naturales).

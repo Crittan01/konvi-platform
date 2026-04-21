@@ -37,12 +37,7 @@
    - Conectar prompts/contexto de upgrade en UX de módulos bloqueados.
    - Ver estado y plan en `docs/tech/tiering-validation-plan.md`.
 
-6. **Build de frontend (pendiente técnico)**
-   - Aislar causa del `next build` que falla con mensaje genérico de webpack en VM local.
-   - Confirmar si el fallo es propio de entorno/CLI o de bundle real antes de salida productiva.
-   - Mantener este punto abierto hasta tener traza reproducible y fix validado.
-
-7. **Arquitectura de paquetes compartidos (cierre gradual)**
+6. **Arquitectura de paquetes compartidos (cierre gradual)**
    - Definir momento para consumo real de `@commerce/shared-types` y `@commerce/config` desde apps.
    - Validar estrategia de build/deploy que permita `workspace:*` sin romper Render.
    - Mantener `@commerce/ui` y `@commerce/test-utils` en estado deferred hasta trigger real.
