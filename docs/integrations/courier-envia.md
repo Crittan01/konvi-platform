@@ -6,6 +6,7 @@
 
 - Fase inicial implementada (`quote` + `history`).
 - Fase 2 parcial implementada (label/tracking/pickup/cancel) con feature flag.
+- Inbox Fase B1: orquestador consume `shipping/quote` para responder cotización en chat con `highlights`.
 - Webhooks async de Envia: pendientes.
 
 ## Implementación real en código

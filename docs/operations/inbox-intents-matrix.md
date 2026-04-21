@@ -54,7 +54,7 @@ Implementar por fases:
 | Consulta por variante (color/talla/modelo) | Implementado mejorado (match exacto asistido) | Auto/Humano | Cerrar UAT y ajuste fino de ambiguedad | A |
 | Politicas del negocio (FAQ) | Dependiente de KB | Auto/Humano | Garantizar cobertura minima por KB activa | A |
 | Estado de pedido | Gap | Humano | Responder con datos transaccionales reales | B |
-| Cotizacion de envio | Parcial (backend listo con highlights) | Humano | Cotizar via backend shipping tool y responder minimo con opcion mas economica + mas rapida | B |
+| Cotizacion de envio | Implementado inicial (auto con direccion guardada) | Auto/Humano | Cotizar via backend shipping tool y responder minimo con opcion mas economica + mas rapida | B |
 | Seguimiento de envio | Gap parcial | Humano | Integrar consulta de tracking en tool | B |
 | Solicitud de pago/link de pago | No implementado | Humano | Integrar Wompi con guardrails y legalidad | C |
 | Reclamo/disputa sensible | Implementado | Humano (takeover) | Mantener escalamiento obligatorio | A |
@@ -91,8 +91,9 @@ Implementar por fases:
 1. Estado de pedido debe venir de fuente transaccional (no LLM).
 2. Cotizacion de envio debe usar endpoints backend existentes.
 3. Respuesta operativa recomendada al cliente: presentar minimo dos opciones (mas economica y mas rapida) usando `highlights` del backend.
-4. Errores externos (carrier/API) deben quedar explicitos y escalarse.
-5. Pruebas UAT sugeridas: minimo 25 casos, exito >= 95%.
+4. Avance runtime: orquestador ya tiene ruta deterministica para shipping quote y evita LLM en ese intent.
+5. Errores externos (carrier/API) deben quedar explicitos y escalarse.
+6. Pruebas UAT sugeridas: minimo 25 casos, exito >= 95%.
 
 ### Fase C - Pagos (Wompi)
 

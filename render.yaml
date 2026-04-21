@@ -154,10 +154,24 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: API_URL
+        value: https://commerce-ops-api.onrender.com
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      - key: INBOX_SHIPPING_DEFAULT_WEIGHT_KG
+        value: "1"
+      - key: INBOX_SHIPPING_DEFAULT_LENGTH_CM
+        value: "10"
+      - key: INBOX_SHIPPING_DEFAULT_WIDTH_CM
+        value: "10"
+      - key: INBOX_SHIPPING_DEFAULT_HEIGHT_CM
+        value: "10"
+      - key: INBOX_SHIPPING_TIMEOUT_SECONDS
+        value: "25"
       - key: POLL_INTERVAL_SECONDS
         value: "3"
       - key: MAX_PROCESSING_ATTEMPTS
