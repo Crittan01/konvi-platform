@@ -9,6 +9,7 @@
      - Avance: contexto runtime ya incluye rango de precio/stock total + variantes.
      - Avance: coincidencia exacta por variante (color/talla/SKU) implementada en prompt.
      - Avance: follow-ups ambiguos usan memoria determinística de historial corto.
+     - Avance: fallback técnico en Free (`scripts/uat/fase_a_free_fallback.sh`) operativo y validado.
      - Pendiente: cierre UAT funcional de precision por variante.
    - Fase B: cubrir estado de pedido + cotizacion/seguimiento de envio desde backend.
    - Fase C (despues): pagos Wompi con sandbox primero (`docs/integrations/wompi-prep.md`).

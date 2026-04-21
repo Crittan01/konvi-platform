@@ -50,6 +50,9 @@
   - metadata de respuestas interactivas (`button_reply`, `list_reply`, `button`)
   - parseo de lotes webhook (`entry/changes/messages`) para no perder mensajes cuando llegan múltiples en un mismo POST
   - migración aplicada en linked: `20260421130000_messages_payload_context.sql`
+- Se agregó fallback de certificación técnica para entorno Free (sin depender de UI Render):
+  - script: `scripts/uat/fase_a_free_fallback.sh`
+  - resultado de ejecución en sesión: `PASSED=5`, `FAILED=0` (aprobado técnico)
 - Se resolvió bloqueo de `next build` en VM/local:
   - causa: dependencia de `next/font/google` en build sin salida de red estable
   - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`

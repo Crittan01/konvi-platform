@@ -54,3 +54,18 @@ Usar esta plantilla como evidencia minima para cerrar Fase A.
 3. Fallas criticas: 0 abiertas.
 4. Fallas altas: mitigacion aprobada y fecha compromiso.
 5. Evidencia archivada en carpeta operativa del sprint.
+
+## Modo Free (fallback cuando Render se congela)
+
+Si el frontend en Render Free está dormido o inestable para pruebas manuales:
+
+1. Ejecutar validación técnica asistida desde VM:
+
+```bash
+./scripts/uat/fase_a_free_fallback.sh
+```
+
+2. Usar su salida como evidencia técnica base.
+3. Completar luego la parte funcional/UAT de negocio cuando el servicio esté disponible.
+
+Nota: este fallback no reemplaza la validación funcional de operación real con usuario, pero evita bloqueo total por cold starts.

@@ -208,19 +208,40 @@ export default function InboxPage() {
     }
 
     try {
-      const res = await fetch(`/api/conversations/${selectedId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-      })
-      if (!res.ok) {
+      const doRequest = async () => {
+        const ctrl = new AbortController()
+        const timeout = setTimeout(() => ctrl.abort(), 45000)
+        try {
+          return await fetch(`/api/conversations/${selectedId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ status }),
+            signal: ctrl.signal,
+          })
+        } finally {
+          clearTimeout(timeout)
+        }
+      }
+
+      let res = await doRequest()
+      if (!res.ok && res.status === 503) {
+        // Render Free puede necesitar un segundo intento tras despertar el servicio.
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        res = await doRequest()
+      }
+
+      if (res.ok) {
+        setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, status } : c))
+      } else {
         const err = await res.json().catch(() => ({ detail: 'Error al actualizar estado' }))
         setStatusError(err.detail || 'Error al actualizar estado')
-      } else {
-        setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, status } : c))
       }
-    } catch {
-      setStatusError('No se pudo actualizar el estado de la conversación.')
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        setStatusError('El servicio tardó demasiado en responder (cold start). Intenta de nuevo en unos segundos.')
+      } else {
+        setStatusError('No se pudo actualizar el estado de la conversación.')
+      }
     }
     setTakingOver(false)
   }
