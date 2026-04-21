@@ -2,6 +2,14 @@
 
 ## Pendientes reales
 
+0. **Inbox - certificacion funcional por intents (nuevo prioridad alta)**
+   - Congelar matriz de intents como contrato operativo:
+     - `docs/operations/inbox-intents-matrix.md`
+   - Fase A: completar respuestas de catalogo con variantes (sin inventar precio/stock).
+   - Fase B: cubrir estado de pedido + cotizacion/seguimiento de envio desde backend.
+   - Fase C (despues): pagos Wompi con sandbox primero (`docs/integrations/wompi-prep.md`).
+   - No abrir fase de pagos sin cierre formal de A y B.
+
 1. **Envia Fase 2**
    - Completar validaciones payload carrier-específicas para label/pickup/cancel por país.
    - Webhooks de estado Envia (fase async) para reconciliación automática de tracking.
@@ -19,6 +27,7 @@
   - Completar canal Email real para alertas de takeover (hoy está preparado como placeholder en worker)
   - Agregar observabilidad operativa de cola outbound WhatsApp (lag, retries, failed por tenant)
   - Ejecutar scorecard del gate formal Free->Pago y cerrar `OQ-INFRA-01` con evidencia (`docs/deployment/production-readiness-gate.md`)
+  - Complementar evidencia operativa desde entorno con salida a internet (smoke directo a endpoints Render + métricas de latencia/disponibilidad por 14 días)
 
 4. **Cierre producción — hallazgos transversales de sesión (2026-04-20)**
    - Extender capacidades transaccionales del Orchestrator con herramientas backend seguras (cotización/envío, estado de pedido, generación de links de pago) sin delegar verdad al LLM.

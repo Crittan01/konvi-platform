@@ -25,6 +25,8 @@ Regla de activación: **cumplir al menos 2 de 3 triggers** y no tener bloqueador
 ### Trigger C — Cierre funcional mínimo
 - Checklist funcional de salida completo:
   - inbox/send/status funcionando de forma estable
+  - cierre de fases funcionales de Inbox segun matriz de intents
+    (`docs/operations/inbox-intents-matrix.md`)
   - runbooks operativos vigentes
   - alertas críticas operativas
   - incidencias P1/P2 controladas
@@ -35,6 +37,7 @@ Regla de activación: **cumplir al menos 2 de 3 triggers** y no tener bloqueador
 2. Secrets/rotación sin cierre documental.
 3. Falta de rollback claro de cutover.
 4. Integraciones críticas con fallos no controlados (Meta/Envia/MeLi).
+5. Fase A/B de Inbox sin certificar (catalogo variantes + pedidos/shipping).
 
 ## 4) Ventana de evidencia mínima
 
@@ -43,6 +46,15 @@ Regla de activación: **cumplir al menos 2 de 3 triggers** y no tener bloqueador
   - Render logs/metrics por servicio
   - Supabase logs/usage/realtime
   - métricas operativas internas (colas, errores, retries)
+  - resultados UAT por intents (`docs/operations/inbox-intents-matrix.md`)
+
+## 4.1) Orden funcional previo al gasto (linea de fases)
+
+1. Fase A: respuestas de catalogo completas (incluye variantes) sin invencion.
+2. Fase B: estado de pedido + cotizacion/seguimiento de envio con datos backend.
+3. Fase C: pagos (Wompi) con sandbox primero y validacion legal/operativa.
+
+Regla: no abrir Fase C sin cierre formal de A y B.
 
 ## 5) Scorecard de decisión
 
@@ -58,6 +70,36 @@ Usar esta tabla y completarla antes de aprobar gasto:
 Regla final:
 - **GO**: al menos 2 triggers en estado Cumplido + bloqueadores duros = 0.
 - **NO-GO**: cualquier otro escenario.
+
+## 5.1) Snapshot actual (2026-04-21)
+
+Evidencia técnica disponible en esta sesión:
+- Build frontend: `pnpm --filter web build` ✅
+- Tests backend: `python3.11 -m unittest discover` ✅ (42 tests)
+- Tests frontend puntuales: `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
+- Estado colas `pgmq`:
+  - `pgmq.q_human_takeover_notifications`: `0` pendientes
+  - `pgmq.q_whatsapp_outbound_messages`: `0` pendientes
+- Actividad 14 días (entorno linked):
+  - `messages_14d`: `43`
+  - `conversations_14d`: `1`
+  - `usage_events_14d`: `8`
+- Integraciones activas:
+  - `envia=connected`, `mercadolibre=connected`, `whatsapp=connected`
+
+Limitación de evidencia:
+- No se pudo ejecutar smoke HTTP directo contra URLs Render desde esta VM por restricción DNS del entorno.
+
+Evaluación del gate hoy:
+
+| Criterio | Estado |
+|---|---|
+| Trigger A (tenant real operativo) | No demostrado con evidencia de negocio en esta sesión |
+| Trigger B (impacto Free demostrado) | No demostrado con evidencia operacional en esta sesión |
+| Trigger C (cierre funcional mínimo) | Parcial (base técnica OK; faltan cierres funcionales/operativos pendientes en backlog) |
+| Bloqueadores duros | Abiertos (pendientes funcionales críticos y validaciones de salida) |
+
+Resultado: **NO-GO** al upgrade pago en este momento.
 
 ## 6) Arquitectura objetivo al pasar a pago
 

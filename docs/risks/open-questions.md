@@ -8,6 +8,8 @@
 | OQ-PRICING-01 | Modelo comercial final por plan/capability | Pendiente | salida productiva comercial |
 | OQ-INFRA-01 | Trigger exacto de upgrade pago (fecha/tenant objetivo/SLA) | En ejecución (gate formal documentado) | readiness productiva |
 | OQ-ENVIA-01 | Estrategia final de webhooks y reconciliación Envia | Pendiente | cierre funcional shipping |
+| OQ-INBOX-01 | Criterio final de certificación por intents (A/B/C) para declarar Inbox \"completo\" | En ejecución (matriz creada) | salida productiva |
+| OQ-PAY-01 | Secuencia final para pagos (Wompi) y owner operativo de conciliación | Pendiente | fase de pagos conversacionales |
 
 ## Regla de cierre
 

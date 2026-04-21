@@ -12,6 +12,7 @@
 
 - Certificación operativa para salida productiva.
 - Cierre de deuda documental y estructural de monorepo.
+- Certificacion funcional de Inbox por intents (Fase A -> B -> C).
 
 ## Hitos bloqueados
 

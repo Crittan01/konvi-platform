@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-21 (rev. 42)
+**Última actualización**: 2026-04-21 (rev. 43)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -35,6 +35,10 @@
 - Se formalizó gate de decisión Free -> Pago:
   - scorecard operativa con triggers, bloqueadores, ventana de evidencia y criterios GO/NO-GO
   - documento: `docs/deployment/production-readiness-gate.md`
+  - snapshot operativo 2026-04-21 registrado con resultado actual `NO-GO`
+- Se formalizó criterio funcional previo a pagos/infra pago en Inbox:
+  - matriz de intents y certificación por fases A/B/C en `docs/operations/inbox-intents-matrix.md`
+  - preparación documental Wompi (sandbox/prod, llaves/eventos) en `docs/integrations/wompi-prep.md`
 - Se resolvió bloqueo de `next build` en VM/local:
   - causa: dependencia de `next/font/google` en build sin salida de red estable
   - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`
