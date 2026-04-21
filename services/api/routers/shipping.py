@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -302,6 +303,105 @@ def _parse_envia_track_data(raw: dict) -> list[dict]:
     return []
 
 
+def _safe_float(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", ".")
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_delivery_estimate_hours(raw: object) -> Optional[float]:
+    if isinstance(raw, (int, float)):
+        if raw > 0:
+            return float(raw)
+        return None
+
+    if not isinstance(raw, str):
+        return None
+
+    text = raw.strip().lower()
+    if not text:
+        return None
+
+    direct = _safe_float(text)
+    if direct is not None and direct > 0:
+        return direct
+
+    # Parseo explícito de unidades para evitar inferencias ambiguas.
+    hour_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(hora|horas|hr|hrs)", text)
+    if hour_match:
+        value = _safe_float(hour_match.group(1))
+        if value is not None and value > 0:
+            return value
+
+    day_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(dia|dias|día|días)", text)
+    if day_match:
+        value = _safe_float(day_match.group(1))
+        if value is not None and value > 0:
+            return value * 24.0
+
+    return None
+
+
+def _parse_delivery_date_score(raw: object) -> Optional[float]:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _rate_speed_key(rate: dict) -> tuple[int, float]:
+    delivery_date_score = _parse_delivery_date_score(rate.get("delivery_date"))
+    if delivery_date_score is not None:
+        return (0, delivery_date_score)
+
+    estimate_hours = _parse_delivery_estimate_hours(rate.get("delivery_estimate"))
+    if estimate_hours is not None:
+        return (1, estimate_hours)
+
+    return (2, float("inf"))
+
+
+def _build_rate_highlights(rates: list[dict]) -> dict:
+    valid_rates = [r for r in rates if isinstance(r, dict)]
+    if not valid_rates:
+        return {}
+
+    priced_rates = [r for r in valid_rates if _safe_float(r.get("total_price")) is not None]
+    cheapest = None
+    if priced_rates:
+        cheapest = min(priced_rates, key=lambda r: _safe_float(r.get("total_price")) or float("inf"))
+
+    fastest = min(valid_rates, key=_rate_speed_key)
+    if _rate_speed_key(fastest)[0] == 2:
+        fastest = None
+
+    highlights: dict[str, dict] = {}
+    if cheapest is not None:
+        highlights["cheapest"] = cheapest
+    if fastest is not None:
+        highlights["fastest"] = fastest
+    return highlights
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.post("/quote", response_model=dict, status_code=201)
@@ -472,6 +572,7 @@ async def quote_shipment(
         response_body = {
             "shipment_id": shipment_id,
             "rates":       normalized_rates,
+            "highlights":  _build_rate_highlights(normalized_rates),
         }
         finalize_idempotency(
             supabase=supabase,
