@@ -36,10 +36,12 @@ supabase db query --linked -f supabase/migrations/<archivo>.sql
 3. Verificar colas `pgmq` (takeover/outbound).
 4. Verificar worker orchestrator consumiendo cola.
 5. Verificar actualización de `processing_status`.
+6. Verificar `messages.payload` para contexto (`context.id`, `interactive/button`) cuando aplique.
 
 ## 6) Checklist de certificacion Inbox por intents
 
 1. Ejecutar pruebas UAT segun `docs/operations/inbox-intents-matrix.md`.
-2. Registrar resultado por intent (`auto`, `humano`, `fallo`).
-3. Validar que intents de Fase A/B cumplen porcentaje objetivo.
-4. Documentar evidencias y decidir `GO/NO-GO` de fase siguiente.
+2. Usar plantilla base de ejecucion: `docs/operations/inbox-uat-fase-a.md`.
+3. Registrar resultado por intent (`auto`, `humano`, `fallo`).
+4. Validar que intents de Fase A/B cumplen porcentaje objetivo.
+5. Documentar evidencias y decidir `GO/NO-GO` de fase siguiente.

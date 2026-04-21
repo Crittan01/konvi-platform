@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-21 (rev. 43)
+**Última actualización**: 2026-04-21 (rev. 46)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -39,6 +39,17 @@
 - Se formalizó criterio funcional previo a pagos/infra pago en Inbox:
   - matriz de intents y certificación por fases A/B/C en `docs/operations/inbox-intents-matrix.md`
   - preparación documental Wompi (sandbox/prod, llaves/eventos) en `docs/integrations/wompi-prep.md`
+- Fase A Inbox (variantes) avanzó en runtime:
+  - `catalog_tool` ahora inyecta rango de precio, stock total y desglose de variantes al contexto LLM
+  - `orchestrator` muestra variantes explícitas en prompt
+  - `orchestrator` agrega análisis determinístico de coincidencia exacta por variante (color/talla/SKU) para reforzar respuesta o escalar sin inventar
+  - follow-ups ambiguos (ej. "y en talla L?") ahora usan memoria determinística de corto plazo basada en historial conversacional para detectar producto en contexto
+  - cobertura de regresión añadida en tests (`test_catalog_tool_variants`, `test_orchestrator_catalog_prompt`)
+- Connector WhatsApp ahora preserva contexto webhook inbound en `messages.payload`:
+  - `context.id/from`
+  - metadata de respuestas interactivas (`button_reply`, `list_reply`, `button`)
+  - parseo de lotes webhook (`entry/changes/messages`) para no perder mensajes cuando llegan múltiples en un mismo POST
+  - migración aplicada en linked: `20260421130000_messages_payload_context.sql`
 - Se resolvió bloqueo de `next build` en VM/local:
   - causa: dependencia de `next/font/google` en build sin salida de red estable
   - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`

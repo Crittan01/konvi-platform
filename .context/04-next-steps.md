@@ -6,6 +6,10 @@
    - Congelar matriz de intents como contrato operativo:
      - `docs/operations/inbox-intents-matrix.md`
    - Fase A: completar respuestas de catalogo con variantes (sin inventar precio/stock).
+     - Avance: contexto runtime ya incluye rango de precio/stock total + variantes.
+     - Avance: coincidencia exacta por variante (color/talla/SKU) implementada en prompt.
+     - Avance: follow-ups ambiguos usan memoria determinística de historial corto.
+     - Pendiente: cierre UAT funcional de precision por variante.
    - Fase B: cubrir estado de pedido + cotizacion/seguimiento de envio desde backend.
    - Fase C (despues): pagos Wompi con sandbox primero (`docs/integrations/wompi-prep.md`).
    - No abrir fase de pagos sin cierre formal de A y B.
