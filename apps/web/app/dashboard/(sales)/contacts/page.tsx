@@ -58,7 +58,7 @@ export default async function ContactsPage({
     if (consentFilter === 'no')  query = query.eq('consent_given', false)
 
     const { data } = await query
-    contacts = (data as Contact[]) || []
+    contacts = Array.isArray(data) ? (data as unknown as Contact[]) : []
   }
 
   // Filtros iniciales ya no se hacen de forma ruda en query,
