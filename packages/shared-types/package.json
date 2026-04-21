@@ -1,6 +1,11 @@
 {
   "name": "@commerce/shared-types",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Tipos TypeScript compartidos entre apps y servicios — DEFERRED. Tipos actualmente definidos localmente en cada app."
+  "description": "Contratos TypeScript canónicos compartidos",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts"
 }

@@ -1,13 +1,25 @@
-# @commerce/config — DEFERRED
+# @commerce/config
 
-**Estado**: Intencionalmente vacío.
+Última actualización: 2026-04-21
 
-**Propósito potencial**: Centralizar configuraciones compartidas del monorepo:
-- `eslint-config-commerce` — reglas ESLint comunes
-- `tsconfig-commerce` — base TypeScript
-- `tailwind-preset-commerce` — tokens de diseño (Dark Warm Theme)
+## Estado
 
-**Cuándo poblarlo**: Cuando haya una segunda app (`apps/platform/`) que necesite las mismas reglas.
-Con una sola app, la duplicación es mínima y no justifica la abstracción.
+Activo mínimo.
 
-**Referencia**: `apps/web/.eslintrc.json`, `apps/web/tailwind.config.ts`, `apps/web/tsconfig.json`
+## Contenido actual
+
+- `eslint/base.cjs` — baseline de ESLint
+- `tailwind/preset.cjs` — preset base de Tailwind
+- `tsconfig/base.json` — baseline de TypeScript
+
+## Alcance
+
+No está cableado globalmente aún; se mantiene como capa lista para reuso gradual.
+Esto evita sobreingeniería mientras solo existe una app frontend.
+
+## Referencia
+
+Uso objetivo cuando se decida consolidar:
+- `apps/web/.eslintrc.json`
+- `apps/web/tailwind.config.ts`
+- `apps/web/tsconfig.json`

@@ -2,9 +2,14 @@
   "name": "@commerce/auth",
   "version": "0.1.0",
   "private": true,
-  "description": "Capa de SSR Supabase y Auth Hooks",
+  "description": "Wrappers SSR de Supabase para reutilización gradual",
+  "type": "module",
+  "exports": {
+    "./client-browser": "./lib/client-browser.ts",
+    "./server-client": "./lib/server-client.ts"
+  },
   "dependencies": {
-    "@supabase/ssr": "latest",
-    "@supabase/supabase-js": "latest"
+    "@supabase/ssr": "^0.10.0",
+    "@supabase/supabase-js": "^2.101.1"
   }
 }

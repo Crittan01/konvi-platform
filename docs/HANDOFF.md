@@ -1,4 +1,4 @@
-# Handoff — Estado Operativo Real (2026-04-20, rev. 27)
+# Handoff — Estado Operativo Real (2026-04-21, rev. 28)
 
 Este documento describe el estado operativo real de `develop`.
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
@@ -15,6 +15,13 @@ tienen prioridad.
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
 - DB canónica: `supabase/migrations/` (42 migraciones)
+
+## Cierre de auditoría (2026-04-21)
+
+- `scripts/test-mass-import.mjs` ya no contiene key hardcodeada; usa `SUPABASE_SERVICE_ROLE_KEY` por entorno.
+- `origin` local saneado sin token embebido en URL.
+- Inbox (`status` y `send`) consolidado vía proxies Next server-side (`/api/conversations/...`).
+- Arquitectura `packages/` normalizada en estado mínimo/deferred (ver `packages/README.md` y `docs/tech/monorepo-packages.md`).
 
 ---
 

@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-20 (rev. 40)
+**Última actualización**: 2026-04-21 (rev. 42)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -12,6 +12,22 @@
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
 - **DB**: ✅ contrato endurecido (42 migraciones)
+
+---
+
+## Cierre de auditoría doc/código (2026-04-21)
+
+- Se eliminó exposición hardcodeada de `SUPABASE_SERVICE_ROLE_KEY` en `scripts/test-mass-import.mjs` (ahora solo por env).
+- Se sanitizó el remote git local para remover token embebido de URL (`origin` queda en `https://github.com/...`).
+- Inbox frontend quedó alineado a proxy server-side para cambios de estado/envío:
+  - `/api/conversations/{id}/status`
+  - `/api/conversations/{id}/send`
+- Se unificó prioridad de `API_URL` sobre `NEXT_PUBLIC_API_URL` en server code de catálogo/marketplace.
+- Se normalizó arquitectura documental de `packages/`:
+  - `shared-types` y `config` activos mínimos
+  - `observability` preparado con contrato mínimo
+  - `ui` y `test-utils` deferred explícitos
+  - `db` marcado snapshot legacy no canónico
 
 ---
 
@@ -204,6 +220,8 @@ Comportamiento efectivo:
 
 ## Migraciones recientes (2026-04-20)
 
+> **Nota:** Ver bloque 2026-04-18 al final para migraciones anteriores del bloque sales.
+
 - `20260420000000_marketplace_listings_meli_fields.sql`
   - Agrega a `marketplace_listings`: `meli_title`, `meli_thumbnail`, `meli_condition`, `meli_category_id`, `meli_attributes`, `synced_at`
   - Habilita sync pull MeLi → Supabase
@@ -321,6 +339,22 @@ Campos en `marketplace_listings` actualizados por tres vías:
 
 ---
 
+## Migraciones anteriores (2026-04-18)
+
+- `20260418000000_marketplace_meli_variation_id.sql`
+  - Agrega `meli_variation_id` a `marketplace_listings` para sincronización de variantes MeLi
+
+- `20260418000003_orders_shipping_cost.sql`
+  - Agrega columna `shipping_cost DECIMAL(10,2) NOT NULL DEFAULT 0` a tabla `orders`
+  - Implementación completa end-to-end:
+    - Backend (`services/api/routers/orders.py`): campo en `OrderCreate`, cálculo de `total_amount = sum(items) + shipping_cost`, incluido en INSERT y en SELECT de listado
+    - Frontend (`apps/web/app/dashboard/(sales)/shipping/shipping-quote-form.tsx`): formulario completo de cotización con formulario de org/dest/paquete, selección de tarifa, y acciones Fase 2 post-cotización
+
+- `20260418000004_contacts_address.sql`
+  - Agrega campos de dirección a `contacts` para contexto de entrega
+
+---
+
 ## UX Mercado Libre (2026-04-20)
 
 - `marketplace-manager.tsx`: filtros por estado (Todos / Activos / Pausados / Cerrados / Sin vincular)
@@ -330,6 +364,19 @@ Campos en `marketplace_listings` actualizados por tres vías:
 ---
 
 ## Validación ejecutada en esta sesión
+
+- Certificación 2026-04-21:
+  - `git remote -v` ✅ (sin token embebido en URL)
+  - `python3.11 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
+  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
+  - `pnpm --filter web lint` ✅ (warnings preexistentes)
+  - `pnpm --filter web exec tsc --noEmit` ✅
+  - `python3.11 -m py_compile services/api/main.py services/connector-whatsapp/main.py services/ai-orchestrator/main.py` ✅
+  - `supabase db query --linked` (solo lectura) ✅:
+    - tablas clave presentes (`api_security_events`, `idempotency_keys`, `integration_oauth_states`, `order_tracking`, `tenant_usage_events`)
+    - extensiones `pgmq` y `vector` activas
+    - funciones críticas de colas/capabilities/idempotency presentes
+  - `pnpm --filter web build` ❌ falla con mensaje genérico `Build failed because of webpack errors` (sin traza detallada en esta VM).
 
 - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
 - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅

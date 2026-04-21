@@ -78,7 +78,7 @@ Ver servicios live e infra → `docs/HANDOFF.md`
 
 ```bash
 supabase db query --linked -f archivo.sql   # psql TCP bloqueado por Supavisor
-python3 main.py                             # Python 3.11.13 sistema
+python3.11 main.py                          # usar python3.11 explícito en esta VM
 pnpm --filter web dev                       # Node v20.20.2 via nvm
 ```
 

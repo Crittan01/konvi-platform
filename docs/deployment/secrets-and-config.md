@@ -1,95 +1,64 @@
-# Secrets y Configuración — Commerce Ops Platform
+# Secrets y Configuración (vigente)
 
-Última actualización: 2026-04-16
+Última actualización: 2026-04-21
 
----
+## Reglas
 
-## Política de secrets
+1. `.env` nunca al repositorio.
+2. `sync: false` en `render.yaml` implica carga manual en Render.
+3. No documentar secretos reales; solo nombres de variables.
 
-- `.env` **NUNCA** al repositorio (está en `.gitignore`)
-- En producción (Render): variables configuradas manualmente en Render Dashboard → Environment
-- Localmente: `.env` en la raíz del monorepo (copiar de `.env.example`)
-- **No se usa** 1Password, Doppler ni Supabase Vault en el estado actual (Free plan)
+## Variables por servicio (runtime actual)
 
----
+### `commerce-ops-web`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `APP_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `API_URL`
+- `NEXT_PUBLIC_API_URL` (compat legacy opcional, no recomendado para nuevos paths server-side)
 
-## Mapa de variables por servicio
+### `commerce-ops-connector`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `META_APP_SECRET`
+- `META_VERIFY_TOKEN`
+- `ALLOWED_ORIGINS`
 
-### Frontend — `commerce-ops-web` (`apps/web`)
+### `commerce-ops-api`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_JWT_SECRET`
+- `ALLOWED_ORIGINS`
+- `MELI_CLIENT_ID`
+- `MELI_CLIENT_SECRET`
+- `MELI_REDIRECT_URI`
+- `MELI_AUTH_URL`
+- `MELI_OAUTH_STATE_SECRET`
+- `MELI_OAUTH_STATE_TTL_SECONDS`
+- `PLAN_ENFORCEMENT_ENABLED`
+- `ENVIA_PHASE2_ENABLED`
+- `API_RATE_LIMIT_WRITE_PER_MINUTE` (opcional)
+- `API_RATE_LIMIT_SEND_PER_MINUTE` (opcional)
 
-| Variable | Tipo | Fuente |
-|----------|------|--------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Pública (baked en build) | Supabase Dashboard → Project Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Pública (baked en build) | Supabase Dashboard → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Secreta — nunca NEXT_PUBLIC_** | Supabase Dashboard → Project Settings → API |
-| `APP_URL` | Valor fijo en render.yaml | `https://commerce-ops-web.onrender.com` |
-| `API_URL` | Valor fijo en render.yaml | `https://commerce-ops-api.onrender.com` |
-| `MELI_CLIENT_ID` | Secreta | Meta Developers → MeLi App |
-| `MELI_REDIRECT_URI` | Valor | `https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback` |
-| `MELI_AUTH_URL` | Valor | `https://auth.mercadolibre.com.co/authorization` |
+### `commerce-ops-orchestrator`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `POLL_INTERVAL_SECONDS`
+- `MAX_PROCESSING_ATTEMPTS`
+- `CONVERSATION_HISTORY_LIMIT`
+- `HUMAN_TAKEOVER_QUEUE_*`
+- `WHATSAPP_OUTBOUND_QUEUE_*`
+- `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
+- `IDEMPOTENCY_CLEANUP_*`
 
-### WhatsApp Connector — `commerce-ops-connector`
+## Aclaración crítica WhatsApp
 
-| Variable | Tipo | Fuente |
-|----------|------|--------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Ref | Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Secreta** | Supabase |
-| `META_APP_SECRET` | **Secreta** | Meta Developers → App Settings → Basic |
-| `META_VERIFY_TOKEN` | Secreta | Definido por nosotros al configurar webhook |
-| `META_ACCESS_TOKEN` | **Secreta** | System User Token permanente (`commerce-ops`) |
-| `WHATSAPP_PHONE_ID` | Valor | Meta Developers → WhatsApp → API Setup |
+- API y orchestrator no usan `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` como fallback global para envío.
+- Las credenciales outbound viven por tenant en `tenant_integrations`.
 
-### API Gateway — `commerce-ops-api`
+## Criterio de pago
 
-| Variable | Tipo | Fuente |
-|----------|------|--------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Ref | Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Secreta** | Supabase |
-| `SUPABASE_JWT_SECRET` | **Secreta** | Supabase Dashboard → Project Settings → Data API → JWT Secret |
-| `ALLOWED_ORIGINS` | Valor | `https://commerce-ops-web.onrender.com,http://localhost:3000` |
-| `MELI_CLIENT_ID` | Secreta | MeLi Developers |
-| `MELI_CLIENT_SECRET` | **Secreta** | MeLi Developers |
-
-### AI Orchestrator — `commerce-ops-orchestrator`
-
-| Variable | Tipo | Fuente |
-|----------|------|--------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Ref | Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Secreta** | Supabase |
-| `META_ACCESS_TOKEN` | **Secreta** | System User Token permanente |
-| `WHATSAPP_PHONE_ID` | Valor | Meta Developers |
-| `GEMINI_API_KEY` | **Secreta** | Google AI Studio |
-| `GEMINI_MODEL` | Valor fijo en render.yaml | `gemini-2.5-flash` |
-| `POLL_INTERVAL_SECONDS` | Valor fijo en render.yaml | `3` |
-
----
-
-## Tokens y credenciales activas
-
-| Token | Estado | Notas |
-|-------|--------|-------|
-| `META_ACCESS_TOKEN` | ✅ Permanente | System User `commerce-ops`, sin expiración |
-| `GEMINI_API_KEY` | ✅ Activa | Billing habilitado en Google Cloud |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ Activa | Bypasea RLS — solo usar en contextos privilegiados |
-| `SUPABASE_JWT_SECRET` | ✅ Activa | Para validar JWTs en API Gateway |
-| `MeLi OAuth tokens` | ✅ Por tenant | Guardados en `tenant_integrations.credentials` |
-| `Envia API key` | ✅ Por tenant | Guardados en `tenant_integrations.credentials` |
-
----
-
-## Rotación de credentials
-
-- `META_ACCESS_TOKEN`: Permanente (System User) — no requiere rotación programática
-- `GEMINI_API_KEY`: Rotar si hay sospecha de compromiso (Google AI Studio → API Keys)
-- `SUPABASE_SERVICE_ROLE_KEY`: Rotar en Supabase Dashboard → Project Settings → API (requiere redeploy de todos los servicios)
-- `SUPABASE_JWT_SECRET`: No rotar sin causa — invalida todos los JWTs activos
-
----
-
-## Gestión futura de secrets
-
-Para producción multi-tenant con volumen real, evaluar:
-- **Doppler** o **Infisical**: sync automático a Render en rotación
-- **Supabase Vault**: para credentials de integraciones por tenant (MeLi, Envia)
-
-Actualmente fuera de scope — ver `docs/risks/open-questions.md` para decisiones pendientes.
+Mover a planes pagos cuando estemos cerca de salida productiva o ante bloqueo operacional real en Free.

@@ -15,7 +15,7 @@
 
 ## RBAC
 
-- Roles: `owner`, `manager`, `agent` en `tenant_users`
+- Roles runtime: `owner`, `manager`, `operator` en `tenant_users`
 - Plataforma (Fase 12): roles separados en `platform_users` — no mezclar con roles de tenant
 
 ## Reglas críticas

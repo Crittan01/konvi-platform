@@ -14,12 +14,20 @@
 
 // xlsx no es necesario para el test funcional — solo se usa para generar Excel de referencia
 
-// ─── Config real de Supabase ──────────────────────────────────────────────────
-const SUPABASE_URL   = 'https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co'
-const SERVICE_KEY    = '***JWT_REDACTED***'
-const TENANT_ID      = '0fb0777e-f3e4-48c7-89bf-a25aa201c0c9'  // Matriz Commerce Dev
-const CATEGORY_ID    = 'dd4c376c-cd3d-4300-94f8-9804a0373401'  // Tecnología y Celulares
-// Nota: usamos Tecnología para los tests y limpiamos al final
+// ─── Config de Supabase (solo desde entorno) ─────────────────────────────────
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const TENANT_ID = process.env.TEST_TENANT_ID
+const CATEGORY_ID = process.env.TEST_CATEGORY_ID
+
+if (!SUPABASE_URL || !SERVICE_KEY || !TENANT_ID || !CATEGORY_ID) {
+  console.error('Faltan variables de entorno requeridas:')
+  console.error('- NEXT_PUBLIC_SUPABASE_URL')
+  console.error('- SUPABASE_SERVICE_ROLE_KEY')
+  console.error('- TEST_TENANT_ID')
+  console.error('- TEST_CATEGORY_ID')
+  process.exit(1)
+}
 
 const HEADERS = {
   'apikey': SERVICE_KEY,

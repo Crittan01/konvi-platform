@@ -207,9 +207,8 @@ export default function InboxPage() {
       return
     }
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     try {
-      const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/status`, {
+      const res = await fetch(`/api/conversations/${selectedId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ status }),
@@ -233,12 +232,11 @@ export default function InboxPage() {
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
     if (!token) { setSendError('Sesión expirada.'); setSending(false); return }
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     try {
       const ctrl = new AbortController()
       const timeout = setTimeout(() => ctrl.abort(), 90000) // Render cold start puede tomar ~60-90s
       const idempotencyKey = createIdempotencyKey('conversations.send')
-      const res = await fetch(`${apiUrl}/api/v1/conversations/${selectedId}/send`, {
+      const res = await fetch(`/api/conversations/${selectedId}/send`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
