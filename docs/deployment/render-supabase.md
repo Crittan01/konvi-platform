@@ -1,78 +1,36 @@
-# Arquitectura de Deployment — Render + Supabase
+# Arquitectura Render + Supabase (vigente)
 
-Última actualización: 2026-04-16
+Última actualización: 2026-04-21
 
----
-
-## Visión general
+## Topología activa
 
 | Capa | Plataforma | Estado |
-|------|-----------|--------|
-| Frontend (Next.js) | Render — Web Service (Node) | ✅ Live |
-| WhatsApp Connector (FastAPI) | Render — Web Service (Python) | ✅ Live |
-| API Gateway (FastAPI) | Render — Web Service (Python) | ✅ Live |
-| AI Orchestrator (FastAPI + daemon thread) | Render — Web Service (Python) | ✅ Live |
-| Base de datos + Auth + Realtime | Supabase Cloud (us-east-1) | ✅ Live |
+|---|---|---|
+| Frontend (`apps/web`) | Render Web Service | Live |
+| Connector WhatsApp (`services/connector-whatsapp`) | Render Web Service | Live |
+| API Gateway (`services/api`) | Render Web Service | Live |
+| AI Orchestrator (`services/ai-orchestrator`) | Render Web Service (`server.py` + thread) | Live |
+| DB/Auth/Realtime/Queues | Supabase | Live |
 
-> Nota: El frontend vive en **Render**, no en Vercel. Todo el stack está en Render.
+## Fuente de verdad de infraestructura
 
----
+1. `render.yaml`
+2. `docs/HANDOFF.md`
+3. `.context/01-state.md`
 
-## Servicios en Render
+## Migraciones
 
-| Servicio Render | Origen en repo | URL | Plan |
-|----------------|---------------|-----|------|
-| `commerce-ops-web` | `apps/web` | `https://commerce-ops-web.onrender.com` | Free |
-| `commerce-ops-connector` | `services/connector-whatsapp` | `https://commerce-ops-connector.onrender.com` | Free |
-| `commerce-ops-api` | `services/api` | `https://commerce-ops-api.onrender.com` | Free |
-| `commerce-ops-orchestrator` | `services/ai-orchestrator` | (solo `/health` interno) | Free |
+`supabase/migrations/` es fuente canónica de esquema.
 
-Toda la configuración IaC está en `render.yaml` en la raíz del repo.
-Render detecta el archivo automáticamente y despliega en cada push a `main`.
-
----
-
-## Supabase
-
-- **Proyecto**: `xmelwnhhphksbpdjmbbp` (us-east-1)
-- **Migraciones**: 25 aplicadas — fuente canónica en `supabase/migrations/`
-- **Auth**: Supabase Auth + SSR (`@supabase/ssr`)
-- **Realtime**: Activo para `messages` y `conversations` (Inbox)
-- **RLS**: Activo en todas las tablas del esquema `public`
-- **Storage**: Bucket `tenant-media` (archivos de catálogo/media)
-
-### Comandos SQL seguros
+Aplicación segura:
 
 ```bash
-# psql TCP NO funciona desde esta VM (Supavisor bloquea)
-# Usar siempre:
-supabase db query --linked -f supabase/migrations/archivo.sql
-supabase db query --linked "SELECT * FROM tenants;"
+supabase db query --linked -f supabase/migrations/<archivo>.sql
 ```
 
----
+## Nota Free vs pago
 
-## Variables de entorno por servicio
+En Free, orchestrator corre como `web` por limitación de workers.
+El target recomendado para pago (Starter+) es `type: worker`.
 
-Ver `render.yaml` para la lista completa. Las marcadas `sync: false` deben configurarse
-manualmente en Render Dashboard → Environment.
-
-| Variable | Servicio | Notas |
-|----------|---------|-------|
-| `NEXT_PUBLIC_SUPABASE_URL` | web, connector | URL pública Supabase |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | web | Key anónima (pública, segura) |
-| `SUPABASE_SERVICE_ROLE_KEY` | web, connector, api, orchestrator | NUNCA exponer con NEXT_PUBLIC_ |
-| `SUPABASE_JWT_SECRET` | api | Para validar JWTs en FastAPI |
-| `META_ACCESS_TOKEN` | connector, orchestrator | Token permanente System User |
-| `GEMINI_API_KEY` | orchestrator | Billing activo requerido |
-| `ALLOWED_ORIGINS` | api | CORS — `https://commerce-ops-web.onrender.com` |
-| `APP_URL` | web | Para invite flow — ya fijo en render.yaml |
-
----
-
-## Limitaciones del plan Free
-
-Ver análisis completo en `docs/deployment/render-upgrade-path.md`.
-
-Resumen: cold starts de 15-30s, sin workers nativos, 512MB RAM (workarounds en render.yaml).
-Para producción con tenants reales se recomienda Starter ($7/servicio/mes).
+Ver análisis: `docs/deployment/render-upgrade-path.md`.

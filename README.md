@@ -1,92 +1,58 @@
 # Commerce Ops Platform
 
-> SaaS Multi-Tenant de operaciones e-commerce conversacionales vía WhatsApp.
+SaaS multi-tenant de operaciones e-commerce conversacionales vía WhatsApp (B2B2C, foco Colombia).
 
-## Qué es este producto
+## Estado actual (2026-04-21)
 
-**El producto NO es un bot.** Es un centro de operaciones e-commerce conversacional donde:
+- Fases `1-11.5` de Tenant Console: completadas y live.
+- Fase `12` (Platform Console): bloqueada por `OQ-P01` y fuera de alcance actual.
+- Runtime activo: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`.
+- Esquema canónico DB: `supabase/migrations/` (42 migraciones en repo).
 
-- WhatsApp Cloud API (Meta oficial) es el canal principal con el cliente final
-- El catálogo, pedidos, inventario y reglas viven en el core del sistema
-- El LLM (Gemini) es asistencia controlada — nunca fuente de verdad de datos
-- Los conectores con marketplaces y servicios externos son módulos desacoplados
-- El tenant opera su negocio desde la **Tenant Console**
-- La **Platform Console** (administración SaaS) es frontera futura — no implementada
+Fuente operativa principal:
+- Estado real por módulo: `.context/01-state.md`
+- Operación/infra: `docs/HANDOFF.md`
 
-## Estado (2026-04-19 — rev. 26)
+## Stack técnico real (repo)
 
-**Fases 1-11.5 completadas** (incl. Reclamos, Compras, Finanzas, Marketplace). Fase 12 (Platform Console) bloqueada por OQ-P01.
-
-| Componente | Estado |
+| Capa | Estado |
 |---|---|
-| Tenant Console | ✅ Live — 18 módulos, Route Groups, RBAC, flujo invite validado |
-| WhatsApp Connector | ✅ Live — HMAC validado, tenant resolver real |
-| AI Orchestrator | ✅ Live — polling 3s, gemini-2.5-flash, KB + pgvector inyectada |
-| API Gateway | ✅ Live — JWT, RBAC, 9 routers |
-| Supabase Cloud | ✅ Activo — 35 migraciones aplicadas |
-| Platform Console | ❌ No implementada — Fase 12, bloqueante OQ-P01 |
+| Frontend | Next.js `14.2.35`, React `^18`, TypeScript `^5` |
+| Backend | FastAPI `0.128.8`, Pydantic `2.12.5`, `supabase==2.28.3` |
+| IA | `google-genai==1.47.0`, modelo `gemini-2.5-flash` |
+| DB/Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
+| Mensajería | WhatsApp Cloud API oficial (`v21.0`) |
+| Hosting | Render (`render.yaml`) |
 
-> Ver estado completo por módulo → `.context/01-state.md`
-> Ver infra y credenciales → `docs/HANDOFF.md`
+## Estructura del monorepo
 
-## Stack Técnico
-
-| Capa | Versión real |
-|---|---|
-| Frontend | **Next.js 14.2.35**, React ^18, TypeScript ^5 |
-| UI | TailwindCSS ^3.3.0, shadcn/ui (11 componentes) — Dark Warm Theme |
-| Backend | **Python 3.11.13**, FastAPI 0.128.8 |
-| DB / Auth | Supabase PostgreSQL + RLS + Auth + Realtime |
-| IA | `gemini-2.5-flash` via `google-genai==1.47.0` |
-| Mensajería | WhatsApp Cloud API (Meta oficial v21.0) |
-| Shipping | Envia API — Fase Inicial live (quote + historial) |
-| Hosting | Render — 4 servicios (Free plan) |
-
-> Fuente de verdad de versiones: `apps/web/package.json` y `services/*/requirements.txt`.
-
-## Estructura del Monorepo
-
-```
-apps/
-  web/                     # Frontend Next.js — Tenant Console ✅ LIVE
-services/
-  connector-whatsapp/      # Webhook Gateway Meta ✅ LIVE
-  ai-orchestrator/         # Worker AI asíncrono ✅ LIVE
-  api/                     # REST API Gateway ✅ LIVE
-packages/
-  auth/                    # Wrappers SSR Supabase Auth (parcial)
-  db/                      # Mirrors parciales de migraciones (fuente real: supabase/migrations/)
-supabase/migrations/       # 35 migraciones SQL — FUENTE CANÓNICA del esquema
-.context/                  # Contexto activo del sistema — leer primero
-.agents/                   # Reglas y workflows para AI agents
-docs/                      # Documentación técnica detallada
+```text
+apps/web/                  # Tenant Console (Next.js)
+services/api/              # API Gateway (FastAPI, 9 routers funcionales + marketplace)
+services/connector-whatsapp/ # Webhook Meta inbound
+services/ai-orchestrator/  # Worker AI + colas (modo web en Render Free)
+packages/                  # Paquetes compartidos y/o deferred (ver docs/tech/monorepo-packages.md)
+supabase/migrations/       # FUENTE CANÓNICA de esquema SQL
+.context/                  # Contexto L1/L2 de producto, estado y reglas
+docs/                      # Documentación técnica y operativa
 ```
 
-## Comandos Frecuentes
+## Comandos frecuentes
 
 ```bash
-# Frontend dev
 pnpm --filter web dev
-
-# Aplicar migración SQL
-supabase db query --linked -f supabase/migrations/archivo.sql
-
-# AI Orchestrator local
-cd services/ai-orchestrator
-export $(grep -v '^#' ../../.env | sed 's/="\(.*\)"/=\1/' | xargs)
-python3 main.py
+python3.11 -m unittest discover -s tests -p 'test_*.py'
+supabase db query --linked -f supabase/migrations/<archivo>.sql
 ```
 
-## Documentación — Leer antes de tocar código
+## Documentación que sí manda
 
-| Documento | Propósito |
+| Documento | Uso |
 |---|---|
-| `.context/00-product.md` | **Tree Funcional vigente** — leer siempre antes de crear o mover UI |
-| `.context/01-state.md` | Estado real de implementación verificado en código |
-| `.context/04-next-steps.md` | Próximos pasos y deuda técnica |
-| `.context/05-doc-policy.md` | **Política documental** — jerarquía y reglas de consistencia |
-| `AGENTS.md` | Quick context para agentes IA |
-| `docs/HANDOFF.md` | Estado operativo, credenciales, lecciones |
-| `docs/architecture/front-back-separation.md` | Mapeo UI ↔ Backend |
-| `docs/integrations/courier-envia.md` | Diseño del módulo Shipping/Courier |
-| `docs/risks/open-questions.md` | Preguntas abiertas y bloqueantes |
+| `.context/00-product.md` | Tree funcional oficial (L1) |
+| `.context/01-state.md` | Estado real implementado (L1) |
+| `.context/04-next-steps.md` | Pendientes reales (L2) |
+| `.context/05-doc-policy.md` | Política de consistencia documental |
+| `docs/HANDOFF.md` | Operación live e infraestructura |
+| `docs/deployment/render-upgrade-path.md` | Criterio para transición Free -> pago |
+| `docs/tech/` | Hardening API, tiering y decisiones técnicas |

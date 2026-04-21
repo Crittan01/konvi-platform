@@ -3,7 +3,10 @@ import { redirect } from 'next/navigation'
 import { Store, ExternalLink } from 'lucide-react'
 import MarketplaceManager from './_components/marketplace-manager'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
+const API_URL =
+  process.env.API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'https://commerce-ops-api.onrender.com'
 
 export default async function MarketplacePage() {
   const supabase = createClient()

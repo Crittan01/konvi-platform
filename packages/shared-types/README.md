@@ -1,18 +1,13 @@
-# @commerce/shared-types — DEFERRED
+# @commerce/shared-types
 
-**Estado**: Intencionalmente vacío.
+Última actualización: 2026-04-21
 
-**Propósito potencial**: Tipos TypeScript compartidos entre frontends y contratos de API:
-- `Tenant`, `TenantUser`, `Role` — tipos de auth/tenant
-- `Product`, `ProductVariation` — tipos de catálogo
-- `Order`, `OrderItem` — tipos de pedidos
-- Contratos de respuesta de la API Gateway
+Paquete activo mínimo para contratos TS canónicos del dominio:
 
-**Cuándo poblarlo**: Cuando haya una segunda app (Platform Console) que necesite los mismos tipos,
-o cuando el contrato API Gateway sea lo suficientemente estable para deserializarse en el frontend
-en lugar de usar Supabase directamente.
+- roles runtime (`owner|manager|operator`)
+- estados de conversación
+- estados de procesamiento de mensajes
+- plan/capabilities de tiering
 
-**Estado actual**: `apps/web` usa Supabase directamente para la mayoría de lecturas. Los tipos de
-la API Gateway no están formalmente tipados en el frontend todavía.
-
-**No extraer tipos aquí** hasta que haya un caso de uso real de sharing entre más de una app.
+Nota:
+- aún no se consume vía `workspace:*` en `apps/web` por restricción de build productivo actual.

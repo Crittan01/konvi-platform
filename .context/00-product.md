@@ -116,8 +116,10 @@ commerce-ops-platform/
 │   ├── connector-whatsapp/      # FastAPI Webhook Meta
 │   └── ai-orchestrator/         # Polling Gemini — daemon thread en Render Free
 ├── packages/
-│   └── auth/                    # Wrappers Supabase SSR (parcial — 2 archivos)
-└── supabase/migrations/         # 35 migraciones — FUENTE CANÓNICA de esquema DB
+│   ├── auth/                    # Wrappers Supabase SSR (parcial)
+│   ├── shared-types/            # Contratos TS compartidos (mínimos)
+│   └── [otros paquetes deferred]
+└── supabase/migrations/         # 42 migraciones — FUENTE CANÓNICA de esquema DB
 ```
 
 **Nota crítica sobre Route Groups:** Las carpetas `(nombre)` en Next.js no cambian las URLs.

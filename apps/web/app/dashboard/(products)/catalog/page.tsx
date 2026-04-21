@@ -3,7 +3,10 @@ import { revalidatePath } from 'next/cache'
 import ProductsManager from './_components/products-manager'
 import type { Product } from './types'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://commerce-ops-api.onrender.com'
+const API_URL =
+  process.env.API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'https://commerce-ops-api.onrender.com'
 const DEFAULT_THRESHOLD = 5
 
 export default async function CatalogPage() {

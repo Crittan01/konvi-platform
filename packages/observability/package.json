@@ -1,6 +1,11 @@
 {
   "name": "@commerce/observability",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Observabilidad compartida (logging, tracing, alertas) — DEFERRED. Actualmente: logs de Render + audit_log en Supabase."
+  "description": "Contratos mínimos de observabilidad compartida",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts"
 }

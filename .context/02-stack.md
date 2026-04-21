@@ -19,7 +19,7 @@
 
 | Elemento | Versión real |
 |---------|-------------|
-| Python (VM) | **3.11.13** (dnf, sin venv) — `Optional[X]` es el estilo del código |
+| Python (VM) | **3.11.13 disponible** (`/usr/bin/python3.11`) y `python3` actualmente apunta a 3.9.25 |
 | FastAPI | 0.128.8 |
 | Pydantic | 2.12.5 |
 | google-genai | 1.47.0 — SDK oficial Gemini (no usar `google-generativeai`) |
@@ -47,4 +47,4 @@ Esta VM es dedicada 100% al proyecto. Todas las herramientas del sistema se inst
 | pnpm | npm global | `npm i -g pnpm` |
 | Supabase CLI | binario estático `/usr/local/bin/` | `curl releases GitHub → sudo mv /usr/local/bin/supabase` |
 
-**Regla:** si una herramienta muestra aviso de nueva versión, actualizar en la misma sesión antes de continuar. Registrar la versión nueva aquí.
+**Regla operativa:** ejecutar servicios/tests Python con `python3.11` hasta alinear el alias `python3` al runtime objetivo.

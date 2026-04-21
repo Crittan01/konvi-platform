@@ -1,19 +1,25 @@
-# @commerce/observability — DEFERRED
+# @commerce/observability
 
-**Estado**: Intencionalmente vacío.
+Última actualización: 2026-04-21
 
-**Propósito potencial**: Capa de observabilidad compartida entre servicios:
-- Structured logging (JSON) estandarizado para todos los servicios Python
-- Wrappers de trazas distribuidas (OpenTelemetry)
-- Alertas programáticas (Telegram, PagerDuty)
-- Métricas de negocio (custom events)
+## Estado
 
-**Estado actual de observabilidad**:
-- Logs: stdout en cada servicio → Render Dashboard (retención 7 días en Free)
-- Auditoría de negocio: tabla `audit_log` en Supabase (ver migración `20260409260000`)
-- Alertas: Telegram via `notification_settings` (configurado por tenant)
+Preparado con contrato mínimo.
 
-**Cuándo poblarlo**: Cuando el volumen de tenants justifique logging centralizado (Datadog, Sentry,
-Grafana Cloud) o cuando los logs de Render sean insuficientes para debugging en producción.
+## Contenido actual
 
-**No abstraer aquí** hasta que el problema sea concreto. Logging en stdout es suficiente para Beta.
+- `src/index.ts` con tipos canónicos para:
+  - eventos de seguridad API
+  - snapshots de salud de colas async
+
+## Límites actuales
+
+No existe SDK centralizado de logging/tracing en runtime.
+
+La operación sigue en:
+- logs stdout por servicio (Render)
+- tablas de auditoría/seguridad en Supabase (`audit_log`, `api_security_events`)
+
+## Cuándo escalar este paquete
+
+Cuando se implemente instrumentación transversal (OpenTelemetry/Sentry/Datadog) o agregación formal de métricas por tenant/cola.

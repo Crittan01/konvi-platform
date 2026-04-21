@@ -17,6 +17,7 @@ Todo agente y desarrollador debe respetar estas normas antes de crear, modificar
 | **L3** | `docs/architecture/` | Decisiones técnicas de arquitectura | Con cambios de arquitectura real |
 | **L3** | `docs/integrations/` | Diseño de conectores externos | Con nuevas integraciones o cambios de fase |
 | **L3** | `docs/HANDOFF.md` | Estado operativo, credenciales, lecciones | Con cambios de infra o credenciales |
+| **L3** | `docs/tech/` | Matrices técnicas, hardening y validaciones | Con cambios de contratos runtime |
 | **L4** | `docs/roadmap/` | Fases de implementación y estado | Con avance formal de fases |
 | **L4** | `docs/risks/` | Preguntas abiertas y registro de riesgos | Con nuevas decisiones o riesgos detectados |
 | **L5** | `AGENTS.md` | Índice rápido y quick context para agentes IA | Solo si L1 o L2 cambian significativamente |
@@ -90,15 +91,15 @@ Al eliminar un archivo, buscar y actualizar todas las referencias a él en el re
 
 ## Archivos Deprecados o Eliminados
 
-Los siguientes archivos fueron eliminados en sesiones previas. No recrear ni referenciar:
+Los siguientes archivos fueron eliminados en sesiones previas. No recrear ni enlazar como rutas vivas:
 
 | Archivo eliminado | Fecha | Razón |
 |---|---|---|
-| `docs/product/navigation-map.md` | 2026-04-14 | Redundante con `.context/00-product.md` |
-| `docs/product/current-scope.md` | 2026-04-14 | Movido y fusionado en `.context/01-state.md` |
-| `docs/product/admin-ui-modules.md` | 2026-04-14 | Redundante con `.context/01-state.md` |
-| `docs/architecture/nav-architecture.md` | 2026-04-14 | Redundante con `.context/00-product.md` |
-| `.agents/rules/nav-architecture.md` | 2026-04-14 | Reemplazado por regla `06-frontend-best-practices.md` |
+| docs/product/navigation-map.md | 2026-04-14 | Redundante con `.context/00-product.md` |
+| docs/product/current-scope.md | 2026-04-14 | Movido y fusionado en `.context/01-state.md` |
+| docs/product/admin-ui-modules.md | 2026-04-14 | Redundante con `.context/01-state.md` |
+| docs/architecture/nav-architecture.md | 2026-04-14 | Redundante con `.context/00-product.md` |
+| .agents/rules/nav-architecture.md | 2026-04-14 | Reemplazado por regla `06-frontend-best-practices.md` |
 
 ---
 

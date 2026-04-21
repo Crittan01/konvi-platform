@@ -38,13 +38,13 @@ Todo agente que ejecute cambios debe, antes de hacer commit:
 
 | Archivo | Razón |
 |---|---|
-| `docs/product/navigation-map.md` | Fusionado en `.context/00-product.md` |
-| `docs/product/current-scope.md` | Movido a `.context/01-state.md` |
-| `docs/product/admin-ui-modules.md` | Fusionado en `.context/01-state.md` |
-| `docs/architecture/nav-architecture.md` | Redundante con `.context/00-product.md` |
-| `.agents/rules/nav-architecture.md` | Reemplazado por `06-frontend-best-practices.md` |
-| `docs/product/functional-requirements.md` | Stub vacío — eliminado |
-| `docs/product/non-functional-requirements.md` | Stub vacío — eliminado |
-| `docs/architecture/async-processing.md` | Stub vacío — eliminado |
-| `docs/architecture/output-template.md` | Stub vacío — eliminado |
-| `docs/architecture/realtime.md` | Stub vacío — eliminado |
+| docs/product/navigation-map.md | Fusionado en `.context/00-product.md` |
+| docs/product/current-scope.md | Movido a `.context/01-state.md` |
+| docs/product/admin-ui-modules.md | Fusionado en `.context/01-state.md` |
+| docs/architecture/nav-architecture.md | Redundante con `.context/00-product.md` |
+| .agents/rules/nav-architecture.md | Reemplazado por `06-frontend-best-practices.md` |
+| docs/product/functional-requirements.md | Stub vacío — eliminado |
+| docs/product/non-functional-requirements.md | Stub vacío — eliminado |
+| docs/architecture/async-processing.md | Stub vacío — eliminado |
+| docs/architecture/output-template.md | Stub vacío — eliminado |
+| docs/architecture/realtime.md | Stub vacío — eliminado |
