@@ -26,6 +26,17 @@
 
 Feature flag: `ENVIA_PHASE2_ENABLED`.
 
+### Contrato de respuesta en `POST /api/v1/shipping/quote` (runtime)
+
+Además de `shipment_id` y `rates`, la API retorna `highlights`:
+
+- `highlights.cheapest`: tarifa con menor `total_price`.
+- `highlights.fastest`: tarifa con menor tiempo de entrega usando:
+  1. `delivery_date` (fecha más temprana) cuando existe.
+  2. `delivery_estimate` parseable (horas/días) cuando no hay `delivery_date`.
+
+Si no hay señal de velocidad confiable (`delivery_date` ni `delivery_estimate` parseable), `fastest` se omite para evitar inferencias.
+
 ## Modelo de credenciales
 
 - Token Envia por tenant en `tenant_integrations.credentials.api_token`.
@@ -49,3 +60,6 @@ Feature flag: `ENVIA_PHASE2_ENABLED`.
 - `docs/architecture/connector-framework.md`
 - `docs/architecture/front-back-separation.md`
 - `docs/data/schema.md`
+- Envia Shipping API Overview: https://docs.envia.com/docs/envia-shipping-api-introduction
+- Envia Quote Shipments (`POST /ship/rate/`): https://docs.envia.com/reference/quote-shipments
+- Envia Core Workflow: https://docs.envia.com/docs/core-workflow

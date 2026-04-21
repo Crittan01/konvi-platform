@@ -56,6 +56,11 @@
 - Se resolvió bloqueo de `next build` en VM/local:
   - causa: dependencia de `next/font/google` en build sin salida de red estable
   - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`
+- Shipping quote ahora retorna highlights operativos para decisión rápida:
+  - `highlights.cheapest` (menor `total_price`)
+  - `highlights.fastest` (menor tiempo por `delivery_date` o `delivery_estimate` parseable)
+  - contrato documentado en `docs/integrations/courier-envia.md`
+  - cobertura de regresión añadida en `tests/test_shipping_rate_highlights.py`
 
 ---
 
@@ -153,6 +158,10 @@ Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `mar
 - Descubrimiento de carriers prioriza Queries API (`available-carrier`) con fallback operativo si Queries falla.
 - `EnviaClient.get_rates()` ahora interpreta como error respuestas `200` con `code/message` sin `data` (evita falsos "sin tarifas").
 - Fallas por carrier guardan mensaje robusto (sin strings vacíos) para diagnóstico en `shipping/quote`.
+- `POST /api/v1/shipping/quote` ahora retorna `highlights` determinísticos:
+  - `cheapest`: menor precio total
+  - `fastest`: entrega más rápida por `delivery_date` o `delivery_estimate` parseable
+  - si no hay señal confiable de velocidad, `fastest` se omite (sin inferencias)
 - Fase 2 parcial implementada en API (feature-flagged):
   - `POST /api/v1/shipping/{shipment_id}/label`
   - `POST /api/v1/shipping/tracking`
