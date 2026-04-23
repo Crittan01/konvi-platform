@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones } from 'lucide-react'
+import { WEB_APP_URL } from '@/lib/runtime-env'
 
 export const metadata = {
   title: 'Usuarios y Acceso — Commerce Ops',
@@ -137,7 +138,7 @@ export default async function TeamPage({
     }
 
     // APP_URL (sin prefijo NEXT_PUBLIC_) = variable de runtime, no baked en el build
-    const appUrl  = process.env.APP_URL ?? 'https://commerce-ops-web.onrender.com'
+    const appUrl  = WEB_APP_URL
     const adminSb = createAdminClient()
 
     const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
@@ -230,7 +231,7 @@ export default async function TeamPage({
       redirect('/dashboard/team?error=sin-permiso')
     }
     const email   = formData.get('email') as string
-    const appUrl  = process.env.APP_URL ?? 'https://commerce-ops-web.onrender.com'
+    const appUrl  = WEB_APP_URL
     const adminSb = createAdminClient()
 
     // inviteUserByEmail para usuario NO confirmado = reenvía el email de invitación

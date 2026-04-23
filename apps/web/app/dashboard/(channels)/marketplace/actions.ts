@@ -2,11 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/utils/supabase/server'
-
-const API_URL =
-  process.env.API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'https://commerce-ops-api.onrender.com'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 async function getToken(): Promise<string> {
   const supabase = createClient()
@@ -20,7 +16,7 @@ export async function linkListing(meliId: string, variationId: string, meliPrice
     const body: Record<string, unknown> = { meli_id: meliId, variation_id: variationId, meli_price: meliPrice }
     if (meliVariationId != null) body.meli_variation_id = meliVariationId
 
-    const res = await fetch(`${API_URL}/api/v1/marketplace/link`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify(body)
@@ -39,7 +35,7 @@ export async function linkListing(meliId: string, variationId: string, meliPrice
 export async function unlinkListing(listingId: string) {
   const token = await getToken()
   try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/link/${listingId}`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/link/${listingId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -57,7 +53,7 @@ export async function unlinkListing(listingId: string) {
 export async function changeListingStatus(listingId: string, status: 'active' | 'paused') {
   const token = await getToken()
   try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/${listingId}/status`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/${listingId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ status })
@@ -76,7 +72,7 @@ export async function changeListingStatus(listingId: string, status: 'active' | 
 export async function importFromMeli(meliId: string, categoryId?: string) {
   const token = await getToken()
   try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/import`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ meli_id: meliId, category_id: categoryId || null })
@@ -96,7 +92,7 @@ export async function importFromMeli(meliId: string, categoryId?: string) {
 export async function syncStockFromSupabase(listingId: string) {
   const token = await getToken()
   try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/${listingId}/sync-stock`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/${listingId}/sync-stock`, {
       method: 'PATCH',
       headers: { 'Authorization': `Bearer ${token}` }
     })

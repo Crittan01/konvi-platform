@@ -13,6 +13,12 @@ from routers import shipping
 
 
 class ShippingDaneRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_normalize_country_aliases_to_co(self):
+        self.assertEqual(shipping._normalize_country("CO"), "CO")
+        self.assertEqual(shipping._normalize_country("col"), "CO")
+        self.assertEqual(shipping._normalize_country("Colombia"), "CO")
+        self.assertEqual(shipping._normalize_country(" Colombia "), "CO")
+
     def test_co_dane_codes_normalize_5_and_8(self):
         self.assertEqual(shipping._co_dane_codes("11001"), ("11001", "11001000"))
         self.assertEqual(shipping._co_dane_codes("11001000"), ("11001", "11001000"))

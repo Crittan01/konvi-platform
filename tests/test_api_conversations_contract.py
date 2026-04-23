@@ -28,6 +28,34 @@ def _chain_with_data(data):
 
 
 class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_conversations_uses_last_interaction_sort(self):
+        supabase = MagicMock()
+        query = _chain_with_data(
+            [
+                {
+                    "id": "c-1",
+                    "customer_phone": "573001112233",
+                    "status": "bot_active",
+                    "created_at": "2026-04-22T10:00:00Z",
+                    "last_interaction_at": "2026-04-22T11:00:00Z",
+                    "messages": [{"content": "hola", "direction": "inbound", "created_at": "2026-04-22T11:00:00Z"}],
+                }
+            ]
+        )
+        supabase.table.return_value = query
+
+        result = await conversations.list_conversations(
+            tenant_id="t-1",
+            supabase=supabase,
+            status=None,
+            limit=30,
+            offset=0,
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "c-1")
+        query.order.assert_called_with("last_interaction_at", desc=True)
+
     async def test_stats_uses_canonical_status_keys(self):
         supabase = MagicMock()
         query = _chain_with_data([

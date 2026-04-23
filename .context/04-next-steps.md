@@ -1,22 +1,67 @@
-# Próximos Pasos — Estado 2026-04-21
+# Próximos Pasos — Estado 2026-04-22
 
 ## Pendientes reales
 
-0. **Inbox - certificacion funcional por intents (nuevo prioridad alta)**
-   - Congelar matriz de intents como contrato operativo:
-     - `docs/operations/inbox-intents-matrix.md`
-   - Fase A: completar respuestas de catalogo con variantes (sin inventar precio/stock).
-     - Avance: contexto runtime ya incluye rango de precio/stock total + variantes.
-     - Avance: coincidencia exacta por variante (color/talla/SKU) implementada en prompt.
-     - Avance: follow-ups ambiguos usan memoria determinística de historial corto.
-     - Avance: fallback técnico en Free (`scripts/uat/fase_a_free_fallback.sh`) operativo y validado.
-     - Pendiente: cierre UAT funcional de precision por variante.
-   - Fase B: cubrir estado de pedido + cotizacion/seguimiento de envio desde backend.
-     - Avance: `POST /api/v1/shipping/quote` ya retorna `highlights` (`cheapest` + `fastest`) para respuesta corta en Inbox sin inferencias.
-     - Avance: orquestador ya consume `shipping/quote` en ruta determinística y responde cotización en chat cuando hay dirección guardada.
-     - Pendiente: completar captura conversacional de destino cuando el contacto no tiene dirección y cerrar estado de pedido desde tool transaccional.
-   - Fase C (despues): pagos Wompi con sandbox primero (`docs/integrations/wompi-prep.md`).
-   - No abrir fase de pagos sin cierre formal de A y B.
+0. **Inbox - certificacion funcional por intents**
+
+   ### Fase A ✅ CERTIFICADA
+   - Catálogo con variantes, precio/stock real, fallback técnico UAT aprobado.
+
+   ### Fase B ✅ COMPLETADA (2026-04-22, rev. 53)
+   - `order_status_tool` determinístico.
+   - `shipping_quote_tool` con cotización real Envia (cheapest+fastest, sin LLM para precios).
+   - Panel contextual UI: contacto, pedidos, catálogo+stock, mini-form crear pedido.
+   - Realtime Supabase (`REPLICA IDENTITY FULL`).
+   - Normalización de teléfono (+57 con/sin espacio) para asociar contactos.
+   - Formato conversacional WhatsApp: párrafos `\n\n`, bullets `•`, negritas `*`.
+   - Escalación automática: stall ≥2 rondas, reclamos, garantías, frustración.
+   - Prefijos de ambiente `[TEST]` eliminados en todas las capas de respuesta al cliente.
+   - TZ Colombia (`America/Bogota`) en frontend y en ETA de envío.
+   - Deduplicación de nombre carrier/servicio ("Deprisa Deprisa" → "Deprisa Estandar").
+
+   ### Fase C — Pendiente formal (NO abrir hasta gate explícito)
+
+   **Objetivo**: Cierre transaccional completo desde WhatsApp — crear pedido + cobrar.
+
+   **Flujo conversacional objetivo:**
+   ```
+   Cliente confirma producto + cantidad + transportista
+   → Bot: resume pedido con total (productos + envío)
+   → Bot solicita: nombre + dirección de entrega
+   → Sistema: crea Order en DB (status=pending_payment, stock reservado)
+   → Sistema: genera link de pago Wompi (sandbox → producción)
+   → Bot: envía link de pago al cliente vía WhatsApp
+   → Webhook Wompi: notifica pago exitoso → Order status=confirmed
+   → Sistema: descuenta stock definitivamente
+   → Bot: confirma pago y da número de pedido al cliente
+   → Sistema: solicita guía de envío a Envia (pickup scheduling)
+   ```
+
+   **Componentes a construir:**
+   - `create_order_tool`: herramienta determinística en orquestador (no LLM).
+     - Input: tenant_id, contact_id, items[], shipping_option, address.
+     - Output: order_id, total, reservation_id.
+     - Stock: reserva (no descuenta definitivo hasta pago confirmado).
+   - `payment_link_tool`: genera link de cobro en Wompi sandbox.
+     - Requiere: `WOMPI_PUBLIC_KEY`, `WOMPI_PRIVATE_KEY` por tenant.
+     - Contrato: `POST https://sandbox.wompi.co/v1/payment_links` (validar en docs).
+   - Webhook `POST /api/v1/webhooks/wompi`: recibe evento `transaction.updated`.
+     - Valida signature Wompi (header `x-event-checksum`).
+     - Confirma order + descuenta stock + notifica WhatsApp al cliente.
+   - `release_order_tool`: libera reserva de stock si pago no llega en N minutos (TTL).
+
+   **Gate de entrada Fase C:**
+   - [ ] Fase B certificada con UAT ≥ 95% en flujo conversacional completo.
+   - [ ] Validar política Wompi sandbox para Colombia (moneda COP, montos mínimos, fees).
+   - [ ] Tenant tiene cuenta Wompi activa (o acceso sandbox).
+   - [ ] Definir TTL de reserva de stock (propuesta: 30 minutos).
+   - [ ] Revisión legal de términos de compra enviados via WhatsApp.
+
+   **Documentación a crear antes de implementar:**
+   - `docs/integrations/wompi.md` — endpoints, eventos, firma, sandbox vs prod.
+   - `docs/operations/order-flow-conversational.md` — diagrama de estados completo.
+
+   **Restricción**: No abrir Fase C sin gate formal aprobado.
 
 1. **Envia Fase 2**
    - Completar validaciones payload carrier-específicas para label/pickup/cancel por país.
@@ -69,11 +114,35 @@
 - Ninguna del bloque 2026-04-20 en entorno linked (`xmelwnhhphksbpdjmbbp`), incluyendo:
   - `20260420000005_plan_tiering_foundation.sql` ✅ aplicada
   - `20260420000006_api_security_observability.sql` ✅ aplicada
+- Ninguna del bloque 2026-04-22 en entorno linked, incluyendo:
+  - `20260422150000_conversations_last_interaction_sync.sql` ✅ aplicada
 - Nota: `20260420000001_order_tracking.sql` ya estaba aplicada previamente en DB;
   su ejecución directa devolvió `relation "order_tracking" already exists`.
 
+## No pendientes (cerrado en sesión 2026-04-22)
+
+- Inbox variantes: match por referencia/SKU corregido para consultas con etiquetas (`referencia`, `sku`, `codigo`) sin perder coincidencia exacta.
+- Inbox shipping quote: detector de intent endurecido con normalización de acentos y rechazo de frases no cotizables (`tracking`, "te envio ...").
+- Inbox shipping quote: continuidad conversacional de cotización al recibir solo ubicación en mensajes de seguimiento (sin repetir “cuánto cuesta envío”).
+- Inbox shipping quote: consultas cortas de precio+ciudad (`Costo a Medellin?`) ahora activan cotización determinística sin depender de la palabra “envío”.
+- Inbox shipping quote: normalización defensiva de país en origen/destino (`Colombia`/`COL` -> `CO`) para evitar rechazos de Envia por `state` fuera de longitud.
+- Inbox shipping quote: errores técnicos upstream de Envia se sanitizan para cliente final (sin detalle crudo) y no disparan takeover automático salvo falla de configuración.
+- Inbox shipping quote: origen endurecido a `tenants.shipping_origin` (sin fallback implícito por texto libre).
+- Inbox shipping quote: destino recuperable desde contexto conversacional (contacto + mensajes recientes) cuando no viene completo en el último mensaje.
+- Inbox shipping quote: estimación de paquete basada en inventario (`product_variations` peso/dimensiones + cantidad inferida del chat) con fallback default solo cuando faltan datos.
+- Inbox shipping quote: control de ambigüedad multi-producto; si contexto no define producto único, solicita confirmación antes de cotizar.
+- Inbox shipping quote: copy de respuesta reorganizado para decisión comercial rápida (económica/rápida + CTA de continuidad de compra).
+- Certificación técnica Inbox re-ejecutada: fallback oficial (`PASSED=5/FAILED=0`) + smoke runtime local de salud y cambio de estado conversacional (`human_takeover <-> bot_active`) con respuesta `200`.
+- Inbox smalltalk: saludos/agradecimientos simples ahora usan ruta determinística y no escalan por LLM.
+- Inbox guardrail: takeover por `requires_human=true` se ignora para smalltalk de bajo riesgo.
+- KB embeddings: modelo primario alineado a `gemini-embedding-001` con fallback configurable para evitar degradación por `404`.
+- Inbox refresh: `conversations.last_interaction_at` ya se mantiene sincronizado con `messages.created_at` (backfill + trigger DB), evitando que se “pierda” la conversación reciente al recargar.
+- API Conversations: `GET /api/v1/conversations` ahora ordena por `last_interaction_at` (ya no referencia `updated_at` inexistente en tabla `conversations`).
+
 ## No pendientes (cerrado en sesión 2026-04-20)
 
+- Marketplace MeLi: fix de sync de variaciones mapeadas (`meli_variation_id`) para no sobrescribir stock por índice.
+- Test de regresión agregado: `tests/test_meli_listing_variations.py`.
 - Sync pull MeLi → Supabase (title/thumbnail/condition/category/attributes/synced_at)
 - Shipment tracking persistido en `order_tracking` (multi-proveedor)
 - Buyer contact creation desde órdenes MeLi (con teléfono si disponible)

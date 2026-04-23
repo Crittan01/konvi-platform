@@ -575,9 +575,16 @@ async def update_item_listing(
         for i, v in enumerate(meli_variations):
             vid = v.get("id")
             if vid:
+                # Si la variación ya trae available_quantity explícita
+                # (ej. mapping exacto desde marketplace.py), respetarla.
+                if "available_quantity" in v and v.get("available_quantity") is not None:
+                    qty = int(v.get("available_quantity") or 0)
+                else:
+                    # Fallback legacy: primera variación recibe el qty objetivo.
+                    qty = max(0, quantity) if i == 0 else 0
                 variations_body.append({
                     "id": vid,
-                    "available_quantity": max(0, quantity) if i == 0 else 0,
+                    "available_quantity": max(0, qty),
                 })
         if variations_body:
             body["variations"] = variations_body

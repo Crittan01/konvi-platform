@@ -1,4 +1,4 @@
-# Handoff — Estado Operativo Real (2026-04-21, rev. 28)
+# Handoff — Estado Operativo Real (2026-04-22, rev. 30)
 
 Este documento describe el estado operativo real de `develop`.
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
@@ -14,7 +14,7 @@ tienen prioridad.
 - Tenant Console: ✅ live (fases 1–11.5 completas)
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
-- DB canónica: `supabase/migrations/` (42 migraciones)
+- DB canónica: `supabase/migrations/` (43 migraciones)
 
 ## Cierre de auditoría (2026-04-21)
 
@@ -35,6 +35,8 @@ Contrato único end-to-end:
 - `closed`
 
 No hay valores legacy válidos en runtime.
+`conversations.last_interaction_at` se sincroniza automáticamente al insertar mensajes
+(trigger DB `trg_sync_conversation_last_interaction` sobre `public.messages`).
 
 ### Procesamiento inbound
 `messages` usa resultado explícito:
@@ -125,6 +127,13 @@ No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en senders.
 - Orchestrator aplica ruta determinística para consultas de envío (sin delegar verdad al LLM).
 - Construye quote vía Core API `POST /api/v1/shipping/quote` con JWT interno de tenant.
 - Responde con `highlights` (`más económica` + `más rápida`) cuando hay datos suficientes.
+- Normaliza alias de país en shipping origin/destination (`Colombia`/`COL` -> `CO`) antes de cotizar.
+- Sanitiza errores upstream de Envia en respuesta al cliente (detalle técnico solo en logs).
+- Origen obligatorio desde `tenants.shipping_origin` (sin fallback automático por texto libre).
+- Si falta destino en contacto, recupera ciudad/departamento desde mensajes recientes del chat.
+- Estima paquete de cotización con inventario real (`product_variations`) + cantidad inferida del texto; usa defaults solo cuando faltan dimensiones/peso.
+- Si detecta más de un producto plausible en la conversación, solicita confirmación explícita antes de cotizar.
+- Copy de respuesta comercial en formato operativo con CTA para continuar compra.
 - Si falta destino/origen, solicita precisión y puede escalar a `human_takeover`.
 
 ---
@@ -174,6 +183,8 @@ Supabase proyecto: `xmelwnhhphksbpdjmbbp`
 - `API_URL`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
+- `GEMINI_EMBEDDING_MODEL` (opcional; default runtime `gemini-embedding-001`)
+- `GEMINI_EMBEDDING_FALLBACK_MODEL` (opcional; fallback `text-embedding-004`)
 - `INBOX_SHIPPING_DEFAULT_WEIGHT_KG`
 - `INBOX_SHIPPING_DEFAULT_LENGTH_CM`
 - `INBOX_SHIPPING_DEFAULT_WIDTH_CM`
@@ -252,6 +263,10 @@ No asumir que frontend o RLS por sí solos aíslan cuando se usa `service_role`.
 - `20260420000006_api_security_observability.sql`
   - tabla `api_security_events`
   - RPC `cleanup_expired_idempotency_keys(...)`
+
+- `20260422150000_conversations_last_interaction_sync.sql`
+  - backfill de `conversations.last_interaction_at` desde `messages.created_at`
+  - trigger DB para mantener recencia de Inbox consistente en nuevos mensajes
 
 ---
 

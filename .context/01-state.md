@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-21 (rev. 46)
+**Última actualización**: 2026-04-22 (rev. 53)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -11,7 +11,7 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **DB**: ✅ contrato endurecido (42 migraciones)
+- **DB**: ✅ contrato endurecido (43 migraciones)
 
 ---
 
@@ -43,6 +43,7 @@
   - `catalog_tool` ahora inyecta rango de precio, stock total y desglose de variantes al contexto LLM
   - `orchestrator` muestra variantes explícitas en prompt
   - `orchestrator` agrega análisis determinístico de coincidencia exacta por variante (color/talla/SKU) para reforzar respuesta o escalar sin inventar
+  - matcher de variantes ahora contempla consultas por `referencia`/`sku` sin falsos negativos por tokens de etiqueta
   - follow-ups ambiguos (ej. "y en talla L?") ahora usan memoria determinística de corto plazo basada en historial conversacional para detectar producto en contexto
   - cobertura de regresión añadida en tests (`test_catalog_tool_variants`, `test_orchestrator_catalog_prompt`)
 - Connector WhatsApp ahora preserva contexto webhook inbound en `messages.payload`:
@@ -53,6 +54,14 @@
 - Se agregó fallback de certificación técnica para entorno Free (sin depender de UI Render):
   - script: `scripts/uat/fase_a_free_fallback.sh`
   - resultado de ejecución en sesión: `PASSED=5`, `FAILED=0` (aprobado técnico)
+- Certificación técnica Inbox (2026-04-22, sesión actual) revalidada:
+  - fallback oficial `scripts/uat/fase_a_free_fallback.sh` en `PASSED=5`, `FAILED=0`
+  - suite adicional Inbox/Shipping (`test_shipping_quote_tool`, `test_orchestrator_catalog_prompt`, `test_orchestrator_takeover`) en verde
+  - smoke runtime local: `api` + `connector` health `200`, y cambio de estado conversacional `human_takeover <-> bot_active` vía proxy web con `200`
+- KB/RAG embeddings endurecido en runtime:
+  - modelo primario configurable `GEMINI_EMBEDDING_MODEL` (default `gemini-embedding-001`)
+  - fallback automático configurable `GEMINI_EMBEDDING_FALLBACK_MODEL` (default `text-embedding-004`) ante `404/not supported`
+  - validación local en sesión: generación de embedding OK (`len=3072`) con modelo vigente
 - Se resolvió bloqueo de `next build` en VM/local:
   - causa: dependencia de `next/font/google` en build sin salida de red estable
   - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`
@@ -65,8 +74,66 @@
   - nuevo tool `shipping_quote_tool` en orquestador (sin depender del LLM para este intent)
   - usa Core API `POST /api/v1/shipping/quote` con JWT interno de tenant (`SUPABASE_JWT_SECRET`)
   - responde al cliente con `más económica + más rápida` cuando hay datos suficientes
+  - origen de cotización ahora es estricto desde `tenants.shipping_origin` (sin fallback implícito por texto libre)
+  - destino se resuelve por contexto conversacional real: `contacts.address` y, si falta, recuperación desde mensajes recientes del chat (ciudad/departamento)
+  - estimación de paquete para quote en Inbox usa inventario real (`products` + `product_variations`) cuando hay producto en contexto:
+    - peso/dimensiones por variante (`weight_kg`, `length_cm`, `width_cm`, `height_cm`)
+    - cantidad inferida desde lenguaje natural (`2 unidades`, `x2`, etc.)
+    - fallback controlado a defaults solo cuando faltan datos de catálogo
+  - control de ambigüedad multi-producto: si hay más de un producto plausible en conversación, Inbox pide confirmación explícita antes de cotizar (no adivina producto)
+  - formato de respuesta en chat reorganizado a bloque operativo (origen->destino, paquete estimado, opción económica/rápida) con CTA de cierre de compra
+  - detector de intent de cotización endurecido (normaliza acentos y evita falsos positivos en frases no transaccionales)
+  - consultas cortas tipo `costo a <ciudad>` (sin palabra “envío”) ahora entran por ruta determinística de cotización y evitan escalamiento innecesario a humano
+  - follow-ups conversacionales de destino (`Medellin`, `Antioquia/ Medellin`) ya reingresan al flujo de cotización sin depender de repetir el intent completo
+  - si no hay dirección guardada, intenta resolver ciudad desde texto libre con catálogo DANE local y pide departamento solo cuando la ciudad es ambigua
+  - normalización de país endurecida para shipping (`Colombia`/`COL`/`CO` -> `CO`) en API y tool de Inbox, evitando rechazo de Envia por `state` largo
+  - errores técnicos de Envia ya no se exponen en texto al cliente final en WhatsApp; se mantienen en logs operativos
+  - ante error upstream de cotización, Inbox responde fallback controlado sin takeover automático; takeover se reserva para falta real de configuración (ej. Envia desconectado)
   - si falta destino/origen, solicita precisión y escala a humano cuando corresponde
   - cobertura de regresión añadida en `tests/test_shipping_quote_tool.py` y `test_orchestrator_takeover.py`
+- Inbox anti-escalación indebida reforzado:
+  - saludos/agradecimientos simples (`Hola`, `Buenas`, `Gracias`) ahora se resuelven por ruta determinística sin pasar por LLM
+  - salvaguarda post-LLM: si devuelve `requires_human=true` para smalltalk de bajo riesgo, se ignora takeover y se responde automáticamente
+  - cobertura de regresión añadida en `tests/test_orchestrator_takeover.py`
+- Marketplace MeLi: corregido sync de variaciones mapeadas (stock por `meli_variation_id`).
+  - `update_item_listing()` ahora respeta `available_quantity` explícito cuando viene preparado por backend.
+  - `sync_meli_stock` y `sync-stock` normalizan fallback de variaciones a payload por IDs para mantener contrato legacy.
+  - cobertura de regresión añadida en `tests/test_meli_listing_variations.py`.
+- Inbox Fase B — Estado de pedido + Panel de contexto UI (2026-04-22, sesión actual):
+  - **`order_status_tool`**: nueva herramienta determinística en orquestador.
+    - Detecta intents de estado de pedido sin LLM.
+    - Consulta `orders` por `conversation_id` primero, luego por `contact_id` (mismo teléfono).
+    - Responde en lenguaje natural con estado real (`pending/confirmed/processing/shipped/delivered/cancelled`).
+    - Si no hay pedido vinculado, pasa al LLM sin escalamiento forzado.
+    - Pipeline orquestador: `shipping_quote → order_status → smalltalk → LLM`.
+  - **`GET /api/v1/conversations/{id}/context`**: nuevo endpoint en conversations router.
+    - Retorna contacto, pedidos recientes e inventario activo en una sola llamada.
+    - Filtro explícito `tenant_id` en todas las queries (service_role en uso).
+  - **Panel contextual en Inbox UI** (`apps/web/app/dashboard/inbox/page.tsx`):
+    - Panel lateral derecho colapsable: contacto, pedidos recientes con badges, catálogo con variantes y stock.
+    - Buscador inline de producto/SKU (filtrado local sobre datos ya cargados).
+    - Toggle desktop (botón) + acceso mobile (icono Info en header).
+  - **Mini-form "Crear Pedido desde Inbox"** (solo `human_takeover`):
+    - Selector de variantes con cantidad editable.
+    - Campo de costo de envío y notas.
+    - Crea pedido con `auto_confirm=true` → pasa a `confirmed` y descuenta stock inmediatamente.
+    - Al crear: recarga contexto para mostrar el nuevo pedido en la lista.
+  - **Fix: conversación perdida al refrescar**:
+    - `selectedId` persiste en URL param `?conv=<id>`.
+    - Al recargar, restaura la conversación desde URL antes de hacer fallback a la primera.
+  - **Preview de último mensaje** en lista de conversaciones.
+  - Proxy server-side `GET /api/conversations/[id]/context/route.ts` hacia Core API.
+- Inbox Fase B — Hardening sesión 2026-04-22 (rev. 53):
+  - **Fix mensajes perdidos al refrescar**: query de mensajes cambiado a `ORDER DESC LIMIT 100` + `.reverse()` → siempre carga los 100 más recientes (antes cargaba los 100 más viejos; conversación tenía 134 msgs).
+  - **Fix selección de conversación al refrescar**: eliminada dependencia de `useSearchParams()` (vacío en SSR) → `window.location.search` + `useRef(pendingConvRestore)` client-side.
+  - **Fix Realtime no emitía eventos**: `messages` y `conversations` ya estaban en `supabase_realtime` publication, pero con `REPLICA IDENTITY DEFAULT` → cambio a `REPLICA IDENTITY FULL` permite filtros por columna (`conversation_id=eq.xxx`) en subscripciones.
+  - **Fix contexto de panel `/context` retornaba 500**: columna `city` no existe en `contacts` (está dentro del JSONB `address`) → eliminada del SELECT.
+  - **Fix flujos conversacionales del orquestador**:
+    - "Envíos a Medellin?" ahora activa cotización (ciudad + token envío sin precio = intención implícita).
+    - Prefijos internos `[TEST]`, `[DEMO]` eliminados de títulos mostrados al cliente.
+    - Respuesta de confirmación de producto retoma cotización como follow-up (marcador añadido a `_SHIPPING_FOLLOWUP_PROMPT_MARKERS`).
+    - Stall automático: ≥2 rondas de desambiguación sin resolver → `requires_human=True`.
+    - System prompt del LLM incluye reglas de escalación explícitas (reclamos, garantías, frustración, loops irresolubles).
 
 ---
 
@@ -84,6 +151,8 @@ Aplicado en:
 - API (`services/api/routers/conversations.py`)
 - Frontend Inbox (`apps/web/app/dashboard/inbox/page.tsx`)
 - Connector/Worker/Orchestrator
+- Sincronización de recencia de Inbox en DB:
+  - migración `20260422150000_conversations_last_interaction_sync.sql` aplicada (backfill + trigger `messages -> conversations.last_interaction_at`)
 
 ### 2) Procesamiento de mensajes inbound
 

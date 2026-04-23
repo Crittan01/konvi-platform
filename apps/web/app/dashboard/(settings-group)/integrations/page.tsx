@@ -8,11 +8,6 @@ export const metadata = {
   description: 'Conectores activos para tu negocio.',
 }
 
-const API_BASE_URL =
-  process.env.API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'https://commerce-ops-api.onrender.com'
-
 type Integration  = { provider: string; status: string; meta: Record<string, string> }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
 
@@ -153,6 +148,7 @@ export default async function IntegrationsPage({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, text: '✅ Commerce Ops — Conexión Telegram verificada correctamente.' }),
+        signal: AbortSignal.timeout(15000),
       })
       const json = await res.json() as { ok: boolean; description?: string; error_code?: number }
       if (!json.ok) {
@@ -160,8 +156,9 @@ export default async function IntegrationsPage({
           ? `[${json.error_code ?? '?'}] ${json.description}`
           : 'Respuesta inválida de Telegram'
       }
-    } catch {
-      telegramError = 'No se pudo conectar con api.telegram.org — verifica la red del servidor.'
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : 'error desconocido'
+      telegramError = `No se pudo conectar con api.telegram.org — verifica la red del servidor. Detalle: ${detail}`
     }
 
     if (telegramError) {
@@ -217,7 +214,6 @@ export default async function IntegrationsPage({
       tgConfig={tgConfig}
       tgConnected={tgConnected}
       connectedCount={connectedCount}
-      apiBaseUrl={API_BASE_URL}
       isOwner={isOwner}
       canWrite={canWrite}
       connectedParam={searchParams.connected}

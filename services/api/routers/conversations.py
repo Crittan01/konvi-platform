@@ -15,6 +15,7 @@ Seguridad:
     El aislamiento depende de filtros explícitos + RLS donde aplique.
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import uuid4
@@ -85,7 +86,7 @@ async def list_conversations(
 ):
     """
     Lista conversaciones del tenant con el último mensaje como preview.
-    Ordenadas por updated_at DESC (más reciente primero).
+    Ordenadas por last_interaction_at DESC (más reciente primero).
     """
     try:
         if status and status not in CONVERSATION_STATUSES:
@@ -96,11 +97,11 @@ async def list_conversations(
         query = (
             supabase.table("conversations")
             .select(
-                "id, customer_phone, status, created_at, updated_at, "
+                "id, customer_phone, status, created_at, last_interaction_at, "
                 "messages(content, direction, created_at)"
             )
             .eq("tenant_id", tenant_id)
-            .order("updated_at", desc=True)
+            .order("last_interaction_at", desc=True)
             .limit(limit)
             .offset(offset)
         )
@@ -152,8 +153,8 @@ async def get_conversation(
         # Ordenar mensajes cronológicamente
         conv = result.data
         messages = conv.get("messages") or []
-        messages.sort(key=lambda m: m.get("created_at", ""))
-        conv["messages"] = messages[-50:]  # últimos 50
+        messages.sort(key=lambda m: m.get("created_at", ""), reverse=True)
+        conv["messages"] = messages[:50]  # últimos 50 (más recientes)
         return conv
     except HTTPException:
         raise
@@ -206,6 +207,132 @@ async def get_conversation_messages(
     except Exception as e:
         logger.error("Error obteniendo mensajes de conversación %s: %s", conversation_id, e)
         raise HTTPException(status_code=500, detail="Error al obtener mensajes")
+
+
+@router.get("/{conversation_id}/context", response_model=dict)
+async def get_conversation_context(
+    conversation_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """
+    Retorna contexto agregado del cliente para el panel lateral del Inbox.
+
+    Incluye:
+    - contact: datos del contacto (si existe en contacts por customer_phone)
+    - recent_orders: últimos 5 pedidos (por conversación o por contacto)
+    - products: catálogo activo del tenant con variantes (máx 100)
+    - product_count: total de productos activos
+    - low_stock_count: productos activos con stock_total <= 3
+
+    Seguridad: usa service_role pero filtra por tenant_id explícito en todas las queries.
+    """
+    try:
+        # 1. Obtener conversación para extraer customer_phone
+        conv_res = (
+            supabase.table("conversations")
+            .select("id, customer_phone, status")
+            .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not conv_res.data:
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+        customer_phone = conv_res.data.get("customer_phone")
+
+        # 2. Buscar contacto por teléfono
+        contact = None
+        contact_id: Optional[str] = None
+        if customer_phone:
+            # Normalizar: eliminar '+' y espacios para cubrir '+57 3125835649', '573125835649', '+573125835649'
+            phone_norm = re.sub(r"[\s+]", "", customer_phone)        # sin + ni espacios: '573125835649'
+            phone_plus = f"+{phone_norm}"                             # con +: '+573125835649'
+            phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
+            contact_res = (
+                supabase.table("contacts")
+                .select("id, name, phone, address, consent_given, consent_revoked_at")
+                .eq("tenant_id", tenant_id)
+                .or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus},phone.eq.{phone_space}")
+                .order("name", nullsfirst=False)   # Contacto con nombre real primero; anónimos al final
+                .limit(1)
+                .execute()
+            )
+            rows = contact_res.data or []
+            if rows:
+                contact = rows[0]
+                contact_id = rows[0].get("id")
+
+        # 3. Pedidos recientes: primero por conversation_id, luego por contact_id
+        recent_orders: List[dict] = []
+        try:
+            orders_query = (
+                supabase.table("orders")
+                .select("id, status, total_amount, shipping_cost, created_at, conversation_id, contact_id, order_items(id)")
+                .eq("tenant_id", tenant_id)
+                .order("created_at", desc=True)
+                .limit(5)
+            )
+            # Filtrar por conversación o contacto
+            if contact_id:
+                orders_query = orders_query.or_(
+                    f"conversation_id.eq.{conversation_id},contact_id.eq.{contact_id}"
+                )
+            else:
+                orders_query = orders_query.eq("conversation_id", conversation_id)
+            orders_res = orders_query.execute()
+            for order in (orders_res.data or []):
+                items = order.pop("order_items", []) or []
+                order["items_count"] = len(items)
+                recent_orders.append(order)
+        except Exception as oe:
+            logger.warning("Error cargando pedidos para context conv=%s: %s", conversation_id, oe)
+
+        # 4. Catálogo activo del tenant con variantes
+        products: List[dict] = []
+        product_count = 0
+        low_stock_count = 0
+        try:
+            products_res = (
+                supabase.table("products")
+                .select(
+                    "id, title, description, cover_image_url, status, "
+                    "product_variations(id, sku, price, stock_quantity, attributes, weight_kg, "
+                    "length_cm, width_cm, height_cm, image_url)"
+                )
+                .eq("tenant_id", tenant_id)
+                .eq("status", "active")
+                .order("title")
+                .limit(100)
+                .execute()
+            )
+            for product in (products_res.data or []):
+                variations = product.get("product_variations") or []
+                stock_total = sum(
+                    int(v.get("stock_quantity") or 0) for v in variations
+                )
+                product["stock_total"] = stock_total
+                product_count += 1
+                if stock_total <= 3:
+                    low_stock_count += 1
+                products.append(product)
+        except Exception as pe:
+            logger.warning("Error cargando catálogo para context tenant=%s: %s", tenant_id, pe)
+
+        return {
+            "contact": contact,
+            "recent_orders": recent_orders,
+            "products": products,
+            "product_count": product_count,
+            "low_stock_count": low_stock_count,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error cargando contexto de conversación %s: %s", conversation_id, e)
+        raise HTTPException(status_code=500, detail="Error al cargar contexto")
 
 
 @router.patch("/{conversation_id}/status", response_model=dict)

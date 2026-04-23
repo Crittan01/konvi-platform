@@ -10,6 +10,7 @@ Endpoints:
   DELETE /api/v1/integrations/meli          — desconectar MeLi            [owner]
 """
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,7 +24,8 @@ from integrations import meli_client
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Integrations"])
 
-FRONTEND_INTEGRATIONS_URL = "https://commerce-ops-web.onrender.com/dashboard/integrations"
+FRONTEND_BASE_URL = os.getenv("APP_URL", "http://localhost:3000").rstrip("/")
+FRONTEND_INTEGRATIONS_URL = f"{FRONTEND_BASE_URL}/dashboard/integrations"
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,7 +24,6 @@ interface Props {
   tgConfig?: NotifSetting
   tgConnected: boolean
   connectedCount: number
-  apiBaseUrl: string
   isOwner: boolean
   canWrite: boolean
   connectedParam?: string
@@ -89,7 +87,7 @@ function MetaPill({ label, value }: { label: string; value: string }) {
 export function IntegrationsManager(props: Props) {
   const {
     waInt, waConnected, enviaInt, enviaConnected, meliInt, meliConnected,
-    tgConfig, tgConnected, connectedCount, apiBaseUrl,
+    tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam, tgTest, tgMsg,
     saveEnviaKey, disconnectEnvia, disconnectMeli,
     saveTelegram, disconnectTelegram, testTelegram,
@@ -101,22 +99,14 @@ export function IntegrationsManager(props: Props) {
   const [connectingMeli, setConnectingMeli] = useState(false)
   const [meliStartError, setMeliStartError] = useState<string | null>(null)
   const toggle = (id: string) => setOpen(p => ({ ...p, [id]: !p[id] }))
-  const supabase = createClient()
 
   const startMeliOAuth = async () => {
     setMeliStartError(null)
     setConnectingMeli(true)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) {
-        setMeliStartError('Sesión expirada. Inicia sesión nuevamente.')
-        return
-      }
-
-      const res = await fetch(`${apiBaseUrl}/api/v1/integrations/meli/auth-url`, {
+      const res = await fetch('/api/integrations/meli/auth-url', {
         method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       })
       const body = await res.json().catch(() => ({} as { detail?: string; auth_url?: string }))
       if (!res.ok || !body.auth_url) {

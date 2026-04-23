@@ -7,6 +7,7 @@ import OrdersNewForm from './orders-new-form'
 import OrdersManager from './_components/orders-manager'
 import Link from 'next/link'
 import AiInsightPanel from '@/components/ai-insight-panel'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 type Variation = { id: string; price: number | null; attributes: Record<string, string> | null }
 type Product   = { id: string; title: string; product_variations: Variation[] }
@@ -57,8 +58,6 @@ const STATUS_ICONS: Record<string, React.ElementType> = {
   delivered:  MapPin,
   cancelled:  X,
 }
-
-const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
 
 export default async function OrdersPage({
   searchParams,
@@ -146,7 +145,7 @@ export default async function OrdersPage({
     try {
       const ctrl = new AbortController()
       const timeout = setTimeout(() => ctrl.abort(), 15000)
-      await fetch(`${API_URL}/api/v1/orders/${orderId}`, {
+      await fetch(`${CORE_API_URL}/api/v1/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ status: nextStatus }),

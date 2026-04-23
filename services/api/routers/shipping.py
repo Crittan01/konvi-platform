@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -60,9 +61,31 @@ _CO_STATE_CODES: dict[str, str] = {
 }
 
 
+def _normalize_country(country: Optional[str], default: str = "CO") -> str:
+    """
+    Normaliza país a formato operativo de Envia.
+    Acepta alias comunes de Colombia y retorna "CO".
+    """
+    raw = str(country or "").strip()
+    if not raw:
+        return default
+
+    ascii_country = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    token = re.sub(r"[^A-Za-z]", "", ascii_country).upper()
+    if not token:
+        return default
+
+    if token in {"CO", "COL", "COLOMBIA"}:
+        return "CO"
+    if len(token) == 2:
+        return token
+    return token
+
+
 def _normalize_state(state: str, country: str) -> str:
     """Convierte nombre largo de departamento al código corto que Envia acepta."""
-    if country != "CO" or len(state) <= 3:
+    country_code = _normalize_country(country, default="CO")
+    if country_code != "CO" or len(state) <= 3:
         return state
     return _CO_STATE_CODES.get(state, state[:3].upper())
 
@@ -105,6 +128,7 @@ async def _validate_co_address_with_envia(_client: EnviaClient, addr: "Address",
     - dane_code de entrada aceptado en 5 u 8 dígitos
     - city/postalCode enviados a Shipping API en DANE 8 dígitos
     """
+    addr.country = _normalize_country(addr.country, default="CO")
     dane5, dane8 = _co_dane_codes(addr.dane_code or addr.postalCode)
     if not dane5 or not dane8:
         raise HTTPException(
@@ -119,7 +143,7 @@ async def _validate_co_address_with_envia(_client: EnviaClient, addr: "Address",
     # para varios carriers CO, DANE de 5 dígitos falla; DANE de 8 dígitos funciona.
     addr.dane_code = dane8
     addr.postalCode = dane8
-    addr.state = _normalize_state(addr.state or "", "CO") or addr.state
+    addr.state = _normalize_state(addr.state or "", addr.country) or addr.state
 
 
 def _extract_carrier_name(item: dict) -> str:
@@ -437,8 +461,8 @@ async def quote_shipment(
         client = _get_envia_client(tenant_id, supabase)
 
         # Normalización mínima de país
-        req.origin.country = (req.origin.country or "CO").upper()
-        req.destination.country = (req.destination.country or "CO").upper()
+        req.origin.country = _normalize_country(req.origin.country, default="CO")
+        req.destination.country = _normalize_country(req.destination.country, default="CO")
 
         # Construir packages con estructura real de Envia (validada sandbox 2026-04-17):
         # dimensiones anidadas, campos content/amount/type requeridos, carrier != "all" en CO.
@@ -459,8 +483,10 @@ async def quote_shipment(
         def _addr(a: Address) -> dict:
             d = a.model_dump(exclude_none=True)
             d.pop("dane_code", None)  # campo interno — no va a Envia
-            d["state"] = _normalize_state(a.state, a.country)
-            if a.country == "CO" and a.dane_code:
+            country_code = _normalize_country(a.country, default="CO")
+            d["country"] = country_code
+            d["state"] = _normalize_state(a.state, country_code)
+            if country_code == "CO" and a.dane_code:
                 # Para Colombia: runtime efectivo en Envia usa DANE 8 dígitos (stat_8digit).
                 d["city"]            = a.dane_code
                 d["postalCode"]      = a.dane_code
@@ -535,10 +561,16 @@ async def quote_shipment(
 
         if not raw_rates:
             error_sample = next(iter(carrier_errors.values()), None) if carrier_errors else None
-            detail = "Envia no retornó tarifas. Verifica la API key y que el account tenga carriers activos para Colombia."
             if error_sample:
-                detail += f" Detalle: {error_sample}"
-            raise HTTPException(status_code=502, detail=detail)
+                logger.warning(
+                    "Envia no retorno tarifas tenant=%s; sample_error=%s",
+                    tenant_id,
+                    error_sample,
+                )
+            raise HTTPException(
+                status_code=502,
+                detail="Envia no retornó tarifas en este momento. Intenta nuevamente en unos minutos.",
+            )
 
         normalized_rates = []
         for r in raw_rates:
