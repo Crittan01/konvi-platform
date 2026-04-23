@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-22 (rev. 53)
+**Última actualización**: 2026-04-23 (rev. 55)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -134,6 +134,12 @@
     - Respuesta de confirmación de producto retoma cotización como follow-up (marcador añadido a `_SHIPPING_FOLLOWUP_PROMPT_MARKERS`).
     - Stall automático: ≥2 rondas de desambiguación sin resolver → `requires_human=True`.
     - System prompt del LLM incluye reglas de escalación explícitas (reclamos, garantías, frustración, loops irresolubles).
+- Inbox Orchestrator hardening (2026-04-23, rev. 55):
+  - **Fix prompt crítico**: instrucciones de extracción de nombre/dirección y cierre de compra estaban como comentarios Python FUERA del f-string — el LLM nunca las recibía. Movidas al interior del prompt.
+  - **Paso 4 explicit**: cláusula de cierre de venta ahora indica explícitamente confirmar resumen, indicar link de pago vía asesor, marcar `intent=order_acknowledgment` + `requires_human=true`.
+  - **Fix schema JSON `city`**: el campo `city` en el JSON de respuesta decía "Ciudad y barrio" — llevaba al LLM a mezclar datos, rompiendo el DANE lookup. Ahora `street` lleva barrio y `city` es solo la ciudad.
+  - **Fix `extracted_address` → `extracted_direction`**: instruccción en prompt corregida al nombre real del campo.
+  - Validación: 83 tests OK, `syntax OK`, y test de construcción de prompt con asserts.
 
 ---
 
@@ -552,3 +558,4 @@ Campos en `marketplace_listings` actualizados por tres vías:
 - Smoke E2E Envia (sandbox/prod, token tenant) ✅:
   - Sandbox: con DANE8 hubo tarifas en 4 carriers (`fedex`, `serviEntrega`, `dhl`, `tcc`)
   - Producción: con DANE8 hubo tarifas en 5 carriers (`serviEntrega`, `dhl`, `interRapidisimo`, `deprisa`, `tcc`)
+- **AI Orchestrator**: Se corrigió un bug donde los picos de demanda del LLM (503 Service Unavailable) marcaban el mensaje como `FAILED` silenciosamente, impidiendo su reintento por el Worker. Ahora los errores transitorios dejan el mensaje en `PENDING` para garantizar la tolerancia a fallos de Gemini.

@@ -19,6 +19,7 @@ from conversation_contract import (
     CONVERSATION_STATUS_CLOSED,
     CONVERSATION_STATUS_HUMAN_TAKEOVER,
     PROCESSING_STATUS_FAILED,
+    PROCESSING_STATUS_PENDING,
     PROCESSING_STATUS_PROCESSED,
     PROCESSING_STATUS_SKIPPED,
     SKIP_REASON_CLOSED,
@@ -205,7 +206,7 @@ class OrchestratorOutput(BaseModel):
     solo puede referenciar datos inyectados en el contexto (catálogo del tenant).
     """
     should_respond: bool = Field(
-        description="True si el mensaje requiere respuesta automática, False si debe escalar a humano"
+        description="True si debes enviar el texto contenido de response_text al usuario. IMPORTANTE: En el Paso 4 (venta), DEBE ser True para enviar el resumen antes de escalar."
     )
     response_text: Optional[str] = Field(
         default=None,
@@ -229,7 +230,7 @@ class OrchestratorOutput(BaseModel):
     )
     extracted_direction: Optional[dict] = Field(
         default=None,
-        description="Objeto JSON. DEBE contener llaves: 'street' (calle/carrera completa y barrio), 'number' (Torre y Apto si aplica), 'city' (SOLO el nombre de la ciudad)."
+        description="Objeto JSON de la dirección. Obligatorios: 'street', 'city' (normalizando fonemas, ej: boogta -> Bogotá D.C.). El 'department' debes deducirlo internamente de la ciudad. Condición: Si mencionan 'edificio' o 'conjunto', pide el apto/torre. Llena 'details' si aplica."
     )
 
 
@@ -538,10 +539,24 @@ ANÁLISIS DE VARIANTE (QUERY ACTUAL):
     no_match_lines.extend(
         [
             "- No se encontraron coincidencias exactas para la variante solicitada en el catálogo disponible.",
-            "- No inventes disponibilidad/precio. Solicita precisión o escala a humano (requires_human=true).",
+            "- No inventes disponibilidad/precio. Solicita precisión o escala al equipo experto (requires_human=true).",
         ]
     )
     return "\n".join(no_match_lines)
+
+
+def _determine_transactional_state(contact: dict) -> str:
+    """Evalúa el contacto y retorna el estado de venta actual (FSM)."""
+    if not contact:
+        return "NEEDS_CONSENT"
+    if not contact.get("consent_given"):
+        return "NEEDS_CONSENT"
+    if not str(contact.get("name") or "").strip():
+        return "NEEDS_NAME"
+    address = contact.get("address")
+    if not isinstance(address, dict) or not address.get("street") or not address.get("city"):
+        return "NEEDS_DIRECTION"
+    return "READY_FOR_SUMMARY"
 
 
 def _build_system_prompt(
@@ -549,9 +564,9 @@ def _build_system_prompt(
     tenant_name: str,
     kb_text: str,
     ai_agent: dict,
+    contact_record: dict,
     query_text: str = "",
     history: Optional[list[dict]] = None,
-    consent_given: bool = False,
 ) -> str:
     """Construye el system prompt con RAG dinámico, catálogo, Anti-Spam estricto y contexto de consentimiento."""
     if history is None:
@@ -601,17 +616,46 @@ def _build_system_prompt(
     if ai_agent.get("strict_guardrails"):
         strict_rules = """
 - ESTRICTO: NO INVENTES INFORMACIÓN, PRECIOS, NI POLÍTICAS que no estén explícitas arriba.
-- Si desconoces la respuesta o la KB no es clara, ESCALA a un agente humano inmediatamente (requires_human=true).
+- Si desconoces la respuesta o la KB no es clara, ESCALA a un asesor experto inmediatamente (requires_human=true).
 - NUNCA des consejos médicos, legales o financieros.
 """
 
-    # Consentimiento: variables para el f-string del prompt
     consent_template = CONSENT_QUESTION_TEMPLATE
-    consent_status_label = "SI" if consent_given else "NO"
+    transaction_state = _determine_transactional_state(contact_record)
+    
+    # FSM: Inyección de Dependencia de Estado
+    if transaction_state == "NEEDS_CONSENT":
+        state_instruction = f"""
+ESTADO ACTUAL DEL FLUJO DE VENTA: (1/4) PEDIR CONSENTIMIENTO LEGAL.
+- Solo debes pedir autorización si ves que el usuario va a comprar. USA EXACTAMENTE este texto (no lo modifiques):
+  "{consent_template}"
+- NO pidas nombre ni dirección todavía.
+"""
+    elif transaction_state == "NEEDS_NAME":
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: (2/4) PEDIR NOMBRE DEL CLIENTE.
+- El cliente ya aceptó el tratamiento de datos. Pide Únicamente su Nombre Completo.
+- NO pidas dirección todavía.
+"""
+    elif transaction_state == "NEEDS_DIRECTION":
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: (3/4) PEDIR DIRECCIÓN COMPLETAMENTE.
+- Ya tenemos su nombre. Pide la Dirección de Entrega.
+- Regla estricta: pregunta si es "Casa" o "Edificio/Conjunto". Si es Edificio, EXIGE torre/apto.
+- Exige SIEMPRE la Ciudad. Deduce el departamento geográficamente.
+- Si el usuario te acaba de dar una información parcial, haz un breve resumen con viñetas de lo que ya tienes y pídele SOLAMENTE el dato que falta. No escales a humano todavía.
+"""
+    else:  # READY_FOR_SUMMARY
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: (4/4) RESUMEN Y CONFIRMACIÓN DE PEDIDO.
+- Ya tienes toda la información personal validada (Nombre y Dirección completa). NO pidas más datos personales.
+- Muestra el resumen completo y estético del pedido: (Producto, Variante, Opción de Envío elegida, Total, Nombre y Dirección completa).
+- Termina preguntándolo: "¿Confirmas que estos datos son correctos para proceder?". NO dejes response_text en null en este paso.
+"""
 
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
-[CONTEXTO SISTEMA: CONSENTIMIENTO={consent_status_label}]
+[ESTADO DE MÁQUINA (FSM): {transaction_state}]
 
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
 - Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
@@ -628,26 +672,13 @@ REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 
 ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
 - No presiones al usuario con preguntas transaccionales bruscas ("¿Lo agregas a tu compra?", "¿Te lo facturo?"). Solo responde su duda y termina tu frase de forma amable o abierta ("¿Tienes alguna otra duda sobre el producto?").
-- Si el usuario dice explícitamente que quiere comprar, pregúntale "¿A qué ciudad te gustaría que lo enviemos para buscar el costo de envío?".
-- SIEMPRE COTIZA EL ENVÍO (haciendo uso de la herramienta de cotización de envíos) ANTES de pedir datos personales.
-- Cuando cotices el envío, dale a elegir las opciones.
+- Si el usuario elige un producto o cantidad, NO INVENTES que vas a calcular o cotizar el envío por tu cuenta ni digas "estoy calculando". Tu labor es PREGUNTARLE explícitamente: "¿Deseas que te cotice el envío a [Ciudad del contexto]?" (si ya conoces su ciudad) o "¿A qué ciudad te gustaría que lo enviemos?" (si no la conoces). El sistema de cotización real se activará SOLO cuando el cliente te responda esa pregunta.
+- SIEMPRE COTIZA EL ENVÍO (guiando al usuario a que responda con su ciudad para activar el cotizador) ANTES de pedir datos personales.
+- Cuando el cotizador arroje las opciones, dale a elegir al usuario (ej: Económica o Rápida).
 - Una vez el usuario elija un tipo de envío, NO pidas todos los datos personales en un solo mensaje gigante.
-- FLUJO PASO A PASO (Obligatorio, sigue el orden y no pidas la siguiente hasta tener la anterior):
-  Paso 1. (Si CONSENTIMIENTO=NO): Pide primero la autorización con el texto legal de consent_template.
-  Paso 2. (Si CONSENTIMIENTO=SI y no tienes el nombre): Pide *Únicamente* su Nombre Completo.
-  Paso 3. (Si tienes el nombre y no tienes dirección): Pide su Dirección de Entrega detallada (pregunta si vive en Casa o Apartamento, para asegurar que incluya torre y número, además del barrio).
-  Paso 4. Ya teniendo Name, Address y City, confirmas el envío y te despides...
-- Para el campo dirección en Colombia: la información mínima es calle y ciudad. Acéptalo si está claro.
-- IMPORTANTÍSIMO SOBRE HERRAMIENTAS: NO llames a la herramienta de cotizar envíos si estás pasados los pasos comerciales (Paso 2 o Paso 3). ¡Existen apellidos (como Garzón) y nombres de calles que también son nombres de ciudades en Colombia y la herraminta fallará el flujo!
-- IMPORTANTE: Si un usuario escupe todos sus datos de golpe (Nombre + Dirección + Ciudad), sé inteligente, captúralos en las variables (extracted_name, extracted_address) y brinca directamente al Paso 4. No lo fuerces al paso a paso si ya te dio la info.
+- IMPORTANTÍSIMO SOBRE HERRAMIENTAS: Respeta estrictamente tu ESTADO ACTUAL (ver abajo). Si el cliente acaba de soltar todos sus datos de golpe, sé inteligente, extráelos todos (no lo obligues al paso a paso) y permite que se procesen.
 
-CONSENTIMIENTO DE DATOS (Ley 1581 de 2012, Colombia):
-- Si el CONTEXTO SISTEMA indica CONSENTIMIENTO=NO y estás por solicitar nombre o dirección:
-  USA EXACTAMENTE este texto (no lo modifiques):
-  "{consent_template}"
-- Si el CONTEXTO SISTEMA indica CONSENTIMIENTO=SI, puedes solicitar nombre y dirección directamente.
-- Cuando pidas la dirección, exige explícitamente que especifiquen si es casa o apartamento (para forzar torre y apto) y el barrio correspondiente.
-- Si el cliente escribe "eliminar mis datos", indica que sus datos serán eliminados (el sistema lo hará automáticamente).
+{state_instruction}
 
 FORMATO WhatsApp (aplica a TODOS los mensajes):
 - Usa saltos de línea (\n) para separar ideas diferentes. Nunca pongas toda la respuesta en una sola línea si contiene más de 2 puntos.
@@ -656,6 +687,12 @@ FORMATO WhatsApp (aplica a TODOS los mensajes):
 
 CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{variant_section}{kb_section}
+
+REGLAS DE EXTRACCIÓN Y CIERRE DE COMPRA (CRÍTICO — aplica siempre):
+- Cuando el cliente da su dirección (calle, barrio, apto), extráela y estructúrala en extracted_direction.
+- Cuando el cliente da nombre o dirección, extráelos en extracted_name y extracted_direction.
+- Cuando el cliente da nombre + dirección completa → intent=order_acknowledgment, should_respond=true, requires_human=true.
+- Cuando confirmas la orden (Paso 4) → response_text DEBE ser: "Perfecto *[Nombre]*! Tengo todo listo: *[resumen producto]* con envío [opción elegida]. Te paso con un asesor para el link de pago. ¡Gracias!" NUNCA dejes response_text en null en este caso.
 
 Responde SIEMPRE en JSON puro con este esquema exacto:
 {{
@@ -666,15 +703,11 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
   "intent_detected": "product_inquiry|order_status|complaint|greeting|off_topic|order_acknowledgment|other",
   "extracted_name": "Nombre Cliente o null",
   "extracted_direction": {{
-    "street": "Calle o carrera principal o null",
-    "number": "Apto, torre o número de casa o null",
-    "city": "Ciudad y barrio o null"
+    "street": "Calle o carrera principal + barrio (ej: Cra 15 #80-45, Barrio Chapinero) o null",
+    "number": "Apto, Torre o número de casa o null",
+    "city": "SOLO el nombre de la ciudad (ej: Bogota, Medellin, Cali) — sin barrio ni departamento"
   }}
 }}"""
-# IMPORTANTE: Cuando el cliente da su dirección, agrúpala y estructúrala en el JSON de extracted_direction.
-# Cuando el cliente da nombre o dirección, extráelos tal cual en extracted_name y extracted_direction.
-# Cuando el cliente da nombre + dirección → intent=order_acknowledgment, should_respond=true, requires_human=true.
-# Cuando confirmas la orden → SIEMPRE generar response_text con la confirmación "Te paso con un asesor para el link de pago Wompi", NUNCA null.
 
 
 def _build_user_context(history: list[dict], new_message: str) -> str:
@@ -848,9 +881,9 @@ async def build_and_run_orchestration(
         except Exception as ce:
             logger.warning(f"[CONTACT] No se pudo upsert contacto: {ce}")
 
-        # ── 1.6 Fetch contact_id + consent_given para flow de consentimiento ────
+        # ── 1.6 Fetch contact_id + state para flow FSM ────
         contact_id: Optional[str] = None
-        contact_consent_given: bool = False
+        contact_record: dict = {}
         try:
             if customer_phone_raw:
                 phone_norm = re.sub(r"[\s+]", "", customer_phone_raw)
@@ -858,7 +891,7 @@ async def build_and_run_orchestration(
                 phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
                 c_res = (
                     supabase.table("contacts")
-                    .select("id, consent_given")
+                    .select("id, consent_given, name, address")
                     .eq("tenant_id", tenant_id)
                     .or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus},phone.eq.{phone_space}")
                     .order("name", nullsfirst=False)
@@ -867,9 +900,9 @@ async def build_and_run_orchestration(
                 )
                 if c_res.data:
                     contact_id = c_res.data[0]["id"]
-                    contact_consent_given = bool(c_res.data[0]["consent_given"])
+                    contact_record = c_res.data[0]
         except Exception as ce:
-            logger.warning("[CONTACT] No se pudo fetch contact_id: %s", ce)
+            logger.warning("[CONTACT] No se pudo fetch contact para FSM: %s", ce)
 
         # ── 2. Obtener catálogo, RAG KB, historial y Config. AI ───────────────
         catalog, kb_docs, history, ai_agent = await __import__('asyncio').gather(
@@ -933,9 +966,9 @@ async def build_and_run_orchestration(
             tenant_name=tenant_name,
             kb_text=kb_text,
             ai_agent=ai_agent,
+            contact_record=contact_record,
             query_text=content,
             history=history[:-1] if history else [],
-            consent_given=contact_consent_given,
         )
         user_context = _build_user_context(history, content)
 
@@ -1029,8 +1062,17 @@ async def build_and_run_orchestration(
                     except Exception as e:
                         logger.warning(f"[CONTACT USYNC] Error en DANE lookup: {e}")
                 
+                # Normalización DIAN para almacenamiento unificado
+                try:
+                    from dian_normalization import normalize_dian_address
+                    if parsed.extracted_direction.get("street"):
+                        parsed.extracted_direction["street"] = normalize_dian_address(parsed.extracted_direction["street"])
+                    if parsed.extracted_direction.get("number"):
+                        parsed.extracted_direction["number"] = normalize_dian_address(parsed.extracted_direction["number"])
+                except Exception as e:
+                    logger.warning(f"[CONTACT USYNC] Error en DIAN normalizer: {e}")
+
                 update_data["address"] = parsed.extracted_direction
-            
             if update_data:
                 try:
                     supabase.table("contacts").update(update_data).eq("id", contact_id).execute()
@@ -1046,10 +1088,41 @@ async def build_and_run_orchestration(
         )
 
     except Exception as e:
-        logger.error(f"[ORCH] Error orquestando mensaje {message_id}: {e}", exc_info=True)
-        _mark_message_processing(
-            supabase,
-            message_id,
-            processing_status=PROCESSING_STATUS_FAILED,
-            last_error=str(e)[:1000],
+        error_str = str(e)
+        error_lower = error_str.lower()
+
+        # Errores transitorios: 503, timeout, connection — dejar en pending para retry del worker
+        is_transient = (
+            "503" in error_str
+            or "unavailable" in error_lower
+            or "timeout" in error_lower
+            or "timed out" in error_lower
+            or "connection" in error_lower
+            or "503 service unavailable" in error_lower
         )
+
+        if is_transient:
+            logger.warning(
+                "[ORCH] Error transitorio en mensaje %s (se reintentará): %s",
+                message_id,
+                error_str[:200],
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_PENDING,
+                last_error=f"[transitorio] {error_str[:500]}",
+            )
+        else:
+            logger.error(
+                "[ORCH] Error orquestando mensaje %s: %s",
+                message_id,
+                error_str,
+                exc_info=True,
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_FAILED,
+                last_error=error_str[:1000],
+            )

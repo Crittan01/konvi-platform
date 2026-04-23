@@ -45,10 +45,9 @@ def validate_orchestrator_output(output: "OrchestratorOutput") -> bool:
         output.response_text = output.response_text[:MAX_RESPONSE_LENGTH].rsplit(" ", 1)[0] + "..."
         # No descartar — solo truncar
 
-    # Regla 4: Escalar a humano (no enviar automáticamente)
+    # Regla 4: Escalar a humano (permitir mensaje de cierre si existe)
     if output.requires_human:
-        logger.info("[GUARDRAIL] requires_human=True — no se envía respuesta automática, se escala.")
-        output.should_respond = False  # Mutar para que el orquestador no envíe
+        logger.info("[GUARDRAIL] requires_human=True — permitiendo flujo con posible mensaje de cierre.")
         checks_passed = True  # Sí procesar (para hacer la escalación)
 
     return checks_passed

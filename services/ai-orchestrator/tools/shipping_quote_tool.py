@@ -648,13 +648,19 @@ def _resolve_product_for_quote(
     return top_product, []
 
 
-def _select_best_variation_for_query(product: dict, query_text: str) -> Optional[dict]:
+def _select_best_variation_for_query(product: dict, query_text: str, recent_messages: list[dict]) -> Optional[dict]:
     variations = product.get("product_variations") or []
     if not variations:
         return None
 
-    normalized_query = _normalize_text(query_text)
-    query_tokens = _tokenize_words(normalized_query)
+    message_window = [query_text]
+    message_window.extend(
+        [
+            str(msg.get("content") or "")
+            for msg in recent_messages
+            if str(msg.get("content") or "").strip()
+        ]
+    )
 
     scored: list[tuple[int, int, dict]] = []
     for variation in variations:
@@ -666,13 +672,30 @@ def _select_best_variation_for_query(product: dict, query_text: str) -> Optional
         if isinstance(attrs, dict):
             searchable_parts.extend([str(k) for k in attrs.keys()])
             searchable_parts.extend([str(v) for v in attrs.values()])
-        variation_tokens = _tokenize_words(" ".join(searchable_parts))
-        score = len(variation_tokens & query_tokens)
+            
+        variation_text = " ".join(searchable_parts).lower()
+        if not variation_text.strip():
+            continue
+            
+        variation_tokens = _tokenize_words(variation_text)
+        
+        best_score = 0
+        for index, text in enumerate(message_window[:8]):
+            norm_text = _normalize_text(text)
+            text_tokens = _tokenize_words(norm_text)
+            overlap = len(variation_tokens & text_tokens)
+            
+            # Si hay overlap exacto parcial o si la metadata literal aparece en el texto
+            if overlap > 0 or any(part in norm_text for part in searchable_parts if len(part) > 3):
+                recency_bonus = max(1, 8 - index)
+                score = (overlap * 10) + recency_bonus
+                best_score = max(best_score, score)
+
         stock = _safe_int(variation.get("stock_quantity")) or 0
-        scored.append((score, stock, variation))
+        scored.append((best_score, stock, variation))
 
     scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    return scored[0][2]
+    return scored[0][2] if scored else None
 
 
 def _scale_dimension(base_value: float, quantity: int) -> float:
@@ -752,11 +775,12 @@ def _estimate_package_from_inventory(
             )
         )
 
-    variation = _select_best_variation_for_query(product, query_text) or {}
-    var_weight = _safe_float(variation.get("weight_kg"))
-    var_length = _safe_float(variation.get("length_cm"))
-    var_width = _safe_float(variation.get("width_cm"))
-    var_height = _safe_float(variation.get("height_cm"))
+    # Usar historial reciente para encontrar tallas, colores o atributos omitidos
+    best_variation = _select_best_variation_for_query(product, query_text, recent_messages) or {}
+    var_weight = _safe_float(best_variation.get("weight_kg"))
+    var_length = _safe_float(best_variation.get("length_cm"))
+    var_width = _safe_float(best_variation.get("width_cm"))
+    var_height = _safe_float(best_variation.get("height_cm"))
 
     per_unit_weight = explicit_weight if explicit_weight is not None else (
         var_weight if var_weight and var_weight > 0 else DEFAULT_WEIGHT_KG
@@ -769,7 +793,7 @@ def _estimate_package_from_inventory(
 
     # Extraer TODAS las variantes mencionadas en historial para este producto.
     # Si el cliente pidió 1 Roja + 1 Azul, mostrar "Rojo y Azul" en vez de solo "Rojo".
-    variant_label_final = _variation_label(variation) if variation else None
+    variant_label_final = _variation_label(best_variation) if best_variation else None
     if quantity > 1 and (product.get("product_variations") or []):
         all_variations = product.get("product_variations") or []
         all_labels: list[str] = []
@@ -839,13 +863,15 @@ def _format_rate_line(label: str, rate: dict) -> str:
     # Deduplicar si el nombre del carrier aparece al inicio del service name
     # Ej: carrier='Deprisa', service='Deprisa Estandar' -> mostramos solo 'Deprisa Estandar'
     if service.lower().startswith(carrier.lower()):
-        display_name = service
+        carrier_info = service
     else:
-        display_name = f"{carrier} {service}"
+        carrier_info = f"{carrier} {service}"
     currency = str(rate.get("currency") or "COP")
-    total = _format_money(rate.get("total_price"), currency)
+    price_info = _format_money(rate.get("total_price"), currency)
+    if not price_info:
+        price_info = "Pendiente"
     eta = _format_eta(rate)
-    return f"{label}: {display_name} | {total} | entrega {eta}"
+    return f"• *{label}*: {carrier_info} | {price_info} | entrega {eta}"
 
 
 def _fmt_weight(kg: float) -> str:
@@ -894,26 +920,26 @@ def _build_quote_response_text(
 
     header = f"Envío de {qty_label}{product_label} a {destination_city}:"
     cheapest_line = _format_rate_line("Económica", cheapest)
-    lines = [header, f"\u2022 {cheapest_line}"]
+    lines = [header, cheapest_line]
 
     if isinstance(fastest, dict):
+        same_eta = _format_eta(fastest) == _format_eta(cheapest)
         same = (
             str(fastest.get("carrier") or "") == str(cheapest.get("carrier") or "")
             and str(fastest.get("service") or "") == str(cheapest.get("service") or "")
             and str(fastest.get("total_price") or "") == str(cheapest.get("total_price") or "")
         )
-        if not same:
-            lines.append(f"• {_format_rate_line('Rápida', fastest)}")
-        # Si es la misma opción, no agregar línea redundante
+        if not same and not same_eta:
+            lines.append(_format_rate_line("Rápida", fastest))
+        # Si es la misma opción o la fecha de entrega es idéntica, no agregar línea redundante
 
-    lines.append("¿Con cuál continuamos?")
+    lines.append("\n¿Con cuál continuamos? (Responde *Económica* o *Rápida*)")
 
     # Detalle técnico del paquete solo en log — no al cliente
     logger.info("[SHIPPING_QUOTE] Paquete estimado: %s", _format_package_context_line(package))
     # Párrafos WhatsApp: \n\n entre secciones para respiro visual
     paragraph = "\n\n"
-    bullet_section = "\n".join(lines[1:-1])  # líneas de bullets
-    return paragraph.join([lines[0], bullet_section, lines[-1]])
+    return paragraph.join([lines[0], "\n".join(lines[1:-1]), lines[-1]])
 
 
 def _build_api_auth_token(tenant_id: str) -> Optional[str]:
@@ -1073,7 +1099,7 @@ def _build_quote_failure_response(detail: str, status_code: int) -> tuple[str, b
 
     if "envia no esta conectado" in normalized or "api token de envia no encontrado" in normalized:
         return (
-            "En este momento no tengo habilitada la cotización automática de envío. Te paso con un asesor humano.",
+            "En este momento no tengo habilitada la cotización automática de envío. Te paso con un asesor experto.",
             True,
         )
 
@@ -1162,7 +1188,7 @@ async def handle_shipping_quote_if_applicable(
             )
             if stall_count >= 2:
                 logger.info(
-                    "[SHIPPING_QUOTE] Stall detectado (%d rondas) para tenant=%s — escalando a humano",
+                    "[SHIPPING_QUOTE] Stall detectado (%d rondas) para tenant=%s — escalando a un experto",
                     stall_count, tenant_id,
                 )
                 return ShippingQuoteResult(
@@ -1220,6 +1246,6 @@ async def handle_shipping_quote_if_applicable(
         logger.error("Error en shipping_quote_tool tenant=%s: %s", tenant_id, exc, exc_info=True)
         return ShippingQuoteResult(
             handled=True,
-            response_text="No pude cotizar el envio ahora mismo. Te apoyo con un asesor humano.",
+            response_text="No pude cotizar el envio ahora mismo. Te apoyo con un asesor experto.",
             requires_human=True,
         )

@@ -1,4 +1,4 @@
-# Próximos Pasos — Estado 2026-04-22
+# Próximos Pasos — Estado 2026-04-23
 
 ## Pendientes reales
 
@@ -63,6 +63,14 @@
 
    **Restricción**: No abrir Fase C sin gate formal aprobado.
 
+   **Gate de entrada Fase C — Estado actual:**
+   - [ ] Fase B certificada con UAT ≥ 95% en flujo conversacional completo (pendiente ejecución formal).
+   - [ ] Validar política Wompi sandbox para Colombia (moneda COP, montos mínimos, fees) — INTERVENCION HUMANA.
+   - [ ] Tenant tiene cuenta Wompi activa o acceso sandbox — INTERVENCION HUMANA.
+   - [ ] Definir TTL de reserva de stock (propuesta: 30 minutos).
+   - [ ] Revisión legal de términos de compra enviados via WhatsApp.
+   - [ ] `docs/integrations/wompi.md` y `docs/operations/order-flow-conversational.md` creados antes de implementar.
+
 1. **Envia Fase 2**
    - Completar validaciones payload carrier-específicas para label/pickup/cancel por país.
    - Webhooks de estado Envia (fase async) para reconciliación automática de tracking.
@@ -118,6 +126,14 @@
   - `20260422150000_conversations_last_interaction_sync.sql` ✅ aplicada
 - Nota: `20260420000001_order_tracking.sql` ya estaba aplicada previamente en DB;
   su ejecución directa devolvió `relation "order_tracking" already exists`.
+
+## No pendientes (cerrado en sesión 2026-04-23)
+
+- **Fix prompt crítico orquestador**: instrucciones de extracción nombre/dirección y cierre de compra (Paso 4) estaban como comentarios Python FUERA del f-string del system prompt — el LLM nunca las recibía. Ahora están dentro del prompt.
+- **Paso 4 explicit**: cláusula de cierre de venta actualizada: confirmar resumen pedido, indicar link de pago vía asesor, marcar `order_acknowledgment` + `requires_human=true`, `response_text` nunca null.
+- **Fix schema JSON `city`**: campo `city` en respuesta del LLM ahora es "solo ciudad" (para DANE lookup). El barrio va explícitamente en `street`.
+- **Fix `extracted_address` → `extracted_direction`**: referencia al nombre correcto del campo en la instrucción del prompt.
+- Validación: 83 tests OK + test construcción de prompt con asserts.
 
 ## No pendientes (cerrado en sesión 2026-04-22)
 

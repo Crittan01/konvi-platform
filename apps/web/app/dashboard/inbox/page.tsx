@@ -351,11 +351,15 @@ export default function InboxPage() {
     const channel = supabase
       .channel(`messages:${selectedId}`)
       .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'messages',
+        event: '*', schema: 'public', table: 'messages',
         filter: `conversation_id=eq.${selectedId}`,
       }, (payload) => {
-        setMessages(prev => [...prev, payload.new as Message])
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+        if (payload.eventType === 'INSERT') {
+          setMessages(prev => [...prev, payload.new as Message])
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+        } else if (payload.eventType === 'UPDATE') {
+          setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new as Message : m))
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
