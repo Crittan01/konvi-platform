@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
-
-const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 export async function PATCH(
   req: NextRequest,
@@ -21,7 +20,7 @@ export async function PATCH(
 
   const idempotencyKey = req.headers.get('Idempotency-Key')
 
-  const upstream = await fetch(`${API_URL}/api/v1/shipping/${params.shipmentId}/rate`, {
+  const upstream = await fetch(`${CORE_API_URL}/api/v1/shipping/${params.shipmentId}/rate`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',

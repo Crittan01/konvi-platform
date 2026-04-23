@@ -1,5 +1,80 @@
 /** @type {import('next').NextConfig} */
 
+function parseOrigin(url) {
+  if (!url) return null
+  try {
+    return new URL(url).origin
+  } catch {
+    return null
+  }
+}
+
+function parseHostname(url) {
+  if (!url) return null
+  try {
+    return new URL(url).hostname
+  } catch {
+    return null
+  }
+}
+
+function toWsOrigin(httpOrigin) {
+  if (!httpOrigin) return null
+  if (httpOrigin.startsWith('https://')) return httpOrigin.replace('https://', 'wss://')
+  if (httpOrigin.startsWith('http://')) return httpOrigin.replace('http://', 'ws://')
+  return null
+}
+
+function unique(values) {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
+const supabaseOrigin = parseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL)
+const supabaseWsOrigin = toWsOrigin(supabaseOrigin)
+const appOrigin = parseOrigin(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL)
+const apiOrigin = parseOrigin(process.env.NEXT_PUBLIC_API_URL || process.env.API_URL)
+const orchestratorOrigin = parseOrigin(process.env.ORCHESTRATOR_URL)
+const connectorOrigin = parseOrigin(process.env.CONNECTOR_URL)
+
+const cspImgSrc = unique([
+  "'self'",
+  'data:',
+  'blob:',
+  supabaseOrigin,
+  'https://http2.mlstatic.com',
+  'https://mlstatic.com',
+]).join(' ')
+
+const cspConnectSrc = unique([
+  "'self'",
+  supabaseOrigin,
+  supabaseWsOrigin,
+  appOrigin,
+  apiOrigin,
+  orchestratorOrigin,
+  connectorOrigin,
+]).join(' ')
+
+const supabaseStorageHost = parseHostname(process.env.NEXT_PUBLIC_SUPABASE_URL)
+const remotePatterns = [
+  {
+    protocol: 'https',
+    hostname: 'http2.mlstatic.com',
+  },
+  {
+    protocol: 'https',
+    hostname: 'mlstatic.com',
+  },
+]
+if (supabaseStorageHost) {
+  remotePatterns.unshift({
+    protocol: 'https',
+    hostname: supabaseStorageHost,
+    port: '',
+    pathname: '/storage/v1/object/public/**',
+  })
+}
+
 // ── Security Headers ─────────────────────────────────────────────────────────
 //
 //  Aplicados globalmente a cada respuesta HTTP del frontend.
@@ -49,10 +124,9 @@ const securityHeaders = [
       // Fuentes
       "font-src 'self' https://fonts.gstatic.com",
       // Imágenes: mismo origen + Supabase Storage + MeLi CDN + data URIs
-      "img-src 'self' data: blob: https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co https://http2.mlstatic.com https://mlstatic.com",
-      // Conexiones API: mismo origen + Supabase + Render services
-      // IMPORTANTE: actualizar si los nombres de servicio de Render cambian
-      "connect-src 'self' https://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co wss://***SUPABASE_PROJECT_REF_REDACTED***.supabase.co https://commerce-ops-web.onrender.com https://commerce-ops-api.onrender.com https://commerce-ops-orchestrator.onrender.com https://commerce-ops-connector.onrender.com",
+      `img-src ${cspImgSrc}`,
+      // Conexiones API: mismo origen + Supabase + orígenes definidos por env
+      `connect-src ${cspConnectSrc}`,
       // Frames: ninguno
       "frame-src 'none'",
     ].join('; '),
@@ -61,22 +135,7 @@ const securityHeaders = [
 
 const nextConfig = {
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '***SUPABASE_PROJECT_REF_REDACTED***.supabase.co',
-        port: '',
-        pathname: '/storage/v1/object/public/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'http2.mlstatic.com',
-      },
-      {
-        protocol: 'https',
-        hostname: 'mlstatic.com',
-      },
-    ],
+    remotePatterns,
   },
 
   async headers() {

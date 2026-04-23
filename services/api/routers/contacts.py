@@ -2,11 +2,14 @@
 Router de Contactos — CRUD con aislamiento multi-tenant via RLS.
 
 Endpoints:
-  GET    /api/v1/contacts/        — listar contactos del tenant
-  POST   /api/v1/contacts/        — crear contacto             [owner, manager]
-  PATCH  /api/v1/contacts/{id}    — editar nombre / notas      [owner, manager]
+  GET    /api/v1/contacts/           — listar contactos del tenant
+  POST   /api/v1/contacts/           — crear contacto                 [owner, manager]
+  PATCH  /api/v1/contacts/{id}       — editar nombre / notas          [owner, manager]
+  POST   /api/v1/contacts/{id}/consent — registrar consentimiento WhatsApp [owner, manager]
+  DELETE /api/v1/contacts/{id}       — soft-delete + anonimización   [owner, manager]
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -268,3 +271,155 @@ async def patch_contact(
         abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error actualizando contacto %s: %s", contact_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar contacto")
+
+
+# ─── Consentimiento WhatsApp (Ley 1581) ─────────────────────────────────────────────
+
+class ConsentRequest(BaseModel):
+    given: bool                                            # True = aceptó, False = rechazó
+    channel: str = "whatsapp"
+    text_version: Optional[str] = Field(default=None, max_length=80)  # hash/version del texto mostrado
+    conversation_id: Optional[str] = None
+
+
+@router.post("/{contact_id}/consent", response_model=dict)
+async def record_consent(
+    contact_id: str,
+    body: ConsentRequest,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
+):
+    """Registra consentimiento explícito o revocación desde chat WhatsApp.
+
+    Llamado por el orquestador cuando el cliente responde al aviso Ley 1581.
+    Auditable: guarda canal, version de texto y timestamp.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        existing = (
+            supabase.table("contacts")
+            .select("id, consent_given, consent_date")
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Contacto no encontrado")
+
+        if body.given:
+            update = {
+                "consent_given": True,
+                "consent_date": existing.data.get("consent_date") or now_iso,
+                "consent_given_at": now_iso,
+                "consent_source": body.channel,
+                "consent_channel": body.channel,
+                "consent_text_version": body.text_version,
+                "consent_revoked_at": None,
+                "consent_revoked_reason": None,
+                "consent_evidence": {
+                    "captured_via": body.channel,
+                    "conversation_id": body.conversation_id,
+                    "timestamp": now_iso,
+                },
+            }
+            logger.info("[CONSENT] Registrado | contact=%s tenant=%s canal=%s", contact_id, tenant_id, body.channel)
+        else:
+            # Revocación: anonimizar inmediatamente (Ley 1581, Art. 15)
+            update = {
+                "consent_given": False,
+                "consent_revoked_at": now_iso,
+                "consent_revoked_reason": "Revocación solicitada por el titular vía WhatsApp",
+                "name": None,      # anonimización inmediata
+                "address": None,   # anonimización inmediata
+                "notes": None,     # anonimización inmediata
+            }
+            logger.info("[CONSENT] Revocado + anonimizado | contact=%s tenant=%s", contact_id, tenant_id)
+
+        result = (
+            supabase.table("contacts")
+            .update(update)
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Contacto no encontrado")
+        return {"ok": True, "consent_given": body.given, "updated_at": now_iso}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error registrando consentimiento contact=%s: %s", contact_id, e)
+        raise HTTPException(status_code=500, detail="Error al registrar consentimiento")
+
+
+# ─── Soft-delete con anonimización (Q3: retención Ley 1581) ───────────────────────
+
+@router.delete("/{contact_id}", response_model=dict)
+async def delete_contact(
+    contact_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
+):
+    """Soft-delete con anonimización inmediata (Ley 1581 / SIC).
+
+    - Anonimiza: name=NULL, address=NULL, notes=NULL
+    - Conserva: phone (lista de supresión), tenant_id, consent_revoked_at, deleted_at
+    - Si el contacto tiene órdenes: el registro anonónimo se retiene (Cod. Comercio Art. 60)
+    - Si no tiene órdenes: marcado para purge físico después de 30 días (cron job)
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        # Verificar si tiene órdenes (requiere retención de 10 años)
+        orders_res = (
+            supabase.table("orders")
+            .select("id")
+            .eq("contact_id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .limit(1)
+            .execute()
+        )
+        has_orders = bool(orders_res.data)
+
+        update = {
+            "name": None,
+            "address": None,
+            "notes": None,
+            "consent_given": False,
+            "consent_revoked_at": now_iso,
+            "consent_revoked_reason": "Eliminación solicitada por operador",
+            "deleted_at": now_iso,
+        }
+        result = (
+            supabase.table("contacts")
+            .update(update)
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Contacto no encontrado")
+
+        logger.info(
+            "[CONTACT] Soft-delete con anonimización | contact=%s tenant=%s has_orders=%s",
+            contact_id, tenant_id, has_orders,
+        )
+        return {
+            "ok": True,
+            "anonymized": True,
+            "has_orders": has_orders,
+            "retention_note": (
+                "Registro retenido 10 años por órdenes vinculadas (Cod. Comercio Art. 60)"
+                if has_orders else
+                "Marcado para purge en 30 días"
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error eliminando contacto %s: %s", contact_id, e)
+        raise HTTPException(status_code=500, detail="Error al eliminar contacto")

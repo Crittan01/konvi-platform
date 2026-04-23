@@ -1,12 +1,18 @@
 # Integración Envia (estado real)
 
-Última actualización: 2026-04-21
+Última actualización: 2026-04-22
 
 ## Estado actual
 
 - Fase inicial implementada (`quote` + `history`).
 - Fase 2 parcial implementada (label/tracking/pickup/cancel) con feature flag.
 - Inbox Fase B1: orquestador consume `shipping/quote` para responder cotización en chat con `highlights`.
+- Normalización runtime de país endurecida para quote (`Colombia` / `COL` / `CO` -> `CO`) antes de construir payload hacia Envia.
+- En Inbox, errores upstream de Envia se registran en logs pero no se exponen en texto técnico al cliente final.
+- En Inbox, origen se toma estrictamente de `tenants.shipping_origin` (sin fallback implícito por texto libre).
+- En Inbox, el paquete de cotización se estima con datos de inventario (`product_variations.weight_kg/length_cm/width_cm/height_cm`) y cantidad inferida del mensaje; si faltan datos usa defaults controlados.
+- En Inbox, si el contexto conversacional tiene múltiples productos plausibles, solicita confirmación del producto antes de cotizar para evitar falsos positivos.
+- Respuesta de cotización en chat: bloque operativo (`origen -> destino`, paquete estimado, opción más económica / más rápida) con CTA para continuidad de compra.
 - Webhooks async de Envia: pendientes.
 
 ## Implementación real en código

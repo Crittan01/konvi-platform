@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
-const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
 const UPSTREAM_TIMEOUT_MS = 30000
 
 export async function POST(
@@ -30,7 +30,7 @@ export async function POST(
 
   try {
     const upstream = await fetch(
-      `${API_URL}/api/v1/conversations/${params.conversationId}/send`,
+      `${CORE_API_URL}/api/v1/conversations/${params.conversationId}/send`,
       {
         method: 'POST',
         headers: {

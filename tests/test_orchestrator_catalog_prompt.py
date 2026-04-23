@@ -68,6 +68,19 @@ class OrchestratorCatalogPromptTests(unittest.TestCase):
         self.assertIn("Producto en contexto detectado por historial: Camiseta Tech", prompt)
         self.assertIn("precio: 55000.0 | stock: 2", prompt)
 
+    def test_prompt_matches_variant_by_reference_or_sku(self):
+        prompt = orchestrator._build_system_prompt(
+            catalog=self._sample_catalog(),
+            tenant_name="Tienda X",
+            kb_text="",
+            ai_agent={"name": "Bot", "role_description": "Ayuda", "strict_guardrails": True},
+            query_text="Tienes referencia CT-M-BLK?",
+        )
+
+        self.assertIn("ANÁLISIS DE VARIANTE (QUERY ACTUAL)", prompt)
+        self.assertIn("Coincidencias exactas detectadas", prompt)
+        self.assertIn("precio: 50000.0 | stock: 4", prompt)
+
     def test_prompt_adds_no_match_warning_for_variant_query_without_exact_match(self):
         prompt = orchestrator._build_system_prompt(
             catalog=self._sample_catalog(),

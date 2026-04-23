@@ -2,11 +2,8 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import ProductsManager from './_components/products-manager'
 import type { Product } from './types'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
-const API_URL =
-  process.env.API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'https://commerce-ops-api.onrender.com'
 const DEFAULT_THRESHOLD = 5
 
 export default async function CatalogPage() {
@@ -251,7 +248,7 @@ export default async function CatalogPage() {
         canWrite={canWrite}
         categories={platformCategories}
         tenantId={tenantId ?? ''}
-        apiUrl={API_URL}
+        apiUrl={CORE_API_URL}
         movements={movements}
         threshold={threshold}
         editProductAction={editProduct}

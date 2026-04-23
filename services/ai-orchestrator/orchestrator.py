@@ -11,6 +11,7 @@ from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
 from tools.shipping_quote_tool import handle_shipping_quote_if_applicable
+from tools.order_status_tool import handle_order_status_if_applicable
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
 from conversation_contract import (
@@ -32,6 +33,96 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
 
+# ── Consentimiento Ley 1581 de 2012 ──────────────────────────────────────────
+CONSENT_TEXT_VERSION = "v2026-04"
+CONSENT_QUESTION_TEMPLATE = (
+    "Para continuar, necesito guardar tu nombre y dirección de entrega "
+    "para procesar tu pedido y coordinar el envío.\n\n"
+    "Puedes solicitar la eliminación de tus datos escribiendo "
+    "*eliminar mis datos* en cualquier momento.\n\n"
+    "¿Nos autorizas?\n• Responde *Sí* para continuar\n• Responde *No* para seguir sin registro"
+)
+_CONSENT_QUESTION_MARKERS = ("nos autorizas", "eliminar mis datos", "responde si para continuar")
+_REVOCATION_TOKENS = {"eliminar mis datos", "borra mis datos", "elimina mis datos",
+                      "borrar mis datos", "quiero ser eliminado", "no guardes mis datos",
+                      "eliminar mi informacion", "elimina mi informacion"}
+_CONSENT_YES_TOKENS = {"si", "sí", "dale", "ok", "claro", "acepto", "autorizo", "afirmativo"}
+_CONSENT_NO_TOKENS  = {"no", "nope", "negativo", "no gracias", "prefiero no"}
+
+
+def _normalize_text_simple(text: str) -> str:
+    """Normaliza para comparación: minúsculas, sin acentos."""
+    nfkd = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).strip()
+
+
+def _detect_revocation_intent(text: str) -> bool:
+    """Retorna True si el mensaje es una solicitud de eliminación de datos."""
+    normalized = _normalize_text_simple(text)
+    return any(token in normalized for token in _REVOCATION_TOKENS)
+
+
+def _detect_consent_yes(text: str) -> bool:
+    normalized = _normalize_text_simple(text)
+    tokens = set(normalized.split())
+    return bool(tokens & _CONSENT_YES_TOKENS) and not bool(tokens & _CONSENT_NO_TOKENS)
+
+
+def _detect_consent_no(text: str) -> bool:
+    normalized = _normalize_text_simple(text)
+    tokens = set(normalized.split())
+    return bool(tokens & _CONSENT_NO_TOKENS)
+
+
+def _last_outbound_was_consent_question(history: list[dict]) -> bool:
+    """Retorna True si el último mensaje del bot fue la pregunta de consentimiento."""
+    for msg in reversed(history):
+        if str(msg.get("direction") or "").lower() == "outbound":
+            content_norm = _normalize_text_simple(str(msg.get("content") or ""))
+            return any(marker in content_norm for marker in _CONSENT_QUESTION_MARKERS)
+    return False
+
+
+def _record_consent(
+    supabase: Client,
+    contact_id: str,
+    tenant_id: str,
+    given: bool,
+    conversation_id: str,
+) -> None:
+    """Registra consentimiento o revocación directamente en DB (sin HTTP round-trip)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        if given:
+            update = {
+                "consent_given": True,
+                "consent_given_at": now_iso,
+                "consent_source": "whatsapp",
+                "consent_channel": "whatsapp",
+                "consent_text_version": CONSENT_TEXT_VERSION,
+                "consent_revoked_at": None,
+                "consent_revoked_reason": None,
+                "consent_evidence": {
+                    "captured_via": "whatsapp",
+                    "conversation_id": conversation_id,
+                    "timestamp": now_iso,
+                },
+            }
+            logger.info("[CONSENT] Registrado via chat | contact=%s tenant=%s", contact_id, tenant_id)
+        else:
+            update = {
+                "consent_given": False,
+                "consent_revoked_at": now_iso,
+                "consent_revoked_reason": "Revocación solicitada por el titular vía WhatsApp",
+                "name": None,
+                "address": None,
+                "notes": None,
+            }
+            logger.info("[CONSENT] Revocado + anonimizado | contact=%s tenant=%s", contact_id, tenant_id)
+        supabase.table("contacts").update(update).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
+    except Exception as e:
+        logger.error("[CONSENT] Error registrando consentimiento contact=%s: %s", contact_id, e)
+
 # Cliente global del nuevo SDK
 _genai_client: Optional[genai.Client] = None
 
@@ -52,6 +143,48 @@ QUERY_STOPWORDS = {
     "tienes", "tiene", "hay", "en", "del", "al", "me", "puedes", "podrias",
     "quisiera", "quiero", "disponible", "disponibles", "precio", "stock",
     "favor", "hola", "buenas", "buenos", "dias", "dia", "tarde", "noches",
+    # Etiquetas de consulta: no deben forzar mismatch cuando el SKU sí coincide.
+    "sku", "referencia", "referencias", "ref", "codigo",
+}
+GREETING_ALLOWED_TOKENS = {
+    "hola",
+    "holi",
+    "buenas",
+    "buenos",
+    "buen",
+    "dias",
+    "dia",
+    "tardes",
+    "noches",
+    "hello",
+    "hey",
+    "alo",
+    "saludos",
+    "que",
+    "tal",
+    "por",
+    "favor",
+    "bot",
+}
+ACK_ALLOWED_TOKENS = {
+    "gracias",
+    "muchas",
+    "ok",
+    "oki",
+    "okey",
+    "vale",
+    "dale",
+    "listo",
+    "perfecto",
+    "genial",
+    "entendido",
+    "bien",
+    "super",
+    "excelente",
+    "de",
+    "nada",
+    "por",
+    "favor",
 }
 
 def _get_genai_client() -> genai.Client:
@@ -89,6 +222,14 @@ class OrchestratorOutput(BaseModel):
     intent_detected: str = Field(
         default="unknown",
         description="Intención detectada: product_inquiry, order_status, complaint, greeting, off_topic, other"
+    )
+    extracted_name: Optional[str] = Field(
+        default=None,
+        description="El nombre del cliente si fue detectado en el historial (ej: 'Juan Pérez')"
+    )
+    extracted_direction: Optional[dict] = Field(
+        default=None,
+        description="Objeto JSON. DEBE contener llaves: 'street' (calle/carrera completa y barrio), 'number' (Torre y Apto si aplica), 'city' (SOLO el nombre de la ciudad)."
     )
 
 
@@ -218,6 +359,25 @@ def _normalize_text(text: str) -> str:
 
 def _tokenize_text(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", _normalize_text(text))
+
+
+def _detect_deterministic_smalltalk_intent(query_text: str) -> Optional[str]:
+    tokens = _tokenize_text(query_text)
+    if not tokens:
+        return None
+    token_set = set(tokens)
+
+    if len(tokens) <= 6 and token_set.issubset(GREETING_ALLOWED_TOKENS):
+        return "greeting"
+    if len(tokens) <= 6 and token_set.issubset(ACK_ALLOWED_TOKENS):
+        return "acknowledgement"
+    return None
+
+
+def _deterministic_smalltalk_response(intent: str) -> str:
+    if intent == "acknowledgement":
+        return "Con gusto. Si quieres, te ayudo con productos, stock o costo de envío."
+    return "¡Hola! ¿En qué te ayudo hoy?"
 
 
 def _is_variant_query(query_text: str) -> bool:
@@ -391,8 +551,9 @@ def _build_system_prompt(
     ai_agent: dict,
     query_text: str = "",
     history: Optional[list[dict]] = None,
+    consent_given: bool = False,
 ) -> str:
-    """Construye el system prompt con RAG dinámico, catálogo, y Anti-Spam estricto."""
+    """Construye el system prompt con RAG dinámico, catálogo, Anti-Spam estricto y contexto de consentimiento."""
     if history is None:
         history = []
     def _format_money(value: float | int | str | None) -> str:
@@ -402,7 +563,9 @@ def _build_system_prompt(
             return "0.00"
 
     def _format_product_for_prompt(product: dict) -> str:
-        title = product.get("title", "Sin nombre")
+        raw_title = product.get("title", "Sin nombre")
+        # Eliminar prefijos de ambiente [TEST], [DEMO], [STAGING] antes de exponer al LLM
+        title = re.sub(r"^\[.*?\]\s*", "", str(raw_title)).strip() or raw_title
         variants = product.get("variants") or []
         if variants:
             price_min = _format_money(product.get("price_min"))
@@ -442,14 +605,55 @@ def _build_system_prompt(
 - NUNCA des consejos médicos, legales o financieros.
 """
 
+    # Consentimiento: variables para el f-string del prompt
+    consent_template = CONSENT_QUESTION_TEMPLATE
+    consent_status_label = "SI" if consent_given else "NO"
+
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
+[CONTEXTO SISTEMA: CONSENTIMIENTO={consent_status_label}]
 
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
 - Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
 - No seas repetitivo. Evita saludar en cada mensaje si ya están en conversación.
 - NUNCA envíes promociones crudas no solicitadas o texto masivo (Evita el bloqueo de la línea WABA).
 {strict_rules}
+REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
+- Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
+- Frustración, molestia, urgencia alta, lenguaje agresivo → ESCALAR.
+- ≥2 intercambios sin resolver la consulta → ESCALAR, no insistas más.
+- Dato faltante (producto/dirección) confirmado pero sigue sin resolver → ESCALAR.
+- Pregunta sin respuesta en catálogo ni KB, no inventar → ESCALAR.
+- Al escalar: mensaje corto y cálido. Ej: "Te paso con un asesor que te ayudará de inmediato."
+
+ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
+- No presiones al usuario con preguntas transaccionales bruscas ("¿Lo agregas a tu compra?", "¿Te lo facturo?"). Solo responde su duda y termina tu frase de forma amable o abierta ("¿Tienes alguna otra duda sobre el producto?").
+- Si el usuario dice explícitamente que quiere comprar, pregúntale "¿A qué ciudad te gustaría que lo enviemos para buscar el costo de envío?".
+- SIEMPRE COTIZA EL ENVÍO (haciendo uso de la herramienta de cotización de envíos) ANTES de pedir datos personales.
+- Cuando cotices el envío, dale a elegir las opciones.
+- Una vez el usuario elija un tipo de envío, NO pidas todos los datos personales en un solo mensaje gigante.
+- FLUJO PASO A PASO (Obligatorio, sigue el orden y no pidas la siguiente hasta tener la anterior):
+  Paso 1. (Si CONSENTIMIENTO=NO): Pide primero la autorización con el texto legal de consent_template.
+  Paso 2. (Si CONSENTIMIENTO=SI y no tienes el nombre): Pide *Únicamente* su Nombre Completo.
+  Paso 3. (Si tienes el nombre y no tienes dirección): Pide su Dirección de Entrega detallada (pregunta si vive en Casa o Apartamento, para asegurar que incluya torre y número, además del barrio).
+  Paso 4. Ya teniendo Name, Address y City, confirmas el envío y te despides...
+- Para el campo dirección en Colombia: la información mínima es calle y ciudad. Acéptalo si está claro.
+- IMPORTANTÍSIMO SOBRE HERRAMIENTAS: NO llames a la herramienta de cotizar envíos si estás pasados los pasos comerciales (Paso 2 o Paso 3). ¡Existen apellidos (como Garzón) y nombres de calles que también son nombres de ciudades en Colombia y la herraminta fallará el flujo!
+- IMPORTANTE: Si un usuario escupe todos sus datos de golpe (Nombre + Dirección + Ciudad), sé inteligente, captúralos en las variables (extracted_name, extracted_address) y brinca directamente al Paso 4. No lo fuerces al paso a paso si ya te dio la info.
+
+CONSENTIMIENTO DE DATOS (Ley 1581 de 2012, Colombia):
+- Si el CONTEXTO SISTEMA indica CONSENTIMIENTO=NO y estás por solicitar nombre o dirección:
+  USA EXACTAMENTE este texto (no lo modifiques):
+  "{consent_template}"
+- Si el CONTEXTO SISTEMA indica CONSENTIMIENTO=SI, puedes solicitar nombre y dirección directamente.
+- Cuando pidas la dirección, exige explícitamente que especifiquen si es casa o apartamento (para forzar torre y apto) y el barrio correspondiente.
+- Si el cliente escribe "eliminar mis datos", indica que sus datos serán eliminados (el sistema lo hará automáticamente).
+
+FORMATO WhatsApp (aplica a TODOS los mensajes):
+- Usa saltos de línea (\n) para separar ideas diferentes. Nunca pongas toda la respuesta en una sola línea si contiene más de 2 puntos.
+- Para listas o pasos, usa viñetas: "• item"
+- Usa *texto* para destacar valores importantes (total, precio).
+
 CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{variant_section}{kb_section}
 
@@ -459,8 +663,18 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
   "response_text": "texto escrito o null",
   "confidence": 0.0-1.0,
   "requires_human": true/false,
-  "intent_detected": "product_inquiry|order_status|complaint|greeting|off_topic|other"
+  "intent_detected": "product_inquiry|order_status|complaint|greeting|off_topic|order_acknowledgment|other",
+  "extracted_name": "Nombre Cliente o null",
+  "extracted_direction": {{
+    "street": "Calle o carrera principal o null",
+    "number": "Apto, torre o número de casa o null",
+    "city": "Ciudad y barrio o null"
+  }}
 }}"""
+# IMPORTANTE: Cuando el cliente da su dirección, agrúpala y estructúrala en el JSON de extracted_direction.
+# Cuando el cliente da nombre o dirección, extráelos tal cual en extracted_name y extracted_direction.
+# Cuando el cliente da nombre + dirección → intent=order_acknowledgment, should_respond=true, requires_human=true.
+# Cuando confirmas la orden → SIEMPRE generar response_text con la confirmación "Te paso con un asesor para el link de pago Wompi", NUNCA null.
 
 
 def _build_user_context(history: list[dict], new_message: str) -> str:
@@ -561,6 +775,50 @@ async def build_and_run_orchestration(
             )
             return
 
+        # Estado de pedido determinístico: responde con datos reales de la DB.
+        # No delega al LLM para evitar inventar estados transaccionales.
+        order_status_result = await handle_order_status_if_applicable(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            query_text=content,
+        )
+        if order_status_result.handled:
+            if order_status_result.response_text:
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=order_status_result.response_text,
+                )
+            if order_status_result.requires_human:
+                _set_conversation_status(
+                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+                )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            return
+
+        # Smalltalk deterministico: evita escalaciones innecesarias por LLM
+        # en saludos/agradecimientos de muy bajo riesgo.
+        smalltalk_intent = _detect_deterministic_smalltalk_intent(content)
+        if smalltalk_intent:
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=_deterministic_smalltalk_response(smalltalk_intent),
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            return
+
         # ── 1. Resolver datos del tenant ──────────────────────────────────────
         tenant_res = supabase.table("tenants").select("name").eq("id", tenant_id).execute()
         tenant_name = tenant_res.data[0]["name"] if tenant_res.data else "Tienda"
@@ -590,6 +848,29 @@ async def build_and_run_orchestration(
         except Exception as ce:
             logger.warning(f"[CONTACT] No se pudo upsert contacto: {ce}")
 
+        # ── 1.6 Fetch contact_id + consent_given para flow de consentimiento ────
+        contact_id: Optional[str] = None
+        contact_consent_given: bool = False
+        try:
+            if customer_phone_raw:
+                phone_norm = re.sub(r"[\s+]", "", customer_phone_raw)
+                phone_plus = f"+{phone_norm}"
+                phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
+                c_res = (
+                    supabase.table("contacts")
+                    .select("id, consent_given")
+                    .eq("tenant_id", tenant_id)
+                    .or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus},phone.eq.{phone_space}")
+                    .order("name", nullsfirst=False)
+                    .limit(1)
+                    .execute()
+                )
+                if c_res.data:
+                    contact_id = c_res.data[0]["id"]
+                    contact_consent_given = bool(c_res.data[0]["consent_given"])
+        except Exception as ce:
+            logger.warning("[CONTACT] No se pudo fetch contact_id: %s", ce)
+
         # ── 2. Obtener catálogo, RAG KB, historial y Config. AI ───────────────
         catalog, kb_docs, history, ai_agent = await __import__('asyncio').gather(
             get_tenant_catalog(supabase, tenant_id),
@@ -599,6 +880,53 @@ async def build_and_run_orchestration(
         )
         kb_text = format_kb_for_prompt(kb_docs)
 
+        # ── 2.5 Detección determinística de revocación (ANTES del LLM) ─────────
+        # Prioridad máxima: el titular siempre puede revocar el consentimiento.
+        if _detect_revocation_intent(content):
+            if contact_id:
+                _record_consent(supabase, contact_id, tenant_id, given=False, conversation_id=conversation_id)
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Tus datos personales han sido eliminados de nuestros registros. "
+                    "Si en un futuro deseas volver a registrarte, puedes hacerlo cuando quieras. "
+                    "Seguiré ayudándote con tu consulta sin guar dar información personal."
+                ),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
+            return
+
+        # ── 2.6 Respuesta de consentimiento (ANTES del LLM) ───────────────────
+        # Si el último mensaje del bot fue la pregunta de consentimiento, el
+        # cliente está respondiendo Sí/No — manejarlo determinísticamente.
+        recent_history_for_consent = history[-4:] if history else []
+        if contact_id and _last_outbound_was_consent_question(recent_history_for_consent):
+            if _detect_consent_yes(content):
+                _record_consent(supabase, contact_id, tenant_id, given=True, conversation_id=conversation_id)
+                contact_consent_given = True
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text="¡Gracias! Tus datos han quedado registrados. ¿Cuál es tu nombre completo y dirección de entrega?",
+                )
+                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                logger.info("[CONSENT] Aceptado | conversation=%s contact=%s", conversation_id, contact_id)
+                return
+            elif _detect_consent_no(content):
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text="Entendido, continuaremos sin guardar tus datos personales. ¿En qué más te puedo ayudar?",
+                )
+                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
+                return
+
         # ── 3. Construir prompts ───────────────────────────────────────────────
         system_prompt = _build_system_prompt(
             catalog=catalog,
@@ -607,6 +935,7 @@ async def build_and_run_orchestration(
             ai_agent=ai_agent,
             query_text=content,
             history=history[:-1] if history else [],
+            consent_given=contact_consent_given,
         )
         user_context = _build_user_context(history, content)
 
@@ -635,6 +964,23 @@ async def build_and_run_orchestration(
             f"requires_human={parsed.requires_human}"
         )
 
+        # Salvaguarda: si LLM pide takeover en un saludo/agradecimiento simple,
+        # degradamos a respuesta determinística para evitar escalamientos espurios.
+        if parsed.requires_human:
+            smalltalk_intent = _detect_deterministic_smalltalk_intent(content)
+            if smalltalk_intent:
+                parsed.requires_human = False
+                parsed.should_respond = True
+                parsed.intent_detected = "greeting"
+                parsed.response_text = parsed.response_text or _deterministic_smalltalk_response(
+                    smalltalk_intent
+                )
+                logger.warning(
+                    "[ORCH] requires_human ignorado para smalltalk de bajo riesgo "
+                    "(intent=%s). Se responde automáticamente.",
+                    smalltalk_intent,
+                )
+
         # ── 6. Guardrails ─────────────────────────────────────────────────────
         is_safe = validate_orchestrator_output(parsed)
         if not is_safe:
@@ -662,6 +1008,35 @@ async def build_and_run_orchestration(
                 supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
             )
             logger.info(f"[ESCALATION] Conversación {conversation_id} marcada para agente humano")
+
+        # ── 8.5 Actualizar datos del contacto ─────────────────────────────────
+        if contact_id and (parsed.extracted_name or parsed.extracted_direction):
+            update_data = {}
+            if parsed.extracted_name:
+                update_data["name"] = parsed.extracted_name
+            if parsed.extracted_direction:
+                # Enriquecer con Estado y Código DANE para que la UI los muestre bien
+                dane_city = parsed.extracted_direction.get("city", "")
+                if dane_city:
+                    try:
+                        from tools.shipping_quote_tool import _resolve_destination_from_query
+                        dest, _ = _resolve_destination_from_query(dane_city)
+                        if dest:
+                            parsed.extracted_direction["city"] = dest["city"]
+                            parsed.extracted_direction["state"] = dest["state"]
+                            parsed.extracted_direction["country"] = "CO"
+                            parsed.extracted_direction["dane_code"] = dest["dane_code"]
+                    except Exception as e:
+                        logger.warning(f"[CONTACT USYNC] Error en DANE lookup: {e}")
+                
+                update_data["address"] = parsed.extracted_direction
+            
+            if update_data:
+                try:
+                    supabase.table("contacts").update(update_data).eq("id", contact_id).execute()
+                    logger.info(f"[CONTACT USYNC] Actualizado {contact_id} con {update_data}")
+                except Exception as ex:
+                    logger.warning(f"[CONTACT USYNC] Error actualizando contacto: {ex}")
 
         # ── 9. Marcar mensaje como procesado ──────────────────────────────────
         _mark_message_processing(

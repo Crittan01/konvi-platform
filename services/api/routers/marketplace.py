@@ -113,7 +113,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
                         for v in meli_variations if v.get("id")
                     ]
                 else:
-                    variations_for_put = meli_variations
+                    variations_for_put = [{"id": v["id"]} for v in meli_variations if v.get("id")]
 
             await update_item_listing(external_id, new_qty, price, original_price, access_token, variations_for_put)
         else:
@@ -520,7 +520,7 @@ async def sync_stock_from_supabase(
                     for v in meli_variations if v.get("id")
                 ]
             else:
-                variations_for_put = meli_variations
+                variations_for_put = [{"id": v["id"]} for v in meli_variations if v.get("id")]
 
         try:
             await update_item_listing(external_id, current_stock, price, original_price, access_token, variations_for_put)

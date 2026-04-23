@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "fallback-dev-token")
+META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "")
 
 @router.get("/webhook")
 async def verify_webhook(
@@ -23,6 +23,10 @@ async def verify_webhook(
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
+
+    if not META_VERIFY_TOKEN:
+        logger.error("META_VERIFY_TOKEN no configurado en runtime")
+        raise HTTPException(status_code=503, detail="META_VERIFY_TOKEN no configurado")
 
     if mode and token:
         if mode == "subscribe" and token == META_VERIFY_TOKEN:

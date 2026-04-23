@@ -2,11 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Store, ExternalLink } from 'lucide-react'
 import MarketplaceManager from './_components/marketplace-manager'
-
-const API_URL =
-  process.env.API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'https://commerce-ops-api.onrender.com'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 export default async function MarketplacePage() {
   const supabase = createClient()
@@ -62,7 +58,7 @@ export default async function MarketplacePage() {
   let marketplaceLoadError: string | null = null
 
   try {
-    const res = await fetch(`${API_URL}/api/v1/marketplace/listings`, {
+    const res = await fetch(`${CORE_API_URL}/api/v1/marketplace/listings`, {
       headers: { 'Authorization': `Bearer ${session?.access_token}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(12000),

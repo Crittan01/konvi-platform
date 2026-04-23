@@ -93,13 +93,23 @@ importers:
   packages/auth:
     dependencies:
       '@supabase/ssr':
-        specifier: latest
+        specifier: ^0.10.0
         version: 0.10.0(@supabase/supabase-js@2.101.1)
       '@supabase/supabase-js':
-        specifier: latest
+        specifier: ^2.101.1
         version: 2.101.1
 
+  packages/config: {}
+
   packages/db: {}
+
+  packages/observability: {}
+
+  packages/shared-types: {}
+
+  packages/test-utils: {}
+
+  packages/ui: {}
 
 packages:
 

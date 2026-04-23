@@ -39,6 +39,14 @@ type Props = {
 
 const ITEMS_PER_PAGE = 30
 
+// Mismo formato que Inbox: +57 312 583 5649
+const formatPhone = (raw: string): string => {
+  const digits = (raw || '').replace(/\D/g, '')
+  if (digits.startsWith('57') && digits.length === 12)
+    return `+57 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`
+  return digits ? `+${digits}` : (raw || '')
+}
+
 export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
@@ -258,7 +266,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           )}
                         </div>
                         <p className="text-xs font-mono text-muted-foreground">
-                          {c.phone.startsWith('+57') ? <><span className="text-muted-foreground/60">+57 </span>{c.phone.slice(3)}</> : c.phone}
+                          {formatPhone(c.phone)}
                         </p>
                         {c.notes && <p className="text-xs text-muted-foreground mt-0.5 italic">{c.notes}</p>}
                         {(c.consent_source || c.consent_notice_version) && (

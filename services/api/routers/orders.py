@@ -50,6 +50,10 @@ class OrderCreate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=1200)
     shipping_cost: float = Field(default=0.0, ge=0.0, le=999999999.0)
     items: List[OrderItemCreate] = Field(..., min_length=1)
+    # Si True, el pedido se crea en 'pending' y se confirma de inmediato
+    # (usa el mismo flujo de decremento de stock que PATCH status=confirmed).
+    # Usado por el flujo de creación desde Inbox (agente humano con contexto completo).
+    auto_confirm: bool = Field(default=False)
 
 
 class OrderPatch(BaseModel):
@@ -164,6 +168,24 @@ async def create_order(
         supabase.table("order_items").insert(items_data).execute()
 
         response_body = {**order_result.data[0], "items": items_data}
+
+        # Confirmar de inmediato si el frontend lo solicita (Inbox flow)
+        if order.auto_confirm:
+            try:
+                (
+                    supabase.table("orders")
+                    .update({"status": "confirmed"})
+                    .eq("id", order_id)
+                    .eq("tenant_id", tenant_id)
+                    .execute()
+                )
+                _decrement_stock_on_confirm(supabase, order_id, tenant_id)
+                response_body["status"] = "confirmed"
+                logger.info("Pedido %s auto-confirmado desde Inbox (stock decrementado)", order_id)
+            except Exception as ce:
+                logger.error("Error auto-confirmando pedido %s: %s", order_id, ce)
+                # No fallar la creación — el pedido quedó en pending
+
         finalize_idempotency(
             supabase=supabase,
             tenant_id=tenant_id,

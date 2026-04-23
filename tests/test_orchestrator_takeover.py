@@ -190,6 +190,141 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         send_msg.assert_awaited_once()
         self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
 
+    async def test_simple_greeting_short_circuits_llm(self):
+        supabase = MagicMock()
+
+        def table_side_effect(name):
+            if name == "conversations":
+                return _Query([{"customer_phone": "573001112233"}])
+            if name == "messages":
+                return _Query([{"id": "out-greet-1"}])
+            return _Query([])
+
+        supabase.table.side_effect = table_side_effect
+
+        with (
+            patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(
+                orchestrator,
+                "handle_shipping_quote_if_applicable",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(
+                    handled=False,
+                    response_text=None,
+                    requires_human=False,
+                ),
+            ),
+            patch.object(orchestrator, "_get_genai_client") as genai_client,
+            patch.object(orchestrator, "_mark_message_processing") as mark_processing,
+            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock, return_value=True) as send_msg,
+        ):
+            await orchestrator.build_and_run_orchestration(
+                supabase=supabase,
+                message_id="m-greet-1",
+                tenant_id="t-1",
+                conversation_id="c-1",
+                content="Hola",
+                content_type="text",
+            )
+
+        genai_client.assert_not_called()
+        send_msg.assert_awaited_once()
+        self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
+
+    async def test_acknowledgement_short_circuits_llm(self):
+        supabase = MagicMock()
+
+        def table_side_effect(name):
+            if name == "conversations":
+                return _Query([{"customer_phone": "573001112233"}])
+            if name == "messages":
+                return _Query([{"id": "out-ack-1"}])
+            return _Query([])
+
+        supabase.table.side_effect = table_side_effect
+
+        with (
+            patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(
+                orchestrator,
+                "handle_shipping_quote_if_applicable",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(
+                    handled=False,
+                    response_text=None,
+                    requires_human=False,
+                ),
+            ),
+            patch.object(orchestrator, "_get_genai_client") as genai_client,
+            patch.object(orchestrator, "_mark_message_processing") as mark_processing,
+            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock, return_value=True) as send_msg,
+        ):
+            await orchestrator.build_and_run_orchestration(
+                supabase=supabase,
+                message_id="m-ack-1",
+                tenant_id="t-1",
+                conversation_id="c-1",
+                content="Muchas gracias",
+                content_type="text",
+            )
+
+        genai_client.assert_not_called()
+        send_msg.assert_awaited_once()
+        self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
+
+    async def test_smalltalk_safeguard_ignores_llm_requires_human(self):
+        supabase = MagicMock()
+
+        def table_side_effect(name):
+            if name == "tenants":
+                return _Query([{"name": "Tenant Test"}])
+            if name == "conversations":
+                return _Query([{"customer_phone": "573001112233"}])
+            if name == "contacts":
+                return _Query([])
+            if name == "messages":
+                return _Query([{"id": "out-guard-1"}])
+            return _Query([])
+
+        supabase.table.side_effect = table_side_effect
+
+        fake_client = MagicMock()
+        fake_client.models.generate_content.return_value = types.SimpleNamespace(
+            text='{"should_respond": true, "response_text": null, "confidence": 0.9, "requires_human": true, "intent_detected": "other"}'
+        )
+
+        with (
+            patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(
+                orchestrator,
+                "handle_shipping_quote_if_applicable",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(handled=False, response_text=None, requires_human=False),
+            ),
+            patch.object(orchestrator, "_detect_deterministic_smalltalk_intent", side_effect=[None, "greeting"]),
+            patch.object(orchestrator, "get_tenant_catalog", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "get_tenant_kb_rag", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "_get_conversation_history", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "_get_tenant_ai_agent", new_callable=AsyncMock, return_value={"name": "Bot", "role_description": "Ayuda", "strict_guardrails": False}),
+            patch.object(orchestrator, "format_kb_for_prompt", return_value=""),
+            patch.object(orchestrator, "_get_genai_client", return_value=fake_client),
+            patch.object(orchestrator, "_set_conversation_status") as set_status,
+            patch.object(orchestrator, "_mark_message_processing") as mark_processing,
+            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock, return_value=True) as send_msg,
+        ):
+            await orchestrator.build_and_run_orchestration(
+                supabase=supabase,
+                message_id="m-guard-1",
+                tenant_id="t-1",
+                conversation_id="c-1",
+                content="Hola bot",
+                content_type="text",
+            )
+
+        send_msg.assert_awaited_once()
+        set_status.assert_not_called()
+        self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
+
     async def test_shipping_quote_can_escalate_human_takeover(self):
         supabase = MagicMock()
 

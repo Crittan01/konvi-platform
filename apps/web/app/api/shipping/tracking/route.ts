@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
-
-const API_URL = process.env.API_URL ?? 'https://commerce-ops-api.onrender.com'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 export async function POST(req: NextRequest) {
   const supabase = createClient()
@@ -23,7 +22,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'Payload inválido' }, { status: 400 })
   }
 
-  const upstream = await fetch(`${API_URL}/api/v1/shipping/tracking`, {
+  const upstream = await fetch(`${CORE_API_URL}/api/v1/shipping/tracking`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
