@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, get_current_role
+from vault_helper import VaultHelper
 from dependencies.plans import PLAN_INTEGRATIONS_MELI
 from integrations import meli_client
 
@@ -99,14 +100,33 @@ async def connect_envia(
     if role != "owner":
         raise HTTPException(status_code=403, detail="Solo el owner puede conectar integraciones")
     try:
+        vault = VaultHelper(supabase)
+
+        # Leer secret_id existente para actualizar en lugar de crear uno nuevo
+        existing = (
+            supabase.table("tenant_integrations")
+            .select("credentials")
+            .eq("tenant_id", tenant_id).eq("provider", "envia")
+            .maybe_single().execute()
+        )
+        existing_creds = (existing.data or {}).get("credentials", {})
+        existing_sid = existing_creds.get("api_token_secret_id")
+
+        if existing_sid:
+            vault.update_secret(existing_sid, body.api_token)
+            secret_id = existing_sid
+        else:
+            secret_id = vault.create_secret(
+                body.api_token, f"{tenant_id}/envia/api_token", "Envia API token"
+            )
+        if not secret_id:
+            raise HTTPException(status_code=500, detail="Error cifrando API key en Vault")
+
         result = supabase.table("tenant_integrations").upsert({
             "tenant_id": tenant_id,
             "provider": "envia",
             "status": "connected",
-            "credentials": {
-                "api_token": body.api_token,
-                "sandbox": body.sandbox,
-            },
+            "credentials": {"api_token_secret_id": secret_id, "sandbox": body.sandbox},
             "meta": {
                 "token_preview": _mask_token(body.api_token),
                 "environment": "sandbox" if body.sandbox else "production",
@@ -117,7 +137,7 @@ async def connect_envia(
             raise HTTPException(status_code=500, detail="Error al guardar integración")
 
         data = result.data[0]
-        data.pop("credentials", None)  # No retornar credenciales
+        data.pop("credentials", None)
         return data
     except HTTPException:
         raise
@@ -132,12 +152,17 @@ async def disconnect_envia(
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
 ):
-    """Desconecta Envia borrando credenciales. Solo owner."""
+    """Desconecta Envia borrando credenciales y el secreto en Vault. Solo owner."""
     if role != "owner":
         raise HTTPException(status_code=403, detail="Solo el owner puede desconectar integraciones")
+    creds_res = (
+        supabase.table("tenant_integrations").select("credentials")
+        .eq("tenant_id", tenant_id).eq("provider", "envia").maybe_single().execute()
+    )
+    creds = (creds_res.data or {}).get("credentials", {})
+    VaultHelper(supabase).delete_secret(creds.get("api_token_secret_id"))
     supabase.table("tenant_integrations").update({
-        "status": "disconnected",
-        "credentials": {},
+        "status": "disconnected", "credentials": {},
     }).eq("tenant_id", tenant_id).eq("provider", "envia").execute()
 
 
@@ -195,21 +220,49 @@ async def meli_oauth_callback(
     try:
         expires_in = token_data.get("expires_in", 21600)
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+        vault = VaultHelper(supabase)
+
+        # Leer secret_ids existentes para update-or-create
+        existing = (
+            supabase.table("tenant_integrations").select("credentials")
+            .eq("tenant_id", tenant_id).eq("provider", "mercadolibre")
+            .maybe_single().execute()
+        )
+        existing_creds = (existing.data or {}).get("credentials", {})
+
+        at = token_data.get("access_token", "")
+        rt = token_data.get("refresh_token", "")
+
+        at_sid = existing_creds.get("access_token_secret_id")
+        rt_sid = existing_creds.get("refresh_token_secret_id")
+
+        if at_sid:
+            vault.update_secret(at_sid, at)
+        else:
+            at_sid = vault.create_secret(at, f"{tenant_id}/meli/access_token", "MeLi access token")
+
+        if rt_sid:
+            vault.update_secret(rt_sid, rt)
+        else:
+            rt_sid = vault.create_secret(rt, f"{tenant_id}/meli/refresh_token", "MeLi refresh token")
+
+        if not at_sid:
+            return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?error=vault_failed")
 
         supabase.table("tenant_integrations").upsert({
             "tenant_id": tenant_id,
             "provider": "mercadolibre",
             "status": "connected",
             "credentials": {
-                "access_token":  token_data.get("access_token"),
-                "refresh_token": token_data.get("refresh_token"),
-                "expires_in":    expires_in,
-                "expires_at":    expires_at,
+                "access_token_secret_id":  at_sid,
+                "refresh_token_secret_id": rt_sid,
+                "expires_in":  expires_in,
+                "expires_at":  expires_at,
             },
             "meta": {
-                "user_id":     str(token_data.get("user_id", "")),
-                "scope":       token_data.get("scope", ""),
-                "token_type":  token_data.get("token_type", "Bearer"),
+                "user_id":    str(token_data.get("user_id", "")),
+                "scope":      token_data.get("scope", ""),
+                "token_type": token_data.get("token_type", "Bearer"),
             },
         }, on_conflict="tenant_id,provider").execute()
     except Exception as e:
@@ -233,28 +286,27 @@ async def disconnect_meli(
     if role != "owner":
         raise HTTPException(status_code=403, detail="Solo el owner puede desconectar integraciones")
 
-    # Leer access_token antes de borrar para poder revocarlo en MeLi
     creds_res = (
-        supabase.table("tenant_integrations")
-        .select("credentials")
-        .eq("tenant_id", tenant_id)
-        .eq("provider", "mercadolibre")
-        .maybe_single()
-        .execute()
+        supabase.table("tenant_integrations").select("credentials")
+        .eq("tenant_id", tenant_id).eq("provider", "mercadolibre")
+        .maybe_single().execute()
     )
-    access_token = (creds_res.data or {}).get("credentials", {}).get("access_token")
+    creds = (creds_res.data or {}).get("credentials", {})
+    vault = VaultHelper(supabase)
 
-    # Revocar en MeLi — fallo silencioso (token puede ya estar expirado)
+    # Leer access_token desde Vault para poder revocarlo en MeLi
+    access_token = vault.read_secret(creds.get("access_token_secret_id"))
     if access_token:
         try:
             await meli_client.revoke_token(access_token)
         except Exception as e:
-            logger.warning("No se pudo revocar token MeLi tenant %s: %s — se limpia localmente de todas formas", tenant_id, e)
+            logger.warning("No se pudo revocar token MeLi tenant %s: %s", tenant_id, e)
 
-    # Limpiar localmente siempre
+    # Eliminar secretos de Vault
+    vault.delete_secret(creds.get("access_token_secret_id"))
+    vault.delete_secret(creds.get("refresh_token_secret_id"))
+
     supabase.table("tenant_integrations").update({
-        "status": "disconnected",
-        "credentials": {},
-        "meta": {},
+        "status": "disconnected", "credentials": {}, "meta": {},
     }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
     logger.info("MeLi desconectado para tenant %s", tenant_id)

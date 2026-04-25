@@ -13,11 +13,12 @@ Endpoints:
   PUT    /api/v1/settings/notifications/{ch}  — upsert config canal     [owner, manager]
 """
 import logging
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_owner_role, require_write_role
+from vault_helper import VaultHelper
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Settings"])
@@ -30,7 +31,7 @@ VALID_ROLES = {"owner", "manager", "operator"}
 class ShippingOrigin(BaseModel):
     name: Optional[str] = None           # Nombre del remitente
     company: Optional[str] = None        # Nombre de la empresa
-    street: Optional[str] = None         # Calle y número
+    street: Optional[str] = None         # Dirección
     city: Optional[str] = None           # Ciudad
     state: Optional[str] = None          # Estado / departamento
     postal_code: Optional[str] = None    # Código postal
@@ -38,10 +39,38 @@ class ShippingOrigin(BaseModel):
     phone: Optional[str] = None          # Teléfono de contacto
 
 
+class SocialLinks(BaseModel):
+    instagram: Optional[str] = None
+    facebook:  Optional[str] = None
+    tiktok:    Optional[str] = None
+    youtube:   Optional[str] = None
+    website:   Optional[str] = None
+
+
+class StoreLocation(BaseModel):
+    name:   Optional[str] = None   # Nombre de la sede, ej: "Sede Principal"
+    city:   Optional[str] = None   # Ciudad
+    state:  Optional[str] = None   # Departamento
+    street: Optional[str] = None   # Dirección
+
+
 class TenantPatch(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1)
-    meta_waba_id: Optional[str] = None
-    shipping_origin: Optional[ShippingOrigin] = None
+    name:               Optional[str] = Field(default=None, min_length=1)
+    meta_waba_id:       Optional[str] = None
+    shipping_origin:    Optional[ShippingOrigin] = None
+    store_type:         Optional[Literal["fisica", "virtual", "fisica_virtual"]] = None
+    social_links:       Optional[SocialLinks] = None
+    store_locations:    Optional[list[StoreLocation]] = None
+    business_hours:     Optional[str] = None
+    # Campos de identidad — ahora editables vía API además de via UI
+    nit:                Optional[str] = None
+    email_contacto:     Optional[str] = Field(
+        default=None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    )
+    telefono_contacto:  Optional[str] = Field(
+        default=None, pattern=r'^3[0-9]{9}$'
+    )
+    low_stock_threshold: Optional[int] = Field(default=None, ge=1, le=999)
 
 
 class TeamRolePatch(BaseModel):
@@ -68,7 +97,9 @@ async def get_tenant(
     try:
         result = (
             supabase.table("tenants")
-            .select("id, name, status, meta_waba_id, shipping_origin, logo_url, created_at")
+            .select("id, name, status, meta_waba_id, shipping_origin, logo_url, "
+                    "store_type, social_links, store_locations, business_hours, "
+                    "nit, email_contacto, telefono_contacto, low_stock_threshold, created_at")
             .eq("id", tenant_id)
             .single()
             .execute()
@@ -90,12 +121,23 @@ async def patch_tenant(
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_owner_role),
 ):
-    """Edita nombre o WABA ID del tenant. Solo owner."""
+    """Actualiza campos del tenant. Solo owner.
+    Soporta: name, meta_waba_id, shipping_origin, store_type, social_links,
+    store_locations, business_hours, nit, email_contacto, telefono_contacto,
+    low_stock_threshold."""
     try:
         raw = patch.model_dump()
-        # Serializar shipping_origin a dict si es un objeto Pydantic
+        # Serializar objetos Pydantic anidados a dict
         if raw.get("shipping_origin") is not None:
             raw["shipping_origin"] = {k: v for k, v in raw["shipping_origin"].items() if v is not None}
+        if raw.get("social_links") is not None:
+            raw["social_links"] = {k: v for k, v in raw["social_links"].items() if v is not None}
+        if raw.get("store_locations") is not None:
+            raw["store_locations"] = [
+                {k: v for k, v in loc.items() if v is not None}
+                for loc in raw["store_locations"]
+                if any(v for v in loc.values() if v)
+            ]
         data = {k: v for k, v in raw.items() if v is not None}
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
@@ -225,11 +267,45 @@ async def upsert_notification(
     if channel not in ("telegram", "email"):
         raise HTTPException(status_code=422, detail="Canal inválido. Válidos: telegram, email")
     try:
+        config = dict(cfg.config)
+
+        # Telegram: cifrar bot_token en Vault si viene en texto plano
+        if channel == "telegram" and config.get("bot_token"):
+            vault = VaultHelper(supabase)
+            existing_res = (
+                supabase.table("notification_settings").select("config")
+                .eq("tenant_id", tenant_id).eq("channel", "telegram")
+                .maybe_single().execute()
+            )
+            existing_sid = (existing_res.data or {}).get("config", {}).get("bot_token_secret_id")
+            if existing_sid:
+                vault.update_secret(existing_sid, config["bot_token"])
+                secret_id = existing_sid
+            else:
+                secret_id = vault.create_secret(
+                    config["bot_token"], f"{tenant_id}/telegram/bot_token", "Telegram bot token"
+                )
+            if secret_id:
+                del config["bot_token"]
+                config["bot_token_secret_id"] = secret_id
+
+        # Si disabled y hay secret_id, eliminar de Vault
+        if channel == "telegram" and not cfg.enabled:
+            vault = VaultHelper(supabase)
+            existing_res = (
+                supabase.table("notification_settings").select("config")
+                .eq("tenant_id", tenant_id).eq("channel", "telegram")
+                .maybe_single().execute()
+            )
+            sid = (existing_res.data or {}).get("config", {}).get("bot_token_secret_id")
+            vault.delete_secret(sid)
+            config = {}
+
         result = supabase.table("notification_settings").upsert({
             "tenant_id": tenant_id,
             "channel": channel,
             "enabled": cfg.enabled,
-            "config": cfg.config,
+            "config": config,
         }, on_conflict="tenant_id,channel").execute()
 
         if not result.data:

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -289,9 +290,9 @@ export function IntegrationsManager(props: Props) {
                           <Label className="text-xs">Token de Acceso (System User)</Label>
                           <Input name="access_token" placeholder="EAABs…" required className="h-8 text-xs font-mono" />
                         </div>
-                        <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-500 text-white">
+                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-500 text-white">
                           <MessageCircle className="h-3.5 w-3.5" /> Conectar WhatsApp
-                        </Button>
+                        </SubmitButton>
                       </form>
                     </>
                   )}
@@ -370,7 +371,7 @@ export function IntegrationsManager(props: Props) {
                           <input type="checkbox" name="sandbox" className="h-3.5 w-3.5 rounded" />
                           <span className="text-xs text-muted-foreground">Usar entorno sandbox (pruebas)</span>
                         </label>
-                        <Button type="submit" size="sm" className="w-full h-8 text-xs">Conectar Envia</Button>
+                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs">Conectar Envia</SubmitButton>
                       </form>
                     </>
                   )}
@@ -552,11 +553,19 @@ export function IntegrationsManager(props: Props) {
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Chat ID del grupo</Label>
-                          <Input name="chat_id" placeholder="***TELEGRAM_CHAT_ID_REDACTED***" required className="h-8 text-xs font-mono" />
+                          <Input
+                            name="chat_id"
+                            placeholder="-1001234567890"
+                            required
+                            pattern="-\d+"
+                            title="El Chat ID de un grupo siempre es un número negativo (ej: -1001234567890)"
+                            className="h-8 text-xs font-mono"
+                          />
+                          <p className="text-[10px] text-muted-foreground">Debe ser un número negativo — los grupos de Telegram siempre tienen ID negativo.</p>
                         </div>
-                        <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5">
+                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs gap-1.5">
                           <Bot className="h-3.5 w-3.5" /> Conectar Telegram
-                        </Button>
+                        </SubmitButton>
                       </form>
                     </>
                   )}

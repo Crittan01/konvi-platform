@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones } from 'lucide-react'
 import { WEB_APP_URL } from '@/lib/runtime-env'
+import RemoveMemberButton from './remove-member-button'
 
 export const metadata = {
   title: 'Usuarios y Acceso — Commerce Ops',
@@ -443,13 +444,11 @@ export default async function TeamPage({
                           <Button type="submit" size="sm" variant="outline" className="text-xs h-7 px-2.5">Cambiar</Button>
                         </form>
                         {m.role !== 'owner' && (
-                          <form action={removeMember}>
-                            <input type="hidden" name="user_id" value={m.user_id} />
-                            <Button type="submit" size="sm" variant="ghost"
-                              className="text-xs h-7 px-2 text-destructive hover:bg-destructive/10">
-                              Eliminar
-                            </Button>
-                          </form>
+                          <RemoveMemberButton
+                            userId={m.user_id}
+                            memberEmail={m.email}
+                            action={removeMember}
+                          />
                         )}
                       </>
                     ) : (

@@ -7,6 +7,7 @@ CONVERSATION_STATUS_HUMAN_TAKEOVER: Final[str] = "human_takeover"
 CONVERSATION_STATUS_CLOSED: Final[str] = "closed"
 
 PROCESSING_STATUS_PENDING: Final[str] = "pending"
+PROCESSING_STATUS_PROCESSING: Final[str] = "processing"
 PROCESSING_STATUS_PROCESSED: Final[str] = "processed"
 PROCESSING_STATUS_SKIPPED: Final[str] = "skipped"
 PROCESSING_STATUS_FAILED: Final[str] = "failed"

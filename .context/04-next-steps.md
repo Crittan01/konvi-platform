@@ -1,4 +1,30 @@
-# Próximos Pasos — Estado 2026-04-23
+# Próximos Pasos — Estado 2026-04-25
+
+## Cierre sesión actual (2026-04-25, rev. 57)
+
+- ✅ Cerrado: CxD + FSM hardening completo (ver `.context/01-state.md` rev. 57 para detalle).
+- ✅ Cerrado: E2E simulado Inbox→Wompi completo (164 unit tests + UAT script 10/10 checks).
+- ✅ Cerrado: humanización de nombre (primer nombre en conversación, completo en resumen).
+- ✅ Cerrado: carrier selection sin falsos positivos.
+- ✅ Cerrado: totales verificados desde DB antes del link de pago.
+- ✅ Cerrado: catálogo condicional (optimización ~30-45% tokens en estados de recolección de datos).
+- ✅ Cerrado: cierre correctivo completo rev. 60 (ver 01-state.md).
+- ✅ Cerrado: R-01 a R-04, R-05, R-07, R-09, R-10, R-12 (ver rev. 58 y 59).
+- ✅ Cerrado rev. 61: migración distributed_rate_limiter aplicada, R-11, R-15, R-18, ANTI_HIBERNATION.
+- ✅ Cerrado rev. 62: F1 (Wompi retry), F2 (Tracking bot), F3A (Timeout 24h), F3B (Cancelar), F4 (R-13 product snapshot).
+- ✅ Cerrado rev. 63: F5 (Ticket claims automático), F6 (Telegram bidireccional /resolver).
+- ⏭️ Pendiente inmediato:
+  - INTERVENCION HUMANA: configurar `ANTI_HIBERNATION_PING_URL` en Render Dashboard (URLs /health de api + connector + orchestrator, separadas por coma).
+  - Validar con tráfico real de WhatsApp en sandbox con número whitelisted (+573125835649).
+- ⏭️ Backlog (plan de trabajo productivo):
+  - ✅ F5: Ticket automático en claims — implementado (rev. 63).
+  - ✅ F6: Telegram `/resolver` bidireccional — implementado (rev. 63). IH pendiente: setWebhook + TELEGRAM_WEBHOOK_SECRET en Render.
+  - F7: Cart abandonment cron — BLOQUEADO por plantilla Meta aprobada (IH: Meta Business Manager).
+  - F8: Audio/imagen via Gemini Vision (multimodal nativo — después de estabilidad F1-F5).
+  - R-08: Email alertas takeover (SMTP Resend.com — IH cuenta SMTP).
+  - R-14: Consentimiento LGPD en primer contacto — decisión de producto.
+  - R-16: Refresh automático tokens MeLi — flujo OAuth complejo.
+  - R-17: DANE dinámico desde Envia API.
 
 ## Pendientes reales
 
@@ -18,6 +44,14 @@
    - Prefijos de ambiente `[TEST]` eliminados en todas las capas de respuesta al cliente.
    - TZ Colombia (`America/Bogota`) en frontend y en ETA de envío.
    - Deduplicación de nombre carrier/servicio ("Deprisa Deprisa" → "Deprisa Estandar").
+
+   ### Fase C ✅ IMPLEMENTADA Y CERTIFICADA E2E (2026-04-25, rev. 57)
+   - Gate no-texto con advertencia antes de escalamiento.
+   - Saludo inicial personalizado por nombre.
+   - Carrier selection sin falsos positivos.
+   - READY_FOR_SUMMARY con contexto verificado (totales desde DB).
+   - Payment link bounds-validated.
+   - E2E simulado 10/10 checks OK.
 
    ### Fase C — Pendiente formal (NO abrir hasta gate explícito)
 
@@ -127,98 +161,6 @@
 - Nota: `20260420000001_order_tracking.sql` ya estaba aplicada previamente en DB;
   su ejecución directa devolvió `relation "order_tracking" already exists`.
 
-## No pendientes (cerrado en sesión 2026-04-23)
+---
 
-- **Fix prompt crítico orquestador**: instrucciones de extracción nombre/dirección y cierre de compra (Paso 4) estaban como comentarios Python FUERA del f-string del system prompt — el LLM nunca las recibía. Ahora están dentro del prompt.
-- **Paso 4 explicit**: cláusula de cierre de venta actualizada: confirmar resumen pedido, indicar link de pago vía asesor, marcar `order_acknowledgment` + `requires_human=true`, `response_text` nunca null.
-- **Fix schema JSON `city`**: campo `city` en respuesta del LLM ahora es "solo ciudad" (para DANE lookup). El barrio va explícitamente en `street`.
-- **Fix `extracted_address` → `extracted_direction`**: referencia al nombre correcto del campo en la instrucción del prompt.
-- Validación: 83 tests OK + test construcción de prompt con asserts.
-
-## No pendientes (cerrado en sesión 2026-04-22)
-
-- Inbox variantes: match por referencia/SKU corregido para consultas con etiquetas (`referencia`, `sku`, `codigo`) sin perder coincidencia exacta.
-- Inbox shipping quote: detector de intent endurecido con normalización de acentos y rechazo de frases no cotizables (`tracking`, "te envio ...").
-- Inbox shipping quote: continuidad conversacional de cotización al recibir solo ubicación en mensajes de seguimiento (sin repetir “cuánto cuesta envío”).
-- Inbox shipping quote: consultas cortas de precio+ciudad (`Costo a Medellin?`) ahora activan cotización determinística sin depender de la palabra “envío”.
-- Inbox shipping quote: normalización defensiva de país en origen/destino (`Colombia`/`COL` -> `CO`) para evitar rechazos de Envia por `state` fuera de longitud.
-- Inbox shipping quote: errores técnicos upstream de Envia se sanitizan para cliente final (sin detalle crudo) y no disparan takeover automático salvo falla de configuración.
-- Inbox shipping quote: origen endurecido a `tenants.shipping_origin` (sin fallback implícito por texto libre).
-- Inbox shipping quote: destino recuperable desde contexto conversacional (contacto + mensajes recientes) cuando no viene completo en el último mensaje.
-- Inbox shipping quote: estimación de paquete basada en inventario (`product_variations` peso/dimensiones + cantidad inferida del chat) con fallback default solo cuando faltan datos.
-- Inbox shipping quote: control de ambigüedad multi-producto; si contexto no define producto único, solicita confirmación antes de cotizar.
-- Inbox shipping quote: copy de respuesta reorganizado para decisión comercial rápida (económica/rápida + CTA de continuidad de compra).
-- Certificación técnica Inbox re-ejecutada: fallback oficial (`PASSED=5/FAILED=0`) + smoke runtime local de salud y cambio de estado conversacional (`human_takeover <-> bot_active`) con respuesta `200`.
-- Inbox smalltalk: saludos/agradecimientos simples ahora usan ruta determinística y no escalan por LLM.
-- Inbox guardrail: takeover por `requires_human=true` se ignora para smalltalk de bajo riesgo.
-- KB embeddings: modelo primario alineado a `gemini-embedding-001` con fallback configurable para evitar degradación por `404`.
-- Inbox refresh: `conversations.last_interaction_at` ya se mantiene sincronizado con `messages.created_at` (backfill + trigger DB), evitando que se “pierda” la conversación reciente al recargar.
-- API Conversations: `GET /api/v1/conversations` ahora ordena por `last_interaction_at` (ya no referencia `updated_at` inexistente en tabla `conversations`).
-
-## No pendientes (cerrado en sesión 2026-04-20)
-
-- Marketplace MeLi: fix de sync de variaciones mapeadas (`meli_variation_id`) para no sobrescribir stock por índice.
-- Test de regresión agregado: `tests/test_meli_listing_variations.py`.
-- Sync pull MeLi → Supabase (title/thumbnail/condition/category/attributes/synced_at)
-- Shipment tracking persistido en `order_tracking` (multi-proveedor)
-- Buyer contact creation desde órdenes MeLi (con teléfono si disponible)
-- `get_shipment()` en meli_client + `ITEM_ATTRIBUTES` ampliados
-- UX Mercado Libre: filtros por estado (Todos/Activos/Pausados/Cerrados/Sin vincular)
-- Badge de condición (Nuevo/Usado) en tabla de publicaciones
-- Shipping CO endurecido: normalización runtime `DANE5/8 -> DANE8` para payload de quote en Envia
-- Normalización DANE canónica (5 dígitos) en backend + fix del bug frontend `dane_code + "000"`
-- Sidebar con activación por integración para Inbox/Cotizador/Mercado Libre
-- Sidebar MeLi con badge numérico de atención (consistente con Inbox)
-- Marketplace con estados separados de: desconectado DB / error de carga / reconexión requerida
-- KB con banner funcional de negocio (sin copy técnico de implementación)
-- Ajuste UX mobile en Shipping (grillas/cards sin sobreposición)
-- Manejo robusto de errores Envia `200` con `code/message` sin `data` (ahora se tratan como error real por carrier)
-- Hardening API v1 aplicado:
-  - rate limit por tenant/IP en writes
-  - idempotencia persistente en endpoints sensibles
-  - `Idempotency-Key` propagada desde frontend en flujos críticos
-  - matriz técnica de validaciones/hardening documentada
-- Contactos con contrato legal extendido (fuente/versión/evidencia/revocatoria) en DB/API/UI
-- Workflow operativo de escalamiento humano implementado con Supabase Queues:
-  - trigger DB encola takeover
-  - ai-orchestrator consume cola y notifica por Telegram
-  - canal Email preparado para fase SMTP
-- Workflow outbound humano de Inbox implementado con Supabase Queues:
-  - API encola mensaje outbound (`whatsapp_outbound_messages`)
-  - ai-orchestrator consume cola, envía a Meta y actualiza estado en `messages`
-  - retries controlados + `failed` al superar `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
-- Tiering foundation implementada (Basic/Pro/Enterprise):
-  - catálogo de planes/capabilities y subscription por tenant en DB
-  - enforcement backend real + cuotas en endpoints críticos
-  - telemetría de uso por capability
-  - endpoint `settings/plan-capabilities` + locks UX en sidebar
-- Observabilidad hardening + mantenimiento idempotency implementados:
-  - tabla `api_security_events` (rate-limit + idempotency events)
-  - cleanup manual owner-only vía `settings/maintenance/idempotency-cleanup`
-  - cleanup automático periódico en ai-orchestrator
-- Envia Fase 2 parcial implementada en backend (feature-flag):
-  - `POST /shipping/{shipment_id}/label`
-  - `POST /shipping/tracking`
-  - `POST /shipping/pickup`
-  - `POST /shipping/cancel`
-- Envia Fase 2 conectada en frontend `/dashboard/shipping`:
-  - acciones post-cotización (label/tracking/pickup/cancel)
-  - manejo explícito de `503` cuando `ENVIA_PHASE2_ENABLED=false`
-
-## No pendientes (cerrado en sesión 2026-04-19)
-
-- Contrato único de estados de conversación end-to-end
-- Human takeover efectivo (bot silenciado en runtime)
-- RBAC runtime unificado (`owner/manager/operator`)
-- OAuth MeLi con state firmado + expiración + anti-replay
-- Endpoint MeLi `/auth-url` con error explícito cuando faltan env vars requeridas
-- Credenciales WhatsApp por tenant como única fuente runtime
-- Frontend residual: badge MeLi real + inventory legacy redirigido
-- Inbox ordenado por `last_interaction_at` + estado de error al fallar carga de conversaciones
-- Contrato explícito de procesamiento de mensajes (`processing_status`)
-
-## No pendientes (cerrado en bloque 2026-04-18)
-
-- `shipping_cost` en pedidos: columna DB + backend (`OrderCreate`, cálculo total, INSERT/SELECT) + frontend (formulario cotizador, selección de tarifa, Fase 2 post-cotización)
-- `meli_variation_id` en `marketplace_listings` para sync de variantes MeLi
-- Campos de dirección en `contacts` (`contacts_address` migration)
+> Historial de trabajo completado (sesiones 2026-04-18 al 2026-04-23) archivado en `.context/01-state-archive.md`.

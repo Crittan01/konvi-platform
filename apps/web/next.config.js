@@ -32,7 +32,7 @@ function unique(values) {
 const supabaseOrigin = parseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL)
 const supabaseWsOrigin = toWsOrigin(supabaseOrigin)
 const appOrigin = parseOrigin(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL)
-const apiOrigin = parseOrigin(process.env.NEXT_PUBLIC_API_URL || process.env.API_URL)
+const apiOrigin = parseOrigin(process.env.API_URL)
 const orchestratorOrigin = parseOrigin(process.env.ORCHESTRATOR_URL)
 const connectorOrigin = parseOrigin(process.env.CONNECTOR_URL)
 

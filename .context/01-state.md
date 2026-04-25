@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-23 (rev. 55)
+**Última actualización**: 2026-04-25 (rev. 64)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -11,289 +11,231 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **DB**: ✅ contrato endurecido (43 migraciones)
+- **DB**: ✅ contrato endurecido (50 migraciones — distributed_rate_limiter aplicada)
 
 ---
 
-## Cierre de auditoría doc/código (2026-04-21)
+## Cierre de sesión actual (2026-04-25, rev. 64)
 
-- Se eliminó exposición hardcodeada de `SUPABASE_SERVICE_ROLE_KEY` en `scripts/test-mass-import.mjs` (ahora solo por env).
-- Se sanitizó el remote git local para remover token embebido de URL (`origin` queda en `https://github.com/...`).
-- Inbox frontend quedó alineado a proxy server-side para cambios de estado/envío:
-  - `/api/conversations/{id}/status`
-  - `/api/conversations/{id}/send`
-- Se unificó prioridad de `API_URL` sobre `NEXT_PUBLIC_API_URL` en server code de catálogo/marketplace.
-- Se normalizó arquitectura documental de `packages/`:
-  - `shared-types` y `config` activos mínimos
-  - `observability` preparado con contrato mínimo
-  - `ui` y `test-utils` deferred explícitos
-  - `db` marcado snapshot legacy no canónico
-- Se congeló contrato de entorno:
-  - `.env.example` alineado con variables realmente consumidas por código fuente
-  - `render.yaml` alineado con límites API explícitos (`API_RATE_LIMIT_*`)
-  - docs de deployment/handoff alineados (requeridas, opcionales y local-only)
-- Se formalizó gate de decisión Free -> Pago:
-  - scorecard operativa con triggers, bloqueadores, ventana de evidencia y criterios GO/NO-GO
-  - documento: `docs/deployment/production-readiness-gate.md`
-  - snapshot operativo 2026-04-21 registrado con resultado actual `NO-GO`
-- Se formalizó criterio funcional previo a pagos/infra pago en Inbox:
-  - matriz de intents y certificación por fases A/B/C en `docs/operations/inbox-intents-matrix.md`
-  - preparación documental Wompi (sandbox/prod, llaves/eventos) en `docs/integrations/wompi-prep.md`
-- Fase A Inbox (variantes) avanzó en runtime:
-  - `catalog_tool` ahora inyecta rango de precio, stock total y desglose de variantes al contexto LLM
-  - `orchestrator` muestra variantes explícitas en prompt
-  - `orchestrator` agrega análisis determinístico de coincidencia exacta por variante (color/talla/SKU) para reforzar respuesta o escalar sin inventar
-  - matcher de variantes ahora contempla consultas por `referencia`/`sku` sin falsos negativos por tokens de etiqueta
-  - follow-ups ambiguos (ej. "y en talla L?") ahora usan memoria determinística de corto plazo basada en historial conversacional para detectar producto en contexto
-  - cobertura de regresión añadida en tests (`test_catalog_tool_variants`, `test_orchestrator_catalog_prompt`)
-- Connector WhatsApp ahora preserva contexto webhook inbound en `messages.payload`:
-  - `context.id/from`
-  - metadata de respuestas interactivas (`button_reply`, `list_reply`, `button`)
-  - parseo de lotes webhook (`entry/changes/messages`) para no perder mensajes cuando llegan múltiples en un mismo POST
-  - migración aplicada en linked: `20260421130000_messages_payload_context.sql`
-- Se agregó fallback de certificación técnica para entorno Free (sin depender de UI Render):
-  - script: `scripts/uat/fase_a_free_fallback.sh`
-  - resultado de ejecución en sesión: `PASSED=5`, `FAILED=0` (aprobado técnico)
-- Certificación técnica Inbox (2026-04-22, sesión actual) revalidada:
-  - fallback oficial `scripts/uat/fase_a_free_fallback.sh` en `PASSED=5`, `FAILED=0`
-  - suite adicional Inbox/Shipping (`test_shipping_quote_tool`, `test_orchestrator_catalog_prompt`, `test_orchestrator_takeover`) en verde
-  - smoke runtime local: `api` + `connector` health `200`, y cambio de estado conversacional `human_takeover <-> bot_active` vía proxy web con `200`
-- KB/RAG embeddings endurecido en runtime:
-  - modelo primario configurable `GEMINI_EMBEDDING_MODEL` (default `gemini-embedding-001`)
-  - fallback automático configurable `GEMINI_EMBEDDING_FALLBACK_MODEL` (default `text-embedding-004`) ante `404/not supported`
-  - validación local en sesión: generación de embedding OK (`len=3072`) con modelo vigente
-- Se resolvió bloqueo de `next build` en VM/local:
-  - causa: dependencia de `next/font/google` en build sin salida de red estable
-  - fix: retirar `next/font/google` en `app/layout.tsx` y definir fallback tipográfico local (`--font-inter`) en `globals.css`
-- Shipping quote ahora retorna highlights operativos para decisión rápida:
-  - `highlights.cheapest` (menor `total_price`)
-  - `highlights.fastest` (menor tiempo por `delivery_date` o `delivery_estimate` parseable)
-  - contrato documentado en `docs/integrations/courier-envia.md`
-  - cobertura de regresión añadida en `tests/test_shipping_rate_highlights.py`
-- Inbox Fase B1 avanzó en runtime con cotización determinística:
-  - nuevo tool `shipping_quote_tool` en orquestador (sin depender del LLM para este intent)
-  - usa Core API `POST /api/v1/shipping/quote` con JWT interno de tenant (`SUPABASE_JWT_SECRET`)
-  - responde al cliente con `más económica + más rápida` cuando hay datos suficientes
-  - origen de cotización ahora es estricto desde `tenants.shipping_origin` (sin fallback implícito por texto libre)
-  - destino se resuelve por contexto conversacional real: `contacts.address` y, si falta, recuperación desde mensajes recientes del chat (ciudad/departamento)
-  - estimación de paquete para quote en Inbox usa inventario real (`products` + `product_variations`) cuando hay producto en contexto:
-    - peso/dimensiones por variante (`weight_kg`, `length_cm`, `width_cm`, `height_cm`)
-    - cantidad inferida desde lenguaje natural (`2 unidades`, `x2`, etc.)
-    - fallback controlado a defaults solo cuando faltan datos de catálogo
-  - control de ambigüedad multi-producto: si hay más de un producto plausible en conversación, Inbox pide confirmación explícita antes de cotizar (no adivina producto)
-  - formato de respuesta en chat reorganizado a bloque operativo (origen->destino, paquete estimado, opción económica/rápida) con CTA de cierre de compra
-  - detector de intent de cotización endurecido (normaliza acentos y evita falsos positivos en frases no transaccionales)
-  - consultas cortas tipo `costo a <ciudad>` (sin palabra “envío”) ahora entran por ruta determinística de cotización y evitan escalamiento innecesario a humano
-  - follow-ups conversacionales de destino (`Medellin`, `Antioquia/ Medellin`) ya reingresan al flujo de cotización sin depender de repetir el intent completo
-  - si no hay dirección guardada, intenta resolver ciudad desde texto libre con catálogo DANE local y pide departamento solo cuando la ciudad es ambigua
-  - normalización de país endurecida para shipping (`Colombia`/`COL`/`CO` -> `CO`) en API y tool de Inbox, evitando rechazo de Envia por `state` largo
-  - errores técnicos de Envia ya no se exponen en texto al cliente final en WhatsApp; se mantienen en logs operativos
-  - ante error upstream de cotización, Inbox responde fallback controlado sin takeover automático; takeover se reserva para falta real de configuración (ej. Envia desconectado)
-  - si falta destino/origen, solicita precisión y escala a humano cuando corresponde
-  - cobertura de regresión añadida en `tests/test_shipping_quote_tool.py` y `test_orchestrator_takeover.py`
-- Inbox anti-escalación indebida reforzado:
-  - saludos/agradecimientos simples (`Hola`, `Buenas`, `Gracias`) ahora se resuelven por ruta determinística sin pasar por LLM
-  - salvaguarda post-LLM: si devuelve `requires_human=true` para smalltalk de bajo riesgo, se ignora takeover y se responde automáticamente
-  - cobertura de regresión añadida en `tests/test_orchestrator_takeover.py`
-- Marketplace MeLi: corregido sync de variaciones mapeadas (stock por `meli_variation_id`).
-  - `update_item_listing()` ahora respeta `available_quantity` explícito cuando viene preparado por backend.
-  - `sync_meli_stock` y `sync-stock` normalizan fallback de variaciones a payload por IDs para mantener contrato legacy.
-  - cobertura de regresión añadida en `tests/test_meli_listing_variations.py`.
-- Inbox Fase B — Estado de pedido + Panel de contexto UI (2026-04-22, sesión actual):
-  - **`order_status_tool`**: nueva herramienta determinística en orquestador.
-    - Detecta intents de estado de pedido sin LLM.
-    - Consulta `orders` por `conversation_id` primero, luego por `contact_id` (mismo teléfono).
-    - Responde en lenguaje natural con estado real (`pending/confirmed/processing/shipped/delivered/cancelled`).
-    - Si no hay pedido vinculado, pasa al LLM sin escalamiento forzado.
-    - Pipeline orquestador: `shipping_quote → order_status → smalltalk → LLM`.
-  - **`GET /api/v1/conversations/{id}/context`**: nuevo endpoint en conversations router.
-    - Retorna contacto, pedidos recientes e inventario activo en una sola llamada.
-    - Filtro explícito `tenant_id` en todas las queries (service_role en uso).
-  - **Panel contextual en Inbox UI** (`apps/web/app/dashboard/inbox/page.tsx`):
-    - Panel lateral derecho colapsable: contacto, pedidos recientes con badges, catálogo con variantes y stock.
-    - Buscador inline de producto/SKU (filtrado local sobre datos ya cargados).
-    - Toggle desktop (botón) + acceso mobile (icono Info en header).
-  - **Mini-form "Crear Pedido desde Inbox"** (solo `human_takeover`):
-    - Selector de variantes con cantidad editable.
-    - Campo de costo de envío y notas.
-    - Crea pedido con `auto_confirm=true` → pasa a `confirmed` y descuenta stock inmediatamente.
-    - Al crear: recarga contexto para mostrar el nuevo pedido en la lista.
-  - **Fix: conversación perdida al refrescar**:
-    - `selectedId` persiste en URL param `?conv=<id>`.
-    - Al recargar, restaura la conversación desde URL antes de hacer fallback a la primera.
-  - **Preview de último mensaje** en lista de conversaciones.
-  - Proxy server-side `GET /api/conversations/[id]/context/route.ts` hacia Core API.
-- Inbox Fase B — Hardening sesión 2026-04-22 (rev. 53):
-  - **Fix mensajes perdidos al refrescar**: query de mensajes cambiado a `ORDER DESC LIMIT 100` + `.reverse()` → siempre carga los 100 más recientes (antes cargaba los 100 más viejos; conversación tenía 134 msgs).
-  - **Fix selección de conversación al refrescar**: eliminada dependencia de `useSearchParams()` (vacío en SSR) → `window.location.search` + `useRef(pendingConvRestore)` client-side.
-  - **Fix Realtime no emitía eventos**: `messages` y `conversations` ya estaban en `supabase_realtime` publication, pero con `REPLICA IDENTITY DEFAULT` → cambio a `REPLICA IDENTITY FULL` permite filtros por columna (`conversation_id=eq.xxx`) en subscripciones.
-  - **Fix contexto de panel `/context` retornaba 500**: columna `city` no existe en `contacts` (está dentro del JSONB `address`) → eliminada del SELECT.
-  - **Fix flujos conversacionales del orquestador**:
-    - "Envíos a Medellin?" ahora activa cotización (ciudad + token envío sin precio = intención implícita).
-    - Prefijos internos `[TEST]`, `[DEMO]` eliminados de títulos mostrados al cliente.
-    - Respuesta de confirmación de producto retoma cotización como follow-up (marcador añadido a `_SHIPPING_FOLLOWUP_PROMPT_MARKERS`).
-    - Stall automático: ≥2 rondas de desambiguación sin resolver → `requires_human=True`.
-    - System prompt del LLM incluye reglas de escalación explícitas (reclamos, garantías, frustración, loops irresolubles).
-- Inbox Orchestrator hardening (2026-04-23, rev. 55):
-  - **Fix prompt crítico**: instrucciones de extracción de nombre/dirección y cierre de compra estaban como comentarios Python FUERA del f-string — el LLM nunca las recibía. Movidas al interior del prompt.
-  - **Paso 4 explicit**: cláusula de cierre de venta ahora indica explícitamente confirmar resumen, indicar link de pago vía asesor, marcar `intent=order_acknowledgment` + `requires_human=true`.
-  - **Fix schema JSON `city`**: el campo `city` en el JSON de respuesta decía "Ciudad y barrio" — llevaba al LLM a mezclar datos, rompiendo el DANE lookup. Ahora `street` lleva barrio y `city` es solo la ciudad.
-  - **Fix `extracted_address` → `extracted_direction`**: instruccción en prompt corregida al nombre real del campo.
-  - Validación: 83 tests OK, `syntax OK`, y test de construcción de prompt con asserts.
+- **GAP-1 — Corrección de datos en READY_FOR_SUMMARY** (`orchestrator.py`):
+  - `_detect_correction_intent(text)`: detecta frases como "el email está mal", "quiero cambiar mi nombre", "la dirección está incorrecta" → retorna `'email'`, `'name'` o `'address'`.
+  - `_clear_contact_field(supabase, contact_id, tenant_id, field)`: limpia el campo en DB → el FSM lo detecta vacío y vuelve al estado correcto (`NEEDS_EMAIL`, `NEEDS_NAME`, `NEEDS_DIRECTION`) en el siguiente mensaje.
+  - `_CORRECTION_PROMPT`: respuestas amigables por campo ("Entendido 👍 ¿Cuál es tu correo electrónico correcto?").
+  - Gate insertado entre el check de afirmativo y el LLM, solo cuando `display_state == READY_FOR_SUMMARY`.
+  - Tests: `tests/test_orchestrator_data_correction.py` (18 tests: 14 detección + 3 limpieza + 2 prompts).
+
+- **GAP-2 — Alternativas determinísticas cuando producto sin stock** (`orchestrator.py`):
+  - En `_build_system_prompt`, cuando `display_state` ∉ data-collection-states y el producto del contexto tiene `stock_total=0`: inyecta bloque "⚠️ PRODUCTO AGOTADO + INSTRUCCIÓN" con hasta 5 alternativas con stock > 0 del catálogo real.
+  - Si no hay alternativas: mensaje "sin alternativas en catálogo" para que el LLM informe al cliente.
+  - El LLM usa datos reales (no inventa precios ni stock).
+  - Tests: `tests/test_orchestrator_no_stock_alternatives.py` (6 tests).
+
+- **TTL verificado**: `payment_link_tool.py` ya decía "30 minutos" — sin cambio necesario.
+
+- **Principio aplicado**: todas las implementaciones basadas en evidencia de código real, sin asumir comportamiento no verificado.
+
+- **Pruebas de regresión**: `validate.sh` → 13/13 OK, **259 tests OK** (+29), TypeScript OK, lint OK.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 63)
+
+- **F5 — Ticket automático en claims al escalar reclamo**:
+  - `services/ai-orchestrator/orchestrator.py`: constante `_COMPLAINT_INTENTS` (`complaint`, `reclamo`, `devolucion`, etc). Funciones `_find_recent_claimable_order` (busca orden confirmed/processing/shipped/delivered) y `_create_claim` (INSERT en `claims`, retorna `ticket_number` del trigger).
+  - En bloque de escalación (paso 8): si `requires_human=True` y `intent_detected ∈ _COMPLAINT_INTENTS`, crea ticket automático y agrega `#ticket` al mensaje de escalación.
+  - `order_id NOT NULL` en claims: si no hay orden elegible, escala sin ticket (sin error).
+  - Tests: `tests/test_orchestrator_claims_flow.py` (11 tests).
+
+- **F6 — Telegram bidireccional (`/resolver` desde Telegram)**:
+  - `services/api/routers/telegram_webhook.py` (nuevo): `POST /api/v1/integrations/telegram/webhook`.
+  - Auth: header `X-Telegram-Bot-Api-Secret-Token` validado contra `TELEGRAM_WEBHOOK_SECRET`.
+  - Comandos: `/resolver {conv_id}` → `bot_active`; `/estado {conv_id}` → status, phone, timestamp; `/ayuda` → lista de comandos.
+  - Responde al asesor via `sendMessage` al mismo `chat_id` usando `bot_token` de `notification_settings`.
+  - Sin `TELEGRAM_WEBHOOK_SECRET` → 503 (endpoint deshabilitado, no rompe producción).
+  - `services/api/main.py`: router registrado en `/api/v1/integrations`.
+  - `render.yaml`: variable `TELEGRAM_WEBHOOK_SECRET` (sync: false).
+  - Tests: `tests/test_telegram_webhook.py` (15 tests).
+  - **INTERVENCION HUMANA REQUERIDA**: configurar `setWebhook` y `TELEGRAM_WEBHOOK_SECRET` en Render.
+
+- **Pruebas de regresión**: `validate.sh` → 13/13 OK, **230 tests OK** (+26), TypeScript OK, lint OK.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 62)
+
+- **F1 — Wompi FAILED/DECLINED → retry de pago**:
+  - `services/api/integrations/wompi_client.py`: nueva función `create_payment_link_sync` (síncrona para BackgroundTasks).
+  - `services/api/routers/wompi_webhook.py`: nuevo `_maybe_offer_payment_retry` — si status ∈ `{DECLINED, ERROR, VOIDED}` y pedido sigue en `pending_payment`, genera nuevo link Wompi y encola outbound al cliente. Si falla o sin clave, encola mensaje de fallo ("escríbenos asesor"). Helpers: `_enqueue_payment_failed_msg`, `_enqueue_outbound_text`.
+  - Tests: `tests/test_wompi_retry_payment.py` (6 tests).
+
+- **F2 — Tracking real en bot via `order_tracking`**:
+  - `services/ai-orchestrator/tools/order_status_tool.py`: nueva función `_get_order_tracking`, `_format_tracking_date`. `_build_order_response` recibe `tracking` opcional y muestra guía, carrier, URL, ETA cuando el pedido está en `shipped`/`processing`/`delivered`. Sin tracking → mensaje "guía no disponible".
+  - Tests: `tests/test_order_status_tracking.py` (14 tests).
+
+- **F3A — Timeout ventana 24h (WhatsApp policy)**:
+  - `services/ai-orchestrator/orchestrator.py`: nueva función `_is_conversation_window_expired` (consulta `last_interaction_at`). Si expiró, `buying_intent = False` → FSM fuerza `CATALOG_MODE`, ignorando historial de compra anterior.
+  - Variable nueva: `CONVERSATION_WINDOW_HOURS=24` en `render.yaml`, `.env.example`.
+
+- **F3B — Comando "cancelar/reiniciar"**:
+  - `services/ai-orchestrator/orchestrator.py`: constante `_CANCEL_TOKENS`, gate nuevo antes del shipping_quote_tool. Si el cliente escribe "cancelar" (o variantes), cancela pedido `pending_payment` de la conversación y responde. Si no hay pedido activo, responde amablemente.
+  - `_cancel_pending_payment_order`: busca `orders` con `status=pending_payment` por `conversation_id`, actualiza a `cancelled`. Stock no estaba decrementado (solo se decrementa en APPROVED), no hay rollback de stock necesario.
+
+- **F4 — R-13: Persistir selección de producto al confirmar carrier**:
+  - `services/ai-orchestrator/orchestrator.py`: `_find_context_product_from_history` ahora busca primero un `context_snapshot` en el historial antes de hacer text-matching.
+  - Nuevo `_save_product_snapshot`: cuando carrier es confirmado por primera vez, inserta mensaje `content_type='context_snapshot'` con `payload={product_id, variation_id, quantity, unit_price_cents}` en tabla `messages`. El snapshot sobrevive reinicios del worker.
+  - `_has_product_snapshot`: guard para no duplicar snapshots por conversación.
+
+- **Pruebas de regresión**: `validate.sh` → 13/13 OK, **204 tests OK** (+20 nuevos), TypeScript OK, lint OK.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 61)
+
+- **Migración `20260425000000_distributed_rate_limiter.sql` aplicada en Supabase linked.**
+  - Tabla `rate_limit_windows` + RPC `rate_limit_hit()` ahora operativos en DB.
+  - Rate limiter distribuido activo (ya no usa fallback in-memory en producción).
+
+- **R-11: Wompi webhook idempotencia + logging estructurado** (`services/api/routers/wompi_webhook.py`):
+  - `_upsert_payment_record` retorna `bool` indicando si fue replay (txn_id ya existía).
+  - Logs ahora en formato `key=value` estructurado para cada paso del flujo.
+  - Replay de webhook explícitamente logeado como `pago_replay`.
+  - Guards nombrados: `pago_no_aprobado`, `pago_sin_orden`, `orden_ya_confirmada`, `orden_confirmada`.
+
+- **R-15: Refetch contacto antes de READY_FOR_SUMMARY** (`services/ai-orchestrator/orchestrator.py`):
+  - Justo antes de mostrar el resumen de pedido, se hace un refetch del contacto desde DB.
+  - Garantiza que nombre, email y dirección guardados en mensajes previos lleguen frescos al prompt.
+
+- **R-18: Eliminado `NEXT_PUBLIC_API_URL` legacy**:
+  - `apps/web/lib/runtime-env.ts`: eliminado fallback a `NEXT_PUBLIC_API_URL`.
+  - `apps/web/next.config.js`: `apiOrigin` ahora lee solo `API_URL` (variable canónica).
+  - Sin usos residuales en `apps/web/`.
+
+- **`render.yaml`: `ANTI_HIBERNATION_ENABLED=true`** (era `false`).
+  - INTERVENCION HUMANA REQUERIDA: configurar `ANTI_HIBERNATION_PING_URL` en Render Dashboard.
+  - Formato: URLs de `/health` separadas por coma (api + connector + orchestrator).
+
+- **Pruebas de regresión**: `validate.sh` → 13/13 OK, **184 tests OK**, TypeScript OK, lint OK.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 60)
+
+- **Cierre correctivo arquitectónico completo**:
+  - `render.yaml`: eliminado duplicado `MAX_PROCESSING_ATTEMPTS` (valor "3" viejo convivía con "5" nuevo → desplegaba valor incorrecto).
+  - `services/api/routers/orders.py` → `get_order`: select de `order_items` ahora incluye `variation_id` y `unit_cost` (faltaban desde que se implementó R-02).
+  - `services/api/routers/contacts.py`:
+    - `ContactCreate` y `ContactPatch`: agregado campo `email` (la migración `20260424300000_contacts_email.sql` añadió la columna en DB pero la API no la exponía).
+    - `list_contacts`: select ahora incluye `email` y `address`; filtro de búsqueda extiende a email.
+    - `create_contact`: payload incluye email normalizado (lowercase, strip).
+    - Soft-delete (`delete_contact`): ahora anonimiza `email=None` (Ley 1581 Art. 15 — omisión legal corregida).
+  - `services/ai-orchestrator/orchestrator.py` → `_record_consent`: revocación vía WhatsApp ahora anonimiza `email=None` (misma corrección legal que en API).
+  - `services/ai-orchestrator/scratch_test.py`: eliminado archivo stale con función inexistente (`handle_incoming_message`) y tenant ID hardcodeado que no debía estar en el servicio.
+  - Conteo de migraciones corregido en `docs/HANDOFF.md` y `01-state.md`: 43/45 → **49** (real).
+- **Pruebas de regresión**: `validate.sh` → 13/13 OK, `184 tests OK`, TypeScript OK, lint OK.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 59)
+
+- **R-05 — Gate WOMPI_ENV en startup** (`services/api/main.py`):
+  - `_validate_startup_config()` via FastAPI `lifespan`: si `WOMPI_ENV=production` y las llaves no comienzan con `prv_prod_`/`prod_events_`, la API falla al arrancar (`sys.exit(1)`) antes de aceptar tráfico.
+  - Valida también que `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y `SUPABASE_JWT_SECRET` estén configuradas.
+
+- **R-07 — CONVERSATION_HISTORY_LIMIT=25** (`orchestrator.py`):
+  - Default subido de 10 a 25. Evita truncamiento del historial de cotización en conversaciones medianas.
+
+- **R-09 — Sweep de startup** (`worker.py`):
+  - `_sweep_stale_messages_on_startup()`: al iniciar el worker, re-encola mensajes en `pending`/`processing` más viejos de 5 min. Cubre el caso de restart del worker (Render Free hiberna, deploy).
+  - Mensajes que superaron `MAX_PROCESSING_ATTEMPTS` se marcan `failed` directamente.
+
+- **R-10 — Anti-hibernación Render Free** (`worker.py`):
+  - `_anti_hibernation_ping_if_due()`: GET periódico (cada 14 min, configurable) a las URLs en `ANTI_HIBERNATION_PING_URL`. Activado con `ANTI_HIBERNATION_ENABLED=true`.
+  - Desactivado por defecto (no penaliza planes de pago ni dev local).
+
+- **R-12 — Carrier selection con opción única** (`orchestrator.py`):
+  - `_has_carrier_been_selected()` ahora detecta si el outbound de cotización mostró UNA sola opción ("¿Continuamos con la opción Económica?"). En ese caso, un "sí" / "ok" / "dale" corto cuenta como selección válida.
+
+- **R-03 — Rate limiter distribuido** (`services/api/dependencies/security.py` + migración):
+  - Tabla `rate_limit_windows` + RPC `rate_limit_hit()` en Supabase para conteo atómico cross-réplica.
+  - `security.py` usa Supabase RPC como path principal; fallback automático a in-memory si la RPC falla (migración no aplicada, etc.).
+  - `API_RATE_LIMIT_DISTRIBUTED=true` por defecto.
+  - El worker limpia `rate_limit_windows` expiradas junto con idempotency keys.
+  - Migración: `supabase/migrations/20260425000000_distributed_rate_limiter.sql`.
+
+- **R-04 — Guard multi-tenant** (`services/api/dependencies/tenant_scope.py`):
+  - Helper `scoped_table(supabase, table, tenant_id)`: aplica `.eq("tenant_id", tenant_id)` automáticamente y falla con `ValueError` si `tenant_id` está vacío.
+  - `TENANT_SCOPED_TABLES`: 18 tablas críticas registradas.
+  - Test `test_tenant_isolation_audit.py`: auditoría estática que verifica que los routers críticos tienen filtro de `tenant_id`.
+
+- **Tests de regresión**:
+  - `python3.11 -m unittest discover -s tests -p 'test_*.py'` → **184 tests OK**.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 58)
+
+- **R-01 — Job de liberación de stock expirado** (`services/ai-orchestrator/worker.py`):
+  - Nuevo método `_release_expired_pending_payment_orders()` en `OrchestratorWorker`.
+  - Cancela pedidos en `pending_payment` más viejos del TTL (35 min por defecto, 5 min sobre el link de 30 min).
+  - Se ejecuta cada `PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS` (default 10 min) en el mismo ciclo del worker.
+  - Guard `eq("status", "pending_payment")` en el UPDATE evita race conditions con el webhook de Wompi.
+  - Variables de entorno: `PENDING_PAYMENT_RELEASE_ENABLED`, `PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS`, `PENDING_PAYMENT_TTL_MINUTES`.
+
+- **R-02 — variation_id real en pedido conversacional** (3 archivos):
+  - `tools/catalog_tool.py`: SELECT ahora incluye `id` de `products` y `product_variations`.
+  - `orchestrator.py` → `_build_verified_order_context()`: retorna `product_id` y `variation_id` reales desde DB. Detecta variante del historial con label normalizado (sin puntuación). Fallback: usa variante más barata con stock si no hay mención explícita.
+  - `tools/payment_link_tool.py` → `handle_payment_link_if_applicable()`: acepta `verified_ctx` opcional. Si está presente, crea ítem del pedido con `variation_id`, `product_id`, precio y cantidad reales. Si no, usa ítem genérico con warning en log.
+  - Resultado: `_decrement_stock_on_confirm` ahora PUEDE decrementar stock al confirmar pago conversacional (antes siempre saltaba porque `variation_id=NULL`).
+
+- **Tests de regresión**:
+  - `python3.11 -m unittest discover -s tests -p 'test_*.py'` → **175 tests OK**.
+  - `tests/test_r01_stock_release.py` (5 tests): TTL, intervalo, no-op sin pedidos, deshabilitado.
+  - `tests/test_r02_variation_id.py` (6 tests): IDs en contexto, variante detectada, fallback.
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 57)
+
+- **Inbox CxD + FSM hardening (sesión rev. 57)**:
+  - **Gate no-texto**: advertencia amable en primer mensaje no-texto; solo escala a `human_takeover` si el cliente insiste. Nuevo marker `_NON_TEXT_WARNING_MARKER` en historial outbound.
+  - **Gate saludo inicial**: cuando no hay outbounds previos, bot saluda con variante rotativa (4 variantes); si hay nombre con consentimiento, saluda por primer nombre ("¡Hola, Cristian!").
+  - **Gate asesor explícito**: si el cliente escribe "asesor", escala directamente a `human_takeover`.
+  - **Carrier selection hardening**: detección ahora busca el outbound de cotización (marker: `continuamos`) y solo acepta inbounds posteriores cortos (≤8 tokens), sin signo de pregunta. Elimina falsos positivos de preguntas sobre el carrier.
+  - **Humanización de nombre — edge case**: nueva función `_try_extract_name_from_message()` extrae el nombre del mensaje del cliente cuando el LLM falla (`extracted_name=null` en estado `NEEDS_NAME`). Primero nombre en conversación, nombre completo en resumen.
+  - **NEEDS_NAME state instruction**: instrucción explícita al LLM para extraer `extracted_name` obligatoriamente y usar solo primer nombre en `response_text`.
+  - **READY_FOR_SUMMARY con contexto verificado**: nueva función `_build_verified_order_context()` calcula subtotal + envío + total desde catálogo DB y historial sin delegar al LLM. Bloque "CONTEXTO VERIFICADO" inyectado en state_instruction para que el LLM use valores reales, no los calcule.
+  - **Payment link bounds validation**: antes de crear el link de pago, `total_in_cents` del LLM se valida contra el contexto verificado (tolerancia 5%). Si difiere, se usa el valor verificado.
+  - **Smalltalk personalizado**: `_deterministic_smalltalk_response()` acepta `first_name` y `seed` para variar respuestas y personalizar con nombre del cliente.
+  - **Optimización tokens (30-45%)**: catálogo condicional por estado — en `NEEDS_CONSENT/EMAIL/NAME/DIRECTION/AWAITING_ORDER_CONFIRMATION` solo se inyecta el producto en contexto (no el catálogo completo). KB omitida en estados de recolección de datos.
+  - **AWAITING_ORDER_CONFIRMATION**: instrucción explícita al LLM para usar el mismo `total_in_cents` del resumen previo.
+  - **Resolución temprana de tenant+contacto+historial**: movida al inicio del flow (antes de las herramientas determinísticas) para que todos los gates tengan contexto completo.
+- **Pruebas de regresión ejecutadas**:
+  - `python3.11 -m unittest discover -s tests -p 'test_*.py'` → **164 tests OK**.
+  - `python3.11 -m py_compile services/ai-orchestrator/orchestrator.py` → **OK**.
+  - `python3.11 scripts/uat/inbox_wompi_e2e_simulated.py` → **E2E simulado completo OK** (10/10 checks: saludo, cotización, carrier selection, resumen, link de pago Wompi, webhook APPROVED, idempotencia DECLINED).
+
+---
+
+## Historial
+
+> Sesiones rev. ≤56, auditoría 2026-04-21 y registros de validación históricos
+> están archivados en `.context/01-state-archive.md` (no leer en contexto normal).
+
+---
+
+## Cierre de auditoría doc/código (2026-04-21 — resumen)
+
+- Contrato de entorno congelado (`.env.example`, `render.yaml`, docs alineados).
+- Inbox Fase A/B completadas: variantes, shipping quote, order_status_tool, panel UI.
+- Fase C Wompi implementada y validada en sandbox.
+- Historial detallado: `.context/01-state-archive.md`.
 
 ---
 
 ## Contratos Canónicos (runtime)
 
-### 1) Conversaciones
-
-Contrato único en runtime y DB:
-- `bot_active`
-- `human_takeover`
-- `closed`
-
-Aplicado en:
-- `supabase` (normalización + constraint)
-- API (`services/api/routers/conversations.py`)
-- Frontend Inbox (`apps/web/app/dashboard/inbox/page.tsx`)
-- Connector/Worker/Orchestrator
-- Sincronización de recencia de Inbox en DB:
-  - migración `20260422150000_conversations_last_interaction_sync.sql` aplicada (backfill + trigger `messages -> conversations.last_interaction_at`)
-
-### 2) Procesamiento de mensajes inbound
-
-`messages` ahora usa outcome explícito:
-- `processing_status`: `pending | processed | skipped | failed`
-- `skip_reason`
-- `last_error`
-- `processing_attempts`
-
-`processed` se mantiene por compatibilidad, pero el loop usa `processing_status='pending'`.
-
-### 3) Human takeover / closed
-
-Comportamiento efectivo:
-- Si conversación está en `human_takeover`: el bot no responde.
-- Si conversación está en `closed`: el bot no responde y no reabre automáticamente.
-- Mensajes no-texto: no respuesta automática, se escalan a `human_takeover` y quedan visibles en Inbox.
-- Escalamiento a `human_takeover` ahora publica evento a cola durable Supabase Queues (`pgmq`) vía trigger DB sobre `conversations`.
-- AI Orchestrator consume la cola y despacha notificaciones por tenant:
-  - `telegram` activo
-  - `email` preparado (placeholder no bloqueante hasta SMTP productivo)
-
-### 4) Outbound humano Inbox -> Queue -> WhatsApp
-
-Comportamiento efectivo:
-- `POST /api/v1/conversations/{id}/send` ya no llama Meta directo; encola evento durable (`pgmq`) para envío async.
-- El endpoint persiste primero el outbound en `messages` (`processing_status='pending'`) y luego encola payload con `tenant_id`.
-- El AI Orchestrator consume `whatsapp_outbound_messages`, envía a Meta y actualiza `messages`:
-  - éxito -> `processing_status='processed'`, `processed=true`, `meta_message_id`
-  - fallo transitorio -> retry por visibilidad de cola (`vt`)
-  - fallo definitivo -> `processing_status='failed'` al llegar a `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
-
-### 5) RBAC runtime
-
-Roles vivos en runtime:
-- `owner`
-- `manager`
-- `operator`
-
-`agent` no existe en runtime; queda únicamente en migraciones históricas.
-
-### 6) OAuth Mercado Libre
-
-`state` OAuth endurecido:
-- firmado (HMAC)
-- con expiración
-- nonce one-time persistido en DB (anti-replay)
-- callback rechaza `state` faltante/inválido/expirado/reutilizado antes de persistir tokens
-- `/integrations/meli/auth-url` responde `503` con detalle explícito de env vars faltantes si la app MeLi no quedó configurada completa en API
-
-### 7) Credenciales WhatsApp
-
-Fuente única runtime:
-- `tenant_integrations` por `tenant_id`
-
-No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en senders (API/Orchestrator).
-El connector solo recibe webhooks; no envía mensajes.
-
-### 8) Seguridad multi-tenant (service_role)
-
-El backend usa `service_role` en varios paths, por lo que:
-- RLS **no** es barrera suficiente por sí sola en esos paths
-- aislamiento runtime depende de filtros explícitos `tenant_id` + RLS donde aplique
-
-Se reforzaron filtros explícitos en paths críticos (`orders`, `shipping`, `marketplace`, `meli_webhook`).
-
-### 9) Shipping Envia (CO) — contrato de dirección endurecido
-
-- En runtime CO, el backend acepta DANE de 5 u 8 dígitos y normaliza a `stat_8digit` para cotizar (ej. `11001 -> 11001000`).
-- Para Colombia, payload de Shipping API usa:
-  - `city = dane_8digit`
-  - `postalCode = dane_8digit`
-- Se retiró la prevalidación bloqueante por Queries `city`/`zipcode` en quote (en cuenta actual esos endpoints retornan `404`).
-- Para CO, payload de Shipping API mantiene contrato:
-  - `city = dane_code` (normalizado a 8 dígitos)
-  - `postalCode = dane_code` (normalizado a 8 dígitos)
-- Se eliminó campo no documentado `city_to_display` del payload hacia Envia.
-- Descubrimiento de carriers prioriza Queries API (`available-carrier`) con fallback operativo si Queries falla.
-- `EnviaClient.get_rates()` ahora interpreta como error respuestas `200` con `code/message` sin `data` (evita falsos "sin tarifas").
-- Fallas por carrier guardan mensaje robusto (sin strings vacíos) para diagnóstico en `shipping/quote`.
-- `POST /api/v1/shipping/quote` ahora retorna `highlights` determinísticos:
-  - `cheapest`: menor precio total
-  - `fastest`: entrega más rápida por `delivery_date` o `delivery_estimate` parseable
-  - si no hay señal confiable de velocidad, `fastest` se omite (sin inferencias)
-- Fase 2 parcial implementada en API (feature-flagged):
-  - `POST /api/v1/shipping/{shipment_id}/label`
-  - `POST /api/v1/shipping/tracking`
-  - `POST /api/v1/shipping/pickup`
-  - `POST /api/v1/shipping/cancel`
-  - activación por env var `ENVIA_PHASE2_ENABLED=true` (default `false`)
-- `/dashboard/shipping` ahora consume Fase 2 end-to-end desde frontend:
-  - proxies Next server-side:
-    - `POST /api/shipping/{shipmentId}/label`
-    - `POST /api/shipping/tracking`
-    - `POST /api/shipping/pickup`
-    - `POST /api/shipping/cancel`
-  - bloque UI post-cotización con acciones:
-    - generar label
-    - consultar tracking
-    - agendar pickup
-    - cancelar envío
-  - manejo explícito de feature flag deshabilitado (`503`): guía operativa para activar `ENVIA_PHASE2_ENABLED=true` en API
-
-### 10) Tiering runtime (Basic / Pro / Enterprise)
-
-Comportamiento efectivo:
-- Se implementó catálogo canónico de planes y capabilities en DB (`billing_plans`, `plan_capabilities`, `tenant_subscriptions`).
-- API Gateway aplica enforcement backend real por capability + cuota con RPC:
-  - `orders.create`
-  - `shipping.quote`
-  - `shipping.confirm_rate`
-  - `conversations.send`
-  - `integrations.mercadolibre`
-- Se expone snapshot operativo por tenant en `GET /api/v1/settings/plan-capabilities`.
-- Sidebar refleja bloqueo UX por plan en módulos capability-gated (sin confiar seguridad al frontend).
-- Telemetría de uso por tenant/capability:
-  - `tenant_usage_counters`
-  - `tenant_usage_events`
-
-### 11) Observabilidad API + mantenimiento idempotency
-
-Comportamiento efectivo:
-- API registra eventos operativos de hardening en `api_security_events`:
-  - `rate_limit.exceeded`
-  - `idempotency.replay`
-  - `idempotency.payload_mismatch`
-  - `idempotency.in_flight_conflict`
-  - `idempotency.duplicate_conflict`
-- Limpieza de llaves expiradas disponible por dos vías:
-  - RPC DB `cleanup_expired_idempotency_keys(...)`
-  - endpoint owner-only `POST /api/v1/settings/maintenance/idempotency-cleanup`
-- AI Orchestrator ejecuta cleanup periódico automático (configurable por env vars):
-  - `IDEMPOTENCY_CLEANUP_ENABLED`
-  - `IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS`
-  - `IDEMPOTENCY_CLEANUP_BATCH`
+> Movidos a `.context/06-contracts.md` para lectura on-demand.
+> Leer cuando se toca Orchestrator, API, Connector, Worker o lógica de estados.
 
 ---
 
@@ -441,121 +383,31 @@ Campos en `marketplace_listings` actualizados por tres vías:
 
 ---
 
-## Migraciones anteriores (2026-04-19)
+## Migraciones anteriores (2026-04-18 / 2026-04-19)
 
-- `20260419000000_conversation_processing_contract.sql`
-  - backfill de estados legacy conversación
-  - constraint canónico de conversación
-  - contrato explícito de procesamiento de mensajes
-
-- `20260419000001_rbac_operator_runtime_only.sql`
-  - backfill `agent -> operator`
-  - constraint de roles runtime
-
-- `20260419000002_meli_oauth_state_store.sql`
-  - tabla `integration_oauth_states` para nonce one-time de OAuth MeLi
-
----
-
-## Migraciones anteriores (2026-04-18)
-
-- `20260418000000_marketplace_meli_variation_id.sql`
-  - Agrega `meli_variation_id` a `marketplace_listings` para sincronización de variantes MeLi
-
-- `20260418000003_orders_shipping_cost.sql`
-  - Agrega columna `shipping_cost DECIMAL(10,2) NOT NULL DEFAULT 0` a tabla `orders`
-  - Implementación completa end-to-end:
-    - Backend (`services/api/routers/orders.py`): campo en `OrderCreate`, cálculo de `total_amount = sum(items) + shipping_cost`, incluido en INSERT y en SELECT de listado
-    - Frontend (`apps/web/app/dashboard/(sales)/shipping/shipping-quote-form.tsx`): formulario completo de cotización con formulario de org/dest/paquete, selección de tarifa, y acciones Fase 2 post-cotización
-
-- `20260418000004_contacts_address.sql`
-  - Agrega campos de dirección a `contacts` para contexto de entrega
+- `20260419000000` — conversation_processing_contract (estados + constraint canónico)
+- `20260419000001` — rbac_operator_runtime_only (backfill agent→operator)
+- `20260419000002` — meli_oauth_state_store (nonce OAuth one-time)
+- `20260418000000` — marketplace_meli_variation_id
+- `20260418000003` — orders_shipping_cost (columna + E2E)
+- `20260418000004` — contacts_address (campo dirección JSONB)
 
 ---
 
 ## UX Mercado Libre (2026-04-20)
 
-- `marketplace-manager.tsx`: filtros por estado (Todos / Activos / Pausados / Cerrados / Sin vincular)
-- Badge de condición (`Nuevo` / `Usado`) en columna de publicación
-- Filtrado combinado: tab de estado + búsqueda por texto
+- `marketplace-manager.tsx`: filtros Todos/Activos/Pausados/Cerrados/Sin vincular
+- Badge condición (`Nuevo`/`Usado`), filtrado combinado
 
 ---
 
-## Validación ejecutada en esta sesión
+## Validación ejecutada (resumen ejecutivo)
 
-- Certificación 2026-04-21:
-  - `git remote -v` ✅ (sin token embebido en URL)
-  - `python3.11 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
-  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
-  - `pnpm --filter web lint` ✅ (warnings preexistentes)
-  - `pnpm --filter web exec tsc --noEmit` ✅
-  - `python3.11 -m py_compile services/api/main.py services/connector-whatsapp/main.py services/ai-orchestrator/main.py` ✅
-  - `supabase db query --linked` (solo lectura) ✅:
-    - tablas clave presentes (`api_security_events`, `idempotency_keys`, `integration_oauth_states`, `order_tracking`, `tenant_usage_events`)
-    - extensiones `pgmq` y `vector` activas
-    - funciones críticas de colas/capabilities/idempotency presentes
-  - `pnpm --filter web build` ✅ (build completo, rutas generadas)
+> Registros detallados archivados en `.context/01-state-archive.md`. No leer en contexto normal.
 
-- `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
-- `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
-- `pnpm --filter web lint` ✅ (con warnings preexistentes, sin errores)
-- `python3 -m py_compile services/api/integrations/envia_client.py services/api/routers/shipping.py` ✅
-- Re-validación post-ajustes UX (2026-04-20): `node --test apps/web/tests/marketplace-badges.test.mjs` ✅ y `pnpm --filter web lint` ✅ (solo warnings preexistentes)
-- Validación hardening/contactos (2026-04-20):
-  - `python3 -m py_compile services/api/main.py services/api/routers/orders.py services/api/routers/shipping.py services/api/routers/conversations.py services/api/routers/contacts.py services/api/dependencies/security.py services/api/dependencies/idempotency.py` ✅
-  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
-- Validación queue/notifications (2026-04-20):
-  - `python3 -m py_compile services/ai-orchestrator/worker.py services/ai-orchestrator/notifications.py` ✅
-  - Migraciones ejecutadas en Supabase linked:
-    - `20260420000000_marketplace_listings_meli_fields.sql` ✅
-    - `20260420000002_api_hardening_and_contacts_legal.sql` ✅
-    - `20260420000003_human_takeover_notifications_queue.sql` ✅
-    - `20260420000004_whatsapp_outbound_queue.sql` ✅
-    - `20260420000001_order_tracking.sql` ya aplicada (DB respondió `relation "order_tracking" already exists`)
-  - Certificación SQL remota (`supabase db query --linked`) ✅:
-    - `has_meli_title=true`
-    - `has_order_tracking=true`
-    - `has_idempotency_keys=true`
-    - `has_contacts_legal=true`
-    - `has_pgmq_extension=true`
-    - `has_dequeue_fn=true`
-    - `has_ack_fn=true`
-    - `has_takeover_trigger=true`
-    - `has_queue_table=true`
-    - `has_enqueue_wa_fn=true`
-    - `has_dequeue_wa_fn=true`
-    - `has_ack_wa_fn=true`
-    - `has_wa_queue_table=true`
-  - Tests dedicados queue outbound:
-    - `python3 -m unittest tests/test_conversations_outbound_queue.py tests/test_worker_whatsapp_outbound_queue.py` ✅
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (39 tests)
-  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
-  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
-- Validación tiering foundation (2026-04-20):
-  - Migración aplicada en Supabase linked:
-    - `20260420000005_plan_tiering_foundation.sql` ✅
-  - Certificación SQL remota (`supabase db query --linked`) ✅:
-    - `has_billing_plans=true`
-    - `has_plan_capabilities=true`
-    - `has_tenant_subscriptions=true`
-    - `has_usage_counters=true`
-    - `has_consume_fn=true`
-    - `has_get_caps_fn=true`
-    - distribución inicial de subscriptions: `enterprise=1 tenant`
-  - `python3 -m unittest tests/test_plan_capability_dependency.py` ✅
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
-  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
-  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
-- Validación observabilidad + Envia Fase 2 parcial (2026-04-20):
-  - `supabase db query --linked -f supabase/migrations/20260420000006_api_security_observability.sql` ✅
-  - Certificación SQL remota (`supabase db query --linked`) ✅:
-    - `has_api_security_events=true`
-    - `has_cleanup_fn=true`
-  - `python3 -m py_compile services/api/integrations/envia_client.py services/api/routers/shipping.py services/api/routers/settings.py services/api/dependencies/idempotency.py services/ai-orchestrator/worker.py services/ai-orchestrator/server.py` ✅
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` ✅ (42 tests)
-  - `node --test apps/web/tests/marketplace-badges.test.mjs` ✅
-  - `pnpm --filter web lint` ✅ (solo warnings preexistentes)
-- Smoke E2E Envia (sandbox/prod, token tenant) ✅:
-  - Sandbox: con DANE8 hubo tarifas en 4 carriers (`fedex`, `serviEntrega`, `dhl`, `tcc`)
-  - Producción: con DANE8 hubo tarifas en 5 carriers (`serviEntrega`, `dhl`, `interRapidisimo`, `deprisa`, `tcc`)
-- **AI Orchestrator**: Se corrigió un bug donde los picos de demanda del LLM (503 Service Unavailable) marcaban el mensaje como `FAILED` silenciosamente, impidiendo su reintento por el Worker. Ahora los errores transitorios dejan el mensaje en `PENDING` para garantizar la tolerancia a fallos de Gemini.
+- Certificaciones aplicadas a las sesiones 2026-04-20 al 2026-04-25.
+- Progresión de tests: 39 → 42 → 50 → 83 → 164 → **184 tests OK** (estado actual).
+- Todas las migraciones del bloque 2026-04-19 / 2026-04-20 aplicadas en Supabase linked y certificadas.
+- Smoke E2E Envia (sandbox/prod, DANE8): OK.
+- `scripts/validate.sh` cubre Python syntax + tests + TypeScript + lint + render.yaml coherencia.
+- Usar `bash scripts/validate.sh` antes de cualquier deploy a Render.

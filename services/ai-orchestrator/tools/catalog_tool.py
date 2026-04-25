@@ -41,8 +41,8 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
         result = (
             supabase.table("products")
             .select(
-                "title, description, "
-                "product_variations(sku, attributes, price, stock_quantity)"
+                "id, title, description, "
+                "product_variations(id, sku, attributes, price, stock_quantity)"
             )
             .eq("tenant_id", tenant_id)
             .eq("status", "active")
@@ -73,6 +73,7 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                 prices.append(price)
                 total_stock += stock
                 parsed_variants.append({
+                    "id": variation.get("id"),  # variation_id real para pedidos
                     "label": _normalize_attributes_label(
                         variation.get("attributes"),
                         variation.get("sku"),
@@ -95,6 +96,7 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
             price_min = min(prices) if prices else 0.0
             price_max = max(prices) if prices else 0.0
             catalog.append({
+                "id": product.get("id"),  # product_id real para pedidos
                 "title": product.get("title", "Sin nombre"),
                 "description": product.get("description", ""),
                 "price_min": price_min,

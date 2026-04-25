@@ -143,6 +143,9 @@ class ShippingQuoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Económica", result.response_text or "")
         self.assertIn("Rápida", result.response_text or "")
         self.assertIn("¿Con cuál continuamos", result.response_text or "")
+        self.assertIn("(*Económica* o *Rápida*)", result.response_text or "")
+        self.assertNotIn("Responde *Económica*", result.response_text or "")
+        self.assertNotIn("\n\n\n", result.response_text or "")
 
     async def test_handle_shipping_quote_hides_upstream_error_detail(self):
         supabase = _SupabaseStub(
@@ -302,6 +305,73 @@ class ShippingQuoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.requires_human)
         self.assertIn("Económica", result.response_text or "")
 
+    async def test_followup_affirmative_si_after_quote_does_not_loop(self):
+        """Si el usuario confirma una opción de envío ya cotizada, NO debe recotizar en loop."""
+        supabase = _SupabaseStub(
+            tenants={"shipping_origin": {"city": "Bogota D.C.", "state": "Bogota D.C.", "dane_code": "11001"}},
+            conversations={"customer_phone": "573001112233"},
+            contacts=[],
+            messages=[
+                {
+                    "direction": "outbound",
+                    "content": "Envío de 1 unidad a Bogotá D.C.:\n• *Económica*: Cabify Express | $6.740 | entrega 23/04/2026\n\n¿Continuamos con la opción *Económica*? (*Sí* para confirmar)",
+                }
+            ],
+        )
+
+        result = await shipping_quote_tool.handle_shipping_quote_if_applicable(
+            supabase=supabase,
+            tenant_id="tenant-1",
+            conversation_id="conv-1",
+            query_text="Si",
+        )
+
+        self.assertFalse(result.handled)
+
+    async def test_followup_affirmative_si_triggers_shipping_quote(self):
+        """Si el bot ofreció cotizar envío y el usuario responde 'Si', debe cotizar."""
+        supabase = _SupabaseStub(
+            tenants={"shipping_origin": {"city": "Bogota D.C.", "state": "Bogota D.C.", "dane_code": "11001"}},
+            conversations={"customer_phone": "573001112233"},
+            contacts=[],
+            messages=[
+                {
+                    "direction": "outbound",
+                    "content": "¿Deseas que te cotice el envío a Bogotá? Con eso te paso las opciones.",
+                }
+            ],
+        )
+
+        with patch.object(
+            shipping_quote_tool,
+            "_request_shipping_quote",
+            new_callable=AsyncMock,
+            return_value=(
+                201,
+                {
+                    "highlights": {
+                        "cheapest": {
+                            "carrier": "Carrier A",
+                            "service": "Standard",
+                            "total_price": 12000,
+                            "currency": "COP",
+                            "delivery_estimate": "72 horas",
+                        }
+                    }
+                },
+            ),
+        ):
+            result = await shipping_quote_tool.handle_shipping_quote_if_applicable(
+                supabase=supabase,
+                tenant_id="tenant-1",
+                conversation_id="conv-1",
+                query_text="Si",
+            )
+
+        self.assertTrue(result.handled)
+        self.assertFalse(result.requires_human)
+        self.assertIn("Económica", result.response_text or "")
+
     async def test_short_city_cost_query_without_envio_word_is_detected(self):
         supabase = _SupabaseStub(
             tenants={"shipping_origin": {"city": "Bogota D.C.", "state": "Bogota D.C.", "dane_code": "11001"}},
@@ -403,6 +473,28 @@ class ShippingQuoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.handled)
         self.assertFalse(result.requires_human)
         self.assertIn("Medell", result.response_text or "")
+
+    async def test_followup_city_for_address_prompt_is_not_treated_as_shipping_quote(self):
+        supabase = _SupabaseStub(
+            tenants={"shipping_origin": {"city": "Bogota D.C.", "state": "Bogota D.C.", "dane_code": "11001"}},
+            conversations={"customer_phone": "573001112233"},
+            contacts=[],
+            messages=[
+                {
+                    "direction": "outbound",
+                    "content": "Gracias, Cristian. ¿En qué ciudad se encuentra esta dirección?",
+                }
+            ],
+        )
+
+        result = await shipping_quote_tool.handle_shipping_quote_if_applicable(
+            supabase=supabase,
+            tenant_id="tenant-1",
+            conversation_id="conv-1",
+            query_text="Medellin",
+        )
+
+        self.assertFalse(result.handled)
 
     async def test_quote_payload_uses_inventory_weight_and_dimensions(self):
         supabase = _SupabaseStub(

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import {
@@ -162,7 +162,7 @@ function variationLabel(v: ProductVariation): string {
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function InboxPage() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -346,6 +346,7 @@ export default function InboxPage() {
   }, [selectedId])
 
   // ── Realtime — mensajes ────────────────────────────────────────────────────
+  const lastRealtimeAt = useRef<number>(0)
   useEffect(() => {
     if (!selectedId) return
     const channel = supabase
@@ -354,6 +355,7 @@ export default function InboxPage() {
         event: '*', schema: 'public', table: 'messages',
         filter: `conversation_id=eq.${selectedId}`,
       }, (payload) => {
+        lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
           setMessages(prev => [...prev, payload.new as Message])
           setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
@@ -361,8 +363,33 @@ export default function InboxPage() {
           setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new as Message : m))
         }
       })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Realtime] messages channel error, fallback polling activado')
+        }
+      })
+
+    // Fallback: si Realtime falla, recargar mensajes cada 5s
+    const fallbackInterval = setInterval(() => {
+      const sinceLastEvent = Date.now() - lastRealtimeAt.current
+      if (sinceLastEvent > 8000) {
+        supabase
+          .from('messages')
+          .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
+          .eq('conversation_id', selectedId)
+          .order('created_at', { ascending: false })
+          .limit(100)
+          .then(({ data, error }) => {
+            if (error) return
+            setMessages((data || []).reverse())
+          })
+      }
+    }, 5000)
+
+    return () => {
+      clearInterval(fallbackInterval)
+      supabase.removeChannel(channel)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 

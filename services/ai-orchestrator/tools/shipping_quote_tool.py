@@ -65,13 +65,14 @@ _SHIPPING_FOLLOWUP_PROMPT_MARKERS = (
     "para cotizar envio con precision, confirma el producto",
     "para cotizar envio necesito confirmar el producto exacto",
     "necesito tu ciudad de entrega",
-    # Frases que el LLM genera libremente al pedir ciudad de entrega
-    "a que ciudad",          # "¿a qué ciudad sería el envío?"
-    "cual ciudad",           # "¿cuál ciudad de entrega?"
-    "que ciudad",            # "¿qué ciudad?"
+    # Frases que el LLM genera libremente al pedir ciudad de entrega en contexto de envío
     "ciudad de destino",     # "ciudad de destino"
-    "ciudad seria",          # "¿a qué ciudad sería?"
     "ciudad del envio",      # "ciudad del envío"
+    # Frases de ofrecimiento de cotización por parte del bot
+    "deseas que te cotice",
+    "quieres que te cotice",
+    "te cotice el envio",
+    "cotice el envio",
 )
 _DANE_SOURCE_FILE = Path(__file__).resolve().parents[3] / "apps" / "web" / "lib" / "dane-colombia.ts"
 _PRODUCT_TITLE_STOPWORDS = {
@@ -344,35 +345,68 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
 
     outbound_text = _normalize_text(str(last_outbound.get("content") or ""))
     
-    # Evitar interceptar como "shipping followup" si el bot acaba de pedir un nombre o dirección explícita
+    # Evitar interceptar como "shipping followup" si el bot acaba de pedir
+    # datos personales/dirección (FSM de cierre de compra).
     personal_data_markers = [
         "tu nombre", "tu nombre completo", "indicanos tu nombre", "cual es tu nombre",
-        "direccion de entrega", "tu direccion", "direccion exacta", "barrio", "torre", "apartamento"
+        "direccion de entrega", "tu direccion", "direccion exacta", "esta direccion",
+        "se encuentra esta direccion", "correo electronico", "barrio", "torre", "apartamento"
     ]
     if any(m in outbound_text for m in personal_data_markers):
         return False
 
     has_separator = "/" in query_text or "," in query_text
+    shipping_context_tokens = {"envio", "cotizar", "cotice", "costo", "flete", "despacho", "domicilio", "delivery"}
     marker_matched = any(marker in outbound_text for marker in _SHIPPING_FOLLOWUP_PROMPT_MARKERS)
+    has_shipping_context = bool(_tokenize_words(outbound_text) & shipping_context_tokens)
     if marker_matched:
+        if not has_shipping_context:
+            return False
         logger.info(
             "[SHIPPING_QUOTE] Followup por marker | last_outbound=%s | query=%s",
             outbound_text[:80], query_text[:60],
         )
         return has_city_hint or has_separator or len(tokens) <= 4
 
-    # Fallback: query corto con city hint + contexto de envío activo en historial.
+    # Respuesta afirmativa simple a ofrecimiento de cotización por parte del bot.
+    # SOLO se activa cuando el ÚLTIMO outbound del bot contiene contexto de envío activo
+    # (pidiendo ciudad, ofreciendo cotizar, etc.). Si el último outbound ya mostró una
+    # tarifa concreta (contiene líneas de rate), NO interceptamos — dejamos que el LLM
+    # avance el FSM de venta.
+    _AFFIRMATIVE_SHIPPING_REPLY = {"si", "sí", "ok", "dale", "claro", "perfecto", "listo", "procede"}
+    if len(tokens) <= 2 and (tokens & _AFFIRMATIVE_SHIPPING_REPLY):
+        if not last_outbound:
+            return False
+        last_outbound_norm = _normalize_text(str(last_outbound.get("content") or ""))
+        # Si el bot ya mostró una tarifa concreta y está esperando confirmación de opción,
+        # NO interceptamos. El LLM debe avanzar al siguiente paso del FSM.
+        if "economica" in last_outbound_norm or "rapida" in last_outbound_norm:
+            return False
+        _SHIPPING_CONTEXT_TOKENS = {"envio", "cotizar", "cotice", "costo", "flete", "despacho", "domicilio", "delivery"}
+        last_tokens = _tokenize_words(last_outbound_norm)
+        # El último outbound debe tener contexto de envío Y no ser una solicitud de datos personales
+        if (last_tokens & _SHIPPING_CONTEXT_TOKENS) and not any(m in last_outbound_norm for m in personal_data_markers):
+            logger.info(
+                "[SHIPPING_QUOTE] Followup afirmativo a ofrecimiento de envío | query=%s",
+                query_text[:60],
+            )
+            return True
+
+    # Fallback: query corto con city hint + contexto de envío activo en el ÚLTIMO outbound.
     # Cubre respuestas tipo "A Valledupar" cuando el LLM preguntó con frase no incluida en markers.
-    if has_city_hint and len(tokens) <= 4:
-        _SHIPPING_CONTEXT_TOKENS = {"envio", "cotizar", "costo", "flete", "despacho", "envio", "domicilio", "delivery"}
-        for msg in recent_messages:
-            msg_tokens = _tokenize_words(_normalize_text(str(msg.get("content") or "")))
-            if msg_tokens & _SHIPPING_CONTEXT_TOKENS:
-                logger.info(
-                    "[SHIPPING_QUOTE] Followup por contexto activo de envío | query=%s",
-                    query_text[:60],
-                )
-                return True
+    if has_city_hint and len(tokens) <= 4 and last_outbound:
+        last_outbound_norm = _normalize_text(str(last_outbound.get("content") or ""))
+        # Si el bot ya mostró tarifas concretas, NO interceptamos como followup de envío
+        if "economica" in last_outbound_norm or "rapida" in last_outbound_norm:
+            return False
+        _SHIPPING_CONTEXT_TOKENS = {"envio", "cotizar", "cotice", "costo", "flete", "despacho", "domicilio", "delivery"}
+        last_tokens = _tokenize_words(last_outbound_norm)
+        if last_tokens & _SHIPPING_CONTEXT_TOKENS:
+            logger.info(
+                "[SHIPPING_QUOTE] Followup por contexto activo de envío | query=%s",
+                query_text[:60],
+            )
+            return True
 
     return False
 
@@ -399,7 +433,21 @@ def _resolve_destination_from_conversation(
         if ambiguous_city:
             return None, ambiguous_city
 
-    # 3) Último intento: combinar señales de ubicación repartidas en varios mensajes.
+    # 3) Si el bot mencionó una ciudad en su último outbound (ej: "¿cotice a Bogotá?")
+    # y el usuario respondió afirmativamente, inferir la ciudad desde el outbound.
+    outbound_texts = [
+        str(msg.get("content") or "").strip()
+        for msg in recent_messages
+        if str(msg.get("direction") or "").strip().lower() == "outbound"
+    ]
+    for text in outbound_texts[:2]:
+        destination, ambiguous_city = _resolve_destination_from_query(text)
+        if destination:
+            return destination, None
+        if ambiguous_city:
+            return None, ambiguous_city
+
+    # 4) Último intento: combinar señales de ubicación repartidas en varios mensajes.
     if inbound_texts:
         merged_text = " / ".join(inbound_texts[:3] + [query_text])
         destination, ambiguous_city = _resolve_destination_from_query(merged_text)
@@ -933,13 +981,20 @@ def _build_quote_response_text(
             lines.append(_format_rate_line("Rápida", fastest))
         # Si es la misma opción o la fecha de entrega es idéntica, no agregar línea redundante
 
-    lines.append("\n¿Con cuál continuamos? (Responde *Económica* o *Rápida*)")
+    # Solo preguntar por elección si realmente hay 2 opciones distintas
+    has_fast_option = len(lines) > 2  # header + cheapest + fastest
+    if has_fast_option:
+        lines.append("¿Con cuál continuamos? (*Económica* o *Rápida*)")
+    else:
+        lines.append("¿Continuamos con la opción *Económica*?")
 
     # Detalle técnico del paquete solo en log — no al cliente
     logger.info("[SHIPPING_QUOTE] Paquete estimado: %s", _format_package_context_line(package))
     # Párrafos WhatsApp: \n\n entre secciones para respiro visual
     paragraph = "\n\n"
-    return paragraph.join([lines[0], "\n".join(lines[1:-1]), lines[-1]])
+    body = "\n".join(lines[1:-1]).strip()
+    question = str(lines[-1]).strip()
+    return paragraph.join([lines[0], body, question])
 
 
 def _build_api_auth_token(tenant_id: str) -> Optional[str]:

@@ -2,15 +2,17 @@
 Router de Pedidos — CRUD con aislamiento multi-tenant via RLS.
 
 Endpoints:
-  GET    /api/v1/orders/          — listar pedidos del tenant
-  POST   /api/v1/orders/          — crear pedido con ítems   [owner, manager]
-  GET    /api/v1/orders/{id}      — detalle con ítems
-  PATCH  /api/v1/orders/{id}      — cambiar estado / notas   [owner, manager]
+  GET    /api/v1/orders/                   — listar pedidos del tenant
+  POST   /api/v1/orders/                   — crear pedido con ítems   [owner, manager]
+  GET    /api/v1/orders/{id}               — detalle con ítems
+  PATCH  /api/v1/orders/{id}               — cambiar estado / notas   [owner, manager]
+  POST   /api/v1/orders/{id}/payment-link  — generar link de pago Wompi [owner, manager]
 
-Estados válidos: pending → confirmed → processing → shipped → delivered | cancelled
+Estados válidos: pending | pending_payment → confirmed → processing → shipped → delivered | cancelled
 """
 import logging
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -30,7 +32,9 @@ from routers.marketplace import sync_meli_stock
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Orders"])
 
-VALID_STATUSES = {"pending", "confirmed", "processing", "shipped", "delivered", "cancelled"}
+VALID_STATUSES = {"pending", "pending_payment", "confirmed", "processing", "shipped", "delivered", "cancelled"}
+
+WOMPI_PAYMENT_LINK_TTL_MINUTES = 30  # Reserva de stock expira en 30 min
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -54,6 +58,9 @@ class OrderCreate(BaseModel):
     # (usa el mismo flujo de decremento de stock que PATCH status=confirmed).
     # Usado por el flujo de creación desde Inbox (agente humano con contexto completo).
     auto_confirm: bool = Field(default=False)
+    # Si True, el pedido se crea en 'pending_payment' (stock reservado, no descontado).
+    # El stock se descuenta definitivamente cuando el webhook de Wompi confirma el pago.
+    payment_link: bool = Field(default=False)
 
 
 class OrderPatch(BaseModel):
@@ -124,11 +131,14 @@ async def create_order(
 
         total = sum(item.unit_price * item.quantity for item in order.items) + order.shipping_cost
 
+        initial_status = (
+            "pending_payment" if order.payment_link else "pending"
+        )
         order_result = supabase.table("orders").insert({
             "tenant_id": tenant_id,
             "contact_id": order.contact_id,
             "conversation_id": order.conversation_id,
-            "status": "pending",
+            "status": initial_status,
             "total_amount": total,
             "shipping_cost": order.shipping_cost,
             "notes": order.notes,
@@ -213,7 +223,7 @@ async def get_order(
     try:
         result = (
             supabase.table("orders")
-            .select("*, contacts(phone, name), order_items(id, title, unit_price, quantity, product_id)")
+            .select("*, contacts(phone, name), order_items(id, title, unit_price, unit_cost, quantity, product_id, variation_id)")
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -281,8 +291,8 @@ async def patch_order(
         if not result.data:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
-        # ── Decremento de stock al confirmar (pending → confirmed) ─────────────
-        if new_status == "confirmed" and current_status == "pending":
+        # ── Decremento de stock al confirmar (pending o pending_payment → confirmed) ──
+        if new_status == "confirmed" and current_status in ("pending", "pending_payment"):
             _decrement_stock_on_confirm(supabase, order_id, tenant_id)
 
         return result.data[0]
@@ -291,6 +301,106 @@ async def patch_order(
     except Exception as e:
         logger.error("Error actualizando pedido %s: %s", order_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar pedido")
+
+
+@router.post("/{order_id}/payment-link", response_model=dict)
+async def create_payment_link(
+    order_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """
+    Genera un link de pago Wompi para un pedido en estado pending o pending_payment.
+    Persiste el link en la tabla payments y retorna la checkout_url.
+    Válido por WOMPI_PAYMENT_LINK_TTL_MINUTES minutos (default 30).
+    """
+    try:
+        from integrations.wompi_client import create_payment_link as wompi_create_link, WOMPI_PRIVATE_KEY
+
+        if not WOMPI_PRIVATE_KEY:
+            raise HTTPException(
+                status_code=503,
+                detail="Integración Wompi no configurada (WOMPI_PRIVATE_KEY ausente)",
+            )
+
+        order_res = (
+            supabase.table("orders")
+            .select("id, status, total_amount, shipping_cost, notes, contact_id, contacts(name, phone)")
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not order_res.data:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+        order = order_res.data
+        if order["status"] not in ("pending", "pending_payment"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"El pedido está en estado '{order['status']}' — solo se puede generar link para pedidos pending o pending_payment",
+            )
+
+        total_amount = float(order.get("total_amount") or 0)
+        amount_in_cents = int(total_amount * 100)
+
+        if amount_in_cents < 150000:  # mínimo $1.500 COP para modelo Agregador
+            raise HTTPException(
+                status_code=422,
+                detail=f"Monto mínimo Wompi es $1.500 COP. Monto actual: ${total_amount:,.0f}",
+            )
+
+        contact = order.get("contacts") or {}
+        contact_name = contact.get("name") or "Cliente"
+        short_id = order_id[:8].upper()
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(minutes=WOMPI_PAYMENT_LINK_TTL_MINUTES)
+        ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        link_data = await wompi_create_link(
+            order_id=order_id,
+            name=f"Pedido #{short_id} — {contact_name}"[:100],
+            description=order.get("notes") or f"Pedido #{short_id}",
+            amount_in_cents=amount_in_cents,
+            expires_at=expires_at,
+        )
+
+        # Persistir en tabla payments
+        supabase.table("payments").insert({
+            "tenant_id": tenant_id,
+            "order_id": order_id,
+            "provider": "wompi",
+            "wompi_link_id": link_data["link_id"],
+            "checkout_url": link_data["checkout_url"],
+            "amount_in_cents": amount_in_cents,
+            "currency": "COP",
+            "status": "pending",
+            "wompi_status": "ACTIVE",
+        }).execute()
+
+        # Asegurar que el pedido quede en pending_payment
+        if order["status"] != "pending_payment":
+            supabase.table("orders").update({"status": "pending_payment"}).eq(
+                "id", order_id
+            ).eq("tenant_id", tenant_id).execute()
+
+        logger.info(
+            "Payment link generado para order %s: %s", order_id, link_data["checkout_url"]
+        )
+        return {
+            "order_id": order_id,
+            "checkout_url": link_data["checkout_url"],
+            "amount_in_cents": amount_in_cents,
+            "expires_at": expires_at,
+            "wompi_link_id": link_data["link_id"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error generando payment link para order %s: %s", order_id, e)
+        raise HTTPException(status_code=500, detail=f"Error al generar link de pago: {e}")
 
 
 def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str) -> None:

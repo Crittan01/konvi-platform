@@ -1,4 +1,4 @@
-# Handoff — Estado Operativo Real (2026-04-22, rev. 30)
+# Handoff — Estado Operativo Real (2026-04-24, rev. 31)
 
 Este documento describe el estado operativo real de `develop`.
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
@@ -14,7 +14,8 @@ tienen prioridad.
 - Tenant Console: ✅ live (fases 1–11.5 completas)
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
-- DB canónica: `supabase/migrations/` (43 migraciones)
+- DB canónica: `supabase/migrations/` (49 migraciones)
+- **Fase C Inbox (pagos Wompi)**: ✅ implementada y validada en sandbox (2026-04-24)
 
 ## Cierre de auditoría (2026-04-21)
 
@@ -28,113 +29,10 @@ tienen prioridad.
 
 ## Contratos runtime vigentes
 
-### Conversaciones
-Contrato único end-to-end:
-- `bot_active`
-- `human_takeover`
-- `closed`
-
-No hay valores legacy válidos en runtime.
-`conversations.last_interaction_at` se sincroniza automáticamente al insertar mensajes
-(trigger DB `trg_sync_conversation_last_interaction` sobre `public.messages`).
-
-### Procesamiento inbound
-`messages` usa resultado explícito:
-- `processing_status`: `pending | processed | skipped | failed`
-- `skip_reason`
-- `last_error`
-- `processing_attempts`
-
-El worker procesa solo `processing_status='pending'`.
-`processed` queda como compatibilidad de lectura, no como driver del loop.
-
-### Human takeover / closed
-- `human_takeover`: el bot queda silenciado.
-- `closed`: el bot queda silenciado y no reabre automáticamente.
-- No-text inbound: no auto-respuesta; se escala a `human_takeover` y el mensaje queda visible en Inbox.
-- Escalamiento a `human_takeover` publica evento a cola durable Supabase Queues (`pgmq`)
-  vía trigger DB sobre `conversations.status`.
-- El AI Orchestrator consume esa cola y notifica por canales activos del tenant
-  (`telegram` activo, `email` preparado placeholder).
-
-### Outbound humano Inbox -> WhatsApp
-- Endpoint `POST /api/v1/conversations/{id}/send` encola outbound en Supabase Queues
-  (`whatsapp_outbound_messages`) y persiste `messages.processing_status='pending'`.
-- El AI Orchestrator consume la cola, envía a Meta con credenciales del tenant y actualiza `messages`:
-  - éxito: `processed`
-  - error transitorio: retry por visibilidad (`vt`)
-  - error definitivo: `failed` al superar `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
-
-### RBAC runtime
-Roles vivos:
-- `owner`
-- `manager`
-- `operator`
-
-`agent` queda solo en migraciones históricas/documentación de migración.
-
-### WhatsApp credentials
-Fuente única runtime para envío:
-- `tenant_integrations` por `tenant_id` (`provider='whatsapp'`, `status='connected'`)
-
-No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en senders.
-
-### MeLi OAuth
-`state` endurecido:
-- HMAC firmado
-- expiración (`MELI_OAUTH_STATE_TTL_SECONDS`)
-- nonce one-time persistido (`integration_oauth_states`)
-- callback rechaza `state` faltante/inválido/expirado/reutilizado antes de persistir tokens
-
-### Tiering runtime (Basic / Pro / Enterprise)
-- Base canónica en DB:
-  - `billing_plans`
-  - `plan_capabilities`
-  - `tenant_subscriptions`
-  - `tenant_usage_counters`
-  - `tenant_usage_events`
-- Enforcement backend activo por capability/cuota vía RPC:
-  - `consume_tenant_capability(...)`
-- Endpoint de snapshot para operación/UX:
-  - `GET /api/v1/settings/plan-capabilities`
-- Existing tenants del entorno linked bootstrappeados a `enterprise` para no cortar operación live.
-
-### Hardening observability + maintenance
-- Eventos de seguridad API persistidos en `api_security_events`:
-  - `rate_limit.exceeded`
-  - `idempotency.replay`
-  - `idempotency.payload_mismatch`
-  - `idempotency.in_flight_conflict`
-  - `idempotency.duplicate_conflict`
-- Limpieza de `idempotency_keys` expiradas:
-  - RPC: `cleanup_expired_idempotency_keys(...)`
-  - endpoint owner-only: `POST /api/v1/settings/maintenance/idempotency-cleanup`
-  - job automático en ai-orchestrator (interval configurable)
-
-### Envia Fase 2 parcial (feature flag)
-- Endpoints backend expuestos en `services/api/routers/shipping.py`:
-  - `POST /api/v1/shipping/{shipment_id}/label`
-  - `POST /api/v1/shipping/tracking`
-  - `POST /api/v1/shipping/pickup`
-  - `POST /api/v1/shipping/cancel`
-- Guardados por `ENVIA_PHASE2_ENABLED` (default `false`).
-- Frontend `/dashboard/shipping` ya integrado a Fase 2:
-  - proxies Next: `POST /api/shipping/{shipmentId}/label|tracking|pickup|cancel`
-  - bloque post-cotización para generar label, consultar tracking, agendar pickup y cancelar envío
-  - mensaje explícito cuando backend responde `503` por feature flag desactivado
-
-### Inbox shipping quote (Fase B1 inicial)
-- Orchestrator aplica ruta determinística para consultas de envío (sin delegar verdad al LLM).
-- Construye quote vía Core API `POST /api/v1/shipping/quote` con JWT interno de tenant.
-- Responde con `highlights` (`más económica` + `más rápida`) cuando hay datos suficientes.
-- Normaliza alias de país en shipping origin/destination (`Colombia`/`COL` -> `CO`) antes de cotizar.
-- Sanitiza errores upstream de Envia en respuesta al cliente (detalle técnico solo en logs).
-- Origen obligatorio desde `tenants.shipping_origin` (sin fallback automático por texto libre).
-- Si falta destino en contacto, recupera ciudad/departamento desde mensajes recientes del chat.
-- Estima paquete de cotización con inventario real (`product_variations`) + cantidad inferida del texto; usa defaults solo cuando faltan dimensiones/peso.
-- Si detecta más de un producto plausible en la conversación, solicita confirmación explícita antes de cotizar.
-- Copy de respuesta comercial en formato operativo con CTA para continuar compra.
-- Si falta destino/origen, solicita precisión y puede escalar a `human_takeover`.
+> Movidos a `.context/06-contracts.md` (lectura on-demand — solo cuando se toca Orchestrator/API/Worker).
+> Resumen operativo rápido: estados conversación (`bot_active | human_takeover | closed`),
+> mensajes con `processing_status`, WhatsApp por tenant_integrations (sin env vars),
+> Wompi Fase C activa en sandbox.
 
 ---
 
@@ -151,70 +49,10 @@ Supabase proyecto: `***SUPABASE_PROJECT_REF_REDACTED***`
 
 ---
 
-## Env vars por servicio (modelo actual)
+## Env vars por servicio
 
-### `commerce-ops-connector`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `META_APP_SECRET`
-- `META_VERIFY_TOKEN`
-- `ALLOWED_ORIGINS`
-
-### `commerce-ops-api`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_JWT_SECRET`
-- `ALLOWED_ORIGINS`
-- `MELI_CLIENT_ID`
-- `MELI_CLIENT_SECRET`
-- `MELI_REDIRECT_URI`
-- `MELI_AUTH_URL`
-- `MELI_OAUTH_STATE_SECRET`
-- `MELI_OAUTH_STATE_TTL_SECONDS`
-- `PLAN_ENFORCEMENT_ENABLED`
-- `ENVIA_PHASE2_ENABLED`
-- `API_RATE_LIMIT_WRITE_PER_MINUTE`
-- `API_RATE_LIMIT_SEND_PER_MINUTE`
-
-### `commerce-ops-orchestrator`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_JWT_SECRET`
-- `API_URL`
-- `GEMINI_API_KEY`
-- `GEMINI_MODEL`
-- `GEMINI_EMBEDDING_MODEL` (opcional; default runtime `gemini-embedding-001`)
-- `GEMINI_EMBEDDING_FALLBACK_MODEL` (opcional; fallback `text-embedding-004`)
-- `INBOX_SHIPPING_DEFAULT_WEIGHT_KG`
-- `INBOX_SHIPPING_DEFAULT_LENGTH_CM`
-- `INBOX_SHIPPING_DEFAULT_WIDTH_CM`
-- `INBOX_SHIPPING_DEFAULT_HEIGHT_CM`
-- `INBOX_SHIPPING_TIMEOUT_SECONDS`
-- `POLL_INTERVAL_SECONDS`
-- `MAX_PROCESSING_ATTEMPTS`
-- `CONVERSATION_HISTORY_LIMIT`
-- `HUMAN_TAKEOVER_QUEUE_ENABLED`
-- `HUMAN_TAKEOVER_QUEUE_POLL_BATCH`
-- `HUMAN_TAKEOVER_QUEUE_VT_SECONDS`
-- `WHATSAPP_OUTBOUND_QUEUE_ENABLED`
-- `WHATSAPP_OUTBOUND_QUEUE_POLL_BATCH`
-- `WHATSAPP_OUTBOUND_QUEUE_VT_SECONDS`
-- `WHATSAPP_OUTBOUND_MAX_ATTEMPTS`
-- `IDEMPOTENCY_CLEANUP_ENABLED`
-- `IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS`
-- `IDEMPOTENCY_CLEANUP_BATCH`
-
-### `commerce-ops-web`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `APP_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `API_URL`
-- `NEXT_PUBLIC_API_URL` (compat legacy, opcional y deprecada)
-
-Notas:
-- `META_ACCESS_TOKEN` y `WHATSAPP_PHONE_ID` no viven en env vars de servicios.
-- Esas credenciales son por tenant en DB (`tenant_integrations`).
+> Referencia canónica: `.env.example` (con etiquetas `[RENDER]` / `[LOCAL]` / `[DB]`).
+> Blueprint de Render: `render.yaml`.
 
 ---
 

@@ -100,10 +100,29 @@ export default async function IntegrationsPage({
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const token  = (formData.get('bot_token') as string)?.trim()
     const chatId = (formData.get('chat_id') as string)?.trim()
+
+    // Leer secret_id existente para update vs create
+    const { data: existing } = await sb.from('notification_settings').select('config')
+      .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').maybeSingle()
+    const existingSid = (existing?.config as Record<string, string>)?.bot_token_secret_id
+
+    let secretId: string | null = null
+    if (existingSid) {
+      await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
+      secretId = existingSid
+    } else {
+      const { data } = await sb.rpc('pgsec_create_secret', {
+        p_secret: token,
+        p_name: `${m.tenant_id}/telegram/bot_token`,
+        p_description: 'Telegram bot token',
+      })
+      secretId = data as string | null
+    }
+
     await sb.from('notification_settings').upsert({
       tenant_id: m.tenant_id, channel: 'telegram', enabled: true,
       config: {
-        bot_token:     token,
+        bot_token_secret_id: secretId,
         chat_id:       chatId,
         token_preview: token.length > 12 ? `${token.slice(0, 8)}...${token.slice(-4)}` : '●●●●',
       },
@@ -117,6 +136,10 @@ export default async function IntegrationsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const { data: existing } = await sb.from('notification_settings').select('config')
+      .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').maybeSingle()
+    const sid = (existing?.config as Record<string, string>)?.bot_token_secret_id
+    if (sid) await sb.rpc('pgsec_delete_secret', { p_id: sid })
     await sb.from('notification_settings').upsert({
       tenant_id: m.tenant_id, channel: 'telegram', enabled: false, config: {},
     }, { onConflict: 'tenant_id,channel' })
@@ -135,8 +158,11 @@ export default async function IntegrationsPage({
       .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').single()
 
     const cfg    = (notif?.config ?? {}) as Record<string, string>
-    const token  = cfg.bot_token
     const chatId = cfg.chat_id
+    // Leer token desde Vault
+    const { data: token } = cfg.bot_token_secret_id
+      ? await sb.rpc('pgsec_read_secret', { p_id: cfg.bot_token_secret_id })
+      : { data: cfg.bot_token ?? null }  // fallback texto plano
 
     if (!token || !chatId) {
       redirect('/dashboard/integrations?tg_test=error&tg_msg=Configuraci%C3%B3n+incompleta.+Guarda+el+Bot+Token+y+Chat+ID+primero.')
@@ -176,11 +202,29 @@ export default async function IntegrationsPage({
     const wabaId  = (formData.get('waba_id') as string)?.trim()
     const phoneId = (formData.get('phone_number_id') as string)?.trim()
     const token   = (formData.get('access_token') as string)?.trim()
+
+    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
+      .eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp').maybeSingle()
+    const existingSid = (existing?.credentials as Record<string, string>)?.access_token_secret_id
+
+    let secretId: string | null = null
+    if (existingSid) {
+      await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
+      secretId = existingSid
+    } else {
+      const { data } = await sb.rpc('pgsec_create_secret', {
+        p_secret: token,
+        p_name: `${m.tenant_id}/whatsapp/access_token`,
+        p_description: 'WhatsApp access token',
+      })
+      secretId = data as string | null
+    }
+
     await sb.from('tenant_integrations').upsert({
       tenant_id:   m.tenant_id,
       provider:    'whatsapp',
       status:      'connected',
-      credentials: { access_token: token, phone_number_id: phoneId },
+      credentials: { access_token_secret_id: secretId, phone_number_id: phoneId },
       meta: {
         waba_id:          wabaId,
         phone_id_preview: `${phoneId.slice(0, 6)}...${phoneId.slice(-4)}`,
@@ -197,6 +241,10 @@ export default async function IntegrationsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
+    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
+      .eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp').maybeSingle()
+    const sid = (existing?.credentials as Record<string, string>)?.access_token_secret_id
+    if (sid) await sb.rpc('pgsec_delete_secret', { p_id: sid })
     await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {}, meta: {} })
       .eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp')
     await sb.from('tenants').update({ meta_waba_id: null }).eq('id', m.tenant_id)

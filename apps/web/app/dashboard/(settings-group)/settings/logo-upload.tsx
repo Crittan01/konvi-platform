@@ -35,7 +35,7 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
     if (!user) { setError('Sesión expirada'); setUploading(false); return }
 
     const ext = file.name.split('.').pop() ?? 'png'
-    const path = `${user.id}/logo/logo.${ext}`
+    const path = `${tenantId}/logo/logo.${ext}`
 
     const { error: uploadErr } = await supabase.storage
       .from('tenant-media')

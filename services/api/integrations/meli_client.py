@@ -295,8 +295,10 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
             return None
 
         creds        = result.data.get("credentials") or {}
-        access_token = creds.get("access_token")
-        refresh_tok  = creds.get("refresh_token")
+        from vault_helper import VaultHelper, resolve_secret
+        vault        = VaultHelper(supabase)
+        access_token = resolve_secret(vault, creds, "access_token")
+        refresh_tok  = resolve_secret(vault, creds, "refresh_token")
         expires_at_s = creds.get("expires_at")
 
         if not access_token:
@@ -324,12 +326,24 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
                 new_exp_in  = token_data.get("expires_in", 21600)
                 new_exp_at  = (datetime.now(timezone.utc) + timedelta(seconds=new_exp_in)).isoformat()
 
+                # Actualizar en Vault (update-or-create)
+                at_sid = creds.get("access_token_secret_id")
+                rt_sid = creds.get("refresh_token_secret_id")
+                if at_sid:
+                    vault.update_secret(at_sid, new_access)
+                else:
+                    at_sid = vault.create_secret(new_access, f"{tenant_id}/meli/access_token", "MeLi access token")
+                if rt_sid:
+                    vault.update_secret(rt_sid, new_refresh)
+                else:
+                    rt_sid = vault.create_secret(new_refresh, f"{tenant_id}/meli/refresh_token", "MeLi refresh token")
+
                 supabase.table("tenant_integrations").update({
                     "credentials": {
-                        "access_token":  new_access,
-                        "refresh_token": new_refresh,
-                        "expires_in":    new_exp_in,
-                        "expires_at":    new_exp_at,
+                        "access_token_secret_id":  at_sid,
+                        "refresh_token_secret_id": rt_sid,
+                        "expires_in":  new_exp_in,
+                        "expires_at":  new_exp_at,
                     },
                 }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
 
@@ -366,11 +380,19 @@ def get_tenant_meli_credentials(supabase, tenant_id: str) -> Optional[dict]:
         if not result.data:
             return None
         creds = result.data.get("credentials") or {}
-        meta = result.data.get("meta") or {}
-        # user_id vive en meta (ver integrations.py meli_oauth_callback)
+        meta  = result.data.get("meta") or {}
+        from vault_helper import VaultHelper, resolve_secret
+        vault = VaultHelper(supabase)
+        access_token  = resolve_secret(vault, creds, "access_token")
+        refresh_token = resolve_secret(vault, creds, "refresh_token")
+        if not access_token:
+            return None
+        resolved = dict(creds)
+        resolved["access_token"]  = access_token
+        resolved["refresh_token"] = refresh_token
         if meta.get("user_id"):
-            creds["user_id"] = meta["user_id"]
-        return creds if creds.get("access_token") else None
+            resolved["user_id"] = meta["user_id"]
+        return resolved
     except Exception as e:
         logger.warning("No se pudo leer credenciales MeLi para tenant %s: %s", tenant_id, e)
         return None

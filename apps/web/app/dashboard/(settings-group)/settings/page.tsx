@@ -1,13 +1,15 @@
 import { createClient } from '@/utils/supabase/server'
-import { revalidatePath } from 'next/cache'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { saveTenant, saveOperativa, savePresenciaDigital, saveHorario, saveShippingOrigin } from './actions'
 import { Label } from '@/components/ui/label'
+import { SubmitButton } from '@/components/ui/submit-button'
 import {
-  Settings, Truck, ShieldCheck, Building2, SlidersHorizontal, Palette,
+  Settings, Truck, Building2, SlidersHorizontal, Globe, Clock,
+  CheckCircle2, XCircle,
 } from 'lucide-react'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
+import StorePresenceForm from './store-presence-form'
 
 export const metadata = {
   title: 'General — Configuración — Commerce Ops',
@@ -20,6 +22,10 @@ type ShippingOrigin = {
   name?: string; company?: string; street?: string; city?: string
   state?: string; postal_code?: string; country?: string; phone?: string; dane_code?: string
 }
+type SocialLinks = {
+  instagram?: string; facebook?: string; tiktok?: string; youtube?: string; website?: string
+}
+type StoreLocation = { name?: string; city?: string; state?: string; street?: string }
 type Tenant = {
   id: string; name: string; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
@@ -27,6 +33,10 @@ type Tenant = {
   nit?: string | null
   email_contacto?: string | null
   telefono_contacto?: string | null
+  store_type?: 'fisica' | 'virtual' | 'fisica_virtual' | null
+  social_links?: SocialLinks | null
+  store_locations?: StoreLocation[] | null
+  business_hours?: string | null
 }
 // ─── Componentes reutilizables ────────────────────────────────────────────────
 
@@ -70,60 +80,9 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto')
+      .select('id, name, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours')
       .eq('id', tenantId).single()
     tenant = data as Tenant
-  }
-
-  // ─── Server Actions ───────────────────────────────────────────────────────
-
-  async function saveTenant(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    await sb.from('tenants').update({
-      name:              (formData.get('name') as string)?.trim() || undefined,
-      nit:               (formData.get('nit') as string)?.trim()  || null,
-      email_contacto:    (formData.get('email_contacto') as string)?.trim() || null,
-      telefono_contacto: (formData.get('telefono_contacto') as string)?.trim() || null,
-    }).eq('id', m.tenant_id)
-    revalidatePath('/dashboard/settings')
-    revalidatePath('/dashboard')
-  }
-
-  async function saveOperativa(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    const threshold = parseInt(formData.get('low_stock_threshold') as string, 10)
-    if (Number.isInteger(threshold) && threshold >= 1 && threshold <= 999) {
-      await sb.from('tenants').update({ low_stock_threshold: threshold }).eq('id', m.tenant_id)
-    }
-    revalidatePath('/dashboard/settings')
-    revalidatePath('/dashboard')
-  }
-
-  async function saveShippingOrigin(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    const fields = ['name', 'company', 'street', 'city', 'state', 'postal_code', 'country', 'phone', 'dane_code']
-    const origin: Record<string, string> = {}
-    for (const f of fields) {
-      const val = (formData.get(`origin_${f}`) as string)?.trim()
-      if (val) origin[f] = val
-    }
-    // CO runtime: mantener postal_code y dane_code alineados para Envia quote.
-    if (origin.dane_code && !origin.postal_code) origin.postal_code = origin.dane_code
-    if (origin.postal_code && !origin.dane_code) origin.dane_code = origin.postal_code
-    await sb.from('tenants').update({ shipping_origin: origin }).eq('id', m.tenant_id)
-    revalidatePath('/dashboard/settings')
   }
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -212,7 +171,7 @@ export default async function SettingsPage() {
                       <p className="text-[10px] text-muted-foreground">10 dígitos, ej: 3121234567</p>
                     </div>
                   </div>
-                  <Button type="submit" size="sm">Guardar cambios</Button>
+                  <SubmitButton size="sm">Guardar cambios</SubmitButton>
                 </form>
               </div>
             ) : (
@@ -225,13 +184,51 @@ export default async function SettingsPage() {
             )}
           </FormSection>
 
-          {/* Dirección de origen — solo Owner */}
+          {/* Presencia digital — client component con show/hide dinámico */}
           {isOwner && (
-            <FormSection icon={Truck} title="Dirección de origen — Envíos"
-              description="Dirección desde donde se despachan los pedidos. Usada por defecto en cotizaciones Envia.">
+            <FormSection icon={Globe} title="Presencia y ubicaciones"
+              description="Tipo de operación, sedes físicas y canales digitales. El asistente IA usa esta información para responder preguntas de clientes sin escalar.">
+              <StorePresenceForm
+                initialStoreType={(tenant?.store_type ?? 'fisica') as 'fisica' | 'virtual' | 'fisica_virtual'}
+                initialLocations={(tenant?.store_locations as Array<{name:string;city:string;state:string;street:string}>) ?? []}
+                initialSocialLinks={(tenant?.social_links as Record<string,string>) ?? {}}
+                action={savePresenciaDigital}
+              />
+            </FormSection>
+          )}
+
+          {/* Horario de atención */}
+          {isOwner && (
+            <FormSection icon={Clock} title="Horario de atención"
+              description="El asistente IA responde preguntas como '¿cuándo abren?' usando este texto.">
+              <form action={saveHorario} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium" htmlFor="business-hours">Horario</Label>
+                  <textarea
+                    id="business-hours"
+                    name="business_hours"
+                    defaultValue={tenant?.business_hours ?? ''}
+                    placeholder={'Lunes a Viernes: 8am – 6pm\nSábados: 9am – 2pm\nDomingos: Cerrado'}
+                    rows={3}
+                    className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Texto libre — el bot lo repite al cliente tal cual.</p>
+                </div>
+                <SubmitButton size="sm">Guardar horario</SubmitButton>
+              </form>
+            </FormSection>
+          )}
+
+          {/* Dirección de despacho — solo para cotizaciones Envia */}
+          {isOwner && (
+            <FormSection icon={Truck} title="Opciones de despacho — Envia"
+              description="Dirección de origen para cotizaciones de envío. Selecciona una sede configurada para auto-completar los campos.">
               <ShippingOriginForm
                 initialData={tenant?.shipping_origin}
                 action={saveShippingOrigin}
+                tenantName={tenant?.name ?? undefined}
+                tenantPhone={tenant?.telefono_contacto ?? undefined}
+                storeLocations={(tenant?.store_locations as Array<{name?:string;city?:string;state?:string;street?:string}>) ?? []}
               />
             </FormSection>
           )}
@@ -240,29 +237,74 @@ export default async function SettingsPage() {
         {/* ── Columna derecha ── */}
         <div className="space-y-5">
 
-          {/* Estado del negocio — info rápida */}
-          <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Resumen</p>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">Estado</span>
-                <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
-                  tenant?.status === 'active'
-                    ? 'bg-emerald-500/15 text-emerald-400'
-                    : 'bg-muted text-muted-foreground'
-                }`}>
-                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                    tenant?.status === 'active' ? 'bg-emerald-400' : 'bg-muted-foreground'
-                  }`} />
-                  {tenant?.status === 'active' ? 'Activo' : tenant?.status ?? '—'}
-                </span>
+          {/* Resumen de configuración */}
+          {(() => {
+            const storeTypeLabel: Record<string, string> = {
+              fisica: 'Solo física', virtual: 'Solo virtual', fisica_virtual: 'Física y virtual',
+            }
+            const sedesCount  = (tenant?.store_locations as unknown[])?.length ?? 0
+            const socialCount = Object.values(tenant?.social_links ?? {}).filter(Boolean).length
+            const hasHorario  = !!tenant?.business_hours?.trim()
+            const hasDespacho = !!tenant?.shipping_origin?.city
+
+            type Row = { label: string; value: string; ok?: boolean }
+            const rows: Row[] = [
+              {
+                label: 'Estado',
+                value: tenant?.status === 'active' ? 'Activo' : tenant?.status ?? '—',
+                ok: tenant?.status === 'active',
+              },
+              {
+                label: 'Stock bajo en',
+                value: `≤ ${tenant?.low_stock_threshold ?? 5} uds`,
+              },
+              {
+                label: 'Tipo de tienda',
+                value: storeTypeLabel[tenant?.store_type ?? 'fisica'] ?? '—',
+                ok: !!tenant?.store_type,
+              },
+              ...(tenant?.store_type !== 'virtual' ? [{
+                label: 'Sedes físicas',
+                value: sedesCount > 0 ? `${sedesCount} configurada${sedesCount > 1 ? 's' : ''}` : 'Sin configurar',
+                ok: sedesCount > 0,
+              }] : []),
+              ...(tenant?.store_type !== 'fisica' ? [{
+                label: 'Redes sociales',
+                value: socialCount > 0 ? `${socialCount} canal${socialCount > 1 ? 'es' : ''}` : 'Sin configurar',
+                ok: socialCount > 0,
+              }] : []),
+              {
+                label: 'Horario',
+                value: hasHorario ? 'Configurado' : 'Sin configurar',
+                ok: hasHorario,
+              },
+              {
+                label: 'Despacho Envia',
+                value: hasDespacho ? 'Configurado' : 'Sin configurar',
+                ok: hasDespacho,
+              },
+            ]
+
+            return (
+              <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Resumen</p>
+                <div className="space-y-2">
+                  {rows.map(({ label, value, ok }) => (
+                    <div key={label} className="flex justify-between items-center gap-2">
+                      <span className="text-xs text-muted-foreground shrink-0">{label}</span>
+                      <span className={`text-xs font-medium flex items-center gap-1 text-right ${
+                        ok === true ? 'text-emerald-400' : ok === false ? 'text-muted-foreground/60' : ''
+                      }`}>
+                        {ok === true && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                        {ok === false && <XCircle className="h-3 w-3 shrink-0" />}
+                        {value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">Stock bajo en</span>
-                <span className="text-xs font-mono font-medium">≤ {tenant?.low_stock_threshold ?? 5} uds</span>
-              </div>
-            </div>
-          </div>
+            )
+          })()}
 
           {/* Configuración Operativa — umbral de stock bajo */}
           {isOwner && (
@@ -285,18 +327,11 @@ export default async function SettingsPage() {
                     Alerta en Inventario cuando stock ≤ este número.
                   </p>
                 </div>
-                <Button type="submit" size="sm" variant="outline">Guardar</Button>
+                <SubmitButton size="sm">Guardar</SubmitButton>
               </form>
             </FormSection>
           )}
 
-          {/* Nota sobre tema oscuro/claro */}
-          <div className="rounded-xl border border-border border-dashed p-4">
-            <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1.5"><Palette className="h-3.5 w-3.5" /> Tema de la interfaz</p>
-            <p className="text-xs text-muted-foreground/70 leading-relaxed">
-              La consola usa tema oscuro por defecto. El selector de tema claro/oscuro estará disponible como preferencia de usuario en una próxima actualización.
-            </p>
-          </div>
 
         </div>
       </div>

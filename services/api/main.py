@@ -1,11 +1,75 @@
+import logging
 import os
+import sys
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace
+from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook
 from dependencies.auth import get_current_tenant
 
-app = FastAPI(title="Commerce Ops Core API", description="Síncrona REST")
+logger = logging.getLogger("api.startup")
+
+# Logging idéntico al de Render: todos los loggers de la app al mismo stream que uvicorn
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s: %(name)s: %(message)s",
+)
+
+def _validate_startup_config() -> None:
+    """
+    Valida coherencia de configuración crítica antes de aceptar tráfico.
+    Falla rápido (sys.exit) si detecta incoherencias que causarían errores
+    silenciosos en producción.
+    """
+    errors: list[str] = []
+
+    # ── Wompi: ambiente vs llaves ─────────────────────────────────────────────
+    wompi_env = os.getenv("WOMPI_ENV", "sandbox").strip().lower()
+    if wompi_env == "production":
+        prv_key = os.getenv("WOMPI_PRIVATE_KEY_PROD", "")
+        events_key = os.getenv("WOMPI_EVENTS_KEY_PROD", "")
+        if not prv_key.startswith("prv_prod_"):
+            errors.append(
+                f"WOMPI_ENV=production pero WOMPI_PRIVATE_KEY_PROD no comienza con 'prv_prod_' "
+                f"(valor actual: {prv_key[:12]}...). Configura la llave real de producción."
+            )
+        if not events_key.startswith("prod_events_"):
+            errors.append(
+                f"WOMPI_ENV=production pero WOMPI_EVENTS_KEY_PROD no comienza con 'prod_events_' "
+                f"(valor actual: {events_key[:15]}...). Configura la events key real de producción."
+            )
+    elif wompi_env == "sandbox":
+        # Advertir si accidentalmente se pusieron llaves de producción en sandbox
+        pub_key = os.getenv("WOMPI_PUBLIC_KEY_SANDBOX", "")
+        if pub_key.startswith("pub_prod_"):
+            logger.warning(
+                "[STARTUP] ⚠️ WOMPI_ENV=sandbox pero WOMPI_PUBLIC_KEY_SANDBOX parece una llave de producción"
+            )
+
+    # ── Variables críticas de Supabase ────────────────────────────────────────
+    if not os.getenv("NEXT_PUBLIC_SUPABASE_URL", "").startswith("https://"):
+        errors.append("NEXT_PUBLIC_SUPABASE_URL no configurada o inválida")
+    if not os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""):
+        errors.append("SUPABASE_SERVICE_ROLE_KEY no configurada")
+    if not os.getenv("SUPABASE_JWT_SECRET", ""):
+        errors.append("SUPABASE_JWT_SECRET no configurada — el Orchestrator no podrá generar links de pago")
+
+    if errors:
+        for err in errors:
+            logger.error("[STARTUP] ❌ %s", err)
+        sys.exit(1)
+
+    logger.info("[STARTUP] ✅ Validación de configuración OK (WOMPI_ENV=%s)", wompi_env)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _validate_startup_config()
+    yield
+
+
+app = FastAPI(title="Commerce Ops Core API", description="Síncrona REST", lifespan=lifespan)
 
 # ─── CORS — restringido a dominios permitidos ──────────────────────────────────
 # En desarrollo: ALLOWED_ORIGINS=http://localhost:3000
@@ -40,6 +104,8 @@ app.include_router(integrations.router, prefix="/api/v1/integrations")
 app.include_router(shipping.router, prefix="/api/v1/shipping")
 app.include_router(marketplace.router, prefix="/api/v1")
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
+app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
+app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
 
 @app.get("/health")
 def health_check():
