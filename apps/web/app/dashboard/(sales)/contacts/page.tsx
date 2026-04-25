@@ -8,6 +8,7 @@ type Contact = {
   id: string
   phone: string
   name: string | null
+  email: string | null
   notes: string | null
   consent_given: boolean
   consent_date: string | null
@@ -48,7 +49,7 @@ export default async function ContactsPage({
     let query = supabase
       .from('contacts')
       .select(
-        'id, phone, name, notes, consent_given, consent_date, consent_source, consent_notice_version, ' +
+        'id, phone, name, email, notes, consent_given, consent_date, consent_source, consent_notice_version, ' +
         'consent_evidence, consent_actor_email, consent_revoked_at, consent_revoked_reason, created_at, address'
       )
       .eq('tenant_id', tenantId)
@@ -100,6 +101,7 @@ export default async function ContactsPage({
       tenant_id:     m.tenant_id,
       phone:         `+57${digits}`,
       name:          (formData.get('name') as string) || null,
+      email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
       consent_given: consentGiven,
       consent_date:  consentGiven ? nowIso : null,
@@ -172,6 +174,7 @@ export default async function ContactsPage({
       : (prev?.consent_date ?? null)
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
+      email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
       address,
       consent_given: consentGiven,

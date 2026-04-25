@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types as genai_types
 from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
+from tools.payment_link_tool import handle_payment_link_if_applicable
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
 from tools.shipping_quote_tool import handle_shipping_quote_if_applicable
 from tools.order_status_tool import handle_order_status_if_applicable
@@ -32,7 +33,8 @@ logger = logging.getLogger("orchestrator.core")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
+CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "25"))
+CONVERSATION_WINDOW_HOURS = int(os.getenv("CONVERSATION_WINDOW_HOURS", "24"))
 
 # ── Consentimiento Ley 1581 de 2012 ──────────────────────────────────────────
 CONSENT_TEXT_VERSION = "v2026-04"
@@ -41,14 +43,48 @@ CONSENT_QUESTION_TEMPLATE = (
     "para procesar tu pedido y coordinar el envío.\n\n"
     "Puedes solicitar la eliminación de tus datos escribiendo "
     "*eliminar mis datos* en cualquier momento.\n\n"
-    "¿Nos autorizas?\n• Responde *Sí* para continuar\n• Responde *No* para seguir sin registro"
+    "¿Nos autorizas?\n"
+    "• *Sí* (continuamos registrando tus datos)\n"
+    "• *No* (continuamos sin registrar tus datos)"
 )
-_CONSENT_QUESTION_MARKERS = ("nos autorizas", "eliminar mis datos", "responde si para continuar")
+ORDER_CREATION_CONFIRMATION_TEMPLATE = (
+    "¡Perfecto! Antes de enviarte el link, ¿deseas crear tu pedido ahora?\n\n"
+    "Con Wompi puedes pagar con:\n"
+    "• Tarjetas\n"
+    "• Billeteras digitales\n"
+    "• Transferencias\n"
+    "• Efectivo\n"
+    "• Créditos\n\n"
+    "Si deseas continuar, responde *Sí, crear pedido*."
+)
+_CONSENT_QUESTION_MARKERS = (
+    "nos autorizas",
+    "autorizas",
+    "eliminar mis datos",
+    "elimina mis datos",
+)
 _REVOCATION_TOKENS = {"eliminar mis datos", "borra mis datos", "elimina mis datos",
                       "borrar mis datos", "quiero ser eliminado", "no guardes mis datos",
                       "eliminar mi informacion", "elimina mi informacion"}
-_CONSENT_YES_TOKENS = {"si", "sí", "dale", "ok", "claro", "acepto", "autorizo", "afirmativo"}
-_CONSENT_NO_TOKENS  = {"no", "nope", "negativo", "no gracias", "prefiero no"}
+_CONSENT_YES_TOKENS = {"si", "sí", "yes", "dale", "ok", "claro", "acepto", "autorizo", "afirmativo", "listo", "de acuerdo"}
+_CONSENT_NO_TOKENS = {"no", "nope", "negativo", "no gracias", "prefiero no", "nunca", "jamas", "rechazo", "no autorizo"}
+_CONSENT_YES_PHRASES = {"por supuesto", "de una", "hágale", "hagale", "claro que si"}
+_CONSENT_NO_PHRASES = {"de ninguna manera", "ni loco", "nunca", "jamas", "no autorizo"}
+_AFFIRMATIVE_CONFIRMATION_TOKENS = {
+    "si", "sí", "ok", "dale", "listo", "claro", "confirmo", "confirmado",
+    "procede", "procedamos", "hagamos", "crear", "pedido",
+}
+_NEGATIVE_CONFIRMATION_TOKENS = {"no", "nunca", "jamas", "cancela", "cancelar", "deten", "detener"}
+_ORDER_CONFIRMATION_MARKERS = (
+    "procedemos a crear",
+    "crear el pedido",
+    "deseas crear tu pedido ahora",
+    "enviarte el link de pago",
+    "link de pago ahora",
+    "generando tu pedido",
+    "creamos el pedido",
+)
+_EMAIL_REGEX = re.compile(r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", flags=re.IGNORECASE)
 
 
 def _normalize_text_simple(text: str) -> str:
@@ -65,12 +101,18 @@ def _detect_revocation_intent(text: str) -> bool:
 
 def _detect_consent_yes(text: str) -> bool:
     normalized = _normalize_text_simple(text)
+    if any(phrase in normalized for phrase in _CONSENT_NO_PHRASES):
+        return False
+    if any(phrase in normalized for phrase in _CONSENT_YES_PHRASES):
+        return True
     tokens = set(normalized.split())
     return bool(tokens & _CONSENT_YES_TOKENS) and not bool(tokens & _CONSENT_NO_TOKENS)
 
 
 def _detect_consent_no(text: str) -> bool:
     normalized = _normalize_text_simple(text)
+    if any(phrase in normalized for phrase in _CONSENT_NO_PHRASES):
+        return True
     tokens = set(normalized.split())
     return bool(tokens & _CONSENT_NO_TOKENS)
 
@@ -116,6 +158,7 @@ def _record_consent(
                 "consent_revoked_at": now_iso,
                 "consent_revoked_reason": "Revocación solicitada por el titular vía WhatsApp",
                 "name": None,
+                "email": None,      # Ley 1581 Art. 15 — anonimización total en revocación
                 "address": None,
                 "notes": None,
             }
@@ -123,6 +166,58 @@ def _record_consent(
         supabase.table("contacts").update(update).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
     except Exception as e:
         logger.error("[CONSENT] Error registrando consentimiento contact=%s: %s", contact_id, e)
+
+
+def _extract_first_name(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    tokens = [token for token in str(name).split() if token]
+    if not tokens:
+        return None
+    return tokens[0].title()
+
+
+def _get_conversation_customer_phone(supabase: Client, conversation_id: str) -> Optional[str]:
+    conv_res = (
+        supabase.table("conversations")
+        .select("customer_phone")
+        .eq("id", conversation_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_res.data:
+        return None
+    return str(conv_res.data[0].get("customer_phone") or "").strip() or None
+
+
+def _fetch_contact_for_phone(
+    supabase: Client,
+    tenant_id: str,
+    customer_phone_raw: Optional[str],
+) -> tuple[Optional[str], dict]:
+    if not customer_phone_raw:
+        return None, {}
+
+    phone_norm = re.sub(r"[\s+]", "", customer_phone_raw)
+    if not phone_norm:
+        return None, {}
+
+    phone_plus = f"+{phone_norm}"
+    phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
+    query = (
+        supabase.table("contacts")
+        .select("id, consent_given, name, email, address")
+        .eq("tenant_id", tenant_id)
+    )
+    if hasattr(query, "or_"):
+        query = query.or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus},phone.eq.{phone_space}")
+    else:
+        query = query.eq("phone", phone_norm)
+    c_res = query.order("name", nullsfirst=False).limit(1).execute()
+    if not c_res.data:
+        return None, {}
+    record = c_res.data[0] or {}
+    return record.get("id"), record
 
 # Cliente global del nuevo SDK
 _genai_client: Optional[genai.Client] = None
@@ -232,6 +327,18 @@ class OrchestratorOutput(BaseModel):
         default=None,
         description="Objeto JSON de la dirección. Obligatorios: 'street', 'city' (normalizando fonemas, ej: boogta -> Bogotá D.C.). El 'department' debes deducirlo internamente de la ciudad. Condición: Si mencionan 'edificio' o 'conjunto', pide el apto/torre. Llena 'details' si aplica."
     )
+    extracted_email: Optional[str] = Field(
+        default=None,
+        description="Email del cliente si fue mencionado en la conversación."
+    )
+    total_in_cents: Optional[int] = Field(
+        default=None,
+        description="Total del pedido en centavos COP. Obligatorio cuando intent=order_acknowledgment."
+    )
+    shipping_cost_cents: Optional[int] = Field(
+        default=None,
+        description="Costo de envío del pedido en centavos COP, si aplica."
+    )
 
 
 # ─── Context Builder ──────────────────────────────────────────────────────────
@@ -274,6 +381,138 @@ def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
 def _set_conversation_status(supabase: Client, conversation_id: str, status: str) -> None:
     """Actualiza el estado de conversación en contrato canónico."""
     supabase.table("conversations").update({"status": status}).eq("id", conversation_id).execute()
+
+
+_COMPLAINT_INTENTS: frozenset[str] = frozenset({
+    "complaint", "reclamo", "devolucion", "garantia", "queja",
+})
+
+
+def _find_recent_claimable_order(
+    supabase: Client, tenant_id: str, contact_id: str
+) -> Optional[str]:
+    """
+    Retorna el order_id más reciente del contacto en estado post-venta
+    (confirmed, processing, shipped, delivered) para asociarlo al claim.
+    Retorna None si no hay orden elegible.
+    """
+    try:
+        res = (
+            supabase.table("orders")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .in_("status", ["confirmed", "processing", "shipped", "delivered"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0]["id"] if rows else None
+    except Exception as e:
+        logger.warning("[CLAIMS] Error buscando orden para claim contact=%s: %s", contact_id, e)
+        return None
+
+
+def _create_claim(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    order_id: str,
+    contact_id: Optional[str],
+    reason: str = "other",
+) -> Optional[int]:
+    """
+    Inserta un claim en DB y retorna el ticket_number asignado por el trigger.
+    Retorna None si falla el INSERT.
+    """
+    try:
+        payload: dict = {
+            "tenant_id": tenant_id,
+            "order_id": order_id,
+            "status": "open",
+            "reason": reason,
+        }
+        if contact_id:
+            payload["customer_id"] = contact_id
+
+        res = supabase.table("claims").insert(payload).execute()
+        inserted = (res.data or [{}])[0]
+        ticket_number = inserted.get("ticket_number")
+        logger.info(
+            "[CLAIMS] Ticket #%s creado: order=%s tenant=%s",
+            ticket_number, order_id, tenant_id,
+        )
+        return ticket_number
+    except Exception as e:
+        logger.warning("[CLAIMS] Error creando claim order=%s: %s", order_id, e)
+        return None
+
+
+def _is_conversation_window_expired(supabase: Client, conversation_id: str) -> bool:
+    """
+    Retorna True si la ventana de mensajería de 24h (CONVERSATION_WINDOW_HOURS) expiró.
+    Fuera de esta ventana, WhatsApp solo permite mensajes de plantilla aprobados.
+    Si no hay last_interaction_at, retorna False (no penalizar conversaciones nuevas).
+    """
+    try:
+        res = (
+            supabase.table("conversations")
+            .select("last_interaction_at")
+            .eq("id", conversation_id)
+            .single()
+            .execute()
+        )
+        last_ts = (res.data or {}).get("last_interaction_at")
+        if not last_ts:
+            return False
+        from datetime import datetime, timezone
+        last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - last_dt
+        return delta.total_seconds() > CONVERSATION_WINDOW_HOURS * 3600
+    except Exception as e:
+        logger.warning("[ORCH] Error verificando ventana conversación %s: %s", conversation_id, e)
+        return False
+
+
+_CANCEL_TOKENS: frozenset[str] = frozenset({
+    "cancelar", "cancelar pedido", "cancelar compra", "reiniciar",
+    "empezar de nuevo", "no quiero", "no quiero el pedido", "olvida el pedido",
+})
+
+
+def _cancel_pending_payment_order(supabase: Client, conversation_id: str, tenant_id: str) -> bool:
+    """
+    Cancela el pedido en pending_payment de esta conversación (si existe).
+    Retorna True si se canceló algún pedido.
+    El stock no estaba decrementado (solo se decrementa en APPROVED), no hay rollback de stock.
+    """
+    try:
+        res = (
+            supabase.table("orders")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .eq("status", "pending_payment")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return False
+        order_id = rows[0]["id"]
+        supabase.table("orders").update({
+            "status": "cancelled",
+            "updated_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat(),
+        }).eq("id", order_id).eq("tenant_id", tenant_id).execute()
+        logger.info("[ORCH] Pedido cancelado por cliente: order=%s conv=%s", order_id, conversation_id)
+        return True
+    except Exception as e:
+        logger.warning("[ORCH] Error cancelando pedido conv=%s: %s", conversation_id, e)
+        return False
 
 
 def _mark_message_processing(
@@ -375,10 +614,63 @@ def _detect_deterministic_smalltalk_intent(query_text: str) -> Optional[str]:
     return None
 
 
-def _deterministic_smalltalk_response(intent: str) -> str:
+_NON_TEXT_WARNING_MARKER = "solo puedo atender mensajes de texto"
+
+_GREETING_VARIATIONS = [
+    "¡Hola! ¿En qué te ayudo hoy?",
+    "¡Buenas! ¿En qué puedo ayudarte?",
+    "¡Hola! ¿Qué necesitas hoy?",
+    "¡Hola! ¿Cómo puedo ayudarte?",
+]
+_GREETING_WITH_NAME_VARIATIONS = [
+    "¡Hola, {name}! ¿En qué te ayudo hoy?",
+    "¡Buenas, {name}! ¿En qué puedo ayudarte?",
+    "¡Hola de nuevo, {name}! ¿En qué estamos?",
+    "¡Qué gusto atenderte, {name}! ¿Cómo puedo ayudarte?",
+]
+_ACK_VARIATIONS = [
+    "Con gusto. Si quieres, te ayudo con productos, stock o costo de envío.",
+    "Claro. Estoy aquí para lo que necesites.",
+    "¡De nada! Cualquier consulta con gusto.",
+]
+_ACK_WITH_NAME_VARIATIONS = [
+    "Con gusto, {name}. Si quieres, te ayudo con productos, stock o costo de envío.",
+    "Claro, {name}. Estoy aquí para lo que necesites.",
+    "¡De nada, {name}! Cualquier consulta con gusto.",
+]
+
+
+def _had_non_text_warning(history: list[dict]) -> bool:
+    """Retorna True si ya se envió una advertencia de no-texto en esta conversación."""
+    for msg in history or []:
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        if _NON_TEXT_WARNING_MARKER in str(msg.get("content") or "").lower():
+            return True
+    return False
+
+
+def _is_conversation_start(history: list[dict]) -> bool:
+    """Retorna True si la conversación acaba de comenzar (sin mensajes previos o muy pocos)."""
+    text_outbounds = [
+        m for m in (history or [])
+        if str(m.get("direction") or "").lower() == "outbound"
+    ]
+    return len(text_outbounds) == 0
+
+
+def _deterministic_smalltalk_response(
+    intent: str,
+    first_name: Optional[str] = None,
+    seed: int = 0,
+) -> str:
     if intent == "acknowledgement":
-        return "Con gusto. Si quieres, te ayudo con productos, stock o costo de envío."
-    return "¡Hola! ¿En qué te ayudo hoy?"
+        if first_name:
+            return _ACK_WITH_NAME_VARIATIONS[seed % len(_ACK_WITH_NAME_VARIATIONS)].format(name=first_name)
+        return _ACK_VARIATIONS[seed % len(_ACK_VARIATIONS)]
+    if first_name:
+        return _GREETING_WITH_NAME_VARIATIONS[seed % len(_GREETING_WITH_NAME_VARIATIONS)].format(name=first_name)
+    return _GREETING_VARIATIONS[seed % len(_GREETING_VARIATIONS)]
 
 
 def _is_variant_query(query_text: str) -> bool:
@@ -417,6 +709,18 @@ def _product_title_tokens(title: str) -> set[str]:
 
 
 def _find_context_product_from_history(catalog: list, history: list[dict]) -> Optional[dict]:
+    # R-13: Buscar snapshot persistido primero (guardado cuando el cliente confirmó carrier).
+    # El snapshot tiene content_type='context_snapshot' y payload con product_id real de DB.
+    for msg in reversed(history or []):
+        if msg.get("content_type") == "context_snapshot":
+            payload = msg.get("payload") or {}
+            snapped_id = str(payload.get("product_id") or "")
+            if snapped_id:
+                for p in catalog:
+                    if str(p.get("id") or "") == snapped_id:
+                        return p
+            break  # Solo el snapshot más reciente; si no encontró en catálogo, cae a texto
+
     if not history:
         return None
 
@@ -450,6 +754,105 @@ def _find_context_product_from_history(catalog: list, history: list[dict]) -> Op
     if best_score <= 0:
         return None
     return best_product
+
+
+_CORRECTION_FIELD_TOKENS: dict[str, frozenset[str]] = {
+    "email": frozenset({"email", "correo", "mail", "correo electronico"}),
+    "name":  frozenset({"nombre", "nombres", "apellido", "apellidos"}),
+    "address": frozenset({
+        "direccion", "domicilio", "calle", "barrio", "apartamento",
+        "apto", "torre", "conjunto", "edificio",
+    }),
+}
+_CORRECTION_SIGNAL_TOKENS: frozenset[str] = frozenset({
+    "mal", "malo", "mala", "incorrecto", "incorrecta", "equivocado",
+    "equivocada", "cambiar", "cambio", "cambia", "error", "corregir",
+    "corrige", "diferente", "otro", "otra", "no es", "no era",
+})
+
+
+def _detect_correction_intent(text: str) -> Optional[str]:
+    """
+    Detecta si el cliente quiere corregir un dato en el resumen (READY_FOR_SUMMARY).
+    Retorna: 'email', 'name', 'address', o None si no hay intento de corrección.
+    """
+    normalized = _normalize_text(text)
+    tokens = set(normalized.split())
+    has_signal = bool(tokens & _CORRECTION_SIGNAL_TOKENS)
+    if not has_signal:
+        return None
+    for field, field_tokens in _CORRECTION_FIELD_TOKENS.items():
+        if tokens & field_tokens:
+            return field
+    return None
+
+
+def _clear_contact_field(
+    supabase: Client,
+    contact_id: str,
+    tenant_id: str,
+    field: str,
+) -> None:
+    """Limpia un campo del contacto en DB para que el FSM lo vuelva a recolectar."""
+    null_value: dict = {field: None}
+    supabase.table("contacts").update(null_value).eq("id", contact_id).eq(
+        "tenant_id", tenant_id
+    ).execute()
+    logger.info("[CORR] Campo '%s' limpiado para recolección | contact=%s", field, contact_id)
+
+
+_CORRECTION_PROMPT: dict[str, str] = {
+    "email":   "Entendido 👍 ¿Cuál es tu correo electrónico correcto?",
+    "name":    "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
+    "address": "Entendido 👍 Dame tu dirección correcta, por favor.",
+}
+
+
+def _has_product_snapshot(history: list[dict]) -> bool:
+    """Retorna True si ya existe un context_snapshot en el historial."""
+    return any(m.get("content_type") == "context_snapshot" for m in (history or []))
+
+
+def _save_product_snapshot(
+    supabase: Client,
+    *,
+    conversation_id: str,
+    tenant_id: str,
+    catalog: list,
+    history_for_prompt: list[dict],
+) -> None:
+    """
+    R-13: Persiste snapshot del producto seleccionado en messages.payload
+    cuando el carrier acaba de ser confirmado.
+    Previene que _build_verified_order_context falle en conversaciones largas
+    donde el usuario habló de otros productos o la detección por texto es ambigua.
+    """
+    ctx = _build_verified_order_context(catalog, history_for_prompt)
+    if not ctx or not ctx.get("product_id"):
+        logger.warning("[R-13] No se pudo construir contexto para snapshot")
+        return
+    try:
+        supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "context_snapshot",
+            "content": "",
+            "payload": {
+                "product_id": ctx["product_id"],
+                "variation_id": ctx["variation_id"],
+                "quantity": ctx["quantity"],
+                "unit_price_cents": ctx["unit_price_cents"],
+            },
+            "processed": True,
+            "processing_status": "processed",
+        }).execute()
+        logger.info(
+            "[R-13] Snapshot guardado: product=%s variation=%s conv=%s",
+            ctx["product_id"], ctx["variation_id"], conversation_id,
+        )
+    except Exception as e:
+        logger.warning("[R-13] Error guardando snapshot: %s", e)
 
 
 def _query_mentions_any_product(catalog: list, query_tokens: set[str]) -> bool:
@@ -545,18 +948,494 @@ ANÁLISIS DE VARIANTE (QUERY ACTUAL):
     return "\n".join(no_match_lines)
 
 
+_BUYING_INTENT_STRONG_TOKENS = {
+    "comprar", "compra", "lo compro", "lo quiero comprar", "agregar al pedido", "hacer pedido",
+    "proceder", "procede", "confirmo", "confirmar pedido", "me lo llevo", "pagar", "pago",
+}
+_BUYING_INTENT_CONTEXT_MARKERS = {
+    "cotice el envio", "cotizar envio", "envio de", "economica", "rapida", "direccion de entrega",
+    "nombre completo", "resumen de tu pedido", "confirmas que los datos", "link de pago",
+}
+_INQUIRY_ONLY_MARKERS = {
+    "averiguar", "consultar", "saber", "informacion", "información", "precio", "stock", "tienes",
+}
+_ADDRESS_HINT_TOKENS = {
+    "calle", "carrera", "cra", "kr", "avenida", "av", "transversal", "diagonal",
+    "barrio", "torre", "apartamento", "apto", "conjunto", "edificio", "casa",
+}
+
+
+def _has_buying_intent(query_text: str, history: list[dict]) -> bool:
+    normalized = _normalize_text(query_text)
+    if not normalized:
+        return False
+
+    if any(token in normalized for token in _BUYING_INTENT_STRONG_TOKENS):
+        return True
+
+    # "me gustaría averiguar/consultar..." no es intención de compra todavía.
+    if "me gustaria" in normalized and any(marker in normalized for marker in _INQUIRY_ONLY_MARKERS):
+        return False
+
+    # Follow-up afirmativo muy corto solo vale como buying intent si venimos
+    # de contexto transaccional reciente.
+    tokens = set(_tokenize_text(query_text))
+    is_short_affirmative = len(tokens) <= 3 and bool(tokens & {"si", "sí", "ok", "dale", "claro", "listo"})
+
+    recent = history[-6:] if history else []
+    has_recent_transactional_context = False
+    for msg in recent:
+        content = _normalize_text(str(msg.get("content") or ""))
+        if any(marker in content for marker in _BUYING_INTENT_CONTEXT_MARKERS):
+            has_recent_transactional_context = True
+            break
+
+    if is_short_affirmative and has_recent_transactional_context:
+        return True
+
+    return has_recent_transactional_context
+
+
+def _has_shipping_been_quoted(history: list[dict]) -> bool:
+    shipping_markers = ("economica", "rapida", "envio de", "opciones de envio", "cotizacion de envio")
+    for msg in history or []:
+        if str(msg.get("direction") or "").strip().lower() != "outbound":
+            continue
+        content_norm = _normalize_text(str(msg.get("content") or ""))
+        if any(marker in content_norm for marker in shipping_markers):
+            return True
+    return False
+
+
+def _has_carrier_been_selected(history: list[dict]) -> bool:
+    """
+    Detecta si el cliente seleccionó explícitamente un carrier.
+    Busca el outbound de cotización más reciente (con "Económica"/"Rápida") y
+    verifica que ALGÚN inbound posterior sea una selección válida:
+    corta (≤8 tokens), con token de carrier, sin signo de pregunta.
+    Evita falsos positivos en preguntas como '¿la económica incluye seguro?'
+    """
+    carrier_tokens = (
+        "economica", "rapida", "deprisa", "servientrega", "coordinadora", "tcc",
+        "dhl", "fedex", "interrapidisimo", "mensajeros", "urbanos",
+    )
+    # "continuamos" es el marcador definitivo — aparece en TODA respuesta de shipping_quote_tool
+    # (tanto "¿Con cuál continuamos?" como "¿Continuamos con la opción Económica?").
+    # "economica"/"rapida" solos también aparecen en resúmenes, NO son suficientes.
+    _quote_outbound_markers = ("continuamos",)
+
+    hist = list(history or [])
+    # Encontrar el índice del outbound de cotización más reciente
+    quote_idx = None
+    quote_content_norm = ""
+    for i, msg in enumerate(hist):
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content_norm = _normalize_text(str(msg.get("content") or ""))
+        if any(m in content_norm for m in _quote_outbound_markers):
+            quote_idx = i
+            quote_content_norm = content_norm  # Guardar para detectar opción única
+
+    if quote_idx is None:
+        return False
+
+    # Detectar si la cotización mostró UNA sola opción.
+    # "¿Continuamos con la opción Económica?" = opción única → afirmativo corto = selección válida.
+    # "¿Con cuál continuamos? Económica o Rápida" = múltiple → requiere mención de carrier.
+    is_single_option = (
+        "continuamos con la opcion" in quote_content_norm
+        and "con cual continuamos" not in quote_content_norm
+    )
+    _affirmative_short = {"si", "sí", "ok", "dale", "listo", "claro", "si claro", "de una"}
+
+    # Verificar inbounds DESPUÉS del outbound de cotización
+    for msg in hist[quote_idx + 1:]:
+        if str(msg.get("direction") or "").lower() != "inbound":
+            continue
+        raw = str(msg.get("content") or "")
+        content_n = _normalize_text(raw)
+        tokens = content_n.split()
+        has_carrier = any(token in content_n for token in carrier_tokens)
+        is_question = "?" in raw
+        is_short = len(tokens) <= 8
+
+        if is_question:
+            continue  # Pregunta nunca es selección
+        if has_carrier and is_short:
+            return True  # Mencionó el carrier explícitamente
+        if is_single_option and is_short and content_n.strip() in _affirmative_short:
+            return True  # Opción única: "sí" confirma la única opción presentada
+    return False
+
+
+def _last_outbound_was_order_confirmation_question(history: list[dict]) -> bool:
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").strip().lower() == "outbound":
+            content_norm = _normalize_text(str(msg.get("content") or ""))
+            return any(marker in content_norm for marker in _ORDER_CONFIRMATION_MARKERS)
+    return False
+
+
+def _normalize_building_type(value: Optional[str]) -> str:
+    normalized = _normalize_text_simple(str(value or ""))
+    if normalized in {"casa", "hogar", "residencia"}:
+        return "casa"
+    if normalized in {"edificio", "apartamento", "apto"}:
+        return "edificio"
+    if normalized in {"conjunto", "unidad", "unidad residencial"}:
+        return "conjunto"
+    return ""
+
+
+def _missing_address_fields(direction: Optional[dict]) -> list[str]:
+    address = direction if isinstance(direction, dict) else {}
+    street = str(address.get("street") or "").strip()
+    city = str(address.get("city") or "").strip()
+    building_type = _normalize_building_type(address.get("building_type"))
+    tower = str(address.get("tower") or "").strip()
+    apartment = str(address.get("apartment") or "").strip()
+
+    missing: list[str] = []
+    if not street:
+        missing.append("Calle y número")
+    if not city:
+        missing.append("Ciudad")
+    # Compatibilidad runtime: no bloquear avance si el tipo de vivienda no fue
+    # informado aún. Solo endurecemos validación cuando sí se reporta el tipo.
+    if building_type == "edificio" and not apartment:
+        missing.append("Apartamento")
+    if building_type == "conjunto":
+        if not tower:
+            missing.append("Torre")
+        if not apartment:
+            missing.append("Apartamento")
+    return missing
+
+
+def _has_real_address_data(direction: Optional[dict]) -> bool:
+    return len(_missing_address_fields(direction)) == 0
+
+
+def _merge_address_data(existing: Optional[dict], incoming: Optional[dict]) -> dict:
+    merged: dict = {}
+    if isinstance(existing, dict):
+        merged.update(existing)
+    if isinstance(incoming, dict):
+        for key, value in incoming.items():
+            if value is None:
+                continue
+            if isinstance(value, str):
+                cleaned = value.strip()
+                if not cleaned:
+                    continue
+                merged[key] = cleaned
+            else:
+                merged[key] = value
+    normalized_type = _normalize_building_type(merged.get("building_type"))
+    if normalized_type:
+        merged["building_type"] = normalized_type
+    return merged
+
+
+def _build_address_request_prompt(contact_record: dict, first_name: Optional[str]) -> str:
+    name_prefix = f", {first_name}" if first_name else ""
+    address = contact_record.get("address") if isinstance(contact_record, dict) else None
+    missing = _missing_address_fields(address)
+    if missing:
+        lines = [f"Gracias{name_prefix}. Para completar la dirección de entrega me falta:"]
+        lines.extend([f"• {field}" for field in missing])
+        lines.append("• Dato adicional opcional: barrio, referencia o portería")
+        return "\n".join(lines)
+    return (
+        f"Gracias{name_prefix}. Para la entrega compárteme por favor:\n"
+        "• Calle y número\n"
+        "• Ciudad\n"
+        "• Tipo de vivienda: *casa*, *edificio* o *conjunto*\n"
+        "• Si es *edificio*: apartamento\n"
+        "• Si es *conjunto*: torre y apartamento\n"
+        "• Dato adicional opcional: barrio, referencia o portería"
+    )
+
+
 def _determine_transactional_state(contact: dict) -> str:
-    """Evalúa el contacto y retorna el estado de venta actual (FSM)."""
     if not contact:
         return "NEEDS_CONSENT"
     if not contact.get("consent_given"):
         return "NEEDS_CONSENT"
+    if not str(contact.get("email") or "").strip():
+        return "NEEDS_EMAIL"
     if not str(contact.get("name") or "").strip():
         return "NEEDS_NAME"
-    address = contact.get("address")
-    if not isinstance(address, dict) or not address.get("street") or not address.get("city"):
+    if not _has_real_address_data(contact.get("address")):
         return "NEEDS_DIRECTION"
     return "READY_FOR_SUMMARY"
+
+
+def _resolve_display_state(
+    *,
+    contact_record: dict,
+    history: Optional[list[dict]],
+    buying_intent: bool,
+    shipping_quoted: bool,
+) -> str:
+    transaction_state = _determine_transactional_state(contact_record)
+    carrier_selected = _has_carrier_been_selected(history or [])
+    order_confirm_pending = _last_outbound_was_order_confirmation_question(history or [])
+
+    if buying_intent:
+        if not shipping_quoted:
+            return "NEEDS_SHIPPING_CITY"
+        if not carrier_selected:
+            return "AWAITING_CARRIER_SELECTION"
+        if order_confirm_pending:
+            return "AWAITING_ORDER_CONFIRMATION"
+        return transaction_state
+    return "CATALOG_MODE"
+
+
+def _build_next_data_request_prompt(contact_record: dict) -> str:
+    state = _determine_transactional_state(contact_record)
+    first_name = _extract_first_name(contact_record.get("name") if isinstance(contact_record, dict) else None)
+    name_prefix = f", {first_name}" if first_name else ""
+    if state == "NEEDS_EMAIL":
+        return f"¡Perfecto{name_prefix}! ¿Cuál es tu correo electrónico?"
+    if state == "NEEDS_NAME":
+        return "Gracias. Para continuar, compárteme tu nombre completo."
+    if state == "NEEDS_DIRECTION":
+        return _build_address_request_prompt(contact_record, first_name)
+    if state == "READY_FOR_SUMMARY":
+        return "Perfecto. Ya tengo tus datos, ¿confirmas que procedamos con el resumen final del pedido?"
+    return "Listo. ¿Me confirmas los datos para continuar con tu pedido?"
+
+
+def _is_affirmative_confirmation(text: str) -> bool:
+    normalized = _normalize_text_simple(text)
+    if not normalized:
+        return False
+    tokens = [tok for tok in re.split(r"\s+", normalized) if tok]
+    if not tokens:
+        return False
+    token_set = set(tokens)
+    if token_set & _NEGATIVE_CONFIRMATION_TOKENS:
+        return False
+    if token_set & _AFFIRMATIVE_CONFIRMATION_TOKENS:
+        return True
+    return any(phrase in normalized for phrase in ("si confirmo", "si, confirmo", "crear pedido", "procedamos"))
+
+
+def _extract_shipping_cost_from_history(history: list[dict]) -> Optional[int]:
+    """
+    Extrae el costo de envío en centavos del último outbound de cotización en el historial.
+    Busca patrones como '$12.000 COP', '$12,000', '12000'.
+    Retorna None si no encuentra o no puede parsear.
+    """
+    _price_pattern = re.compile(r"\$\s*([\d.,]+)\s*(?:COP)?", re.IGNORECASE)
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content = str(msg.get("content") or "")
+        content_norm = _normalize_text(content)
+        if "economica" not in content_norm and "rapida" not in content_norm:
+            continue
+        # Encontrado: extraer primer precio de la línea "Económica"
+        for line in content.splitlines():
+            if "Económica" in line or "Economica" in line or "economica" in _normalize_text(line):
+                matches = _price_pattern.findall(line)
+                for raw in matches:
+                    cleaned = raw.replace(".", "").replace(",", "")
+                    try:
+                        value = int(cleaned)
+                        if value >= 1000:  # mínimo $10 COP en centavos
+                            return value * 100  # convertir pesos → centavos
+                    except ValueError:
+                        continue
+    return None
+
+
+def _build_verified_order_context(
+    catalog: list,
+    history: list[dict],
+) -> Optional[dict]:
+    """
+    Construye un contexto de pedido verificado desde datos reales (catálogo DB + historial).
+    NO delega cálculos al LLM.
+    Retorna dict con totales listos para inyectar en el prompt de READY_FOR_SUMMARY,
+    o None si no hay suficientes datos.
+    """
+    product = _find_context_product_from_history(catalog, history)
+    if not product:
+        return None
+
+    # Precio + IDs: preferir variante detectada en historial, fallback a la más barata con stock
+    unit_price: float = 0.0
+    variant_label: Optional[str] = None
+    variation_id: Optional[str] = None
+    variants = product.get("variants") or []
+    if variants:
+        # Precio base: variante más barata con stock
+        prices = [
+            float(v.get("price") or 0)
+            for v in variants
+            if (v.get("stock") or 0) > 0 and v.get("price")
+        ]
+        if prices:
+            unit_price = min(prices)
+        else:
+            unit_price = float(product.get("price_min") or product.get("price") or 0)
+        # Detectar variante específica mencionada en el historial.
+        # Normaliza label quitando puntuación para que "Color: Rojo" matchee "color rojo".
+        def _clean_label(raw: str) -> str:
+            normalized = _normalize_text(raw)
+            return " ".join(re.sub(r"[^a-z0-9 ]", " ", normalized).split())
+
+        for msg in reversed(history or []):
+            if str(msg.get("direction") or "").lower() != "inbound":
+                continue
+            c = _normalize_text(str(msg.get("content") or ""))
+            for v in variants:
+                lbl_clean = _clean_label(str(v.get("label") or ""))
+                if lbl_clean and lbl_clean in c:
+                    unit_price = float(v.get("price") or unit_price)
+                    variant_label = str(v.get("label"))
+                    variation_id = v.get("id")  # ID real de DB
+                    break
+            if variant_label:
+                break
+        # Si no se detectó variante específica, usar la más barata disponible con su ID
+        if not variation_id:
+            best = min(
+                (v for v in variants if (v.get("stock") or 0) > 0 and v.get("price")),
+                key=lambda v: float(v.get("price") or 0),
+                default=None,
+            )
+            if best:
+                variation_id = best.get("id")
+    else:
+        unit_price = float(product.get("price") or 0)
+
+    if unit_price <= 0:
+        return None
+
+    # Cantidad: extraer del historial reciente
+    quantity = 1
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").lower() != "inbound":
+            continue
+        q = _extract_quantity_from_text(str(msg.get("content") or ""))
+        if q > 1:
+            quantity = q
+            break
+
+    subtotal_cents = int(round(unit_price * quantity * 100))
+    shipping_cost_cents = _extract_shipping_cost_from_history(history) or 0
+    total_cents = subtotal_cents + shipping_cost_cents
+
+    title = re.sub(r"^\[.*?\]\s*", "", str(product.get("title", "Producto"))).strip()
+    return {
+        "product_id": product.get("id"),      # UUID del producto en DB
+        "variation_id": variation_id,          # UUID de la variante en DB (None si sin variantes)
+        "product_name": title,
+        "variant_label": variant_label,
+        "unit_price_cents": int(round(unit_price * 100)),
+        "quantity": quantity,
+        "subtotal_cents": subtotal_cents,
+        "shipping_cost_cents": shipping_cost_cents,
+        "total_cents": total_cents,
+    }
+
+
+def _extract_quantity_from_text(text: str) -> int:
+    """Extrae cantidad desde texto libre. Retorna 1 si no detecta."""
+    normalized = _normalize_text(text)
+    patterns = [
+        r"\bx\s*(\d{1,3})\b",
+        r"\b(\d{1,3})\s*x\b",
+        r"\b(\d{1,3})\s*(?:unidad|unidades|ud|uds|u)\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, normalized)
+        if m:
+            try:
+                q = int(m.group(1))
+                if q > 0:
+                    return min(q, 200)
+            except ValueError:
+                pass
+    return 1
+
+
+def _format_cop(cents: int) -> str:
+    """Formatea centavos COP a string legible: 1350000 → '$13.500 COP'"""
+    pesos = cents // 100
+    return f"${pesos:,.0f} COP".replace(",", ".")
+
+
+def _build_store_info_section(
+    tenant_name: str,
+    store_type: str,
+    shipping_origin: dict,
+    social_links: dict,
+    store_locations: list,
+    business_hours: str,
+) -> str:
+    """
+    Construye la sección de información comercial del tenant para el system prompt.
+    Adaptativa por tipo de tienda: fisica | virtual | fisica_virtual.
+    Permite al bot responder sin escalar: ubicación, sedes, redes, horario.
+    """
+    has_fisica  = store_type in ("fisica", "fisica_virtual")
+    has_virtual = store_type in ("virtual", "fisica_virtual")
+
+    lines: list[str] = [f"\nINFORMACIÓN COMERCIAL DE {tenant_name.upper()}:"]
+
+    if has_fisica:
+        # Usar sedes configuradas por el tenant; fallback a shipping_origin si no hay
+        sedes = [s for s in (store_locations or []) if s.get("city") or s.get("street")]
+        if sedes:
+            for sede in sedes:
+                sede_name = sede.get("name") or "Sede"
+                city      = sede.get("city", "")
+                state     = sede.get("state", "")
+                street    = sede.get("street", "")
+                loc       = city
+                if state and state != city:
+                    loc += f", {state}"
+                lines.append(f"- {sede_name}: {street}{', ' + loc if loc else ''}" if street else f"- {sede_name}: {loc}")
+        elif shipping_origin.get("city"):
+            city    = shipping_origin.get("city", "")
+            state   = shipping_origin.get("state", "")
+            country = shipping_origin.get("country", "Colombia")
+            street  = shipping_origin.get("street", "")
+            loc     = city
+            if state and state != city:
+                loc += f", {state}"
+            loc += f" — {country}"
+            lines.append(f"- Tienda física en: {loc}")
+            if street:
+                lines.append(f"  Dirección: {street}")
+
+    if has_virtual:
+        if has_fisica:
+            lines.append("- También operamos como tienda virtual.")
+        else:
+            lines.append("- Somos tienda virtual (sin sede física al público).")
+
+    active_social = {k: v for k, v in (social_links or {}).items() if v}
+    if active_social:
+        social_parts = ", ".join(f"{k.capitalize()}: {v}" for k, v in active_social.items())
+        lines.append(f"- Redes y canales digitales: {social_parts}")
+
+    if business_hours:
+        lines.append(f"- Horario de atención: {business_hours}")
+
+    if len(lines) == 1:
+        return ""  # Sin info configurada → no inyectar sección vacía
+
+    lines.append(
+        "INSTRUCCIÓN: usa esta información para responder preguntas sobre ubicación, "
+        "sedes físicas, canales digitales, redes sociales u horario. NO escales por estas preguntas."
+    )
+    return "\n".join(lines)
 
 
 def _build_system_prompt(
@@ -567,8 +1446,15 @@ def _build_system_prompt(
     contact_record: dict,
     query_text: str = "",
     history: Optional[list[dict]] = None,
+    buying_intent: bool = False,
+    shipping_quoted: bool = False,
+    tenant_shipping_origin: Optional[dict] = None,
+    tenant_store_type: str = "fisica",
+    tenant_social_links: Optional[dict] = None,
+    tenant_store_locations: Optional[list] = None,
+    tenant_business_hours: str = "",
 ) -> str:
-    """Construye el system prompt con RAG dinámico, catálogo, Anti-Spam estricto y contexto de consentimiento."""
+    """Construye el system prompt con FSM contextual para venta vs consulta."""
     if history is None:
         history = []
     def _format_money(value: float | int | str | None) -> str:
@@ -602,61 +1488,195 @@ def _build_system_prompt(
         # Compatibilidad con estructura legacy.
         return f"- {title}: ${_format_money(product.get('price'))} (stock: {product.get('stock', 0)})"
 
-    catalog_text = "\n".join([_format_product_for_prompt(p) for p in catalog])
-    if not catalog_text:
-        catalog_text = "(No hay productos disponibles en este momento)"
+    # Catálogo condicional por estado — evita inyectar el catálogo completo
+    # cuando el cliente ya tomó decisiones y solo necesitamos recolectar datos.
+    _data_collection_states = {
+        "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME", "NEEDS_DIRECTION",
+        "AWAITING_ORDER_CONFIRMATION",
+    }
+    display_state_for_catalog = _resolve_display_state(
+        contact_record=contact_record,
+        history=history,
+        buying_intent=buying_intent,
+        shipping_quoted=shipping_quoted,
+    )
+    if display_state_for_catalog in _data_collection_states:
+        # Solo incluir el producto en contexto (1 ítem), no el catálogo completo
+        context_product = _find_context_product_from_history(catalog, history)
+        if context_product:
+            catalog_text = f"Producto en contexto:\n{_format_product_for_prompt(context_product)}"
+        else:
+            catalog_text = "(catálogo omitido — recolección de datos)"
+        variant_section = ""  # Sin análisis de variantes en este estado
+    elif display_state_for_catalog == "READY_FOR_SUMMARY":
+        # Solo el producto en contexto para el resumen
+        context_product = _find_context_product_from_history(catalog, history)
+        catalog_text = (
+            f"Producto en contexto:\n{_format_product_for_prompt(context_product)}"
+            if context_product else "(catálogo omitido — resumen)"
+        )
+        variant_section = ""
+    else:
+        # CATALOG_MODE / NEEDS_SHIPPING_CITY / AWAITING_CARRIER_SELECTION → catálogo completo
+        catalog_text = "\n".join([_format_product_for_prompt(p) for p in catalog])
+        if not catalog_text:
+            catalog_text = "(No hay productos disponibles en este momento)"
+        variant_section = _build_variant_match_section(catalog, query_text, history)
+
+        # GAP-2: Si el producto del contexto tiene stock=0, inyectar lista de alternativas con stock
+        _ctx_product = _find_context_product_from_history(catalog, history)
+        if _ctx_product:
+            _ctx_stock = int(_ctx_product.get("stock_total") or _ctx_product.get("stock") or 0)
+            if _ctx_stock == 0:
+                _alternatives = [
+                    p for p in catalog
+                    if str(p.get("id")) != str(_ctx_product.get("id"))
+                    and int(p.get("stock_total") or p.get("stock") or 0) > 0
+                ]
+                if _alternatives:
+                    _alt_lines = "\n".join(
+                        _format_product_for_prompt(p) for p in _alternatives[:5]
+                    )
+                    _ctx_title = re.sub(r"^\[.*?\]\s*", "", str(_ctx_product.get("title", ""))).strip()
+                    catalog_text += (
+                        f"\n\n⚠️ PRODUCTO AGOTADO: {_ctx_title}\n"
+                        f"INSTRUCCIÓN: informa al cliente que ese producto está agotado y ofrece alguna de estas alternativas con stock disponible (usa datos reales, no inventes precios):\n"
+                        f"{_alt_lines}"
+                    )
+                else:
+                    catalog_text += "\n\n⚠️ PRODUCTO AGOTADO y sin alternativas en catálogo. Informa amablemente y pregunta si desea ver el catálogo completo."
 
     kb_section = ""
-    if kb_text:
+    if kb_text and display_state_for_catalog not in _data_collection_states:
         kb_section = f"\n\nINFORMACIÓN EXTRAÍDA DE LA BASE DE CONOCIMIENTOS (ÚSALA PARA RESPONDER):\n{kb_text}"
-    variant_section = _build_variant_match_section(catalog, query_text, history)
 
-    # Reglas dinámicas inyectadas desde UI del Tenant
+    store_location_section = _build_store_info_section(
+        tenant_name=tenant_name,
+        store_type=tenant_store_type,
+        shipping_origin=tenant_shipping_origin or {},
+        social_links=tenant_social_links or {},
+        store_locations=tenant_store_locations or [],
+        business_hours=tenant_business_hours or "",
+    )
+
     strict_rules = ""
     if ai_agent.get("strict_guardrails"):
         strict_rules = """
 - ESTRICTO: NO INVENTES INFORMACIÓN, PRECIOS, NI POLÍTICAS que no estén explícitas arriba.
-- Si desconoces la respuesta o la KB no es clara, ESCALA a un asesor experto inmediatamente (requires_human=true).
+- Si falta un dato para responder (producto, variante, ciudad), pide precisión antes de escalar.
+- Escala a humano solo cuando el usuario insista sin resolución, haya molestia, reclamo o riesgo transaccional.
 - NUNCA des consejos médicos, legales o financieros.
 """
 
     consent_template = CONSENT_QUESTION_TEMPLATE
-    transaction_state = _determine_transactional_state(contact_record)
-    
-    # FSM: Inyección de Dependencia de Estado
-    if transaction_state == "NEEDS_CONSENT":
+    display_state = _resolve_display_state(
+        contact_record=contact_record,
+        history=history,
+        buying_intent=buying_intent,
+        shipping_quoted=shipping_quoted,
+    )
+
+    if display_state == "NEEDS_SHIPPING_CITY":
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: COTIZAR ENVÍO — PEDIR CIUDAD.
+- El usuario quiere comprar. AÚN NO has cotizado envío.
+- NO pidas nombre, email, consentimiento ni dirección todavía.
+- Primero valida interés de forma suave: "¿Te gustaría que te cotice el envío?"
+- Si responde afirmativamente, pide ciudad de entrega para cotizar.
+"""
+    elif display_state == "AWAITING_CARRIER_SELECTION":
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: ESPERANDO SELECCIÓN DE TRANSPORTISTA.
+- Ya mostraste opciones Económica/Rápida.
+- NO pidas datos personales todavía.
+- Si no eligió, recuerda: "¿Con cuál continuamos? (*Económica* o *Rápida*)".
+"""
+    elif display_state == "NEEDS_CONSENT":
         state_instruction = f"""
-ESTADO ACTUAL DEL FLUJO DE VENTA: (1/4) PEDIR CONSENTIMIENTO LEGAL.
-- Solo debes pedir autorización si ves que el usuario va a comprar. USA EXACTAMENTE este texto (no lo modifiques):
+ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR CONSENTIMIENTO LEGAL.
+- Solo debes pedir autorización después de cotizar envío y elegir transportista.
+- USA EXACTAMENTE este texto:
   "{consent_template}"
+- NO pidas email, nombre ni dirección todavía.
+"""
+    elif display_state == "NEEDS_EMAIL":
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR EMAIL DEL CLIENTE.
+- Ya tienes consentimiento. Pide solo email válido y extráelo en extracted_email.
 - NO pidas nombre ni dirección todavía.
 """
-    elif transaction_state == "NEEDS_NAME":
+    elif display_state == "NEEDS_NAME":
         state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: (2/4) PEDIR NOMBRE DEL CLIENTE.
-- El cliente ya aceptó el tratamiento de datos. Pide Únicamente su Nombre Completo.
+ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR NOMBRE DEL CLIENTE.
+- Ya tienes consentimiento y email. Pide solo el nombre.
+- Cuando el cliente responde con su nombre, extráelo OBLIGATORIAMENTE en extracted_name (nombre completo tal como lo escribió).
+- En response_text usa SOLO el primer nombre. Ejemplo: si da "Cristian Camilo Garzon Tamayo", escribe "Gracias, Cristian." (nunca el nombre completo).
 - NO pidas dirección todavía.
 """
-    elif transaction_state == "NEEDS_DIRECTION":
+    elif display_state == "NEEDS_DIRECTION":
         state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: (3/4) PEDIR DIRECCIÓN COMPLETAMENTE.
-- Ya tenemos su nombre. Pide la Dirección de Entrega.
-- Regla estricta: pregunta si es "Casa" o "Edificio/Conjunto". Si es Edificio, EXIGE torre/apto.
-- Exige SIEMPRE la Ciudad. Deduce el departamento geográficamente.
-- Si el usuario te acaba de dar una información parcial, haz un breve resumen con viñetas de lo que ya tienes y pídele SOLAMENTE el dato que falta. No escales a humano todavía.
+ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DIRECCIÓN DE ENTREGA.
+- Ya tenemos nombre y email.
+- Solicita con formato visual:
+  • Calle y número
+  • Ciudad
+  • Tipo de vivienda: casa, edificio o conjunto
+  • Dato opcional: barrio, referencia o portería
+- Si es edificio: apartamento obligatorio.
+- Si es conjunto: torre y apartamento obligatorios.
+- Si da datos parciales, pide solo lo que falta.
 """
-    else:  # READY_FOR_SUMMARY
+    elif display_state == "READY_FOR_SUMMARY":
+        # Calcular contexto verificado desde datos reales (no delegar al LLM)
+        _verified_ctx = _build_verified_order_context(catalog, history)
+        if _verified_ctx:
+            _p = _verified_ctx
+            _variant_str = f" ({_p['variant_label']})" if _p.get("variant_label") else ""
+            _qty_str = f" × {_p['quantity']}" if _p["quantity"] > 1 else ""
+            _verified_block = (
+                f"\nCONTEXTO VERIFICADO DE PEDIDO (usa estos valores exactos — NO recalcules):\n"
+                f"• Producto: {_p['product_name']}{_variant_str}\n"
+                f"• Precio unitario: {_format_cop(_p['unit_price_cents'])}{_qty_str}\n"
+                f"• Subtotal productos: {_format_cop(_p['subtotal_cents'])}\n"
+                f"• Envío: {_format_cop(_p['shipping_cost_cents'])}\n"
+                f"• *TOTAL: {_format_cop(_p['total_cents'])}*\n"
+            )
+        else:
+            _verified_block = ""
+            logger.warning("[ORCH] READY_FOR_SUMMARY sin contexto verificado — LLM calculará totales")
+
+        state_instruction = f"""
+ESTADO ACTUAL DEL FLUJO DE VENTA: RESUMEN Y CONFIRMACIÓN DE DATOS.
+- Ya tienes información completa. Genera el resumen con los datos del cliente (de contact_record en el contexto) y los valores de pedido.
+- OBLIGATORIO: usa los valores del bloque CONTEXTO VERIFICADO para subtotal, envío y total. NO calcules precios por tu cuenta.
+- Termina con: "¿Confirmas que los datos están correctos?"
+- NO escales a humano en este paso. Solo muestra resumen y pide confirmación.
+{_verified_block}"""
+    elif display_state == "AWAITING_ORDER_CONFIRMATION":
         state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: (4/4) RESUMEN Y CONFIRMACIÓN DE PEDIDO.
-- Ya tienes toda la información personal validada (Nombre y Dirección completa). NO pidas más datos personales.
-- Muestra el resumen completo y estético del pedido: (Producto, Variante, Opción de Envío elegida, Total, Nombre y Dirección completa).
-- Termina preguntándolo: "¿Confirmas que estos datos son correctos para proceder?". NO dejes response_text en null en este paso.
+ESTADO ACTUAL DEL FLUJO DE VENTA: CONFIRMACIÓN FINAL DE CREACIÓN DE PEDIDO.
+- El cliente ya confirmó datos y ahora debes confirmar creación de pedido.
+- Responde breve y marca intent_detected=order_acknowledgment.
+- requires_human=true solo para activar el tool transaccional y link de pago.
+- total_in_cents DEBE ser exactamente el mismo total que mostraste en el resumen anterior. NO recalcules. Lee el total del último resumen en el historial.
+- shipping_cost_cents DEBE ser el costo de envío que aparece en el resumen anterior.
+"""
+    else:
+        state_instruction = """
+ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
+- El usuario está consultando, no cerrando compra.
+- NO pidas consentimiento ni datos personales en este modo.
+- Responde breve con datos reales de catálogo/KB.
+- OBLIGATORIO: termina SIEMPRE con UNA pregunta de siguiente paso natural (nunca cortes sin ofrecer continuidad):
+  • Tras responder precio o disponibilidad: "¿Te gustaría cotizar el envío o tienes otra consulta?"
+  • Tras responder características del producto: "¿Te interesa saber el costo de envío a tu ciudad?"
+  • Tras respuesta general: "¿Hay algo más en lo que te pueda ayudar?"
 """
 
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
-[ESTADO DE MÁQUINA (FSM): {transaction_state}]
-
+[ESTADO DE MÁQUINA (FSM): {display_state}]
+{store_location_section}
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
 - Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
 - No seas repetitivo. Evita saludar en cada mensaje si ya están en conversación.
@@ -666,17 +1686,19 @@ REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 - Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
 - Frustración, molestia, urgencia alta, lenguaje agresivo → ESCALAR.
 - ≥2 intercambios sin resolver la consulta → ESCALAR, no insistas más.
-- Dato faltante (producto/dirección) confirmado pero sigue sin resolver → ESCALAR.
-- Pregunta sin respuesta en catálogo ni KB, no inventar → ESCALAR.
+- Dato faltante confirmado y 2 rondas sin resolver → ESCALAR.
+- Pregunta SOBRE UBICACIÓN O CIUDAD DE LA TIENDA → NO escalar, responder con la sección UBICACIÓN DE LA TIENDA.
+- Pregunta fuera de alcance transaccional, sin datos suficientes ni alternativa → ESCALAR.
 - Al escalar: mensaje corto y cálido. Ej: "Te paso con un asesor que te ayudará de inmediato."
 
 ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
-- No presiones al usuario con preguntas transaccionales bruscas ("¿Lo agregas a tu compra?", "¿Te lo facturo?"). Solo responde su duda y termina tu frase de forma amable o abierta ("¿Tienes alguna otra duda sobre el producto?").
-- Si el usuario elige un producto o cantidad, NO INVENTES que vas a calcular o cotizar el envío por tu cuenta ni digas "estoy calculando". Tu labor es PREGUNTARLE explícitamente: "¿Deseas que te cotice el envío a [Ciudad del contexto]?" (si ya conoces su ciudad) o "¿A qué ciudad te gustaría que lo enviemos?" (si no la conoces). El sistema de cotización real se activará SOLO cuando el cliente te responda esa pregunta.
-- SIEMPRE COTIZA EL ENVÍO (guiando al usuario a que responda con su ciudad para activar el cotizador) ANTES de pedir datos personales.
-- Cuando el cotizador arroje las opciones, dale a elegir al usuario (ej: Económica o Rápida).
-- Una vez el usuario elija un tipo de envío, NO pidas todos los datos personales en un solo mensaje gigante.
-- IMPORTANTÍSIMO SOBRE HERRAMIENTAS: Respeta estrictamente tu ESTADO ACTUAL (ver abajo). Si el cliente acaba de soltar todos sus datos de golpe, sé inteligente, extráelos todos (no lo obligues al paso a paso) y permite que se procesen.
+- No presiones al usuario con preguntas transaccionales bruscas ("¿Lo agregas a tu compra?", "¿Te lo facturo?"). Solo responde su duda y termina tu frase de forma amable y ofreciendo el siguiente paso natural ("¿Te gustaría saber más detalles?" o "¿Te cotizo el envío?").
+- Si el usuario elige un producto o cantidad y aún NO has cotizado envío, pregunta:
+  "¿Te gustaría cotizar el envío?"
+- Si acepta, pide ciudad de entrega.
+- Si YA cotizaste envío o YA tienes los datos personales, no repitas la pregunta de envío.
+- RESPETA TU ESTADO ACTUAL. Si el FSM dice NEEDS_NAME pide nombre, etc.
+- EN EL MISMO MENSAJE → intent=order_acknowledgment aplica cuando el usuario confirma cierre transaccional.
 
 {state_instruction}
 
@@ -684,15 +1706,17 @@ FORMATO WhatsApp (aplica a TODOS los mensajes):
 - Usa saltos de línea (\n) para separar ideas diferentes. Nunca pongas toda la respuesta en una sola línea si contiene más de 2 puntos.
 - Para listas o pasos, usa viñetas: "• item"
 - Usa *texto* para destacar valores importantes (total, precio).
+- Si terminas con pregunta, ponla en párrafo separado.
 
 CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{variant_section}{kb_section}
 
 REGLAS DE EXTRACCIÓN Y CIERRE DE COMPRA (CRÍTICO — aplica siempre):
 - Cuando el cliente da su dirección (calle, barrio, apto), extráela y estructúrala en extracted_direction.
-- Cuando el cliente da nombre o dirección, extráelos en extracted_name y extracted_direction.
-- Cuando el cliente da nombre + dirección completa → intent=order_acknowledgment, should_respond=true, requires_human=true.
-- Cuando confirmas la orden (Paso 4) → response_text DEBE ser: "Perfecto *[Nombre]*! Tengo todo listo: *[resumen producto]* con envío [opción elegida]. Te paso con un asesor para el link de pago. ¡Gracias!" NUNCA dejes response_text en null en este caso.
+- Cuando el cliente da nombre, email o dirección, extráelos.
+- Si mencionas el nombre del cliente en conversación, usa solo primer nombre.
+- En línea de resumen "Nombre:" usa nombre completo.
+- Cuando confirmas creación de pedido y haya montos claros, entrega total_in_cents y shipping_cost_cents.
 
 Responde SIEMPRE en JSON puro con este esquema exacto:
 {{
@@ -702,23 +1726,129 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
   "requires_human": true/false,
   "intent_detected": "product_inquiry|order_status|complaint|greeting|off_topic|order_acknowledgment|other",
   "extracted_name": "Nombre Cliente o null",
+  "extracted_email": "email@dominio.com o null",
   "extracted_direction": {{
-    "street": "Calle o carrera principal + barrio (ej: Cra 15 #80-45, Barrio Chapinero) o null",
-    "number": "Apto, Torre o número de casa o null",
-    "city": "SOLO el nombre de la ciudad (ej: Bogota, Medellin, Cali) — sin barrio ni departamento"
-  }}
+    "street": "Calle y número o null",
+    "number": "Número/interior/apto o null",
+    "city": "SOLO ciudad (ej: Bogota, Medellin, Cali)",
+    "building_type": "casa|edificio|conjunto o null",
+    "tower": "torre/bloque o null",
+    "apartment": "apartamento o null",
+    "additional_info": "detalle adicional o null"
+  }},
+  "total_in_cents": null,
+  "shipping_cost_cents": null
 }}"""
 
 
 def _build_user_context(history: list[dict], new_message: str) -> str:
     """Formatea el historial de conversación como contexto para Gemini."""
+    history_for_prompt = _history_without_current_inbound(history, new_message)
     lines = []
-    for msg in history[:-1]:  # Excluir el mensaje actual (último)
+    for msg in history_for_prompt:
         role = "Cliente" if msg["direction"] == "inbound" else "Asistente"
         lines.append(f"{role}: {msg['content']}")
 
     lines.append(f"Cliente: {new_message}")
     return "\n".join(lines)
+
+
+def _history_without_current_inbound(history: list[dict], new_message: str) -> list[dict]:
+    if not history:
+        return []
+    last = history[-1] or {}
+    last_direction = str(last.get("direction") or "").strip().lower()
+    last_content_norm = _normalize_text(str(last.get("content") or ""))
+    new_content_norm = _normalize_text(new_message)
+    if last_direction == "inbound" and last_content_norm and last_content_norm == new_content_norm:
+        return history[:-1]
+    return history
+
+
+_NAME_DISCARD_TOKENS = {
+    "si", "sí", "no", "ok", "oki", "okey", "vale", "dale", "listo", "claro",
+    "gracias", "hola", "buenas", "buenos", "bien", "perfecto", "genial",
+    "confirmo", "acepto", "entendido", "de", "una", "la", "el",
+}
+
+
+def _try_extract_name_from_message(content: str, display_state: str) -> Optional[str]:
+    """
+    Fallback conservador: cuando display_state==NEEDS_NAME y el LLM no extrae
+    el nombre, intenta detectarlo desde el mensaje del cliente.
+    Solo activa con mensajes cortos (2-5 tokens), sin stopwords críticas,
+    sin caracteres especiales de frase.
+    """
+    if display_state != "NEEDS_NAME":
+        return None
+    normalized = content.strip()
+    if any(c in normalized for c in ["@", "http", "www", "?", "!", "#"]):
+        return None
+    tokens = [t for t in normalized.split() if t]
+    if not (2 <= len(tokens) <= 5):
+        return None
+    lower_tokens = {t.lower() for t in tokens}
+    if lower_tokens & _NAME_DISCARD_TOKENS:
+        return None
+    return " ".join(t.title() for t in tokens)
+
+
+def _humanize_name_in_text(text: str, contact_name: Optional[str], extracted_name: Optional[str]) -> str:
+    if not text:
+        return text
+
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for full_name in (contact_name, extracted_name):
+        if not full_name:
+            continue
+        normalized_name = " ".join(str(full_name).split())
+        if not normalized_name:
+            continue
+        tokens = [token for token in normalized_name.split(" ") if token]
+        if len(tokens) <= 1:
+            continue
+        first_name = tokens[0].title()
+        patterns.append((
+            re.compile(
+                r"\b" + r"\s+".join(re.escape(token) for token in tokens) + r"\b",
+                flags=re.IGNORECASE,
+            ),
+            first_name,
+        ))
+
+    if not patterns:
+        return text
+
+    protected_lines: dict[int, str] = {}
+    original_lines = text.splitlines()
+    for idx, line in enumerate(original_lines):
+        if "nombre:" in _normalize_text_simple(line):
+            protected_lines[idx] = line
+
+    for pattern, replacement in patterns:
+        text = pattern.sub(replacement, text)
+
+    if protected_lines:
+        updated_lines = text.splitlines()
+        for idx, original_line in protected_lines.items():
+            if idx < len(updated_lines):
+                updated_lines[idx] = original_line
+        text = "\n".join(updated_lines)
+
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
+    return text
+
+
+def _format_whatsapp_response_text(text: str) -> str:
+    if not text:
+        return text
+    formatted = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    formatted = re.sub(r":\s*•", ":\n•", formatted)
+    formatted = re.sub(r"(•[^\n]+)\s+(¿)", r"\1\n\n\2", formatted)
+    formatted = re.sub(r"([.!?])\s+(¿)", r"\1\n\n\2", formatted)
+    formatted = re.sub(r"\n{3,}", "\n\n", formatted)
+    return formatted
 
 
 # ─── Core Orchestration ───────────────────────────────────────────────────────
@@ -765,23 +1895,125 @@ async def build_and_run_orchestration(
             )
             return
 
-        # Producto definido: no-text => escalar a humano, sin respuesta automática.
+        # ── 0.5 Resolución temprana: tenant + contacto + historial ────────────────
+        # Necesario antes de los gates para personalizar respuestas y verificar estado.
+        tenant_res = supabase.table("tenants").select(
+            "name, shipping_origin, store_type, social_links, store_locations, business_hours"
+        ).eq("id", tenant_id).execute()
+        tenant_row              = tenant_res.data[0] if tenant_res.data else {}
+        tenant_name             = tenant_row.get("name") or "Tienda"
+        tenant_shipping_origin  = tenant_row.get("shipping_origin") or {}
+        tenant_store_type       = tenant_row.get("store_type") or "fisica"
+        tenant_social_links     = tenant_row.get("social_links") or {}
+        tenant_store_locations  = tenant_row.get("store_locations") or []
+        tenant_business_hours   = tenant_row.get("business_hours") or ""
+
+        customer_phone_raw: Optional[str] = None
+        contact_id: Optional[str] = None
+        contact_record: dict = {}
+        try:
+            customer_phone_raw = _get_conversation_customer_phone(supabase, conversation_id)
+            if customer_phone_raw:
+                supabase.table("contacts").upsert(
+                    {"tenant_id": tenant_id, "phone": customer_phone_raw, "consent_given": False},
+                    on_conflict="tenant_id,phone",
+                    ignore_duplicates=True,
+                ).execute()
+                logger.debug("[CONTACT] Upsert contacto %s en tenant %s", customer_phone_raw, tenant_id)
+        except Exception as ce:
+            logger.warning("[CONTACT] No se pudo upsert contacto: %s", ce)
+        try:
+            contact_id, contact_record = _fetch_contact_for_phone(
+                supabase=supabase, tenant_id=tenant_id, customer_phone_raw=customer_phone_raw,
+            )
+        except Exception as ce:
+            logger.warning("[CONTACT] No se pudo fetch contact para FSM: %s", ce)
+
+        history: list[dict] = await _get_conversation_history(supabase, conversation_id)
+
+        # Primer nombre: solo si hay consentimiento explícito en DB
+        first_name = (
+            _extract_first_name(contact_record.get("name"))
+            if contact_record.get("consent_given") else None
+        )
+
+        # Gate 1: no-texto — advertir primero; escalar solo si insiste.
         if content_type != "text":
-            logger.info(
-                "[ORCH] Mensaje %s no-text (%s): escalado a human_takeover",
-                message_id,
-                content_type,
-            )
-            _set_conversation_status(
-                supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
-            )
-            _mark_message_processing(
-                supabase,
-                message_id,
-                processing_status=PROCESSING_STATUS_SKIPPED,
-                skip_reason=SKIP_REASON_NON_TEXT,
-            )
+            if _had_non_text_warning(history):
+                logger.info(
+                    "[ORCH] Mensaje %s no-text (%s): cliente insiste → human_takeover",
+                    message_id, content_type,
+                )
+                _set_conversation_status(
+                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_SKIPPED,
+                    skip_reason=SKIP_REASON_NON_TEXT,
+                )
+            else:
+                logger.info(
+                    "[ORCH] Mensaje %s no-text (%s): primera advertencia enviada",
+                    message_id, content_type,
+                )
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=(
+                        "Por el momento solo puedo atender mensajes de texto. "
+                        "Si necesitas que un asesor revise lo que enviaste, "
+                        "escríbeme *asesor* y te contactamos. 😊"
+                    ),
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
             return
+
+        # Gate: solicitud explícita de asesor humano
+        if _normalize_text_simple(content).strip() in {
+            "asesor", "un asesor", "quiero asesor", "necesito asesor", "hablar con asesor",
+        }:
+            _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
+            await _send_outbound_text(
+                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                text="Entendido, te conecto con un asesor. ¡Un momento! 🙏",
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            return
+
+        # F3B Gate: comando "cancelar" — cancela pedido pending_payment y resetea FSM implícito
+        if _normalize_text_simple(content).strip() in _CANCEL_TOKENS:
+            cancelled = _cancel_pending_payment_order(supabase, conversation_id, tenant_id)
+            if cancelled:
+                reply = (
+                    "Entendido, tu pedido ha sido cancelado. 😊\n\n"
+                    "Puedes consultar el catálogo cuando quieras y volver a cotizar."
+                )
+            else:
+                reply = (
+                    "No hay un pedido activo para cancelar en este momento. "
+                    "¿En qué más te puedo ayudar?"
+                )
+            await _send_outbound_text(
+                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                text=reply,
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.info("[ORCH] Comando cancelar | conv=%s cancelled=%s", conversation_id, cancelled)
+            return
+
+        # F3A: Ventana de conversación 24h — si expiró, forzar CATALOG_MODE en FSM
+        # (WhatsApp cierra la ventana de mensajería libre; el historial de compra anterior no aplica)
+        _window_expired = _is_conversation_window_expired(supabase, conversation_id)
+        if _window_expired:
+            logger.info(
+                "[ORCH] Ventana de conversación expirada (>%sh) | conv=%s — forzando CATALOG_MODE",
+                CONVERSATION_WINDOW_HOURS, conversation_id,
+            )
 
         shipping_result = await handle_shipping_quote_if_applicable(
             supabase=supabase,
@@ -792,24 +2024,14 @@ async def build_and_run_orchestration(
         if shipping_result.handled:
             if shipping_result.response_text:
                 await _send_outbound_text(
-                    supabase=supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
+                    supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
                     text=shipping_result.response_text,
                 )
             if shipping_result.requires_human:
-                _set_conversation_status(
-                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
-                )
-            _mark_message_processing(
-                supabase,
-                message_id,
-                processing_status=PROCESSING_STATUS_PROCESSED,
-            )
+                _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
-        # Estado de pedido determinístico: responde con datos reales de la DB.
-        # No delega al LLM para evitar inventar estados transaccionales.
         order_status_result = await handle_order_status_if_applicable(
             supabase=supabase,
             tenant_id=tenant_id,
@@ -819,96 +2041,41 @@ async def build_and_run_orchestration(
         if order_status_result.handled:
             if order_status_result.response_text:
                 await _send_outbound_text(
-                    supabase=supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
+                    supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
                     text=order_status_result.response_text,
                 )
             if order_status_result.requires_human:
-                _set_conversation_status(
-                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
-                )
-            _mark_message_processing(
-                supabase,
-                message_id,
-                processing_status=PROCESSING_STATUS_PROCESSED,
-            )
+                _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
-        # Smalltalk deterministico: evita escalaciones innecesarias por LLM
-        # en saludos/agradecimientos de muy bajo riesgo.
+        # Gate 2: saludo de inicio de conversación (personalizado si hay nombre con consentimiento)
+        # Se activa cuando no hay outbounds previos y el mensaje es un saludo o el primero del cliente.
         smalltalk_intent = _detect_deterministic_smalltalk_intent(content)
-        if smalltalk_intent:
+        if _is_conversation_start(history):
+            seed = abs(hash(content)) % 4
+            greeting_text = _deterministic_smalltalk_response("greeting", first_name, seed)
             await _send_outbound_text(
-                supabase=supabase,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-                text=_deterministic_smalltalk_response(smalltalk_intent),
+                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                text=greeting_text,
             )
-            _mark_message_processing(
-                supabase,
-                message_id,
-                processing_status=PROCESSING_STATUS_PROCESSED,
-            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
-        # ── 1. Resolver datos del tenant ──────────────────────────────────────
-        tenant_res = supabase.table("tenants").select("name").eq("id", tenant_id).execute()
-        tenant_name = tenant_res.data[0]["name"] if tenant_res.data else "Tienda"
+        # Smalltalk determinístico en conversación activa (saludos / agradecimientos)
+        if smalltalk_intent:
+            seed = abs(hash(content)) % 4
+            await _send_outbound_text(
+                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                text=_deterministic_smalltalk_response(smalltalk_intent, first_name, seed),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            return
 
-        # ── 1.5 Auto-crear contacto si no existe (desde WhatsApp) ─────────────
-        # Solo insertamos si no existe — nunca sobreescribimos datos manuales.
-        # consent_given se deja en FALSE (default): el tenant debe obtenerlo
-        # por canal propio (link de términos, mensaje explícito, etc.).
-        try:
-            conv_res = supabase.table("conversations") \
-                .select("customer_phone") \
-                .eq("id", conversation_id) \
-                .execute()
-            customer_phone_raw = conv_res.data[0]["customer_phone"] if conv_res.data else None
-            if customer_phone_raw:
-                supabase.table("contacts").upsert(
-                    {
-                        "tenant_id": tenant_id,
-                        "phone": customer_phone_raw,
-                        # name/notes remain NULL — tenant fills them manually
-                        "consent_given": False,
-                    },
-                    on_conflict="tenant_id,phone",
-                    ignore_duplicates=True,
-                ).execute()
-                logger.debug(f"[CONTACT] Upsert contacto {customer_phone_raw} en tenant {tenant_id}")
-        except Exception as ce:
-            logger.warning(f"[CONTACT] No se pudo upsert contacto: {ce}")
-
-        # ── 1.6 Fetch contact_id + state para flow FSM ────
-        contact_id: Optional[str] = None
-        contact_record: dict = {}
-        try:
-            if customer_phone_raw:
-                phone_norm = re.sub(r"[\s+]", "", customer_phone_raw)
-                phone_plus = f"+{phone_norm}"
-                phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
-                c_res = (
-                    supabase.table("contacts")
-                    .select("id, consent_given, name, address")
-                    .eq("tenant_id", tenant_id)
-                    .or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus},phone.eq.{phone_space}")
-                    .order("name", nullsfirst=False)
-                    .limit(1)
-                    .execute()
-                )
-                if c_res.data:
-                    contact_id = c_res.data[0]["id"]
-                    contact_record = c_res.data[0]
-        except Exception as ce:
-            logger.warning("[CONTACT] No se pudo fetch contact para FSM: %s", ce)
-
-        # ── 2. Obtener catálogo, RAG KB, historial y Config. AI ───────────────
-        catalog, kb_docs, history, ai_agent = await __import__('asyncio').gather(
+        # ── 2. Obtener catálogo, RAG KB y Config. AI (paralelo; historial ya cargado) ──
+        catalog, kb_docs, ai_agent = await __import__('asyncio').gather(
             get_tenant_catalog(supabase, tenant_id),
             get_tenant_kb_rag(supabase, tenant_id, content),
-            _get_conversation_history(supabase, conversation_id),
             _get_tenant_ai_agent(supabase, tenant_id)
         )
         kb_text = format_kb_for_prompt(kb_docs)
@@ -939,12 +2106,22 @@ async def build_and_run_orchestration(
         if contact_id and _last_outbound_was_consent_question(recent_history_for_consent):
             if _detect_consent_yes(content):
                 _record_consent(supabase, contact_id, tenant_id, given=True, conversation_id=conversation_id)
-                contact_consent_given = True
+
+                refreshed_contact_id, refreshed_contact_record = _fetch_contact_for_phone(
+                    supabase=supabase,
+                    tenant_id=tenant_id,
+                    customer_phone_raw=customer_phone_raw,
+                )
+                if refreshed_contact_id:
+                    contact_id = refreshed_contact_id
+                if refreshed_contact_record:
+                    contact_record = refreshed_contact_record
+
                 await _send_outbound_text(
                     supabase=supabase,
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
-                    text="¡Gracias! Tus datos han quedado registrados. ¿Cuál es tu nombre completo y dirección de entrega?",
+                    text=_build_next_data_request_prompt(contact_record),
                 )
                 _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
                 logger.info("[CONSENT] Aceptado | conversation=%s contact=%s", conversation_id, contact_id)
@@ -954,13 +2131,99 @@ async def build_and_run_orchestration(
                     supabase=supabase,
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
-                    text="Entendido, continuaremos sin guardar tus datos personales. ¿En qué más te puedo ayudar?",
+                    text=(
+                        "Entendido. Podemos continuar con tu pedido sin guardar tus datos personales.\n\n"
+                        "Si quieres, te cotizo el envío. Solo dime la ciudad de entrega."
+                    ),
                 )
                 _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
                 logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
                 return
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
+        history_for_prompt = _history_without_current_inbound(history or [], content)
+        # F3A: si la ventana de 24h expiró, buying_intent del historial no aplica
+        buying_intent = False if _window_expired else _has_buying_intent(content, history_for_prompt)
+        shipping_quoted = _has_shipping_been_quoted(history_for_prompt)
+        display_state = _resolve_display_state(
+            contact_record=contact_record,
+            history=history_for_prompt,
+            buying_intent=buying_intent,
+            shipping_quoted=shipping_quoted,
+        )
+
+        # R-13: Snapshot de producto al confirmar carrier — una sola vez por conversación
+        if (
+            buying_intent
+            and _has_carrier_been_selected(history_for_prompt)
+            and not _has_product_snapshot(history)
+        ):
+            _save_product_snapshot(
+                supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                catalog=catalog,
+                history_for_prompt=history_for_prompt,
+            )
+
+        # R-15: Refetch contacto antes de mostrar el resumen — garantiza datos frescos de DB
+        # (nombre, email, dirección pueden haber sido escritos en el mensaje previo)
+        if display_state == "READY_FOR_SUMMARY" and contact_id:
+            try:
+                _, fresh_contact = _fetch_contact_for_phone(
+                    supabase=supabase,
+                    tenant_id=tenant_id,
+                    customer_phone_raw=customer_phone_raw,
+                )
+                if fresh_contact:
+                    contact_record = fresh_contact
+            except Exception as _r15_err:
+                logger.warning("[ORCH] R-15: error refetch contacto para READY_FOR_SUMMARY: %s", _r15_err)
+
+        if display_state == "NEEDS_CONSENT":
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=CONSENT_QUESTION_TEMPLATE,
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            return
+
+        if display_state == "READY_FOR_SUMMARY" and _is_affirmative_confirmation(content):
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=ORDER_CREATION_CONFIRMATION_TEMPLATE,
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            return
+
+        # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
+        if display_state == "READY_FOR_SUMMARY" and contact_id:
+            correction_field = _detect_correction_intent(content)
+            if correction_field:
+                _clear_contact_field(supabase, contact_id, tenant_id, correction_field)
+                reply = _CORRECTION_PROMPT.get(correction_field, "Entendido. ¿Qué dato quieres corregir?")
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=reply,
+                )
+                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                logger.info("[CORR] Corrección solicitada campo='%s' | conv=%s", correction_field, conversation_id)
+                return
+
         system_prompt = _build_system_prompt(
             catalog=catalog,
             tenant_name=tenant_name,
@@ -968,7 +2231,14 @@ async def build_and_run_orchestration(
             ai_agent=ai_agent,
             contact_record=contact_record,
             query_text=content,
-            history=history[:-1] if history else [],
+            history=history_for_prompt,
+            buying_intent=buying_intent,
+            shipping_quoted=shipping_quoted,
+            tenant_shipping_origin=tenant_shipping_origin,
+            tenant_store_type=tenant_store_type,
+            tenant_social_links=tenant_social_links,
+            tenant_store_locations=tenant_store_locations,
+            tenant_business_hours=tenant_business_hours,
         )
         user_context = _build_user_context(history, content)
 
@@ -1005,14 +2275,72 @@ async def build_and_run_orchestration(
                 parsed.requires_human = False
                 parsed.should_respond = True
                 parsed.intent_detected = "greeting"
+                _st_seed = abs(hash(content)) % 4
                 parsed.response_text = parsed.response_text or _deterministic_smalltalk_response(
-                    smalltalk_intent
+                    smalltalk_intent, first_name, _st_seed
                 )
                 logger.warning(
                     "[ORCH] requires_human ignorado para smalltalk de bajo riesgo "
                     "(intent=%s). Se responde automáticamente.",
                     smalltalk_intent,
                 )
+
+        # Salvaguarda de escalación espuria en modo consulta.
+        if parsed.requires_human and display_state in {"CATALOG_MODE", "NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}:
+            if parsed.intent_detected in {"product_inquiry", "other", "unknown", "greeting"}:
+                parsed.requires_human = False
+                parsed.should_respond = True
+                if not (parsed.response_text or "").strip():
+                    parsed.response_text = "Te ayudo con eso. ¿Me confirmas producto y ciudad para avanzar?"
+
+        # order_acknowledgment no debe aparecer temprano sin datos transaccionales.
+        if parsed.intent_detected == "order_acknowledgment" and parsed.requires_human:
+            has_data = bool(parsed.extracted_name) or bool(parsed.extracted_email) or _has_real_address_data(parsed.extracted_direction)
+            if display_state not in {"AWAITING_ORDER_CONFIRMATION", "READY_FOR_SUMMARY"} and not has_data:
+                parsed.intent_detected = "product_inquiry"
+                parsed.requires_human = False
+                parsed.should_respond = True
+
+        payment_link_result = None
+        if (
+            parsed.intent_detected == "order_acknowledgment"
+            and parsed.requires_human
+            and parsed.total_in_cents
+        ):
+            order_confirmation_prompted = _last_outbound_was_order_confirmation_question(history_for_prompt)
+            if not order_confirmation_prompted:
+                parsed.requires_human = False
+                parsed.should_respond = True
+                parsed.response_text = ORDER_CREATION_CONFIRMATION_TEMPLATE
+            else:
+                # Validación de bounds: el total debe estar alineado con el contexto verificado
+                verified_ctx = _build_verified_order_context(catalog, history_for_prompt)
+                if verified_ctx and verified_ctx["total_cents"] > 0:
+                    expected = verified_ctx["total_cents"]
+                    tolerance = max(50000, int(expected * 0.05))  # 5% o $500 COP
+                    if abs(parsed.total_in_cents - expected) > tolerance:
+                        logger.warning(
+                            "[PAYMENT_LINK] total_in_cents=%s difiere del contexto verificado=%s → usando verificado",
+                            parsed.total_in_cents, expected,
+                        )
+                        parsed.total_in_cents = expected
+                        parsed.shipping_cost_cents = verified_ctx["shipping_cost_cents"] or parsed.shipping_cost_cents
+
+                payment_link_result = await handle_payment_link_if_applicable(
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                    conversation_id=conversation_id,
+                    contact_name=contact_record.get("name") if contact_record else None,
+                    total_in_cents=parsed.total_in_cents,
+                    shipping_cost_cents=parsed.shipping_cost_cents,
+                    notes=None,
+                    supabase=supabase,
+                    verified_ctx=verified_ctx,  # IDs reales para stock correcto
+                )
+                if payment_link_result:
+                    parsed.requires_human = False
+                    parsed.should_respond = True
+                    parsed.response_text = payment_link_result.response_text
 
         # ── 6. Guardrails ─────────────────────────────────────────────────────
         is_safe = validate_orchestrator_output(parsed)
@@ -1028,6 +2356,14 @@ async def build_and_run_orchestration(
 
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
         if parsed.should_respond and parsed.response_text:
+            # Fallback: si el LLM no extrajo el nombre pero el cliente lo acaba de dar, detectarlo
+            name_for_humanize = parsed.extracted_name or _try_extract_name_from_message(content, display_state)
+            parsed.response_text = _humanize_name_in_text(
+                parsed.response_text,
+                contact_record.get("name") if contact_record else None,
+                name_for_humanize,
+            )
+            parsed.response_text = _format_whatsapp_response_text(parsed.response_text)
             await _send_outbound_text(
                 supabase=supabase,
                 conversation_id=conversation_id,
@@ -1042,37 +2378,59 @@ async def build_and_run_orchestration(
             )
             logger.info(f"[ESCALATION] Conversación {conversation_id} marcada para agente humano")
 
+            # F5: Crear ticket automático en claims si es reclamo y hay contacto con orden
+            if parsed.intent_detected in _COMPLAINT_INTENTS and contact_id:
+                order_id_for_claim = _find_recent_claimable_order(supabase, tenant_id, contact_id)
+                if order_id_for_claim:
+                    ticket_number = _create_claim(
+                        supabase,
+                        tenant_id=tenant_id,
+                        order_id=order_id_for_claim,
+                        contact_id=contact_id,
+                    )
+                    if ticket_number and parsed.response_text:
+                        parsed.response_text = (
+                            parsed.response_text.rstrip()
+                            + f"\n\n📋 Tu caso quedó registrado con el número *#{ticket_number}*."
+                        )
+
         # ── 8.5 Actualizar datos del contacto ─────────────────────────────────
-        if contact_id and (parsed.extracted_name or parsed.extracted_direction):
+        if contact_id and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email):
             update_data = {}
-            if parsed.extracted_name:
-                update_data["name"] = parsed.extracted_name
-            if parsed.extracted_direction:
+            if parsed.extracted_email and "@" in str(parsed.extracted_email):
+                update_data["email"] = str(parsed.extracted_email).strip().lower()
+            if parsed.extracted_name and str(parsed.extracted_name).strip():
+                update_data["name"] = " ".join(str(parsed.extracted_name).split())
+            merged_address = _merge_address_data(
+                contact_record.get("address") if isinstance(contact_record, dict) else None,
+                parsed.extracted_direction,
+            )
+            if merged_address:
                 # Enriquecer con Estado y Código DANE para que la UI los muestre bien
-                dane_city = parsed.extracted_direction.get("city", "")
+                dane_city = merged_address.get("city", "")
                 if dane_city:
                     try:
                         from tools.shipping_quote_tool import _resolve_destination_from_query
                         dest, _ = _resolve_destination_from_query(dane_city)
                         if dest:
-                            parsed.extracted_direction["city"] = dest["city"]
-                            parsed.extracted_direction["state"] = dest["state"]
-                            parsed.extracted_direction["country"] = "CO"
-                            parsed.extracted_direction["dane_code"] = dest["dane_code"]
+                            merged_address["city"] = dest["city"]
+                            merged_address["state"] = dest["state"]
+                            merged_address["country"] = "CO"
+                            merged_address["dane_code"] = dest["dane_code"]
                     except Exception as e:
                         logger.warning(f"[CONTACT USYNC] Error en DANE lookup: {e}")
                 
                 # Normalización DIAN para almacenamiento unificado
                 try:
                     from dian_normalization import normalize_dian_address
-                    if parsed.extracted_direction.get("street"):
-                        parsed.extracted_direction["street"] = normalize_dian_address(parsed.extracted_direction["street"])
-                    if parsed.extracted_direction.get("number"):
-                        parsed.extracted_direction["number"] = normalize_dian_address(parsed.extracted_direction["number"])
+                    if merged_address.get("street"):
+                        merged_address["street"] = normalize_dian_address(merged_address["street"])
+                    if merged_address.get("number"):
+                        merged_address["number"] = normalize_dian_address(merged_address["number"])
                 except Exception as e:
                     logger.warning(f"[CONTACT USYNC] Error en DIAN normalizer: {e}")
 
-                update_data["address"] = parsed.extracted_direction
+                update_data["address"] = merged_address
             if update_data:
                 try:
                     supabase.table("contacts").update(update_data).eq("id", contact_id).execute()

@@ -44,6 +44,7 @@ CONSENT_SOURCES = {
 class ContactCreate(BaseModel):
     phone: str = Field(..., min_length=8, max_length=20, pattern=r"^\+?[1-9]\d{7,19}$")
     name: Optional[str] = Field(default=None, max_length=120)
+    email: Optional[str] = Field(default=None, max_length=254)
     notes: Optional[str] = Field(default=None, max_length=1200)
     consent_given: bool = False
     consent_source: Optional[str] = None
@@ -54,6 +55,7 @@ class ContactCreate(BaseModel):
 
 class ContactPatch(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
+    email: Optional[str] = Field(default=None, max_length=254)
     notes: Optional[str] = Field(default=None, max_length=1200)
     consent_given: Optional[bool] = None
     consent_source: Optional[str] = None
@@ -77,7 +79,7 @@ async def list_contacts(
         query = (
             supabase.table("contacts")
             .select(
-                "id, phone, name, notes, consent_given, consent_date, consent_source, "
+                "id, phone, name, email, notes, address, consent_given, consent_date, consent_source, "
                 "consent_notice_version, consent_evidence, consent_actor_email, "
                 "consent_revoked_at, consent_revoked_reason, created_at"
             )
@@ -89,11 +91,12 @@ async def list_contacts(
         result = query.execute()
         rows = result.data or []
 
-        # Filtro básico client-side si hay búsqueda (Supabase Free no tiene full-text fácil)
+        # Filtro básico client-side (búsqueda por teléfono, nombre o email)
         if search:
             s = search.lower()
             rows = [r for r in rows if s in (r.get("phone") or "").lower()
-                    or s in (r.get("name") or "").lower()]
+                    or s in (r.get("name") or "").lower()
+                    or s in (r.get("email") or "").lower()]
         return rows
     except Exception as e:
         logger.error("Error listando contactos tenant %s: %s", tenant_id, e)
@@ -143,6 +146,7 @@ async def create_contact(
             "tenant_id": tenant_id,
             "phone": contact.phone,
             "name": contact.name,
+            "email": contact.email.strip().lower() if contact.email else None,
             "notes": contact.notes,
             "consent_given": contact.consent_given,
             "consent_date": now_iso if contact.consent_given else None,
@@ -387,6 +391,7 @@ async def delete_contact(
 
         update = {
             "name": None,
+            "email": None,      # Ley 1581 Art. 15 — anonimización total al eliminar
             "address": None,
             "notes": None,
             "consent_given": False,

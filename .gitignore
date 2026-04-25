@@ -41,3 +41,23 @@ Thumbs.db
 *.log
 logs/
 packages/auth/node_modules/
+
+# ─── Scratch / Debug local ────────────────────────────────────────────────────
+# Archivos temporales de sesión y scripts ad-hoc — no son parte del producto
+scratch/
+scripts/debug/
+
+# ─── packages/db/migrations — snapshot legacy (no canónico) ──────────────────
+# Fuente de verdad: supabase/migrations/
+# packages/db/migrations/ es un snapshot histórico divergido
+packages/db/migrations/
+
+# ─── infra/ subdirectorios vacíos ─────────────────────────────────────────────
+infra/render/
+infra/local/
+infra/supabase/
+
+# ─── Artefactos Python adicionales ────────────────────────────────────────────
+pip-selfcheck.json
+.mypy_cache/
+.ruff_cache/

@@ -20,13 +20,14 @@ def _build_takeover_text(payload: dict[str, Any]) -> str:
     customer_phone = str(payload.get("customer_phone", ""))
     previous_status = str(payload.get("previous_status") or "unknown")
 
+    short_id = conversation_id[:8] if conversation_id else "N/A"
     return (
-        "🚨 Escalamiento humano requerido\n"
-        f"Cliente: {customer_phone or 'N/A'}\n"
-        f"Conversación: {conversation_id or 'N/A'}\n"
-        f"Estado anterior: {previous_status}\n"
-        "Acción: revisar Inbox en /dashboard/inbox\n"
-        f"Tenant: {tenant_id or 'N/A'}"
+        "🚨 *Escalamiento humano requerido*\n"
+        f"Cliente: `{customer_phone or 'N/A'}`\n"
+        f"Conv ID: `{conversation_id or 'N/A'}`\n\n"
+        f"Para devolver al bot:\n"
+        f"`/resolver {conversation_id}`\n\n"
+        "Inbox: /dashboard/inbox"
     )
 
 
@@ -39,7 +40,7 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
         return True
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -104,11 +105,16 @@ async def dispatch_human_takeover_event(supabase: Client, payload: dict[str, Any
     text = _build_takeover_text(payload)
     transient_error = False
 
+    from vault_helper import VaultHelper, resolve_secret
+    vault = VaultHelper(supabase)
+
     for row in settings:
         channel = row.get("channel")
-        config = row.get("config") or {}
+        config  = dict(row.get("config") or {})
 
         if channel == "telegram":
+            # Resolver bot_token desde Vault
+            config["bot_token"] = resolve_secret(vault, config, "bot_token") or ""
             ok = await _send_telegram_notification(config, text)
         elif channel == "email":
             ok = _dispatch_email_placeholder(config, payload)

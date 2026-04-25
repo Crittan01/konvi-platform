@@ -1,6 +1,6 @@
 # AI Orchestrator — Arquitectura Runtime
 
-Última actualización: 2026-04-21
+Última actualización: 2026-04-25
 
 ---
 
@@ -59,18 +59,33 @@ Mensajes no-texto:
 
 ## Pipeline resumido
 
-1. Lee estado de conversación
-2. Si aplica, omite por takeover/closed/no-text
-3. Carga contexto (catálogo, KB, historial, configuración del agente IA)
-4. Ruta determinística para shipping quote (si el intent aplica):
+1. Lee estado de conversación (`conversations.status`)
+2. Si aplica, omite por `human_takeover` / `closed` / mensaje no-texto
+3. Ruta determinística `shipping_quote_tool` (si el intent aplica):
    - usa API transaccional `POST /api/v1/shipping/quote`
    - responde con `highlights` (`más económica` + `más rápida`)
    - si faltan datos (destino/origen), solicita precisión o escala a humano
-5. Si no aplica ruta determinística, llama Gemini (`gemini-2.5-flash`)
-6. Ejecuta guardrails
-7. Si corresponde, envía WhatsApp (credenciales del tenant en DB)
-8. Persiste outbound
-9. Marca `processing_status` final
+4. Ruta determinística `order_status_tool` (si el intent aplica):
+   - consulta `orders` por `conversation_id` o `contact_id`
+   - responde estado real en lenguaje natural; si no hay pedido, delega al LLM
+5. Ruta determinística smalltalk (saludos/agradecimientos simples)
+6. Carga contexto (catálogo, KB, historial, configuración del agente IA)
+7. Detección determinística de revocación de consentimiento (antes del LLM)
+8. Respuesta de consentimiento Sí/No (si el último outbound fue la pregunta de consentimiento)
+9. Construye prompt con FSM contextual:
+   - `_has_buying_intent()` evalúa si hay intención de compra real
+   - Si hay buying intent: inyecta FSM de venta (`NEEDS_SHIPPING_CITY -> AWAITING_CARRIER_SELECTION -> NEEDS_CONSENT -> NEEDS_EMAIL -> NEEDS_NAME -> NEEDS_DIRECTION -> READY_FOR_SUMMARY -> AWAITING_ORDER_CONFIRMATION`)
+   - Si NO hay buying intent: inyecta instrucciones de `CATALOG_MODE` (sin pedir datos personales)
+   - Incluye ejemplos few-shot anti-alucinación en el prompt
+10. Llama Gemini (`gemini-2.5-flash`) con output estructurado JSON
+11. Ejecuta guardrails (`validate_orchestrator_output`)
+    - Salvaguarda post-LLM: si pide takeover en smalltalk, se ignora y se responde automáticamente
+    - Variante inexistente: el prompt instruye al LLM a mencionar alternativas disponibles del producto en lugar de escalar a humano automáticamente
+12. Si corresponde, ejecuta creación de pedido/link de pago (`payment_link_tool`) en `order_acknowledgment`
+13. Envía WhatsApp (credenciales del tenant en DB)
+14. Actualiza datos del contacto (`extracted_name`, `extracted_email`, `extracted_direction` + normalización DANE/DIAN)
+15. Persiste outbound en `messages`
+16. Marca `processing_status` final (`processed` / `skipped` / `failed`)
 
 ---
 

@@ -1,24 +1,21 @@
 # render.yaml — Commerce Ops Platform
 # Infraestructura como código para Render.com
 # Referencia oficial: https://render.com/docs/blueprint-spec
-# Última actualización: 2026-04-21 (v7 — contrato de entorno congelado)
+# Última actualización: 2026-04-25 (v8 — nuevas vars post sesiones rev. 57-59)
 #
 # USO:
 #   1. Render detecta este archivo automáticamente desde el repo
 #   2. Configurar las env vars (sync: false) manualmente en Render Dashboard
 #   3. Ver contexto operativo actualizado en docs/HANDOFF.md
+#   4. Referencia canónica de variables: .env.example
 #
 # HISTORIAL:
-#   v1: servicios iniciales
-#   v2: 4 servicios (web + connector + api + orchestrator)
-#   v3: commerce-ops-orchestrator: type:worker → type:web (worker no disponible en Free)
-#       server.py lanza el OrchestratorWorker en daemon thread + expone /health
-#   v4: supabase==2.28.3 + httpx==0.28.1 en todos los servicios Python (versiones alineadas)
-#   v5: Next.js build: NODE_OPTIONS max-old-space-size=460 + NEXT_TELEMETRY_DISABLED
-#       Razón: Render Free plan (512MB) — edge-server compiler recibe SIGTERM por OOM
-#       Referencia: https://nextjs.org/docs/messages/node-module-load-failure
-#   v6: WhatsApp sender por tenant_integrations (sin env fallback) + MeLi OAuth state firmado
-#   v7: contrato de entorno alineado (API rate limits explícitos en blueprint)
+#   v1–v7: ver historial anterior
+#   v8: CONVERSATION_HISTORY_LIMIT=25 (era 10), vars de R-01/R-03/R-09/R-10
+#       API_RATE_LIMIT_DISTRIBUTED=true (rate limiter distribuido PostgreSQL)
+#       PENDING_PAYMENT_RELEASE_* (job de liberación de stock expirado)
+#       ANTI_HIBERNATION_* (ping anti-hibernación Render Free)
+#       MAX_PROCESSING_ATTEMPTS=5 (era implícito — se hace explícito)
 
 services:
 
@@ -121,16 +118,44 @@ services:
         # AR: https://auth.mercadolibre.com.ar/authorization
       - key: MELI_OAUTH_STATE_SECRET
         sync: false
+      # ── Telegram Webhook bidireccional (F6) ────────────────────────────────
+      # Secret configurado en setWebhook — enviado por Telegram en X-Telegram-Bot-Api-Secret-Token
+      # IH: curl "https://api.telegram.org/bot{TOKEN}/setWebhook" -d "url=...&secret_token={VALOR}"
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
       - key: MELI_OAUTH_STATE_TTL_SECONDS
         value: "600"
       - key: PLAN_ENFORCEMENT_ENABLED
         value: "true"
       - key: ENVIA_PHASE2_ENABLED
         value: "false"
+      - key: API_RATE_LIMIT_ENABLED
+        value: "true"
       - key: API_RATE_LIMIT_WRITE_PER_MINUTE
         value: "120"
       - key: API_RATE_LIMIT_SEND_PER_MINUTE
         value: "40"
+      - key: API_RATE_LIMIT_DISTRIBUTED
+        value: "true"
+      # ── Wompi (Fase C — Pagos) ─────────────────────────────────────────────
+      - key: WOMPI_ENV
+        value: "sandbox"
+      - key: WOMPI_PUBLIC_KEY_SANDBOX
+        sync: false
+      - key: WOMPI_PRIVATE_KEY_SANDBOX
+        sync: false
+      - key: WOMPI_EVENTS_KEY_SANDBOX
+        sync: false
+      - key: WOMPI_INTEGRITY_KEY_SANDBOX
+        sync: false
+      - key: WOMPI_PUBLIC_KEY_PROD
+        sync: false
+      - key: WOMPI_PRIVATE_KEY_PROD
+        sync: false
+      - key: WOMPI_EVENTS_KEY_PROD
+        sync: false
+      - key: WOMPI_INTEGRITY_KEY_PROD
+        sync: false
     healthCheckPath: /health
     autoDeploy: true
 
@@ -162,6 +187,10 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: GEMINI_EMBEDDING_FALLBACK_MODEL
+        value: text-embedding-004
       - key: INBOX_SHIPPING_DEFAULT_WEIGHT_KG
         value: "1"
       - key: INBOX_SHIPPING_DEFAULT_LENGTH_CM
@@ -174,10 +203,10 @@ services:
         value: "25"
       - key: POLL_INTERVAL_SECONDS
         value: "3"
-      - key: MAX_PROCESSING_ATTEMPTS
-        value: "3"
       - key: CONVERSATION_HISTORY_LIMIT
-        value: "10"
+        value: "25"
+      - key: CONVERSATION_WINDOW_HOURS
+        value: "24"
       - key: HUMAN_TAKEOVER_QUEUE_ENABLED
         value: "true"
       - key: HUMAN_TAKEOVER_QUEUE_POLL_BATCH
@@ -198,5 +227,24 @@ services:
         value: "3600"
       - key: IDEMPOTENCY_CLEANUP_BATCH
         value: "2000"
+      # ── Liberación de pedidos pending_payment expirados (R-01) ────────────
+      - key: PENDING_PAYMENT_RELEASE_ENABLED
+        value: "true"
+      - key: PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS
+        value: "600"
+      - key: PENDING_PAYMENT_TTL_MINUTES
+        value: "35"
+      # ── Anti-hibernación Render Free (R-10) ───────────────────────────────
+      # ANTI_HIBERNATION_PING_URL: configurar en Render Dashboard (sync: false)
+      # Formato: URLs separadas por coma, ej:
+      #   https://commerce-ops-api.onrender.com/health,https://commerce-ops-connector.onrender.com/health
+      - key: ANTI_HIBERNATION_ENABLED
+        value: "true"
+      - key: ANTI_HIBERNATION_PING_URL
+        sync: false
+      - key: ANTI_HIBERNATION_INTERVAL_SECONDS
+        value: "840"
+      - key: MAX_PROCESSING_ATTEMPTS
+        value: "5"
     healthCheckPath: /health
     autoDeploy: true

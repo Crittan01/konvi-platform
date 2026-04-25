@@ -30,7 +30,11 @@ def _get_tenant_wa_credentials(tenant_id: str, supabase: Client) -> tuple[str, s
         if res.data.get("status") != "connected":
             return "", ""
         creds = res.data.get("credentials", {})
-        return creds.get("phone_number_id", ""), creds.get("access_token", "")
+        from vault_helper import VaultHelper, resolve_secret
+        vault = VaultHelper(supabase)
+        phone_id     = creds.get("phone_number_id", "")
+        access_token = resolve_secret(vault, creds, "access_token") or ""
+        return phone_id, access_token
     except Exception:
         return "", ""
 

@@ -47,11 +47,21 @@ def _resolve_tenant_by_waba(supabase: Client, meta_waba_id: str) -> Optional[str
     return tenant_id
 
 
+def _normalize_phone(phone: str) -> str:
+    """
+    Normaliza el teléfono a formato sin prefijo '+'.
+    Meta envía el wa_id sin '+' (ej: '573125835649').
+    Guardar siempre sin '+' evita conversaciones duplicadas por formato.
+    """
+    return phone.lstrip("+").strip()
+
+
 def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) -> str:
     """
     Find-or-create de conversación para el cliente.
     Retorna el conversation_id.
     """
+    customer_phone = _normalize_phone(customer_phone)
     res = (
         supabase.table("conversations")
         .select("id, status")
@@ -102,7 +112,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
         return
 
     meta_waba_id: str = data.get("meta_waba_id", "")
-    customer_phone: str = data.get("customer_phone", "")
+    customer_phone: str = _normalize_phone(data.get("customer_phone", ""))
     meta_message_id: str = data.get("meta_message_id", "")
     content_type: str = data.get("content_type", "text")
     content: str = data.get("content", "")
@@ -120,6 +130,25 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
 
         # ── 2. Find-or-Create Conversación ───────────────────────────────────
         conversation_id = _upsert_conversation(supabase, tenant_id, customer_phone)
+
+        # ── 2.5 Deduplicación por meta_message_id ────────────────────────────
+        # Meta puede reenviar el mismo webhook si el background task tarda
+        # o si hay timeouts de red. Evitamos insertar duplicados.
+        if meta_message_id:
+            dup_check = (
+                supabase.table("messages")
+                .select("id")
+                .eq("conversation_id", conversation_id)
+                .eq("meta_message_id", meta_message_id)
+                .limit(1)
+                .execute()
+            )
+            if dup_check.data:
+                logger.info(
+                    "[INBOUND] Mensaje con meta_message_id=%s ya existe en conversación %s. Se omite.",
+                    meta_message_id, conversation_id,
+                )
+                return
 
         # ── 3. Insertar Mensaje inbound (processing_status=pending) ───────────
         supabase.table("messages").insert({
@@ -140,4 +169,14 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
         )
 
     except Exception as e:
-        logger.error(f"Error fatal en db_persistence: {e}", exc_info=True)
+        err_str = str(e).lower()
+        # Unique violation (23505) = mensaje duplicado, ya manejado por dedup check
+        # pero en race condition puede ocurrir; se loguea como info, no error.
+        if "unique constraint" in err_str or "duplicate key" in err_str or "23505" in err_str:
+            logger.info(
+                "[INBOUND] Mensaje duplicado ignorado (unique constraint). "
+                "meta_message_id=%s | conversation=%s",
+                meta_message_id, conversation_id if 'conversation_id' in dir() else "N/A",
+            )
+        else:
+            logger.error(f"Error fatal en db_persistence: {e}", exc_info=True)

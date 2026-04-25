@@ -114,7 +114,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { kind: 'leaf', href: '/dashboard/settings',     label: 'General',            icon: Building2, roles: ['owner'] },
       { kind: 'leaf', href: '/dashboard/team',         label: 'Usuarios y Acceso',  icon: Users,     roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',      icon: Plug,      roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',      icon: Plug,      roles: ['owner', 'manager'] },
     ],
   },
 ]

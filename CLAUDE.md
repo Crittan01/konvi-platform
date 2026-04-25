@@ -37,10 +37,38 @@ supabase/migrations/          # fuente canónica de esquema
 4. El LLM no decide verdad transaccional.
 5. WhatsApp: solo API oficial Meta.
 
-## Leer primero
+## Leer en TODA sesión (obligatorio)
 
-1. `.context/00-product.md`
-2. `.context/01-state.md`
-3. `.context/04-next-steps.md`
-4. `docs/HANDOFF.md`
+1. `.context/00-product.md` — árbol funcional, qué está en scope (135 líneas)
+2. `.context/01-state.md`   — estado actual del sistema, últimas 3 sesiones (≈290 líneas)
+3. `.context/02-stack.md`   — versiones reales del stack (50 líneas)
+4. `.context/03-rules.md`   — reglas de implementación (34 líneas)
+5. `.context/04-next-steps.md` — pendientes reales y backlog (≈160 líneas)
+
+## Leer solo cuando la tarea lo requiera (on-demand)
+
+- `.context/06-contracts.md` — contratos de runtime: estados de conversación, procesamiento, FSM Inbox, Wompi, Envia.
+  Leer si tocas: Orchestrator, API, Connector, Worker, lógica de pedidos/pagos.
+- `docs/HANDOFF.md` — estado operativo de infra Render + migraciones aplicadas.
+  Leer si tocas: deployment, infra, migraciones pendientes.
+- `.context/05-doc-policy.md` — política documental.
+  Leer solo si actualizas documentación.
+
+## NO leer (reduce tokens ~50%)
+
+- `supabase/migrations/` — 49+ SQLs. Leer solo si hay tarea explícita de migración.
+- `.context/01-state-archive.md` — historial de sesiones archivado.
+- `packages/db/migrations/` — snapshot legacy divergido, no canónico.
+- `scratch/`, `scripts/debug/` — temporales locales.
+- `docs/reports/` — vacío.
+- `infra/render/`, `infra/local/`, `infra/supabase/` — vacíos.
+- `services/connector-mercadolibre/`, `services/connector-shopify/`,
+  `services/cron/`, `services/worker/` — solo README (Fase 13 futura).
+
+## Validación pre-deploy
+
+```bash
+bash scripts/validate.sh          # sintaxis + 184 tests + TypeScript + lint
+bash scripts/validate.sh --full   # + pip-audit + coherencia vars
+```
 

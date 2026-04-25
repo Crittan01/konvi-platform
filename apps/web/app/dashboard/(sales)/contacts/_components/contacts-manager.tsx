@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +16,7 @@ type Contact = {
   id: string
   phone: string
   name: string | null
+  email: string | null
   notes: string | null
   consent_given: boolean
   consent_date: string | null
@@ -65,7 +66,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     const q = search.trim().toLowerCase()
     if (q) {
       result = result.filter(c => 
-        (c.name?.toLowerCase().includes(q) ?? false) || c.phone.includes(q)
+        (c.name?.toLowerCase().includes(q) ?? false) ||
+        c.phone.includes(q) ||
+        (c.email?.toLowerCase().includes(q) ?? false)
       )
     }
 
@@ -124,7 +127,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Buscar por nombre o teléfono..."
+            placeholder="Buscar por nombre, teléfono o email..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -179,6 +182,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                 <div className="space-y-1">
                   <Label className="text-xs">Nombre</Label>
                   <Input name="name" placeholder="Juan García" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Email</Label>
+                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Notas</Label>
@@ -268,6 +275,12 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                         <p className="text-xs font-mono text-muted-foreground">
                           {formatPhone(c.phone)}
                         </p>
+                        {c.email && (
+                          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            {c.email}
+                          </p>
+                        )}
                         {c.notes && <p className="text-xs text-muted-foreground mt-0.5 italic">{c.notes}</p>}
                         {(c.consent_source || c.consent_notice_version) && (
                           <p className="text-xs text-muted-foreground mt-0.5">
@@ -312,6 +325,12 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             <Label className="text-xs">Nombre</Label>
                             <Input name="name" defaultValue={c.name ?? ''} className="h-8 text-xs" />
                           </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Email</Label>
+                            <Input name="email" type="email" defaultValue={c.email ?? ''} className="h-8 text-xs" autoComplete="email" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-xs">Notas</Label>
                             <Input name="notes" defaultValue={c.notes ?? ''} className="h-8 text-xs" />

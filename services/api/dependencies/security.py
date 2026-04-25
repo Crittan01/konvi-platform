@@ -2,8 +2,13 @@
 Controles de seguridad runtime para API Gateway.
 
 - Rate limiting por bucket + tenant + IP.
-- Pensado como defensa en profundidad en capa API (antes de RLS).
+- Implementación híbrida:
+    1. Contador in-memory (fast path, <1μs) como primera barrera.
+    2. Contador distribuido en Supabase (RPC rate_limit_hit) para
+       coordinación correcta cuando hay múltiples réplicas del API.
+- En caso de fallo del RPC distribuido, el in-memory actúa como fallback.
 """
+import logging
 import os
 import time
 import threading
@@ -17,6 +22,8 @@ from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client
 from dependencies.observability import record_api_security_event
 
+logger = logging.getLogger("api.security")
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -26,6 +33,8 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 RATE_LIMIT_ENABLED = _env_bool("API_RATE_LIMIT_ENABLED", True)
+# Distribuido: usa Supabase RPC si está disponible; fallback a in-memory si falla.
+RATE_LIMIT_DISTRIBUTED = _env_bool("API_RATE_LIMIT_DISTRIBUTED", True)
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,7 @@ class RateLimitRule:
 
 
 class _SlidingWindowLimiter:
+    """Fallback in-memory. Funciona correctamente en instancia única."""
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._events: dict[str, deque[float]] = defaultdict(deque)
@@ -47,18 +57,39 @@ class _SlidingWindowLimiter:
             cutoff = now - window_seconds
             while q and q[0] <= cutoff:
                 q.popleft()
-
             if len(q) >= limit:
                 retry_after = max(1, int((q[0] + window_seconds) - now))
                 return False, 0, retry_after
-
             q.append(now)
             remaining = max(0, limit - len(q))
             reset_in = max(1, int((q[0] + window_seconds) - now))
             return True, remaining, reset_in
 
 
-_limiter = _SlidingWindowLimiter()
+_local_limiter = _SlidingWindowLimiter()
+
+
+def _distributed_hit(
+    supabase: Client,
+    key: str,
+    limit: int,
+    window_seconds: int,
+) -> tuple[bool, int, int]:
+    """
+    Llama a la RPC rate_limit_hit en Supabase para un hit atómico distribuido.
+    Retorna (allowed, remaining, reset_in) igual que _SlidingWindowLimiter.hit.
+    Lanza excepción si la RPC falla — el caller hace fallback al in-memory.
+    """
+    res = supabase.rpc(
+        "rate_limit_hit",
+        {"p_key": key, "p_limit": limit, "p_window_seconds": window_seconds},
+    ).execute()
+    row = (res.data or [{}])[0]
+    return (
+        bool(row.get("allowed", True)),
+        int(row.get("remaining", 0)),
+        int(row.get("reset_in", window_seconds)),
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -84,7 +115,26 @@ def build_rate_limit_dependency(rule: RateLimitRule) -> Callable:
 
         ip = _client_ip(request)
         key = f"{rule.bucket}:{tenant_id}:{ip}"
-        allowed, remaining, reset_in = _limiter.hit(key, rule.limit, rule.window_seconds)
+
+        allowed, remaining, reset_in = True, rule.limit - 1, rule.window_seconds
+
+        if RATE_LIMIT_DISTRIBUTED:
+            try:
+                allowed, remaining, reset_in = _distributed_hit(
+                    supabase, key, rule.limit, rule.window_seconds
+                )
+            except Exception as exc:
+                # Fallback: in-memory si Supabase no está disponible o falta migración
+                logger.warning(
+                    "[RL] RPC rate_limit_hit falló (%s) — usando in-memory como fallback", exc
+                )
+                allowed, remaining, reset_in = _local_limiter.hit(
+                    key, rule.limit, rule.window_seconds
+                )
+        else:
+            allowed, remaining, reset_in = _local_limiter.hit(
+                key, rule.limit, rule.window_seconds
+            )
 
         response.headers["X-RateLimit-Limit"] = str(rule.limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)

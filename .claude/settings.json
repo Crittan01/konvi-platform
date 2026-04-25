@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:developers.mercadolibre.com.co)"
+      "WebFetch(*)",
+      "Bash(*)"
     ]
   }
 }

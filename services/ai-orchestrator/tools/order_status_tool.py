@@ -159,8 +159,21 @@ def _format_money(value: object) -> str:
         return "N/D"
 
 
-def _build_order_response(order: dict, items_count: int) -> str:
-    """Construye respuesta en lenguaje natural con datos reales del pedido."""
+def _format_tracking_date(date_str: Optional[str]) -> str:
+    if not date_str:
+        return "N/D"
+    try:
+        # Soporta DATE (YYYY-MM-DD) y TIMESTAMPTZ
+        if "T" in date_str or "+" in date_str or "Z" in date_str:
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            return dt.strftime("%d/%m/%Y")
+        return datetime.strptime(date_str[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return str(date_str)[:10]
+
+
+def _build_order_response(order: dict, items_count: int, tracking: Optional[dict] = None) -> str:
+    """Construye respuesta en lenguaje natural con datos reales del pedido y tracking."""
     status_raw = str(order.get("status") or "pending")
     status_label = _STATUS_LABEL.get(status_raw, status_raw)
     total = _format_money(order.get("total_amount"))
@@ -171,9 +184,21 @@ def _build_order_response(order: dict, items_count: int) -> str:
     lines.append(f"Total: {total} | {items_count} artículo(s).")
     if notes:
         lines.append(f"Nota: {notes}")
-    if status_raw in {"shipped", "processing"}:
-        lines.append("Si quieres el seguimiento del envío, te lo paso de inmediato.")
-    elif status_raw == "delivered":
+
+    # Mostrar datos de tracking reales si existen
+    if tracking and status_raw in {"shipped", "processing", "delivered"}:
+        if tracking.get("tracking_number"):
+            lines.append(f"📦 Guía: *{tracking['tracking_number']}*")
+        if tracking.get("carrier"):
+            lines.append(f"Transportador: {tracking['carrier']}")
+        if tracking.get("tracking_url"):
+            lines.append(f"Seguimiento: {tracking['tracking_url']}")
+        if tracking.get("estimated_delivery"):
+            lines.append(f"Entrega estimada: {_format_tracking_date(tracking['estimated_delivery'])}")
+    elif status_raw in {"shipped", "processing"}:
+        lines.append("Aún no tenemos número de guía disponible. ¿Quieres que un asesor te ayude?")
+
+    if status_raw == "delivered":
         lines.append("¿Recibiste todo bien? Si hay algún problema, con gusto te ayudo.")
     elif status_raw == "pending":
         lines.append("En breve lo confirman y preparamos el despacho.")
@@ -247,6 +272,29 @@ def _get_order_by_contact(
         return None
 
 
+def _get_order_tracking(
+    supabase: Client,
+    tenant_id: str,
+    order_id: str,
+) -> Optional[dict]:
+    """Retorna el registro de tracking más reciente para un pedido, o None si no hay."""
+    try:
+        res = (
+            supabase.table("order_tracking")
+            .select("status, tracking_number, tracking_url, carrier, estimated_delivery")
+            .eq("order_id", order_id)
+            .eq("tenant_id", tenant_id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("Error leyendo order_tracking order=%s: %s", order_id, exc)
+        return None
+
+
 def _get_conversation_phone(
     supabase: Client,
     conversation_id: str,
@@ -310,14 +358,16 @@ async def handle_order_status_if_applicable(
             )
             return OrderStatusResult(handled=False)
 
-        # 3) Contar ítems (order_items ya vienen del select).
+        # 3) Contar ítems y buscar tracking real.
         items = order.get("order_items") or []
         items_count = len(items)
+        tracking = _get_order_tracking(supabase, tenant_id, order["id"])
 
-        response_text = _build_order_response(order, items_count)
+        response_text = _build_order_response(order, items_count, tracking)
         logger.info(
-            "[ORDER_STATUS] Respondiendo estado '%s' | order=%s conv=%s",
+            "[ORDER_STATUS] Respondiendo estado '%s' tracking=%s | order=%s conv=%s",
             order.get("status"),
+            bool(tracking and tracking.get("tracking_number")),
             order.get("id"),
             conversation_id,
         )

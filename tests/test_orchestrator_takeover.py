@@ -82,12 +82,16 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         mark_processing.assert_called_once()
         self.assertEqual(mark_processing.call_args.kwargs["skip_reason"], "closed_conversation")
 
-    async def test_non_text_escalates_to_human_takeover(self):
+    async def test_non_text_first_sends_warning_not_escalate(self):
+        """Primera vez que llega no-texto: envía advertencia pero NO escala."""
         with (
             patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(orchestrator, "_get_conversation_history", return_value=[]),
+            patch.object(orchestrator, "_get_conversation_customer_phone", return_value="+573001112233"),
+            patch.object(orchestrator, "_fetch_contact_for_phone", return_value=(None, {})),
+            patch.object(orchestrator, "_send_outbound_text", new_callable=AsyncMock) as send_outbound,
             patch.object(orchestrator, "_set_conversation_status") as set_status,
             patch.object(orchestrator, "_mark_message_processing") as mark_processing,
-            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock) as send_msg,
         ):
             await orchestrator.build_and_run_orchestration(
                 supabase=MagicMock(),
@@ -96,6 +100,35 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
                 conversation_id="c-1",
                 content="[Imagen recibida]",
                 content_type="image",
+            )
+
+        # Envía advertencia (outbound_text llamado), NO escala a humano
+        send_outbound.assert_called_once()
+        self.assertIn("solo puedo atender", send_outbound.call_args.kwargs.get("text", "").lower())
+        set_status.assert_not_called()
+        mark_processing.assert_called_once()
+        self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
+
+    async def test_non_text_second_escalates_to_human_takeover(self):
+        """Si ya hay advertencia previa de no-texto, escala a human_takeover."""
+        with (
+            patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
+            patch.object(orchestrator, "_get_conversation_history", return_value=[
+                {"direction": "outbound", "content": "Por el momento solo puedo atender mensajes de texto."},
+            ]),
+            patch.object(orchestrator, "_get_conversation_customer_phone", return_value="+573001112233"),
+            patch.object(orchestrator, "_fetch_contact_for_phone", return_value=(None, {})),
+            patch.object(orchestrator, "_set_conversation_status") as set_status,
+            patch.object(orchestrator, "_mark_message_processing") as mark_processing,
+            patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock) as send_msg,
+        ):
+            await orchestrator.build_and_run_orchestration(
+                supabase=MagicMock(),
+                message_id="m-3b",
+                tenant_id="t-1",
+                conversation_id="c-1",
+                content="[Audio]",
+                content_type="audio",
             )
 
         send_msg.assert_not_called()

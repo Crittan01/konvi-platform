@@ -262,7 +262,8 @@ def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
             detail="Envia no está conectado. Ve a /dashboard/integrations para configurarlo."
         )
     creds = result.data.get("credentials", {})
-    api_token = creds.get("api_token")
+    from vault_helper import VaultHelper, resolve_secret
+    api_token = resolve_secret(VaultHelper(supabase), creds, "api_token")
     if not api_token:
         raise HTTPException(status_code=400, detail="API token de Envia no encontrado")
 
