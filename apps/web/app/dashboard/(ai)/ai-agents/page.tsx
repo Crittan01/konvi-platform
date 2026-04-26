@@ -1,11 +1,15 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { Bot, Save, ShieldAlert, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { Bot, BookOpen, Sparkles } from 'lucide-react'
+import { AiAgentForm } from './ai-agent-form'
+
+const TONO_LABEL: Record<string, string> = {
+  amigable: 'Amigable y cercano',
+  formal: 'Formal y profesional',
+  neutro: 'Neutro',
+  energico: 'Enérgico y motivador',
+}
 
 export default async function AiAgentsPage() {
   const supabase = createClient()
@@ -19,13 +23,18 @@ export default async function AiAgentsPage() {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  // Obtener config
-  const { data } = await supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle()
+  const [{ data }, { data: tenant }] = await Promise.all([
+    supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle(),
+    supabase.from('tenants').select('mision, vision, valores, tono_comunicacion').eq('id', tenantId).maybeSingle(),
+  ])
+
   const agent = data || {
     name: 'Bot Asistente',
     role_description: 'Eres el agente de atención al cliente de esta tienda por WhatsApp. Te encargas de asistir e informar cordialmente.',
     strict_guardrails: true
   }
+
+  const hasFilosofia = !!(tenant?.mision || tenant?.valores)
 
   async function saveAiAgent(formData: FormData) {
     'use server'
@@ -37,6 +46,8 @@ export default async function AiAgentsPage() {
     const name = (formData.get('name') as string).trim() || 'Bot Asistente'
     const role_description = (formData.get('role_description') as string).trim() || 'Asistente de ventas.'
     const strict_guardrails = formData.get('strict_guardrails') !== null
+
+    if (role_description.length > 1500) return
 
     await sb.from('ai_agents').upsert({
       tenant_id: m.tenant_id,
@@ -73,76 +84,64 @@ export default async function AiAgentsPage() {
           <div>
             <p className="font-semibold text-foreground">Anti-Spam & RAG en Tiempo Real</p>
             <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-              La IA solo puede nutrirse de la base de conocimientos y catálogos explícitos. 
+              La IA solo puede nutrirse de la base de conocimientos y catálogos explícitos.
               Además, está controlada por guardrails de Meta (WhatsApp) que le obligan a emitir mensajes cortos.
             </p>
           </div>
         </div>
       </div>
 
-      <form action={saveAiAgent} className="space-y-6 bg-card border border-border p-6 rounded-xl">
-        <div className="space-y-2">
-          <Label htmlFor="name">Nombre del Analista / Bot</Label>
-          <Input 
-            id="name" 
-            name="name" 
-            defaultValue={agent.name} 
-            placeholder="Ej: Sofia (Ventas), Bot Automático" 
-            readOnly={!canWrite}
-          />
-          <p className="text-xs text-muted-foreground">Este es el rol que el modelo asumirá implícitamente.</p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="role_description" className="text-base font-semibold">Directrices de Comportamiento (Prompt Maestro)</Label>
-          <Textarea 
-            id="role_description" 
-            name="role_description" 
-            defaultValue={agent.role_description} 
-            className="min-h-[350px] font-mono text-sm leading-relaxed"
-            placeholder="Escribe cómo debe interactuar el bot... Ej: Eres muy formal y nunca das descuentos."
-            readOnly={!canWrite}
-          />
-          <p className="text-xs text-muted-foreground">
-            Instrucciones explícitas de actuación. Define su actitud, manejo de disputas y forma de hablar. Cuanto más detallado sea el prompt, más exacto será su comportamiento.
+      {/* Card: Filosofía del negocio — contexto inyectado automáticamente */}
+      <div className={`rounded-xl border p-5 space-y-3 ${hasFilosofia ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-amber-500/25 bg-amber-500/5'}`}>
+        <div className="flex items-center gap-2">
+          <BookOpen className={`h-4 w-4 ${hasFilosofia ? 'text-emerald-500' : 'text-amber-500'}`} />
+          <p className="text-sm font-semibold">
+            Filosofía del negocio — inyectada automáticamente al bot
           </p>
         </div>
-
-        <div className="space-y-4 pt-2">
-          <div className="flex items-center justify-between rounded-lg border border-border p-4 bg-muted/20">
-            <div className="space-y-0.5">
-              <Label className="text-base flex items-center gap-2">
-                <ShieldAlert className="h-4 w-4 text-emerald-500" />
-                Umbral de Seguridad Estricto (Guardrails)
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                Si se activa, el bot se negará rotúndamente a inventar precios, reglas o información no registrada en el catálogo y escalará a un humano.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-               <Label htmlFor="strict_guardrails" className="text-sm">Activado</Label>
-               <input
-                 type="checkbox"
-                 id="strict_guardrails"
-                 name="strict_guardrails"
-                 defaultChecked={agent.strict_guardrails}
-                 disabled={!canWrite}
-                 className="h-4 w-4 accent-primary"
-               />
-            </div>
+        {hasFilosofia ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            {tenant?.mision && (
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Misión</p>
+                <p className="text-foreground leading-relaxed">{tenant.mision}</p>
+              </div>
+            )}
+            {tenant?.vision && (
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Visión</p>
+                <p className="text-foreground leading-relaxed">{tenant.vision}</p>
+              </div>
+            )}
+            {tenant?.valores && (
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Valores</p>
+                <p className="text-foreground leading-relaxed">{tenant.valores}</p>
+              </div>
+            )}
+            {tenant?.tono_comunicacion && (
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Tono de marca</p>
+                <p className="text-foreground">{TONO_LABEL[tenant.tono_comunicacion] ?? tenant.tono_comunicacion}</p>
+              </div>
+            )}
           </div>
-        </div>
-
-        {canWrite && (
-          <div className="flex justify-end pt-4 border-t border-border">
-             {/* Note: In a production App router, we'd use useFormStatus in a subcomponent for loading states. Doing simple button to keep it clean */}
-            <Button type="submit" className="gap-2">
-              <Save className="h-4 w-4" />
-              Guardar Configuración IA
-            </Button>
-          </div>
+        ) : (
+          <p className="text-sm text-amber-600 dark:text-amber-400">
+            No has configurado la Filosofía del negocio todavía.{' '}
+            <a href="/dashboard/settings" className="underline hover:no-underline">
+              Configúrala en Ajustes → General
+            </a>{' '}
+            para que el bot conozca tu marca.
+          </p>
         )}
-      </form>
+        <p className="text-xs text-muted-foreground">
+          Esta información se combina con el Prompt Maestro abajo. No la repitas — usa el Prompt para definir
+          cómo actúa el bot en ventas: su nombre, qué ofrece primero, cómo cierra.
+        </p>
+      </div>
+
+      <AiAgentForm agent={agent} canWrite={canWrite} saveAiAgent={saveAiAgent} />
     </div>
   )
 }

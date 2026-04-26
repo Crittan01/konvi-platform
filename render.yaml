@@ -51,6 +51,10 @@ services:
         sync: false
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
+      # Requerida para generar embeddings al crear/actualizar documentos KB
+      # Sin esta variable, todos los documentos quedan sin embedding y el RAG no funciona
+      - key: GEMINI_API_KEY
+        sync: false
     healthCheckPath: /
     autoDeploy: true
 
