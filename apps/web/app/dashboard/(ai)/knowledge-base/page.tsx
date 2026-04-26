@@ -4,7 +4,12 @@ import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine } from 'lucide-react'
+import { SubmitButton } from '@/components/ui/submit-button'
+import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine, Zap, AlertCircle, RefreshCw } from 'lucide-react'
+
+const MAX_DOCS     = 30
+const MAX_CONTENT  = 3000
+const MAX_TITLE    = 120
 
 const CATEGORIES = [
   { value: 'faq',      label: 'FAQ',          icon: HelpCircle },
@@ -29,6 +34,7 @@ type KbDocument = {
   category: string
   is_active: boolean
   updated_at: string
+  has_embedding?: boolean
 }
 
 export default async function KnowledgeBasePage({
@@ -50,14 +56,26 @@ export default async function KnowledgeBasePage({
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  const { data } = await supabase
-    .from('kb_documents')
-    .select('id, title, content, category, is_active, updated_at')
-    .eq('tenant_id', tenantId)
-    .order('category')
-    .order('updated_at', { ascending: false })
+  const [{ data }, { data: withEmb }] = await Promise.all([
+    supabase
+      .from('kb_documents')
+      .select('id, title, content, category, is_active, updated_at')
+      .eq('tenant_id', tenantId)
+      .order('category')
+      .order('updated_at', { ascending: false }),
+    // IDs de documentos que ya tienen embedding (RAG activo)
+    supabase
+      .from('kb_documents')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .not('embedding', 'is', null),
+  ])
 
-  let documents = (data as KbDocument[]) ?? []
+  const embeddingIds = new Set((withEmb ?? []).map((r: { id: string }) => r.id))
+  let documents = ((data as KbDocument[]) ?? []).map(d => ({
+    ...d,
+    has_embedding: embeddingIds.has(d.id),
+  }))
 
   // Filtros en memoria
   if (cat) documents = documents.filter(d => d.category === cat)
@@ -66,8 +84,11 @@ export default async function KnowledgeBasePage({
     d.content.toLowerCase().includes(q.toLowerCase())
   )
 
-  const activeCount = ((data as KbDocument[]) ?? []).filter(d => d.is_active).length
-  const totalCount  = ((data as KbDocument[]) ?? []).length
+  const allDocs     = (data as KbDocument[]) ?? []
+  const activeCount = allDocs.filter(d => d.is_active).length
+  const totalCount  = allDocs.length
+  const embCount    = embeddingIds.size
+  const atLimit     = totalCount >= MAX_DOCS
 
   // ── Server Actions ─────────────────────────────────────────────────────────
 
@@ -97,22 +118,41 @@ export default async function KnowledgeBasePage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    const title   = (formData.get('title') as string).trim()
-    const content = (formData.get('content') as string).trim()
+    const title    = (formData.get('title') as string).trim()
+    const content  = (formData.get('content') as string).trim()
     const category = formData.get('category') as string
     if (!title || !content) return
+    // Límite de caracteres
+    if (content.length > MAX_CONTENT || title.length > MAX_TITLE) return
+    // Límite de documentos por tenant
+    const { count } = await sb.from('kb_documents').select('*', { count: 'exact', head: true }).eq('tenant_id', m.tenant_id)
+    if ((count ?? 0) >= MAX_DOCS) return
 
-    // Generar embedding semántico combinando título y contenido
     const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
-
     await sb.from('kb_documents').insert({
-      tenant_id: m.tenant_id, 
-      title, 
-      content, 
-      category: category || 'general', 
-      is_active: true,
-      embedding: embedding ? `[${embedding.join(',')}]` : null
+      tenant_id: m.tenant_id, title, content,
+      category: category || 'general', is_active: true,
+      embedding: embedding ? `[${embedding.join(',')}]` : null,
     })
+    revalidatePath('/dashboard/knowledge-base')
+  }
+
+  async function regenerateEmbedding(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const docId = formData.get('doc_id') as string
+    const { data: doc } = await sb.from('kb_documents').select('title, content')
+      .eq('id', docId).eq('tenant_id', m.tenant_id).single()
+    if (!doc) return
+    const embedding = await getGeminiEmbedding(`Título: ${doc.title}\nContenido: ${doc.content}`)
+    if (!embedding) return
+    await sb.from('kb_documents').update({
+      embedding: `[${embedding.join(',')}]`,
+      updated_at: new Date().toISOString(),
+    }).eq('id', docId).eq('tenant_id', m.tenant_id)
     revalidatePath('/dashboard/knowledge-base')
   }
 
@@ -151,7 +191,12 @@ export default async function KnowledgeBasePage({
             <BookOpen className="h-5 w-5 text-primary" /> Knowledge Base
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {totalCount} documentos · {activeCount} activos · La IA los usa al responder por WhatsApp
+            <span className={totalCount >= MAX_DOCS ? 'text-amber-400 font-medium' : ''}>
+              {totalCount}/{MAX_DOCS} documentos
+            </span>
+            {' · '}{activeCount} activos
+            {' · '}<span className="text-emerald-400">{embCount} con RAG</span>
+            {embCount < activeCount && <span className="text-muted-foreground/60"> · {activeCount - embCount} sin embedding</span>}
           </p>
         </div>
       </div>
@@ -208,34 +253,44 @@ export default async function KnowledgeBasePage({
         {canWrite && (
           <div className="xl:col-span-1">
             <div className="rounded-xl border border-border bg-card p-5 sticky top-4">
-              <h2 className="font-semibold text-base mb-4 flex items-center gap-2"><PenLine className="h-4 w-4" /> Nuevo documento</h2>
-              <form action={createDocument} className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Título *</Label>
-                  <Input name="title" placeholder="Política de devoluciones" required className="h-8 text-sm" />
+              <h2 className="font-semibold text-base mb-1 flex items-center gap-2"><PenLine className="h-4 w-4" /> Nuevo documento</h2>
+              {atLimit ? (
+                <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/8 text-xs text-amber-400 mt-3">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>Límite de {MAX_DOCS} documentos alcanzado. Elimina alguno para agregar nuevos.</span>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Categoría</Label>
-                  <select name="category"
-                    className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                    {CATEGORIES.map(c => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Contenido *</Label>
-                  <textarea
-                    name="content"
-                    rows={7}
-                    required
-                    placeholder="Escribe el texto tal como quieres que la IA lo lea. Ej: 'Aceptamos devoluciones dentro de los 15 días...'"
-                    className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <p className="text-xs text-muted-foreground">La IA lo leerá antes de responder al cliente.</p>
-                </div>
-                <Button type="submit" className="w-full h-8 text-sm">Agregar documento</Button>
-              </form>
+              ) : (
+                <form action={createDocument} className="space-y-3 mt-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Título * <span className="text-muted-foreground font-normal">(máx {MAX_TITLE} chars)</span></Label>
+                    <Input name="title" placeholder="Política de devoluciones" required maxLength={MAX_TITLE} className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Categoría</Label>
+                    <select name="category"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                      {CATEGORIES.map(c => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Contenido * <span className="text-muted-foreground font-normal">(máx {MAX_CONTENT} chars)</span></Label>
+                    <textarea
+                      name="content"
+                      rows={7}
+                      required
+                      maxLength={MAX_CONTENT}
+                      placeholder="Escribe el texto tal como quieres que la IA lo lea. Ej: 'Aceptamos devoluciones dentro de los 15 días...'"
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <p className="text-xs text-muted-foreground">La IA usará búsqueda semántica para encontrar el doc más relevante.</p>
+                  </div>
+                  <SubmitButton className="w-full h-8 text-sm" pendingText="Guardando y generando embedding...">
+                    Agregar documento
+                  </SubmitButton>
+                </form>
+              )}
             </div>
           </div>
         )}
@@ -270,6 +325,15 @@ export default async function KnowledgeBasePage({
                             {catInfo?.icon && <catInfo.icon className="h-3 w-3 shrink-0" />}
                             {catInfo?.label ?? doc.category}
                           </span>
+                          {doc.has_embedding ? (
+                            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
+                              <Zap className="h-2.5 w-2.5" /> RAG ✓
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-amber-400/80 border border-amber-500/30 bg-amber-500/8 rounded-full px-1.5 py-0.5">
+                              Sin embedding
+                            </span>
+                          )}
                           {!doc.is_active && (
                             <span className="text-[11px] text-muted-foreground border border-border rounded-full px-2 py-0.5">
                               Inactivo
@@ -293,6 +357,15 @@ export default async function KnowledgeBasePage({
                               {doc.is_active ? 'Desactivar' : 'Activar'}
                             </Button>
                           </form>
+                          {!doc.has_embedding && (
+                            <form action={regenerateEmbedding}>
+                              <input type="hidden" name="doc_id" value={doc.id} />
+                              <Button type="submit" size="sm" variant="outline"
+                                className="text-xs h-7 w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
+                                <RefreshCw className="h-3 w-3 mr-1" /> Activar RAG
+                              </Button>
+                            </form>
+                          )}
                           <form action={deleteDocument}>
                             <input type="hidden" name="doc_id" value={doc.id} />
                             <Button type="submit" size="sm" variant="ghost"
