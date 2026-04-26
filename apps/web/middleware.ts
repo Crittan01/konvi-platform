@@ -66,11 +66,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Nota: cuentas inactivas son manejadas nativamente por Supabase Auth (ban_duration).
+  // Un usuario baneado no puede obtener sesión válida — getUser() retorna null → redirect a /login.
+  // No se necesita check adicional aquí.
+
   return supabaseResponse
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|login|auth/callback|api).*)',
+    '/((?!_next/static|_next/image|favicon.ico|login|forgot-password|auth/callback|cuenta-suspendida|api).*)',
   ],
 }

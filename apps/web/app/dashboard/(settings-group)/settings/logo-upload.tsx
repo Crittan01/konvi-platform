@@ -17,9 +17,18 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Extensión derivada SOLO del MIME type validado — nunca de file.name
+  // Previene path traversal y extensión spoofing (ej: exploit.php.jpg → logo.php)
+  const MIME_TO_EXT: Record<string, string> = {
+    'image/png':  'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+  }
+
   const handleFile = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('Solo se aceptan imágenes (PNG, JPG, WebP)')
+    const ext = MIME_TO_EXT[file.type]
+    if (!ext) {
+      setError('Formato no soportado. Usa PNG, JPG o WebP.')
       return
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -34,7 +43,6 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setError('Sesión expirada'); setUploading(false); return }
 
-    const ext = file.name.split('.').pop() ?? 'png'
     const path = `${tenantId}/logo/logo.${ext}`
 
     const { error: uploadErr } = await supabase.storage
@@ -95,7 +103,7 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept=".jpg,.jpeg,.png,.webp"
           className="hidden"
           onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }}
         />
@@ -118,7 +126,7 @@ export default function LogoUpload({ tenantId, currentLogoUrl, onSaved = () => {
             </Button>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">PNG, JPG o WebP · máx 2 MB · 64×64 px o mayor</p>
+        <p className="text-xs text-muted-foreground">PNG, JPG o WebP · máx 2 MB</p>
         {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
     </div>

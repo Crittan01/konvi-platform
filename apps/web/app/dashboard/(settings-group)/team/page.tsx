@@ -8,6 +8,9 @@ import { Label } from '@/components/ui/label'
 import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones } from 'lucide-react'
 import { WEB_APP_URL } from '@/lib/runtime-env'
 import RemoveMemberButton from './remove-member-button'
+import ChangeRoleButton from './change-role-button'
+import InactivateMemberButton from './inactivate-member-button'
+import { TeamUrlCleaner } from './url-cleaner'
 
 export const metadata = {
   title: 'Usuarios y Acceso — Commerce Ops',
@@ -16,7 +19,14 @@ export const metadata = {
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
-type TeamMember = { user_id: string; email: string; role: string; joined_at: string; confirmed: boolean }
+type TeamMember = {
+  user_id:   string
+  email:     string
+  role:      string
+  status:    string   // 'active' | 'inactive'
+  joined_at: string
+  confirmed: boolean
+}
 
 // ─── Configuración de Roles ───────────────────────────────────────────────────
 //
@@ -91,7 +101,7 @@ function Section({ icon: Icon, title, description, children, className = '' }: {
 export default async function TeamPage({
   searchParams,
 }: {
-  searchParams: { invited?: string; error?: string; tab?: string; resent?: string; role_changed?: string }
+  searchParams: { invited?: string; added?: string; removed?: string; inactivated?: string; activated?: string; error?: string; tab?: string; resent?: string; role_changed?: string }
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -100,6 +110,9 @@ export default async function TeamPage({
   const role = meta.role ?? 'operator'
   const isOwner = role === 'owner'
   const myUserId = user?.id
+
+  // Protección por navegación directa — solo owners acceden a esta página
+  if (!isOwner) redirect('/dashboard')
 
   let team: TeamMember[] = []
   if (tenantId) {
@@ -138,6 +151,12 @@ export default async function TeamPage({
       redirect('/dashboard/team?error=datos-invalidos')
     }
 
+    // Validar que el email no sea ya miembro del tenant
+    const { data: currentTeam } = await sb.rpc('get_tenant_team')
+    if ((currentTeam as Array<{email: string}> | null)?.some(m => m.email === email)) {
+      redirect('/dashboard/team?error=ya-es-miembro')
+    }
+
     // APP_URL (sin prefijo NEXT_PUBLIC_) = variable de runtime, no baked en el build
     const appUrl  = WEB_APP_URL
     const adminSb = createAdminClient()
@@ -147,9 +166,12 @@ export default async function TeamPage({
       { redirectTo: `${appUrl}/auth/confirm?next=/set-password`, data: { invited_by: u?.id } }
     )
 
+    let wasExistingUser = false
+
     if (inviteError) {
-      // Usuario ya existente en Supabase Auth — asignar directamente al tenant
+      // Usuario ya existente en Supabase Auth — asignar directamente al tenant (sin email)
       if (inviteError.message.includes('already been registered')) {
+        wasExistingUser = true
         const { data: list, error: listError } = await adminSb.auth.admin.listUsers()
         if (listError) {
           console.error('[invite] listUsers error:', listError.message)
@@ -184,6 +206,10 @@ export default async function TeamPage({
     }
 
     revalidatePath('/dashboard/team')
+    // Distinguir: usuario nuevo (email enviado) vs usuario existente (acceso directo, sin email)
+    if (wasExistingUser) {
+      redirect(`/dashboard/team?added=${encodeURIComponent(email)}`)
+    }
     redirect(`/dashboard/team?invited=${encodeURIComponent(email)}`)
   }
 
@@ -193,19 +219,21 @@ export default async function TeamPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
-    const newRole    = formData.get('role') as string
-    const targetId   = formData.get('user_id') as string
-    // Guard: owner es único por tenant — no puede asignarse por esta vía
+    const newRole  = formData.get('role') as string
+    const targetId = formData.get('user_id') as string
     if (!['manager', 'operator'].includes(newRole)) return
+
+    // Actualizar tenant_users — el Custom Access Token Hook leerá el nuevo rol en el próximo JWT
     await sb.from('tenant_users')
       .update({ role: newRole })
       .eq('user_id', targetId)
       .eq('tenant_id', m.tenant_id)
-      .neq('role', 'owner') // guard DB: nunca cambiar al propio owner
-    // Invalidar sesión del miembro para forzar JWT fresco con el nuevo rol.
-    // Sin esto, el usuario mantiene claims viejos hasta que el access token expire (~1h).
+      .neq('role', 'owner')
+
+    // signOut fuerza al miembro a re-autenticarse → hook inyecta claims frescos de inmediato
     const adminSb = createAdminClient()
     await adminSb.auth.admin.signOut(targetId, 'global')
+
     revalidatePath('/dashboard/team')
     redirect('/dashboard/team?role_changed=1')
   }
@@ -216,11 +244,87 @@ export default async function TeamPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
+
+    const targetId = formData.get('user_id') as string
+
+    // 1. Eliminar del tenant — el hook ya no inyectará tenant_id sin esta fila
     await sb.from('tenant_users').delete()
-      .eq('user_id', formData.get('user_id') as string)
+      .eq('user_id', targetId)
       .eq('tenant_id', m.tenant_id)
-      .neq('role', 'owner') // guard: nunca eliminar owner
+      .neq('role', 'owner')
+
+    const adminSb = createAdminClient()
+
+    // 2. signOut global — revoca sesión activa inmediatamente
+    //    El hook ya no encontrará tenant_users activo → JWT sin tenant_id en próximo login
+    await adminSb.auth.admin.signOut(targetId, 'global')
+
+    // 3. Soft-delete en auth.users — preserva el ID para audit trails pero anonimiza PII
+    //    Si necesita volver, se le puede re-invitar (recibe nuevo enlace de onboarding)
+    await adminSb.auth.admin.deleteUser(targetId, true)
+
     revalidatePath('/dashboard/team')
+    redirect('/dashboard/team?removed=1')
+  }
+
+  async function inactivateMember(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const targetId = formData.get('user_id') as string
+    const reason   = (formData.get('reason') as string)?.trim() || null
+
+    // 1. Marcar como inactivo en tenant_users — el hook no inyectará claims
+    await sb.from('tenant_users').update({
+      status:             'inactive',
+      inactivated_at:     new Date().toISOString(),
+      inactivated_reason: reason,
+      inactivated_by:     u!.id,
+    }).eq('user_id', targetId).eq('tenant_id', m.tenant_id).neq('role', 'owner')
+
+    const adminSb = createAdminClient()
+
+    // 2. Ban nativo de Supabase Auth — bloquea login y refresh de token
+    //    "876600h" ≈ 100 años (ban indefinido reversible con ban_duration: 'none')
+    await adminSb.auth.admin.updateUserById(targetId, {
+      ban_duration: '876600h',
+    })
+
+    // 3. signOut global — corta la sesión activa inmediatamente (no esperar expiración del JWT)
+    await adminSb.auth.admin.signOut(targetId, 'global')
+
+    revalidatePath('/dashboard/team')
+    redirect('/dashboard/team?inactivated=1')
+  }
+
+  async function activateMember(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const targetId = formData.get('user_id') as string
+
+    // 1. Restaurar en tenant_users — el hook inyectará claims en próximo login
+    await sb.from('tenant_users').update({
+      status:             'active',
+      inactivated_at:     null,
+      inactivated_reason: null,
+      inactivated_by:     null,
+    }).eq('user_id', targetId).eq('tenant_id', m.tenant_id)
+
+    // 2. Levantar el ban nativo de Supabase Auth — permite login de nuevo
+    const adminSb = createAdminClient()
+    await adminSb.auth.admin.updateUserById(targetId, {
+      ban_duration: 'none',
+    })
+
+    revalidatePath('/dashboard/team')
+    redirect('/dashboard/team?activated=1')
   }
 
   async function resendInvite(formData: FormData) {
@@ -267,6 +371,9 @@ export default async function TeamPage({
         </p>
       </div>
 
+      {/* Limpia la URL automáticamente después de 4s */}
+      <TeamUrlCleaner hasResult={!!(searchParams.invited || searchParams.added || searchParams.removed || searchParams.inactivated || searchParams.activated || searchParams.error || searchParams.resent || searchParams.role_changed)} />
+
       {/* Banners resultado */}
       {searchParams.invited && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
@@ -275,6 +382,19 @@ export default async function TeamPage({
             <p className="font-medium">Invitación enviada</p>
             <p className="text-xs text-emerald-400/70 mt-0.5">
               Se envió un email a <strong>{searchParams.invited}</strong> con el enlace de acceso.
+              Si no llega en unos minutos, revisa la carpeta de spam o usa &quot;Reenviar&quot;.
+            </p>
+          </div>
+        </div>
+      )}
+      {searchParams.added && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Acceso otorgado</p>
+            <p className="text-xs text-emerald-400/70 mt-0.5">
+              <strong>{searchParams.added}</strong> ya tenía cuenta y fue agregado al equipo directamente.
+              No se envió email — puede iniciar sesión ahora.
             </p>
           </div>
         </div>
@@ -287,6 +407,8 @@ export default async function TeamPage({
           ? 'No tienes permiso para realizar esta acción.'
           : raw.includes('datos-invalidos')
           ? 'Email o rol inválido. Verifica los datos e inténtalo de nuevo.'
+          : raw.includes('ya-es-miembro')
+          ? 'Este email ya es miembro del equipo.'
           : decodeURIComponent(searchParams.error)
 
         return (
@@ -299,6 +421,39 @@ export default async function TeamPage({
           </div>
         )
       })()}
+      {searchParams.inactivated && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-500/30 bg-amber-500/8 text-sm text-amber-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Miembro inactivado</p>
+            <p className="text-xs text-amber-400/70 mt-0.5">
+              El acceso fue suspendido y la sesión cerrada. Puedes activarlo de nuevo cuando sea necesario.
+            </p>
+          </div>
+        </div>
+      )}
+      {searchParams.activated && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Miembro activado</p>
+            <p className="text-xs text-emerald-400/70 mt-0.5">
+              El acceso fue restaurado. El miembro podrá iniciar sesión nuevamente.
+            </p>
+          </div>
+        </div>
+      )}
+      {searchParams.removed && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Miembro eliminado</p>
+            <p className="text-xs text-emerald-400/70 mt-0.5">
+              El usuario fue removido del equipo y su sesión activa fue cerrada inmediatamente.
+            </p>
+          </div>
+        </div>
+      )}
       {searchParams.resent && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/8 text-sm text-emerald-400">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
@@ -410,6 +565,11 @@ export default async function TeamPage({
                             Pendiente
                           </span>
                         )}
+                        {m.confirmed && m.status === 'inactive' && (
+                          <span className="text-[10px] font-medium text-muted-foreground border border-border bg-muted/40 rounded-full px-1.5 py-0.5 shrink-0">
+                            Inactivo
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         Desde {new Date(m.joined_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -417,32 +577,55 @@ export default async function TeamPage({
                     </div>
                   </div>
 
-                  {/* Acciones */}
+                  {/* Acciones según estado */}
                   <div className="flex items-center gap-2 pl-11 sm:pl-0">
                     {isOwner && m.user_id !== myUserId ? (
                       <>
-                        {/* Reenviar invitación — solo para pendientes */}
+                        {/* PENDIENTE: solo reenviar o eliminar */}
                         {!m.confirmed && (
-                          <form action={resendInvite}>
-                            <input type="hidden" name="email" value={m.email} />
+                          <>
+                            <form action={resendInvite}>
+                              <input type="hidden" name="email" value={m.email} />
+                              <Button type="submit" size="sm" variant="outline"
+                                className="text-xs h-7 px-2.5 text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
+                                Reenviar
+                              </Button>
+                            </form>
+                            <span className="text-[10px] text-muted-foreground italic">Pendiente</span>
+                          </>
+                        )}
+
+                        {/* INACTIVO: solo activar o eliminar */}
+                        {m.confirmed && m.status === 'inactive' && (
+                          <form action={activateMember}>
+                            <input type="hidden" name="user_id" value={m.user_id} />
                             <Button type="submit" size="sm" variant="outline"
-                              className="text-xs h-7 px-2.5 text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
-                              Reenviar
+                              className="text-xs h-7 px-2.5 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
+                              Activar
                             </Button>
                           </form>
                         )}
-                        <form action={changeRole} className="flex items-center gap-1.5">
-                          <input type="hidden" name="user_id" value={m.user_id} />
-                          <select
-                            name="role"
-                            defaultValue={m.role === 'owner' ? 'manager' : m.role}
-                            className="text-xs rounded-lg border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                          >
-                            <option value="manager">Supervisor</option>
-                            <option value="operator">Gestor</option>
-                          </select>
-                          <Button type="submit" size="sm" variant="outline" className="text-xs h-7 px-2.5">Cambiar</Button>
-                        </form>
+
+                        {/* ACTIVO: cambiar rol + inactivar */}
+                        {m.confirmed && m.status === 'active' && (
+                          <>
+                            <ChangeRoleButton
+                              userId={m.user_id}
+                              memberEmail={m.email}
+                              currentRole={m.role}
+                              action={changeRole}
+                            />
+                            {m.role !== 'owner' && (
+                              <InactivateMemberButton
+                                userId={m.user_id}
+                                memberEmail={m.email}
+                                action={inactivateMember}
+                              />
+                            )}
+                          </>
+                        )}
+
+                        {/* Eliminar — disponible para activo, inactivo y pendiente (no owner) */}
                         {m.role !== 'owner' && (
                           <RemoveMemberButton
                             userId={m.user_id}

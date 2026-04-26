@@ -1,9 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import LoginForm from './login-form'
 
 export default async function LoginPage({
   searchParams,
@@ -50,30 +48,9 @@ export default async function LoginPage({
 
         <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
           <CardContent className="pt-6">
-            <form action={loginAction} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="email">Correo Corporativo</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                placeholder="admin@commerce.local"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Contraseña</Label>
-              <Input id="password" name="password" type="password" required />
-            </div>
-            {searchParams.message && (
-              <p className="text-sm text-destructive text-center">
-                {searchParams.message}
-              </p>
-            )}
-            <Button className="w-full" type="submit">Entrar</Button>
-          </form>
-        </CardContent>
-      </Card>
+            <LoginForm action={loginAction} message={searchParams.message} />
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

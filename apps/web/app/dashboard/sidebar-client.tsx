@@ -9,7 +9,7 @@ import {
   Package, Users, Settings, Plug, Truck, BarChart2,
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
-  Wallet, DollarSign, AlertCircle, Bot, Lock,
+  Wallet, DollarSign, AlertCircle, Bot, Lock, KeyRound,
   Store, Crown, Briefcase, Headphones,
 } from 'lucide-react'
 
@@ -156,7 +156,8 @@ export default function SidebarClient({
   role, userEmail, tenantName, tenantLogoUrl, inboxBadge, meliBadge, planCode, planCapabilities, integrations, logoutAction,
 }: SidebarProps) {
   const pathname = usePathname()
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileOpen,   setMobileOpen]   = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   // Grupos abiertos por defecto — auto-expand si una ruta hija está activa
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
@@ -390,29 +391,74 @@ export default function SidebarClient({
           })}
         </nav>
 
-        {/* ── Footer: usuario + rol + logout ─────────────────────────────── */}
-        <div className="shrink-0 border-t border-border/40 p-3 space-y-2">
-          <div className="px-1">
-            <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
-              <badge.icon className="h-3 w-3 shrink-0" />
-              {badge.label}
-            </span>
-            <span className="ml-1 inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
-              {planLabel}
-            </span>
-          </div>
-          <div className="px-1">
-            <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
-          </div>
-          <form action={logoutAction}>
+        {/* ── Footer: usuario + menú desplegable ──────────────────────────── */}
+        <div className="shrink-0 border-t border-border/40 p-3">
+          <div className="relative">
+            {/* Trigger */}
             <button
-              type="submit"
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+              type="button"
+              onClick={() => setUserMenuOpen(v => !v)}
+              className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg transition-colors text-left ${
+                userMenuOpen ? 'bg-white/8' : 'hover:bg-white/5'
+              }`}
             >
-              <LogOut className="h-4 w-4 shrink-0" />
-              Cerrar sesión
+              {/* Avatar */}
+              <div className="h-7 w-7 rounded-full bg-primary/25 border border-primary/40 flex items-center justify-center shrink-0 text-[11px] font-bold text-primary">
+                {userEmail.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] text-foreground/75 truncate">{userEmail}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 rounded-full ${badge.color}`}>
+                    <badge.icon className="h-2.5 w-2.5 shrink-0" />
+                    {badge.label}
+                  </span>
+                  <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-1.5 rounded-full bg-primary/20 text-primary border border-primary/30">
+                    {planLabel}
+                  </span>
+                </div>
+              </div>
+              <ChevronDown className={`h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${userMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-          </form>
+
+            {/* Menú — aparece ARRIBA, colores del propio sidebar para coherencia */}
+            {userMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
+                <div
+                  className="absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl overflow-hidden shadow-2xl"
+                  style={{ background: 'hsl(168 14% 10%)', border: '1px solid hsl(156 30% 20%)' }}
+                >
+                  <div className="p-1">
+                    <Link
+                      href="/dashboard/account"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                      style={{ color: 'hsl(156 20% 70%)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'hsl(168 14% 16%)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                      Cambiar contraseña
+                    </Link>
+                    <div className="my-1 mx-2" style={{ borderTop: '1px solid hsl(156 30% 18%)' }} />
+                    <form action={logoutAction}>
+                      <button
+                        type="submit"
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                        style={{ color: 'hsl(0 70% 65%)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'hsl(0 30% 14%)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <LogOut className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                        Cerrar sesión
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </aside>
     </>

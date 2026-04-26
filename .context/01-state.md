@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-25 (rev. 64)
+**Última actualización**: 2026-04-26 (rev. 65)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md`.
 
@@ -15,7 +15,198 @@
 
 ---
 
-## Cierre de sesión actual (2026-04-25, rev. 64)
+## Cierre de sesión actual (2026-04-26, rev. 65) — MÓDULO CONFIGURACIÓN CERTIFICADO
+
+### Estado: 13/13 OK · 305 tests · TypeScript OK · Lint OK
+
+---
+
+### Sub-módulo: General (`/dashboard/settings`)
+
+**Identidad del negocio:**
+- Logo: solo PNG/JPG/WebP; extensión derivada de MIME (no `file.name`) — previene path traversal
+- Nombre: `maxLength=100`, label NIT → "NIT / CC"
+- Email + celular: validados (patrón + formato)
+- Todas las acciones en `actions.ts` centralizado; `getOwnerTenantId` hace `redirect('/dashboard')` si no es owner
+
+**Filosofía del negocio (nuevo — conecta con IA):**
+- Campos: `mision`, `vision`, `valores` (max 280 chars), `tono_comunicacion` (formal/amigable/cercano/profesional/juvenil)
+- El orchestrator los inyecta automáticamente en el system prompt — bot habla con coherencia de marca
+- DB: columnas en `tenants` + migración `20260426030000_tenant_brand_and_hours.sql`
+
+**Presencia y ubicaciones (`StorePresenceForm` — client component):**
+- Tipo: física / virtual / ambas — secciones visibles/ocultas dinámicamente
+- Sedes físicas: DANE en cascada (Departamento → Municipio), campos: nombre, dirección, celular, email
+- Validación: física → ≥1 sede con ciudad + dirección; virtual → ≥1 canal digital
+- Canales digitales: Instagram, Facebook, TikTok, YouTube, Website
+- DB: `store_type` + `social_links` + `store_locations` (JSONB flexible, incluye phone y email)
+
+**Horario y disponibilidad (nuevo — reestructurado):**
+- Horario de asesor: días Lu-Do (selector reactivo `DaysSelector` client component) + hora apertura/cierre
+- Mensaje fuera de horario: el bot lo envía automáticamente cuando cliente pide asesor fuera de franja
+- Política de envío: texto libre con cut-off y promociones (ej. "envío gratis desde $150.000")
+- DB: `support_schedule` (JSONB), `after_hours_message`, `cutoff_message`
+- Orchestrator: gate `_is_outside_support_hours()` + `_TONO_INSTRUCCIONES` por tono de marca
+
+**Opciones de despacho — Envia (`ShippingOriginForm` — client component):**
+- Selector de sede: auto-rellena nombre, dirección, departamento, municipio, celular al elegir
+- "Empresa": read-only vinculada al nombre del negocio (evita inconsistencia)
+- DANE en cascada igual que sedes
+- Celular reactivo (state controlado)
+
+**Resumen (panel derecho):**
+- Rows navegables: cada ítem hace scroll suave a su sección (`#section-*`)
+- Indicadores: ✅ configurado / ❌ sin configurar por sección
+- Incluye: Estado, Stock, Tipo tienda, Sedes, Redes, Filosofía, Horario, Despacho
+
+**Configuración operativa:** umbral de stock bajo (1–999)
+
+---
+
+### Sub-módulo: Usuarios y Acceso (`/dashboard/team`)
+
+**Protección de acceso:**
+- `redirect('/dashboard')` si el usuario no es owner (protección por navegación directa)
+- Todas las server actions verifican `role === 'owner'`
+
+**Estados de miembros (nuevo):**
+
+| Estado | Descripción | Acciones disponibles |
+|---|---|---|
+| **Pendiente** | Invitado, no aceptó | Reenviar · Eliminar |
+| **Activo** | Acceso normal | Cambiar rol · **Inactivar** · Eliminar |
+| **Inactivo** | Suspendido temporalmente | **Activar** · Eliminar |
+
+**Inactivar** (`InactivateMemberButton` con motivo opcional):
+- `ban_duration: '876600h'` en Supabase Auth nativo → bloquea login + refresh de token
+- `signOut(global)` → corta sesión activa inmediatamente
+- `tenant_users.status = 'inactive'` → display en UI
+- DB: columnas `status`, `inactivated_at`, `inactivated_reason`, `inactivated_by`
+
+**Activar:**
+- `ban_duration: 'none'` → permite login de nuevo
+- `tenant_users.status = 'active'`
+
+**Eliminar** (`RemoveMemberButton` con dialog):
+- Borra de `tenant_users`
+- `deleteUser(id, true)` → soft delete en Supabase (preserva UUID para audit, anonimiza PII)
+- `signOut(global)` → revoca sesión inmediatamente
+
+**Cambiar rol** (`ChangeRoleButton` con dialog):
+- Dialog advierte "sesión se cerrará" antes de confirmar
+- `signOut(global)` → fuerza re-autenticación con nuevas claims
+- API `PATCH /settings/team/{id}` rechaza `role='owner'` (ASSIGNABLE_ROLES = {manager, operator})
+
+**Invitación:**
+- Nuevo usuario → `inviteUserByEmail` → email con link → set-password
+- Usuario existente → `add_member_to_tenant` (sin email, sin nuevo usuario en auth)
+- Banner diferenciado: "Invitación enviada" vs "Acceso otorgado"
+- Validación: email duplicado detectado antes de invitar
+- `?error=ya-es-miembro` si ya está en el equipo
+
+**URL cleanup:** params de resultado se limpian a los 4 segundos (`TeamUrlCleaner` client component)
+
+---
+
+### Sub-módulo: Integraciones (`/dashboard/integrations`)
+
+**Acceso:** owner y manager (sidebar actualizado); operators → redirect
+
+**Vault (Supabase) — credenciales cifradas:**
+- Todas las integraciones usan Vault en lugar de texto plano en JSONB
+- `pgsec_create_secret` / `pgsec_read_secret` / `pgsec_update_secret` / `pgsec_delete_secret`
+- `pgsec_upsert_secret` → evita error 23505 al reconectar sin haber desconectado
+- Migración: `20260426020000_vault_setup_and_migration.sql`
+- Ver: migración `20260426050000_vault_upsert_secret.sql`
+
+**Confirmación antes de desconectar** (`DisconnectIntegrationButton` — dialog con advertencia específica por integración)
+
+**Tests de conexión:**
+- WhatsApp: `GET /v21.0/{phone_number_id}` en Meta API — verifica token y número activo
+- Envia: `GET /available-carrier/CO/0` — verifica API key y servicio disponible
+- Telegram: `sendMessage` al grupo del asesor
+- Todos usan `AbortController` manual (no `AbortSignal.timeout` — compatibilidad Next.js)
+- Banners de resultado con URL cleanup a los 4 segundos
+
+**Estado visual:**
+- Envia: badge "Sandbox" (naranja) / "Producción" (verde)
+- MeLi: panel "Token expirado" con botón Reconectar cuando `status='error'`
+- SubmitButton en todos los botones Guardar/Probar (loading state)
+- `tgConnected` verifica `bot_token_secret_id` (vault) o `bot_token` (legacy)
+
+**Manager puede:** configurar Telegram y notificaciones  
+**Solo owner puede:** configurar WhatsApp, Envia, MeLi
+
+---
+
+### Flujos de autenticación (nuevos)
+
+**`/set-password`** (invite + reset):
+- Show/hide contraseña en ambos campos
+- Validación inline (no URL redirect para errores básicos)
+- Loading spinner "Guardando..."
+
+**`/login`:**
+- Show/hide contraseña
+- Link "¿Olvidaste tu contraseña?" → `/forgot-password`
+- Loading spinner "Ingresando..."
+
+**`/forgot-password`:**
+- Client component — `resetPasswordForEmail` desde browser (PKCE verifier en cookies del browser)
+- Mensaje de éxito sin revelar si el email existe (seguridad)
+
+**`/dashboard/account`** (nueva):
+- Cambio de contraseña para usuarios logueados
+- Link en sidebar: dropdown usuario → "Cambiar contraseña"
+
+**Sidebar usuario (dropdown):**
+- Avatar con inicial, email, badges de rol y plan
+- Clic abre menú arriba con colores del sidebar (oscuro)
+- Opciones: Cambiar contraseña · Cerrar sesión
+
+---
+
+### Seguridad — resumen de capas
+
+| Capa | Implementación |
+|---|---|
+| Redirect por navegación directa | `/settings`, `/team` → solo owner; `/integrations` → owner/manager |
+| API role enforcement | `ASSIGNABLE_ROLES = {manager, operator}` — nunca owner por API |
+| Logo upload | MIME_TO_EXT — extensión del path nunca viene de `file.name` |
+| Credenciales | Supabase Vault — AES cifrado, nunca texto plano en JSONB |
+| Sesiones | `signOut(global)` en inactivar/eliminar/cambiar rol |
+| Inactivación | `ban_duration` nativo Supabase Auth — bloquea login + refresh |
+| JWT claims | Trigger `on_tenant_assignment` (activo) — Custom Access Token Hook preparado (pendiente activación en Dashboard, en beta) |
+
+---
+
+### Migraciones aplicadas en esta sesión
+
+| Archivo | Descripción |
+|---|---|
+| `20260426000000_tenant_store_info.sql` | `store_type`, `social_links` |
+| `20260426010000_tenant_locations_and_hours.sql` | `store_locations`, `business_hours` |
+| `20260426020000_vault_setup_and_migration.sql` | Vault RPCs + migración de credentials existentes |
+| `20260426030000_tenant_brand_and_hours.sql` | `mision`, `vision`, `valores`, `tono_comunicacion`, `support_schedule`, `after_hours_message`, `cutoff_message` |
+| `20260426040000_tenant_vision.sql` | Campo `vision` |
+| `20260426050000_vault_upsert_secret.sql` | `pgsec_upsert_secret` (fix reconexión) |
+| `20260426060000_tenant_users_status.sql` | `status`, `inactivated_at/reason/by` en `tenant_users`; RPC `get_tenant_team` actualizada |
+| `20260426070000_auth_custom_access_token_hook.sql` | Función hook (pendiente IH para activar) |
+| `20260426080000_drop_tenant_assignment_trigger.sql` | Trigger a eliminar post-IH (no aplicada) |
+
+---
+
+### Pendientes operativos (no bloquean producción)
+
+| Item | Estado |
+|---|---|
+| SMTP propio (Resend/SendGrid) | ⏳ Pre go-live — R-08 |
+| Custom Access Token Hook | ⏳ Activar en Dashboard cuando salga de beta |
+| `ANTI_HIBERNATION_PING_URL` en Render | ⏳ IH pendiente |
+
+---
+
+## Cierre de sesión anterior (2026-04-25, rev. 64)
 
 - **GAP-1 — Corrección de datos en READY_FOR_SUMMARY** (`orchestrator.py`):
   - `_detect_correction_intent(text)`: detecta frases como "el email está mal", "quiero cambiar mi nombre", "la dirección está incorrecta" → retorna `'email'`, `'name'` o `'address'`.

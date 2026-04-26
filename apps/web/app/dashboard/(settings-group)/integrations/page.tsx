@@ -14,7 +14,12 @@ type NotifSetting = { channel: string; enabled: boolean; config: Record<string, 
 export default async function IntegrationsPage({
   searchParams,
 }: {
-  searchParams: { connected?: string; error?: string; tg_test?: string; tg_msg?: string }
+  searchParams: {
+    connected?: string; error?: string
+    tg_test?: string; tg_msg?: string
+    wa_test?: string; wa_msg?: string
+    envia_test?: string; envia_msg?: string
+  }
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -23,6 +28,9 @@ export default async function IntegrationsPage({
   const role     = meta.role ?? 'operator'
   const isOwner  = role === 'owner'
   const canWrite = role === 'owner' || role === 'manager'
+
+  // Protección por navegación directa — operators no acceden a esta página
+  if (role === 'operator') redirect('/dashboard')
 
   let integrations: Integration[]  = []
   let notifications: NotifSetting[] = []
@@ -49,7 +57,8 @@ export default async function IntegrationsPage({
   const enviaConnected = enviaInt.status === 'connected'
   const meliConnected  = meliInt.status === 'connected'
   const waConnected    = waInt.status === 'connected'
-  const tgConnected    = !!(tgConfig?.enabled && tgConfig?.config?.bot_token && tgConfig?.config?.chat_id)
+  // bot_token_secret_id (vault) o bot_token (texto plano legacy) indican que el token está configurado
+  const tgConnected    = !!(tgConfig?.enabled && (tgConfig?.config?.bot_token_secret_id || tgConfig?.config?.bot_token) && tgConfig?.config?.chat_id)
   const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected].filter(Boolean).length
 
   // ── Server Actions ────────────────────────────────────────────────────────
@@ -62,9 +71,25 @@ export default async function IntegrationsPage({
     if (!m.tenant_id || m.role !== 'owner') return
     const token   = formData.get('api_token') as string
     const sandbox = formData.get('sandbox') === 'on'
+
+    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
+      .eq('tenant_id', m.tenant_id).eq('provider', 'envia').maybeSingle()
+    const existingSid = (existing?.credentials as Record<string, string>)?.api_token_secret_id
+
+    let secretId: string | null = null
+    if (existingSid) {
+      await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
+      secretId = existingSid
+    } else {
+      const { data } = await sb.rpc('pgsec_upsert_secret', {
+        p_secret: token, p_name: `${m.tenant_id}/envia/api_token`, p_description: 'Envia API token',
+      })
+      secretId = data as string | null
+    }
+
     await sb.from('tenant_integrations').upsert({
       tenant_id: m.tenant_id, provider: 'envia', status: 'connected',
-      credentials: { api_token: token, sandbox },
+      credentials: { api_token_secret_id: secretId, sandbox },
       meta: { token_preview: `${token.slice(0, 6)}...${token.slice(-4)}`, environment: sandbox ? 'sandbox' : 'production' },
     }, { onConflict: 'tenant_id,provider' })
     revalidatePath('/dashboard/integrations')
@@ -76,6 +101,10 @@ export default async function IntegrationsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
+    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
+      .eq('tenant_id', m.tenant_id).eq('provider', 'envia').maybeSingle()
+    const sid = (existing?.credentials as Record<string, string>)?.api_token_secret_id
+    if (sid) await sb.rpc('pgsec_delete_secret', { p_id: sid })
     await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {} })
       .eq('tenant_id', m.tenant_id).eq('provider', 'envia')
     revalidatePath('/dashboard/integrations')
@@ -111,7 +140,7 @@ export default async function IntegrationsPage({
       await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
       secretId = existingSid
     } else {
-      const { data } = await sb.rpc('pgsec_create_secret', {
+      const { data } = await sb.rpc('pgsec_upsert_secret', {
         p_secret: token,
         p_name: `${m.tenant_id}/telegram/bot_token`,
         p_description: 'Telegram bot token',
@@ -170,27 +199,139 @@ export default async function IntegrationsPage({
 
     let telegramError: string | null = null
     try {
-      const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: '✅ Commerce Ops — Conexión Telegram verificada correctamente.' }),
-        signal: AbortSignal.timeout(15000),
-      })
-      const json = await res.json() as { ok: boolean; description?: string; error_code?: number }
-      if (!json.ok) {
-        telegramError = json.description
-          ? `[${json.error_code ?? '?'}] ${json.description}`
-          : 'Respuesta inválida de Telegram'
+      // AbortController manual en lugar de AbortSignal.timeout para mayor compatibilidad
+      const controller = new AbortController()
+      const timeout    = setTimeout(() => controller.abort(), 15000)
+      try {
+        const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: '✅ Commerce Ops — Conexión Telegram verificada.' }),
+          signal: controller.signal,
+        })
+        clearTimeout(timeout)
+        const json = await res.json() as { ok: boolean; description?: string; error_code?: number }
+        if (!json.ok) {
+          telegramError = json.description
+            ? `[${json.error_code ?? '?'}] ${json.description}`
+            : 'Respuesta inválida de Telegram'
+        }
+      } finally {
+        clearTimeout(timeout)
       }
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : 'error desconocido'
-      telegramError = `No se pudo conectar con api.telegram.org — verifica la red del servidor. Detalle: ${detail}`
+      if (detail.includes('abort') || detail.includes('timeout')) {
+        telegramError = 'Tiempo de espera agotado. Telegram tardó más de 15s en responder.'
+      } else {
+        telegramError = `Error al contactar Telegram. Detalle: ${detail}`
+      }
     }
 
     if (telegramError) {
       redirect(`/dashboard/integrations?tg_test=error&tg_msg=${encodeURIComponent(telegramError)}`)
     }
     redirect('/dashboard/integrations?tg_test=success')
+  }
+
+  async function testWhatsApp() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const { data: waRow } = await sb.from('tenant_integrations')
+      .select('credentials').eq('tenant_id', m.tenant_id).eq('provider', 'whatsapp').maybeSingle()
+
+    const creds    = (waRow?.credentials as Record<string, string>) ?? {}
+    const phoneId  = creds.phone_number_id
+    const secretId = creds.access_token_secret_id
+    const { data: token } = secretId
+      ? await sb.rpc('pgsec_read_secret', { p_id: secretId })
+      : { data: null }
+
+    if (!phoneId || !token) {
+      redirect('/dashboard/integrations?wa_test=error&wa_msg=Credenciales+incompletas.+Reconecta+WhatsApp.')
+    }
+
+    // Patrón correcto: redirect() NO puede ir dentro de try/catch
+    // — Next.js lo implementa como throw y el catch lo interceptaría
+    let waError: string | null = null
+    try {
+      const controller = new AbortController()
+      const timeout    = setTimeout(() => controller.abort(), 10000)
+      try {
+        const res  = await fetch(`https://graph.facebook.com/v21.0/${phoneId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        })
+        clearTimeout(timeout)
+        const json = await res.json() as { error?: { message?: string } }
+        if (!res.ok) {
+          waError = json.error?.message ?? `Error ${res.status}`
+        }
+      } finally {
+        clearTimeout(timeout)
+      }
+    } catch (err) {
+      waError = err instanceof Error ? err.message : 'No se pudo conectar con Meta API'
+    }
+
+    if (waError) {
+      redirect(`/dashboard/integrations?wa_test=error&wa_msg=${encodeURIComponent(waError)}`)
+    }
+    redirect('/dashboard/integrations?wa_test=success')
+  }
+
+  async function testEnvia() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const { data: enviaRow } = await sb.from('tenant_integrations')
+      .select('credentials, meta').eq('tenant_id', m.tenant_id).eq('provider', 'envia').maybeSingle()
+
+    const secretId  = (enviaRow?.credentials as Record<string, string>)?.api_token_secret_id
+    const isSandbox = (enviaRow?.meta as Record<string, string>)?.environment === 'sandbox'
+    const baseUrl   = isSandbox ? 'https://queries-test.envia.com' : 'https://queries.envia.com'
+
+    const { data: token, error: vaultErr } = secretId
+      ? await sb.rpc('pgsec_read_secret', { p_id: secretId })
+      : { data: null, error: null }
+
+    if (!token) {
+      const msg = vaultErr ? `Vault error: ${vaultErr.message}` : 'API key no encontrada. Reconecta Envia.'
+      redirect(`/dashboard/integrations?envia_test=error&envia_msg=${encodeURIComponent(msg)}`)
+    }
+
+    // Patrón correcto: redirect() fuera del try/catch
+    let enviaError: string | null = null
+    try {
+      const controller = new AbortController()
+      const timeout    = setTimeout(() => controller.abort(), 15000)
+      try {
+        const res = await fetch(`${baseUrl}/available-carrier/CO/0`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        })
+        clearTimeout(timeout)
+        if (!res.ok) {
+          enviaError = res.status === 401 ? 'API key inválida o expirada' : `Error ${res.status}`
+        }
+      } finally {
+        clearTimeout(timeout)
+      }
+    } catch (err) {
+      enviaError = err instanceof Error ? err.message : 'No se pudo conectar con Envia'
+    }
+
+    if (enviaError) {
+      redirect(`/dashboard/integrations?envia_test=error&envia_msg=${encodeURIComponent(enviaError)}`)
+    }
+    redirect('/dashboard/integrations?envia_test=success')
   }
 
   async function saveWhatsApp(formData: FormData) {
@@ -212,7 +353,7 @@ export default async function IntegrationsPage({
       await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
       secretId = existingSid
     } else {
-      const { data } = await sb.rpc('pgsec_create_secret', {
+      const { data } = await sb.rpc('pgsec_upsert_secret', {
         p_secret: token,
         p_name: `${m.tenant_id}/whatsapp/access_token`,
         p_description: 'WhatsApp access token',
@@ -268,12 +409,18 @@ export default async function IntegrationsPage({
       errorParam={searchParams.error}
       tgTest={searchParams.tg_test}
       tgMsg={searchParams.tg_msg}
+      waTest={searchParams.wa_test}
+      waMsg={searchParams.wa_msg}
+      enviaTest={searchParams.envia_test}
+      enviaMsg={searchParams.envia_msg}
       saveEnviaKey={saveEnviaKey}
       disconnectEnvia={disconnectEnvia}
       disconnectMeli={disconnectMeli}
       saveTelegram={saveTelegram}
       disconnectTelegram={disconnectTelegram}
       testTelegram={testTelegram}
+      testWhatsApp={testWhatsApp}
+      testEnvia={testEnvia}
       saveWhatsApp={saveWhatsApp}
       disconnectWhatsApp={disconnectWhatsApp}
     />
