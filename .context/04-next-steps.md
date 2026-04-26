@@ -1,5 +1,14 @@
 # Próximos Pasos — Estado 2026-04-25
 
+## Cierre sesión actual (2026-04-26, rev. 65) — Módulo Configuración CERTIFICADO
+
+- ✅ **General**: Filosofía del negocio (misión/visión/valores/tono), Presencia y ubicaciones (DANE + sedes con phone/email), Horario estructurado (asesor + fuera de horario + cut-off), Despacho con selector de sede, Resumen navegable, colores emerald/amber globalmente más claros.
+- ✅ **Usuarios y Acceso**: Estados activo/inactivo/pendiente/eliminado, ban_duration nativo Supabase, shouldSoftDelete, ChangeRoleButton con confirmación, InactivateMemberButton con motivo, URL cleanup, redirect para non-owners.
+- ✅ **Integraciones**: Vault para credentials, DisconnectIntegrationButton, tests de WhatsApp/Envia/Telegram, badge sandbox/producción, MeLi expired state, pgsec_upsert_secret (fix reconexión), manager en sidebar.
+- ✅ **Auth flows**: set-password (show/hide + loading), forgot-password (browser client PKCE), login (show/hide + forgot link), /dashboard/account (cambiar contraseña), dropdown usuario en sidebar.
+- ✅ **Seguridad**: ASSIGNABLE_ROLES, MIME_TO_EXT logo, redirects por navegación directa, signOut global en todas las acciones destructivas.
+- 13/13 validate.sh OK · 305 tests · TypeScript OK
+
 ## Cierre sesión actual (2026-04-25, rev. 57)
 
 - ✅ Cerrado: CxD + FSM hardening completo (ver `.context/01-state.md` rev. 57 para detalle).

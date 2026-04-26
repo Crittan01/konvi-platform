@@ -2,16 +2,19 @@
 
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 
 // ── Auth helper compartido ────────────────────────────────────────────────────
-// Retorna el tenant_id solo si el usuario autenticado es owner.
-// Retorna null si no hay sesión, no tiene tenant o no es owner.
+// Verifica que el usuario autenticado sea owner del tenant.
+// Si no tiene permiso, redirige a /dashboard — nunca retorna null silenciosamente.
 
-async function getOwnerTenantId(): Promise<string | null> {
+async function getOwnerTenantId(): Promise<string> {
   const sb = createClient()
   const { data: { user } } = await sb.auth.getUser()
   const m = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  if (!m.tenant_id || m.role !== 'owner') return null
+  if (!m.tenant_id || m.role !== 'owner') {
+    redirect('/dashboard')
+  }
   return m.tenant_id
 }
 
@@ -29,7 +32,6 @@ async function updateTenant(tenantId: string, data: Record<string, unknown>) {
 
 export async function saveTenant(formData: FormData) {
   const tenantId = await getOwnerTenantId()
-  if (!tenantId) return
   await updateTenant(tenantId, {
     name:              (formData.get('name') as string)?.trim() || undefined,
     nit:               (formData.get('nit') as string)?.trim()  || null,
@@ -39,9 +41,32 @@ export async function saveTenant(formData: FormData) {
   revalidateSettings()
 }
 
+export async function saveFilosofia(formData: FormData) {
+  const tenantId = await getOwnerTenantId()
+  await updateTenant(tenantId, {
+    tono_comunicacion: (formData.get('tono_comunicacion') as string) || 'amigable',
+    mision:            (formData.get('mision') as string)?.trim() || null,
+    vision:            (formData.get('vision') as string)?.trim() || null,
+    valores:           (formData.get('valores') as string)?.trim() || null,
+  })
+  revalidatePath('/dashboard/settings')
+}
+
+export async function saveHorarioAsesor(formData: FormData) {
+  const tenantId = await getOwnerTenantId()
+  const daysRaw = formData.getAll('support_days') as string[]
+  const days = daysRaw.map(Number).filter(d => d >= 1 && d <= 7)
+  const open  = (formData.get('support_open')  as string)?.trim()
+  const close = (formData.get('support_close') as string)?.trim()
+  const after_hours_message = (formData.get('after_hours_message') as string)?.trim() || null
+  const cutoff_message      = (formData.get('cutoff_message') as string)?.trim()      || null
+  const support_schedule = days.length && open && close ? { days, open, close } : null
+  await updateTenant(tenantId, { support_schedule, after_hours_message, cutoff_message })
+  revalidatePath('/dashboard/settings')
+}
+
 export async function saveOperativa(formData: FormData) {
   const tenantId = await getOwnerTenantId()
-  if (!tenantId) return
   const threshold = parseInt(formData.get('low_stock_threshold') as string, 10)
   if (Number.isInteger(threshold) && threshold >= 1 && threshold <= 999) {
     await updateTenant(tenantId, { low_stock_threshold: threshold })
@@ -51,7 +76,6 @@ export async function saveOperativa(formData: FormData) {
 
 export async function savePresenciaDigital(formData: FormData) {
   const tenantId = await getOwnerTenantId()
-  if (!tenantId) return
 
   const store_type = (formData.get('store_type') as string) || 'fisica'
 
@@ -71,9 +95,9 @@ export async function savePresenciaDigital(formData: FormData) {
   revalidatePath('/dashboard/settings')
 }
 
+// saveHorario mantenida por compatibilidad — usa saveHorarioAsesor para el nuevo flujo
 export async function saveHorario(formData: FormData) {
   const tenantId = await getOwnerTenantId()
-  if (!tenantId) return
   const business_hours = (formData.get('business_hours') as string)?.trim() || null
   await updateTenant(tenantId, { business_hours })
   revalidatePath('/dashboard/settings')
@@ -81,7 +105,6 @@ export async function saveHorario(formData: FormData) {
 
 export async function saveShippingOrigin(formData: FormData) {
   const tenantId = await getOwnerTenantId()
-  if (!tenantId) return
 
   const fields = ['name', 'company', 'street', 'city', 'state', 'postal_code', 'country', 'phone', 'dane_code']
   const origin: Record<string, string> = {}

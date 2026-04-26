@@ -1,8 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
+import { DisconnectIntegrationButton } from './disconnect-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -31,12 +33,18 @@ interface Props {
   errorParam?: string
   tgTest?: string
   tgMsg?: string
+  waTest?: string
+  waMsg?: string
+  enviaTest?: string
+  enviaMsg?: string
   saveEnviaKey: (fd: FormData) => Promise<void>
   disconnectEnvia: () => Promise<void>
   disconnectMeli: () => Promise<void>
   saveTelegram: (fd: FormData) => Promise<void>
   disconnectTelegram: () => Promise<void>
   testTelegram: () => Promise<void>
+  testWhatsApp: () => Promise<void>
+  testEnvia:    () => Promise<void>
   saveWhatsApp: (fd: FormData) => Promise<void>
   disconnectWhatsApp: () => Promise<void>
 }
@@ -76,11 +84,11 @@ function ConfigToggle({ open, onToggle }: { open: boolean; onToggle: () => void 
   )
 }
 
-function MetaPill({ label, value }: { label: string; value: string }) {
+function MetaPill({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
     <div className="rounded-lg bg-muted px-3 py-2 min-w-0">
       <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
-      <p className="text-xs font-mono font-medium mt-0.5 truncate">{value || '—'}</p>
+      <p className={`text-xs font-mono font-medium mt-0.5 truncate ${className ?? ''}`}>{value || '—'}</p>
     </div>
   )
 }
@@ -89,11 +97,24 @@ export function IntegrationsManager(props: Props) {
   const {
     waInt, waConnected, enviaInt, enviaConnected, meliInt, meliConnected,
     tgConfig, tgConnected, connectedCount,
-    isOwner, canWrite, connectedParam, errorParam, tgTest, tgMsg,
+    isOwner, canWrite, connectedParam, errorParam,
+    tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
     saveEnviaKey, disconnectEnvia, disconnectMeli,
     saveTelegram, disconnectTelegram, testTelegram,
+    testWhatsApp, testEnvia,
     saveWhatsApp, disconnectWhatsApp,
   } = props
+
+  const router   = useRouter()
+  const pathname = usePathname()
+
+  // Limpiar params de test/conexión de la URL después de 4 segundos
+  useEffect(() => {
+    const hasResult = waTest || enviaTest || tgTest || connectedParam
+    if (!hasResult) return
+    const t = setTimeout(() => router.replace(pathname), 4000)
+    return () => clearTimeout(t)
+  }, [waTest, enviaTest, tgTest, connectedParam, router, pathname])
 
   const [activeFilter, setActiveFilter] = useState<Category>('todas')
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -174,7 +195,7 @@ export function IntegrationsManager(props: Props) {
       {tgTest === 'success' && (
         <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          Mensaje de prueba enviado al grupo de Telegram correctamente.
+          Telegram verificado — el bot puede enviar alertas de escalamiento al grupo del asesor.
         </div>
       )}
       {tgTest === 'error' && (
@@ -186,6 +207,40 @@ export function IntegrationsManager(props: Props) {
             {tgMsg?.includes('403') && <p className="text-xs text-red-300/90 mt-1.5">El grupo fue eliminado o el bot fue expulsado. Desconecta Telegram, crea un nuevo grupo, agrega el bot como miembro y reconecta.</p>}
             {tgMsg?.includes('400') && <p className="text-xs text-red-300/90 mt-1.5">El Chat ID no es válido. Debe ser negativo (ej: -1001234567890).</p>}
             {tgMsg?.includes('401') && <p className="text-xs text-red-300/90 mt-1.5">Bot Token inválido o revocado. Desconecta y regenera en @BotFather → /token.</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Banners WhatsApp test */}
+      {waTest === 'success' && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          WhatsApp verificado — el token es válido y el número está activo. El bot puede enviar mensajes a los clientes.
+        </div>
+      )}
+      {waTest === 'error' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Error al probar WhatsApp</p>
+            {waMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(waMsg)}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Banners Envia test */}
+      {enviaTest === 'success' && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Envia verificado — API key válida y carriers disponibles. Las cotizaciones de envío funcionarán correctamente.
+        </div>
+      )}
+      {enviaTest === 'error' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Error al probar Envia</p>
+            {enviaMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(enviaMsg)}</p>}
           </div>
         </div>
       )}
@@ -237,12 +292,19 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   <MetaPill label="Phone Number ID" value={waInt.meta?.phone_id_preview ?? ''} />
                   {isOwner && (
-                    <form action={disconnectWhatsApp}>
-                      <Button type="submit" size="sm" variant="outline"
-                        className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
-                        Desconectar WhatsApp
-                      </Button>
-                    </form>
+                    <div className="flex gap-2">
+                      <form action={testWhatsApp} className="flex-1">
+                        <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
+                          className="w-full h-8 text-xs gap-1.5">
+                          <SendHorizonal className="h-3 w-3" /> Probar
+                        </SubmitButton>
+                      </form>
+                      <DisconnectIntegrationButton
+                        provider="whatsapp" providerLabel="WhatsApp"
+                        action={disconnectWhatsApp}
+                        className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      />
+                    </div>
                   )}
                 </div>
               ) : isOwner ? (
@@ -327,15 +389,26 @@ export function IntegrationsManager(props: Props) {
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-2">
                     <MetaPill label="Token" value={enviaInt.meta?.token_preview ?? '***'} />
-                    <MetaPill label="Entorno" value={enviaInt.meta?.environment ?? '—'} />
+                    <MetaPill
+                      label="Entorno"
+                      value={enviaInt.meta?.environment === 'sandbox' ? 'Sandbox' : 'Producción'}
+                      className={enviaInt.meta?.environment === 'sandbox' ? 'text-amber-400' : 'text-emerald-400'}
+                    />
                   </div>
                   {isOwner && (
-                    <form action={disconnectEnvia}>
-                      <Button type="submit" size="sm" variant="outline"
-                        className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
-                        Desconectar Envia
-                      </Button>
-                    </form>
+                    <div className="flex gap-2">
+                      <form action={testEnvia} className="flex-1">
+                        <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
+                          className="w-full h-8 text-xs gap-1.5">
+                          <SendHorizonal className="h-3 w-3" /> Probar
+                        </SubmitButton>
+                      </form>
+                      <DisconnectIntegrationButton
+                        provider="envia" providerLabel="Envia"
+                        action={disconnectEnvia}
+                        className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      />
+                    </div>
                   )}
                 </div>
               ) : isOwner ? (
@@ -402,16 +475,25 @@ export function IntegrationsManager(props: Props) {
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
               <p className="text-xs text-muted-foreground">Sincroniza catálogo y recibe pedidos de MeLi vía webhooks.</p>
-              {meliConnected ? (
+              {meliInt?.status === 'error' && isOwner ? (
+                /* Token expirado o error de refresh — acción clara para el operador */
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/8 p-3 space-y-2">
+                  <p className="text-xs font-medium text-amber-400">Token expirado</p>
+                  <p className="text-[11px] text-amber-400/70">El acceso a Mercado Libre expiró. Reconecta tu cuenta para restaurar la sincronización.</p>
+                  <button onClick={startMeliOAuth} disabled={connectingMeli}
+                    className="mt-1 h-7 text-xs px-3 rounded-md border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50">
+                    {connectingMeli ? 'Conectando...' : 'Reconectar Mercado Libre'}
+                  </button>
+                </div>
+              ) : meliConnected ? (
                 <div className="space-y-2.5">
                   <MetaPill label="Usuario MeLi ID" value={meliInt.meta?.user_id ?? '—'} />
                   {isOwner && (
-                    <form action={disconnectMeli}>
-                      <Button type="submit" size="sm" variant="outline"
-                        className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
-                        Desconectar Mercado Libre
-                      </Button>
-                    </form>
+                    <DisconnectIntegrationButton
+                      provider="mercadolibre" providerLabel="Mercado Libre"
+                      action={disconnectMeli}
+                      className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                    />
                   )}
                 </div>
               ) : isOwner ? (
@@ -498,17 +580,19 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   <div className="flex gap-2">
                     <form action={testTelegram} className="flex-1">
-                      <Button type="submit" size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5">
+                      <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
+                        className="w-full h-8 text-xs gap-1.5">
                         <SendHorizonal className="h-3.5 w-3.5" /> Probar
-                      </Button>
+                      </SubmitButton>
                     </form>
                     {canWrite && (
-                      <form action={disconnectTelegram}>
-                        <Button type="submit" size="sm" variant="outline"
-                          className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
-                          Desconectar
-                        </Button>
-                      </form>
+                      <DisconnectIntegrationButton
+                        provider="telegram" providerLabel="Telegram"
+                        action={disconnectTelegram}
+                        className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      >
+                        Desconectar
+                      </DisconnectIntegrationButton>
                     )}
                   </div>
                 </div>

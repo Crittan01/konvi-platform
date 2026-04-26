@@ -351,6 +351,16 @@ async def get_valid_token(supabase, tenant_id: str) -> Optional[str]:
                 return new_access
             except Exception as e:
                 logger.warning("No se pudo renovar token MeLi tenant %s: %s — usando token existente", tenant_id, e)
+                # Si el access_token también expiró, marcar la integración como error
+                # para que el frontend muestre "Reconectar" al operador.
+                if not access_token:
+                    try:
+                        supabase.table("tenant_integrations").update(
+                            {"status": "error"}
+                        ).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
+                        logger.warning("MeLi marcada como error (refresh y token expirados) tenant %s", tenant_id)
+                    except Exception:
+                        pass
 
         return access_token
 

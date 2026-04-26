@@ -11,7 +11,7 @@ type ShippingOrigin = {
   name?: string; company?: string; street?: string; city?: string
   state?: string; postal_code?: string; country?: string; phone?: string; dane_code?: string
 }
-type StoreLocation = { name?: string; city?: string; state?: string; street?: string }
+type StoreLocation = { name?: string; city?: string; state?: string; street?: string; phone?: string }
 
 interface Props {
   initialData?:    ShippingOrigin | null
@@ -33,6 +33,8 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
   // Campos auto-rellenables desde una sede
   const [remitente, setRemitente] = useState(initialData?.name ?? '')
   const [street,    setStreet]    = useState(initialData?.street ?? '')
+  // Celular: sede.phone → tenantPhone → initialData.phone (en ese orden de prioridad)
+  const [phone,     setPhone]     = useState(initialData?.phone ?? tenantPhone ?? '')
   // Empresa siempre vinculada al nombre del negocio (read-only en el form)
   const empresa = tenantName ?? initialData?.company ?? ''
 
@@ -61,6 +63,8 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
 
     if (sede.name)   setRemitente(sede.name)
     if (sede.street) setStreet(sede.street)
+    // Celular: usa el de la sede si existe, cae al teléfono principal del tenant
+    setPhone(sede.phone || tenantPhone || '')
 
     if (sede.state) {
       const dpto = DEPARTAMENTOS.find(d => d.nombre === sede.state)
@@ -195,7 +199,8 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
           <div className="flex items-center gap-1">
             <span className="h-8 px-2.5 rounded-md border border-input bg-muted/50 text-xs text-muted-foreground flex items-center shrink-0">+57</span>
             <Input id="origin-phone" name="origin_phone" type="tel"
-              defaultValue={initialData?.phone ?? tenantPhone ?? ''}
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
               placeholder="3121234567" pattern="3[0-9]{9}" maxLength={10}
               className="h-8 text-sm" />
           </div>

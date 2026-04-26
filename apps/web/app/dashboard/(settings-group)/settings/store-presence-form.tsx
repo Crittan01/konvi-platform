@@ -8,7 +8,7 @@ import { Check, Loader2, Plus, Trash2 } from 'lucide-react'
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 type StoreType = 'fisica' | 'virtual' | 'fisica_virtual'
-type Location = { name: string; city: string; state: string; street: string }
+type Location = { name: string; city: string; state: string; street: string; phone?: string; email?: string }
 type SocialLinks = { instagram?: string; facebook?: string; tiktok?: string; youtube?: string; website?: string }
 
 interface Props {
@@ -32,7 +32,7 @@ const SOCIAL_KEYS: Array<{ key: keyof SocialLinks; placeholder: string }> = [
   { key: 'website',   placeholder: 'https://minegocio.com' },
 ]
 
-const EMPTY_LOC: Location = { name: '', city: '', state: '', street: '' }
+const EMPTY_LOC: Location = { name: '', city: '', state: '', street: '', phone: undefined, email: undefined }
 
 function resolveDptoCode(stateName?: string): string {
   return DEPARTAMENTOS.find(d => d.nombre === stateName)?.codigo ?? ''
@@ -103,10 +103,40 @@ function SedeRow({
         </div>
 
         {/* Dirección */}
-        <div className="space-y-1 sm:col-span-2">
+        <div className="space-y-1">
           <Label className="text-[10px] text-muted-foreground">Dirección</Label>
           <Input value={loc.street} onChange={e => onChange('street', e.target.value)}
-            placeholder="Calle 10 # 20-30" className="h-8 text-xs" />
+            placeholder="Calle 10 # 5-20, Local 3" className="h-8 text-xs" />
+        </div>
+
+        {/* Celular de la sede (opcional) */}
+        <div className="space-y-1">
+          <Label className="text-[10px] text-muted-foreground">
+            Celular <span className="text-muted-foreground/60">(opcional)</span>
+          </Label>
+          <Input
+            value={loc.phone ?? ''}
+            onChange={e => onChange('phone', e.target.value)}
+            placeholder="3001234567"
+            pattern="[0-9]{10}"
+            maxLength={10}
+            inputMode="numeric"
+            className="h-8 text-xs"
+          />
+        </div>
+
+        {/* Email de la sede (opcional) */}
+        <div className="space-y-1">
+          <Label className="text-[10px] text-muted-foreground">
+            Email <span className="text-muted-foreground/60">(opcional)</span>
+          </Label>
+          <Input
+            type="email"
+            value={loc.email ?? ''}
+            onChange={e => onChange('email', e.target.value)}
+            placeholder="sede@minegocio.com"
+            className="h-8 text-xs"
+          />
         </div>
 
       </div>
@@ -121,8 +151,9 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
   const [locs, setLocs] = useState<Location[]>(
     initialLocations && initialLocations.length > 0 ? initialLocations : [{ ...EMPTY_LOC }]
   )
-  const [saved,   setSaved]   = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [saved,        setSaved]        = useState(false)
+  const [loading,      setLoading]      = useState(false)
+  const [validationErr, setValidationErr] = useState<string | null>(null)
 
   const showFisica  = storeType === 'fisica' || storeType === 'fisica_virtual'
   const showVirtual = storeType === 'virtual' || storeType === 'fisica_virtual'
@@ -132,6 +163,27 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    setValidationErr(null)
+
+    // Validación: física requiere ≥1 sede con city + street
+    if (showFisica) {
+      const validSedes = locs.filter(l => l.city?.trim() && l.street?.trim())
+      if (validSedes.length === 0) {
+        setValidationErr('Debes configurar al menos una sede con municipio y dirección.')
+        return
+      }
+    }
+    // Validación: virtual requiere ≥1 canal digital
+    if (showVirtual && !showFisica) {
+      const socialInputs = SOCIAL_KEYS.map(({ key }) =>
+        (e.currentTarget.elements.namedItem(`social_${key}`) as HTMLInputElement | null)?.value?.trim() ?? ''
+      )
+      if (!socialInputs.some(v => v)) {
+        setValidationErr('Debes configurar al menos un canal digital (red social o sitio web).')
+        return
+      }
+    }
+
     const fd = new FormData()
     fd.set('store_type', storeType)
     fd.set('store_locations', JSON.stringify(
@@ -197,7 +249,9 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
       {showVirtual && (
         <div className="space-y-2">
           <Label className="text-xs font-medium">
-            Canales digitales <span className="text-muted-foreground font-normal">(opcional)</span>
+            Canales digitales
+            {showFisica && <span className="text-muted-foreground font-normal text-[10px] ml-1">(opcional si tienes sede física)</span>}
+            {!showFisica && <span className="text-destructive text-[10px] ml-1">*</span>}
           </Label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {SOCIAL_KEYS.map(({ key, placeholder }) => (
@@ -212,6 +266,9 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
         </div>
       )}
 
+      {validationErr && (
+        <p className="text-xs text-destructive">{validationErr}</p>
+      )}
       <div className="flex items-center gap-3">
         <Button type="submit" size="sm" disabled={loading}>
           {loading

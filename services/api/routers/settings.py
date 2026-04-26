@@ -23,7 +23,8 @@ from vault_helper import VaultHelper
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Settings"])
 
-VALID_ROLES = {"owner", "manager", "operator"}
+VALID_ROLES      = {"owner", "manager", "operator"}   # roles válidos en el sistema
+ASSIGNABLE_ROLES = {"manager", "operator"}             # roles asignables vía API (nunca owner)
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -48,21 +49,23 @@ class SocialLinks(BaseModel):
 
 
 class StoreLocation(BaseModel):
-    name:   Optional[str] = None   # Nombre de la sede, ej: "Sede Principal"
-    city:   Optional[str] = None   # Ciudad
-    state:  Optional[str] = None   # Departamento
-    street: Optional[str] = None   # Dirección
+    name:   Optional[str] = Field(default=None, max_length=80)
+    city:   Optional[str] = None
+    state:  Optional[str] = None
+    street: Optional[str] = None
+    phone:  Optional[str] = Field(default=None, pattern=r'^[0-9]{10}$')
+    email:  Optional[str] = Field(default=None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
 class TenantPatch(BaseModel):
-    name:               Optional[str] = Field(default=None, min_length=1)
+    name:               Optional[str] = Field(default=None, min_length=1, max_length=100)
     meta_waba_id:       Optional[str] = None
     shipping_origin:    Optional[ShippingOrigin] = None
     store_type:         Optional[Literal["fisica", "virtual", "fisica_virtual"]] = None
     social_links:       Optional[SocialLinks] = None
     store_locations:    Optional[list[StoreLocation]] = None
     business_hours:     Optional[str] = None
-    # Campos de identidad — ahora editables vía API además de via UI
+    # Identidad legal
     nit:                Optional[str] = None
     email_contacto:     Optional[str] = Field(
         default=None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$'
@@ -71,6 +74,15 @@ class TenantPatch(BaseModel):
         default=None, pattern=r'^3[0-9]{9}$'
     )
     low_stock_threshold: Optional[int] = Field(default=None, ge=1, le=999)
+    # Filosofía de marca — alimenta el system prompt del bot
+    mision:              Optional[str] = Field(default=None, max_length=280)
+    vision:              Optional[str] = Field(default=None, max_length=280)
+    valores:             Optional[str] = Field(default=None, max_length=280)
+    tono_comunicacion:   Optional[Literal['formal', 'amigable', 'cercano', 'profesional', 'juvenil']] = None
+    # Horario de soporte y mensajes automáticos
+    support_schedule:    Optional[dict] = None
+    after_hours_message: Optional[str] = None
+    cutoff_message:      Optional[str] = None
 
 
 class TeamRolePatch(BaseModel):
@@ -99,7 +111,9 @@ async def get_tenant(
             supabase.table("tenants")
             .select("id, name, status, meta_waba_id, shipping_origin, logo_url, "
                     "store_type, social_links, store_locations, business_hours, "
-                    "nit, email_contacto, telefono_contacto, low_stock_threshold, created_at")
+                    "nit, email_contacto, telefono_contacto, low_stock_threshold, "
+                    "mision, vision, valores, tono_comunicacion, "
+                    "support_schedule, after_hours_message, cutoff_message, created_at")
             .eq("id", tenant_id)
             .single()
             .execute()
@@ -183,10 +197,10 @@ async def patch_team_member(
     _role: str = Depends(require_owner_role),
 ):
     """Cambia el rol de un miembro. Solo owner."""
-    if patch.role not in VALID_ROLES:
+    if patch.role not in ASSIGNABLE_ROLES:
         raise HTTPException(
             status_code=422,
-            detail=f"Rol inválido. Valores permitidos: {sorted(VALID_ROLES)}",
+            detail=f"Rol no asignable. Solo se permite: {sorted(ASSIGNABLE_ROLES)}. El rol 'owner' no puede asignarse vía API.",
         )
     try:
         result = (

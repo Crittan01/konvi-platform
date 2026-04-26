@@ -17,14 +17,15 @@ class VaultHelper:
         self._sb = supabase
 
     def create_secret(self, secret: str, name: str, description: str = "") -> Optional[str]:
-        """Guarda un secreto en Vault. Retorna UUID o None si falla."""
+        """Guarda un secreto en Vault. Si el nombre ya existe, actualiza el valor.
+        Retorna UUID o None si falla."""
         try:
-            r = self._sb.rpc("pgsec_create_secret", {
+            r = self._sb.rpc("pgsec_upsert_secret", {
                 "p_secret": secret, "p_name": name, "p_description": description,
             }).execute()
             return str(r.data) if r.data else None
         except Exception as e:
-            logger.error("[VAULT] create '%s' error: %s", name, e)
+            logger.error("[VAULT] upsert '%s' error: %s", name, e)
             return None
 
     def read_secret(self, secret_id: Optional[str]) -> Optional[str]:

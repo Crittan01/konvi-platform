@@ -1,11 +1,9 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { ShieldCheck, AlertCircle } from 'lucide-react'
+import SetPasswordForm from './set-password-form'
 
 export const metadata = {
   title: 'Crear contraseña — Commerce Ops',
@@ -35,15 +33,8 @@ export default async function SetPasswordPage({
     const { data: { user: u } } = await sb.auth.getUser()
     if (!u) redirect('/login')
 
-    const password  = (formData.get('password') as string)?.trim()
-    const confirm   = (formData.get('confirm') as string)?.trim()
-
-    if (!password || password.length < 8) {
-      redirect('/set-password?error=La+contraseña+debe+tener+al+menos+8+caracteres.')
-    }
-    if (password !== confirm) {
-      redirect('/set-password?error=Las+contraseñas+no+coinciden.')
-    }
+    const password = (formData.get('password') as string)?.trim()
+    if (!password || password.length < 8) return // client validates first
 
     const { error } = await sb.auth.updateUser({ password })
     if (error) {
@@ -78,37 +69,7 @@ export default async function SetPasswordPage({
               <p>{decodeURIComponent(searchParams.error)}</p>
             </div>
           )}
-          <form action={setPassword} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Nueva contraseña</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="Mínimo 8 caracteres"
-                required
-                minLength={8}
-                autoComplete="new-password"
-                className="h-10"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="confirm">Confirmar contraseña</Label>
-              <Input
-                id="confirm"
-                name="confirm"
-                type="password"
-                placeholder="Repite la contraseña"
-                required
-                minLength={8}
-                autoComplete="new-password"
-                className="h-10"
-              />
-            </div>
-            <Button className="w-full" type="submit" size="lg">
-              Activar cuenta y entrar
-            </Button>
-          </form>
+          <SetPasswordForm action={setPassword} />
         </CardContent>
       </Card>
     </div>

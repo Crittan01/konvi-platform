@@ -1370,6 +1370,44 @@ def _format_cop(cents: int) -> str:
     return f"${pesos:,.0f} COP".replace(",", ".")
 
 
+_TONO_INSTRUCCIONES: dict[str, str] = {
+    "formal":      "TONO: Formal y respetuoso. Tutear solo si el cliente lo hace primero.",
+    "profesional": "TONO: Profesional y preciso. Sin coloquialismos.",
+    "amigable":    "TONO: Amigable y cercano. Tutear al cliente.",
+    "cercano":     "TONO: Muy cercano, casi como un amigo. Tutear siempre.",
+    "juvenil":     "TONO: Joven y dinámico, puedes usar emojis con moderación. Tutear siempre.",
+}
+
+
+def _is_outside_support_hours(support_schedule: dict) -> bool:
+    """
+    Retorna True si la hora actual (Colombia UTC-5) está fuera del horario de soporte configurado.
+    Si support_schedule está vacío o mal formado, retorna False (no bloquear).
+    """
+    from datetime import datetime, timezone, timedelta
+    if not support_schedule:
+        return False
+    try:
+        days: list[int] = support_schedule.get("days") or []
+        open_time: str  = support_schedule.get("open") or ""
+        close_time: str = support_schedule.get("close") or ""
+        if not days or not open_time or not close_time:
+            return False
+        co_tz = timezone(timedelta(hours=-5))
+        now = datetime.now(co_tz)
+        # isoweekday: Monday=1 ... Sunday=7
+        if now.isoweekday() not in days:
+            return True
+        open_h, open_m = map(int, open_time.split(":"))
+        close_h, close_m = map(int, close_time.split(":"))
+        current_minutes = now.hour * 60 + now.minute
+        open_minutes    = open_h * 60 + open_m
+        close_minutes   = close_h * 60 + close_m
+        return not (open_minutes <= current_minutes < close_minutes)
+    except Exception:
+        return False
+
+
 def _build_store_info_section(
     tenant_name: str,
     store_type: str,
@@ -1377,6 +1415,10 @@ def _build_store_info_section(
     social_links: dict,
     store_locations: list,
     business_hours: str,
+    mision: str = "",
+    vision: str = "",
+    valores: str = "",
+    cutoff_message: str = "",
 ) -> str:
     """
     Construye la sección de información comercial del tenant para el system prompt.
@@ -1397,10 +1439,17 @@ def _build_store_info_section(
                 city      = sede.get("city", "")
                 state     = sede.get("state", "")
                 street    = sede.get("street", "")
+                phone     = sede.get("phone", "")
+                email     = sede.get("email", "")
                 loc       = city
                 if state and state != city:
                     loc += f", {state}"
-                lines.append(f"- {sede_name}: {street}{', ' + loc if loc else ''}" if street else f"- {sede_name}: {loc}")
+                sede_line = f"- {sede_name}: {street}{', ' + loc if loc else ''}" if street else f"- {sede_name}: {loc}"
+                if phone:
+                    sede_line += f" | Tel: {phone}"
+                if email:
+                    sede_line += f" | Email: {email}"
+                lines.append(sede_line)
         elif shipping_origin.get("city"):
             city    = shipping_origin.get("city", "")
             state   = shipping_origin.get("state", "")
@@ -1428,12 +1477,21 @@ def _build_store_info_section(
     if business_hours:
         lines.append(f"- Horario de atención: {business_hours}")
 
+    if mision:
+        lines.append(f"- Misión: {mision}")
+    if vision:
+        lines.append(f"- Visión: {vision}")
+    if valores:
+        lines.append(f"- Valores: {valores}")
+    if cutoff_message:
+        lines.append(f"- Corte de envíos: {cutoff_message}")
+
     if len(lines) == 1:
         return ""  # Sin info configurada → no inyectar sección vacía
 
     lines.append(
         "INSTRUCCIÓN: usa esta información para responder preguntas sobre ubicación, "
-        "sedes físicas, canales digitales, redes sociales u horario. NO escales por estas preguntas."
+        "sedes, canales digitales, redes, horario, misión o valores de la marca. NO escales por estas preguntas."
     )
     return "\n".join(lines)
 
@@ -1453,6 +1511,11 @@ def _build_system_prompt(
     tenant_social_links: Optional[dict] = None,
     tenant_store_locations: Optional[list] = None,
     tenant_business_hours: str = "",
+    tenant_mision: str = "",
+    tenant_vision: str = "",
+    tenant_valores: str = "",
+    tenant_tono: str = "amigable",
+    tenant_cutoff_msg: str = "",
 ) -> str:
     """Construye el system prompt con FSM contextual para venta vs consulta."""
     if history is None:
@@ -1557,7 +1620,12 @@ def _build_system_prompt(
         social_links=tenant_social_links or {},
         store_locations=tenant_store_locations or [],
         business_hours=tenant_business_hours or "",
+        mision=tenant_mision or "",
+        vision=tenant_vision or "",
+        valores=tenant_valores or "",
+        cutoff_message=tenant_cutoff_msg or "",
     )
+    tono_instruccion = _TONO_INSTRUCCIONES.get(tenant_tono, _TONO_INSTRUCCIONES["amigable"])
 
     strict_rules = ""
     if ai_agent.get("strict_guardrails"):
@@ -1675,6 +1743,7 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
 
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
+{tono_instruccion}
 [ESTADO DE MÁQUINA (FSM): {display_state}]
 {store_location_section}
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
@@ -1898,7 +1967,8 @@ async def build_and_run_orchestration(
         # ── 0.5 Resolución temprana: tenant + contacto + historial ────────────────
         # Necesario antes de los gates para personalizar respuestas y verificar estado.
         tenant_res = supabase.table("tenants").select(
-            "name, shipping_origin, store_type, social_links, store_locations, business_hours"
+            "name, shipping_origin, store_type, social_links, store_locations, business_hours, "
+            "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, cutoff_message"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
@@ -1907,6 +1977,13 @@ async def build_and_run_orchestration(
         tenant_social_links     = tenant_row.get("social_links") or {}
         tenant_store_locations  = tenant_row.get("store_locations") or []
         tenant_business_hours   = tenant_row.get("business_hours") or ""
+        tenant_mision           = tenant_row.get("mision") or ""
+        tenant_vision           = tenant_row.get("vision") or ""
+        tenant_valores          = tenant_row.get("valores") or ""
+        tenant_tono             = tenant_row.get("tono_comunicacion") or "amigable"
+        tenant_support_schedule = tenant_row.get("support_schedule") or {}
+        tenant_after_hours_msg  = tenant_row.get("after_hours_message") or ""
+        tenant_cutoff_msg       = tenant_row.get("cutoff_message") or ""
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -1977,11 +2054,19 @@ async def build_and_run_orchestration(
         if _normalize_text_simple(content).strip() in {
             "asesor", "un asesor", "quiero asesor", "necesito asesor", "hablar con asesor",
         }:
+            # Gate fuera de horario — enviar mensaje antes de escalar si está configurado
+            if tenant_after_hours_msg and _is_outside_support_hours(tenant_support_schedule):
+                await _send_outbound_text(
+                    supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                    text=tenant_after_hours_msg,
+                )
+                logger.info("[ORCH] Fuera de horario — mensaje after_hours enviado | conv=%s", conversation_id)
+            else:
+                await _send_outbound_text(
+                    supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                    text="Entendido, te conecto con un asesor. ¡Un momento! 🙏",
+                )
             _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
-            await _send_outbound_text(
-                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                text="Entendido, te conecto con un asesor. ¡Un momento! 🙏",
-            )
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
@@ -2239,6 +2324,11 @@ async def build_and_run_orchestration(
             tenant_social_links=tenant_social_links,
             tenant_store_locations=tenant_store_locations,
             tenant_business_hours=tenant_business_hours,
+            tenant_mision=tenant_mision,
+            tenant_vision=tenant_vision,
+            tenant_valores=tenant_valores,
+            tenant_tono=tenant_tono,
+            tenant_cutoff_msg=tenant_cutoff_msg,
         )
         user_context = _build_user_context(history, content)
 

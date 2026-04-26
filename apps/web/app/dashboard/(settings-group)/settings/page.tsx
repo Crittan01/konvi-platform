@@ -1,15 +1,17 @@
 import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { saveTenant, saveOperativa, savePresenciaDigital, saveHorario, saveShippingOrigin } from './actions'
+import { saveTenant, saveOperativa, savePresenciaDigital, saveHorario, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
 import {
   Settings, Truck, Building2, SlidersHorizontal, Globe, Clock,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, Sparkles, Bot,
 } from 'lucide-react'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
 import StorePresenceForm from './store-presence-form'
+import { DaysSelector } from './days-selector'
 
 export const metadata = {
   title: 'General — Configuración — Commerce Ops',
@@ -25,7 +27,8 @@ type ShippingOrigin = {
 type SocialLinks = {
   instagram?: string; facebook?: string; tiktok?: string; youtube?: string; website?: string
 }
-type StoreLocation = { name?: string; city?: string; state?: string; street?: string }
+type StoreLocation = { name?: string; city?: string; state?: string; street?: string; phone?: string; email?: string }
+type SupportSchedule = { days: number[]; open: string; close: string }
 type Tenant = {
   id: string; name: string; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
@@ -37,14 +40,21 @@ type Tenant = {
   social_links?: SocialLinks | null
   store_locations?: StoreLocation[] | null
   business_hours?: string | null
+  mision?: string | null
+  vision?: string | null
+  valores?: string | null
+  tono_comunicacion?: string | null
+  support_schedule?: SupportSchedule | null
+  after_hours_message?: string | null
+  cutoff_message?: string | null
 }
 // ─── Componentes reutilizables ────────────────────────────────────────────────
 
-function FormSection({ icon: Icon, title, description, children }: {
-  icon: React.ElementType; title: string; description?: string; children: React.ReactNode
+function FormSection({ icon: Icon, title, description, children, id }: {
+  icon: React.ElementType; title: string; description?: string; children: React.ReactNode; id?: string
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div id={id} className="rounded-xl border border-border bg-card overflow-hidden scroll-mt-4">
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/20">
         <Icon className="h-4 w-4 text-primary shrink-0" />
         <div>
@@ -76,11 +86,14 @@ export default async function SettingsPage() {
   const role = meta.role ?? 'operator'
   const isOwner = role === 'owner'
 
+  // Protección por navegación directa — solo owners acceden a esta página
+  if (!isOwner) redirect('/dashboard')
+
   let tenant: Tenant | null = null
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours')
+      .select('id, name, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, cutoff_message')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -112,7 +125,7 @@ export default async function SettingsPage() {
         <div className="lg:col-span-2 space-y-5">
 
           {/* Identidad del negocio */}
-          <FormSection icon={Building2} title="Identidad del negocio"
+          <FormSection id="section-identidad" icon={Building2} title="Identidad del negocio"
             description="Nombre, logo y datos legales del negocio.">
             {isOwner ? (
               <div className="space-y-5">
@@ -131,15 +144,24 @@ export default async function SettingsPage() {
                       <Label className="text-xs font-medium" htmlFor="tenant-name">
                         Nombre del negocio <span className="text-destructive">*</span>
                       </Label>
-                      <Input id="tenant-name" name="name" defaultValue={tenant?.name ?? ''} required className="h-9" />
+                      <Input id="tenant-name" name="name"
+                        defaultValue={tenant?.name ?? ''}
+                        required
+                        maxLength={100}
+                        className="h-9" />
+                      <p className="text-[10px] text-muted-foreground">
+                        Máx 100 caracteres — aparece en mensajes WhatsApp y guías de envío.
+                      </p>
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-medium" htmlFor="tenant-nit">NIT / Razón social</Label>
+                      <Label className="text-xs font-medium" htmlFor="tenant-nit">NIT / CC</Label>
                       <Input id="tenant-nit" name="nit"
                         defaultValue={tenant?.nit ?? ''}
-                        placeholder="900.123.456-7"
+                        placeholder="900.123.456-7 o cédula"
                         className="h-9" />
-                      <p className="text-[10px] text-muted-foreground">Opcional — persona natural puede omitirlo</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Empresa: NIT · Persona natural: CC · Opcional
+                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -184,45 +206,162 @@ export default async function SettingsPage() {
             )}
           </FormSection>
 
+          {/* Filosofía del negocio — alimenta automáticamente al bot */}
+          {isOwner && (
+            <FormSection id="section-filosofia" icon={Sparkles} title="Filosofía del negocio"
+              description="Define la identidad de tu marca. El asistente IA usa estos datos para comunicarse con coherencia y personalidad.">
+              <div className="flex items-center gap-1.5 mb-1 text-[11px] font-medium text-primary/70 bg-primary/5 border border-primary/15 rounded-lg px-3 py-2">
+                <Bot className="h-3.5 w-3.5 shrink-0" />
+                El asistente IA usa estos datos automáticamente en cada conversación
+              </div>
+              <form action={saveFilosofia} className="space-y-4">
+                {/* Tono de comunicación */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium">Tono de comunicación</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    {([
+                      { value: 'formal',       label: 'Formal',       desc: 'Respetuoso, corporativo' },
+                      { value: 'profesional',  label: 'Profesional',  desc: 'Preciso, sin coloquialismos' },
+                      { value: 'amigable',     label: 'Amigable',     desc: 'Cercano y accesible' },
+                      { value: 'cercano',      label: 'Cercano',      desc: 'Casual, como un amigo' },
+                      { value: 'juvenil',      label: 'Juvenil',      desc: 'Dinámico, con emojis' },
+                    ] as const).map(({ value, label, desc }) => (
+                      <label key={value}
+                        className="flex flex-col gap-0.5 rounded-lg border border-border p-2.5 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+                        <input type="radio" name="tono_comunicacion" value={value}
+                          defaultChecked={(tenant?.tono_comunicacion ?? 'amigable') === value}
+                          className="sr-only" />
+                        <span className="text-xs font-semibold">{label}</span>
+                        <span className="text-[10px] text-muted-foreground">{desc}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Misión */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="mision">Misión</Label>
+                    <textarea id="mision" name="mision"
+                      defaultValue={tenant?.mision ?? ''}
+                      maxLength={280}
+                      placeholder={'Ej: "Conectar a los colombianos con tecnología de calidad a precio justo, directamente desde el fabricante."'}
+                      rows={4}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                    <p className="text-[10px] text-muted-foreground">¿Por qué existe tu negocio? Máx 280 chars.</p>
+                  </div>
+                  {/* Visión */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="vision">Visión</Label>
+                    <textarea id="vision" name="vision"
+                      defaultValue={tenant?.vision ?? ''}
+                      maxLength={280}
+                      placeholder={'Ej: "Ser la tienda de tecnología más recomendada de Colombia para 2028."'}
+                      rows={4}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                    <p className="text-[10px] text-muted-foreground">¿Dónde quieres llegar? Máx 280 chars.</p>
+                  </div>
+                  {/* Valores */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="valores">Valores</Label>
+                    <textarea id="valores" name="valores"
+                      defaultValue={tenant?.valores ?? ''}
+                      maxLength={280}
+                      placeholder={'Ej: "Confianza, Calidad, Transparencia y Cercanía con el cliente."'}
+                      rows={4}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                    <p className="text-[10px] text-muted-foreground">¿Qué principios te guían? Máx 280 chars.</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground/70">
+                  Todos los campos son opcionales. El asistente IA usa estos datos para responder preguntas sobre la marca.
+                </p>
+                <SubmitButton size="sm">Guardar filosofía</SubmitButton>
+              </form>
+            </FormSection>
+          )}
+
           {/* Presencia digital — client component con show/hide dinámico */}
           {isOwner && (
-            <FormSection icon={Globe} title="Presencia y ubicaciones"
+            <FormSection id="section-presencia" icon={Globe} title="Presencia y ubicaciones"
               description="Tipo de operación, sedes físicas y canales digitales. El asistente IA usa esta información para responder preguntas de clientes sin escalar.">
               <StorePresenceForm
                 initialStoreType={(tenant?.store_type ?? 'fisica') as 'fisica' | 'virtual' | 'fisica_virtual'}
-                initialLocations={(tenant?.store_locations as Array<{name:string;city:string;state:string;street:string}>) ?? []}
+                initialLocations={(tenant?.store_locations as Array<{name:string;city:string;state:string;street:string;phone?:string}>) ?? []}
                 initialSocialLinks={(tenant?.social_links as Record<string,string>) ?? {}}
                 action={savePresenciaDigital}
               />
             </FormSection>
           )}
 
-          {/* Horario de atención */}
-          {isOwner && (
-            <FormSection icon={Clock} title="Horario de atención"
-              description="El asistente IA responde preguntas como '¿cuándo abren?' usando este texto.">
-              <form action={saveHorario} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium" htmlFor="business-hours">Horario</Label>
-                  <textarea
-                    id="business-hours"
-                    name="business_hours"
-                    defaultValue={tenant?.business_hours ?? ''}
-                    placeholder={'Lunes a Viernes: 8am – 6pm\nSábados: 9am – 2pm\nDomingos: Cerrado'}
-                    rows={3}
-                    className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
-                  />
-                  <p className="text-[10px] text-muted-foreground">Texto libre — el bot lo repite al cliente tal cual.</p>
-                </div>
-                <SubmitButton size="sm">Guardar horario</SubmitButton>
-              </form>
-            </FormSection>
-          )}
+          {/* Horario y disponibilidad */}
+          {(() => {
+            const sched = tenant?.support_schedule as { days?: number[]; open?: string; close?: string } | null
+            return isOwner && (
+              <FormSection id="section-horario" icon={Clock} title="Horario y disponibilidad"
+                description="Configura cuándo hay asesores disponibles. El bot informará a clientes que escriban fuera de ese horario.">
+                <form action={saveHorarioAsesor} className="space-y-4">
+
+                  {/* Indicador: bot 24/7 */}
+                  <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="text-xs text-emerald-400 font-medium">Bot de ventas: activo 24/7 (automático)</span>
+                  </div>
+
+                  {/* Horario de asesor humano — client component para interactividad */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium">Días de atención con asesor</Label>
+                    <DaysSelector initialDays={sched?.days} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium" htmlFor="support-open">Hora de apertura</Label>
+                      <Input id="support-open" name="support_open" type="time"
+                        defaultValue={sched?.open ?? '09:00'} className="h-9 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium" htmlFor="support-close">Hora de cierre</Label>
+                      <Input id="support-close" name="support_close" type="time"
+                        defaultValue={sched?.close ?? '18:00'} className="h-9 text-sm" />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">Hora Colombia (UTC−5). Cuando un cliente pide asesor fuera de este horario, el bot enviará el mensaje de abajo.</p>
+
+                  {/* Mensaje fuera de horario */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="after-hours">
+                      Mensaje fuera de horario <span className="text-muted-foreground font-normal">(opcional)</span>
+                    </Label>
+                    <textarea id="after-hours" name="after_hours_message"
+                      defaultValue={tenant?.after_hours_message ?? ''}
+                      placeholder={'¡Hola! En este momento nuestros asesores no están disponibles.\nTe atenderemos a partir de las 9:00 AM.'}
+                      rows={3}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                    <p className="text-[10px] text-muted-foreground">El bot lo envía automáticamente antes de escalar al asesor.</p>
+                  </div>
+
+                  {/* Política de envío */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="cutoff">
+                      Política de envío <span className="text-muted-foreground font-normal">(opcional)</span>
+                    </Label>
+                    <textarea id="cutoff" name="cutoff_message"
+                      defaultValue={tenant?.cutoff_message ?? ''}
+                      rows={3}
+                      placeholder={'• Pedidos antes de las 2:00 PM salen el mismo día\n• Envío gratis en compras desde $150.000\n• Sin despachos en domingos y festivos'}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                    <p className="text-[10px] text-muted-foreground">El bot lo menciona al cotizar envíos. Escribe cada política en una línea.</p>
+                  </div>
+
+                  <SubmitButton size="sm">Guardar horario</SubmitButton>
+                </form>
+              </FormSection>
+            )
+          })()}
 
           {/* Dirección de despacho — solo para cotizaciones Envia */}
           {isOwner && (
-            <FormSection icon={Truck} title="Opciones de despacho — Envia"
-              description="Dirección de origen para cotizaciones de envío. Selecciona una sede configurada para auto-completar los campos.">
+            <FormSection id="section-despacho" icon={Truck} title="Dirección de despacho principal — Envia"
+              description="Dirección desde donde salen físicamente los paquetes (puede ser bodega, no necesariamente una sede pública). Usada por Envia para calcular costos y tiempos de envío.">
               <ShippingOriginForm
                 initialData={tenant?.shipping_origin}
                 action={saveShippingOrigin}
@@ -242,17 +381,19 @@ export default async function SettingsPage() {
             const storeTypeLabel: Record<string, string> = {
               fisica: 'Solo física', virtual: 'Solo virtual', fisica_virtual: 'Física y virtual',
             }
-            const sedesCount  = (tenant?.store_locations as unknown[])?.length ?? 0
-            const socialCount = Object.values(tenant?.social_links ?? {}).filter(Boolean).length
-            const hasHorario  = !!tenant?.business_hours?.trim()
-            const hasDespacho = !!tenant?.shipping_origin?.city
+            const sedesCount    = (tenant?.store_locations as unknown[])?.length ?? 0
+            const socialCount   = Object.values(tenant?.social_links ?? {}).filter(Boolean).length
+            const hasHorario    = !!(tenant?.support_schedule) || !!tenant?.business_hours?.trim()
+            const hasDespacho   = !!tenant?.shipping_origin?.city
+            const hasFilosofia  = !!(tenant?.mision || tenant?.valores)
 
-            type Row = { label: string; value: string; ok?: boolean }
+            type Row = { label: string; value: string; ok?: boolean; anchor?: string }
             const rows: Row[] = [
               {
                 label: 'Estado',
                 value: tenant?.status === 'active' ? 'Activo' : tenant?.status ?? '—',
                 ok: tenant?.status === 'active',
+                anchor: 'section-identidad',
               },
               {
                 label: 'Stock bajo en',
@@ -262,45 +403,68 @@ export default async function SettingsPage() {
                 label: 'Tipo de tienda',
                 value: storeTypeLabel[tenant?.store_type ?? 'fisica'] ?? '—',
                 ok: !!tenant?.store_type,
+                anchor: 'section-presencia',
               },
               ...(tenant?.store_type !== 'virtual' ? [{
                 label: 'Sedes físicas',
                 value: sedesCount > 0 ? `${sedesCount} configurada${sedesCount > 1 ? 's' : ''}` : 'Sin configurar',
                 ok: sedesCount > 0,
+                anchor: 'section-presencia',
               }] : []),
               ...(tenant?.store_type !== 'fisica' ? [{
                 label: 'Redes sociales',
                 value: socialCount > 0 ? `${socialCount} canal${socialCount > 1 ? 'es' : ''}` : 'Sin configurar',
                 ok: socialCount > 0,
+                anchor: 'section-presencia',
               }] : []),
               {
-                label: 'Horario',
+                label: 'Filosofía',
+                value: hasFilosofia ? 'Configurada' : 'Sin configurar',
+                ok: hasFilosofia,
+                anchor: 'section-filosofia',
+              },
+              {
+                label: 'Horario asesor',
                 value: hasHorario ? 'Configurado' : 'Sin configurar',
                 ok: hasHorario,
+                anchor: 'section-horario',
               },
               {
                 label: 'Despacho Envia',
                 value: hasDespacho ? 'Configurado' : 'Sin configurar',
                 ok: hasDespacho,
+                anchor: 'section-despacho',
               },
             ]
 
             return (
               <div className="rounded-xl border border-border bg-card p-5 space-y-3">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Resumen</p>
-                <div className="space-y-2">
-                  {rows.map(({ label, value, ok }) => (
-                    <div key={label} className="flex justify-between items-center gap-2">
-                      <span className="text-xs text-muted-foreground shrink-0">{label}</span>
-                      <span className={`text-xs font-medium flex items-center gap-1 text-right ${
-                        ok === true ? 'text-emerald-400' : ok === false ? 'text-muted-foreground/60' : ''
-                      }`}>
-                        {ok === true && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                        {ok === false && <XCircle className="h-3 w-3 shrink-0" />}
-                        {value}
-                      </span>
-                    </div>
-                  ))}
+                <div className="space-y-1.5">
+                  {rows.map(({ label, value, ok, anchor }) => {
+                    const content = (
+                      <>
+                        <span className="text-xs text-muted-foreground shrink-0 group-hover:text-foreground/70 transition-colors">{label}</span>
+                        <span className={`text-xs font-medium flex items-center gap-1 text-right ${
+                          ok === true ? 'text-emerald-400' : ok === false ? 'text-muted-foreground/60' : ''
+                        }`}>
+                          {ok === true && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                          {ok === false && <XCircle className="h-3 w-3 shrink-0" />}
+                          {value}
+                        </span>
+                      </>
+                    )
+                    return anchor ? (
+                      <a key={label} href={`#${anchor}`}
+                        className="flex justify-between items-center gap-2 group rounded px-1 -mx-1 py-0.5 hover:bg-muted/40 transition-colors cursor-pointer">
+                        {content}
+                      </a>
+                    ) : (
+                      <div key={label} className="flex justify-between items-center gap-2 px-1 py-0.5">
+                        {content}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )
