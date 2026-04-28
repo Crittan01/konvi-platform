@@ -26,15 +26,20 @@ export async function PATCH(
     return NextResponse.json({ detail: 'Payload inválido' }, { status: 400 })
   }
 
+  // A5: reenviar Idempotency-Key al backend para que dedup funcione end-to-end.
+  const idempotencyKey = req.headers.get('Idempotency-Key') || ''
+  const upstreamHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  }
+  if (idempotencyKey) upstreamHeaders['Idempotency-Key'] = idempotencyKey
+
   try {
     const upstream = await fetch(
       `${CORE_API_URL}/api/v1/conversations/${params.conversationId}/status`,
       {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: upstreamHeaders,
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       }

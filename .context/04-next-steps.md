@@ -1,6 +1,30 @@
 # Próximos Pasos — Estado 2026-04-28
 
-## Cierre sesión actual (2026-04-28, rev. 66) — CIERRE DE CERTIFICACIÓN REAL
+## Cierre sesión actual (2026-04-28, rev. 67) — INBOX CERTIFICADO
+
+- ✅ WS-A Frontend Inbox: timestamp lateral fix, badge unread, banner ventana 24h, tooltips estados, Idempotency-Key end-to-end, dedupe realtime, render emojis WhatsApp.
+- ✅ WS-B Compliance Meta: ventana 24h enforced backend (422 + códigos accionables), ACK transaccional outbound (retry + ack_pending status).
+- ✅ WS-C Multi-tenant runtime: tests `test_tenant_isolation_inbox.py` (5 tests) cubren todos los endpoints Inbox.
+- ✅ WS-D Multimodal audio: bot entiende y responde mensajes de voz vía Gemini 2.5 Flash. `meta_media.py` + transcripción + caché. Feature flag `MULTIMODAL_AUDIO_ENABLED`.
+- ✅ WS-E Limpieza: role/misión ortogonales (UI + system prompt), sender legacy eliminado, roles `agent` legacy barridos.
+- ✅ WS-F Conversaciones archivadas + scroll histórico cursor-based.
+- ✅ WS-G Docs: `06-contracts.md` ampliado (secciones 14, 15), `01-state.md` rev. 67.
+- ✅ 4 migraciones Supabase aplicadas (66 total).
+- ✅ 411 tests · validate.sh 13/13 · sin regresiones.
+
+### Pendientes operativos (rev. 67)
+
+- **F7 cart abandonment** (BLOQUEADO): requiere plantilla Meta aprobada en Meta Business Manager. INTERVENCION HUMANA: registrar plantilla cuando se priorice campañas de recuperación.
+- **F8 multimodal imagen**: aplazado tras audio. Reusará la base `meta_media.py` + agregará rama de procesamiento de imagen al orchestrator.
+- **Templates Meta**: cuando llegue F7, extender `POST /conversations/{id}/send` para aceptar `template_name` + variables.
+
+### Tarea recurrente (anotación)
+
+- **Revisión trimestral de IPs MeLi**: validar `https://developers.mercadolibre.com.co/es_ar/notificaciones` cada 3 meses. Próxima 2026-07-28.
+
+---
+
+## Cierre sesión anterior (2026-04-28, rev. 66) — CIERRE DE CERTIFICACIÓN REAL
 
 - ✅ Cerrado WS1: humanización end-to-end (system prompt + 5 tonos ampliados +
   salvaguarda con 25 variantes + reescritura humana de mensajes templated:
