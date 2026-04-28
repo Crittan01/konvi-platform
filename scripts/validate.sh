@@ -111,13 +111,8 @@ if [ -f "render.yaml" ]; then
       _ok "render.yaml: CONVERSATION_HISTORY_LIMIT='$val'"
     fi
   fi
-  # WOMPI_ENV coherencia
-  wompi_val=$(grep -A1 'key: WOMPI_ENV' render.yaml | grep 'value:' | grep -o '"[^"]*"' | tr -d '"')
-  if [ "$wompi_val" = "production" ]; then
-    _warn "render.yaml: WOMPI_ENV=production — verificar llaves reales configuradas en Dashboard"
-  else
-    _ok "render.yaml: WOMPI_ENV='${wompi_val:-sandbox}'"
-  fi
+  # Wompi: credenciales por-tenant en DB — no hay env vars globales en render.yaml
+  _ok "render.yaml: Wompi por-tenant (tenant_integrations + Vault)"
   # Nuevas vars presentes
   for var in PENDING_PAYMENT_RELEASE_ENABLED API_RATE_LIMIT_DISTRIBUTED ANTI_HIBERNATION_ENABLED; do
     if grep -q "$var" render.yaml; then
@@ -138,7 +133,6 @@ required_example=(
   "SUPABASE_SERVICE_ROLE_KEY"
   "SUPABASE_JWT_SECRET"
   "GEMINI_API_KEY"
-  "WOMPI_ENV"
   "PENDING_PAYMENT_RELEASE_ENABLED"
   "CONVERSATION_HISTORY_LIMIT"
   "API_RATE_LIMIT_DISTRIBUTED"

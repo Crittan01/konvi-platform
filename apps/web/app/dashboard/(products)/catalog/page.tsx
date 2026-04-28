@@ -26,12 +26,11 @@ export default async function CatalogPage() {
   // Products (active + archived) + inventory data
   let products: Product[] = []
   let archivedProducts: Product[] = []
-  let movements: { id: string; delta: number; new_stock: number; reason: string | null; created_at: string }[] = []
   let threshold = DEFAULT_THRESHOLD
   let linkedVariationIds: string[] = []
 
   if (tenantId) {
-    const [activeRes, archivedRes, movementsRes, tenantRes, listingsRes] = await Promise.all([
+    const [activeRes, archivedRes, tenantRes, listingsRes] = await Promise.all([
       supabase
         .from('products')
         .select(`id, title, description, cover_image_url, platform_category_id,
@@ -47,12 +46,6 @@ export default async function CatalogPage() {
         .eq('status', 'inactive')
         .order('title'),
       supabase
-        .from('stock_movements')
-        .select('id, delta, new_stock, reason, created_at')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(30),
-      supabase
         .from('tenants')
         .select('low_stock_threshold')
         .eq('id', tenantId)
@@ -66,7 +59,6 @@ export default async function CatalogPage() {
     ])
     products          = (activeRes.data as Product[]) ?? []
     archivedProducts  = (archivedRes.data as Product[]) ?? []
-    movements         = movementsRes.data ?? []
     threshold         = (tenantRes.data as { low_stock_threshold?: number } | null)?.low_stock_threshold ?? DEFAULT_THRESHOLD
     linkedVariationIds = (listingsRes.data ?? []).map((l: { variation_id: string }) => l.variation_id).filter(Boolean)
   }
@@ -79,10 +71,15 @@ export default async function CatalogPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('products').update({
-      title:       formData.get('title') as string,
-      description: (formData.get('description') as string) || null,
-    }).eq('id', formData.get('product_id') as string).eq('tenant_id', m.tenant_id)
+    const updates: Record<string, unknown> = {
+      title:                formData.get('title') as string,
+      description:          (formData.get('description') as string) || null,
+      platform_category_id: (formData.get('platform_category_id') as string) || null,
+    }
+    const coverUrl = formData.get('cover_image_url') as string
+    if (coverUrl) updates.cover_image_url = coverUrl
+    await sb.from('products').update(updates)
+      .eq('id', formData.get('product_id') as string).eq('tenant_id', m.tenant_id)
     revalidatePath('/dashboard/catalog')
   }
 
@@ -100,11 +97,16 @@ export default async function CatalogPage() {
     const costStr = formData.get('cost_price') as string
     const cost_price = costStr ? parseFloat(costStr) : 0
     const sku = (formData.get('sku') as string) || null
-    const attrKey = formData.get('attr_key') as string
-    const attrVal = formData.get('attr_val') as string
+    // Soporte multi-atributo: attrs_json tiene prioridad sobre attr_key/attr_val legacy
+    const attrsJson = formData.get('attrs_json') as string
+    const attrKey   = formData.get('attr_key') as string
+    const attrVal   = formData.get('attr_val') as string
     if (isNaN(price) || price <= 0 || isNaN(stock) || stock < 0) return
-    let attributes = null
-    if (attrKey && attrVal) attributes = { [attrKey.trim()]: attrVal.trim() }
+    let attributes: Record<string, string> | null = null
+    if (attrsJson) {
+      try { attributes = JSON.parse(attrsJson) } catch { /* usa legado */ }
+    }
+    if (!attributes && attrKey && attrVal) attributes = { [attrKey.trim()]: attrVal.trim() }
     await sb.from('product_variations').insert({
       tenant_id: m.tenant_id,
       product_id: formData.get('product_id') as string,
@@ -135,6 +137,19 @@ export default async function CatalogPage() {
       const basePrice = updates.price || 0
       updates.compare_at_price = (!isNaN(cmp) && cmp > 0 && cmp > basePrice) ? cmp : null
     }
+    // Dimensiones, peso, imagen y SKU
+    const wkg = parseFloat(formData.get('weight_kg') as string)
+    const lcm = parseFloat(formData.get('length_cm') as string)
+    const wcm = parseFloat(formData.get('width_cm')  as string)
+    const hcm = parseFloat(formData.get('height_cm') as string)
+    const imgUrl = (formData.get('image_url') as string) || null
+    const sku    = (formData.get('sku')       as string) || null
+    if (!isNaN(wkg) && wkg > 0) updates.weight_kg = wkg
+    if (!isNaN(lcm) && lcm > 0) updates.length_cm = lcm
+    if (!isNaN(wcm) && wcm > 0) updates.width_cm  = wcm
+    if (!isNaN(hcm) && hcm > 0) updates.height_cm = hcm
+    if (imgUrl !== null) updates.image_url = imgUrl
+    if (sku !== null)   updates.sku        = sku
     if (!Object.keys(updates).length) return
     await sb.from('product_variations')
       .update(updates)
@@ -249,7 +264,6 @@ export default async function CatalogPage() {
         categories={platformCategories}
         tenantId={tenantId ?? ''}
         apiUrl={CORE_API_URL}
-        movements={movements}
         threshold={threshold}
         editProductAction={editProduct}
         editVariationAction={editVariation}

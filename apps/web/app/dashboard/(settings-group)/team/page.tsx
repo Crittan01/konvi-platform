@@ -3,6 +3,7 @@ import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones } from 'lucide-react'
@@ -163,7 +164,7 @@ export default async function TeamPage({
 
     const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
       email,
-      { redirectTo: `${appUrl}/auth/confirm?next=/set-password`, data: { invited_by: u?.id } }
+      { redirectTo: `${appUrl}/auth/callback?next=/set-password`, data: { invited_by: u?.id } }
     )
 
     let wasExistingUser = false
@@ -342,7 +343,7 @@ export default async function TeamPage({
     // inviteUserByEmail para usuario NO confirmado = reenvía el email de invitación
     // generateLink() solo retorna el link sin enviar email — NO usar para reenvío
     const { error } = await adminSb.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${appUrl}/auth/confirm?next=/set-password`,
+      redirectTo: `${appUrl}/auth/callback?next=/set-password`,
     })
 
     // "already been registered" solo ocurre para usuarios CONFIRMADOS
@@ -527,10 +528,10 @@ export default async function TeamPage({
                 Solo Supervisor o Gestor. El rol Administrador es único por negocio y no puede invitarse.
               </p>
             </div>
-            <Button type="submit" size="sm" className="gap-1.5">
+            <SubmitButton size="sm" pendingText="Enviando..." savedText="¡Invitación enviada!" className="gap-1.5">
               <UserPlus className="h-3.5 w-3.5" />
               Enviar invitación
-            </Button>
+            </SubmitButton>
           </form>
         </Section>
       )}
@@ -586,10 +587,10 @@ export default async function TeamPage({
                           <>
                             <form action={resendInvite}>
                               <input type="hidden" name="email" value={m.email} />
-                              <Button type="submit" size="sm" variant="outline"
+                              <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Enviado"
                                 className="text-xs h-7 px-2.5 text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
                                 Reenviar
-                              </Button>
+                              </SubmitButton>
                             </form>
                             <span className="text-[10px] text-muted-foreground italic">Pendiente</span>
                           </>
@@ -599,10 +600,10 @@ export default async function TeamPage({
                         {m.confirmed && m.status === 'inactive' && (
                           <form action={activateMember}>
                             <input type="hidden" name="user_id" value={m.user_id} />
-                            <Button type="submit" size="sm" variant="outline"
+                            <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Activado"
                               className="text-xs h-7 px-2.5 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
                               Activar
-                            </Button>
+                            </SubmitButton>
                           </form>
                         )}
 

@@ -44,7 +44,7 @@ export default async function IntegrationsPage({
     notifications = (notifRes.data as NotifSetting[]) || []
   }
 
-  const providers = ['envia', 'mercadolibre', 'whatsapp']
+  const providers = ['envia', 'mercadolibre', 'whatsapp', 'wompi']
   const fullList: Integration[] = providers.map(p =>
     integrations.find(i => i.provider === p) ?? { provider: p, status: 'disconnected', meta: {} }
   )
@@ -52,14 +52,16 @@ export default async function IntegrationsPage({
   const enviaInt  = fullList.find(i => i.provider === 'envia')!
   const meliInt   = fullList.find(i => i.provider === 'mercadolibre')!
   const waInt     = fullList.find(i => i.provider === 'whatsapp')!
+  const wompiInt  = fullList.find(i => i.provider === 'wompi')!
   const tgConfig  = notifications.find(n => n.channel === 'telegram')
 
   const enviaConnected = enviaInt.status === 'connected'
   const meliConnected  = meliInt.status === 'connected'
   const waConnected    = waInt.status === 'connected'
+  const wompiConnected = wompiInt.status === 'connected'
   // bot_token_secret_id (vault) o bot_token (texto plano legacy) indican que el token está configurado
   const tgConnected    = !!(tgConfig?.enabled && (tgConfig?.config?.bot_token_secret_id || tgConfig?.config?.bot_token) && tgConfig?.config?.chat_id)
-  const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected].filter(Boolean).length
+  const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
 
   // ── Server Actions ────────────────────────────────────────────────────────
 
@@ -376,6 +378,76 @@ export default async function IntegrationsPage({
     revalidatePath('/dashboard/integrations')
   }
 
+  async function saveWompi(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const privateKey  = (formData.get('private_key') as string)?.trim()
+    const eventsKey   = (formData.get('events_key') as string)?.trim()
+    const environment = (formData.get('environment') as string) === 'production' ? 'production' : 'sandbox'
+
+    if (!privateKey || !eventsKey) return
+
+    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
+      .eq('tenant_id', m.tenant_id).eq('provider', 'wompi').maybeSingle()
+    const creds = (existing?.credentials as Record<string, string>) ?? {}
+
+    // private_key
+    let privateSid: string | null = creds.private_key_secret_id ?? null
+    if (privateSid) {
+      await sb.rpc('pgsec_update_secret', { p_id: privateSid, p_secret: privateKey })
+    } else {
+      const { data } = await sb.rpc('pgsec_upsert_secret', {
+        p_secret: privateKey, p_name: `${m.tenant_id}/wompi/private_key`, p_description: 'Wompi private key',
+      })
+      privateSid = data as string | null
+    }
+
+    // events_key
+    let eventsSid: string | null = creds.events_key_secret_id ?? null
+    if (eventsSid) {
+      await sb.rpc('pgsec_update_secret', { p_id: eventsSid, p_secret: eventsKey })
+    } else {
+      const { data } = await sb.rpc('pgsec_upsert_secret', {
+        p_secret: eventsKey, p_name: `${m.tenant_id}/wompi/events_key`, p_description: 'Wompi events key',
+      })
+      eventsSid = data as string | null
+    }
+
+    if (!privateSid || !eventsSid) return  // Vault failure — no persistir estado incompleto
+
+    await sb.from('tenant_integrations').upsert({
+      tenant_id: m.tenant_id, provider: 'wompi', status: 'connected',
+      credentials: { private_key_secret_id: privateSid, events_key_secret_id: eventsSid },
+      meta: {
+        environment,
+        private_key_preview: `${privateKey.slice(0, 8)}...${privateKey.slice(-4)}`,
+      },
+    }, { onConflict: 'tenant_id,provider' })
+    revalidatePath('/dashboard/integrations')
+  }
+
+  async function disconnectWompi() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || m.role !== 'owner') return
+
+    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
+      .eq('tenant_id', m.tenant_id).eq('provider', 'wompi').maybeSingle()
+    const creds = (existing?.credentials as Record<string, string>) ?? {}
+    if (creds.private_key_secret_id) await sb.rpc('pgsec_delete_secret', { p_id: creds.private_key_secret_id })
+    if (creds.events_key_secret_id)  await sb.rpc('pgsec_delete_secret', { p_id: creds.events_key_secret_id })
+
+    await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {}, meta: {} })
+      .eq('tenant_id', m.tenant_id).eq('provider', 'wompi')
+    revalidatePath('/dashboard/integrations')
+  }
+
   async function disconnectWhatsApp() {
     'use server'
     const sb = createClient()
@@ -400,6 +472,8 @@ export default async function IntegrationsPage({
       enviaConnected={enviaConnected}
       meliInt={meliInt}
       meliConnected={meliConnected}
+      wompiInt={wompiInt}
+      wompiConnected={wompiConnected}
       tgConfig={tgConfig}
       tgConnected={tgConnected}
       connectedCount={connectedCount}
@@ -416,6 +490,8 @@ export default async function IntegrationsPage({
       saveEnviaKey={saveEnviaKey}
       disconnectEnvia={disconnectEnvia}
       disconnectMeli={disconnectMeli}
+      saveWompi={saveWompi}
+      disconnectWompi={disconnectWompi}
       saveTelegram={saveTelegram}
       disconnectTelegram={disconnectTelegram}
       testTelegram={testTelegram}

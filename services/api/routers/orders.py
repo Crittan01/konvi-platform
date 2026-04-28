@@ -316,12 +316,13 @@ async def create_payment_link(
     Válido por WOMPI_PAYMENT_LINK_TTL_MINUTES minutos (default 30).
     """
     try:
-        from integrations.wompi_client import create_payment_link as wompi_create_link, WOMPI_PRIVATE_KEY
+        from integrations.wompi_client import create_payment_link as wompi_create_link, get_tenant_wompi_creds
 
-        if not WOMPI_PRIVATE_KEY:
+        private_key, _, wompi_environment = get_tenant_wompi_creds(supabase, tenant_id)
+        if not private_key:
             raise HTTPException(
                 status_code=503,
-                detail="Integración Wompi no configurada (WOMPI_PRIVATE_KEY ausente)",
+                detail="Integración Wompi no configurada. Conéctala en Ajustes → Integraciones.",
             )
 
         order_res = (
@@ -359,6 +360,8 @@ async def create_payment_link(
         ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         link_data = await wompi_create_link(
+            private_key=private_key,
+            environment=wompi_environment,
             order_id=order_id,
             name=f"Pedido #{short_id} — {contact_name}"[:100],
             description=order.get("notes") or f"Pedido #{short_id}",

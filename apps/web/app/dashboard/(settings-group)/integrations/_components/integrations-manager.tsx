@@ -10,10 +10,10 @@ import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
-  MessageCircle, Settings2, ChevronUp,
+  MessageCircle, Settings2, ChevronUp, CreditCard,
 } from 'lucide-react'
 
-type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones'
+type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
 type Integration = { provider: string; status: string; meta: Record<string, string> }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
 
@@ -24,6 +24,8 @@ interface Props {
   enviaConnected: boolean
   meliInt: Integration
   meliConnected: boolean
+  wompiInt: Integration
+  wompiConnected: boolean
   tgConfig?: NotifSetting
   tgConnected: boolean
   connectedCount: number
@@ -40,6 +42,8 @@ interface Props {
   saveEnviaKey: (fd: FormData) => Promise<void>
   disconnectEnvia: () => Promise<void>
   disconnectMeli: () => Promise<void>
+  saveWompi: (fd: FormData) => Promise<void>
+  disconnectWompi: () => Promise<void>
   saveTelegram: (fd: FormData) => Promise<void>
   disconnectTelegram: () => Promise<void>
   testTelegram: () => Promise<void>
@@ -54,6 +58,7 @@ const TABS: { key: Category; label: string }[] = [
   { key: 'canal', label: 'Canal' },
   { key: 'logistica', label: 'Logística' },
   { key: 'marketplace', label: 'Marketplace' },
+  { key: 'pagos', label: 'Pagos' },
   { key: 'notificaciones', label: 'Notificaciones' },
 ]
 
@@ -61,7 +66,7 @@ const COMING_SOON = [
   { name: 'Shopify', category: 'canal' as Category },
   { name: 'WooCommerce', category: 'canal' as Category },
   { name: 'Zapier / Make', category: 'notificaciones' as Category },
-  { name: 'Stripe', category: 'todas' as Category },
+  { name: 'Stripe', category: 'pagos' as Category },
 ]
 
 function StatusBadge({ connected, colorClass }: { connected: boolean; colorClass: string }) {
@@ -96,10 +101,12 @@ function MetaPill({ label, value, className }: { label: string; value: string; c
 export function IntegrationsManager(props: Props) {
   const {
     waInt, waConnected, enviaInt, enviaConnected, meliInt, meliConnected,
+    wompiInt, wompiConnected,
     tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam,
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
     saveEnviaKey, disconnectEnvia, disconnectMeli,
+    saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
     testWhatsApp, testEnvia,
     saveWhatsApp, disconnectWhatsApp,
@@ -148,10 +155,11 @@ export function IntegrationsManager(props: Props) {
     whatsapp: 'canal',
     envia: 'logistica',
     mercadolibre: 'marketplace',
+    wompi: 'pagos',
     telegram: 'notificaciones',
   }
 
-  const allCards = ['whatsapp', 'envia', 'mercadolibre', 'telegram']
+  const allCards = ['whatsapp', 'envia', 'mercadolibre', 'wompi', 'telegram']
   const visibleCards = activeFilter === 'todas'
     ? allCards
     : allCards.filter(c => cardCategories[c] === activeFilter)
@@ -169,7 +177,7 @@ export function IntegrationsManager(props: Props) {
           <Plug className="h-5 w-5 text-primary" /> Integraciones
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Conectores activos para tu negocio · {connectedCount}/4 conectados
+          Conectores activos para tu negocio · {connectedCount}/5 conectados
         </p>
       </div>
 
@@ -350,7 +358,7 @@ export function IntegrationsManager(props: Props) {
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Token de Acceso (System User)</Label>
-                          <Input name="access_token" placeholder="EAABs…" required className="h-8 text-xs font-mono" />
+                          <Input type="password" name="access_token" placeholder="EAABs…" required autoComplete="off" className="h-8 text-xs font-mono" />
                         </div>
                         <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-500 text-white">
                           <MessageCircle className="h-3.5 w-3.5" /> Conectar WhatsApp
@@ -438,7 +446,7 @@ export function IntegrationsManager(props: Props) {
                       <form action={saveEnviaKey} className="space-y-2.5">
                         <div className="space-y-1">
                           <Label className="text-xs">API Token de Envia</Label>
-                          <Input name="api_token" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required className="h-8 text-xs font-mono" />
+                          <Input type="password" name="api_token" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required autoComplete="off" className="h-8 text-xs font-mono" />
                         </div>
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" name="sandbox" className="h-3.5 w-3.5 rounded" />
@@ -550,6 +558,105 @@ export function IntegrationsManager(props: Props) {
           </div>
         )}
 
+        {/* ── Wompi ─────────────────────────────────────────────────────────── */}
+        {visibleCards.includes('wompi') && (
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${wompiConnected ? 'border-violet-500/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${wompiConnected ? 'border-violet-500/20 bg-violet-500/5' : 'border-border bg-muted/20'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center shrink-0">
+                    <CreditCard className="h-4 w-4 text-violet-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm">Wompi</p>
+                    <p className="text-[11px] text-muted-foreground truncate">Pagos en línea Colombia</p>
+                  </div>
+                </div>
+                <StatusBadge connected={wompiConnected} colorClass="bg-violet-500/15 text-violet-400 border-violet-500/30" />
+              </div>
+            </div>
+            <div className="px-4 py-3.5 space-y-3 flex-1">
+              <p className="text-xs text-muted-foreground">Genera links de pago y recibe confirmaciones automáticas vía webhook.</p>
+              {wompiConnected ? (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetaPill label="Clave privada" value={wompiInt.meta?.private_key_preview ?? '●●●●'} />
+                    <MetaPill
+                      label="Entorno"
+                      value={wompiInt.meta?.environment === 'production' ? 'Producción' : 'Sandbox'}
+                      className={wompiInt.meta?.environment === 'production' ? 'text-emerald-400' : 'text-amber-400'}
+                    />
+                  </div>
+                  {isOwner && (
+                    <DisconnectIntegrationButton
+                      provider="wompi" providerLabel="Wompi"
+                      action={disconnectWompi}
+                      className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                    />
+                  )}
+                </div>
+              ) : isOwner ? (
+                <div className="space-y-3">
+                  <div className="flex justify-end">
+                    <ConfigToggle open={!!open.wompi} onToggle={() => toggle('wompi')} />
+                  </div>
+                  {open.wompi && (
+                    <>
+                      <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">Pasos de configuración</p>
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              Regístrate en <span className="font-mono text-foreground">wompi.co</span> y activa tu cuenta de comercio.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              En el Dashboard de Wompi → <strong className="text-foreground font-medium">Desarrolladores</strong> → copia la <strong className="text-foreground font-medium">Llave Privada</strong> y la <strong className="text-foreground font-medium">Llave de Eventos</strong>.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">https://commerce-ops-api.onrender.com/api/v1/webhooks/wompi</span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <form action={saveWompi} className="space-y-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Entorno</Label>
+                          <select name="environment"
+                            className="w-full h-8 rounded-md border border-input bg-background text-xs px-2 text-foreground">
+                            <option value="sandbox">Sandbox (pruebas)</option>
+                            <option value="production">Producción</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Llave Privada</Label>
+                          <Input type="password" name="private_key" required autoComplete="off" placeholder="prv_test_..." className="h-8 text-xs font-mono" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Llave de Eventos (Events Key)</Label>
+                          <Input type="password" name="events_key" required autoComplete="off" placeholder="test_events_..." className="h-8 text-xs font-mono" />
+                        </div>
+                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!"
+                          className="w-full h-8 text-xs gap-1.5 bg-violet-600 hover:bg-violet-500 text-white">
+                          <CreditCard className="h-3.5 w-3.5" /> Conectar Wompi
+                        </SubmitButton>
+                      </form>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Telegram ──────────────────────────────────────────────────────── */}
         {visibleCards.includes('telegram') && (
           <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${tgConnected ? 'border-sky-500/30' : 'border-border'}`}>
@@ -633,7 +740,7 @@ export function IntegrationsManager(props: Props) {
                       <form action={saveTelegram} className="space-y-2.5">
                         <div className="space-y-1">
                           <Label className="text-xs">Bot Token</Label>
-                          <Input name="bot_token" placeholder="123456789:AAG…" required className="h-8 text-xs font-mono" />
+                          <Input type="password" name="bot_token" placeholder="123456789:AAG…" required autoComplete="off" className="h-8 text-xs font-mono" />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Chat ID del grupo</Label>

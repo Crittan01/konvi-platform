@@ -16,9 +16,6 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
-os.environ.setdefault("WOMPI_EVENTS_KEY_SANDBOX", "test-events-key-wompi-12345")
-os.environ.setdefault("WOMPI_PRIVATE_KEY_SANDBOX", "prv_sandbox_test_key")
-os.environ.setdefault("WOMPI_ENV", "sandbox")
 
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/tests")
@@ -135,8 +132,9 @@ class WompiRetryTests(unittest.TestCase):
 
     @patch("routers.wompi_webhook._get_service_client")
     @patch("routers.wompi_webhook.verify_event_signature", return_value=True)
-    @patch("integrations.wompi_client.create_payment_link_sync")
-    def test_declined_pending_payment_triggers_retry(self, mock_create_link, mock_sig, mock_supabase_client):
+    @patch("routers.wompi_webhook.get_tenant_wompi_creds", return_value=("prv_test_key", "events_key", "sandbox"))
+    @patch("routers.wompi_webhook.create_payment_link_sync")
+    def test_declined_pending_payment_triggers_retry(self, mock_create_link, _mock_creds, mock_sig, mock_supabase_client):
         """DECLINED en pending_payment → genera nuevo link y encola outbound."""
         mock_create_link.return_value = {
             "link_id": "new-link-id",
@@ -174,8 +172,9 @@ class WompiRetryTests(unittest.TestCase):
 
     @patch("routers.wompi_webhook._get_service_client")
     @patch("routers.wompi_webhook.verify_event_signature", return_value=True)
-    @patch("integrations.wompi_client.create_payment_link_sync")
-    def test_error_status_triggers_retry(self, mock_create_link, mock_sig, mock_supabase_client):
+    @patch("routers.wompi_webhook.get_tenant_wompi_creds", return_value=("prv_test_key", "events_key", "sandbox"))
+    @patch("routers.wompi_webhook.create_payment_link_sync")
+    def test_error_status_triggers_retry(self, mock_create_link, _mock_creds, mock_sig, mock_supabase_client):
         """ERROR en pending_payment también activa retry."""
         mock_create_link.return_value = {
             "link_id": "error-retry-link",
@@ -192,20 +191,21 @@ class WompiRetryTests(unittest.TestCase):
         mock_create_link.assert_called_once()
 
     @patch("routers.wompi_webhook.verify_event_signature", return_value=True)
-    def test_no_wompi_key_enqueues_failure_msg(self, _mock_sig):
-        """Sin WOMPI_PRIVATE_KEY → encola mensaje de fallo vía _enqueue_outbound_text, sin generar link."""
+    @patch("routers.wompi_webhook.get_tenant_wompi_creds", return_value=(None, None, "sandbox"))
+    def test_no_wompi_key_enqueues_failure_msg(self, _mock_creds, _mock_sig):
+        """Wompi no configurado para el tenant → encola mensaje de fallo sin generar link."""
         supabase = _make_supabase_mock(order_status="pending_payment")
-        with patch("integrations.wompi_client.WOMPI_PRIVATE_KEY", ""):
-            from routers.wompi_webhook import _maybe_offer_payment_retry
-            with patch("integrations.wompi_client.create_payment_link_sync") as mock_create, \
-                 patch("routers.wompi_webhook._enqueue_outbound_text") as mock_enqueue:
-                _maybe_offer_payment_retry(supabase, order_id="order-uuid-123", txn_status="DECLINED")
-                mock_create.assert_not_called()
-                mock_enqueue.assert_called_once()
+        from routers.wompi_webhook import _maybe_offer_payment_retry
+        with patch("integrations.wompi_client.create_payment_link_sync") as mock_create, \
+             patch("routers.wompi_webhook._enqueue_outbound_text") as mock_enqueue:
+            _maybe_offer_payment_retry(supabase, order_id="order-uuid-123", txn_status="DECLINED")
+            mock_create.assert_not_called()
+            mock_enqueue.assert_called_once()
 
     @patch("routers.wompi_webhook._get_service_client")
+    @patch("routers.wompi_webhook.get_tenant_wompi_creds", return_value=(None, None, "sandbox"))
     @patch("routers.wompi_webhook.verify_event_signature", return_value=True)
-    def test_approved_does_not_trigger_retry(self, _mock_sig, mock_supabase_client):
+    def test_approved_does_not_trigger_retry(self, _mock_sig, _mock_creds, mock_supabase_client):
         """APPROVED nunca activa retry — lo maneja el flujo de confirmación."""
         supabase = _make_supabase_mock(order_status="pending_payment")
         mock_supabase_client.return_value = supabase

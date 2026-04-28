@@ -6,7 +6,7 @@ import LoginForm from './login-form'
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { message?: string }
+  searchParams: { message?: string; error?: string }
 }) {
   const supabase = createClient()
   const { data } = await supabase.auth.getUser()
@@ -48,7 +48,7 @@ export default async function LoginPage({
 
         <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
           <CardContent className="pt-6">
-            <LoginForm action={loginAction} message={searchParams.message} />
+            <LoginForm action={loginAction} message={searchParams.error ?? searchParams.message} />
           </CardContent>
         </Card>
       </div>

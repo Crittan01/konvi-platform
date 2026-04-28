@@ -5,11 +5,50 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
-import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine, Zap, AlertCircle, RefreshCw } from 'lucide-react'
+import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine, AlertCircle } from 'lucide-react'
+import { DocCard } from './doc-card'
+import { TemplatesSection } from './templates-section'
+import { STARTER_TEMPLATES } from './starter-templates'
+import { IndexPendingBanner } from './index-pending-banner'
 
-const MAX_DOCS     = 30
-const MAX_CONTENT  = 3000
-const MAX_TITLE    = 120
+const MAX_DOCS    = 30
+const MAX_CONTENT = 3000
+const MAX_TITLE   = 120
+
+// Debe estar a nivel de módulo — NO dentro del componente.
+// Los server actions serializan su closure y no pueden capturar funciones del scope del componente.
+async function getGeminiEmbedding(text: string): Promise<number[] | null> {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) {
+    console.error('[KB-Embed] GEMINI_API_KEY no configurada en el web service')
+    return null
+  }
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'models/gemini-embedding-001', content: { parts: [{ text }] }, outputDimensionality: 3072 }),
+      }
+    )
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error(`[KB-Embed] Gemini ${res.status}: ${body.slice(0, 200)}`)
+      return null
+    }
+    const data = await res.json()
+    const values = data.embedding?.values
+    if (!values?.length) {
+      console.error('[KB-Embed] Respuesta sin values:', JSON.stringify(data).slice(0, 200))
+      return null
+    }
+    return values
+  } catch (e) {
+    console.error('[KB-Embed] Excepción llamando a Gemini:', e)
+    return null
+  }
+}
 
 const CATEGORIES = [
   { value: 'faq',      label: 'FAQ',          icon: HelpCircle },
@@ -84,33 +123,14 @@ export default async function KnowledgeBasePage({
     d.content.toLowerCase().includes(q.toLowerCase())
   )
 
-  const allDocs     = (data as KbDocument[]) ?? []
-  const activeCount = allDocs.filter(d => d.is_active).length
-  const totalCount  = allDocs.length
-  const embCount    = embeddingIds.size
-  const atLimit     = totalCount >= MAX_DOCS
+  const allDocs      = (data as KbDocument[]) ?? []
+  const activeCount  = allDocs.filter(d => d.is_active).length
+  const totalCount   = allDocs.length
+  const embCount     = embeddingIds.size
+  const pendingCount = allDocs.filter(d => d.is_active && !embeddingIds.has(d.id)).length
+  const atLimit      = totalCount >= MAX_DOCS
 
   // ── Server Actions ─────────────────────────────────────────────────────────
-
-  async function getGeminiEmbedding(text: string): Promise<number[] | null> {
-    const key = process.env.GEMINI_API_KEY
-    if (!key) return null
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'models/text-embedding-004',
-          content: { parts: [{ text }] }
-        })
-      })
-      if (!res.ok) return null
-      const data = await res.json()
-      return data.embedding?.values || null
-    } catch {
-      return null
-    }
-  }
 
   async function createDocument(formData: FormData) {
     'use server'
@@ -137,6 +157,28 @@ export default async function KnowledgeBasePage({
     revalidatePath('/dashboard/knowledge-base')
   }
 
+  async function updateDocument(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const docId    = (formData.get('doc_id') as string).trim()
+    const title    = (formData.get('title') as string).trim()
+    const content  = (formData.get('content') as string).trim()
+    const category = formData.get('category') as string
+    if (!docId || !title || !content) return
+    if (content.length > MAX_CONTENT || title.length > MAX_TITLE) return
+    const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
+    await sb.from('kb_documents').update({
+      title, content,
+      category: category || 'general',
+      embedding: embedding ? `[${embedding.join(',')}]` : null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', docId).eq('tenant_id', m.tenant_id)
+    redirect('/dashboard/knowledge-base')
+  }
+
   async function regenerateEmbedding(formData: FormData) {
     'use server'
     const sb = createClient()
@@ -156,15 +198,37 @@ export default async function KnowledgeBasePage({
     revalidatePath('/dashboard/knowledge-base')
   }
 
-  async function toggleDocument(formData: FormData) {
+  async function activateDocument(formData: FormData) {
     'use server'
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    const docId    = formData.get('doc_id') as string
-    const isActive = formData.get('is_active') === 'true'
-    await sb.from('kb_documents').update({ is_active: !isActive }).eq('id', docId).eq('tenant_id', m.tenant_id)
+    const docId = formData.get('doc_id') as string
+    const { data: doc } = await sb.from('kb_documents')
+      .select('title, content, embedding')
+      .eq('id', docId).eq('tenant_id', m.tenant_id).single()
+    if (!doc) return
+    const needsEmbed = !doc.embedding
+    const embedding = needsEmbed
+      ? await getGeminiEmbedding(`Título: ${doc.title}\nContenido: ${doc.content}`)
+      : null
+    await sb.from('kb_documents').update({
+      is_active: true,
+      ...(embedding ? { embedding: `[${embedding.join(',')}]` } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq('id', docId).eq('tenant_id', m.tenant_id)
+    revalidatePath('/dashboard/knowledge-base')
+  }
+
+  async function desactivateDocument(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    await sb.from('kb_documents').update({ is_active: false })
+      .eq('id', formData.get('doc_id') as string).eq('tenant_id', m.tenant_id)
     revalidatePath('/dashboard/knowledge-base')
   }
 
@@ -176,6 +240,26 @@ export default async function KnowledgeBasePage({
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     await sb.from('kb_documents').delete()
       .eq('id', formData.get('doc_id') as string).eq('tenant_id', m.tenant_id)
+    revalidatePath('/dashboard/knowledge-base')
+  }
+
+  async function loadSelectedTemplates(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+
+    const selectedIds = formData.getAll('template_ids') as string[]
+    if (!selectedIds.length) return
+
+    const tenantId = m.tenant_id
+    const toInsert = STARTER_TEMPLATES
+      .filter(t => selectedIds.includes(t.id))
+      .map(t => ({ tenant_id: tenantId, title: t.title, content: t.content, category: t.category, is_active: true }))
+
+    if (!toInsert.length) return
+    await sb.from('kb_documents').insert(toInsert)
     revalidatePath('/dashboard/knowledge-base')
   }
 
@@ -209,6 +293,17 @@ export default async function KnowledgeBasePage({
           Cuando el cliente pregunta por WhatsApp, el asistente prioriza estos documentos antes de responder para mantener consistencia con tus políticas, productos y operación.
         </span>
       </div>
+
+      {/* Banner documentos pendientes de indexar */}
+      <IndexPendingBanner pendingCount={pendingCount} />
+
+      {/* Plantillas — siempre visible, colapsadas si ya hay documentos */}
+      {canWrite && (
+        <TemplatesSection
+          loadSelectedTemplates={loadSelectedTemplates}
+          defaultExpanded={totalCount === 0}
+        />
+      )}
 
       {/* Búsqueda y filtros de categoría */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -253,7 +348,9 @@ export default async function KnowledgeBasePage({
         {canWrite && (
           <div className="xl:col-span-1">
             <div className="rounded-xl border border-border bg-card p-5 sticky top-4">
-              <h2 className="font-semibold text-base mb-1 flex items-center gap-2"><PenLine className="h-4 w-4" /> Nuevo documento</h2>
+              <h2 className="font-semibold text-base mb-1 flex items-center gap-2">
+                <PenLine className="h-4 w-4" /> Nuevo documento
+              </h2>
               {atLimit ? (
                 <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/8 text-xs text-amber-400 mt-3">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -276,14 +373,9 @@ export default async function KnowledgeBasePage({
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">Contenido * <span className="text-muted-foreground font-normal">(máx {MAX_CONTENT} chars)</span></Label>
-                    <textarea
-                      name="content"
-                      rows={7}
-                      required
-                      maxLength={MAX_CONTENT}
+                    <textarea name="content" rows={7} required maxLength={MAX_CONTENT}
                       placeholder="Escribe el texto tal como quieres que la IA lo lea. Ej: 'Aceptamos devoluciones dentro de los 15 días...'"
-                      className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
                     <p className="text-xs text-muted-foreground">La IA usará búsqueda semántica para encontrar el doc más relevante.</p>
                   </div>
                   <SubmitButton className="w-full h-8 text-sm" pendingText="Guardando y generando embedding...">
@@ -309,76 +401,16 @@ export default async function KnowledgeBasePage({
             </div>
           ) : (
             <div className="space-y-3">
-              {documents.map(doc => {
-                const catInfo = CATEGORIES.find(c => c.value === doc.category)
-                return (
-                  <div key={doc.id}
-                    className={`rounded-xl border bg-card p-4 transition-all hover:shadow-sm ${
-                      doc.is_active ? 'border-border' : 'border-border/50 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        {/* Categoría + estado */}
-                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                          <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category] ?? 'bg-muted text-muted-foreground'}`}>
-                            {catInfo?.icon && <catInfo.icon className="h-3 w-3 shrink-0" />}
-                            {catInfo?.label ?? doc.category}
-                          </span>
-                          {doc.has_embedding ? (
-                            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
-                              <Zap className="h-2.5 w-2.5" /> RAG ✓
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-amber-400/80 border border-amber-500/30 bg-amber-500/8 rounded-full px-1.5 py-0.5">
-                              Sin embedding
-                            </span>
-                          )}
-                          {!doc.is_active && (
-                            <span className="text-[11px] text-muted-foreground border border-border rounded-full px-2 py-0.5">
-                              Inactivo
-                            </span>
-                          )}
-                        </div>
-                        <p className="font-medium text-sm">{doc.title}</p>
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">{doc.content}</p>
-                        <p className="text-[11px] text-muted-foreground/70 mt-2">
-                          Actualizado: {new Date(doc.updated_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
-                        </p>
-                      </div>
-
-                      {/* Acciones */}
-                      {canWrite && (
-                        <div className="flex flex-col gap-1.5 shrink-0">
-                          <form action={toggleDocument}>
-                            <input type="hidden" name="doc_id"    value={doc.id} />
-                            <input type="hidden" name="is_active" value={String(doc.is_active)} />
-                            <Button type="submit" size="sm" variant="outline" className="text-xs h-7 w-full">
-                              {doc.is_active ? 'Desactivar' : 'Activar'}
-                            </Button>
-                          </form>
-                          {!doc.has_embedding && (
-                            <form action={regenerateEmbedding}>
-                              <input type="hidden" name="doc_id" value={doc.id} />
-                              <Button type="submit" size="sm" variant="outline"
-                                className="text-xs h-7 w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
-                                <RefreshCw className="h-3 w-3 mr-1" /> Activar RAG
-                              </Button>
-                            </form>
-                          )}
-                          <form action={deleteDocument}>
-                            <input type="hidden" name="doc_id" value={doc.id} />
-                            <Button type="submit" size="sm" variant="ghost"
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs h-7 w-full">
-                              Eliminar
-                            </Button>
-                          </form>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+              {documents.map(doc => (
+                <DocCard
+                  key={doc.id}
+                  doc={{ ...doc, has_embedding: doc.has_embedding ?? false }}
+                  updateDocument={updateDocument}
+                  activateDocument={activateDocument}
+                  desactivateDocument={desactivateDocument}
+                  deleteDocument={deleteDocument}
+                />
+              ))}
             </div>
           )}
         </div>

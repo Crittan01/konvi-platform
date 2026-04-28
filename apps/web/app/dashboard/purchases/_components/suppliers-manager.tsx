@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Plus, User, Mail, Phone, CalendarClock } from 'lucide-react'
 import { addSupplier } from '../actions'
@@ -60,9 +61,9 @@ export default function SuppliersManager({ suppliers, canWrite }: Props) {
                 <Button type="button" variant="ghost" size="sm" onClick={() => setShowAdd(false)} className="text-xs">
                   Cancelar
                 </Button>
-                <Button type="submit" size="sm" className="text-xs">
+                <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado" className="text-xs">
                   Guardar Proveedor
-                </Button>
+                </SubmitButton>
               </div>
             </form>
           </CardContent>
