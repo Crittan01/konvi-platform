@@ -1019,13 +1019,19 @@ def _coerce_origin(raw: Optional[dict]) -> Optional[dict]:
     if not dane_code or not city or not state:
         return None
 
-    return {
+    out = {
         "city": city,
         "state": state,
         "country": country,
         "postalCode": dane_code,
         "dane_code": dane_code,
     }
+    # Rev. 68 — district (barrio) opcional. Algunos carriers (Coordinadora,
+    # Servientrega) lo usan para optimizar zona de despacho.
+    neighborhood = str(source.get("neighborhood") or "").strip()
+    if neighborhood:
+        out["district"] = neighborhood
+    return out
 
 
 def _coerce_destination(raw: Optional[dict]) -> Optional[dict]:
@@ -1039,13 +1045,18 @@ def _coerce_destination(raw: Optional[dict]) -> Optional[dict]:
     if not dane_code:
         return None
 
-    return {
+    out = {
         "city": city,
         "state": state,
         "country": country,
         "postalCode": dane_code,
         "dane_code": dane_code,
     }
+    # Rev. 68 — district (barrio) opcional desde contact.address.neighborhood.
+    neighborhood = str(raw.get("neighborhood") or "").strip()
+    if neighborhood:
+        out["district"] = neighborhood
+    return out
 
 
 def _build_quote_payload(origin: dict, destination: dict, package: PackageEstimate) -> dict:

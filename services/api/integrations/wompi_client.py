@@ -112,6 +112,42 @@ def verify_event_signature(payload: dict, events_key: str) -> bool:
     return valid
 
 
+def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
+    """Construye el bloque customer_data Wompi a partir del contacto.
+
+    Rev. 68 — pre-popula el checkout Wompi para reducir abandono. Wompi acepta
+    todos los campos como opcionales pero PSE/Bancolombia los requieren en
+    práctica. Incluimos solo los campos que tienen valor (Wompi rechaza
+    explícitamente campos null).
+
+    legal_id_type debe ser uno de: CC, CE, NIT, PP, TI, OTHER (para Colombia).
+    """
+    if not contact:
+        return None
+    cd: dict = {}
+    # Email (lowercase, ya normalizado en contacts.py)
+    if email := (contact.get("email") or "").strip():
+        cd["email"] = email
+    # Nombre completo
+    if full_name := (contact.get("name") or "").strip():
+        cd["full_name"] = full_name
+    # Teléfono Wompi: split prefix + number. WhatsApp guarda con + (ej. +573001234567).
+    if phone := (contact.get("phone") or "").strip():
+        digits = phone.lstrip("+").lstrip("0")
+        if digits.startswith("57") and len(digits) >= 12:
+            cd["phone_number_prefix"] = "+57"
+            cd["phone_number"] = digits[2:]
+        else:
+            cd["phone_number"] = digits
+    # Documento: ambos juntos o ninguno (regla Wompi).
+    doc_type = (contact.get("document_type") or "").strip().upper()
+    doc_num  = (contact.get("document_number") or "").strip()
+    if doc_type and doc_num:
+        cd["legal_id"] = doc_num
+        cd["legal_id_type"] = doc_type
+    return cd or None
+
+
 def create_payment_link_sync(
     *,
     private_key: str,
@@ -122,10 +158,11 @@ def create_payment_link_sync(
     amount_in_cents: int,
     expires_at: str,
     redirect_url: Optional[str] = None,
+    contact: Optional[dict] = None,
 ) -> dict:
     """
     Versión síncrona de create_payment_link — para BackgroundTasks y webhooks síncronos.
-    Mismos parámetros y respuesta que create_payment_link.
+    Rev. 68 — recibe `contact` opcional para pre-poblar customer_data en checkout.
     """
     if not private_key:
         raise ValueError("private_key Wompi no configurada para este tenant")
@@ -143,6 +180,9 @@ def create_payment_link_sync(
     }
     if redirect_url:
         payload["redirect_url"] = redirect_url
+    customer_data = _build_customer_data(contact)
+    if customer_data:
+        payload["customer_data"] = customer_data
 
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = client.post(
@@ -173,12 +213,14 @@ async def create_payment_link(
     amount_in_cents: int,
     expires_at: str,
     redirect_url: Optional[str] = None,
+    contact: Optional[dict] = None,
 ) -> dict:
     """
     Crea un link de pago en Wompi.
 
     Campos requeridos por Wompi: name, description, single_use, collect_shipping.
     Correlación orden↔pago: order_id en campo `sku` (UUID v4 = 36 chars exactos).
+    Rev. 68 — pre-popula `customer_data` desde el contacto para checkout sin re-tipear.
 
     Returns dict con:
       - link_id: str (id del payment link)
@@ -202,6 +244,9 @@ async def create_payment_link(
     }
     if redirect_url:
         payload["redirect_url"] = redirect_url
+    customer_data = _build_customer_data(contact)
+    if customer_data:
+        payload["customer_data"] = customer_data
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = await client.post(

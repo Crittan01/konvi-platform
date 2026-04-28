@@ -197,16 +197,17 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
             _enqueue_payment_failed_msg(supabase, conversation_id=conversation_id, tenant_id=tenant_id, order_id=order_id)
             return
 
-        # Obtener nombre del contacto para el link
+        # Obtener contacto completo para customer_data Wompi (rev. 68)
         contact_res = (
             supabase.table("orders")
-            .select("contacts(name)")
+            .select("contacts(name, phone, email, document_type, document_number)")
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )
-        contact_name = ((contact_res.data or [{}])[0].get("contacts") or {}).get("name") or "Cliente"
+        contact = ((contact_res.data or [{}])[0].get("contacts") or {})
+        contact_name = contact.get("name") or "Cliente"
 
         short_id = order_id[:8].upper()
         expires_at = (
@@ -221,6 +222,7 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
             description=f"Reintento pedido #{short_id}",
             amount_in_cents=amount_in_cents,
             expires_at=expires_at,
+            contact=contact,  # rev. 68
         )
 
         supabase.table("payments").insert({
