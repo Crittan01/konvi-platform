@@ -352,10 +352,10 @@ def _load_cart_recovery_block(
         new_total += cur_price * qty
         if abs(cur_price - prev_price) > 0.01:
             item_lines.append(
-                f"- {qty}x {title} (precio anterior ${prev_price:,.0f}, AHORA ${cur_price:,.0f}) — precio cambió"
+                f"- {qty}x {title} (precio anterior {_format_pesos(prev_price)}, AHORA {_format_pesos(cur_price)}) — precio cambió"
             )
         else:
-            item_lines.append(f"- {qty}x {title} (${cur_price:,.0f}) — disponible")
+            item_lines.append(f"- {qty}x {title} ({_format_pesos(cur_price)}) — disponible")
 
     if not any_available:
         # Todo el carrito es irrecuperable: no aporta valor inyectarlo, evita
@@ -364,7 +364,7 @@ def _load_cart_recovery_block(
 
     lines = ["", f"CARRITO PREVIO (cancelado por timeout, {when}):"]
     lines.extend(item_lines)
-    lines.append(f"Total recalculado al precio actual: ${new_total:,.0f} COP.")
+    lines.append(f"Total recalculado al precio actual: {_format_pesos(new_total)} COP.")
     lines.append(
         "INSTRUCCIÓN: si el cliente quiere retomar, ofrece el total recalculado "
         "y advierte si algún precio cambió. Si algo está SIN STOCK, ofrece "
@@ -447,7 +447,7 @@ def _load_customer_context_block(
                 short = (o.get("id") or "")[:8].upper()
                 status = o.get("status", "?")
                 total = o.get("total_amount") or 0
-                lines.append(f"- Pedido #{short} | estado: {status} | total: ${float(total):,.0f} COP")
+                lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)} COP")
         if open_claims:
             for c in open_claims:
                 tn = c.get("ticket_number", "?")
@@ -1673,7 +1673,7 @@ def _extract_quantity_from_text(text: str) -> int:
     return 1
 
 
-from text_utils import format_cents_cop as _format_cop  # noqa: E402
+from text_utils import format_cents_cop as _format_cop, format_pesos as _format_pesos  # noqa: E402
 
 
 _TONO_INSTRUCCIONES: dict[str, str] = {
@@ -2012,20 +2012,14 @@ def _build_system_prompt(
     """Construye el system prompt con FSM contextual para venta vs consulta."""
     if history is None:
         history = []
-    def _format_money(value: float | int | str | None) -> str:
-        try:
-            return f"{float(value or 0):.2f}"
-        except (TypeError, ValueError):
-            return "0.00"
-
     def _format_product_for_prompt(product: dict) -> str:
         raw_title = product.get("title", "Sin nombre")
         # Eliminar prefijos de ambiente [TEST], [DEMO], [STAGING] antes de exponer al LLM
         title = re.sub(r"^\[.*?\]\s*", "", str(raw_title)).strip() or raw_title
         variants = product.get("variants") or []
         if variants:
-            price_min = _format_money(product.get("price_min"))
-            price_max = _format_money(product.get("price_max"))
+            price_min = _format_pesos(product.get("price_min"))
+            price_max = _format_pesos(product.get("price_max"))
             stock_total = product.get("stock_total", product.get("stock", 0))
             lines = [
                 f"- {title}: precio {price_min}-{price_max} (stock total: {stock_total})"
@@ -2033,7 +2027,7 @@ def _build_system_prompt(
             for variant in variants[:3]:
                 lines.append(
                     f"  - {variant.get('label', 'variante')}: "
-                    f"${_format_money(variant.get('price'))} "
+                    f"{_format_pesos(variant.get('price'))} "
                     f"(stock: {variant.get('stock', 0)})"
                 )
             remaining = len(variants) - 3
@@ -2041,7 +2035,7 @@ def _build_system_prompt(
                 lines.append(f"  - ... y {remaining} variante(s) adicional(es)")
             return "\n".join(lines)
         # Compatibilidad con estructura legacy.
-        return f"- {title}: ${_format_money(product.get('price'))} (stock: {product.get('stock', 0)})"
+        return f"- {title}: {_format_pesos(product.get('price'))} (stock: {product.get('stock', 0)})"
 
     # Catálogo condicional por estado — evita inyectar el catálogo completo
     # cuando el cliente ya tomó decisiones y solo necesitamos recolectar datos.

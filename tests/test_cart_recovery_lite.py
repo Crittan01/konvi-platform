@@ -226,8 +226,8 @@ class LoadCartRecoveryBlockTests(unittest.TestCase):
         self.assertIn("Camiseta Negra M", block)
         self.assertIn("Pantalón Beige 30", block)
         self.assertIn("disponible", block)
-        # Total recalculado = 2*30k + 1*85k = 145k
-        self.assertIn("$145,000", block)
+        # Total recalculado = 2*30k + 1*85k = 145k (formato Colombia: punto miles)
+        self.assertIn("$145.000", block)
         self.assertIn("INSTRUCCIÓN", block)
 
     def test_price_changed_marks_diff_and_uses_current_price(self):
@@ -240,11 +240,11 @@ class LoadCartRecoveryBlockTests(unittest.TestCase):
             ],
         )
         block = _load_cart_recovery_block(sb, "tenant-1", "contact-1")
-        self.assertIn("precio anterior $30,000", block)
-        self.assertIn("AHORA $35,000", block)
+        self.assertIn("precio anterior $30.000", block)
+        self.assertIn("AHORA $35.000", block)
         self.assertIn("precio cambió", block)
         # Total recalculado = 2 * 35k = 70k
-        self.assertIn("$70,000", block)
+        self.assertIn("$70.000", block)
 
     def test_stock_zero_marks_sin_stock_excludes_from_total(self):
         sb = FakeSupabase(
@@ -261,8 +261,8 @@ class LoadCartRecoveryBlockTests(unittest.TestCase):
         self.assertIn("Gorra", block)
         self.assertIn("SIN STOCK", block)
         # Solo la camiseta entra al total: 2 * 30k = 60k (Gorra excluida)
-        self.assertIn("$60,000", block)
-        self.assertNotIn("$80,000", block)
+        self.assertIn("$60.000", block)
+        self.assertNotIn("$80.000", block)
 
     def test_all_items_out_of_stock_returns_empty(self):
         sb = FakeSupabase(
@@ -289,7 +289,7 @@ class LoadCartRecoveryBlockTests(unittest.TestCase):
         block = _load_cart_recovery_block(sb, "tenant-1", "contact-1")
         self.assertIn("variante removida", block)
         self.assertIn("Pantalon", block)
-        self.assertIn("$85,000", block)
+        self.assertIn("$85.000", block)
 
     def test_empty_order_items_returns_empty(self):
         sb = FakeSupabase(cart_orders=self._cart([]))
