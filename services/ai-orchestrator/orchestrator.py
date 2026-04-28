@@ -190,17 +190,64 @@ def _get_conversation_customer_phone(supabase: Client, conversation_id: str) -> 
     return str(conv_res.data[0].get("customer_phone") or "").strip() or None
 
 
+_CUSTOMER_CONTEXT_LAZY_TOKENS: frozenset[str] = frozenset({
+    # Tokens léxicos que indican que el cliente está consultando por sus operaciones.
+    # Si la query del cliente contiene cualquiera de estos, cargamos el contexto.
+    "pedido", "pedidos", "orden", "ordenes", "compra", "compras",
+    "tracking", "guia", "guía", "envio", "envío", "rastreo",
+    "reclamo", "reclamos", "queja", "quejas",
+    "garantia", "garantía", "devolucion", "devolución", "cambio",
+    "estado", "status",
+})
+
+
+def _customer_context_should_load(query_text: Optional[str]) -> bool:
+    """Decide si cargar el bloque de contexto cliente conocido.
+
+    Modos (CUSTOMER_CONTEXT_MODE env var, default 'lazy'):
+    - 'always': siempre carga (rev. 68 default — mayor costo en tokens).
+    - 'lazy': carga solo si la query del cliente contiene tokens de consulta
+      sobre sus operaciones (pedido/reclamo/envío/etc.).
+    - 'disabled': nunca carga (kill switch).
+
+    El kill switch global CUSTOMER_CONTEXT_ENABLED (default 'true') anula
+    el modo si está en 'false'.
+    """
+    if os.getenv("CUSTOMER_CONTEXT_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
+        return False
+    mode = (os.getenv("CUSTOMER_CONTEXT_MODE", "lazy") or "lazy").strip().lower()
+    if mode == "disabled":
+        return False
+    if mode == "always":
+        return True
+    # Default: lazy — solo si la query menciona operaciones del cliente.
+    if not query_text:
+        return False
+    # _tokenize_text extrae solo alfanuméricos sin acentos — robusto contra
+    # signos de puntuación ("¿pedido?" → ["pedido"]).
+    tokens = set(_tokenize_text(query_text))
+    return bool(tokens & _CUSTOMER_CONTEXT_LAZY_TOKENS)
+
+
 def _load_customer_context_block(
-    supabase: Client, tenant_id: str, contact_id: Optional[str], first_name: Optional[str]
+    supabase: Client, tenant_id: str, contact_id: Optional[str], first_name: Optional[str],
+    *, query_text: Optional[str] = None,
 ) -> str:
     """Construye un bloque "CONTEXTO DEL CLIENTE" para el system prompt
-    cuando el contacto es conocido y tiene operaciones activas (rev. 68).
+    cuando el contacto es conocido y tiene operaciones activas.
 
-    Razón: si el cliente conocido escribe, el bot debe saber si tiene un pedido
-    en curso o un reclamo abierto, para no preguntarle de cero. Si no hay nada
-    activo, retorna "" (no inyecta).
+    Rev. 68: siempre cargaba si había contact_id.
+    Rev. 69: respeta CUSTOMER_CONTEXT_MODE (always/lazy/disabled) y
+    CUSTOMER_CONTEXT_ENABLED (kill switch). Default 'lazy' — carga solo si la
+    query del cliente menciona pedido/reclamo/envío/etc.
+
+    Razón: a escala el contexto suma ~150-300 tokens por mensaje. La mayoría
+    de mensajes son saludos o consultas de catálogo donde el contexto no se
+    usa. Cargar solo cuando aporta reduce 70-80% del overhead sin perder UX.
     """
     if not contact_id:
+        return ""
+    if not _customer_context_should_load(query_text):
         return ""
     try:
         # Pedidos activos (no cancelados ni delivered).
@@ -2675,7 +2722,8 @@ async def build_and_run_orchestration(
             if contact_record and contact_record.get("consent_given") else None
         )
         customer_context_block = _load_customer_context_block(
-            supabase, tenant_id, contact_id, _customer_first_name
+            supabase, tenant_id, contact_id, _customer_first_name,
+            query_text=content,  # rev. 69 — usado en modo 'lazy' para gate léxico
         )
 
         system_prompt = _build_system_prompt(

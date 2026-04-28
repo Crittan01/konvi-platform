@@ -353,6 +353,12 @@ class OrchestratorWorker:
         except Exception:
             pass  # La función puede no existir si la migración no está aplicada aún
 
+        # Rev. 69 — cleanup del dedup distribuido de webhooks MeLi.
+        try:
+            self.supabase.rpc("cleanup_expired_meli_webhook_dedup").execute()
+        except Exception:
+            pass  # La función puede no existir si la migración rev. 69 no está aplicada
+
         try:
             res = self.supabase.rpc(
                 "cleanup_expired_idempotency_keys",

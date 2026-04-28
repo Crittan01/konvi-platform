@@ -40,6 +40,28 @@ def normalize_document_number(raw: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def _calculate_nit_dv(number_without_dv: str) -> int:
+    """Calcula dígito verificador de un NIT colombiano (módulo-11 oficial DIAN).
+
+    Pesos oficiales DIAN para 1-15 posiciones (de derecha a izquierda).
+    Algoritmo:
+      sum = sum(digit_i * weight_i) para cada dígito de derecha a izquierda
+      mod = sum % 11
+      DV = mod si mod < 2, sino 11 - mod
+
+    Lanza ValueError si number_without_dv no es solo dígitos.
+    """
+    if not number_without_dv.isdigit():
+        raise ValueError("NIT base debe ser solo dígitos para calcular DV")
+    weights = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71]
+    digits_reversed = list(map(int, reversed(number_without_dv)))
+    if len(digits_reversed) > len(weights):
+        raise ValueError(f"NIT excede longitud máxima ({len(weights)} dígitos sin DV)")
+    total = sum(d * w for d, w in zip(digits_reversed, weights))
+    mod = total % 11
+    return mod if mod < 2 else 11 - mod
+
+
 def validate_document(doc_type: Optional[str], doc_number: Optional[str]) -> Optional[str]:
     """Valida tipo + número de documento. Retorna mensaje de error o None si OK.
 
@@ -47,6 +69,8 @@ def validate_document(doc_type: Optional[str], doc_number: Optional[str]) -> Opt
     - Si uno es None y el otro no → error (deben ir juntos).
     - Tipo debe estar en DOCUMENT_TYPES_CO.
     - Número debe pasar reglas de longitud / formato según tipo.
+    - Para NIT: si trae '-X' al final, validar que X sea el DV correcto (módulo-11).
+      Si NO trae DV, aceptar (lenient — Wompi acepta NIT sin DV).
     """
     if doc_type is None and doc_number is None:
         return None
@@ -70,6 +94,21 @@ def validate_document(doc_type: Optional[str], doc_number: Optional[str]) -> Opt
             f"document_number para {doc_type} debe tener entre "
             f"{rules['min']} y {rules['max']} caracteres ({len(length_check)} provisto)."
         )
+
+    # Rev. 69 — validación DV NIT (módulo-11 oficial DIAN).
+    if doc_type == "NIT" and "-" in cleaned:
+        try:
+            base, dv_str = cleaned.rsplit("-", 1)
+            if not base.isdigit() or not dv_str.isdigit() or len(dv_str) != 1:
+                return "NIT con DV inválido. Formato esperado: '123456789-0'."
+            expected_dv = _calculate_nit_dv(base)
+            if int(dv_str) != expected_dv:
+                return (
+                    f"DV del NIT incorrecto. Para {base} el DV correcto es {expected_dv} "
+                    f"(provisto: {dv_str}). Verifica el número."
+                )
+        except ValueError as exc:
+            return f"NIT inválido: {exc}"
     return None
 
 

@@ -70,7 +70,8 @@ _dedup_lock = threading.Lock()
 _dedup_seen: dict[str, float] = {}
 
 
-def _is_duplicate_event(application_id: str, resource: str, sent: str) -> bool:
+def _is_duplicate_event_local(application_id: str, resource: str, sent: str) -> bool:
+    """Dedup in-memory (fallback si la RPC distribuida falla)."""
     if not (application_id and resource and sent):
         return False
     key = f"{application_id}|{resource}|{sent}"
@@ -87,6 +88,82 @@ def _is_duplicate_event(application_id: str, resource: str, sent: str) -> bool:
             return True
         _dedup_seen[key] = now
         return False
+
+
+def _is_duplicate_event(application_id: str, resource: str, sent: str, supabase=None) -> bool:
+    """Idempotencia distribuida via Supabase RPC `meli_webhook_seen` (rev. 69).
+
+    Razón: en Render Starter+ con 2+ réplicas, el dedup in-memory no es
+    coherente cross-réplica. La RPC en Supabase usa INSERT ON CONFLICT atómico
+    para garantizar que un evento se procese exactamente una vez sin importar
+    cuántas réplicas haya.
+
+    Si la RPC falla (Supabase down, RPC no aplicada todavía, etc.) → fallback
+    al dedup in-memory local. Mejor que nada cross-instancia.
+    """
+    if not (application_id and resource and sent):
+        return False
+    if supabase is None:
+        return _is_duplicate_event_local(application_id, resource, sent)
+    try:
+        res = supabase.rpc(
+            "meli_webhook_seen",
+            {
+                "p_application_id": application_id,
+                "p_resource": resource,
+                "p_sent": sent,
+                "p_ttl_seconds": _DEDUP_TTL_SECONDS,
+            },
+        ).execute()
+        # La RPC retorna boolean directo (no array). El cliente Supabase
+        # devuelve `data` con el escalar.
+        already = bool(res.data) if res.data is not None else False
+        return already
+    except Exception as exc:
+        logger.warning("meli_webhook.dedup_rpc_failed err=%s — fallback local", exc)
+        return _is_duplicate_event_local(application_id, resource, sent)
+
+
+# ─── Alerta proactiva: rejected_origin threshold (B3 rev. 69) ────────────────
+
+_alert_lock = threading.Lock()
+_alert_counters: dict[str, list[float]] = {}
+
+
+def _check_meli_origin_alert(ip: str) -> None:
+    """Cuenta rechazos por IP en ventana deslizante. Si excede umbral, log warning.
+
+    Razón B3: las 4 IPs MeLi están hardcoded como default. Si MeLi cambia las
+    IPs, todos los webhooks fallan en silencio hasta que alguien revise logs.
+    Aquí emitimos un log estructurado cuando excede umbral, para que el
+    operador filtre por `meli_webhook.alert_threshold_exceeded` en Render
+    Dashboard y revise la doc oficial MeLi.
+    """
+    if not ip:
+        return
+    threshold = int(os.getenv("MELI_WEBHOOK_ALERT_THRESHOLD", "5"))
+    window = int(os.getenv("MELI_WEBHOOK_ALERT_WINDOW_SECONDS", "300"))
+    now = time.time()
+    with _alert_lock:
+        timestamps = _alert_counters.get(ip, [])
+        cutoff = now - window
+        timestamps = [ts for ts in timestamps if ts >= cutoff]
+        timestamps.append(now)
+        _alert_counters[ip] = timestamps
+        # Cleanup oportunista de IPs viejas que ya no acumulan rechazos.
+        if len(_alert_counters) > 100:
+            for k, tss in list(_alert_counters.items()):
+                fresh = [ts for ts in tss if ts >= cutoff]
+                if not fresh:
+                    _alert_counters.pop(k, None)
+                else:
+                    _alert_counters[k] = fresh
+        if len(timestamps) >= threshold:
+            logger.warning(
+                "meli_webhook.alert_threshold_exceeded ip=%s rejections=%d threshold=%d "
+                "window=%ds — verificar IPs en https://developers.mercadolibre.com.co/es_ar/notificaciones",
+                ip, len(timestamps), threshold, window,
+            )
 
 
 def _extract_request_ip(request: Request) -> str:
@@ -107,6 +184,8 @@ def _verify_meli_origin(request: Request, supabase=Depends(get_service_client)) 
     if ip not in _ALLOWED_MELI_IPS:
         ua = request.headers.get("user-agent", "")[:80]
         logger.warning("meli_webhook.rejected_origin ip=%s ua=%r", ip or "<empty>", ua)
+        # Rev. 69 — alerta proactiva: log estructurado si excede umbral en ventana.
+        _check_meli_origin_alert(ip)
         raise HTTPException(status_code=403, detail="Origen no autorizado")
     allowed, retry_after = webhook_rate_limit_check(
         supabase, ip=ip, bucket="webhook.meli", limit=200, window_seconds=60,
@@ -515,11 +594,18 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
 # ─── Endpoint ────────────────────────────────────────────────────────────────
 
 @router.post("/webhook", dependencies=[Depends(_verify_meli_origin)])
-async def meli_webhook(request: Request, background_tasks: BackgroundTasks):
+async def meli_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    supabase=Depends(get_service_client),
+):
     """
     Recibe notificaciones IPN de MeLi.
     Retorna 200 inmediatamente y procesa en background.
     MeLi reintenta hasta 8 veces si no recibe 200 en 500ms.
+
+    Rev. 69 — idempotencia distribuida via Supabase RPC `meli_webhook_seen`,
+    coherente cross-réplica.
     """
     try:
         body = await request.json()
@@ -537,7 +623,7 @@ async def meli_webhook(request: Request, background_tasks: BackgroundTasks):
     if not (topic and resource and meli_user_id):
         return JSONResponse({"ok": True})
 
-    if _is_duplicate_event(application_id, resource, sent):
+    if _is_duplicate_event(application_id, resource, sent, supabase):
         logger.info("meli_webhook.duplicate_skipped resource=%s sent=%s", resource, sent)
         return JSONResponse({"ok": True, "duplicate": True})
 
