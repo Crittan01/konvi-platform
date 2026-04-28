@@ -62,6 +62,9 @@ const TABS: { key: Category; label: string }[] = [
   { key: 'notificaciones', label: 'Notificaciones' },
 ]
 
+// WhatsApp, Envia, MercadoLibre, Wompi, Telegram
+const TOTAL_CONNECTORS = 5
+
 const COMING_SOON = [
   { name: 'Shopify', category: 'canal' as Category },
   { name: 'WooCommerce', category: 'canal' as Category },
@@ -177,7 +180,7 @@ export function IntegrationsManager(props: Props) {
           <Plug className="h-5 w-5 text-primary" /> Integraciones
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Conectores activos para tu negocio · {connectedCount}/5 conectados
+          Conectores activos para tu negocio · {connectedCount}/{TOTAL_CONNECTORS} conectados
         </p>
       </div>
 

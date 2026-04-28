@@ -42,10 +42,10 @@ class VaultHelper:
     def update_secret(self, secret_id: str, new_secret: str) -> bool:
         """Actualiza un secreto existente en Vault."""
         try:
-            self._sb.rpc("pgsec_update_secret", {
+            r = self._sb.rpc("pgsec_update_secret", {
                 "p_id": secret_id, "p_secret": new_secret,
             }).execute()
-            return True
+            return bool(r.data)
         except Exception as e:
             logger.error("[VAULT] update '%s' error: %s", secret_id, e)
             return False

@@ -101,7 +101,7 @@ class TestGetTenantKbRag(unittest.IsolatedAsyncioTestCase):
     async def test_rag_path_calls_rpc(self):
         docs = [{"title": "Envíos", "content": "3 días", "category": "politica"}]
         sb = _mock_supabase(docs)
-        mock_vector = [0.1] * 768
+        mock_vector = [0.1] * 3072
         with patch("tools.kb_tool.GEMINI_API_KEY", "test-key"), \
              patch("tools.kb_tool._embed_query_vector", return_value=mock_vector):
             result = await get_tenant_kb_rag(sb, TENANT_ID, "¿Cuánto demora el envío?")
@@ -123,7 +123,7 @@ class TestGetTenantKbRag(unittest.IsolatedAsyncioTestCase):
         sb.table.return_value.select.return_value.eq.return_value.eq.return_value \
             .order.return_value.limit.return_value.execute.return_value.data = fallback_doc
         with patch("tools.kb_tool.GEMINI_API_KEY", "test-key"), \
-             patch("tools.kb_tool._embed_query_vector", return_value=[0.1] * 768):
+             patch("tools.kb_tool._embed_query_vector", return_value=[0.1] * 3072):
             result = await get_tenant_kb_rag(sb, TENANT_ID, "pregunta cualquiera")
         self.assertEqual(result, fallback_doc)
 
@@ -134,7 +134,7 @@ class TestGetTenantKbRag(unittest.IsolatedAsyncioTestCase):
         sb.table.return_value.select.return_value.eq.return_value.eq.return_value \
             .order.return_value.limit.return_value.execute.return_value.data = fallback_doc
         with patch("tools.kb_tool.GEMINI_API_KEY", "test-key"), \
-             patch("tools.kb_tool._embed_query_vector", return_value=[0.1] * 768):
+             patch("tools.kb_tool._embed_query_vector", return_value=[0.1] * 3072):
             result = await get_tenant_kb_rag(sb, TENANT_ID, "pregunta")
         self.assertEqual(result, fallback_doc)
 

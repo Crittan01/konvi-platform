@@ -84,7 +84,7 @@ _ORDER_CONFIRMATION_MARKERS = (
     "generando tu pedido",
     "creamos el pedido",
 )
-_EMAIL_REGEX = re.compile(r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", flags=re.IGNORECASE)
+_EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re.IGNORECASE)
 
 
 def _normalize_text_simple(text: str) -> str:
@@ -560,21 +560,57 @@ async def _send_outbound_text(
         text=text,
     )
 
-    if not meta_message_id:
-        return False
+    if meta_message_id:
+        # Envío directo exitoso
+        supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "text",
+            "content": text,
+            "meta_message_id": meta_message_id,
+            "processed": True,
+            "processing_status": PROCESSING_STATUS_PROCESSED,
+        }).execute()
+        logger.info("[OUTBOUND] Respuesta enviada directamente a %s", customer_phone)
+        return True
 
-    supabase.table("messages").insert({
-        "conversation_id": conversation_id,
-        "tenant_id": tenant_id,
-        "direction": "outbound",
-        "content_type": "text",
-        "content": text,
-        "meta_message_id": meta_message_id,
-        "processed": True,
-        "processing_status": PROCESSING_STATUS_PROCESSED,
-    }).execute()
-    logger.info("[OUTBOUND] Respuesta enviada a %s", customer_phone)
-    return True
+    # Fallo en envío directo — insertar en DB y encolar para retry del worker
+    logger.warning(
+        "[OUTBOUND] send_whatsapp_message falló para conv=%s. Encolando para reintento.",
+        conversation_id,
+    )
+    try:
+        from uuid import uuid4
+        from datetime import datetime, timezone as _tz
+        msg_res = supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "text",
+            "content": text,
+            "processed": False,
+            "processing_status": PROCESSING_STATUS_PENDING,
+        }).execute()
+        if msg_res.data:
+            new_msg_id = msg_res.data[0]["id"]
+            supabase.rpc(
+                "enqueue_whatsapp_outbound_message",
+                {"p_message": {
+                    "event_type": "whatsapp.outbound.send",
+                    "tenant_id": tenant_id,
+                    "conversation_id": conversation_id,
+                    "message_id": new_msg_id,
+                    "customer_phone": customer_phone,
+                    "text": text,
+                    "client_message_id": str(uuid4()),
+                    "queued_at": datetime.now(_tz.utc).isoformat(),
+                }, "p_delay": 5},
+            ).execute()
+            logger.info("[OUTBOUND] Mensaje encolado para reintento: msg_id=%s", new_msg_id)
+    except Exception as enqueue_exc:
+        logger.error("[OUTBOUND] No se pudo encolar para reintento: %s", enqueue_exc)
+    return False
 
 
 async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
@@ -1973,7 +2009,8 @@ async def build_and_run_orchestration(
         # Necesario antes de los gates para personalizar respuestas y verificar estado.
         tenant_res = supabase.table("tenants").select(
             "name, shipping_origin, store_type, social_links, store_locations, business_hours, "
-            "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message"
+            "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, "
+            "cutoff_message, dispatch_lead_time"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
@@ -1988,8 +2025,8 @@ async def build_and_run_orchestration(
         tenant_tono             = tenant_row.get("tono_comunicacion") or "amigable"
         tenant_support_schedule = tenant_row.get("support_schedule") or {}
         tenant_after_hours_msg  = tenant_row.get("after_hours_message") or ""
-        tenant_cutoff_msg       = ""
-        tenant_dispatch_lead    = ""
+        tenant_cutoff_msg       = tenant_row.get("cutoff_message") or ""
+        tenant_dispatch_lead    = tenant_row.get("dispatch_lead_time") or ""
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -2097,13 +2134,24 @@ async def build_and_run_orchestration(
             logger.info("[ORCH] Comando cancelar | conv=%s cancelled=%s", conversation_id, cancelled)
             return
 
-        # F3A: Ventana de conversación 24h — si expiró, forzar CATALOG_MODE en FSM
-        # (WhatsApp cierra la ventana de mensajería libre; el historial de compra anterior no aplica)
+        # F3A: Ventana de conversación 24h
+        # Si expiró, forzar CATALOG_MODE en FSM Y enviar mensaje de reactivación al cliente.
+        # No silenciar — el cliente merece saber que puede empezar de nuevo.
         _window_expired = _is_conversation_window_expired(supabase, conversation_id)
         if _window_expired:
             logger.info(
-                "[ORCH] Ventana de conversación expirada (>%sh) | conv=%s — forzando CATALOG_MODE",
+                "[ORCH] Ventana de conversación expirada (>%sh) | conv=%s — reiniciando con mensaje de reactivación",
                 CONVERSATION_WINDOW_HOURS, conversation_id,
+            )
+            _reactivation_msg = (
+                "¡Hola! 😊 Ha pasado un tiempo desde tu última consulta. "
+                "Estoy aquí para ayudarte de nuevo. ¿En qué te puedo asistir hoy?"
+            )
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=_reactivation_msg,
             )
 
         shipping_result = await handle_shipping_quote_if_applicable(
@@ -2183,7 +2231,7 @@ async def build_and_run_orchestration(
                 text=(
                     "Tus datos personales han sido eliminados de nuestros registros. "
                     "Si en un futuro deseas volver a registrarte, puedes hacerlo cuando quieras. "
-                    "Seguiré ayudándote con tu consulta sin guar dar información personal."
+                    "Seguiré ayudándote con tu consulta sin guardar información personal."
                 ),
             )
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
@@ -2243,11 +2291,11 @@ async def build_and_run_orchestration(
             shipping_quoted=shipping_quoted,
         )
 
-        # R-13: Snapshot de producto al confirmar carrier — una sola vez por conversación
+        # R-13: Snapshot de producto al confirmar carrier
+        # Se actualiza si ya existe uno (cliente puede cambiar de producto antes de confirmar).
         if (
             buying_intent
             and _has_carrier_been_selected(history_for_prompt)
-            and not _has_product_snapshot(history)
         ):
             _save_product_snapshot(
                 supabase,
@@ -2494,7 +2542,7 @@ async def build_and_run_orchestration(
         # ── 8.5 Actualizar datos del contacto ─────────────────────────────────
         if contact_id and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email):
             update_data = {}
-            if parsed.extracted_email and "@" in str(parsed.extracted_email):
+            if parsed.extracted_email and _EMAIL_REGEX.match(str(parsed.extracted_email).strip()):
                 update_data["email"] = str(parsed.extracted_email).strip().lower()
             if parsed.extracted_name and str(parsed.extracted_name).strip():
                 update_data["name"] = " ".join(str(parsed.extracted_name).split())
@@ -2546,7 +2594,7 @@ async def build_and_run_orchestration(
         error_str = str(e)
         error_lower = error_str.lower()
 
-        # Errores transitorios: 503, timeout, connection — dejar en pending para retry del worker
+        # Errores transitorios: 503, 429, timeout, connection — dejar en pending para retry del worker
         is_transient = (
             "503" in error_str
             or "unavailable" in error_lower
@@ -2554,6 +2602,10 @@ async def build_and_run_orchestration(
             or "timed out" in error_lower
             or "connection" in error_lower
             or "503 service unavailable" in error_lower
+            or "429" in error_str                     # Gemini rate limit → reintentar
+            or "rate limit" in error_lower            # Rate limit genérico
+            or "quota" in error_lower                 # Quota de API agotada
+            or "resource_exhausted" in error_lower   # gRPC rate limit de Gemini
         )
 
         if is_transient:

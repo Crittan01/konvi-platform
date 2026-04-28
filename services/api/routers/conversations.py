@@ -446,8 +446,8 @@ async def send_agent_message(
                 "direction": "outbound",
                 "content_type": "text",
                 "content": text,
-                "processed": False,
-                "processing_status": "pending",
+                "processed": True,
+                "processing_status": "processed",  # Mensaje del asesor humano, no requiere procesamiento IA
                 "last_error": None,
                 "skip_reason": None,
             })
