@@ -146,6 +146,13 @@ services:
       # Configurar aquí solo si MeLi cambia las IPs antes del próximo redeploy.
       - key: MELI_WEBHOOK_ALLOWED_IPS
         sync: false
+      # ── MeLi alerta proactiva (rev. 69) ─────────────────────────────────────
+      # Si N rechazos de origen excede el umbral en la ventana, log warning
+      # estructurado para que el operador filtre en Render Dashboard.
+      - key: MELI_WEBHOOK_ALERT_THRESHOLD
+        value: "5"
+      - key: MELI_WEBHOOK_ALERT_WINDOW_SECONDS
+        value: "300"
       # ── Wompi — credenciales por-tenant en Supabase Vault (tenant_integrations) ──
       # Las llaves de Wompi se ingresan por tenant en Ajustes → Integraciones → Wompi.
       # No se necesitan env vars globales para Wompi.
@@ -248,5 +255,12 @@ services:
         value: "16777216"
       - key: META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS
         value: "10"
+      # ── Customer context — cliente conocido (rev. 69) ─────────────────────
+      # 'lazy' carga el bloque solo si la query menciona pedido/orden/envío/reclamo.
+      # 'always' siempre carga (rev. 68). 'disabled' nunca.
+      - key: CUSTOMER_CONTEXT_ENABLED
+        value: "true"
+      - key: CUSTOMER_CONTEXT_MODE
+        value: "lazy"
     healthCheckPath: /health
     autoDeploy: true

@@ -10,6 +10,7 @@ import { DocCard } from './doc-card'
 import { TemplatesSection } from './templates-section'
 import { STARTER_TEMPLATES } from './starter-templates'
 import { IndexPendingBanner } from './index-pending-banner'
+import { KbMigrationBanner } from './kb-migration-banner'
 
 const MAX_DOCS    = 30
 const MAX_CONTENT = 3000
@@ -332,6 +333,9 @@ export default async function KnowledgeBasePage({
           Cuando el cliente pregunta por WhatsApp, el asistente prioriza estos documentos antes de responder para mantener consistencia con tus políticas, productos y operación.
         </span>
       </div>
+
+      {/* Rev. 69 — Banner one-time migración rev. 68 (general → faq + nuevas categorías) */}
+      <KbMigrationBanner canWrite={canWrite} />
 
       {/* Banner documentos pendientes de indexar */}
       <IndexPendingBanner pendingCount={pendingCount} />
