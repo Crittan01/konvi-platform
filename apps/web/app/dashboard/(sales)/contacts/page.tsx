@@ -49,7 +49,8 @@ export default async function ContactsPage({
     let query = supabase
       .from('contacts')
       .select(
-        'id, phone, name, email, notes, consent_given, consent_date, consent_source, consent_notice_version, ' +
+        'id, phone, name, email, notes, document_type, document_number, ' +
+        'consent_given, consent_date, consent_source, consent_notice_version, ' +
         'consent_evidence, consent_actor_email, consent_revoked_at, consent_revoked_reason, created_at, address'
       )
       .eq('tenant_id', tenantId)
@@ -87,14 +88,27 @@ export default async function ContactsPage({
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
+    // Rev. 69 — campos estructurados de address.
+    const buildingTypeRaw = (formData.get('addr_building_type') as string) || ''
+    const buildingType = ['casa', 'edificio', 'conjunto'].includes(buildingTypeRaw) ? buildingTypeRaw : undefined
     const address  = street ? {
       street,
-      number:    (formData.get('addr_number')   as string) || undefined,
-      city:      addrCity,
-      state:     (formData.get('addr_state')    as string) || undefined,
-      country:   'CO',
-      dane_code: daneCode || undefined,
+      number:        (formData.get('addr_number')        as string) || undefined,
+      city:          addrCity,
+      state:         (formData.get('addr_state')         as string) || undefined,
+      country:       'CO',
+      dane_code:     daneCode || undefined,
+      neighborhood:  (formData.get('addr_neighborhood')  as string) || undefined,
+      building_type: buildingType,
+      tower:         (formData.get('addr_tower')         as string) || undefined,
+      apartment:     (formData.get('addr_apartment')     as string) || undefined,
+      complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
+      reference:     (formData.get('addr_reference')     as string) || undefined,
     } : null
+    // Rev. 69 — documento de identidad.
+    const docTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
+    const docType = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'].includes(docTypeRaw) ? docTypeRaw : null
+    const docNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
     const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 10)
     if (digits.length !== 10) return
     await sb.from('contacts').insert({
@@ -103,6 +117,9 @@ export default async function ContactsPage({
       name:          (formData.get('name') as string) || null,
       email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
+      // rev. 69 — solo persiste si tipo+número están AMBOS poblados (regla Wompi).
+      document_type:   docType && docNumber ? docType : null,
+      document_number: docType && docNumber ? docNumber : null,
       consent_given: consentGiven,
       consent_date:  consentGiven ? nowIso : null,
       consent_source: consentGiven ? consentSource : null,
@@ -150,14 +167,27 @@ export default async function ContactsPage({
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
+    // Rev. 69 — campos estructurados de address (igual que addAction).
+    const editBuildingTypeRaw = (formData.get('addr_building_type') as string) || ''
+    const editBuildingType = ['casa', 'edificio', 'conjunto'].includes(editBuildingTypeRaw) ? editBuildingTypeRaw : undefined
     const address  = street ? {
       street,
-      number:    (formData.get('addr_number')    as string) || undefined,
-      city:      addrCity,
-      state:     (formData.get('addr_state')     as string) || undefined,
-      country:   'CO',
-      dane_code: daneCode || undefined,
+      number:        (formData.get('addr_number')        as string) || undefined,
+      city:          addrCity,
+      state:         (formData.get('addr_state')         as string) || undefined,
+      country:       'CO',
+      dane_code:     daneCode || undefined,
+      neighborhood:  (formData.get('addr_neighborhood')  as string) || undefined,
+      building_type: editBuildingType,
+      tower:         (formData.get('addr_tower')         as string) || undefined,
+      apartment:     (formData.get('addr_apartment')     as string) || undefined,
+      complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
+      reference:     (formData.get('addr_reference')     as string) || undefined,
     } : null
+    // Rev. 69 — documento de identidad en edit.
+    const editDocTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
+    const editDocType = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'].includes(editDocTypeRaw) ? editDocTypeRaw : null
+    const editDocNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
     const mergedEvidence = {
       ...((prev?.consent_evidence ?? {}) as Record<string, unknown>),
       last_update: {
@@ -176,6 +206,9 @@ export default async function ContactsPage({
       name:          (formData.get('name') as string) || null,
       email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
+      // Rev. 69 — documento (ambos juntos o ambos null).
+      document_type:   editDocType && editDocNumber ? editDocType : null,
+      document_number: editDocType && editDocNumber ? editDocNumber : null,
       address,
       consent_given: consentGiven,
       consent_date: effectiveConsentDate,

@@ -10,6 +10,13 @@ import AddressSelector from '@/components/address-selector'
 type ContactAddress = {
   street?: string; number?: string; city?: string
   state?: string; country?: string; dane_code?: string
+  // Rev. 69 — schema canónico extendido
+  neighborhood?: string
+  building_type?: 'casa' | 'edificio' | 'conjunto'
+  tower?: string
+  apartment?: string
+  complex_name?: string
+  reference?: string
 }
 
 type Contact = {
@@ -18,6 +25,8 @@ type Contact = {
   name: string | null
   email: string | null
   notes: string | null
+  document_type?: string | null   // rev. 69 — CC/CE/NIT/PP/TI/OTHER
+  document_number?: string | null // rev. 69
   consent_given: boolean
   consent_date: string | null
   consent_source?: string | null
@@ -187,13 +196,36 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   <Label className="text-xs">Email</Label>
                   <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" />
                 </div>
+                {/* Rev. 69 — Documento de identidad (Wompi pre-fill checkout) */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tipo doc.</Label>
+                    <select
+                      name="document_type"
+                      defaultValue=""
+                      className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-xs"
+                    >
+                      <option value="">—</option>
+                      <option value="CC">CC</option>
+                      <option value="CE">CE</option>
+                      <option value="NIT">NIT</option>
+                      <option value="PP">PP</option>
+                      <option value="TI">TI</option>
+                      <option value="OTHER">Otro</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2 space-y-1">
+                    <Label className="text-xs">Número doc.</Label>
+                    <Input name="document_number" placeholder="1.234.567.890" />
+                  </div>
+                </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Notas</Label>
                   <Input name="notes" placeholder="Cliente frecuente..." />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
-                  <AddressSelector fieldPrefix="addr" />
+                  <AddressSelector fieldPrefix="addr" showBuildingDetails />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="space-y-1">
@@ -300,10 +332,17 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             Evidencia: {extractEvidenceNote(c.consent_evidence)}
                           </p>
                         )}
+                        {c.document_type && c.document_number && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Doc: <span className="font-mono">{c.document_type} {c.document_number}</span>
+                          </p>
+                        )}
                         {c.address?.street && (
                           <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                             <MapPin className="h-3 w-3 shrink-0" />
-                            {c.address.street}{c.address.city ? `, ${c.address.city}` : ''}
+                            {c.address.street}
+                            {c.address.neighborhood ? `, ${c.address.neighborhood}` : ''}
+                            {c.address.city ? `, ${c.address.city}` : ''}
                           </p>
                         )}
                       </div>
@@ -330,6 +369,29 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             <Input name="email" type="email" defaultValue={c.email ?? ''} className="h-8 text-xs" autoComplete="email" />
                           </div>
                         </div>
+                        {/* Rev. 69 — Documento de identidad (edición) */}
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Tipo doc.</Label>
+                            <select
+                              name="document_type"
+                              defaultValue={c.document_type ?? ''}
+                              className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs"
+                            >
+                              <option value="">—</option>
+                              <option value="CC">CC</option>
+                              <option value="CE">CE</option>
+                              <option value="NIT">NIT</option>
+                              <option value="PP">PP</option>
+                              <option value="TI">TI</option>
+                              <option value="OTHER">Otro</option>
+                            </select>
+                          </div>
+                          <div className="col-span-2 space-y-1">
+                            <Label className="text-xs">Número doc.</Label>
+                            <Input name="document_number" defaultValue={c.document_number ?? ''} className="h-8 text-xs" />
+                          </div>
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-xs">Notas</Label>
@@ -338,7 +400,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
-                          <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} />
+                          <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} showBuildingDetails />
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
