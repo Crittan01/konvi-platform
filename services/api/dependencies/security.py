@@ -103,7 +103,32 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
-def build_rate_limit_dependency(rule: RateLimitRule) -> Callable:
+def _get_optional_user_id(request: Request) -> str:
+    """Extrae user_id (sub claim) del JWT sin levantar 401 si falta.
+
+    Rev. 69 — usado en rate limiters user-aware. Si JWT ausente o sin sub
+    válido, retorna 'anon' (todos los anónimos del tenant comparten bucket).
+    """
+    try:
+        from dependencies.auth import _extract_jwt_payload
+        payload = _extract_jwt_payload(request)
+        sub = payload.get("sub")
+        if sub:
+            return str(sub)
+    except Exception:
+        pass
+    return "anon"
+
+
+def build_rate_limit_dependency(rule: RateLimitRule, include_user_id: bool = False) -> Callable:
+    """Construye dependency de rate-limit. Rev. 69 admite include_user_id.
+
+    Si include_user_id=True, la key del bucket incluye el user_id del JWT
+    (claim 'sub'). Esto previene que un usuario malicioso desde IPs rotadas
+    dentro del mismo tenant pueda saturar (caso C1).
+    Si el JWT no trae sub, todos los anónimos del tenant comparten bucket
+    'anon' (degradación segura).
+    """
     async def _dependency(
         request: Request,
         response: Response,
@@ -114,7 +139,11 @@ def build_rate_limit_dependency(rule: RateLimitRule) -> Callable:
             return
 
         ip = _client_ip(request)
-        key = f"{rule.bucket}:{tenant_id}:{ip}"
+        if include_user_id:
+            user_id = _get_optional_user_id(request)
+            key = f"{rule.bucket}:{tenant_id}:{user_id}:{ip}"
+        else:
+            key = f"{rule.bucket}:{tenant_id}:{ip}"
 
         allowed, remaining, reset_in = True, rule.limit - 1, rule.window_seconds
 
@@ -183,7 +212,8 @@ RL_WRITE_DEFAULT = build_rate_limit_dependency(
     RateLimitRule(bucket="write.default", limit=WRITE_LIMIT_PER_MINUTE, window_seconds=60)
 )
 RL_SEND_MESSAGE = build_rate_limit_dependency(
-    RateLimitRule(bucket="conversation.send", limit=SEND_LIMIT_PER_MINUTE, window_seconds=60)
+    RateLimitRule(bucket="conversation.send", limit=SEND_LIMIT_PER_MINUTE, window_seconds=60),
+    include_user_id=True,  # rev. 69 — previene abuse desde IPs rotadas dentro del mismo tenant
 )
 
 
