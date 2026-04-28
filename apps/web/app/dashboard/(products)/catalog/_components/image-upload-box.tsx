@@ -10,9 +10,10 @@ interface Props {
   tenantId: string
   size?: 'sm' | 'md' | 'lg'
   label?: string
+  onUrlChange?: (url: string) => void  // callback para estado externo (crear producto)
 }
 
-export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', label }: Props) {
+export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', label, onUrlChange }: Props) {
   const [url, setUrl]       = useState(defaultUrl)
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState<string | null>(null)
@@ -37,6 +38,7 @@ export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', l
       if (uploadErr) throw new Error(uploadErr.message)
       const { data } = supabase.storage.from('tenant-media').getPublicUrl(path)
       setUrl(data.publicUrl)
+      onUrlChange?.(data.publicUrl)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al subir')
     } finally {
@@ -82,7 +84,7 @@ export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', l
         {url && (
           <button
             type="button"
-            onClick={() => setUrl('')}
+            onClick={() => { setUrl(''); onUrlChange?.('') }}
             className="text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-0.5 transition-colors"
           >
             <X className="h-3 w-3" /> Quitar

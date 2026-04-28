@@ -2,31 +2,27 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, Loader2, Upload, Image as ImageIcon, Check, Info, Layers } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Plus, Trash2, Loader2, Zap, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { createClient } from '@/utils/supabase/client'
+import { ImageUploadBox } from './image-upload-box'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface Attr { key: string; value: string }
 interface VariantDraft {
-  sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''; stock: number; cost_price: number | '';
-  weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''; image_url: string;
+  sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''
+  stock: number; cost_price: number | ''
+  weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''
+  image_url: string
 }
 interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
-  sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '', stock: 0, cost_price: '',
-  weight_kg: '', length_cm: '', width_cm: '', height_cm: '', image_url: ''
+  sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '',
+  stock: 0, cost_price: '', weight_kg: '', length_cm: '', width_cm: '', height_cm: '', image_url: '',
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function attrsToObj(attrs: Attr[]): Record<string, string> {
   const obj: Record<string, string> = {}
@@ -34,164 +30,181 @@ function attrsToObj(attrs: Attr[]): Record<string, string> {
   return obj
 }
 
-function variantLabel(v: VariantDraft): string {
-  const filled = v.attrs.filter(a => a.key.trim() && a.value.trim())
-  if (filled.length === 0) return 'Estándar'
-  return filled.map(a => `${a.key}: ${a.value}`).join(', ')
+// ─── Variante individual ──────────────────────────────────────────────────────
+
+function VariantForm({ v, idx, total, onChange, onRemove, tenantId }: {
+  v: VariantDraft; idx: number; total: number; tenantId: string
+  onChange: (field: keyof VariantDraft, val: unknown) => void
+  onRemove: () => void
+}) {
+  const [showDims, setShowDims] = useState(false)
+
+  const addAttr = () => onChange('attrs', [...v.attrs, { key: '', value: '' }])
+  const removeAttr = (i: number) => onChange('attrs', v.attrs.filter((_, j) => j !== i))
+  const updateAttr = (i: number, field: 'key' | 'value', val: string) =>
+    onChange('attrs', v.attrs.map((a, j) => j === i ? { ...a, [field]: val } : a))
+
+  return (
+    <div className="rounded-xl border border-border/60 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b border-border/40">
+        <span className="text-xs font-semibold text-foreground">
+          {v.sku || `Variante ${idx + 1}`}
+          {v.attrs.filter(a => a.key && a.value).length > 0 && (
+            <span className="font-normal text-muted-foreground ml-1.5">
+              — {v.attrs.filter(a => a.key && a.value).map(a => `${a.key}: ${a.value}`).join(', ')}
+            </span>
+          )}
+        </span>
+        {total > 1 && (
+          <button type="button" onClick={onRemove}
+            className="text-muted-foreground hover:text-destructive transition-colors">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      <div className="p-4 space-y-3">
+        {/* Atributos */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-semibold text-muted-foreground uppercase">Atributos (tamaño, color, aroma…)</label>
+          {v.attrs.map((attr, i) => (
+            <div key={i} className="flex gap-1.5 items-center">
+              <Input value={attr.key} onChange={e => updateAttr(i, 'key', e.target.value)}
+                placeholder="Propiedad (Ej: Volumen)" className="h-7 text-xs flex-1" />
+              <Input value={attr.value} onChange={e => updateAttr(i, 'value', e.target.value)}
+                placeholder="Valor (Ej: 100ml)" className="h-7 text-xs flex-1" />
+              {v.attrs.length > 1 && (
+                <button type="button" onClick={() => removeAttr(i)}
+                  className="text-muted-foreground hover:text-destructive"><X className="h-3 w-3" /></button>
+              )}
+            </div>
+          ))}
+          <button type="button" onClick={addAttr} className="text-[11px] text-primary hover:underline">+ atributo</button>
+        </div>
+
+        {/* Precio, stock, SKU */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio *</label>
+            <Input type="number" step="50" min="50" value={v.price || ''}
+              onChange={e => onChange('price', parseFloat(e.target.value) || 0)}
+              className="h-8 text-xs font-mono mt-1" placeholder="0" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio anterior</label>
+            <Input type="number" step="50" value={v.compare_at_price}
+              onChange={e => onChange('compare_at_price', parseFloat(e.target.value) || '')}
+              className="h-8 text-xs font-mono mt-1 border-dashed bg-muted/20" placeholder="Opcional" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock *</label>
+            <Input type="number" min="0" value={v.stock}
+              onChange={e => onChange('stock', parseInt(e.target.value) || 0)}
+              className="h-8 text-xs font-mono mt-1" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">SKU *</label>
+            <Input value={v.sku} onChange={e => onChange('sku', e.target.value.toUpperCase())}
+              className="h-8 text-xs font-mono mt-1" placeholder="PROD-001" maxLength={50} />
+          </div>
+          <div>
+            <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
+            <Input type="number" step="50" min="0" value={v.cost_price}
+              onChange={e => onChange('cost_price', parseFloat(e.target.value) || '')}
+              className="h-8 text-xs font-mono mt-1 border-amber-500/30" placeholder="Para margen" />
+          </div>
+        </div>
+
+        {/* Foto de la variante */}
+        <ImageUploadBox name={`image_url_${idx}`} defaultUrl={v.image_url}
+          tenantId={tenantId} size="sm" label="Foto de esta variante (opcional)"
+          onUrlChange={url => onChange('image_url', url)} key={`img-${idx}`} />
+
+        {/* Dimensiones */}
+        <button type="button" onClick={() => setShowDims(d => !d)}
+          className="flex items-center gap-1 text-[10px] text-primary/70 font-medium hover:text-primary transition-colors">
+          {showDims ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {showDims ? 'Ocultar dimensiones' : 'Dimensiones y peso (Envia)'}
+        </button>
+        {showDims && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-border/30">
+            {([['weight_kg','Peso (kg)','0.1'],['length_cm','Largo (cm)','10'],['width_cm','Ancho (cm)','10'],['height_cm','Alto (cm)','5']] as const).map(([f,l,p]) => (
+              <div key={f}>
+                <label className="text-[10px] text-muted-foreground uppercase">{l}</label>
+                <Input type="number" step="0.01" min="0" value={v[f]}
+                  onChange={e => onChange(f, parseFloat(e.target.value) || '')}
+                  className="h-7 text-xs font-mono mt-1" placeholder={p} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
-// ─── Componente ───────────────────────────────────────────────────────────────
+// ─── Formulario principal ─────────────────────────────────────────────────────
 
-export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [], tenantId }: Props) {
+export default function CatalogForm({ onCreated = () => {}, categories = [], tenantId }: Props) {
   const router = useRouter()
-  const [platformCategoryId, setPlatformCategoryId] = useState('')
-  const [coverImageUrl, setCoverImageUrl] = useState('')
-  const [uploadingCover, setUploadingCover] = useState(false)
-  const [uploadingVariantIdx, setUploadingVariantIdx] = useState<number | null>(null)
-  const [title, setTitle] = useState('')
+  const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
-  const [variants, setVariants] = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
+  const [categoryId, setCategoryId] = useState('')
+  const [coverUrl, setCoverUrl]     = useState('')
+  const [variants, setVariants]     = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
+  const [showMatrix, setShowMatrix] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]           = useState<string | null>(null)
 
-  // ── Variantes ───────────────────────────────────────────────────────────────
-
-  const addVariant = () => setVariants(prev => [
-    ...prev,
-    { ...DEFAULT_VARIANT },
-  ])
-
-  const removeVariant = (idx: number) => {
-    if (variants.length === 1) return
-    setVariants(prev => prev.filter((_, i) => i !== idx))
-  }
-
-  const updateVariantField = (idx: number, field: keyof VariantDraft, val: any) =>
+  const updateVariant = (idx: number, field: keyof VariantDraft, val: unknown) =>
     setVariants(prev => prev.map((v, i) => i === idx ? { ...v, [field]: val } : v))
 
-  // ── Upload ──────────────────────────────────────────────────────────────────
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>, variantIdx?: number) {
-    const file = e.target.files?.[0]
-    if (!file || !tenantId) return
-
-    const isCover = variantIdx === undefined
-    if (isCover) setUploadingCover(true)
-    else setUploadingVariantIdx(variantIdx)
-    setError(null)
-
-    try {
-      const ext = file.name.split('.').pop()
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-      const path = `${tenantId}/${filename}`
-      const supabase = createClient()
-      const { error: uploadError } = await supabase.storage.from('tenant-media').upload(path, file)
-      if (uploadError) throw new Error(uploadError.message)
-      const { data } = supabase.storage.from('tenant-media').getPublicUrl(path)
-
-      if (isCover) {
-        setCoverImageUrl(data.publicUrl)
-      } else {
-        updateVariantField(variantIdx, 'image_url', data.publicUrl)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al subir imagen')
-    } finally {
-      if (isCover) setUploadingCover(false)
-      else setUploadingVariantIdx(null)
-    }
-  }
-
-  const addAttr = (vIdx: number) =>
-    setVariants(prev => prev.map((v, i) =>
-      i === vIdx ? { ...v, attrs: [...v.attrs, { key: '', value: '' }] } : v
-    ))
-
-  const removeAttr = (vIdx: number, aIdx: number) =>
-    setVariants(prev => prev.map((v, i) =>
-      i === vIdx ? { ...v, attrs: v.attrs.filter((_, j) => j !== aIdx) } : v
-    ))
-
-  const updateAttr = (vIdx: number, aIdx: number, field: 'key' | 'value', val: string) =>
-    setVariants(prev => prev.map((v, i) =>
-      i === vIdx
-        ? { ...v, attrs: v.attrs.map((a, j) => j === aIdx ? { ...a, [field]: val } : a) }
-        : v
-    ))
-
-  // ── Submit ──────────────────────────────────────────────────────────────────
+  const addVariant = () => setVariants(prev => [...prev, { ...DEFAULT_VARIANT }])
+  const removeVariant = (idx: number) => setVariants(prev => prev.filter((_, i) => i !== idx))
 
   const handleSubmit = async () => {
     if (!title.trim()) { setError('El nombre del producto es obligatorio'); return }
-    if (variants.some(v => !v.sku.trim())) { setError('Todas las variantes deben tener un SKU (Obligatorio)'); return }
-    if (variants.some(v => v.price <= 0)) { setError('Todos los precios normales deben ser mayores a 0'); return }
+    if (variants.some(v => !v.sku.trim())) { setError('Todas las variantes deben tener un SKU'); return }
+    if (variants.some(v => v.price <= 0)) { setError('Todos los precios deben ser mayores a 0'); return }
 
-    setSubmitting(true)
-    setError(null)
-
+    setSubmitting(true); setError(null)
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
-    const token = session?.access_token
-    const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!token || !meta.tenant_id) { setError('Sesión expirada'); setSubmitting(false); return }
+    const meta = (session?.user?.app_metadata ?? {}) as { tenant_id?: string }
+    if (!session?.access_token || !meta.tenant_id) { setError('Sesión expirada'); setSubmitting(false); return }
 
     try {
-      // Crear producto
-      const { data: prod, error: prodErr } = await supabase
-        .from('products')
-        .insert({
-          tenant_id: meta.tenant_id,
-          platform_category_id: platformCategoryId || null,
-          title: title.trim(),
-          description: description.trim() || null,
-          cover_image_url: coverImageUrl.trim() || null,
-          status: 'active',
-        })
-        .select()
-        .single()
+      const { data: prod, error: e1 } = await supabase.from('products').insert({
+        tenant_id: meta.tenant_id, platform_category_id: categoryId || null,
+        title: title.trim(), description: description.trim() || null,
+        cover_image_url: coverUrl.trim() || null, status: 'active',
+      }).select().single()
+      if (e1 || !prod) throw new Error(e1?.message ?? 'Error al crear producto')
 
-      if (prodErr || !prod) throw new Error(prodErr?.message ?? 'Error al crear producto')
-
-      // Crear variantes
-      const variationsPayload = variants.map(v => {
-        let finalPrice = v.price > 0 ? v.price : 1;
-        let finalCompare = null;
-        const promo = v.compare_at_price === '' ? null : Number(v.compare_at_price);
-
-        // Lógica de inversión automática de promoción
-        if (promo && promo > 0 && promo < finalPrice) {
-          finalPrice = promo;
-          finalCompare = v.price; // El "Precio Normal" original pasa a ser el tachado
-        }
-
+      const payload = variants.map(v => {
+        let finalPrice = v.price > 0 ? v.price : 1
+        let finalCompare: number | null = null
+        const promo = v.compare_at_price === '' ? null : Number(v.compare_at_price)
+        if (promo && promo > 0 && promo < finalPrice) { finalCompare = finalPrice; finalPrice = promo }
         return {
-          product_id: prod.id,
-          tenant_id: meta.tenant_id,
-          sku: v.sku.trim(),
-          price: finalPrice,
-          compare_at_price: finalCompare,
+          product_id: prod.id, tenant_id: meta.tenant_id, sku: v.sku.trim(),
+          price: finalPrice, compare_at_price: finalCompare,
           cost_price: v.cost_price === '' ? 0 : Number(v.cost_price),
-          stock_quantity: v.stock,
-          attributes: attrsToObj(v.attrs),
+          stock_quantity: v.stock, attributes: attrsToObj(v.attrs),
           weight_kg: v.weight_kg === '' ? null : v.weight_kg,
           length_cm: v.length_cm === '' ? null : v.length_cm,
-          width_cm: v.width_cm === '' ? null : v.width_cm,
+          width_cm:  v.width_cm  === '' ? null : v.width_cm,
           height_cm: v.height_cm === '' ? null : v.height_cm,
-          image_url: v.image_url.trim() || null,
+          image_url: v.image_url || null,
         }
       })
 
-      const { error: varErr } = await supabase
-        .from('product_variations')
-        .insert(variationsPayload)
+      const { error: e2 } = await supabase.from('product_variations').insert(payload)
+      if (e2) throw new Error(e2.message)
 
-      if (varErr) throw new Error(varErr.message)
-
-      // Reset y refrescar Server Component
-      setTitle('')
-      setDescription('')
-      setVariants([{ ...DEFAULT_VARIANT }])
-      onCreated()
-      router.refresh() // Fuerza re-fetch del Server Component para mostrar el nuevo producto
+      setTitle(''); setDescription(''); setVariants([{ ...DEFAULT_VARIANT }]); setCoverUrl('')
+      onCreated(); router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al crear producto')
     } finally {
@@ -199,260 +212,87 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
     }
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-xl">Añadir Producto</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4 h-auto">
-            <TabsTrigger value="general" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
-              <Info className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden xs:inline sm:inline">Info</span>
-              <span className="hidden sm:inline"> General</span>
-            </TabsTrigger>
-            <TabsTrigger value="variants" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
-              <Layers className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden xs:inline sm:inline">Variantes</span>
-              <span className="hidden sm:inline"> e Inventario</span>
-            </TabsTrigger>
-          </TabsList>
+    <div className="space-y-5">
 
-          <TabsContent value="general" className="space-y-4 mt-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-            <Label>Nombre del Producto *</Label>
-            <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Zapatillas Pro V2" />
+      {/* ① INFORMACIÓN */}
+      <div className="space-y-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">① Información</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Nombre *</label>
+            <Input value={title} onChange={e => setTitle(e.target.value)}
+              placeholder="Ej: Aceite Esencial de Lavanda" className="h-8 text-sm mt-1" />
           </div>
-          <div className="space-y-2">
-            <Label>Categoría Global</Label>
-            <select
-              value={platformCategoryId}
-              onChange={e => setPlatformCategoryId(e.target.value)}
-              className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background"
-            >
-              <option value="">-- Seleccionar Categoría --</option>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría</label>
+            <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
+              className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
+              <option value="">Sin categoría</option>
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+          <div className="sm:col-span-2">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción (la IA la usa para responder sobre el producto)</label>
+            <Textarea value={description} onChange={e => setDescription(e.target.value)}
+              placeholder="Ingredientes, beneficios, cómo usarlo..." className="min-h-[70px] text-sm resize-y mt-1" />
+          </div>
+        </div>
+        <ImageUploadBox name="cover_image_url" defaultUrl={coverUrl}
+          tenantId={tenantId} size="lg" label="Imagen portada del producto"
+          onUrlChange={setCoverUrl} key="cover" />
+      </div>
+
+      {/* ② VARIANTES */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">② Variantes</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={addVariant}
+              className="inline-flex items-center gap-1 h-6 px-2.5 text-[11px] font-medium rounded-md border border-primary/30 text-primary bg-primary/5 hover:bg-primary/10 transition-colors">
+              <Plus className="h-3 w-3" /> Agregar
+            </button>
+            <button type="button" onClick={() => setShowMatrix(m => !m)}
+              className="inline-flex items-center gap-1 h-6 px-2.5 text-[11px] font-medium rounded-md border border-border text-muted-foreground bg-muted/30 hover:bg-muted hover:text-foreground transition-colors">
+              <Zap className="h-3 w-3" /> Generar variantes
+            </button>
+          </div>
         </div>
 
-        <div className="space-y-1">
-          <Label className="text-xs">Descripción detallada (Leída por la IA)</Label>
-          <Textarea 
-            value={description} 
-            onChange={e => setDescription(e.target.value)} 
-            placeholder="Especificaciones, material, usos... Entre más detalles incluyas, mejor responderá el Agente IA." 
-            className="resize-y min-h-[100px]"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Imagen Principal</Label>
-          <div className="flex items-center gap-3">
-            {coverImageUrl ? (
-              <div className="relative h-16 w-16 border border-border rounded-lg bg-muted overflow-hidden flex-shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={coverImageUrl} alt="Cover" className="object-cover w-full h-full" />
-                <button type="button" onClick={() => setCoverImageUrl('')} className="absolute top-1 right-1 bg-black/60 text-white p-0.5 rounded-full hover:bg-black">
-                  <Plus className="h-3 w-3 rotate-45" />
-                </button>
-              </div>
-            ) : null}
-            <div className="relative overflow-hidden inline-block">
-              <input type="file" accept="image/*" onChange={handleFileUpload} disabled={uploadingCover} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
-              <Button type="button" variant="outline" disabled={uploadingCover} className="gap-2 h-9 text-sm">
-                {uploadingCover ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                {uploadingCover ? 'Subiendo...' : 'Subir Foto'}
-              </Button>
+        {showMatrix && (
+          <div className="p-3 bg-muted/20 rounded-xl border border-border/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase">Generador de variantes</p>
+              <button type="button" onClick={() => setShowMatrix(false)}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Define los atributos con sus opciones y el sistema crea todas las combinaciones. Ej: Color [Rojo, Azul] × Talla [S, M, L] = 6 variantes.
+            </p>
+            <p className="text-[11px] text-amber-500/80 bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2">
+              Para usar el generador, primero guarda el producto y luego abre el drawer de edición → Variantes.
+            </p>
           </div>
-        </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="variants" className="space-y-4 mt-2">
-        <div className="flex items-center justify-between bg-muted/20 p-3 rounded-lg border border-border/50">
-          <div className="space-y-0.5">
-            <Label className="text-base">Variantes de Producto</Label>
-            <p className="text-xs text-muted-foreground mr-4">Agrega tallas, colores y gestiona el inventario ({variants.length} en total)</p>
-          </div>
-          <Button type="button" size="sm" variant="secondary" onClick={addVariant} className="h-8 text-xs gap-1.5 flex-shrink-0">
-            <Plus className="h-3.5 w-3.5" /> Añadir variante
-          </Button>
-        </div>
-
-        <Accordion type="multiple" defaultValue={["item-0"]} className="w-full space-y-3">
-          {variants.map((v, vIdx) => (
-            <AccordionItem key={vIdx} value={`item-${vIdx}`} className="border border-border/60 bg-card rounded-lg px-4 shadow-sm overflow-hidden data-[state=open]:border-primary/30">
-              <AccordionTrigger className="hover:no-underline py-4">
-                <div className="flex items-center gap-3 text-left">
-                  <span className="text-sm font-semibold">{v.sku || `Variante ${vIdx + 1}`}</span>
-                  <span className="text-xs text-muted-foreground hidden sm:inline-block">— {variantLabel(v)}</span>
-                  {v.price > 0 && (
-                     <div className="flex items-center gap-1.5 ml-2">
-                       {v.compare_at_price && Number(v.compare_at_price) > 0 && Number(v.compare_at_price) < v.price ? (
-                         <>
-                           <span className="text-[10px] text-muted-foreground line-through">${v.price}</span>
-                           <span className="text-[10px] font-bold border border-green-500/20 text-green-600 px-2 py-0.5 rounded-full bg-green-500/10">${v.compare_at_price}</span>
-                         </>
-                       ) : (
-                         <span className="text-[10px] font-medium border border-primary/20 text-primary px-2 py-0.5 rounded-full bg-primary/5">${v.price}</span>
-                       )}
-                     </div>
-                  )}
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="pt-2 pb-5 space-y-5 border-t border-border/30 mt-1">
-                <div className="flex justify-end p-0 m-0">
-                  {variants.length > 1 && (
-                    <button type="button" onClick={() => removeVariant(vIdx)} className="text-muted-foreground hover:text-destructive flex items-center gap-1.5 text-xs font-medium -mt-2 bg-destructive/5 px-2 py-1 rounded">
-                      <Trash2 className="h-3.5 w-3.5" /> Eliminar
-                    </button>
-                  )}
-                </div>
-
-              {/* Atributos */}
-              <div className="space-y-1">
-                {v.attrs.map((attr, aIdx) => (
-                  <div key={aIdx} className="flex gap-1.5 items-center">
-                    <Input
-                      value={attr.key}
-                      onChange={e => updateAttr(vIdx, aIdx, 'key', e.target.value)}
-                      placeholder="Propiedad"
-                      className="h-7 text-xs w-24 flex-shrink-0"
-                    />
-                    <span className="text-muted-foreground text-xs">:</span>
-                    <Input
-                      value={attr.value}
-                      onChange={e => updateAttr(vIdx, aIdx, 'value', e.target.value)}
-                      placeholder="Valor"
-                      className="h-7 text-xs flex-1"
-                    />
-                    {v.attrs.length > 1 && (
-                      <button type="button" onClick={() => removeAttr(vIdx, aIdx)} className="text-muted-foreground hover:text-destructive flex-shrink-0">
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => addAttr(vIdx)}
-                  className="text-xs text-primary hover:underline"
-                >
-                  + atributo
-                </button>
-              </div>
-
-              {/* Pricing, SKU y Configuración de Stock */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase">SKU *</label>
-                  <Input
-                    value={v.sku}
-                    onChange={e => updateVariantField(vIdx, 'sku', e.target.value.toUpperCase())}
-                    className="h-8 text-xs font-mono"
-                    placeholder="PROD-001"
-                    maxLength={50}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Normal ($) *</label>
-                  <Input
-                    type="number" step="50" min="50"
-                    value={v.price === 0 ? '' : v.price}
-                    onChange={e => updateVariantField(vIdx, 'price', parseFloat(e.target.value) || 0)}
-                    className="h-8 text-xs font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Precio Promo ($)</label>
-                  <Input
-                    type="number" step="50" min="50"
-                    value={v.compare_at_price}
-                    onChange={e => updateVariantField(vIdx, 'compare_at_price', parseFloat(e.target.value) || '')}
-                    className="h-8 text-xs font-mono placeholder:text-muted-foreground/50"
-                    placeholder="Opcional"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground text-amber-600/90 uppercase">Costo Proveedor ($)</label>
-                  <Input
-                    type="number" step="50" min="0"
-                    value={v.cost_price}
-                    onChange={e => updateVariantField(vIdx, 'cost_price', parseFloat(e.target.value) || '')}
-                    className="h-8 text-xs font-mono border-amber-500/30"
-                    placeholder="Para rentabilidad"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase">Inventario</label>
-                  <Input
-                    type="number" min="0"
-                    value={v.stock}
-                    onChange={e => updateVariantField(vIdx, 'stock', parseInt(e.target.value) || 0)}
-                    className="h-8 text-xs"
-                  />
-                </div>
-              </div>
-
-              {/* Opciones Avanzadas (Dimensiones e Imagen Variante) */}
-              <div className="space-y-3 bg-muted/40 p-3 rounded-lg border border-border/40">
-                <div className="flex items-center gap-2">
-                  <div className="relative overflow-hidden inline-block">
-                    <input type="file" accept="image/*" onChange={e => handleFileUpload(e, vIdx)} disabled={uploadingVariantIdx === vIdx} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
-                    <Button type="button" variant="secondary" size="sm" disabled={uploadingVariantIdx === vIdx} className="h-7 text-xs gap-1.5 px-2">
-                      {uploadingVariantIdx === vIdx ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
-                      Foto Variante
-                    </Button>
-                  </div>
-                  {v.image_url && (
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background px-2 py-1 rounded border">
-                      <Check className="h-3 w-3 text-green-500" /> Adjunta
-                      <button type="button" onClick={() => updateVariantField(vIdx, 'image_url', '')} className="text-secondary-foreground hover:text-destructive shrink-0 ml-1">
-                        <Plus className="h-3 w-3 rotate-45" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-muted-foreground uppercase">Peso (kg)</label>
-                    <Input type="number" step="0.001" value={v.weight_kg} onChange={e => updateVariantField(vIdx, 'weight_kg', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-muted-foreground uppercase">Largo (cm)</label>
-                    <Input type="number" step="0.01" value={v.length_cm} onChange={e => updateVariantField(vIdx, 'length_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-muted-foreground uppercase">Ancho (cm)</label>
-                    <Input type="number" step="0.01" value={v.width_cm} onChange={e => updateVariantField(vIdx, 'width_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-muted-foreground uppercase">Alto (cm)</label>
-                    <Input type="number" step="0.01" value={v.height_cm} onChange={e => updateVariantField(vIdx, 'height_cm', parseFloat(e.target.value) || '')} className="h-7 text-xs bg-background" />
-                  </div>
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
+        <div className="space-y-3">
+          {variants.map((v, idx) => (
+            <VariantForm key={idx} v={v} idx={idx} total={variants.length}
+              tenantId={tenantId}
+              onChange={(field, val) => updateVariant(idx, field, val)}
+              onRemove={() => removeVariant(idx)} />
           ))}
-        </Accordion>
-        </TabsContent>
-        </Tabs>
-
-        {error && <p className="text-xs text-red-500 font-medium px-1 bg-red-500/10 p-2 rounded">{error}</p>}
-
-        <div className="pt-4 mt-2 border-t border-border">
-            <Button type="button" onClick={handleSubmit} disabled={submitting} className="w-full sm:w-auto sm:min-w-[200px]">
-              {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : 'Guardar Producto'}
-            </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      {/* Error + Guardar */}
+      {error && (
+        <p className="text-xs text-red-500 font-medium bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>
+      )}
+
+      <button type="button" onClick={handleSubmit} disabled={submitting}
+        className="w-full h-10 rounded-lg bg-foreground text-background text-sm font-medium hover:bg-foreground/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2">
+        {submitting ? <><Loader2 className="h-4 w-4 animate-spin" />Guardando...</> : 'Guardar producto'}
+      </button>
+    </div>
   )
 }
