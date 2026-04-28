@@ -25,12 +25,23 @@ export default async function AiAgentsPage() {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  const [{ data }, { data: tenant }, { data: kbStats }] = await Promise.all([
+  const [{ data }, { data: tenant }, { data: kbStats }, { data: catalogStats }, { data: integrations }] = await Promise.all([
     supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle(),
-    supabase.from('tenants').select('mision, vision, valores, tono_comunicacion').eq('id', tenantId).maybeSingle(),
+    supabase.from('tenants').select(
+      'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin'
+    ).eq('id', tenantId).maybeSingle(),
     supabase.from('kb_documents')
       .select('is_active, embedding')
       .eq('tenant_id', tenantId),
+    supabase.from('products')
+      .select('id', { count: 'exact', head: false })
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .limit(1),
+    supabase.from('tenant_integrations')
+      .select('provider, status')
+      .eq('tenant_id', tenantId)
+      .in('provider', ['wompi', 'envia']),
   ])
 
   const kbDocs     = (kbStats ?? []) as Array<{ is_active: boolean; embedding: string | null }>
@@ -45,6 +56,16 @@ export default async function AiAgentsPage() {
   }
 
   const hasFilosofia = !!(tenant?.mision || tenant?.valores)
+  // Rev. 68 — checks adicionales para Estado del bot ampliado.
+  const hasTono = !!tenant?.tono_comunicacion
+  const hasSedesHorario = !!(
+    (Array.isArray(tenant?.store_locations) && tenant!.store_locations.length > 0) ||
+    (tenant?.shipping_origin && (tenant.shipping_origin as { city?: string })?.city)
+  ) && !!tenant?.support_schedule
+  const hasCatalog = Array.isArray(catalogStats) && catalogStats.length > 0
+  const integrationsRows = (integrations ?? []) as Array<{ provider: string; status: string }>
+  const wompiConnected = integrationsRows.some(i => i.provider === 'wompi' && i.status === 'connected')
+  const enviaConnected = integrationsRows.some(i => i.provider === 'envia' && i.status === 'connected')
 
   async function saveAiAgent(formData: FormData) {
     'use server'
@@ -88,11 +109,16 @@ export default async function AiAgentsPage() {
 
       <ReadinessCard
         hasFilosofia={hasFilosofia}
+        hasTono={hasTono}
+        hasSedesHorario={hasSedesHorario}
+        hasCatalog={hasCatalog}
         totalDocs={totalDocs}
         activeDocs={activeDocs}
         indexedDocs={indexedDocs}
         agentName={agent.name}
         hasPrompt={!!agent.role_description && agent.role_description.length > 20}
+        wompiConnected={wompiConnected}
+        enviaConnected={enviaConnected}
       />
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">

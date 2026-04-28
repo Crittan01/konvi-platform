@@ -45,6 +45,7 @@ type Tenant = {
   tono_comunicacion?: string | null
   support_schedule?: SupportSchedule | null
   after_hours_message?: string | null
+  escalation_role?: 'asesor' | 'especialista' | 'consultor' | 'agente' | null
 }
 // ─── Componentes reutilizables ────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message')
+      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -322,7 +323,7 @@ export default async function SettingsPage() {
                         defaultValue={sched?.close ?? '18:00'} className="h-9 text-sm" />
                     </div>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">Hora Colombia (UTC−5). Cuando un cliente pide asesor fuera de este horario, el bot enviará el mensaje de abajo.</p>
+                  <p className="text-[10px] text-muted-foreground">Hora Colombia (UTC−5). Cuando un cliente pida atención fuera de este horario, el bot enviará el mensaje de abajo.</p>
 
                   {/* Mensaje fuera de horario */}
                   <div className="space-y-1.5">
@@ -331,10 +332,31 @@ export default async function SettingsPage() {
                     </Label>
                     <textarea id="after-hours" name="after_hours_message"
                       defaultValue={tenant?.after_hours_message ?? ''}
-                      placeholder={'¡Hola! En este momento nuestros asesores no están disponibles.\nTe atenderemos a partir de las 9:00 AM.'}
+                      placeholder={'Ej: ¡Hola! 👋 En este momento nuestro equipo descansa.\nTe respondemos mañana entre las 8:00 AM y 6:00 PM.\n¡Gracias por escribirnos!'}
                       rows={3}
                       className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
-                    <p className="text-[10px] text-muted-foreground">El bot lo envía automáticamente antes de escalar al asesor.</p>
+                    <p className="text-[10px] text-muted-foreground">Tip: escríbelo como tú le hablarías al cliente — natural y cálido. El bot lo envía automáticamente antes de escalar.</p>
+                  </div>
+
+                  {/* Rev. 68 — escalation_role configurable */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium" htmlFor="escalation-role">
+                      ¿Cómo llamas a quien atiende personalmente?
+                    </Label>
+                    <select
+                      id="escalation-role"
+                      name="escalation_role"
+                      defaultValue={tenant?.escalation_role ?? 'asesor'}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="asesor">Asesor (default — comercial)</option>
+                      <option value="especialista">Especialista (servicios profesionales, salud)</option>
+                      <option value="consultor">Consultor (B2B, asesoría)</option>
+                      <option value="agente">Agente (call center, soporte)</option>
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">
+                      El bot usa este término al escalar a un humano (ej. &quot;Te paso con un {tenant?.escalation_role ?? 'asesor'} que te ayudará&quot;).
+                    </p>
                   </div>
 
                   <SubmitButton size="sm">Guardar horario</SubmitButton>

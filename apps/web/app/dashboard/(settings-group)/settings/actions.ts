@@ -59,8 +59,12 @@ export async function saveHorarioAsesor(formData: FormData) {
   const open  = (formData.get('support_open')  as string)?.trim()
   const close = (formData.get('support_close') as string)?.trim()
   const after_hours_message = (formData.get('after_hours_message') as string)?.trim() || null
+  // Rev. 68 — escalation_role configurable por tenant (default 'asesor').
+  const ALLOWED_ROLES = new Set(['asesor', 'especialista', 'consultor', 'agente'])
+  const raw_role = (formData.get('escalation_role') as string)?.trim() || 'asesor'
+  const escalation_role = ALLOWED_ROLES.has(raw_role) ? raw_role : 'asesor'
   const support_schedule = days.length && open && close ? { days, open, close } : null
-  await updateTenant(tenantId, { support_schedule, after_hours_message })
+  await updateTenant(tenantId, { support_schedule, after_hours_message, escalation_role })
   revalidatePath('/dashboard/settings')
 }
 
