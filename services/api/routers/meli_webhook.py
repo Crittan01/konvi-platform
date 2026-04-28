@@ -11,22 +11,113 @@ Flujo:
      c. Consulta el recurso en la MeLi API
      d. Persiste en nuestra base de datos
 
+Defensa de origen:
+  MeLi NO firma webhooks. La doc oficial publica las IPs desde donde envía
+  notificaciones: si la IP del request no está en esa lista, rechazamos
+  con 403 antes de hacer cualquier trabajo. Esto cierra el vector DoS y
+  el de costo (sin filtro, un atacante podría disparar GETs a la API MeLi).
+
 Referencia oficial:
-  https://developers.mercadolibre.com/es_ar/recibir-notificaciones
+  https://developers.mercadolibre.com.co/es_ar/notificaciones
 """
 import logging
+import os
 import asyncio
 import httpx
+import time
+import threading
 from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from dependencies.auth import _get_service_client
+from dependencies.auth import _get_service_client, get_service_client
+from dependencies.security import webhook_rate_limit_check
 from integrations import meli_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["MeLi Webhook"])
 
 MELI_API_URL = "https://api.mercadolibre.com"
+
+# IPs oficiales desde donde MeLi envía notificaciones.
+# Fuente: https://developers.mercadolibre.com.co/es_ar/notificaciones
+# Sección "Historial de notificaciones" (verificada 2026-04-28).
+# Si MeLi cambia las IPs, override por env var MELI_WEBHOOK_ALLOWED_IPS (CSV).
+_MELI_DEFAULT_NOTIFICATION_IPS: frozenset[str] = frozenset({
+    "54.88.218.97",
+    "18.215.140.160",
+    "18.213.114.129",
+    "18.206.34.84",
+})
+
+
+def _load_allowed_meli_ips() -> frozenset[str]:
+    raw = os.getenv("MELI_WEBHOOK_ALLOWED_IPS", "").strip()
+    if not raw:
+        return _MELI_DEFAULT_NOTIFICATION_IPS
+    ips = {ip.strip() for ip in raw.split(",") if ip.strip()}
+    return frozenset(ips) if ips else _MELI_DEFAULT_NOTIFICATION_IPS
+
+
+_ALLOWED_MELI_IPS: frozenset[str] = _load_allowed_meli_ips()
+
+# Idempotencia in-memory para webhooks repetidos.
+# MeLi reintenta hasta 8 veces durante 1 hora si no recibe 200; un atacante
+# con IP legítima podría replay. Memoización TTL=300s evita reprocesar el
+# mismo (application_id, resource, sent). Por instancia (no distribuido):
+# acepta replay cross-instancia, pero el handler interno ya es idempotente.
+_DEDUP_TTL_SECONDS = 300
+_dedup_lock = threading.Lock()
+_dedup_seen: dict[str, float] = {}
+
+
+def _is_duplicate_event(application_id: str, resource: str, sent: str) -> bool:
+    if not (application_id and resource and sent):
+        return False
+    key = f"{application_id}|{resource}|{sent}"
+    now = time.time()
+    with _dedup_lock:
+        cutoff = now - _DEDUP_TTL_SECONDS
+        # Limpieza oportunista
+        if len(_dedup_seen) > 1000:
+            for k, ts in list(_dedup_seen.items()):
+                if ts < cutoff:
+                    _dedup_seen.pop(k, None)
+        last_seen = _dedup_seen.get(key)
+        if last_seen and last_seen >= cutoff:
+            return True
+        _dedup_seen[key] = now
+        return False
+
+
+def _extract_request_ip(request: Request) -> str:
+    """Extrae IP real del cliente. Prefiere x-forwarded-for[0] (LB Render)."""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    if request.client and request.client.host:
+        return request.client.host
+    return ""
+
+
+def _verify_meli_origin(request: Request, supabase=Depends(get_service_client)) -> None:
+    """Dependency: valida origen IP + rate-limit. <1ms en happy path."""
+    ip = _extract_request_ip(request)
+    if ip not in _ALLOWED_MELI_IPS:
+        ua = request.headers.get("user-agent", "")[:80]
+        logger.warning("meli_webhook.rejected_origin ip=%s ua=%r", ip or "<empty>", ua)
+        raise HTTPException(status_code=403, detail="Origen no autorizado")
+    allowed, retry_after = webhook_rate_limit_check(
+        supabase, ip=ip, bucket="webhook.meli", limit=200, window_seconds=60,
+    )
+    if not allowed:
+        logger.warning("meli_webhook.rate_limited ip=%s retry_after=%s", ip, retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit excedido",
+            headers={"Retry-After": str(retry_after)},
+        )
 
 # Mapeo de status MeLi (pedido) → status interno
 MELI_ORDER_STATUS_MAP: dict[str, str] = {
@@ -423,12 +514,12 @@ async def _process_notification(topic: str, resource: str, meli_user_id: str):
 
 # ─── Endpoint ────────────────────────────────────────────────────────────────
 
-@router.post("/webhook")
+@router.post("/webhook", dependencies=[Depends(_verify_meli_origin)])
 async def meli_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Recibe notificaciones IPN de MeLi.
     Retorna 200 inmediatamente y procesa en background.
-    MeLi reintenta hasta 10 veces si no recibe 200.
+    MeLi reintenta hasta 8 veces si no recibe 200 en 500ms.
     """
     try:
         body = await request.json()
@@ -438,10 +529,17 @@ async def meli_webhook(request: Request, background_tasks: BackgroundTasks):
     topic        = body.get("topic", "")
     resource     = body.get("resource", "")
     meli_user_id = str(body.get("user_id", ""))
+    application_id = str(body.get("application_id", ""))
+    sent         = str(body.get("sent", ""))
 
     logger.info("Webhook MeLi — topic=%s resource=%s user_id=%s", topic, resource, meli_user_id)
 
-    if topic and resource and meli_user_id:
-        background_tasks.add_task(_process_notification, topic, resource, meli_user_id)
+    if not (topic and resource and meli_user_id):
+        return JSONResponse({"ok": True})
 
+    if _is_duplicate_event(application_id, resource, sent):
+        logger.info("meli_webhook.duplicate_skipped resource=%s sent=%s", resource, sent)
+        return JSONResponse({"ok": True, "duplicate": True})
+
+    background_tasks.add_task(_process_notification, topic, resource, meli_user_id)
     return JSONResponse({"ok": True})

@@ -141,6 +141,11 @@ services:
         value: "40"
       - key: API_RATE_LIMIT_DISTRIBUTED
         value: "true"
+      # ── MeLi webhook origin allowlist (opcional override) ───────────────────
+      # Default en código incluye las 4 IPs oficiales (verificada 2026-04-28).
+      # Configurar aquí solo si MeLi cambia las IPs antes del próximo redeploy.
+      - key: MELI_WEBHOOK_ALLOWED_IPS
+        sync: false
       # ── Wompi — credenciales por-tenant en Supabase Vault (tenant_integrations) ──
       # Las llaves de Wompi se ingresan por tenant en Ajustes → Integraciones → Wompi.
       # No se necesitan env vars globales para Wompi.
