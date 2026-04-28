@@ -20,6 +20,7 @@ interface Conversation {
   created_at: string
   last_interaction_at?: string
   last_message?: { content: string; direction: string; created_at: string } | null
+  last_read_at?: string | null  // A2: marca de lectura del operador actual
 }
 
 interface Message {
@@ -109,10 +110,28 @@ const ORDER_STATUS_COLOR: Record<string, string> = {
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
+// A4: cada estado lleva un description que se muestra como tooltip HTML nativo
+// en los badges. Permite que un operador no técnico entienda el significado y
+// las transiciones permitidas sin abrir documentación externa.
 const STATUS_CONFIG = {
-  bot_active:     { label: 'Bot activo',    color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20', dot: 'bg-emerald-500' },
-  human_takeover: { label: 'Agente humano', color: 'bg-amber-500/10 text-amber-700 border-amber-500/20',       dot: 'bg-amber-500' },
-  closed:         { label: 'Cerrada',       color: 'bg-slate-500/10 text-slate-700 border-slate-500/20',       dot: 'bg-slate-500' },
+  bot_active: {
+    label: 'Bot activo',
+    color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
+    dot: 'bg-emerald-500',
+    description: 'Bot activo: el asistente IA responde automáticamente con catálogo, KB y FSM de venta. Toma el control con "Tomar control" si necesitas intervenir.',
+  },
+  human_takeover: {
+    label: 'Agente humano',
+    color: 'bg-amber-500/10 text-amber-700 border-amber-500/20',
+    dot: 'bg-amber-500',
+    description: 'Agente humano: un operador tomó el control y el bot está pausado. Para devolver al bot, usa "Volver al bot" aquí o desde Telegram envía /resolver {id}.',
+  },
+  closed: {
+    label: 'Cerrada',
+    color: 'bg-slate-500/10 text-slate-700 border-slate-500/20',
+    dot: 'bg-slate-500',
+    description: 'Cerrada: la conversación quedó archivada por inactividad o resolución manual. Si el cliente vuelve a escribir, se reabre automáticamente como Bot activo.',
+  },
 }
 
 const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
@@ -184,6 +203,13 @@ export default function InboxPage() {
   const [statusError, setStatusError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
+  // F1: toggle para mostrar conversaciones archivadas (>90 días sin actividad).
+  const [showArchived, setShowArchived] = useState(false)
+  const showArchivedRef = useRef(false)
+  // F2: scroll histórico cursor-based.
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMoreMessages, setHasMoreMessages] = useState(true)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'context'>('list')
   const [waConnected, setWaConnected] = useState<boolean | null>(null)
 
@@ -241,11 +267,17 @@ export default function InboxPage() {
 
   // ── Cargar conversaciones ──────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
-    const { data, error } = await supabase
+    // F1: por default solo conversaciones activas (archived_at IS NULL).
+    // Toggle "Ver archivadas" expone las archivadas en el filtro lateral.
+    let query = supabase
       .from('conversations')
-      .select('id, customer_phone, status, created_at, last_interaction_at, messages(content, direction, created_at)')
+      .select('id, customer_phone, status, created_at, last_interaction_at, archived_at, messages(content, direction, created_at)')
       .order('last_interaction_at', { ascending: false })
       .limit(50)
+    if (!showArchivedRef.current) {
+      query = query.is('archived_at', null)
+    }
+    const { data, error } = await query
 
     if (error) {
       setConversations([])
@@ -268,6 +300,22 @@ export default function InboxPage() {
           : null,
       } as Conversation
     })
+
+    // A2: traer marcas de lectura del operador actual para badge unread.
+    if (rows.length > 0) {
+      const ids = rows.map(r => r.id)
+      const { data: readsData } = await supabase
+        .from('conversation_reads')
+        .select('conversation_id, last_read_at')
+        .in('conversation_id', ids)
+      const readsMap = new Map<string, string>()
+      ;(readsData ?? []).forEach((r: { conversation_id: string; last_read_at: string }) => {
+        readsMap.set(r.conversation_id, r.last_read_at)
+      })
+      rows.forEach(r => {
+        r.last_read_at = readsMap.get(r.id) ?? null
+      })
+    }
     setConversations(rows)
     setLoading(false)
 
@@ -303,6 +351,13 @@ export default function InboxPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadConversations])
 
+  // F1: refrescar lista cuando cambia el toggle de archivadas.
+  useEffect(() => {
+    showArchivedRef.current = showArchived
+    loadConversations()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArchived])
+
   // ── Cargar contexto del panel al cambiar conversación ─────────────────────
   useEffect(() => {
     if (!selectedId) {
@@ -337,6 +392,7 @@ export default function InboxPage() {
   // ── Cargar mensajes ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedId) return
+    setHasMoreMessages(true)
     supabase
       .from('messages')
       .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
@@ -352,7 +408,10 @@ export default function InboxPage() {
           return
         }
         setMessagesLoadError(null)
-        setMessages((data || []).reverse())   // revertir DESC → ASC para display cronológico
+        const fetched = (data || []).reverse()
+        setMessages(fetched)
+        // Si vinieron menos de 100, no hay más historial.
+        setHasMoreMessages(fetched.length === 100)
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,8 +429,28 @@ export default function InboxPage() {
       }, (payload) => {
         lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
-          setMessages(prev => [...prev, payload.new as Message])
+          // A6: dedupe por id para evitar duplicado entre realtime y polling fallback.
+          setMessages(prev =>
+            prev.some(m => m.id === (payload.new as Message).id)
+              ? prev
+              : [...prev, payload.new as Message]
+          )
           setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+          // A1: optimistic update del timestamp lateral — el trigger DB
+          // actualizará conversations.last_interaction_at, pero sin esperar al
+          // round-trip refrescamos local para que el lateral y el chat
+          // queden alineados de inmediato.
+          const ts = (payload.new as Message).created_at || new Date().toISOString()
+          setConversations(prev =>
+            prev.map(c => c.id === selectedId
+              ? { ...c, last_interaction_at: ts }
+              : c
+            ).sort((a, b) => {
+              const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
+              const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
+              return bt - at
+            })
+          )
         } else if (payload.eventType === 'UPDATE') {
           setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new as Message : m))
         }
@@ -410,22 +489,97 @@ export default function InboxPage() {
   useEffect(() => {
     const channel = supabase
       .channel('conversations:all')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
-        loadConversations()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
+        // A1: optimistic update con el payload, sin re-fetch completo.
+        // El trigger DB actualiza last_interaction_at en cada INSERT a messages;
+        // ese UPDATE llega aquí con REPLICA IDENTITY FULL.
+        if (payload.eventType === 'INSERT') {
+          // Conversación nueva — un re-fetch sí es necesario para traer joins.
+          loadConversations()
+          return
+        }
+        if (payload.eventType === 'UPDATE') {
+          const upd = payload.new as Partial<Conversation> & { id: string }
+          setConversations(prev =>
+            prev.map(c => c.id === upd.id ? { ...c, ...upd } : c)
+              .sort((a, b) => {
+                const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
+                const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
+                return bt - at
+              })
+          )
+          return
+        }
+        if (payload.eventType === 'DELETE') {
+          const old = payload.old as { id: string }
+          setConversations(prev => prev.filter(c => c.id !== old.id))
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadConversations])
 
+  // F2: cargar más mensajes históricos cuando el operador hace scroll arriba.
+  const loadMoreMessages = async () => {
+    if (!selectedId || loadingMore || !hasMoreMessages || messages.length === 0) return
+    const oldest = messages[0]
+    if (!oldest?.created_at) return
+    const container = messagesContainerRef.current
+    const prevScrollHeight = container?.scrollHeight ?? 0
+    setLoadingMore(true)
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
+        .eq('conversation_id', selectedId)
+        .lt('created_at', oldest.created_at)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      if (error || !data) {
+        setHasMoreMessages(false)
+        return
+      }
+      const older = data.reverse()
+      if (older.length === 0) {
+        setHasMoreMessages(false)
+        return
+      }
+      setMessages(prev => [...older, ...prev])
+      // Restaurar scroll position para que el operador no pierda contexto.
+      requestAnimationFrame(() => {
+        const c = messagesContainerRef.current
+        if (c) c.scrollTop = c.scrollHeight - prevScrollHeight
+      })
+      if (older.length < 50) setHasMoreMessages(false)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   // ── Seleccionar conversación ───────────────────────────────────────────────
-  const handleSelectConv = (id: string) => {
+  const handleSelectConv = async (id: string) => {
     setSelectedId(id)
     syncUrlParam(id)
     setMobileView('chat')
     setReplyText('')
     setSendError(null)
     setStatusError(null)
+    // A2: marcar como leída — upsert en conversation_reads.
+    const now = new Date().toISOString()
+    setConversations(prev => prev.map(c => c.id === id ? { ...c, last_read_at: now } : c))
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const tenantId = user?.app_metadata?.tenant_id
+      if (user?.id && tenantId) {
+        await supabase.from('conversation_reads').upsert(
+          { tenant_id: tenantId, user_id: user.id, conversation_id: id, last_read_at: now },
+          { onConflict: 'tenant_id,user_id,conversation_id' },
+        )
+      }
+    } catch {
+      // El badge optimistic ya está aplicado; el upsert es best-effort.
+    }
   }
 
   // ── Acciones — cambio de estado ────────────────────────────────────────────
@@ -438,6 +592,9 @@ export default function InboxPage() {
     const token = session?.access_token
     if (!token) { setStatusError('Sesión expirada.'); setTakingOver(false); return }
 
+    // A5: Idempotency-Key con scope canónico (igual que send/orders/shipping).
+    // Misma key durante reintentos (503) → backend dedup a un solo cambio.
+    const idempotencyKey = createIdempotencyKey('conversations.status')
     try {
       const doRequest = async () => {
         const ctrl = new AbortController()
@@ -448,7 +605,7 @@ export default function InboxPage() {
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`,
-              'Idempotency-Key': `status:${selectedId}:${status}:${Date.now()}`,
+              'Idempotency-Key': idempotencyKey,
             },
             body: JSON.stringify({ status }),
             signal: ctrl.signal,
@@ -688,10 +845,23 @@ export default function InboxPage() {
                 {opt.label}
               </button>
             ))}
+            {/* F1: toggle archivadas */}
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                showArchived
+                  ? 'bg-slate-200 text-slate-700 border-slate-400 font-medium'
+                  : 'border-border text-muted-foreground hover:text-foreground'
+              }`}
+              title="Mostrar conversaciones archivadas (cerradas con >90 días sin actividad)"
+            >
+              {showArchived ? 'Ocultar archivadas' : 'Ver archivadas'}
+            </button>
           </div>
 
           <p className="text-xs text-muted-foreground">
             {filteredConvs.length} conversacion{filteredConvs.length !== 1 ? 'es' : ''}
+            {showArchived && ' (incl. archivadas)'}
           </p>
         </div>
 
@@ -717,6 +887,13 @@ export default function InboxPage() {
             filteredConvs.map(conv => {
               const st = STATUS_CONFIG[conv.status]
               const isSelected = conv.id === selectedId
+              // A2: marca de unread = último mensaje inbound posterior a last_read_at del operador.
+              const hasUnread = !!(
+                conv.last_message &&
+                conv.last_message.direction === 'inbound' &&
+                (!conv.last_read_at || conv.last_message.created_at > conv.last_read_at) &&
+                !isSelected
+              )
               return (
                 <button
                   key={conv.id}
@@ -728,7 +905,15 @@ export default function InboxPage() {
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <div className={`h-2 w-2 rounded-full flex-shrink-0 ${st.dot}`} />
-                      <span className="text-sm font-medium">{formatPhone(conv.customer_phone)}</span>
+                      <span className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'}`}>
+                        {formatPhone(conv.customer_phone)}
+                      </span>
+                      {hasUnread && (
+                        <span
+                          className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"
+                          title="Mensaje sin leer"
+                        />
+                      )}
                     </div>
                     <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <Clock className="h-2.5 w-2.5" />
@@ -742,7 +927,10 @@ export default function InboxPage() {
                     </p>
                   )}
                   <div className="ml-4 mt-1">
-                    <span className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border ${st.color}`}>
+                    <span
+                      className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${st.color}`}
+                      title={st.description}
+                    >
                       {st.label}
                     </span>
                   </div>
@@ -782,7 +970,10 @@ export default function InboxPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm truncate">{formatPhone(selectedConv.customer_phone)}</p>
-                    <span className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border ${STATUS_CONFIG[selectedConv.status].color}`}>
+                    <span
+                      className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${STATUS_CONFIG[selectedConv.status].color}`}
+                      title={STATUS_CONFIG[selectedConv.status].description}
+                    >
                       {STATUS_CONFIG[selectedConv.status].label}
                     </span>
                   </div>
@@ -824,6 +1015,52 @@ export default function InboxPage() {
                 {statusError}
               </div>
             )}
+            {/* A3: Banner ventana 24h Meta — solo visible en human_takeover.
+                Calcula horas desde el último mensaje inbound real para dar
+                visibilidad al operador antes de que intente enviar fuera de
+                ventana (Meta rechazaría sin template aprobado). */}
+            {selectedConv.status === 'human_takeover' && (() => {
+              const lastInbound = [...messages]
+                .reverse()
+                .find(m => m.direction === 'inbound')
+              if (!lastInbound) {
+                return (
+                  <div className="px-4 py-2 text-[12px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Aún no hay mensaje del cliente. Meta solo permite responder libre cuando el cliente abrió la conversación —
+                      espera a que escriba o usa una plantilla aprobada.
+                    </span>
+                  </div>
+                )
+              }
+              const hoursSince =
+                (Date.now() - new Date(lastInbound.created_at).getTime()) / 3_600_000
+              const hoursRemaining = 24 - hoursSince
+              if (hoursRemaining <= 0) {
+                return (
+                  <div className="px-4 py-2 text-[12px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      <strong>Ventana 24h expirada</strong> (último mensaje del cliente hace {hoursSince.toFixed(1)}h).
+                      Los mensajes libres serán rechazados por Meta — usa una plantilla aprobada.
+                    </span>
+                  </div>
+                )
+              }
+              if (hoursRemaining < 4) {
+                return (
+                  <div className="px-4 py-2 text-[12px] text-amber-700 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+                    <Clock className="h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Ventana 24h: quedan <strong>{hoursRemaining.toFixed(1)}h</strong> para responder libremente.
+                      Después necesitarás una plantilla aprobada por Meta.
+                    </span>
+                  </div>
+                )
+              }
+              return null
+            })()}
             {orderSuccess && (
               <div className="px-4 py-2 text-[11px] text-emerald-600 bg-emerald-500/5 border-b border-emerald-500/20 flex items-center gap-1">
                 <BadgeCheck className="h-3.5 w-3.5" /> {orderSuccess}
@@ -831,7 +1068,26 @@ export default function InboxPage() {
             )}
 
             {/* Mensajes */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div
+              ref={messagesContainerRef}
+              onScroll={(e) => {
+                const t = e.currentTarget
+                if (t.scrollTop < 80 && hasMoreMessages && !loadingMore) {
+                  void loadMoreMessages()
+                }
+              }}
+              className="flex-1 overflow-y-auto p-4 space-y-3"
+            >
+              {loadingMore && (
+                <div className="text-center text-[11px] text-muted-foreground py-2">
+                  Cargando mensajes anteriores...
+                </div>
+              )}
+              {!hasMoreMessages && messages.length >= 100 && (
+                <div className="text-center text-[10px] text-muted-foreground py-1">
+                  Inicio de la conversación
+                </div>
+              )}
               {messagesLoadError ? (
                 <div className="text-center text-red-400 text-sm pt-12">
                   <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-70" />

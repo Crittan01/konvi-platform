@@ -77,7 +77,13 @@
   }
 
   html {
-    font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+    /* A7: incluir fuentes de emojis a color (Apple/Segoe/Noto) para que los
+       mensajes de WhatsApp se vean igual que en el celular del cliente. Si la
+       fuente principal no soporta el glifo, el navegador cae a la primera de
+       estas que lo tenga. */
+    font-family: var(--font-inter), system-ui, -apple-system, 'Segoe UI', Roboto,
+      'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla',
+      sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }

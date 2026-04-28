@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-28 (rev. 66)
+**Última actualización**: 2026-04-28 (rev. 67)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
 
@@ -11,11 +11,79 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **DB**: ✅ contrato endurecido (62 migraciones aplicadas)
+- **Inbox**: ✅ Certificado (rev. 67) — compliance Meta ventana 24h, multimodal audio, multi-tenant runtime
+- **DB**: ✅ contrato endurecido (66 migraciones aplicadas)
 
 ---
 
-## Cierre de sesión actual (2026-04-28, rev. 66) — CIERRE DE CERTIFICACIÓN REAL
+## Cierre de sesión actual (2026-04-28, rev. 67) — INBOX CERTIFICADO
+
+### Estado: 13/13 OK · 411 tests · TypeScript OK · Lint OK · 66 migraciones
+
+Certificación profunda del módulo Inbox tras Configuración e IA y Conocimiento. 7 workstreams (A-G).
+
+### Workstream A — Frontend Inbox
+
+- **A1 Bug timestamp lateral fix**: optimistic update sobre `conversations.last_interaction_at` cuando llega INSERT en `messages` (sin esperar al trigger DB). El UPDATE de `conversations` ahora aplica payload directamente al estado local (sin re-fetch).
+- **A2 Badge unread**: tabla nueva `conversation_reads (tenant_id, user_id, conversation_id, last_read_at)` con RLS. Lateral muestra dot verde + nombre en negrita cuando hay inbound posterior a `last_read_at`. Upsert al abrir conversación.
+- **A3 Banner ventana 24h Meta**: amarillo si quedan <4h, rojo si expirada o sin inbound previo. Solo en `human_takeover`.
+- **A4 Tooltips en badges Bot/Agente/Cerradas**: cada estado lleva descripción explicando transiciones (no requiere docs externas para operadores no técnicos).
+- **A5 Idempotency-Key end-to-end en PATCH /status**: scope canónico (`createIdempotencyKey('conversations.status')`) + proxy reenvía header + backend honra con `begin_idempotency`. Doble click rápido → 1 sola transición + 1 sola notificación Telegram.
+- **A6 Dedupe realtime INSERT**: por id, evita duplicado entre realtime y polling fallback.
+- **A7 Render emojis WhatsApp**: `font-family` en globals.css incluye `Apple Color Emoji`, `Segoe UI Emoji`, `Noto Color Emoji`, `Twemoji Mozilla` para que los mensajes se vean a color como en celular.
+
+### Workstream B — Compliance Meta
+
+- **B1 Ventana 24h en envío outbound**: `_check_24h_window_or_raise()` en `routers/conversations.py` verifica `MAX(created_at) FROM messages WHERE direction='inbound'`. Si fuera de ventana → 422 con códigos accionables (`WINDOW_EXPIRED`, `WINDOW_NO_INBOUND`). Cierra el vector de baneo del WABA.
+- **B2 ACK transaccional outbound**: `_mark_outbound_sent` reintenta UPDATE 3 veces (backoff 100/300/1000 ms). Si falla los 3, marca `processing_status='ack_pending'` y ACK pgmq (NO reenvía a Meta para no duplicar al cliente). Migración 20260428000001 agrega `ack_pending` al CHECK constraint.
+
+### Workstream C — Multi-tenant runtime
+
+- `tests/test_tenant_isolation_inbox.py` (5 tests): valida que TODOS los endpoints del Inbox filtran por `tenant_id` en cada query a Supabase. Defensa en profundidad (RLS sola no aplica con service_role).
+
+### Workstream D — Multimodal audio Gemini
+
+- Módulo `services/ai-orchestrator/services/meta_media.py` con `fetch_media_bytes()` (descarga 2-step Meta: resolver URL + bytes), caché in-memory TTL 240s, validación de tamaño máx (16 MB), timeout configurable (10s).
+- `_transcribe_audio_or_none()` en `orchestrator.py`: descarga audio + envía inline a Gemini 2.5 Flash multimodal (`Part(inline_data=Blob)`) + reemplaza content por la transcripción + el flow normal continúa.
+- Connector persiste `media_id` + `media_mime` (extracted_media_metadata) en `messages`.
+- Mimes soportados: `audio/ogg`, `audio/mp3`, `audio/mpeg`, `audio/wav`, `audio/aiff`, `audio/aac`, `audio/flac`.
+- Feature flag `MULTIMODAL_AUDIO_ENABLED=true` (default activo, apagable sin redeploy).
+- Migración 20260428000002 agrega `messages.media_id` + `messages.media_mime`.
+
+### Workstream E — Limpieza y coherencia
+
+- **E1 role_description vs misión ortogonales**: system prompt ahora separa "COMPORTAMIENTO DEL AGENTE" (de `ai_agents.role_description`) de "SOBRE LA TIENDA" (de `tenants.mision/vision/valores`). UI Settings y AI Agents con nota cruzada explicando la distinción.
+- **E2 default ai_agent**: si `mision` poblada → `role_description` default sintetiza `"Asistente comercial de {tenant}, alineado a su misión y valores"`.
+- **E3**: eliminado `services/api/integrations/whatsapp_sender.py` (legacy duplicado, 0 usos confirmados).
+- **E4**: barrer roles legacy `agent` → 0 referencias residuales.
+
+### Workstream F — Conversaciones huérfanas + scroll
+
+- Migración 20260428000003 agrega `conversations.archived_at` + index parcial + backfill 90 días sin actividad. Frontend filtra `archived_at IS NULL` por default; toggle "Ver archivadas" expone histórico.
+- Scroll histórico cursor-based (`loadMoreMessages`) carga +50 al llegar al top, manteniendo scroll position.
+
+### Workstream G — Documentación
+
+- `.context/06-contracts.md` ampliado con secciones 14 (identidad vs comportamiento), 15 (Inbox runtime).
+- `.context/01-state.md` rev. 67 (este bloque).
+- `.context/04-next-steps.md` actualizado.
+
+### Tests nuevos del workstream (24)
+
+- `tests/test_send_message_24h_window.py` (6).
+- `tests/test_outbound_ack_transactional.py` (4).
+- `tests/test_multimodal_audio.py` (9).
+- `tests/test_tenant_isolation_inbox.py` (5).
+
+### Riesgos abiertos (no bloqueantes)
+
+- **Templates Meta para envío proactivo (F7 cart abandonment)**: requiere registrar plantillas en Meta Business Manager. Documentado como IH cuando se priorice.
+- **Multimodal imagen (F8)**: aplazado para sesión futura. Audio ya activo cubre el caso real más frecuente.
+- **Costo tokens multimodal**: cada audio 30s ≈ 5k tokens input. Despreciable a escala Free; revisar al masificar.
+
+---
+
+## Cierre de sesión anterior (2026-04-28, rev. 66) — CIERRE DE CERTIFICACIÓN REAL
 
 ### Estado: 13/13 OK · 389 tests · TypeScript OK · Lint OK
 
