@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-28 (rev. 67)
+**Última actualización**: 2026-04-29 (rev. 68)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
 
@@ -12,11 +12,106 @@
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
 - **Inbox**: ✅ Certificado (rev. 67) — compliance Meta ventana 24h, multimodal audio, multi-tenant runtime
-- **DB**: ✅ contrato endurecido (66 migraciones aplicadas)
+- **Coherencia core del bot**: ✅ Certificado (rev. 68) — Wompi customer_data + Envia district + FSM aterrizado + KB con guías por categoría
+- **DB**: ✅ contrato endurecido (69 migraciones aplicadas)
 
 ---
 
-## Cierre de sesión actual (2026-04-28, rev. 67) — INBOX CERTIFICADO
+## Cierre de sesión actual (2026-04-29, rev. 68) — COHERENCIA CORE DEL BOT
+
+### Estado: 13/13 OK · 452 tests · TypeScript OK · Lint OK · 69 migraciones
+
+Cierre completo de coherencia conversacional aterrizado a las APIs reales (Wompi customer_data + Envia district), eliminando duplicaciones de prompt y haciendo el FSM del bot cero alucinaciones / cero punto de fallo.
+
+### Investigación oficial validada
+
+- **Wompi `legal_id_type` Colombia**: solo `CC, CE, NIT, PP, TI, OTHER` (`DNI, RG` no aplican CO).
+- **Wompi customer_data**: técnicamente opcional pero PSE/Bancolombia los requieren — pre-poblarlos reduce abandono.
+- **Envia `district`**: hoy estaba en el modelo pero NO se enviaba; carriers como Coordinadora lo usan para optimizar zona de despacho.
+
+### WS1 — Filosofía + UI Settings (eliminar duplicaciones)
+
+- **D1 misión duplicada**: `_build_system_prompt()` ya no duplica la misión — solo va en "SOBRE LA TIENDA".
+- **Placeholders humanos**: `after_hours_message` con ejemplo cálido (no robótico).
+- **`escalation_role` configurable** por tenant (`tenants.escalation_role`, default `'asesor'`). UI Settings → "Escalación" con dropdown {asesor, especialista, consultor, agente}. El bot usa este término en escalaciones; tokens de detección admiten múltiples variantes para el cliente.
+
+### WS2 — Knowledge Base reestructurado
+
+- **6 categorías canónicas** con CHECK constraint DB: `faq, negocio, politicas, productos, envios, pagos`. "general" eliminada (cajón de sastre); migración bulk de valores antiguos a `faq`.
+- **Guía por categoría** colapsable en UI: ejemplos placeholder + qué SÍ va aquí + qué NO (cross-references a Filosofía y Productos para evitar duplicación).
+
+### WS3 — Estado del bot ampliado (4 → 8 checks)
+
+`readiness-card.tsx` con tooltips por check + link a configurar:
+1. Identidad del negocio (mision/vision/valores)
+2. Tono de comunicación
+3. Sedes y horario
+4. Catálogo de productos
+5. Knowledge Base
+6. Indexación para IA
+7. Agente IA — comportamiento
+8. Pasarela y courier (Wompi + Envia)
+
+### WS4 — Contactos rediseñado (document + address estructurada)
+
+- **Migración `20260429000000_contacts_document_and_address.sql`**: `document_type` (CC/CE/NIT/PP/TI/OTHER) + `document_number` con CHECK constraint + index parcial.
+- **Schema canónico de `address` JSONB** documentado en COMMENT: street, neighborhood, city, state, dane_code, building_type (casa/edificio/conjunto), tower, apartment, complex_name, reference.
+- **Validators Python** en `dependencies/contact_validators.py`: tipos aceptados, longitud por tipo, normalización (puntos/espacios), helper `is_address_complete()` por building_type.
+- **API**: `ContactCreate`/`ContactPatch` con field_validator + endpoint valida cruzada doc_type+doc_number; SELECT, INSERT, UPDATE incluyen los nuevos campos.
+- **Anonimización Ley 1581**: revocación + soft-delete anonimizan también `document_type` + `document_number`.
+
+### WS5 — FSM aterrizado a la realidad
+
+- **Nuevo estado `NEEDS_DOCUMENT`** entre NAME y DIRECTION. Orden FSM rev. 68:
+  ```
+  CONSENT → EMAIL → NAME → DOCUMENT → DIRECTION → READY_FOR_SUMMARY
+  ```
+- **`OrchestratorOutput`** con `extracted_document_type` + `extracted_document_number` que el LLM extrae.
+- **Persistencia validada**: el orchestrator solo escribe a DB si tipo+número son válidos (CC/CE/NIT/PP/TI/OTHER).
+- **`_clear_contact_field('document')`** limpia ambos campos juntos.
+- **`_CORRECTION_FIELD_TOKENS`/_PROMPT/_VARIANTS**: agregada categoría `document` para flujo de corrección post-resumen.
+- **Cart summary pre-shipping**: instrucción explícita en state_instruction de `NEEDS_SHIPPING_CITY` para resumir carrito + ofrecer "agregar más productos" antes de cotizar.
+- **Contexto cliente conocido**: nueva función `_load_customer_context_block()` carga pedidos activos + reclamos abiertos del contacto y los inyecta como bloque "CONTEXTO DEL CLIENTE" en el system prompt cuando hay consent.
+
+### WS6 — Wompi customer_data completo
+
+- `_build_customer_data()` arma el bloque desde el contacto: email, full_name, phone (con prefix `+57` separado), legal_id, legal_id_type. Solo incluye campos no vacíos.
+- `create_payment_link` y `create_payment_link_sync` reciben `contact: dict` y lo propagan al payload.
+- Call sites actualizados: `routers/orders.py:create_payment_link` y `routers/wompi_webhook.py` (retry) cargan `email, document_type, document_number` desde la relación `contacts` y los pasan completos.
+
+### WS7 — Envia district enviado
+
+- `_coerce_origin` y `_coerce_destination` en `tools/shipping_quote_tool.py` mapean `address.neighborhood` → `district` cuando está poblado. Si no, omiten el campo (no envían null).
+- Funciona end-to-end desde el FSM hasta el payload Envia.
+
+### Tests nuevos (~41)
+
+- `tests/test_contacts_document_validation.py` (18) — tipos, longitud, normalización, address completa por building_type.
+- `tests/test_orchestrator_fsm_needs_document.py` (8) — orden FSM rev. 68 con NEEDS_DOCUMENT.
+- `tests/test_wompi_payment_link_customer_data.py` (9) — builder customer_data, prefix +57, regla legal_id+type juntos.
+- `tests/test_envia_payload_district.py` (6) — district desde neighborhood, omisión si vacío.
+
+Total tests: 411 → 452. Sin regresiones (test_orchestrator_catalog_prompt ajustado para nuevo orden FSM).
+
+### Migraciones nuevas (3)
+
+| Archivo | Descripción |
+|---|---|
+| `20260429000000_contacts_document_and_address.sql` | document_type/number + CHECK + index parcial + COMMENT schema address JSONB |
+| `20260429000001_kb_categories_constraint.sql` | CHECK 6 categorías + migración valores legacy → faq |
+| `20260429000002_tenant_escalation_role.sql` | escalation_role TEXT NOT NULL DEFAULT 'asesor' + CHECK |
+
+Total migraciones: 66 → 69.
+
+### Riesgos abiertos (no bloqueantes)
+
+- **Frontend Contacts UI**: el form de contactos no muestra aún los campos `document_type/number` y `building_type` estructurado — el bot conversacional ya los captura por WhatsApp. La UI manual de contactos es backlog para sesión futura (no bloquea el flujo conversacional).
+- **F7 cart abandonment**: sigue bloqueado por templates Meta.
+- **F8 multimodal imagen**: aplazado tras audio (rev. 67).
+
+---
+
+## Cierre de sesión anterior (2026-04-28, rev. 67) — INBOX CERTIFICADO
 
 ### Estado: 13/13 OK · 411 tests · TypeScript OK · Lint OK · 66 migraciones
 

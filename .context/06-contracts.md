@@ -117,7 +117,92 @@ Datos personales: SOLO se piden después de cotización aprobada (carrier selecc
 Carrier selection: detecta inbound corto (≤8 tokens), sin pregunta, DESPUÉS del outbound con "continuamos".  
 Resumen: usa `_build_verified_order_context()` — precios desde catalog DB, envío desde historial. El LLM NO calcula.
 
-## 14) Identidad del negocio vs Comportamiento del agente (rev. 67)
+## 16) Coherencia core del bot conversacional (rev. 68)
+
+### Datos del cliente para checkout
+
+| Dato | Origen | Destino |
+|---|---|---|
+| `name` | `contacts.name` | Wompi `customer_data.full_name` |
+| `email` | `contacts.email` | Wompi `customer_data.email` |
+| `phone` | `contacts.phone` | Wompi `customer_data.phone_number_prefix` + `phone_number` (+57 separado) |
+| `document_type + document_number` | `contacts.document_type` + `contacts.document_number` | Wompi `customer_data.legal_id_type + legal_id` |
+| `address.neighborhood` | `contacts.address.neighborhood` | Envia `destination.district` |
+
+Reglas oficiales:
+- `legal_id_type` Colombia: solo `CC, CE, NIT, PP, TI, OTHER`. NO `DNI` (Argentina/España) ni `RG` (Brasil).
+- `legal_id` y `legal_id_type` van **juntos o ninguno** (regla Wompi).
+- Phone Wompi: prefijo separado en `phone_number_prefix` (`+57`) y dígitos en `phone_number`.
+- Si algún campo es null, NO se incluye en el payload (Wompi rechaza nulls explícitos).
+
+### FSM rev. 68 — orden aterrizado a la realidad
+
+```
+CATALOG_MODE
+  ↓ (cliente expresa intención de compra)
+PRODUCT_CONFIRMED + opcional carrito multi-producto
+  ↓
+NEEDS_SHIPPING_CITY (incluye instrucción al LLM: resumir carrito ANTES de pedir ciudad + ofrecer agregar más productos)
+  ↓
+AWAITING_CARRIER_SELECTION
+  ↓
+NEEDS_CONSENT  (autorización ANTES de pedir datos)
+  ↓
+NEEDS_EMAIL
+  ↓
+NEEDS_NAME
+  ↓
+NEEDS_DOCUMENT  ← rev. 68: tipo + número (Wompi customer_data)
+  ↓
+NEEDS_DIRECTION  (estructurada con building_type + neighborhood)
+  ↓
+READY_FOR_SUMMARY
+  ↓
+AWAITING_ORDER_CONFIRMATION → handle_payment_link_if_applicable (Wompi con customer_data completo)
+```
+
+### Schema canónico `contacts.address` JSONB
+
+```json
+{
+  "street": "Calle 10 # 5-23",         // requerido
+  "number": "401",                     // opcional
+  "neighborhood": "Chapinero",         // requerido (Envia district)
+  "city": "Bogotá",                    // requerido
+  "state": "DC",                       // requerido (código corto)
+  "dane_code": "11001000",             // requerido (DANE 8 dígitos)
+  "country": "CO",                     // default "CO"
+  "building_type": "edificio",         // "casa" | "edificio" | "conjunto"
+  "tower": "Torre 3",                  // opcional, solo conjunto
+  "apartment": "401",                  // opcional, edificio o conjunto
+  "complex_name": "Torres del Parque", // opcional
+  "reference": "Frente al parque"      // opcional
+}
+```
+
+Campos requeridos según `building_type`:
+- `casa` → street, neighborhood, city, state, dane_code
+- `edificio` → + apartment
+- `conjunto` → + tower, apartment
+
+Validación: `dependencies/contact_validators.py.is_address_complete(addr)`.
+
+### Knowledge Base — 6 categorías canónicas (rev. 68)
+
+`kb_documents.category` CHECK: `faq, negocio, politicas, productos, envios, pagos`.
+
+| Categoría | SÍ | NO |
+|---|---|---|
+| **FAQ** | Preguntas frecuentes con respuestas cortas | Misión, descripción de productos |
+| **Negocio** | Historia, equipo, hitos, alianzas | Misión/visión/valores (van en Filosofía) |
+| **Políticas** | Devoluciones, cambios, garantía, RMA | Métodos de pago, tarifas envío |
+| **Productos** | Guía de uso, talla, cuidado | Precio, stock, descripción de catálogo |
+| **Envíos** | Tarifas/zonas/tiempos, restricciones | Política de devolución |
+| **Pagos** | Métodos aceptados, financiamiento | Datos del banco (sensible) |
+
+RAG: embeddings `gemini-embedding-001` (3072 dim), búsqueda semántica top-3, threshold 0.4. Sin filtro por categoría — el RAG busca en todo el KB del tenant por significado.
+
+### Identidad del negocio vs Comportamiento del agente (rev. 67)
 
 Ortogonal — dos campos NO confundir:
 
