@@ -2,7 +2,7 @@ import logging
 import os
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel, Field
 from google import genai
@@ -198,6 +198,12 @@ _CUSTOMER_CONTEXT_LAZY_TOKENS: frozenset[str] = frozenset({
     "reclamo", "reclamos", "queja", "quejas",
     "garantia", "garantía", "devolucion", "devolución", "cambio",
     "estado", "status",
+    # F7-lite cart recovery: el cliente vuelve a hablar de "el carrito" /
+    # "lo del otro día" / "retomar" — disparamos contexto para inyectar
+    # carrito previo cancelled y permitir que el bot ofrezca retomar.
+    "carrito", "retomar", "retomo", "antes", "ayer",
+    "anterior", "ultima", "última", "ultimo", "último",
+    "pendiente", "pendientes", "pagar", "pago",
 })
 
 
@@ -229,17 +235,159 @@ def _customer_context_should_load(query_text: Optional[str]) -> bool:
     return bool(tokens & _CUSTOMER_CONTEXT_LAZY_TOKENS)
 
 
+def _cart_recovery_enabled() -> bool:
+    """F7-lite kill switch independiente del global CUSTOMER_CONTEXT_ENABLED.
+
+    Permite apagar solo el bloque de carrito previo sin tumbar el contexto
+    de pedidos activos / reclamos abiertos.
+    """
+    raw = os.getenv("CART_RECOVERY_ENABLED", "true")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _cart_recovery_lookback_days() -> int:
+    raw = os.getenv("CART_RECOVERY_LOOKBACK_DAYS", "7")
+    try:
+        v = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 7
+    return max(1, min(v, 60))
+
+
+def _load_cart_recovery_block(
+    supabase: Client, tenant_id: str, contact_id: str,
+) -> str:
+    """F7-lite: si el cliente tiene una orden 'cancelled' reciente, inyecta
+    el carrito previo al system prompt con re-validación de stock y precio
+    actual por variante.
+
+    Salida: bloque vacío si no aplica o ningún item es válido. Si hay carrito,
+    formato:
+
+      CARRITO PREVIO (cancelado por timeout, hace 2 días):
+      - 2x Camiseta Negra M (precio anterior $30.000, AHORA $35.000) — precio cambió
+      - 1x Pantalón Beige 30 ($85.000) — disponible
+      - 1x Gorra Roja — SIN STOCK
+      Total recalculado al precio actual: $155.000.
+      INSTRUCCIÓN: si el cliente quiere retomar, ofrece el total recalculado y
+      advierte cambios. Si algo está SIN STOCK, ofrece reemplazar.
+
+    NO crea orden nueva — eso lo hace el flujo normal del LLM con
+    payment_link_tool una vez el cliente confirma.
+    """
+    if not _cart_recovery_enabled():
+        return ""
+    lookback_days = _cart_recovery_lookback_days()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+    try:
+        cart_res = (
+            supabase.table("orders")
+            .select("id, status, total_amount, created_at, order_items(title, unit_price, quantity, variation_id, product_id)")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .eq("status", "cancelled")
+            .gte("created_at", cutoff)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = cart_res.data or []
+    except Exception as exc:
+        logger.warning("[CART-REC] Error cargando carrito previo contact=%s: %s", contact_id, exc)
+        return ""
+    if not rows:
+        return ""
+    cart = rows[0] or {}
+    items = cart.get("order_items") or []
+    if not items:
+        return ""
+
+    # Re-validar stock y precio actual para cada item por variation_id.
+    variation_ids = [it.get("variation_id") for it in items if it.get("variation_id")]
+    variants_by_id: dict[str, dict] = {}
+    if variation_ids:
+        try:
+            v_res = (
+                supabase.table("product_variations")
+                .select("id, stock_quantity, price")
+                .eq("tenant_id", tenant_id)
+                .in_("id", variation_ids)
+                .execute()
+            )
+            variants_by_id = {row["id"]: row for row in (v_res.data or []) if row.get("id")}
+        except Exception as exc:
+            logger.warning("[CART-REC] Error re-validando variantes: %s", exc)
+            variants_by_id = {}
+
+    created_at_raw = str(cart.get("created_at") or "")
+    days_ago: Optional[int] = None
+    try:
+        if created_at_raw:
+            iso = created_at_raw.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(iso)
+            days_ago = max(0, (datetime.now(timezone.utc) - dt).days)
+    except Exception:
+        days_ago = None
+    when = f"hace {days_ago} día{'s' if days_ago != 1 else ''}" if days_ago is not None else "reciente"
+
+    item_lines: list[str] = []
+    new_total = 0.0
+    any_available = False
+    for it in items:
+        title = (it.get("title") or "").strip() or "Producto"
+        qty = int(it.get("quantity") or 0) or 1
+        prev_price = float(it.get("unit_price") or 0)
+        variation_id = it.get("variation_id")
+        v = variants_by_id.get(variation_id) if variation_id else None
+        if v is None:
+            # Sin variación o variación borrada → no recuperable.
+            item_lines.append(f"- {qty}x {title} — NO DISPONIBLE (variante removida)")
+            continue
+        cur_stock = int(v.get("stock_quantity") or 0)
+        cur_price = float(v.get("price") or 0)
+        if cur_stock < qty:
+            item_lines.append(f"- {qty}x {title} — SIN STOCK (disponibles: {cur_stock})")
+            continue
+        any_available = True
+        new_total += cur_price * qty
+        if abs(cur_price - prev_price) > 0.01:
+            item_lines.append(
+                f"- {qty}x {title} (precio anterior ${prev_price:,.0f}, AHORA ${cur_price:,.0f}) — precio cambió"
+            )
+        else:
+            item_lines.append(f"- {qty}x {title} (${cur_price:,.0f}) — disponible")
+
+    if not any_available:
+        # Todo el carrito es irrecuperable: no aporta valor inyectarlo, evita
+        # ruido en el prompt. El cliente recibirá flujo normal de catálogo.
+        return ""
+
+    lines = ["", f"CARRITO PREVIO (cancelado por timeout, {when}):"]
+    lines.extend(item_lines)
+    lines.append(f"Total recalculado al precio actual: ${new_total:,.0f} COP.")
+    lines.append(
+        "INSTRUCCIÓN: si el cliente quiere retomar, ofrece el total recalculado "
+        "y advierte si algún precio cambió. Si algo está SIN STOCK, ofrece "
+        "reemplazarlo o armar el pedido con lo disponible. NO menciones el "
+        "carrito previo si el cliente no expresa intención de comprar."
+    )
+    return "\n".join(lines)
+
+
 def _load_customer_context_block(
     supabase: Client, tenant_id: str, contact_id: Optional[str], first_name: Optional[str],
     *, query_text: Optional[str] = None,
 ) -> str:
     """Construye un bloque "CONTEXTO DEL CLIENTE" para el system prompt
-    cuando el contacto es conocido y tiene operaciones activas.
+    cuando el contacto es conocido y tiene operaciones activas o un
+    carrito previo cancelado recientemente (F7-lite).
 
     Rev. 68: siempre cargaba si había contact_id.
     Rev. 69: respeta CUSTOMER_CONTEXT_MODE (always/lazy/disabled) y
     CUSTOMER_CONTEXT_ENABLED (kill switch). Default 'lazy' — carga solo si la
     query del cliente menciona pedido/reclamo/envío/etc.
+    Rev. 70 (F7-lite): además inyecta carrito previo cancelled reciente para
+    permitir que el bot ofrezca retomar.
 
     Razón: a escala el contexto suma ~150-300 tokens por mensaje. La mayoría
     de mensajes son saludos o consultas de catálogo donde el contexto no se
@@ -283,27 +431,36 @@ def _load_customer_context_block(
         logger.warning("[CTX] Error cargando claims contact=%s: %s", contact_id, exc)
         open_claims = []
 
-    if not active_orders and not open_claims:
+    cart_block = _load_cart_recovery_block(supabase, tenant_id, contact_id)
+
+    if not active_orders and not open_claims and not cart_block:
         return ""
 
-    lines = ["", "CONTEXTO DEL CLIENTE (cliente conocido):"]
-    if first_name:
-        lines[-1] = f"CONTEXTO DEL CLIENTE — {first_name} (cliente conocido):"
-    if active_orders:
-        for o in active_orders:
-            short = (o.get("id") or "")[:8].upper()
-            status = o.get("status", "?")
-            total = o.get("total_amount") or 0
-            lines.append(f"- Pedido #{short} | estado: {status} | total: ${float(total):,.0f} COP")
-    if open_claims:
-        for c in open_claims:
-            tn = c.get("ticket_number", "?")
-            lines.append(f"- Reclamo abierto #{tn} (sin resolver)")
-    lines.append(
-        "INSTRUCCIÓN: si el cliente pregunta por estos pedidos o reclamos, "
-        "ya tienes contexto y puedes mencionar el número y estado. "
-        "Si NO pregunta por ellos, NO los menciones — atiende lo que el cliente quiere ahora."
-    )
+    lines: list[str] = []
+    if active_orders or open_claims:
+        header = "CONTEXTO DEL CLIENTE (cliente conocido):"
+        if first_name:
+            header = f"CONTEXTO DEL CLIENTE — {first_name} (cliente conocido):"
+        lines.extend(["", header])
+        if active_orders:
+            for o in active_orders:
+                short = (o.get("id") or "")[:8].upper()
+                status = o.get("status", "?")
+                total = o.get("total_amount") or 0
+                lines.append(f"- Pedido #{short} | estado: {status} | total: ${float(total):,.0f} COP")
+        if open_claims:
+            for c in open_claims:
+                tn = c.get("ticket_number", "?")
+                lines.append(f"- Reclamo abierto #{tn} (sin resolver)")
+        lines.append(
+            "INSTRUCCIÓN: si el cliente pregunta por estos pedidos o reclamos, "
+            "ya tienes contexto y puedes mencionar el número y estado. "
+            "Si NO pregunta por ellos, NO los menciones — atiende lo que el cliente quiere ahora."
+        )
+
+    if cart_block:
+        lines.append(cart_block)
+
     return "\n".join(lines)
 
 

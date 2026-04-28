@@ -262,5 +262,12 @@ services:
         value: "true"
       - key: CUSTOMER_CONTEXT_MODE
         value: "lazy"
+      # ── Cart recovery (F7-lite, rev. 70) ─────────────────────────────────
+      # Inyecta carrito previo cancelado al system prompt para que el bot
+      # ofrezca retomar cuando el cliente vuelve a expresar intención de compra.
+      - key: CART_RECOVERY_ENABLED
+        value: "true"
+      - key: CART_RECOVERY_LOOKBACK_DAYS
+        value: "7"
     healthCheckPath: /health
     autoDeploy: true
