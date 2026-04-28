@@ -19,6 +19,7 @@ interface Conversation {
   status: 'bot_active' | 'human_takeover' | 'closed'
   created_at: string
   last_interaction_at?: string
+  archived_at?: string | null
   last_message?: { content: string; direction: string; created_at: string } | null
   last_read_at?: string | null  // A2: marca de lectura del operador actual
 }
@@ -494,7 +495,30 @@ export default function InboxPage() {
         // El trigger DB actualiza last_interaction_at en cada INSERT a messages;
         // ese UPDATE llega aquí con REPLICA IDENTITY FULL.
         if (payload.eventType === 'INSERT') {
-          // Conversación nueva — un re-fetch sí es necesario para traer joins.
+          // Conversación nueva — inyectar al state inmediatamente con los datos
+          // del payload para evitar race contra el re-fetch (el connector hace
+          // INSERT conversations + INSERT messages en pasos separados; sin
+          // optimistic update la fila no aparece hasta que el operador
+          // refresca con F5).
+          const newConv = payload.new as Conversation
+          if (newConv?.id) {
+            setConversations(prev => {
+              if (prev.some(c => c.id === newConv.id)) return prev
+              if (!showArchivedRef.current && newConv.archived_at) return prev
+              const merged: Conversation = {
+                ...newConv,
+                last_message: null,
+                last_read_at: null,
+              }
+              return [merged, ...prev].sort((a, b) => {
+                const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
+                const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
+                return bt - at
+              })
+            })
+          }
+          // Re-fetch para llenar last_message cuando el INSERT a messages
+          // (que ocurre milisegundos después) ya esté visible.
           loadConversations()
           return
         }
