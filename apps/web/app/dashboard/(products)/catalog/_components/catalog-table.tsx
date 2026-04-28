@@ -2,13 +2,14 @@
 
 import { useState, useMemo, useCallback, memo } from 'react'
 import Image from 'next/image'
-import { Button } from '@/components/ui/button'
+import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import {
-  Search, LayoutGrid, List as ListIcon, Check,
-  ChevronRight, ChevronDown, ImageOff, Tag, Package, Edit3, X, Plus, Archive, RotateCcw, Trash2, Minus, Store,
+  Search, LayoutGrid, List as ListIcon,
+  ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X,
+  ArrowUp, ArrowDown, ChevronsUpDown,
 } from 'lucide-react'
+import { ProductEditDrawer } from './product-edit-drawer'
 import type { Product, Variation } from '../types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -18,6 +19,8 @@ type Props = {
   archivedProducts: Product[]
   catMap: Record<string, string>
   canWrite: boolean
+  threshold: number
+  tenantId: string
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
@@ -44,140 +47,13 @@ function fmtPrice(vars: Variation[]): string {
   return min === max ? `$${locale(min)}` : `$${locale(min)} – $${locale(max)}`
 }
 
-// ── VariantRow — memoizado para evitar re-renders en edición inline ──────────
 
-const VariantRow = memo(function VariantRow({
-  v, canWrite, editVariationAction, isLinked,
-}: { v: Variation; canWrite: boolean; editVariationAction: (fd: FormData) => Promise<void>; isLinked?: boolean }) {
-  const [editing, setEditing] = useState(false)
-  return (
-    <>
-      {/* Desktop table row */}
-      <tr className="hidden sm:table-row bg-background hover:bg-muted/10 transition-colors">
-        <td className="px-3 py-2">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-medium">{fmtAttrs(v.attributes)}</span>
-            {v.sku && <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{v.sku}</span>}
-            {isLinked && (
-              <span title="Sincronizado con Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-500/20">
-                <Store className="h-2.5 w-2.5" /> MeLi
-              </span>
-            )}
-          </div>
-        </td>
-        <td className="px-2 py-2 text-center">
-          {editing ? (
-            <form action={editVariationAction} onSubmit={() => setEditing(false)} className="flex flex-col gap-1 items-center">
-              <input type="hidden" name="variation_id" value={v.id} />
-              <input type="hidden" name="stock" value={v.stock_quantity} />
-              <Input name="price" type="number" defaultValue={v.price} step="50" min="50" placeholder="Precio" className="h-7 w-24 text-xs text-center font-mono" autoFocus title="Precio Final" />
-              <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="50" min="50" placeholder="Tachado..." className="h-6 w-24 text-[10px] text-center font-mono border-dashed bg-muted/30" title="Precio Normal Tachado (Op)" />
-              <div className="flex gap-1 w-24">
-                <Button type="submit" size="sm" className="h-6 flex-1 px-1 text-[10px]">Guardar</Button>
-                <button type="button" onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground p-1"><X className="h-3 w-3" /></button>
-              </div>
-            </form>
-          ) : (
-            <button onClick={() => canWrite && setEditing(true)} className={`font-mono font-semibold text-primary tabular-nums ${canWrite ? 'hover:opacity-70 cursor-pointer' : 'cursor-default'}`}>
-              {v.price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
-              {v.compare_at_price && (
-                <span className="ml-1 text-[10px] text-muted-foreground line-through">{v.compare_at_price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</span>
-              )}
-            </button>
-          )}
-        </td>
-        <td className="px-2 py-2 text-center">
-          {editing ? (
-            <form action={editVariationAction} onSubmit={() => setEditing(false)} className="flex gap-1 justify-center">
-              <input type="hidden" name="variation_id" value={v.id} />
-              <input type="hidden" name="price" value={v.price} />
-              <Input name="stock" type="number" defaultValue={v.stock_quantity} min="0" className="h-7 w-20 text-xs text-center font-mono" />
-              <Button type="submit" size="sm" className="h-7 px-2 text-xs"><Check className="h-3 w-3" /></Button>
-            </form>
-          ) : (
-            <button onClick={() => canWrite && setEditing(true)} className={`font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive font-bold' : v.stock_quantity <= 5 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'} ${canWrite ? 'hover:opacity-70 cursor-pointer' : 'cursor-default'}`}>
-              {v.stock_quantity} u.
-            </button>
-          )}
-        </td>
-        <td className="px-2 py-2 text-right">
-          {canWrite && (
-            <button onClick={() => setEditing(!editing)} className="text-muted-foreground hover:text-primary transition-colors p-1 rounded">
-              <Edit3 className="h-3 w-3" />
-            </button>
-          )}
-        </td>
-      </tr>
-
-      {/* Mobile card row */}
-      <div className="sm:hidden flex items-center justify-between py-2 px-3 border-b border-border/20 last:border-0">
-        <div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-xs font-medium">{fmtAttrs(v.attributes)}</p>
-            {isLinked && (
-              <span title="Sincronizado con Mercado Libre" className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 border border-yellow-500/20">
-                <Store className="h-2.5 w-2.5" /> MeLi
-              </span>
-            )}
-          </div>
-          {v.sku && <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{v.sku}</p>}
-        </div>
-        <div className="text-right flex items-center gap-3">
-          <div>
-            <div className="flex items-center justify-end gap-1.5">
-              <p className="text-xs font-bold text-primary tabular-nums">${v.price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</p>
-              {v.compare_at_price && (
-                <p className="text-[10px] text-muted-foreground line-through tabular-nums">${v.compare_at_price.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</p>
-              )}
-            </div>
-            <p className={`text-[10px] tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= 5 ? 'text-amber-500' : 'text-muted-foreground'}`}>
-              {v.stock_quantity} u.
-            </p>
-          </div>
-          {canWrite && (
-            <button onClick={() => setEditing(!editing)} className="text-muted-foreground hover:text-primary transition-colors">
-              <Edit3 className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        {editing && (
-          <div className="w-full mt-2 p-3 bg-muted/20 rounded-lg border border-border/40">
-            <form action={editVariationAction} onSubmit={() => setEditing(false)} className="grid grid-cols-2 gap-2">
-              <input type="hidden" name="variation_id" value={v.id} />
-              <div>
-                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio</label>
-                <Input name="price" type="number" defaultValue={v.price} step="50" min="50" className="h-8 text-xs font-mono mt-1" />
-              </div>
-              <div>
-                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Tachado (Promo)</label>
-                <Input name="compare_at_price" type="number" defaultValue={v.compare_at_price ?? ''} step="50" min="50" className="h-8 text-xs font-mono mt-1" placeholder="Opcional" />
-              </div>
-              <div>
-                <label className="text-[10px] text-amber-600/90 uppercase font-semibold">Costo ($)</label>
-                <Input name="cost_price" type="number" defaultValue={v.cost_price ?? ''} step="50" min="0" className="h-8 text-xs font-mono mt-1 border-amber-500/30" placeholder="0" />
-              </div>
-              <div>
-                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock</label>
-                <Input name="stock" type="number" defaultValue={v.stock_quantity} min="0" className="h-8 text-xs font-mono mt-1" />
-              </div>
-              <div className="col-span-2 flex gap-2 justify-end mt-1">
-                <Button type="submit" size="sm" className="h-7 text-xs">Guardar</Button>
-                <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground px-3">Cancelar</button>
-              </div>
-            </form>
-          </div>
-        )}
-      </div>
-    </>
-  )
-})
-
-// ── ExpandedPanel — memoizado ─────────────────────────────────────────────────
+// ── ExpandedPanel — lean: solo tabla de variantes + botón Editar ─────────────
 
 const ExpandedPanel = memo(function ExpandedPanel({
-  p, canWrite, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
+  p, canWrite, catMap, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
-  p: Product; canWrite: boolean;
+  p: Product; canWrite: boolean; catMap: Record<string, string>; threshold: number; tenantId: string;
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
@@ -185,175 +61,73 @@ const ExpandedPanel = memo(function ExpandedPanel({
   adjustStockAction?: (fd: FormData) => Promise<void>
   linkedVariationIds?: string[]
 }) {
-  const [editingProduct, setEditingProduct] = useState(false)
-  const [showAddVar, setShowAddVar] = useState(false)
-  const [showAdjust, setShowAdjust] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const vars = p.product_variations ?? []
 
   return (
-    <div className="px-3 sm:px-5 py-4 space-y-4 border-t border-border/30">
+    <div className="px-3 sm:px-5 py-3 border-t border-border/30 space-y-3">
 
-      {/* Variants list */}
-      <div className="space-y-2">
-        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-          Variantes — Editar precio y stock
-        </p>
-
-        {/* Desktop: nested table */}
-        <div className="rounded-lg border border-border overflow-hidden hidden sm:block">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Variante / SKU</th>
-                <th className="text-center px-2 py-2 font-semibold text-muted-foreground w-32">Precio Normal ($)</th>
-                <th className="text-center px-2 py-2 font-semibold text-muted-foreground w-24">Stock (u.)</th>
-                <th className="w-12 px-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/20">
-              {vars.map(v => (
-                <VariantRow key={v.id} v={v} canWrite={canWrite} editVariationAction={editVariationAction} isLinked={linkedVariationIds?.includes(v.id)} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile: stacked cards */}
-        <div className="sm:hidden rounded-lg border border-border overflow-hidden divide-y divide-border/20 bg-background">
-          {vars.map(v => (
-            <VariantRow key={v.id} v={v} canWrite={canWrite} editVariationAction={editVariationAction} isLinked={linkedVariationIds?.includes(v.id)} />
-          ))}
-        </div>
+      {/* Tabla compacta de variantes — solo lectura */}
+      <div className="rounded-lg border border-border overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Variante / SKU</th>
+              <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-28">Precio</th>
+              <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-20">Stock</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/20">
+            {vars.map(v => {
+              const linked = linkedVariationIds?.includes(v.id)
+              return (
+                <tr key={v.id} className="bg-background hover:bg-muted/10 transition-colors">
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium">{fmtAttrs(v.attributes)}</span>
+                      {v.sku && <span className="font-mono text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{v.sku}</span>}
+                      {linked && <span className="text-[10px] text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 px-1.5 py-0.5 rounded">MeLi</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                    ${(v.price ?? 0).toLocaleString('es-CO')}
+                    {v.compare_at_price && <span className="text-muted-foreground line-through text-[10px] ml-1">${v.compare_at_price.toLocaleString('es-CO')}</span>}
+                  </td>
+                  <td className={`px-3 py-2 text-right font-mono tabular-nums ${v.stock_quantity === 0 ? 'text-destructive font-bold' : v.stock_quantity <= threshold ? 'text-amber-500 font-semibold' : 'text-muted-foreground'}`}>
+                    {v.stock_quantity} u.
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
 
-      {/* Add variant form */}
+      {/* Botón único de edición */}
       {canWrite && (
-        <div className="space-y-2">
-          {!showAddVar ? (
-            <button
-              onClick={() => setShowAddVar(true)}
-              className="flex items-center gap-1.5 text-xs text-primary hover:underline font-medium"
-            >
-              <Plus className="h-3.5 w-3.5" /> Agregar variante
-            </button>
-          ) : (
-            <form action={addVariationAction} onSubmit={() => setShowAddVar(false)} className="p-3 bg-muted/20 rounded-lg border border-border/40 space-y-3">
-              <input type="hidden" name="product_id" value={p.id} />
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase">Nueva Variante</p>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Tipo</label>
-                  <Input name="attr_key" placeholder="Propiedad (Ej: Color)" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Valor</label>
-                  <Input name="attr_val" placeholder="Ej: L" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">SKU</label>
-                  <Input name="sku" placeholder="PROD-001" className="h-8 text-xs font-mono" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Normal *</label>
-                  <Input name="price" type="number" min="50" step="50" placeholder="0" className="h-8 text-xs font-mono" required />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Precio Tachado</label>
-                  <Input name="compare_at_price" type="number" min="50" step="50" placeholder="Opcional" className="h-8 text-xs font-mono border-dashed bg-muted/30" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-amber-600/90 uppercase">Costo Base ($)</label>
-                  <Input name="cost_price" type="number" min="0" step="50" placeholder="0" className="h-8 text-xs font-mono border-amber-500/30" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Stock *</label>
-                  <Input name="stock" type="number" min="0" defaultValue={0} className="h-8 text-xs font-mono" required />
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button type="submit" size="sm" className="h-7 text-xs">Guardar Variante</Button>
-                <button type="button" onClick={() => setShowAddVar(false)} className="text-xs text-muted-foreground hover:text-foreground px-3">Cancelar</button>
-              </div>
-            </form>
-          )}
+        <div className="flex justify-end">
+          <button onClick={() => setDrawerOpen(true)}
+            className="inline-flex items-center gap-2 h-8 px-4 text-xs font-medium rounded-lg bg-foreground text-background hover:bg-foreground/80 transition-colors">
+            <Edit3 className="h-3.5 w-3.5" /> Editar producto
+          </button>
         </div>
       )}
 
-      {/* Adjust stock (delta) */}
-      {canWrite && adjustStockAction && (
-        <div className="pt-2 border-t border-border/20 space-y-2">
-          {!showAdjust ? (
-            <button
-              onClick={() => setShowAdjust(true)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary font-medium transition-colors"
-            >
-              <Minus className="h-3 w-3" /> Ajustar stock (±delta)
-            </button>
-          ) : (
-            <div className="p-3 bg-muted/20 rounded-lg border border-border/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase">Ajuste de stock por variante</p>
-                <button onClick={() => setShowAdjust(false)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
-              </div>
-              {vars.map(v => (
-                <form key={v.id} action={adjustStockAction} className="flex items-center gap-2 flex-wrap">
-                  <input type="hidden" name="variation_id" value={v.id} />
-                  <input type="hidden" name="product_id" value={p.id} />
-                  <span className="text-xs font-medium w-28 truncate">{fmtAttrs(v.attributes)}</span>
-                  <span className="text-xs text-muted-foreground font-mono w-12 text-right">{v.stock_quantity} u.</span>
-                  <Input name="delta" type="number" placeholder="±" className="h-7 w-16 text-xs font-mono" required />
-                  <Input name="reason" placeholder="Motivo" className="h-7 flex-1 text-xs min-w-24" />
-                  <Button type="submit" size="sm" className="h-7 text-xs px-2">OK</Button>
-                </form>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Edit product info */}
-      {canWrite && (
-        <div className="pt-2 border-t border-border/20 space-y-2">
-          {!editingProduct ? (
-            <button
-              onClick={() => setEditingProduct(true)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary font-medium transition-colors"
-            >
-              <Edit3 className="h-3 w-3" /> Editar nombre / descripción
-            </button>
-          ) : (
-            <form action={editProductAction} onSubmit={() => setEditingProduct(false)} className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-muted/20 rounded-lg border border-border/40">
-              <input type="hidden" name="product_id" value={p.id} />
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase">Nombre</label>
-                <Input name="title" defaultValue={p.title} className="h-8 text-xs" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción detallada</label>
-                <Textarea name="description" defaultValue={p.description ?? ''} className="min-h-[80px] text-xs resize-y" />
-              </div>
-              <div className="col-span-1 sm:col-span-2 flex gap-2 justify-end">
-                <Button type="submit" size="sm" className="h-7 text-xs">Guardar</Button>
-                <button type="button" onClick={() => setEditingProduct(false)} className="text-xs text-muted-foreground hover:text-foreground px-3">Cancelar</button>
-              </div>
-            </form>
-          )}
-        </div>
-      )}
-
-      {/* Archive */}
-      {canWrite && (
-        <form action={deactivateProductAction}>
-          <input type="hidden" name="product_id" value={p.id} />
-          <Button
-            type="submit"
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/5 border border-transparent hover:border-destructive/20 transition-all"
-          >
-            Archivar producto
-          </Button>
-        </form>
+      {/* Drawer de edición completo */}
+      {drawerOpen && adjustStockAction && (
+        <ProductEditDrawer
+          product={p}
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          catMap={catMap}
+          tenantId={tenantId}
+          threshold={threshold}
+          editProductAction={editProductAction}
+          editVariationAction={editVariationAction}
+          addVariationAction={addVariationAction}
+          adjustStockAction={adjustStockAction}
+          deactivateProductAction={deactivateProductAction}
+        />
       )}
     </div>
   )
@@ -362,10 +136,10 @@ const ExpandedPanel = memo(function ExpandedPanel({
 // ── ProductMobileCard — tarjeta para vista móvil en lista ─────────────────────
 
 const ProductMobileCard = memo(function ProductMobileCard({
-  p, catName, isExpanded, onToggle, canWrite,
+  p, catName, catMap, threshold, tenantId, isExpanded, onToggle, canWrite,
   editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
-  p: Product; catName: string | null; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
+  p: Product; catName: string | null; catMap: Record<string, string>; threshold: number; tenantId: string; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
@@ -415,7 +189,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
 
         <div className="text-right flex-shrink-0 mr-1">
           <p className="font-bold text-sm text-primary">{fmtPrice(vars)}</p>
-          <p className={`text-[10px] tabular-nums ${hasZero ? 'text-destructive' : totalStock <= 5 ? 'text-amber-500' : 'text-muted-foreground'}`}>
+          <p className={`text-[10px] tabular-nums ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-500' : 'text-muted-foreground'}`}>
             {totalStock} u.
           </p>
         </div>
@@ -424,7 +198,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
 
       {isExpanded && (
         <ExpandedPanel
-          p={p} canWrite={canWrite}
+          p={p} canWrite={canWrite} catMap={catMap} threshold={threshold} tenantId={tenantId}
           editProductAction={editProductAction}
           editVariationAction={editVariationAction}
           addVariationAction={addVariationAction}
@@ -484,9 +258,9 @@ const ArchivedSection = memo(function ArchivedSection({
               <div className="flex items-center gap-2 flex-shrink-0">
                 <form action={restoreProductAction}>
                   <input type="hidden" name="product_id" value={p.id} />
-                  <Button type="submit" size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
+                  <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Restaurado" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
                     <RotateCcw className="h-3 w-3" /> Restaurar
-                  </Button>
+                  </SubmitButton>
                 </form>
                 <form
                   action={deleteProductAction}
@@ -495,9 +269,9 @@ const ArchivedSection = memo(function ArchivedSection({
                   }}
                 >
                   <input type="hidden" name="product_id" value={p.id} />
-                  <Button type="submit" size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                  <SubmitButton size="sm" variant="ghost" pendingText="" savedText="" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                     <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  </SubmitButton>
                 </form>
               </div>
             </div>
@@ -511,26 +285,70 @@ const ArchivedSection = memo(function ArchivedSection({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function CatalogTable({
-  products, archivedProducts, catMap, canWrite,
+  products, archivedProducts, catMap, canWrite, threshold, tenantId,
   editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
   adjustStockAction, linkedVariationIds,
 }: Props) {
   const [search, setSearch]           = useState('')
   const [viewMode, setViewMode]       = useState<'list' | 'grid'>('list')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [sortBy,  setSortBy]          = useState<'title' | 'category' | 'price' | 'stock' | null>(null)
+  const [sortDir, setSortDir]         = useState<'asc' | 'desc'>('asc')
+
+  const handleSort = (col: 'title' | 'category' | 'price' | 'stock') => {
+    if (sortBy === col) {
+      if (sortDir === 'asc') setSortDir('desc')
+      else { setSortBy(null); setSortDir('asc') }
+    } else {
+      setSortBy(col)
+      setSortDir('asc')
+    }
+  }
+
+  const SortIcon = ({ col }: { col: 'title' | 'category' | 'price' | 'stock' }) => {
+    if (sortBy !== col) return <ChevronsUpDown className="h-3 w-3 opacity-40 group-hover:opacity-80" />
+    return sortDir === 'asc'
+      ? <ArrowUp className="h-3 w-3 text-primary" />
+      : <ArrowDown className="h-3 w-3 text-primary" />
+  }
 
   const toggle = useCallback((id: string) =>
     setExpandedIds(prev => { const n = new Set(prev); if (n.has(id)) { n.delete(id) } else { n.add(id) } return n }), [])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
-    if (!q) return products
-    return products.filter(p =>
-      p.title.toLowerCase().includes(q) ||
-      p.description?.toLowerCase().includes(q) ||
-      p.product_variations.some(v => v.sku?.toLowerCase().includes(q))
-    )
-  }, [products, search])
+    let result = q
+      ? products.filter(p =>
+          p.title.toLowerCase().includes(q) ||
+          p.description?.toLowerCase().includes(q) ||
+          p.product_variations.some(v => v.sku?.toLowerCase().includes(q))
+        )
+      : [...products]
+
+    if (sortBy) {
+      result.sort((a, b) => {
+        let va: string | number = 0
+        let vb: string | number = 0
+        if (sortBy === 'title') { va = a.title.toLowerCase(); vb = b.title.toLowerCase() }
+        else if (sortBy === 'category') {
+          va = (a.platform_category_id ? catMap[a.platform_category_id] ?? '' : '').toLowerCase()
+          vb = (b.platform_category_id ? catMap[b.platform_category_id] ?? '' : '').toLowerCase()
+        }
+        else if (sortBy === 'price') {
+          va = Math.min(...a.product_variations.map(v => v.price ?? Infinity))
+          vb = Math.min(...b.product_variations.map(v => v.price ?? Infinity))
+        }
+        else if (sortBy === 'stock') {
+          va = a.product_variations.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
+          vb = b.product_variations.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
+        }
+        if (va < vb) return sortDir === 'asc' ? -1 : 1
+        if (va > vb) return sortDir === 'asc' ? 1 : -1
+        return 0
+      })
+    }
+    return result
+  }, [products, search, sortBy, sortDir, catMap])
 
   // ── Empty State ─────────────────────────────────────────────────────────────
   if (products.length === 0) {
@@ -620,6 +438,9 @@ export default function CatalogTable({
               key={p.id}
               p={p}
               catName={p.platform_category_id ? catMap[p.platform_category_id] : null}
+              catMap={catMap}
+              threshold={threshold}
+              tenantId={tenantId}
               isExpanded={expandedIds.has(p.id)}
               onToggle={() => toggle(p.id)}
               canWrite={canWrite}
@@ -639,10 +460,22 @@ export default function CatalogTable({
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 <th className="w-14 px-3 py-3" />
-                <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Producto</th>
-                <th className="hidden md:table-cell text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Categoría</th>
-                <th className="text-right px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Precio</th>
-                <th className="text-right px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Stock</th>
+                {(['title', 'category', 'price', 'stock'] as const).map((col, i) => {
+                  const labels = { title: 'Producto', category: 'Categoría', price: 'Precio', stock: 'Stock' }
+                  const align  = col === 'title' || col === 'category' ? 'text-left' : 'text-right'
+                  const hidden = col === 'category' ? 'hidden md:table-cell' : ''
+                  return (
+                    <th key={col} className={`${align} ${hidden} px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider`}>
+                      <button
+                        onClick={() => handleSort(col)}
+                        className={`group inline-flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === col ? 'text-foreground' : ''}`}
+                      >
+                        {labels[col]}
+                        <SortIcon col={col} />
+                      </button>
+                    </th>
+                  )
+                })}
                 <th className="w-8 px-2" />
               </tr>
             </thead>
@@ -694,11 +527,11 @@ export default function CatalogTable({
                       )}
                     </td>
                     <td className="px-3 py-3 text-right">
-                      <span className="font-bold text-primary tabular-nums">{fmtPrice(vars)}</span>
+                      <span className="text-sm font-medium text-foreground tabular-nums">{fmtPrice(vars)}</span>
                     </td>
                     <td className="px-3 py-3 text-right">
                       <span className={`text-sm font-semibold tabular-nums ${
-                        hasZero ? 'text-destructive' : totalStock <= 5 ? 'text-amber-500' : 'text-muted-foreground'
+                        hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-500' : 'text-muted-foreground'
                       }`}>{totalStock} u.</span>
                     </td>
                     <td className="px-2 py-3 text-muted-foreground">
@@ -710,7 +543,7 @@ export default function CatalogTable({
                     <tr key={`${p.id}-exp`}>
                       <td colSpan={6} className="bg-muted/10" onClick={e => e.stopPropagation()}>
                         <ExpandedPanel
-                          p={p} canWrite={canWrite}
+                          p={p} canWrite={canWrite} catMap={catMap} threshold={threshold} tenantId={tenantId}
                           editProductAction={editProductAction}
                           editVariationAction={editVariationAction}
                           addVariationAction={addVariationAction}
@@ -795,7 +628,7 @@ export default function CatalogTable({
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="font-bold text-primary text-sm">{fmtPrice(vars)}</p>
-                      <p className={`text-[11px] tabular-nums font-medium ${hasZero ? 'text-destructive' : totalStock <= 5 ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                      <p className={`text-[11px] tabular-nums font-medium ${hasZero ? 'text-destructive' : totalStock <= threshold ? 'text-amber-500' : 'text-muted-foreground'}`}>
                         {totalStock} u.
                       </p>
                     </div>
@@ -820,7 +653,7 @@ export default function CatalogTable({
                 {isExpanded && (
                   <div className="border-t border-border/40">
                     <ExpandedPanel
-                      p={p} canWrite={canWrite}
+                      p={p} canWrite={canWrite} catMap={catMap} threshold={threshold} tenantId={tenantId}
                       editProductAction={editProductAction}
                       editVariationAction={editVariationAction}
                       addVariationAction={addVariationAction}

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Plus, Receipt, Calendar, Tag } from 'lucide-react'
 import { addExpense } from '../actions'
@@ -63,7 +64,7 @@ export default function ExpensesManager({ expenses, canWrite }: Props) {
                 </div>
                 <div className="flex justify-end gap-2 pt-3 border-t">
                   <Button type="button" variant="ghost" size="sm" onClick={() => setShowAdd(false)} className="h-8 text-xs">Cancelar</Button>
-                  <Button type="submit" size="sm" className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white">Guardar Egreso</Button>
+                  <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado" className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white">Guardar Egreso</SubmitButton>
                 </div>
               </form>
            </CardContent>

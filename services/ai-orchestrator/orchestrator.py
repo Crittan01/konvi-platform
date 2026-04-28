@@ -1419,6 +1419,7 @@ def _build_store_info_section(
     vision: str = "",
     valores: str = "",
     cutoff_message: str = "",
+    dispatch_lead_time: str = "",
 ) -> str:
     """
     Construye la sección de información comercial del tenant para el system prompt.
@@ -1483,8 +1484,10 @@ def _build_store_info_section(
         lines.append(f"- Visión: {vision}")
     if valores:
         lines.append(f"- Valores: {valores}")
+    if dispatch_lead_time:
+        lines.append(f"- Tiempo de despacho: {dispatch_lead_time}")
     if cutoff_message:
-        lines.append(f"- Corte de envíos: {cutoff_message}")
+        lines.append(f"- Política de envíos: {cutoff_message}")
 
     if len(lines) == 1:
         return ""  # Sin info configurada → no inyectar sección vacía
@@ -1516,6 +1519,7 @@ def _build_system_prompt(
     tenant_valores: str = "",
     tenant_tono: str = "amigable",
     tenant_cutoff_msg: str = "",
+    tenant_dispatch_lead: str = "",
 ) -> str:
     """Construye el system prompt con FSM contextual para venta vs consulta."""
     if history is None:
@@ -1624,6 +1628,7 @@ def _build_system_prompt(
         vision=tenant_vision or "",
         valores=tenant_valores or "",
         cutoff_message=tenant_cutoff_msg or "",
+        dispatch_lead_time=tenant_dispatch_lead or "",
     )
     tono_instruccion = _TONO_INSTRUCCIONES.get(tenant_tono, _TONO_INSTRUCCIONES["amigable"])
 
@@ -1968,7 +1973,7 @@ async def build_and_run_orchestration(
         # Necesario antes de los gates para personalizar respuestas y verificar estado.
         tenant_res = supabase.table("tenants").select(
             "name, shipping_origin, store_type, social_links, store_locations, business_hours, "
-            "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, cutoff_message"
+            "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
@@ -1983,7 +1988,8 @@ async def build_and_run_orchestration(
         tenant_tono             = tenant_row.get("tono_comunicacion") or "amigable"
         tenant_support_schedule = tenant_row.get("support_schedule") or {}
         tenant_after_hours_msg  = tenant_row.get("after_hours_message") or ""
-        tenant_cutoff_msg       = tenant_row.get("cutoff_message") or ""
+        tenant_cutoff_msg       = ""
+        tenant_dispatch_lead    = ""
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -2329,6 +2335,7 @@ async def build_and_run_orchestration(
             tenant_valores=tenant_valores,
             tenant_tono=tenant_tono,
             tenant_cutoff_msg=tenant_cutoff_msg,
+            tenant_dispatch_lead=tenant_dispatch_lead,
         )
         user_context = _build_user_context(history, content)
 

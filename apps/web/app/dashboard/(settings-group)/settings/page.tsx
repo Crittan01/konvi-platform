@@ -1,11 +1,11 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { saveTenant, saveOperativa, savePresenciaDigital, saveHorario, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
+import { saveTenant, savePresenciaDigital, saveHorario, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
 import {
-  Settings, Truck, Building2, SlidersHorizontal, Globe, Clock,
+  Settings, Truck, Building2, Globe, Clock,
   CheckCircle2, XCircle, Sparkles, Bot,
 } from 'lucide-react'
 import LogoUpload from './logo-upload'
@@ -32,7 +32,6 @@ type SupportSchedule = { days: number[]; open: string; close: string }
 type Tenant = {
   id: string; name: string; status: string
   shipping_origin?: ShippingOrigin | null; logo_url?: string | null
-  low_stock_threshold?: number | null
   nit?: string | null
   email_contacto?: string | null
   telefono_contacto?: string | null
@@ -46,7 +45,6 @@ type Tenant = {
   tono_comunicacion?: string | null
   support_schedule?: SupportSchedule | null
   after_hours_message?: string | null
-  cutoff_message?: string | null
 }
 // ─── Componentes reutilizables ────────────────────────────────────────────────
 
@@ -93,7 +91,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, low_stock_threshold, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, cutoff_message')
+      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -339,19 +337,6 @@ export default async function SettingsPage() {
                     <p className="text-[10px] text-muted-foreground">El bot lo envía automáticamente antes de escalar al asesor.</p>
                   </div>
 
-                  {/* Política de envío */}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium" htmlFor="cutoff">
-                      Política de envío <span className="text-muted-foreground font-normal">(opcional)</span>
-                    </Label>
-                    <textarea id="cutoff" name="cutoff_message"
-                      defaultValue={tenant?.cutoff_message ?? ''}
-                      rows={3}
-                      placeholder={'• Pedidos antes de las 2:00 PM salen el mismo día\n• Envío gratis en compras desde $150.000\n• Sin despachos en domingos y festivos'}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
-                    <p className="text-[10px] text-muted-foreground">El bot lo menciona al cotizar envíos. Escribe cada política en una línea.</p>
-                  </div>
-
                   <SubmitButton size="sm">Guardar horario</SubmitButton>
                 </form>
               </FormSection>
@@ -394,10 +379,6 @@ export default async function SettingsPage() {
                 value: tenant?.status === 'active' ? 'Activo' : tenant?.status ?? '—',
                 ok: tenant?.status === 'active',
                 anchor: 'section-identidad',
-              },
-              {
-                label: 'Stock bajo en',
-                value: `≤ ${tenant?.low_stock_threshold ?? 5} uds`,
               },
               {
                 label: 'Tipo de tienda',
@@ -470,31 +451,6 @@ export default async function SettingsPage() {
             )
           })()}
 
-          {/* Configuración Operativa — umbral de stock bajo */}
-          {isOwner && (
-            <FormSection icon={SlidersHorizontal} title="Configuración Operativa"
-              description="Parámetros globales que afectan el comportamiento del sistema.">
-              <form action={saveOperativa} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium" htmlFor="low-stock">Umbral stock bajo</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="low-stock"
-                      name="low_stock_threshold"
-                      type="number" min={1} max={999}
-                      defaultValue={tenant?.low_stock_threshold ?? 5}
-                      className="h-9 w-24"
-                    />
-                    <span className="text-xs text-muted-foreground">unidades</span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Alerta en Inventario cuando stock ≤ este número.
-                  </p>
-                </div>
-                <SubmitButton size="sm">Guardar</SubmitButton>
-              </form>
-            </FormSection>
-          )}
 
 
         </div>

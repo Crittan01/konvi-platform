@@ -59,20 +59,11 @@ export async function saveHorarioAsesor(formData: FormData) {
   const open  = (formData.get('support_open')  as string)?.trim()
   const close = (formData.get('support_close') as string)?.trim()
   const after_hours_message = (formData.get('after_hours_message') as string)?.trim() || null
-  const cutoff_message      = (formData.get('cutoff_message') as string)?.trim()      || null
   const support_schedule = days.length && open && close ? { days, open, close } : null
-  await updateTenant(tenantId, { support_schedule, after_hours_message, cutoff_message })
+  await updateTenant(tenantId, { support_schedule, after_hours_message })
   revalidatePath('/dashboard/settings')
 }
 
-export async function saveOperativa(formData: FormData) {
-  const tenantId = await getOwnerTenantId()
-  const threshold = parseInt(formData.get('low_stock_threshold') as string, 10)
-  if (Number.isInteger(threshold) && threshold >= 1 && threshold <= 999) {
-    await updateTenant(tenantId, { low_stock_threshold: threshold })
-  }
-  revalidateSettings()
-}
 
 export async function savePresenciaDigital(formData: FormData) {
   const tenantId = await getOwnerTenantId()

@@ -25,7 +25,6 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/tests")
 
-import integrations.wompi_client
 from routers import wompi_webhook
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY
 
@@ -138,8 +137,10 @@ def _make_supabase_mock(state):
 
 class WompiWebhookTests(unittest.TestCase):
     def setUp(self):
-        self._patcher = patch.object(
-            integrations.wompi_client, "WOMPI_EVENTS_KEY", TEST_EVENTS_KEY
+        # Inyectar events_key del tenant vía get_tenant_wompi_creds (nueva API multi-tenant)
+        self._patcher = patch(
+            "routers.wompi_webhook.get_tenant_wompi_creds",
+            return_value=(None, TEST_EVENTS_KEY, "sandbox"),
         )
         self._patcher.start()
         self.addCleanup(self._patcher.stop)
@@ -154,7 +155,7 @@ class WompiWebhookTests(unittest.TestCase):
 
         wompi_webhook._process_wompi_event(payload)
 
-        supabase.table.assert_not_called()
+        # Con multi-tenant: payments + orders son consultados antes de verificar firma
         mock_decrement.assert_not_called()
 
     @patch("routers.orders._decrement_stock_on_confirm")

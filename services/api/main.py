@@ -21,31 +21,11 @@ def _validate_startup_config() -> None:
     Valida coherencia de configuración crítica antes de aceptar tráfico.
     Falla rápido (sys.exit) si detecta incoherencias que causarían errores
     silenciosos en producción.
+
+    Nota: las credenciales de Wompi son por-tenant (tenant_integrations + Vault).
+    No se validan aquí.
     """
     errors: list[str] = []
-
-    # ── Wompi: ambiente vs llaves ─────────────────────────────────────────────
-    wompi_env = os.getenv("WOMPI_ENV", "sandbox").strip().lower()
-    if wompi_env == "production":
-        prv_key = os.getenv("WOMPI_PRIVATE_KEY_PROD", "")
-        events_key = os.getenv("WOMPI_EVENTS_KEY_PROD", "")
-        if not prv_key.startswith("prv_prod_"):
-            errors.append(
-                f"WOMPI_ENV=production pero WOMPI_PRIVATE_KEY_PROD no comienza con 'prv_prod_' "
-                f"(valor actual: {prv_key[:12]}...). Configura la llave real de producción."
-            )
-        if not events_key.startswith("prod_events_"):
-            errors.append(
-                f"WOMPI_ENV=production pero WOMPI_EVENTS_KEY_PROD no comienza con 'prod_events_' "
-                f"(valor actual: {events_key[:15]}...). Configura la events key real de producción."
-            )
-    elif wompi_env == "sandbox":
-        # Advertir si accidentalmente se pusieron llaves de producción en sandbox
-        pub_key = os.getenv("WOMPI_PUBLIC_KEY_SANDBOX", "")
-        if pub_key.startswith("pub_prod_"):
-            logger.warning(
-                "[STARTUP] ⚠️ WOMPI_ENV=sandbox pero WOMPI_PUBLIC_KEY_SANDBOX parece una llave de producción"
-            )
 
     # ── Variables críticas de Supabase ────────────────────────────────────────
     if not os.getenv("NEXT_PUBLIC_SUPABASE_URL", "").startswith("https://"):
@@ -60,7 +40,7 @@ def _validate_startup_config() -> None:
             logger.error("[STARTUP] ❌ %s", err)
         sys.exit(1)
 
-    logger.info("[STARTUP] ✅ Validación de configuración OK (WOMPI_ENV=%s)", wompi_env)
+    logger.info("[STARTUP] ✅ Validación de configuración OK")
 
 
 @asynccontextmanager

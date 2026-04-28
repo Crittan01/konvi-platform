@@ -1,7 +1,7 @@
 'use client'
 
 import { useFormStatus } from 'react-dom'
-import { Bot, Save, ShieldAlert } from 'lucide-react'
+import { Bot, Save, ShieldAlert, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,8 +15,10 @@ function SubmitButton() {
   const { pending } = useFormStatus()
   return (
     <Button type="submit" disabled={pending} className="gap-2">
-      <Save className="h-4 w-4" />
-      {pending ? 'Guardando...' : 'Guardar Configuración IA'}
+      {pending
+        ? <><Loader2 className="h-4 w-4 animate-spin" />Guardando...</>
+        : <><Save className="h-4 w-4" />Guardar Configuración IA</>
+      }
     </Button>
   )
 }

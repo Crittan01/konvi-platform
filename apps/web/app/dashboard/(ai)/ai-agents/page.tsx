@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Bot, BookOpen, Sparkles } from 'lucide-react'
 import { AiAgentForm } from './ai-agent-form'
+import { BotPreview } from './bot-preview'
+import { ReadinessCard } from './readiness-card'
 
 const TONO_LABEL: Record<string, string> = {
   amigable: 'Amigable y cercano',
@@ -23,10 +25,18 @@ export default async function AiAgentsPage() {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
   }
 
-  const [{ data }, { data: tenant }] = await Promise.all([
+  const [{ data }, { data: tenant }, { data: kbStats }] = await Promise.all([
     supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle(),
     supabase.from('tenants').select('mision, vision, valores, tono_comunicacion').eq('id', tenantId).maybeSingle(),
+    supabase.from('kb_documents')
+      .select('is_active, embedding')
+      .eq('tenant_id', tenantId),
   ])
+
+  const kbDocs     = (kbStats ?? []) as Array<{ is_active: boolean; embedding: string | null }>
+  const activeDocs  = kbDocs.filter(d => d.is_active).length
+  const indexedDocs = kbDocs.filter(d => d.is_active && d.embedding).length
+  const totalDocs   = kbDocs.length
 
   const agent = data || {
     name: 'Bot Asistente',
@@ -75,6 +85,15 @@ export default async function AiAgentsPage() {
           Ajusta la personalidad, rol y los límites estrictos de tu asistente virtual de WhatsApp.
         </p>
       </div>
+
+      <ReadinessCard
+        hasFilosofia={hasFilosofia}
+        totalDocs={totalDocs}
+        activeDocs={activeDocs}
+        indexedDocs={indexedDocs}
+        agentName={agent.name}
+        hasPrompt={!!agent.role_description && agent.role_description.length > 20}
+      />
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">
         <div className="flex items-start gap-4">
@@ -142,6 +161,8 @@ export default async function AiAgentsPage() {
       </div>
 
       <AiAgentForm agent={agent} canWrite={canWrite} saveAiAgent={saveAiAgent} />
+
+      <BotPreview />
     </div>
   )
 }

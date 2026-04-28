@@ -387,8 +387,8 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           <span className="text-xs text-muted-foreground">Consentimiento Habeas Data</span>
                         </label>
                         <div className="flex items-center gap-2">
-                          <Button type="submit" disabled={isPending} size="sm" variant="outline" className="h-7 text-xs">
-                            {isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null} Guardar cambios
+                          <Button type="submit" disabled={isPending} size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+                            {isPending ? <><Loader2 className="h-3 w-3 animate-spin" />Guardando...</> : 'Guardar cambios'}
                           </Button>
                           <Button
                             type="button"

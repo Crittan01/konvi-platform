@@ -88,10 +88,11 @@ class WompiPayloadBuilder:
         self._properties = properties
         return self
 
-    def _compute_checksum(self, data: dict) -> str:
+    def _compute_checksum(self, payload: dict) -> str:
+        """Computa el checksum SHA256 desde ROOT del payload — igual que Wompi en producción."""
         parts = []
         for prop in self._properties:
-            val = data
+            val: object = payload  # traversal desde ROOT del payload completo
             for key in prop.split("."):
                 val = val.get(key, "") if isinstance(val, dict) else ""
             parts.append(str(val))
@@ -108,13 +109,12 @@ class WompiPayloadBuilder:
                 "amount_in_cents": self._amount_in_cents,
             }
         }
-        checksum = self._compute_checksum(data)
-        return {
+        # Construir payload completo primero para computar checksum desde ROOT
+        payload: dict[str, Any] = {
             "event": self._event,
             "timestamp": self._timestamp,
-            "signature": {
-                "properties": self._properties,
-                "checksum": checksum,
-            },
             "data": data,
         }
+        checksum = self._compute_checksum(payload)
+        payload["signature"] = {"properties": self._properties, "checksum": checksum}
+        return payload

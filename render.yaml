@@ -141,25 +141,9 @@ services:
         value: "40"
       - key: API_RATE_LIMIT_DISTRIBUTED
         value: "true"
-      # ── Wompi (Fase C — Pagos) ─────────────────────────────────────────────
-      - key: WOMPI_ENV
-        value: "sandbox"
-      - key: WOMPI_PUBLIC_KEY_SANDBOX
-        sync: false
-      - key: WOMPI_PRIVATE_KEY_SANDBOX
-        sync: false
-      - key: WOMPI_EVENTS_KEY_SANDBOX
-        sync: false
-      - key: WOMPI_INTEGRITY_KEY_SANDBOX
-        sync: false
-      - key: WOMPI_PUBLIC_KEY_PROD
-        sync: false
-      - key: WOMPI_PRIVATE_KEY_PROD
-        sync: false
-      - key: WOMPI_EVENTS_KEY_PROD
-        sync: false
-      - key: WOMPI_INTEGRITY_KEY_PROD
-        sync: false
+      # ── Wompi — credenciales por-tenant en Supabase Vault (tenant_integrations) ──
+      # Las llaves de Wompi se ingresan por tenant en Ajustes → Integraciones → Wompi.
+      # No se necesitan env vars globales para Wompi.
     healthCheckPath: /health
     autoDeploy: true
 

@@ -10,11 +10,13 @@ Ambientes:
 
 Algoritmo de firma webhook: SHA256 simple sobre string concatenado
 (no HMAC) — ver verify_event_signature().
+
+Credenciales: por-tenant en tenant_integrations (provider='wompi'),
+almacenadas en Supabase Vault. No se usan env vars globales.
 """
 import hashlib
 import logging
-import os
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
 
@@ -23,21 +25,48 @@ logger = logging.getLogger(__name__)
 WOMPI_SANDBOX_URL = "https://sandbox.wompi.co/v1"
 WOMPI_PROD_URL = "https://production.wompi.co/v1"
 
-WOMPI_ENV = os.getenv("WOMPI_ENV", "sandbox").strip().lower()
-_is_prod = WOMPI_ENV == "production"
-
-WOMPI_BASE_URL = WOMPI_PROD_URL if _is_prod else WOMPI_SANDBOX_URL
-WOMPI_PRIVATE_KEY = os.getenv(
-    "WOMPI_PRIVATE_KEY_PROD" if _is_prod else "WOMPI_PRIVATE_KEY_SANDBOX", ""
-)
-WOMPI_EVENTS_KEY = os.getenv(
-    "WOMPI_EVENTS_KEY_PROD" if _is_prod else "WOMPI_EVENTS_KEY_SANDBOX", ""
-)
-
 REQUEST_TIMEOUT_SECONDS = 15
 
 
-def verify_event_signature(payload: dict) -> bool:
+def wompi_base_url(environment: str) -> str:
+    return WOMPI_PROD_URL if environment == "production" else WOMPI_SANDBOX_URL
+
+
+def get_tenant_wompi_creds(supabase, tenant_id: str) -> Tuple[Optional[str], Optional[str], str]:
+    """
+    Lee private_key, events_key y environment desde tenant_integrations (Vault).
+    Retorna (private_key, events_key, environment).
+    Retorna (None, None, "sandbox") si el tenant no tiene Wompi configurado.
+    """
+    try:
+        from vault_helper import VaultHelper, resolve_secret
+        res = (
+            supabase.table("tenant_integrations")
+            .select("credentials, meta, status")
+            .eq("tenant_id", tenant_id)
+            .eq("provider", "wompi")
+            .eq("status", "connected")
+            .maybe_single()
+            .execute()
+        )
+        if not res.data:
+            return None, None, "sandbox"
+
+        creds = res.data.get("credentials", {})
+        meta = res.data.get("meta", {})
+        environment = meta.get("environment", "sandbox")
+
+        vault = VaultHelper(supabase)
+        private_key = resolve_secret(vault, creds, "private_key")
+        events_key = resolve_secret(vault, creds, "events_key")
+
+        return private_key, events_key, environment
+    except Exception as e:
+        logger.error("[WOMPI] error_leyendo_creds tenant=%s error=%s", tenant_id, e)
+        return None, None, "sandbox"
+
+
+def verify_event_signature(payload: dict, events_key: str) -> bool:
     """
     Valida la firma de un evento webhook de Wompi.
 
@@ -50,8 +79,8 @@ def verify_event_signature(payload: dict) -> bool:
 
     Referencia: https://docs.wompi.co/en/docs/colombia/eventos/
     """
-    if not WOMPI_EVENTS_KEY:
-        logger.error("[WOMPI] WOMPI_EVENTS_KEY no configurada — rechazando evento")
+    if not events_key:
+        logger.error("[WOMPI] events_key no configurada — rechazando evento")
         return False
 
     sig = payload.get("signature", {})
@@ -63,15 +92,14 @@ def verify_event_signature(payload: dict) -> bool:
         logger.warning("[WOMPI] Payload sin signature.properties o checksum")
         return False
 
-    data = payload.get("data", {})
     parts = []
     for prop in properties:
-        val = data
+        val: object = payload  # traversal desde ROOT — "data.transaction.id" → payload["data"]["transaction"]["id"]
         for key in prop.split("."):
             val = val.get(key, "") if isinstance(val, dict) else ""
         parts.append(str(val))
 
-    concat = "".join(parts) + str(timestamp) + WOMPI_EVENTS_KEY
+    concat = "".join(parts) + str(timestamp) + events_key
     computed = hashlib.sha256(concat.encode()).hexdigest().upper()
     valid = computed == expected_checksum.upper()
 
@@ -86,6 +114,8 @@ def verify_event_signature(payload: dict) -> bool:
 
 def create_payment_link_sync(
     *,
+    private_key: str,
+    environment: str,
     order_id: str,
     name: str,
     description: str,
@@ -97,9 +127,10 @@ def create_payment_link_sync(
     Versión síncrona de create_payment_link — para BackgroundTasks y webhooks síncronos.
     Mismos parámetros y respuesta que create_payment_link.
     """
-    if not WOMPI_PRIVATE_KEY:
-        raise ValueError("WOMPI_PRIVATE_KEY no configurada")
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
 
+    base_url = wompi_base_url(environment)
     payload = {
         "name": name[:100],
         "description": description[:255],
@@ -115,8 +146,8 @@ def create_payment_link_sync(
 
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = client.post(
-            f"{WOMPI_BASE_URL}/payment_links",
-            headers={"Authorization": f"Bearer {WOMPI_PRIVATE_KEY}"},
+            f"{base_url}/payment_links",
+            headers={"Authorization": f"Bearer {private_key}"},
             json=payload,
         )
         response.raise_for_status()
@@ -134,6 +165,8 @@ def create_payment_link_sync(
 
 async def create_payment_link(
     *,
+    private_key: str,
+    environment: str,
     order_id: str,
     name: str,
     description: str,
@@ -153,9 +186,10 @@ async def create_payment_link(
       - active: bool
     Raises httpx.HTTPStatusError on HTTP errors.
     """
-    if not WOMPI_PRIVATE_KEY:
-        raise ValueError("WOMPI_PRIVATE_KEY no configurada")
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
 
+    base_url = wompi_base_url(environment)
     payload = {
         "name": name[:100],
         "description": description[:255],
@@ -171,8 +205,8 @@ async def create_payment_link(
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = await client.post(
-            f"{WOMPI_BASE_URL}/payment_links",
-            headers={"Authorization": f"Bearer {WOMPI_PRIVATE_KEY}"},
+            f"{base_url}/payment_links",
+            headers={"Authorization": f"Bearer {private_key}"},
             json=payload,
         )
         response.raise_for_status()

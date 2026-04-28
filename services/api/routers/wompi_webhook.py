@@ -21,7 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from dependencies.auth import _get_service_client
-from integrations.wompi_client import verify_event_signature
+from integrations.wompi_client import verify_event_signature, get_tenant_wompi_creds, create_payment_link_sync
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +51,7 @@ async def wompi_webhook(request: Request, background_tasks: BackgroundTasks):
 def _process_wompi_event(payload: dict) -> None:
     event_name = payload.get("event", "")
 
-    # ── 1. Validar firma ──────────────────────────────────────────────────────
-    if not verify_event_signature(payload):
-        logger.warning("[WOMPI] firma_invalida event=%s", event_name)
-        return
-
-    # ── 2. Solo procesar transaction.updated ─────────────────────────────────
+    # ── 1. Solo procesar transaction.updated (antes de cualquier DB lookup) ──
     if event_name != "transaction.updated":
         logger.info("[WOMPI] evento_ignorado event=%s", event_name)
         return
@@ -66,7 +61,6 @@ def _process_wompi_event(payload: dict) -> None:
     txn_status = txn.get("status", "")
     amount_in_cents = txn.get("amount_in_cents", 0)
     payment_link_id = txn.get("payment_link_id")
-    # wompi_reference es generado por Wompi — no es nuestro order_id; correlación via payment_link_id
     wompi_reference = txn.get("reference", "")
 
     logger.info(
@@ -76,8 +70,23 @@ def _process_wompi_event(payload: dict) -> None:
 
     supabase = _get_service_client()
 
-    # ── 3. Correlacionar payment_link_id → order_id via tabla payments ────────
+    # ── 2. Correlacionar payment_link_id → order_id → tenant_id ──────────────
+    # Necesitamos el tenant_id para cargar su events_key desde Vault y verificar la firma.
+    # El SELECT es de solo lectura; si el link no existe, la firma fallará igualmente.
     order_id = _get_order_id_by_link(supabase, payment_link_id) if payment_link_id else None
+    tenant_id_for_sig: str | None = None
+    if order_id:
+        order_preview = _get_order_by_id(supabase, order_id)
+        tenant_id_for_sig = (order_preview or {}).get("tenant_id")
+
+    # ── 3. Verificar firma con events_key del tenant ──────────────────────────
+    events_key: str = ""
+    if tenant_id_for_sig:
+        _, events_key_val, _ = get_tenant_wompi_creds(supabase, tenant_id_for_sig)
+        events_key = events_key_val or ""
+    if not verify_event_signature(payload, events_key):
+        logger.warning("[WOMPI] firma_invalida event=%s link=%s tenant=%s", event_name, payment_link_id, tenant_id_for_sig)
+        return
 
     # ── 4. Registrar/actualizar pago en tabla payments (idempotente por txn_id) ─
     try:
@@ -175,9 +184,9 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
 
     logger.info("[WOMPI] iniciando_retry order=%s txn_status=%s", order_id, txn_status)
     try:
-        from integrations.wompi_client import create_payment_link_sync, WOMPI_PRIVATE_KEY
-        if not WOMPI_PRIVATE_KEY:
-            logger.warning("[WOMPI] retry_sin_clave order=%s — notificando fallo sin nuevo link", order_id)
+        private_key, _, environment = get_tenant_wompi_creds(supabase, tenant_id)
+        if not private_key:
+            logger.warning("[WOMPI] retry_sin_clave order=%s tenant=%s — notificando fallo sin nuevo link", order_id, tenant_id)
             _enqueue_payment_failed_msg(supabase, conversation_id=conversation_id, tenant_id=tenant_id, order_id=order_id)
             return
 
@@ -205,6 +214,8 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
         ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         link_data = create_payment_link_sync(
+            private_key=private_key,
+            environment=environment,
             order_id=order_id,
             name=f"Pedido #{short_id} — {contact_name}"[:100],
             description=f"Reintento pedido #{short_id}",
