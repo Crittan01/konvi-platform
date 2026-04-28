@@ -16,7 +16,7 @@ Seguridad:
 """
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -339,6 +339,7 @@ async def get_conversation_context(
 async def update_conversation_status(
     conversation_id: str,
     body: ConversationStatusUpdate,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _rl: None = Depends(RL_WRITE_DEFAULT),
@@ -351,13 +352,31 @@ async def update_conversation_status(
     - `closed` → conversación cerrada (sin respuesta automática)
 
     El AI Orchestrator consulta el status antes de procesar inbound.
+    Idempotencia: si el cliente hace doble click (mismo Idempotency-Key),
+    devolvemos la primera respuesta sin volver a UPDATE (evita notificaciones
+    Telegram duplicadas por el trigger DB de takeover).
     """
     if body.status not in CONVERSATION_STATUSES:
         raise HTTPException(
             status_code=422,
             detail=f"Status inválido. Valores permitidos: {sorted(CONVERSATION_STATUSES)}",
         )
+    idem_session = None
     try:
+        request_hash = payload_fingerprint({"conversation_id": conversation_id, "status": body.status})
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
         result = (
             supabase.table("conversations")
             .update({"status": body.status})
@@ -366,13 +385,79 @@ async def update_conversation_status(
             .execute()
         )
         if not result.data:
+            if idem_session is not None:
+                abort_idempotency(idem_session)
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
-        return {"id": conversation_id, "status": body.status}
+        body_payload = {"id": conversation_id, "status": body.status}
+        if idem_session is not None:
+            finalize_idempotency(idem_session, status_code=200, body=body_payload)
+        return body_payload
     except HTTPException:
+        if idem_session is not None:
+            abort_idempotency(idem_session)
         raise
     except Exception as e:
+        if idem_session is not None:
+            abort_idempotency(idem_session)
         logger.error("Error actualizando status de conversación %s: %s", conversation_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar conversación")
+
+
+# Ventana 24h de Meta: regla anti-spam oficial.
+# Free-form text outbound solo es válido dentro de las 24h tras el último inbound.
+# Fuera de esa ventana, Meta rechaza el envío y reiteradamente puede llevar a baneo
+# del WABA. Sin templates aprobados (fuera de scope hoy), bloqueamos el envío.
+WINDOW_HOURS = 24
+
+
+def _check_24h_window_or_raise(supabase: Client, tenant_id: str, conversation_id: str) -> None:
+    """Verifica ventana 24h Meta. Lanza HTTPException 422 si está fuera o sin inbound."""
+    last_inbound = (
+        supabase.table("messages")
+        .select("created_at")
+        .eq("tenant_id", tenant_id)
+        .eq("conversation_id", conversation_id)
+        .eq("direction", "inbound")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = last_inbound.data or []
+    if not rows:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "WINDOW_NO_INBOUND",
+                "message": (
+                    "No hay mensaje entrante previo del cliente. Meta solo permite "
+                    "responder libre cuando el cliente abrió la conversación. Espera "
+                    "a que escriba o usa una plantilla aprobada."
+                ),
+            },
+        )
+    last_inbound_at = rows[0]["created_at"]
+    # Parse ISO8601 (con o sin Z)
+    if isinstance(last_inbound_at, str):
+        last_inbound_dt = datetime.fromisoformat(last_inbound_at.replace("Z", "+00:00"))
+    else:
+        last_inbound_dt = last_inbound_at
+    if last_inbound_dt.tzinfo is None:
+        last_inbound_dt = last_inbound_dt.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - last_inbound_dt
+    if delta > timedelta(hours=WINDOW_HOURS):
+        hours_late = round(delta.total_seconds() / 3600, 1)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "WINDOW_EXPIRED",
+                "message": (
+                    f"Fuera de ventana 24h Meta (último inbound hace {hours_late}h). "
+                    "Para enviar fuera de ventana se requiere plantilla aprobada por Meta."
+                ),
+                "last_inbound_at": last_inbound_dt.isoformat(),
+                "hours_since_last_inbound": hours_late,
+            },
+        )
 
 
 @router.post("/{conversation_id}/send", response_model=dict)
@@ -435,6 +520,11 @@ async def send_agent_message(
                 detail="Solo se puede responder cuando la conversación está en 'human_takeover'. "
                        "Toma el control antes de responder.",
             )
+
+        # 1.5 Compliance Meta: ventana 24h.
+        # Solo permitimos free-form si el cliente escribió en las últimas 24h.
+        # Fuera de ventana → 422 con código accionable para la UI.
+        _check_24h_window_or_raise(supabase, tenant_id, conversation_id)
 
         # 2. Persistir mensaje outbound pendiente en DB
         client_message_id = str(uuid4())

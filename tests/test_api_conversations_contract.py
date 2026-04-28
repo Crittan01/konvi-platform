@@ -76,26 +76,37 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("resolved", stats)
 
     async def test_update_status_rejects_legacy_values(self):
+        request = MagicMock()
+        request.headers = {}
         with self.assertRaises(HTTPException) as ctx:
             await conversations.update_conversation_status(
                 conversation_id="c-1",
                 body=conversations.ConversationStatusUpdate(status="resolved"),
+                request=request,
                 tenant_id="t-1",
                 supabase=MagicMock(),
             )
         self.assertEqual(ctx.exception.status_code, 422)
 
     async def test_update_status_accepts_canonical_values(self):
+        from unittest.mock import patch
         supabase = MagicMock()
         query = _chain_with_data([{"id": "c-1", "status": "closed"}])
         supabase.table.return_value = query
+        request = MagicMock()
+        request.headers = {}
 
-        result = await conversations.update_conversation_status(
-            conversation_id="c-1",
-            body=conversations.ConversationStatusUpdate(status="closed"),
-            tenant_id="t-1",
-            supabase=supabase,
-        )
+        # Idempotencia: mockear para no requerir DB real para el contrato.
+        with patch("routers.conversations.begin_idempotency", return_value=(MagicMock(), None)), \
+             patch("routers.conversations.finalize_idempotency"), \
+             patch("routers.conversations.payload_fingerprint", return_value="fp"):
+            result = await conversations.update_conversation_status(
+                conversation_id="c-1",
+                body=conversations.ConversationStatusUpdate(status="closed"),
+                request=request,
+                tenant_id="t-1",
+                supabase=supabase,
+            )
 
         self.assertEqual(result, {"id": "c-1", "status": "closed"})
 
