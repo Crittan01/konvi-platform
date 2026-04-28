@@ -239,5 +239,14 @@ services:
         value: "840"
       - key: MAX_PROCESSING_ATTEMPTS
         value: "5"
+      # ── Multimodal audio (rev. 67) ────────────────────────────────────────
+      # Comprensión de audios WhatsApp via Gemini 2.5 Flash multimodal.
+      # Default "true" — apagar a "false" sin redeploy si hay issues en producción.
+      - key: MULTIMODAL_AUDIO_ENABLED
+        value: "true"
+      - key: META_MEDIA_MAX_BYTES
+        value: "16777216"
+      - key: META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS
+        value: "10"
     healthCheckPath: /health
     autoDeploy: true

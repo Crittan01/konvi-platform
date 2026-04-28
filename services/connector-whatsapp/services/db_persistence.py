@@ -125,6 +125,8 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
     customer_phone: str = _normalize_phone(data.get("customer_phone", ""))
     meta_message_id: str = data.get("meta_message_id", "")
     content_type: str = data.get("content_type", "text")
+    media_id: Optional[str] = data.get("media_id")
+    media_mime: Optional[str] = data.get("media_mime")
     content: str = data.get("content", "")
     payload: Dict[str, Any] = data.get("payload", {}) or {}
 
@@ -161,7 +163,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
                 return
 
         # ── 3. Insertar Mensaje inbound (processing_status=pending) ───────────
-        supabase.table("messages").insert({
+        msg_row = {
             "conversation_id": conversation_id,
             "tenant_id": tenant_id,
             "direction": "inbound",
@@ -171,7 +173,12 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
             "meta_message_id": meta_message_id,
             "processed": False,
             "processing_status": "pending",
-        }).execute()
+        }
+        if media_id:
+            msg_row["media_id"] = media_id
+        if media_mime:
+            msg_row["media_mime"] = media_mime
+        supabase.table("messages").insert(msg_row).execute()
 
         logger.info(
             f"[INBOUND] Mensaje persistido | tenant={tenant_id} | "
