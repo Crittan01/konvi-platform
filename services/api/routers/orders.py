@@ -327,7 +327,10 @@ async def create_payment_link(
 
         order_res = (
             supabase.table("orders")
-            .select("id, status, total_amount, shipping_cost, notes, contact_id, contacts(name, phone)")
+            .select(
+                "id, status, total_amount, shipping_cost, notes, contact_id, "
+                "contacts(name, phone, email, document_type, document_number)"
+            )
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -367,6 +370,7 @@ async def create_payment_link(
             description=order.get("notes") or f"Pedido #{short_id}",
             amount_in_cents=amount_in_cents,
             expires_at=expires_at,
+            contact=contact,  # rev. 68 — pre-popula customer_data
         )
 
         # Persistir en tabla payments
