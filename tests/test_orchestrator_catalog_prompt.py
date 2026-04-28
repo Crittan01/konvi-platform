@@ -137,6 +137,9 @@ class OrchestratorCatalogPromptTests(unittest.TestCase):
                 "consent_given": True,
                 "email": "juan@test.com",
                 "name": "Juan",
+                # Rev. 68 — document obligatorio antes de address en el FSM.
+                "document_type": "CC",
+                "document_number": "1234567890",
                 "address": {"street": "Calle 1", "city": "Bogotá", "state": "Cundinamarca"},
             },
             query_text="Si deseo 2 color Rojo",
@@ -169,7 +172,7 @@ class OrchestratorCatalogPromptTests(unittest.TestCase):
         )
         self.assertIn("NEEDS_SHIPPING_CITY", prompt)
         self.assertIn("COTIZAR ENVÍO", prompt)
-        self.assertIn("NO pidas nombre, email, consentimiento ni dirección todavía", prompt)
+        self.assertIn("NO pidas nombre, email, documento, consentimiento ni dirección todavía", prompt)
 
     def test_prompt_order_acknowledgment_requires_same_message(self):
         """order_acknowledgment con requires_human solo aplica cuando datos vienen en el mismo mensaje."""

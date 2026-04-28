@@ -190,6 +190,76 @@ def _get_conversation_customer_phone(supabase: Client, conversation_id: str) -> 
     return str(conv_res.data[0].get("customer_phone") or "").strip() or None
 
 
+def _load_customer_context_block(
+    supabase: Client, tenant_id: str, contact_id: Optional[str], first_name: Optional[str]
+) -> str:
+    """Construye un bloque "CONTEXTO DEL CLIENTE" para el system prompt
+    cuando el contacto es conocido y tiene operaciones activas (rev. 68).
+
+    Razón: si el cliente conocido escribe, el bot debe saber si tiene un pedido
+    en curso o un reclamo abierto, para no preguntarle de cero. Si no hay nada
+    activo, retorna "" (no inyecta).
+    """
+    if not contact_id:
+        return ""
+    try:
+        # Pedidos activos (no cancelados ni delivered).
+        active_status = ("pending_payment", "confirmed", "processing", "shipped")
+        orders_res = (
+            supabase.table("orders")
+            .select("id, status, total_amount, created_at")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .in_("status", active_status)
+            .order("created_at", desc=True)
+            .limit(3)
+            .execute()
+        )
+        active_orders = orders_res.data or []
+    except Exception as exc:
+        logger.warning("[CTX] Error cargando orders contact=%s: %s", contact_id, exc)
+        active_orders = []
+
+    try:
+        claims_res = (
+            supabase.table("claims")
+            .select("id, ticket_number, status, created_at")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .eq("status", "open")
+            .order("created_at", desc=True)
+            .limit(3)
+            .execute()
+        )
+        open_claims = claims_res.data or []
+    except Exception as exc:
+        logger.warning("[CTX] Error cargando claims contact=%s: %s", contact_id, exc)
+        open_claims = []
+
+    if not active_orders and not open_claims:
+        return ""
+
+    lines = ["", "CONTEXTO DEL CLIENTE (cliente conocido):"]
+    if first_name:
+        lines[-1] = f"CONTEXTO DEL CLIENTE — {first_name} (cliente conocido):"
+    if active_orders:
+        for o in active_orders:
+            short = (o.get("id") or "")[:8].upper()
+            status = o.get("status", "?")
+            total = o.get("total_amount") or 0
+            lines.append(f"- Pedido #{short} | estado: {status} | total: ${float(total):,.0f} COP")
+    if open_claims:
+        for c in open_claims:
+            tn = c.get("ticket_number", "?")
+            lines.append(f"- Reclamo abierto #{tn} (sin resolver)")
+    lines.append(
+        "INSTRUCCIÓN: si el cliente pregunta por estos pedidos o reclamos, "
+        "ya tienes contexto y puedes mencionar el número y estado. "
+        "Si NO pregunta por ellos, NO los menciones — atiende lo que el cliente quiere ahora."
+    )
+    return "\n".join(lines)
+
+
 def _fetch_contact_for_phone(
     supabase: Client,
     tenant_id: str,
@@ -206,7 +276,7 @@ def _fetch_contact_for_phone(
     phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
     query = (
         supabase.table("contacts")
-        .select("id, consent_given, name, email, address")
+        .select("id, consent_given, name, email, address, document_type, document_number, phone")
         .eq("tenant_id", tenant_id)
     )
     if hasattr(query, "or_"):
@@ -366,6 +436,15 @@ class OrchestratorOutput(BaseModel):
     extracted_email: Optional[str] = Field(
         default=None,
         description="Email del cliente si fue mencionado en la conversación."
+    )
+    # Rev. 68 — documento de identidad (Wompi customer_data.legal_id_type CO).
+    extracted_document_type: Optional[str] = Field(
+        default=None,
+        description="Tipo de documento si fue mencionado: CC, CE, NIT, PP, TI, OTHER (mayúsculas)."
+    )
+    extracted_document_number: Optional[str] = Field(
+        default=None,
+        description="Número de documento sin puntos ni espacios. Para NIT puede incluir '-DV' al final."
     )
     total_in_cents: Optional[int] = Field(
         default=None,
@@ -764,6 +843,9 @@ def _find_context_product_from_history(catalog: list, history: list[dict]) -> Op
 _CORRECTION_FIELD_TOKENS: dict[str, frozenset[str]] = {
     "email": frozenset({"email", "correo", "mail", "correo electronico"}),
     "name":  frozenset({"nombre", "nombres", "apellido", "apellidos"}),
+    "document": frozenset({
+        "documento", "cedula", "cédula", "nit", "pasaporte", "ti", "cc", "ce",
+    }),
     "address": frozenset({
         "direccion", "domicilio", "calle", "barrio", "apartamento",
         "apto", "torre", "conjunto", "edificio",
@@ -798,8 +880,15 @@ def _clear_contact_field(
     tenant_id: str,
     field: str,
 ) -> None:
-    """Limpia un campo del contacto en DB para que el FSM lo vuelva a recolectar."""
-    null_value: dict = {field: None}
+    """Limpia un campo del contacto en DB para que el FSM lo vuelva a recolectar.
+
+    Rev. 68 — 'document' limpia document_type Y document_number a la vez
+    (van como par en Wompi, no tiene sentido limpiar uno solo).
+    """
+    if field == "document":
+        null_value: dict = {"document_type": None, "document_number": None}
+    else:
+        null_value = {field: None}
     supabase.table("contacts").update(null_value).eq("id", contact_id).eq(
         "tenant_id", tenant_id
     ).execute()
@@ -807,9 +896,10 @@ def _clear_contact_field(
 
 
 _CORRECTION_PROMPT: dict[str, str] = {
-    "email":   "Entendido 👍 ¿Cuál es tu correo electrónico correcto?",
-    "name":    "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
-    "address": "Entendido 👍 Dame tu dirección correcta, por favor.",
+    "email":    "Entendido 👍 ¿Cuál es tu correo electrónico correcto?",
+    "name":     "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
+    "document": "Entendido 👍 ¿Cuál es tu tipo (CC/CE/NIT/PP/TI) y número de documento correctos?",
+    "address":  "Entendido 👍 Dame tu dirección correcta, por favor.",
 }
 
 
@@ -1158,6 +1248,12 @@ def _build_address_request_prompt(contact_record: dict, first_name: Optional[str
 
 
 def _determine_transactional_state(contact: dict) -> str:
+    """Orden FSM rev. 68: consent → email → name → document → direction → ready.
+
+    NEEDS_DOCUMENT (rev. 68) se inserta entre NAME y DIRECTION para que el
+    customer_data Wompi quede pre-poblado en checkout (legal_id + legal_id_type).
+    Si la pasarela cambia la regla, ajustar aquí sin tocar el resto del FSM.
+    """
     if not contact:
         return "NEEDS_CONSENT"
     if not contact.get("consent_given"):
@@ -1166,6 +1262,9 @@ def _determine_transactional_state(contact: dict) -> str:
         return "NEEDS_EMAIL"
     if not str(contact.get("name") or "").strip():
         return "NEEDS_NAME"
+    # Rev. 68 — documento: ambos campos juntos.
+    if not str(contact.get("document_type") or "").strip() or not str(contact.get("document_number") or "").strip():
+        return "NEEDS_DOCUMENT"
     if not _has_real_address_data(contact.get("address")):
         return "NEEDS_DIRECTION"
     return "READY_FOR_SUMMARY"
@@ -1201,6 +1300,12 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
         return f"¡Perfecto{name_prefix}! ¿Cuál es tu correo electrónico?"
     if state == "NEEDS_NAME":
         return "Gracias. Para continuar, compárteme tu nombre completo."
+    if state == "NEEDS_DOCUMENT":
+        return (
+            "Para procesar tu pago, necesito tu documento de identidad. "
+            "¿Qué tipo es: Cédula (CC), Cédula de extranjería (CE), NIT, Pasaporte (PP) o Tarjeta de identidad (TI)? "
+            "Después indícame el número, por favor."
+        )
     if state == "NEEDS_DIRECTION":
         return _build_address_request_prompt(contact_record, first_name)
     if state == "READY_FOR_SUMMARY":
@@ -1539,6 +1644,10 @@ _CORRECTION_PROMPT_VARIANTS: dict[str, list[str]] = {
         "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
         "Sin problema. ¿Me confirmas tu nombre completo?",
     ],
+    "document": [
+        "Entendido 👍 Compárteme tu tipo (CC/CE/NIT/PP/TI) y número de documento correctos.",
+        "Listo, lo ajustamos. ¿Me das el tipo y número de documento correcto?",
+    ],
     "address": [
         "Entendido 👍 Dame tu dirección correcta, por favor.",
         "Listo, lo ajustamos. ¿Me compartes la dirección correcta?",
@@ -1693,6 +1802,8 @@ def _build_system_prompt(
     tenant_tono: str = "amigable",
     tenant_cutoff_msg: str = "",
     tenant_dispatch_lead: str = "",
+    tenant_escalation_role: str = "asesor",
+    customer_context_block: str = "",
 ) -> str:
     """Construye el system prompt con FSM contextual para venta vs consulta."""
     if history is None:
@@ -1731,7 +1842,7 @@ def _build_system_prompt(
     # Catálogo condicional por estado — evita inyectar el catálogo completo
     # cuando el cliente ya tomó decisiones y solo necesitamos recolectar datos.
     _data_collection_states = {
-        "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME", "NEEDS_DIRECTION",
+        "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME", "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
         "AWAITING_ORDER_CONFIRMATION",
     }
     display_state_for_catalog = _resolve_display_state(
@@ -1826,9 +1937,11 @@ def _build_system_prompt(
         state_instruction = """
 ESTADO ACTUAL DEL FLUJO DE VENTA: COTIZAR ENVÍO — PEDIR CIUDAD.
 - El usuario quiere comprar. AÚN NO has cotizado envío.
-- NO pidas nombre, email, consentimiento ni dirección todavía.
-- Primero valida interés de forma suave: "¿Te gustaría que te cotice el envío?"
-- Si responde afirmativamente, pide ciudad de entrega para cotizar.
+- NO pidas nombre, email, documento, consentimiento ni dirección todavía.
+- ANTES de pedir ciudad, RESUME el carrito una sola vez si aún no lo hiciste:
+  "Tienes [producto + variante] × [cantidad] = $[subtotal]. ¿Te cotizo el envío?"
+- También pregunta si quiere agregar otro producto: "¿Quieres agregar algo más a tu pedido o seguimos con el envío?"
+- Si el cliente confirma proceder con el envío, pide ciudad de entrega para cotizar.
 """
     elif display_state == "AWAITING_CARRIER_SELECTION":
         state_instruction = """
@@ -1857,6 +1970,16 @@ ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR NOMBRE DEL CLIENTE.
 - Ya tienes consentimiento y email. Pide solo el nombre.
 - Cuando el cliente responde con su nombre, extráelo OBLIGATORIAMENTE en extracted_name (nombre completo tal como lo escribió).
 - En response_text usa SOLO el primer nombre. Ejemplo: si da "Cristian Camilo Garzon Tamayo", escribe "Gracias, Cristian." (nunca el nombre completo).
+- NO pidas documento ni dirección todavía.
+"""
+    elif display_state == "NEEDS_DOCUMENT":
+        state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DOCUMENTO DE IDENTIDAD.
+- Ya tienes consentimiento, email y nombre.
+- Pide tipo Y número de documento. Tipos válidos en Colombia: CC (Cédula), CE (Cédula Extranjería), NIT (empresa), PP (Pasaporte), TI (Tarjeta de Identidad).
+- Si el cliente solo da número, pregunta tipo. Si solo da tipo, pide número.
+- Cuando tengas ambos, indícalo extrayendo en extracted_document_type ('CC'/'CE'/'NIT'/'PP'/'TI'/'OTHER') y extracted_document_number (solo dígitos, sin puntos ni espacios).
+- Es necesario para emitir tu link de pago Wompi pre-poblado y para la factura del envío.
 - NO pidas dirección todavía.
 """
     elif display_state == "NEEDS_DIRECTION":
@@ -1925,15 +2048,12 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
     # Role/comportamiento del agente IA (cómo responde) — ortogonal a la
     # identidad del negocio (qué es / por qué existe), que vive en
     # tenants.mision/vision/valores y se inyecta en store_location_section.
+    # Rev. 68 — D1: eliminamos la mención "alineado a su misión" del default
+    # porque la misión ya se inyecta abajo en SOBRE LA TIENDA. Mencionarla
+    # también aquí duplica el bloque y consume tokens sin aportar.
     role_desc = (ai_agent.get("role_description") or "").strip()
     if not role_desc:
-        # Default sensato: si el tenant tiene misión configurada, role queda
-        # alineado a ella; sino, asistente comercial genérico.
-        role_desc = (
-            f"Asistente comercial de {tenant_name}, alineado a su misión y valores."
-            if (tenant_mision or "").strip()
-            else f"Asistente comercial cordial de {tenant_name}."
-        )
+        role_desc = f"Asistente comercial cordial de {tenant_name}."
 
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 COMPORTAMIENTO DEL AGENTE: {role_desc}
@@ -1941,6 +2061,7 @@ COMPORTAMIENTO DEL AGENTE: {role_desc}
 {tono_instruccion}
 {_HUMAN_STYLE_GUIDE}
 [ESTADO DE MÁQUINA (FSM): {display_state}]
+{customer_context_block}
 {store_location_section}
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
 - Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
@@ -1954,7 +2075,7 @@ REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 - Dato faltante confirmado y 2 rondas sin resolver → ESCALAR.
 - Pregunta SOBRE UBICACIÓN O CIUDAD DE LA TIENDA → NO escalar, responder con la sección UBICACIÓN DE LA TIENDA.
 - Pregunta fuera de alcance transaccional, sin datos suficientes ni alternativa → ESCALAR.
-- Al escalar: mensaje corto y cálido. Ej: "Te paso con un asesor que te ayudará de inmediato."
+- Al escalar: mensaje corto y cálido. Ej: "Te paso con un {tenant_escalation_role} que te ayudará de inmediato."
 
 ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
 - No presiones al usuario con preguntas transaccionales bruscas ("¿Lo agregas a tu compra?", "¿Te lo facturo?"). Solo responde su duda y termina tu frase de forma amable y ofreciendo el siguiente paso natural ("¿Te gustaría saber más detalles?" o "¿Te cotizo el envío?").
@@ -2165,7 +2286,7 @@ async def build_and_run_orchestration(
         tenant_res = supabase.table("tenants").select(
             "name, shipping_origin, store_type, social_links, store_locations, business_hours, "
             "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, "
-            "cutoff_message, dispatch_lead_time"
+            "cutoff_message, dispatch_lead_time, escalation_role"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
@@ -2182,6 +2303,10 @@ async def build_and_run_orchestration(
         tenant_after_hours_msg  = tenant_row.get("after_hours_message") or ""
         tenant_cutoff_msg       = tenant_row.get("cutoff_message") or ""
         tenant_dispatch_lead    = tenant_row.get("dispatch_lead_time") or ""
+        # Rev. 68 — escalation_role configurable por tenant (default 'asesor').
+        # Se usa en mensajes de escalación al humano para alinear el término al
+        # lenguaje de la marca (asesor / especialista / consultor / agente).
+        tenant_escalation_role  = tenant_row.get("escalation_role") or "asesor"
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -2274,8 +2399,8 @@ async def build_and_run_orchestration(
                     tenant_id=tenant_id,
                     text=(
                         "Por el momento solo puedo atender mensajes de texto. "
-                        "Si necesitas que un asesor revise lo que enviaste, "
-                        "escríbeme *asesor* y te contactamos. 😊"
+                        f"Si necesitas que un {tenant_escalation_role} revise lo que enviaste, "
+                        f"escríbeme *{tenant_escalation_role}* y te contactamos. 😊"
                     ),
                 )
                 _mark_message_processing(
@@ -2284,10 +2409,18 @@ async def build_and_run_orchestration(
                 )
             return
 
-        # Gate: solicitud explícita de asesor humano
-        if _normalize_text_simple(content).strip() in {
+        # Gate: solicitud explícita de humano (rev. 68 — admite múltiples términos
+        # para que el cliente pueda usar "asesor", "especialista", "consultor" o
+        # "agente" sin importar cómo el tenant configuró el rol de escalación).
+        _norm = _normalize_text_simple(content).strip()
+        _ESCALATION_TRIGGERS = {
             "asesor", "un asesor", "quiero asesor", "necesito asesor", "hablar con asesor",
-        }:
+            "especialista", "un especialista", "quiero especialista", "necesito especialista", "hablar con especialista",
+            "consultor", "un consultor", "quiero consultor", "necesito consultor", "hablar con consultor",
+            "agente", "un agente", "quiero agente", "necesito agente", "hablar con agente",
+            "humano", "un humano", "persona real",
+        }
+        if _norm in _ESCALATION_TRIGGERS:
             # Gate fuera de horario — enviar mensaje antes de escalar si está configurado
             if tenant_after_hours_msg and _is_outside_support_hours(tenant_support_schedule):
                 await _send_outbound_text(
@@ -2298,7 +2431,7 @@ async def build_and_run_orchestration(
             else:
                 await _send_outbound_text(
                     supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                    text="Entendido, te conecto con un asesor. ¡Un momento! 🙏",
+                    text=f"Entendido, te conecto con un {tenant_escalation_role}. ¡Un momento! 🙏",
                 )
             _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
@@ -2536,6 +2669,15 @@ async def build_and_run_orchestration(
                 logger.info("[CORR] Corrección solicitada campo='%s' | conv=%s", correction_field, conversation_id)
                 return
 
+        # Rev. 68 — contexto cliente conocido: pedidos activos + reclamos abiertos.
+        _customer_first_name = (
+            _extract_first_name(contact_record.get("name"))
+            if contact_record and contact_record.get("consent_given") else None
+        )
+        customer_context_block = _load_customer_context_block(
+            supabase, tenant_id, contact_id, _customer_first_name
+        )
+
         system_prompt = _build_system_prompt(
             catalog=catalog,
             tenant_name=tenant_name,
@@ -2557,6 +2699,8 @@ async def build_and_run_orchestration(
             tenant_tono=tenant_tono,
             tenant_cutoff_msg=tenant_cutoff_msg,
             tenant_dispatch_lead=tenant_dispatch_lead,
+            tenant_escalation_role=tenant_escalation_role,
+            customer_context_block=customer_context_block,
         )
         user_context = _build_user_context(history, content)
 
@@ -2715,19 +2859,28 @@ async def build_and_run_orchestration(
                     if ticket_number and parsed.response_text:
                         _ticket_variants = [
                             f"\n\n📋 Quedó registrado tu caso con el número *#{ticket_number}*.",
-                            f"\n\n📋 Tu reclamo ya está abierto con el ticket *#{ticket_number}*. Un asesor lo revisa.",
+                            f"\n\n📋 Tu reclamo ya está abierto con el ticket *#{ticket_number}*. Un {tenant_escalation_role} lo revisa.",
                             f"\n\n📋 Listo, tu caso queda con número *#{ticket_number}* para seguimiento.",
                         ]
                         _ticket_suffix = _pick_variant(_ticket_variants, seed=str(ticket_number))
                         parsed.response_text = parsed.response_text.rstrip() + _ticket_suffix
 
         # ── 8.5 Actualizar datos del contacto ─────────────────────────────────
-        if contact_id and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email):
+        _has_doc_extract = bool(parsed.extracted_document_type or parsed.extracted_document_number)
+        if contact_id and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email or _has_doc_extract):
             update_data = {}
             if parsed.extracted_email and _EMAIL_REGEX.match(str(parsed.extracted_email).strip()):
                 update_data["email"] = str(parsed.extracted_email).strip().lower()
             if parsed.extracted_name and str(parsed.extracted_name).strip():
                 update_data["name"] = " ".join(str(parsed.extracted_name).split())
+            # Rev. 68 — documento. Solo persiste si tipo+número son válidos juntos.
+            if _has_doc_extract:
+                _doc_type = (str(parsed.extracted_document_type or "").strip().upper() or None)
+                _doc_num_raw = str(parsed.extracted_document_number or "").strip()
+                _doc_num = re.sub(r"[\s.]", "", _doc_num_raw) or None
+                if _doc_type and _doc_num and _doc_type in {"CC", "CE", "NIT", "PP", "TI", "OTHER"}:
+                    update_data["document_type"] = _doc_type
+                    update_data["document_number"] = _doc_num
             merged_address = _merge_address_data(
                 contact_record.get("address") if isinstance(contact_record, dict) else None,
                 parsed.extracted_direction,
