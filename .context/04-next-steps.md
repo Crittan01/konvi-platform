@@ -1,6 +1,28 @@
-# Próximos Pasos — Estado 2026-04-29
+# Próximos Pasos — Estado 2026-04-30
 
-## Cierre sesión actual (2026-04-29, rev. 68) — COHERENCIA CORE DEL BOT
+## Cierre sesión actual (2026-04-30, rev. 69) — RIESGOS ABIERTOS CERRADOS
+
+- ✅ **A2 DV NIT**: validación módulo-11 oficial DIAN para NITs con DV.
+- ✅ **A4 Customer context lazy**: feature flag + 3 modos (always/lazy/disabled). Default lazy reduce 70-80% de tokens del contexto.
+- ✅ **A3 KB migration banner**: banner one-time dismissible con tabla `user_dismissed_alerts` + RLS.
+- ✅ **B3 MeLi rejected_origin alert**: contador in-memory + log warning estructurado al exceder umbral.
+- ✅ **B6 Tenants tono backfill**: NULL → `'amigable'` + SET NOT NULL guard.
+- ✅ **C1 Rate-limit user-aware**: `RL_SEND_MESSAGE` con `include_user_id=True`. Key `bucket:tenant:user:ip`. Previene abuse cross-IP.
+- ✅ **C2 MeLi dedup distribuido**: tabla + RPC `meli_webhook_seen` atómica cross-réplica + cleanup en worker. Fallback in-memory.
+- ✅ **A1 Frontend Contacts UI**: validators TS + AddressSelector con building_type + form con document_type/number + tabla muestra Doc y Barrio.
+- ✅ 23 tests nuevos · 478 total · validate.sh 13/13 OK.
+
+### Riesgos restantes (postpuestos a producción)
+
+- **B4 Anti-hibernation Render**: aplica al pasar a Render Starter+ (HOY en Free + VM local).
+- **B5 Wompi producción**: aplica cuando Kaiu (o cualquier tenant) pase a operativo.
+- **C3 DR Supabase**: aplica en producción.
+- **F7 cart abandonment**: bloqueado por templates Meta (IH del tenant).
+- **F8 multimodal imagen**: aplazado tras audio (rev. 67).
+
+---
+
+## Cierre sesión anterior (2026-04-29, rev. 68) — COHERENCIA CORE DEL BOT
 
 - ✅ Eliminada duplicación de misión en system prompt (D1).
 - ✅ Placeholders humanos en `after_hours_message` UI Settings.

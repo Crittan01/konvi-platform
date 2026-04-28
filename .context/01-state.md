@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-29 (rev. 68)
+**Última actualización**: 2026-04-30 (rev. 69)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
 
@@ -11,13 +11,110 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **Inbox**: ✅ Certificado (rev. 67) — compliance Meta ventana 24h, multimodal audio, multi-tenant runtime
-- **Coherencia core del bot**: ✅ Certificado (rev. 68) — Wompi customer_data + Envia district + FSM aterrizado + KB con guías por categoría
-- **DB**: ✅ contrato endurecido (69 migraciones aplicadas)
+- **Inbox**: ✅ Certificado (rev. 67) — compliance Meta ventana 24h, multimodal audio
+- **Coherencia core del bot**: ✅ Certificado (rev. 68) — Wompi customer_data + Envia district + FSM aterrizado
+- **Riesgos abiertos cerrados**: ✅ Certificado (rev. 69) — DV NIT, lazy customer context, MeLi alert+distributed dedup, rate-limit user-aware, frontend contacts UI completo
+- **DB**: ✅ contrato endurecido (72 migraciones aplicadas)
 
 ---
 
-## Cierre de sesión actual (2026-04-29, rev. 68) — COHERENCIA CORE DEL BOT
+## Cierre de sesión actual (2026-04-30, rev. 69) — RIESGOS ABIERTOS CERRADOS
+
+### Estado: 13/13 OK · 478 tests · TypeScript OK · Lint OK · 72 migraciones
+
+Cierre de los 8 riesgos abiertos del rev. 68 que el usuario priorizó (A1, A2, A3, A4, B3, B6, C1, C2). Postponed: B4 (anti-hibernation IH), B5 (Wompi prod), C3 (DR Supabase) — aplican al pasar a producción.
+
+### WS-A2 · Validación DV NIT (módulo-11 oficial DIAN)
+
+- `services/api/dependencies/contact_validators.py`: `_calculate_nit_dv()` con tabla oficial de pesos DIAN. Si NIT trae `-X`, valida que el DV sea correcto. Si no trae DV, sigue aceptando (Wompi lenient).
+- Tests: 5 nuevos (NIT con DV correcto/incorrecto, sin DV, formato inválido, valores conocidos).
+
+### WS-A4 · Feature flag CUSTOMER_CONTEXT_MODE
+
+- `services/ai-orchestrator/orchestrator.py`: `_customer_context_should_load(query_text)` con 3 modos.
+- `CUSTOMER_CONTEXT_ENABLED` (kill switch) + `CUSTOMER_CONTEXT_MODE` (always/lazy/disabled).
+- Default rev. 69: `lazy` — solo carga si query del cliente menciona pedido/orden/envío/reclamo/garantía/devolución/etc.
+- Reduce 70-80% del overhead de tokens del contexto sin perder UX.
+
+### WS-A3 · Banner KB migration (transparente)
+
+- Migración `20260430000001_user_dismissed_alerts.sql`: tabla con RLS por user+tenant.
+- `apps/web/app/dashboard/(ai)/knowledge-base/kb-migration-banner.tsx` (NUEVO): client component que muestra banner amarillo one-time sobre la migración rev. 68 (general → faq + nuevas categorías Envíos/Pagos). Botón "Entendido" hace upsert para no volver a mostrarlo.
+
+### WS-B3 · Alerta proactiva rejected_origin MeLi
+
+- `services/api/routers/meli_webhook.py`: contador in-memory por IP con ventana deslizante. Cuando excede umbral (default 5 rechazos en 5 min), emite log warning estructurado `meli_webhook.alert_threshold_exceeded`.
+- Variables `MELI_WEBHOOK_ALERT_THRESHOLD` (default 5) y `MELI_WEBHOOK_ALERT_WINDOW_SECONDS` (default 300).
+- El operador filtra logs en Render Dashboard para detectar si MeLi cambió las IPs.
+
+### WS-B6 · Auto-set tono_comunicacion + NOT NULL guard
+
+- Migración `20260430000002_tenants_tono_backfill.sql`: backfill `'amigable'` para tenants con NULL + `ALTER COLUMN ... SET NOT NULL`. Previene futuros NULLs.
+- "Estado del bot" check `Tono de comunicación` ya no aparece rojo en tenants existentes.
+
+### WS-C1 · Rate-limit por user_id
+
+- `services/api/dependencies/security.py`: nueva dependency `_get_optional_user_id(request)` que extrae `sub` del JWT o devuelve `'anon'`. `build_rate_limit_dependency(rule, include_user_id=True)` compone key `bucket:tenant:user:ip`.
+- `RL_SEND_MESSAGE` activado con `include_user_id=True` — previene abuse desde IPs rotadas dentro del mismo tenant.
+- Webhooks (MeLi/Wompi) NO afectados — usan `webhook_rate_limit_check` directo.
+- Tests: 6 nuevos (sin auth, JWT inválido, JWT con/sin sub, key composition con/sin user_id).
+
+### WS-C2 · Idempotencia MeLi distribuida
+
+- Migración `20260430000000_meli_webhook_dedup.sql`: tabla `meli_webhook_dedup` + RPC `meli_webhook_seen(app_id, resource, sent, ttl)` atómica con `INSERT ... ON CONFLICT` + cleanup helper `cleanup_expired_meli_webhook_dedup`.
+- `meli_webhook.py`: `_is_duplicate_event_distributed` llama RPC; fallback a `_is_duplicate_event_local` si la RPC falla.
+- Worker (`services/ai-orchestrator/worker.py`): cleanup periódico junto con `cleanup_expired_rate_limit_windows`.
+- Tests: 5 nuevos (RPC True/False, fallback ante error RPC, supabase=None usa local).
+
+### WS-A1 · Frontend Contacts UI
+
+- `apps/web/lib/validators/document.ts` (NUEVO): `DOCUMENT_TYPES_CO`, `validateColombianDocument()`, `normalizeDocumentNumber()`.
+- `apps/web/lib/validators/address.ts` (NUEVO): `BUILDING_TYPES`, `addressRequiredFields()`, `validateAddress()`.
+- `apps/web/components/address-selector.tsx`: extendido con prop `showBuildingDetails`. Si activo: barrio + radio building_type + campos condicionales (apartment/tower/complex_name) + reference.
+- `apps/web/app/dashboard/(sales)/contacts/_components/contacts-manager.tsx`: 2 inputs nuevos (document_type select + document_number) en form crear y editar. Tabla muestra `Doc: CC 1.234.567` y `barrio` cuando están poblados.
+- `apps/web/app/dashboard/(sales)/contacts/page.tsx`: SELECT incluye nuevos campos. Server actions `addAction`/`editAction` mapean los nuevos fields del FormData con validación enum.
+
+### Migraciones nuevas (3)
+
+| Archivo | Descripción |
+|---|---|
+| `20260430000000_meli_webhook_dedup.sql` | Tabla + RPC `meli_webhook_seen` + cleanup |
+| `20260430000001_user_dismissed_alerts.sql` | Tabla one-time alerts dismissed con RLS |
+| `20260430000002_tenants_tono_backfill.sql` | Backfill `amigable` + SET NOT NULL |
+
+Total migraciones: 69 → 72.
+
+### Variables de entorno nuevas (4)
+
+- `CUSTOMER_CONTEXT_ENABLED="true"` (kill switch)
+- `CUSTOMER_CONTEXT_MODE="lazy"` (always/lazy/disabled)
+- `MELI_WEBHOOK_ALERT_THRESHOLD="5"`
+- `MELI_WEBHOOK_ALERT_WINDOW_SECONDS="300"`
+
+Configuradas en `.env.example`, `render.yaml` (commerce-ops-orchestrator + commerce-ops-api respectivamente), y `.env` local.
+
+### Tests nuevos (~23)
+
+| Archivo | Tests |
+|---|---|
+| `tests/test_contacts_document_validation.py` (extend) | +5 (DV NIT) |
+| `tests/test_customer_context_lazy.py` (NUEVO) | 7 |
+| `tests/test_rate_limit_user_aware.py` (NUEVO) | 6 |
+| `tests/test_meli_webhook_alert_and_dedup.py` (NUEVO) | 10 |
+
+Total: 455 → 478 tests OK. Sin regresiones.
+
+### Riesgos abiertos restantes (postponed a producción)
+
+- **B4 ANTI_HIBERNATION_PING_URL**: configurar en Render Dashboard al pasar a Starter+. Hoy en Free local, no aplica.
+- **B5 Wompi producción**: cuando Kaiu (o cualquier tenant) pase a operativo, registrar app Wompi prod + reconectar.
+- **C3 DR Supabase**: backup/recovery testeado. Aplica en producción.
+- **F7 cart abandonment** (sigue bloqueado): requiere plantilla Meta aprobada (IH del tenant).
+- **F8 multimodal imagen**: aplazado tras audio (rev. 67). Costo despreciable según estimación rev. 69.
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 68) — COHERENCIA CORE DEL BOT
 
 ### Estado: 13/13 OK · 452 tests · TypeScript OK · Lint OK · 69 migraciones
 
