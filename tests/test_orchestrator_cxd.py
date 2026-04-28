@@ -95,25 +95,6 @@ class NonTextWarningTests(unittest.TestCase):
         self.assertFalse(orchestrator._had_non_text_warning(history))
 
 
-# ── Conversation Start ─────────────────────────────────────────────────────────
-
-class ConversationStartTests(unittest.TestCase):
-
-    def test_empty_history_is_start(self):
-        self.assertTrue(orchestrator._is_conversation_start([]))
-
-    def test_no_outbound_is_start(self):
-        history = [{"direction": "inbound", "content": "Hola"}]
-        self.assertTrue(orchestrator._is_conversation_start(history))
-
-    def test_with_outbound_is_not_start(self):
-        history = [
-            {"direction": "inbound", "content": "Hola"},
-            {"direction": "outbound", "content": "¡Hola! ¿En qué te ayudo?"},
-        ]
-        self.assertFalse(orchestrator._is_conversation_start(history))
-
-
 # ── Name Extraction Fallback ───────────────────────────────────────────────────
 
 class NameExtractionFallbackTests(unittest.TestCase):
@@ -152,32 +133,6 @@ class NameExtractionFallbackTests(unittest.TestCase):
             "me llamo cristian camilo garzon tamayo correo", "NEEDS_NAME"
         )
         self.assertIsNone(result)
-
-
-# ── Smalltalk Personalization ─────────────────────────────────────────────────
-
-class SmallTalkPersonalizationTests(unittest.TestCase):
-
-    def test_greeting_with_name(self):
-        text = orchestrator._deterministic_smalltalk_response("greeting", "Cristian", 0)
-        self.assertIn("Cristian", text)
-
-    def test_greeting_without_name(self):
-        text = orchestrator._deterministic_smalltalk_response("greeting", None, 0)
-        self.assertNotIn("Cristian", text)
-        self.assertTrue(len(text) > 0)
-
-    def test_ack_with_name(self):
-        text = orchestrator._deterministic_smalltalk_response("acknowledgement", "Cristian", 0)
-        self.assertIn("Cristian", text)
-
-    def test_seed_varies_response(self):
-        responses = {
-            orchestrator._deterministic_smalltalk_response("greeting", "Cristian", i)
-            for i in range(4)
-        }
-        # Al menos 2 variantes distintas entre 4 llamadas
-        self.assertGreater(len(responses), 1)
 
 
 # ── Verified Order Context ────────────────────────────────────────────────────

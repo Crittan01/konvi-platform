@@ -59,6 +59,12 @@ def _normalize_phone(phone: str) -> str:
 def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) -> str:
     """
     Find-or-create de conversación para el cliente.
+
+    Política de reutilización: siempre la conversación MÁS RECIENTE para el par
+    (tenant_id, customer_phone). Si está 'closed', se reabre con 'bot_active'.
+    Esto evita el bug de mensajes que se enrutaban no-determinísticamente a
+    conversaciones cerradas cuando había duplicados históricos en DB.
+
     Retorna el conversation_id.
     """
     customer_phone = _normalize_phone(customer_phone)
@@ -67,6 +73,8 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         .select("id, status")
         .eq("tenant_id", tenant_id)
         .eq("customer_phone", customer_phone)
+        .order("last_interaction_at", desc=True)
+        .limit(1)
         .execute()
     )
 
@@ -75,12 +83,14 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         conversation_id = conversation["id"]
         current_status = conversation.get("status")
 
-        # Si hay un valor fuera del contrato canónico, vuelve al default seguro.
-        if current_status not in {"bot_active", "human_takeover", "closed"}:
+        # Reabrir si está cerrada o tiene status fuera del contrato.
+        if current_status in {"closed"} or current_status not in {"bot_active", "human_takeover", "closed"}:
             supabase.table("conversations").update(
                 {"status": "bot_active"}
             ).eq("id", conversation_id).execute()
-        logger.debug(f"Conversación existente reutilizada: {conversation_id}")
+            logger.info(f"Conversación {conversation_id} reabierta (estaba '{current_status}')")
+        else:
+            logger.debug(f"Conversación existente reutilizada: {conversation_id}")
     else:
         new_conv = supabase.table("conversations").insert({
             "tenant_id": tenant_id,
