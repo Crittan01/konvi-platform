@@ -35,7 +35,8 @@ class OrchestratorCatalogPromptTests(unittest.TestCase):
             contact_record={},
         )
 
-        self.assertIn("precio 50000.00-55000.00 (stock total: 6)", prompt)
+        # Formato Colombia: separador miles punto, sin centavos.
+        self.assertIn("precio $50.000-$55.000 (stock total: 6)", prompt)
         self.assertIn("color: Negro, talla: M", prompt)
         self.assertIn("color: Negro, talla: L", prompt)
 
