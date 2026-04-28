@@ -4,32 +4,67 @@ interface ReadinessItem {
   label: string
   ok: boolean
   detail?: string
+  tooltip?: string
   link?: string
 }
 
 interface Props {
+  // Identidad y comportamiento (existentes)
   hasFilosofia:  boolean
   totalDocs:     number
   activeDocs:    number
   indexedDocs:   number
   agentName:     string
   hasPrompt:     boolean
+  // Rev. 68 — fuentes adicionales que el bot consume
+  hasTono?:           boolean
+  hasSedesHorario?:   boolean
+  hasCatalog?:        boolean
+  wompiConnected?:    boolean
+  enviaConnected?:    boolean
 }
 
-export function ReadinessCard({ hasFilosofia, totalDocs, activeDocs, indexedDocs, agentName, hasPrompt }: Props) {
+export function ReadinessCard({
+  hasFilosofia, totalDocs, activeDocs, indexedDocs, agentName, hasPrompt,
+  hasTono = false, hasSedesHorario = false, hasCatalog = false,
+  wompiConnected = false, enviaConnected = false,
+}: Props) {
   const items: ReadinessItem[] = [
     {
-      label: 'Filosofía del negocio',
+      label: 'Identidad del negocio',
       ok: hasFilosofia,
-      detail: hasFilosofia ? 'Configurada — el bot conoce tu marca' : 'Sin configurar',
+      detail: hasFilosofia ? 'Misión / visión / valores configurados' : 'Sin configurar',
+      tooltip: 'El bot habla con coherencia de marca usando tu Filosofía configurada (se inyecta automáticamente al system prompt).',
       link: hasFilosofia ? undefined : '/dashboard/settings#section-filosofia',
     },
     {
-      label: 'Documentos en KB',
+      label: 'Tono de comunicación',
+      ok: hasTono,
+      detail: hasTono ? 'Configurado (formal/amigable/cercano/etc.)' : 'Sin configurar — el bot usa tono "amigable" por defecto',
+      tooltip: 'El bot adapta su lenguaje al tono que elegiste. Si no configuras uno, usa "amigable" por defecto.',
+      link: hasTono ? undefined : '/dashboard/settings#section-filosofia',
+    },
+    {
+      label: 'Sedes y horario',
+      ok: hasSedesHorario,
+      detail: hasSedesHorario ? 'Sedes y horario de atención configurados' : 'Sin configurar',
+      tooltip: 'El bot responde dónde estás y cuándo atiendes. Configura al menos una sede o el origen de despacho + el horario.',
+      link: hasSedesHorario ? undefined : '/dashboard/settings#section-presencia',
+    },
+    {
+      label: 'Catálogo de productos',
+      ok: hasCatalog,
+      detail: hasCatalog ? 'Hay productos activos con stock' : 'Sin productos activos — el bot no puede vender',
+      tooltip: 'El bot consulta tu catálogo en tiempo real para dar precios reales y stock disponible (nunca alucina).',
+      link: hasCatalog ? undefined : '/dashboard/catalog',
+    },
+    {
+      label: 'Knowledge Base',
       ok: activeDocs > 0,
       detail: activeDocs > 0
         ? `${activeDocs} documento${activeDocs !== 1 ? 's' : ''} activo${activeDocs !== 1 ? 's' : ''}`
-        : 'KB vacío — el bot no tiene políticas ni FAQ',
+        : 'KB vacío — el bot no tiene políticas, envíos ni pagos',
+      tooltip: 'El bot busca semánticamente en tu KB respuestas que no están en catálogo. Llena al menos las categorías Políticas, Envíos y Pagos.',
       link: activeDocs > 0 ? undefined : '/dashboard/knowledge-base',
     },
     {
@@ -40,14 +75,30 @@ export function ReadinessCard({ hasFilosofia, totalDocs, activeDocs, indexedDocs
         : indexedDocs < activeDocs
           ? `${indexedDocs}/${activeDocs} documentos listos — activa los pendientes`
           : `${indexedDocs} documento${indexedDocs !== 1 ? 's' : ''} listo${indexedDocs !== 1 ? 's' : ''} para IA`,
+      tooltip: 'Cada documento KB se convierte en un vector de embeddings para que el bot lo encuentre por significado, no por palabras exactas.',
       link: indexedDocs < activeDocs ? '/dashboard/knowledge-base' : undefined,
     },
     {
-      label: 'Nombre y directrices del bot',
+      label: 'Agente IA — comportamiento',
       ok: hasPrompt && agentName !== 'Bot Asistente',
       detail: hasPrompt && agentName !== 'Bot Asistente'
-        ? `"${agentName}" configurado con directrices personalizadas`
+        ? `"${agentName}" con directrices personalizadas`
         : 'Usando configuración por defecto',
+      tooltip: 'Define cómo se comporta tu bot en ventas: nombre, qué ofrece primero, cómo cierra. La identidad del negocio (misión) va aparte en Configuración.',
+      link: '/dashboard/ai-agents',
+    },
+    {
+      label: 'Pasarela y courier',
+      ok: wompiConnected && enviaConnected,
+      detail: wompiConnected && enviaConnected
+        ? 'Wompi y Envia conectados'
+        : !wompiConnected && !enviaConnected
+          ? 'Wompi y Envia sin conectar — el bot no puede generar links de pago ni cotizar envío'
+          : !wompiConnected
+            ? 'Falta conectar Wompi (links de pago)'
+            : 'Falta conectar Envia (cotizar envío)',
+      tooltip: 'El bot necesita Wompi para generar links de pago y Envia para cotizar envíos. Sin estos, el flujo conversacional se queda sin cierre transaccional.',
+      link: '/dashboard/integrations',
     },
   ]
 
@@ -81,7 +132,7 @@ export function ReadinessCard({ hasFilosofia, totalDocs, activeDocs, indexedDocs
 
       <div className="space-y-1.5">
         {items.map(item => (
-          <div key={item.label} className="flex items-center gap-2.5">
+          <div key={item.label} className="flex items-center gap-2.5" title={item.tooltip}>
             {item.ok
               ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
               : score === 0 || !item.detail
@@ -89,15 +140,15 @@ export function ReadinessCard({ hasFilosofia, totalDocs, activeDocs, indexedDocs
                 : <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
             }
             <div className="flex-1 min-w-0">
-              <span className="text-xs font-medium">{item.label}</span>
+              <span className="text-xs font-medium cursor-help">{item.label}</span>
               {item.detail && (
                 <span className="text-xs text-muted-foreground"> — {item.detail}</span>
               )}
             </div>
-            {!item.ok && item.link && (
+            {item.link && (
               <a href={item.link}
                 className="text-[10px] text-primary underline underline-offset-2 shrink-0 hover:no-underline">
-                Configurar
+                {item.ok ? 'Editar' : 'Configurar'}
               </a>
             )}
           </div>

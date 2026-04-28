@@ -50,20 +50,59 @@ async function getGeminiEmbedding(text: string): Promise<number[] | null> {
   }
 }
 
+// Rev. 68 — 6 categorías canónicas con CHECK constraint en DB.
+// "general" eliminada (cajón de sastre). "envios" + "pagos" agregadas.
 const CATEGORIES = [
-  { value: 'faq',      label: 'FAQ',          icon: HelpCircle },
-  { value: 'politica', label: 'Políticas',    icon: FileText },
-  { value: 'negocio',  label: 'Negocio',      icon: Building2 },
-  { value: 'producto', label: 'Productos',    icon: Package },
-  { value: 'general',  label: 'General',      icon: StickyNote },
+  { value: 'faq',       label: 'FAQ',          icon: HelpCircle },
+  { value: 'negocio',   label: 'Negocio',      icon: Building2 },
+  { value: 'politicas', label: 'Políticas',    icon: FileText },
+  { value: 'productos', label: 'Productos',    icon: Package },
+  { value: 'envios',    label: 'Envíos',       icon: StickyNote },
+  { value: 'pagos',     label: 'Pagos',        icon: StickyNote },
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
-  faq:      'bg-blue-500/15 text-blue-400 border border-blue-500/30',
-  politica: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-  negocio:  'bg-green-500/15 text-green-400 border border-green-500/30',
-  producto: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
-  general:  'bg-muted text-muted-foreground border border-border',
+  faq:       'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  negocio:   'bg-green-500/15 text-green-400 border border-green-500/30',
+  politicas: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+  productos: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  envios:    'bg-cyan-500/15 text-cyan-600 border border-cyan-500/30',
+  pagos:     'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30',
+}
+
+// Rev. 68 — guía por categoría: qué SÍ y qué NO escribir para evitar
+// duplicación con otras fuentes (catálogo, Filosofía del negocio).
+const CATEGORY_GUIDES: Record<string, { placeholder: string; doYes: string; doNo: string }> = {
+  faq: {
+    placeholder: "Ej: ¿Hacen envíos a domicilio? Sí, despachamos a todo Colombia con cobertura por carrier.",
+    doYes: "Preguntas frecuentes con respuestas cortas y claras.",
+    doNo: "Misión, descripción de productos, info legal.",
+  },
+  negocio: {
+    placeholder: "Ej: Somos una marca colombiana fundada en 2018 por dos hermanos. Hoy tenemos 4 sedes y atendemos toda Latinoamérica.",
+    doYes: "Historia, equipo, hitos, alianzas.",
+    doNo: "Misión/visión/valores (van en Configuración → Filosofía del negocio).",
+  },
+  politicas: {
+    placeholder: "Ej: Aceptamos devoluciones dentro de los 15 días después de la compra, siempre que el producto esté en su empaque original.",
+    doYes: "Devoluciones, cambios, garantía, RMA, privacidad.",
+    doNo: "Métodos de pago (Pagos), tarifas de envío (Envíos).",
+  },
+  productos: {
+    placeholder: "Ej: La camiseta de algodón orgánico se debe lavar en agua fría y secar a la sombra para preservar el color.",
+    doYes: "Guía de uso, talla, cuidado, accesorios compatibles, instalación.",
+    doNo: "Precio, stock, descripción del catálogo (ya están en Productos).",
+  },
+  envios: {
+    placeholder: "Ej: Envíos a Bogotá: 1-2 días, $12.000. Resto del país: 3-5 días, $15.000-$25.000 según ciudad.",
+    doYes: "Tarifas/zonas/tiempos por carrier, restricciones, pickup.",
+    doNo: "Política de devolución (eso va en Políticas).",
+  },
+  pagos: {
+    placeholder: "Ej: Aceptamos PSE, tarjetas de crédito y débito, Bancolombia, Nequi y efectivo en Efecty. Pago contado: 5% de descuento.",
+    doYes: "Métodos aceptados, financiamiento, descuentos por pago contado.",
+    doNo: "Datos del banco (sensibles, no deben ir en KB).",
+  },
 }
 
 type KbDocument = {
@@ -151,7 +190,7 @@ export default async function KnowledgeBasePage({
     const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
     await sb.from('kb_documents').insert({
       tenant_id: m.tenant_id, title, content,
-      category: category || 'general', is_active: true,
+      category: category || 'faq', is_active: true,
       embedding: embedding ? `[${embedding.join(',')}]` : null,
     })
     revalidatePath('/dashboard/knowledge-base')
@@ -172,7 +211,7 @@ export default async function KnowledgeBasePage({
     const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
     await sb.from('kb_documents').update({
       title, content,
-      category: category || 'general',
+      category: category || 'faq',
       embedding: embedding ? `[${embedding.join(',')}]` : null,
       updated_at: new Date().toISOString(),
     }).eq('id', docId).eq('tenant_id', m.tenant_id)
@@ -374,10 +413,30 @@ export default async function KnowledgeBasePage({
                   <div className="space-y-1">
                     <Label className="text-xs">Contenido * <span className="text-muted-foreground font-normal">(máx {MAX_CONTENT} chars)</span></Label>
                     <textarea name="content" rows={7} required maxLength={MAX_CONTENT}
-                      placeholder="Escribe el texto tal como quieres que la IA lo lea. Ej: 'Aceptamos devoluciones dentro de los 15 días...'"
+                      placeholder="Escribe el texto tal como quieres que la IA lo lea (ver guía abajo según la categoría que elegiste)."
                       className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
                     <p className="text-xs text-muted-foreground">La IA usará búsqueda semántica para encontrar el doc más relevante.</p>
                   </div>
+                  {/* Rev. 68 — guía por categoría: qué SÍ y qué NO escribir */}
+                  <details className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+                    <summary className="cursor-pointer font-medium text-foreground/80">
+                      💡 Guía por categoría — ejemplos de qué escribir en cada una
+                    </summary>
+                    <div className="mt-2 space-y-2.5">
+                      {CATEGORIES.map(c => {
+                        const g = CATEGORY_GUIDES[c.value]
+                        if (!g) return null
+                        return (
+                          <div key={c.value} className="border-l-2 border-primary/30 pl-2.5">
+                            <p className="font-semibold text-foreground/90">{c.label}</p>
+                            <p className="text-muted-foreground italic">{g.placeholder}</p>
+                            <p className="text-emerald-600 mt-0.5">✓ Sí: <span className="text-foreground/80">{g.doYes}</span></p>
+                            <p className="text-red-500">✗ No: <span className="text-foreground/80">{g.doNo}</span></p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </details>
                   <SubmitButton className="w-full h-8 text-sm" pendingText="Guardando y generando embedding...">
                     Agregar documento
                   </SubmitButton>
