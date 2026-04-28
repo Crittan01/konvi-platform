@@ -78,8 +78,9 @@ export function AiAgentForm({ agent, canWrite, saveAiAgent }: AiAgentFormProps) 
           onChange={e => setRoleLen(e.target.value.length)}
         />
         <p className="text-xs text-muted-foreground">
-          Define <strong>cómo actúa el bot en ventas</strong>: su nombre, qué ofrece primero, cómo cierra, tono específico.
-          La Filosofía del negocio (misión, valores, tono de marca) se inyecta automáticamente — no la repitas aquí.
+          Define <strong>el COMPORTAMIENTO del bot</strong>: qué ofrece primero, cómo cierra, qué pregunta extra hace.
+          La <strong>IDENTIDAD del negocio</strong> (misión, visión, valores, tono) se configura aparte en
+          Configuración → General → Filosofía del negocio y se inyecta automáticamente — no la repitas aquí.
         </p>
       </div>
 

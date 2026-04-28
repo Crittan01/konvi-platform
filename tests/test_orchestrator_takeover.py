@@ -110,7 +110,7 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
 
     async def test_non_text_second_escalates_to_human_takeover(self):
-        """Si ya hay advertencia previa de no-texto, escala a human_takeover."""
+        """Si ya hay advertencia previa de no-texto y multimodal falla, escala a human_takeover."""
         with (
             patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
             patch.object(orchestrator, "_get_conversation_history", return_value=[
@@ -121,6 +121,8 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
             patch.object(orchestrator, "_set_conversation_status") as set_status,
             patch.object(orchestrator, "_mark_message_processing") as mark_processing,
             patch.object(orchestrator, "send_whatsapp_message", new_callable=AsyncMock) as send_msg,
+            # Multimodal: simulamos que la transcripción falla → cae al gate legacy.
+            patch.object(orchestrator, "_transcribe_audio_or_none", new_callable=AsyncMock, return_value=None),
         ):
             await orchestrator.build_and_run_orchestration(
                 supabase=MagicMock(),
