@@ -1,6 +1,6 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-30 (rev. 69)
+**Última actualización**: 2026-04-30 (rev. 70)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
 
@@ -14,7 +14,55 @@
 - **Inbox**: ✅ Certificado (rev. 67) — compliance Meta ventana 24h, multimodal audio
 - **Coherencia core del bot**: ✅ Certificado (rev. 68) — Wompi customer_data + Envia district + FSM aterrizado
 - **Riesgos abiertos cerrados**: ✅ Certificado (rev. 69) — DV NIT, lazy customer context, MeLi alert+distributed dedup, rate-limit user-aware, frontend contacts UI completo
+- **F7-lite cart recovery**: ✅ Implementado (rev. 70) — bot recupera carrito previo cancelado al volver el cliente, con re-validación stock+precio
 - **DB**: ✅ contrato endurecido (72 migraciones aplicadas)
+
+---
+
+## Cierre de sesión actual (2026-04-30, rev. 70) — F7-LITE CART RECOVERY
+
+### Estado: 13/13 OK · 496 tests · TypeScript OK · Lint OK · 72 migraciones
+
+Implementación de la variante accesible de F7 (cart abandonment) sin templates Meta — cart recovery reactivo. Costo $0 al tenant. Cuando el cliente vuelve a expresar intención de compra, el bot ve el carrito previo cancelado en system prompt, con stock+precio re-validados, y puede ofrecer retomar.
+
+### WS · Cart recovery reactivo (F7-lite)
+
+- `services/ai-orchestrator/orchestrator.py`:
+  - Nuevo helper `_load_cart_recovery_block(supabase, tenant_id, contact_id)` que carga la última orden `cancelled` reciente del contacto + JOIN `order_items` + lookup batch en `product_variations` para re-validar stock y precio actual.
+  - Inyecta bloque "CARRITO PREVIO" estructurado al system prompt: items con marca de "disponible" / "precio cambió" / "SIN STOCK" / "variante removida", total recalculado al precio actual y INSTRUCCIÓN al LLM ("ofrecer retomar SOLO si el cliente expresa intención de compra").
+  - Si todos los items son irrecuperables, devuelve vacío para no contaminar el prompt.
+  - Cableado dentro de `_load_customer_context_block` — el bloque carrito coexiste con pedidos activos y reclamos abiertos, o aparece solo.
+- Tokens léxicos extendidos en `_CUSTOMER_CONTEXT_LAZY_TOKENS`: `carrito`, `retomar`, `retomo`, `antes`, `ayer`, `anterior`, `ultima/última`, `ultimo/último`, `pendiente/pendientes`, `pagar`, `pago`. El gate lazy se activa con frases naturales tipo "oye, mi carrito" o "quiero retomar lo de antes".
+- Variables de entorno nuevas (`.env.example`, `render.yaml`, `.env`):
+  - `CART_RECOVERY_ENABLED` (default `true`) — kill switch independiente del global `CUSTOMER_CONTEXT_ENABLED`.
+  - `CART_RECOVERY_LOOKBACK_DAYS` (default `7`, clamped 1-60) — ventana en días.
+- Tests `tests/test_cart_recovery_lite.py` (18 nuevos, 478 → 496):
+  - Env helpers: kill switch + lookback default + boundaries + invalid fallback.
+  - Tokens léxicos cart-recovery activan lazy mode.
+  - Bloque cart recovery: stock OK, precio cambió, stock=0 excluye del total, todo SIN STOCK → vacío, variante removida marcada, error supabase → vacío, sin order_items → vacío.
+  - Integración con `_load_customer_context_block`: solo cart, cart + activos coexisten.
+
+### WS · Script utilitario de vaciado de conversación
+
+- `scripts/wipe_conversation.py`: vacía la conversación de un teléfono (default `+573125835649`).
+- Modos: `--keep-conversation` (borra messages + reads + reset status), default (`DELETE conversations`, CASCADE limpia messages+reads).
+- Multi-tenant safety: lista todas las conversaciones encontradas antes de actuar; pide confirmación interactiva (`--yes` para skip).
+- Lee Supabase URL + service_role desde `.env`.
+
+### Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| `services/ai-orchestrator/orchestrator.py` | `_load_cart_recovery_block` + extensión `_load_customer_context_block` + tokens léxicos + helpers env |
+| `.env.example` | `CART_RECOVERY_ENABLED`, `CART_RECOVERY_LOOKBACK_DAYS` |
+| `render.yaml` | mismas dos vars en commerce-ops-orchestrator |
+| `.env` | mismas dos vars |
+| `tests/test_cart_recovery_lite.py` | NUEVO (18 tests) |
+| `scripts/wipe_conversation.py` | NUEVO (utilidad multi-tenant aware) |
+
+### Por qué este enfoque (no se creó tool separado)
+
+El plan original (`.context/04-next-steps.md`) sugería un tool determinístico `recreate_order_from_cancelled`. Al revisar el código existente, `payment_link_tool.handle_payment_link_if_applicable` ya recibe `total_in_cents` y crea orden + link de pago — el LLM solo necesita ver el carrito recuperable en el contexto y decidir, no necesita un tool aparte. Patrón coherente con `_load_customer_context_block` (rev. 68/69) y evita duplicación.
 
 ---
 

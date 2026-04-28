@@ -1,6 +1,21 @@
 # Próximos Pasos — Estado 2026-04-30
 
-## Cierre sesión actual (2026-04-30, rev. 69) — RIESGOS ABIERTOS CERRADOS
+## Cierre sesión actual (2026-04-30, rev. 70) — F7-LITE CART RECOVERY
+
+- ✅ **F7-lite cart recovery reactivo**: `_load_cart_recovery_block` inyecta carrito previo cancelado (TTL `CART_RECOVERY_LOOKBACK_DAYS` default 7d) al system prompt con re-validación stock+precio actual por variante. Marca "disponible" / "precio cambió" / "SIN STOCK" / "variante removida". Total recalculado al precio actual.
+- ✅ Tokens léxicos extendidos (`carrito`, `retomar`, `antes`, `ayer`, `pagar`, etc.) activan lazy mode con frases naturales.
+- ✅ Env vars: `CART_RECOVERY_ENABLED`, `CART_RECOVERY_LOOKBACK_DAYS` (`.env.example` + `render.yaml` + `.env`).
+- ✅ Script utilitario `scripts/wipe_conversation.py` para vaciar conversación de teléfono específico (multi-tenant aware, modo full-delete o keep-conversation).
+- ✅ 18 tests nuevos · 496 total · validate.sh 13/13 OK.
+
+### Variantes F7 restantes (postpuestas)
+
+- **F7-email** (recovery dual-channel): bloqueado por SMTP propio. Trivial tras tener Resend con dominio.
+- **F7-full** (templates Meta proactivos): solo cuando un tenant Pro/Enterprise tenga plantilla aprobada Y volumen que justifique el costo Meta pass-through.
+
+---
+
+## Cierre sesión anterior (2026-04-30, rev. 69) — RIESGOS ABIERTOS CERRADOS
 
 - ✅ **A2 DV NIT**: validación módulo-11 oficial DIAN para NITs con DV.
 - ✅ **A4 Customer context lazy**: feature flag + 3 modos (always/lazy/disabled). Default lazy reduce 70-80% de tokens del contexto.
@@ -17,8 +32,90 @@
 - **B4 Anti-hibernation Render**: aplica al pasar a Render Starter+ (HOY en Free + VM local).
 - **B5 Wompi producción**: aplica cuando Kaiu (o cualquier tenant) pase a operativo.
 - **C3 DR Supabase**: aplica en producción.
-- **F7 cart abandonment**: bloqueado por templates Meta (IH del tenant).
+- **F7 cart abandonment**: bloqueado por templates Meta (IH del tenant). Detalle ejecutable abajo en `Backlog detallado — F7`.
 - **F8 multimodal imagen**: aplazado tras audio (rev. 67).
+
+---
+
+## Backlog detallado — F7 Cart abandonment (3 variantes)
+
+3 variantes documentadas con costos y prerequisitos diferenciados. Listo para ejecutar cuando se priorice.
+
+### F7-lite — Cart recovery reactivo (variante accesible, prioridad alta)
+
+**Hipótesis comercial**: pequeños e-commerce no pueden costear templates Meta. El bot debe recordar el carrito previo cuando el cliente vuelve a escribir, sin proactividad costosa.
+
+**Costo tenant**: $0. Todo dentro de la ventana 24h (gratis Meta) o reactivado por el cliente (la ventana 24h se reabre al primer mensaje del cliente).
+
+**Por qué hoy NO funciona**: `_release_expired_pending_payment_orders` ([worker.py:477](services/ai-orchestrator/worker.py#L477)) cambia status a `cancelled` pero NO borra la orden. Los `order_items` quedan asociados. Sin embargo, `_load_customer_context_block` ([orchestrator.py:232](services/ai-orchestrator/orchestrator.py#L232)) excluye `cancelled` del contexto cargado al system prompt, por eso el bot HOY no recupera carritos cuando el cliente reescribe.
+
+**Cambios concretos:**
+
+| Item | Detalle | Tiempo |
+|---|---|---|
+| Extender `_load_customer_context_block` | Query a `orders` con `status='cancelled'` + JOIN `order_items` con TTL configurable. Variable env `CART_RECOVERY_LOOKBACK_DAYS` (default 7). | 45 min |
+| Bloque system prompt | Sección "CARRITO PREVIO (cancelado hace N días)" con items, totales y INSTRUCCIÓN: ofrecer retomar SOLO si el cliente expresa intención de compra (no proactivo, no intrusivo). | 20 min |
+| Tokens léxicos lazy mode | Agregar `"carrito"`, `"retomar"`, `"ese pedido"`, `"lo de antes"`, `"el otro dia"`, `"el de ayer"` a `_CUSTOMER_CONTEXT_LAZY_TOKENS`. | 10 min |
+| Tool `recreate_order_from_cancelled(order_id)` | Determinístico, en orchestrator. Copia items, **re-valida stock actual** por variante, **re-calcula precio actual**. Output: `{ new_order_id, stock_diffs[], price_diffs[] }`. | 60 min |
+| UX bot — branching | Si stock=0 en alguna variante: ofrecer reemplazo desde catálogo activo. Si precio cambió: advertir antes de generar nuevo link Wompi. | 30 min |
+| Tests | (a) carrito cancelled <7d aparece en contexto; (b) cancelled >7d NO aparece; (c) cliente conocido sin token léxico → no se carga; (d) stock=0 dispara branch reemplazo; (e) diff precio se reporta al cliente. | 45 min |
+
+**Total: ~3.5 horas.**
+
+**Reusos:**
+- `_load_customer_context_block` y `_customer_context_should_load` (rev. 69) — extender, no reescribir.
+- Lazy mode + feature flag `CUSTOMER_CONTEXT_ENABLED/MODE` (rev. 69) cubren el on/off global.
+- Wompi `payment_link` y `_build_customer_data` (rev. 68) reusables tal cual al regenerar el link.
+
+### F7-email — Recovery dual-channel (postpuesto hasta SMTP propio)
+
+**Bloqueado por**: IH-SMTP (Resend con dominio propio del operador SaaS, identificado en `docs/HANDOFF.md` como bloqueante operativo conocido).
+
+**Cuando se desbloquee** (~45 min adicionales tras F7-lite):
+- Al generar link Wompi en `READY_FOR_SUMMARY`, el bot ofrece: *"¿Te lo mando también por correo?"* — si el cliente acepta, se envía vía Resend con el mismo `payment_link.id`.
+- El cliente paga desde cualquier canal; el webhook Wompi llega igual y notifica vía WhatsApp si todavía está dentro de 24h, o vía email si ya cerró.
+- No requiere cambios en webhook Wompi ni en orchestrator más allá de un branch en el envío.
+
+### F7-full — Templates Meta proactivos (upgrade Pro/Enterprise)
+
+**Hipótesis comercial**: tenants con volumen alto que quieran capturar el segmento de "fantasmas" (clientes que abandonan y nunca vuelven a escribir). Templates Meta se justifica solo a escala.
+
+**Modelo de costos**: **Pass-through**. Tenant paga Meta directo vía su WABA (`tenant_integrations.whatsapp_credentials`). Plataforma SaaS NO factura el extra. Coherente con cómo opera Wompi y Envia hoy.
+
+**Migración futura a Modelo 3 (gated por plan)**: trivial — agregar gate en `consume_tenant_capability` y condicionar UI/endpoint. Sin cambio en flujo de envío.
+
+**Pre-requisitos (INTERVENCION HUMANA del tenant):**
+- Tenant registra plantilla en Meta Business Manager (categoría `MARKETING`) con placeholders `{{nombre}}` y/o `{{link}}`.
+- Tenant espera aprobación Meta (24-48h típico).
+- Operador del SaaS configura `template_name` aprobado en UI Settings.
+
+**Cambios concretos cuando se priorice (~2.5 h):**
+
+| Item | Detalle | Tiempo |
+|---|---|---|
+| Migración | `tenants.cart_abandonment_template_name TEXT NULL` + `cart_abandonment_enabled BOOLEAN NOT NULL DEFAULT FALSE`. | 5 min |
+| UI Settings | Sección "Plantillas Meta aprobadas" con input + toggle. Validación frontend: `enabled=true` exige `template_name` non-empty. | 30 min |
+| Endpoint envío | Extender `POST /conversations/{id}/send` con `{ template_name, template_variables }`. Reusa `ack_pending` + retries (rev. 67 WS-B). | 30 min |
+| Worker hook | En `_release_expired_pending_payment_orders`: ANTES de cancelar, si `cart_abandonment_enabled` para el tenant, enviar template vía cliente WhatsApp existente. | 45 min |
+| Tests | Unit cubren: `template_name` vacío + `enabled=true` → 422; envío exitoso → message persisted con `template_name=...`; ack flow reusa el existente. | 30 min |
+
+**Reusos:**
+- Cliente WhatsApp ya soporta `messages.template` (Meta API v21.0).
+- ACK transaccional + retries (rev. 67) cubren el outbound del template.
+- `messages` — verificar al implementar si ya existe columna `template_name`; si no, una columna más en la migración.
+
+### Coherencia transversal
+
+- El cron del worker ya existe — F7-lite y F7-full se inyectan en el mismo loop, no requieren cron separado.
+- `MAX_PROCESSING_ATTEMPTS=5` (rev. 66) aplica también al outbound de templates.
+- La ventana 24h Meta NO aplica a templates — Meta los acepta fuera de ventana, ese es justo el caso de uso de F7-full.
+- F7-lite + F7-full son **complementarias, no excluyentes**. Un tenant Pro puede usar ambas: cart recovery captura los que vuelven (gratis) + templates capturan los fantasmas (paga).
+
+### Cuándo priorizar cada variante
+
+- **F7-lite**: cuando un tenant pida cart recovery O cuando se detecte abandono >5% en métricas. Implementable HOY sin prerequisitos.
+- **F7-email**: cuando IH-SMTP esté resuelto. Trivial tras F7-lite.
+- **F7-full**: solo cuando un tenant Pro/Enterprise concreto tenga plantilla Meta aprobada Y volumen que justifique el costo. NO antes — sin tenant target con plantilla aprobada, el código queda muerto.
 
 ---
 
