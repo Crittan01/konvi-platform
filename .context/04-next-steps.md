@@ -1,6 +1,33 @@
-# Próximos Pasos — Estado 2026-04-25
+# Próximos Pasos — Estado 2026-04-28
 
-## Cierre sesión actual (2026-04-26, rev. 65) — Módulo Configuración CERTIFICADO
+## Cierre sesión actual (2026-04-28, rev. 66) — CIERRE DE CERTIFICACIÓN REAL
+
+- ✅ Cerrado WS1: humanización end-to-end (system prompt + 5 tonos ampliados +
+  salvaguarda con 25 variantes + reescritura humana de mensajes templated:
+  cancelación, reactivación, corrección de datos, pago fallido Wompi, tracking,
+  ticket de claim).
+- ✅ Cerrado WS2: `MAX_PROCESSING_ATTEMPTS=5` unificado (.env.example, worker.py
+  default, render.yaml). Local replica producción.
+- ✅ Cerrado WS3: MeLi webhook hardening — IP allowlist (4 IPs oficiales como
+  default en código, override por env), rate-limit 200 req/min por IP,
+  idempotencia in-memory TTL 300s. Sin IH obligatoria.
+- ✅ Cerrado WS4: docs sincronizadas — `.context/00-product.md` rev. 6 con
+  rutas hidden, `.context/01-state.md` rev. 66, `docs/HANDOFF.md` con 62
+  migraciones reales.
+- ✅ 74 tests nuevos · 389 tests OK · 13/13 validate.sh OK · sin regresiones.
+
+### Tarea recurrente (anotación)
+
+- **Revisión trimestral de IPs MeLi**: validar
+  `https://developers.mercadolibre.com.co/es_ar/notificaciones` sección
+  "Historial de notificaciones" cada 3 meses. Si MeLi expande las IPs,
+  actualizar `_MELI_DEFAULT_NOTIFICATION_IPS` en
+  `services/api/routers/meli_webhook.py` en un PR menor.
+- **Próxima revisión**: 2026-07-28.
+
+---
+
+## Cierre sesión anterior (2026-04-26, rev. 65) — Módulo Configuración CERTIFICADO
 
 - ✅ **General**: Filosofía del negocio (misión/visión/valores/tono), Presencia y ubicaciones (DANE + sedes con phone/email), Horario estructurado (asesor + fuera de horario + cut-off), Despacho con selector de sede, Resumen navegable, colores emerald/amber globalmente más claros.
 - ✅ **Usuarios y Acceso**: Estados activo/inactivo/pendiente/eliminado, ban_duration nativo Supabase, shouldSoftDelete, ChangeRoleButton con confirmación, InactivateMemberButton con motivo, URL cleanup, redirect para non-owners.

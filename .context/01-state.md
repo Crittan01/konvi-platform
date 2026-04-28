@@ -1,8 +1,8 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-26 (rev. 65)
+**Última actualización**: 2026-04-28 (rev. 66)
 **Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
-**Tree funcional vigente**: `.context/00-product.md`.
+**Tree funcional vigente**: `.context/00-product.md` (rev. 6).
 
 ---
 
@@ -11,11 +11,115 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **DB**: ✅ contrato endurecido (50 migraciones — distributed_rate_limiter aplicada)
+- **DB**: ✅ contrato endurecido (62 migraciones aplicadas)
 
 ---
 
-## Cierre de sesión actual (2026-04-26, rev. 65) — MÓDULO CONFIGURACIÓN CERTIFICADO
+## Cierre de sesión actual (2026-04-28, rev. 66) — CIERRE DE CERTIFICACIÓN REAL
+
+### Estado: 13/13 OK · 389 tests · TypeScript OK · Lint OK
+
+Cierre repo-wide en 4 workstreams. Coherencia entre código, runtime, infra,
+seguridad, UX, pruebas y documentación.
+
+### Workstream 1 — Humanización end-to-end de la conversación
+
+**Razón:** el producto no debe sonar robótico en NINGUNA parte de la conversación.
+
+- **System prompt Gemini**: nuevo bloque `_HUMAN_STYLE_GUIDE` inyectado en
+  `_build_system_prompt`. Lista frases prohibidas ("Procesando su solicitud",
+  "Estamos procesando", "Lamentamos los inconvenientes ocasionados"), reglas
+  de variación sintáctica, adaptación de registro al cliente y rotación de
+  expresiones de confirmación.
+- **`_TONO_INSTRUCCIONES` ampliado** (orchestrator.py:1293): cada uno de los 5
+  tonos pasó de un descriptor de 1 línea a un bloque con saludo / confirmación /
+  cierre + ejemplo natural concreto. Reduce drift del LLM.
+- **Salvaguarda de saludo determinística** (orchestrator.py): hardcoded único
+  reemplazado por `_safety_greeting_response()` con **5 variaciones por tono
+  (25 totales)**, rotativas por seed `hash(conversation_id + day_of_year) % 5`.
+  Personalización por `first_name` cuando hay consent. Tono inválido → fallback
+  amigable.
+- **Mensajes templated humanizados**:
+  - Cancelación de pedido (success / no-pedido-activo): 3 variantes c/u.
+  - Reactivación 24h: 3 variantes.
+  - Corrección de datos (`_CORRECTION_PROMPT_VARIANTS`): 2 variantes por campo.
+  - Pago fallido Wompi (`_PAYMENT_FAILED_VARIANTS`): 3 variantes seleccionadas
+    por hash(order_id) — mismo pedido siempre recibe la misma para consistencia.
+  - Tracking no disponible: 3 variantes empáticas.
+  - Ticket de claim creado: 3 variantes.
+- Helper `_pick_variant(variants, seed)` y `_today_seed(conversation_id)` para
+  selección determinística reutilizable.
+
+### Workstream 2 — `MAX_PROCESSING_ATTEMPTS` unificado a 5
+
+- `.env.example`: `5` (era `3`).
+- `services/ai-orchestrator/worker.py:15`: default `5` (era `3`).
+- `render.yaml:236`: ya estaba en `5`.
+- Resultado: el comportamiento de reintentos local replica producción. Bugs en
+  reintento 4-5 dejan de ser invisibles localmente.
+
+### Workstream 3 — MeLi webhook hardening
+
+**Razón:** `POST /api/v1/meli/webhook` aceptaba cualquier POST del internet
+(vector DoS y costo: cada notificación dispara GET a la API MeLi).
+
+- **IP allowlist con default seguro en código**: 4 IPs oficiales de MeLi
+  (`54.88.218.97`, `18.215.140.160`, `18.213.114.129`, `18.206.34.84`)
+  hardcoded como `_MELI_DEFAULT_NOTIFICATION_IPS`. Verificadas en doc oficial
+  con fecha 23/04/2026. Override opcional por env var `MELI_WEBHOOK_ALLOWED_IPS`.
+- **Dependency `_verify_meli_origin`**: extrae IP de `x-forwarded-for` (primer
+  hop) o `request.client.host`; rechaza con 403 si IP no está en allowlist.
+  Latencia in-memory < 1ms (cumple regla MeLi de 500ms en respuesta).
+- **Rate-limit por IP**: bucket `webhook.meli`, 200 req/min, sobre el mismo
+  limiter distribuido (`rate_limit_hit` RPC). Helper nuevo
+  `webhook_rate_limit_check()` en `dependencies/security.py` no requiere
+  `tenant_id` (a diferencia del rate limiter de endpoints autenticados).
+- **Idempotencia in-memory**: dedup TTL 300s por
+  `(application_id, resource, sent)` para defender contra replays con IP legítima.
+- **`.env.example` + `render.yaml`**: variable `MELI_WEBHOOK_ALLOWED_IPS=""`
+  agregada con `sync: false`. **Sin IH obligatoria** — el default cubre producción.
+
+### Workstream 4 — Coherencia documental
+
+- `.context/00-product.md` rev. 6: nueva sección 5.1 "Rutas hidden /
+  pendientes de decisión de producto" listando `/dashboard/(products)/media`
+  (gestor funcional oculto) y `/dashboard/(products)/inventory` (redirect legacy).
+- `.context/01-state.md` rev. 66: este bloque.
+- `.context/04-next-steps.md`: cierre 2026-04-28 + items resueltos.
+- `docs/HANDOFF.md`: conteo migraciones actualizado a 62.
+
+### Tests nuevos (74 total)
+
+| Archivo | Tests | Cobertura |
+|---|---|---|
+| `tests/test_text_utils.py` | 22 | normalize_text, tokenize_text, normalize_phone, safe_float, format_pesos, format_cents_cop |
+| `tests/test_orchestrator_safety_greeting.py` | 11 | 5 variaciones × 5 tonos, personalización first_name, fallback amigable, determinismo por seed |
+| `tests/test_orchestrator_conversation_start.py` | 8 | helpers legacy eliminados confirmados, salvaguarda no escala |
+| `tests/test_orchestrator_tone_variation.py` | 9 | cada tono con ≥200 chars, ejemplos concretos, frases anti-robot en _HUMAN_STYLE_GUIDE |
+| `tests/test_humanization_audit.py` | 3 | auditoría estática anti-robot en orchestrator + routers + bancos de variantes |
+| `tests/test_db_persistence_reopen.py` | 5 | reapertura de conversación closed, selección por last_interaction_at desc, creación nueva |
+| `tests/test_meli_webhook_origin.py` | 16 | IP allowlist, override por env, x-forwarded-for, rate-limit, idempotencia, latencia |
+
+### Archivos modificados
+
+- `services/ai-orchestrator/orchestrator.py` — system prompt + tonos + salvaguarda + variantes templated
+- `services/ai-orchestrator/worker.py:15` — default 5
+- `services/ai-orchestrator/tools/order_status_tool.py` — variantes "tracking no disponible"
+- `services/api/routers/wompi_webhook.py` — `_PAYMENT_FAILED_VARIANTS`
+- `services/api/routers/meli_webhook.py` — IP allowlist + rate-limit + idempotencia
+- `services/api/dependencies/security.py` — `webhook_rate_limit_check()` helper
+- `.env.example` — MAX_PROCESSING_ATTEMPTS=5, MELI_WEBHOOK_ALLOWED_IPS
+- `render.yaml` — MELI_WEBHOOK_ALLOWED_IPS
+
+### Riesgos abiertos (no bloqueantes)
+
+- **MeLi puede cambiar las 4 IPs** publicadas. Mitigación: env var override + revisión trimestral en backlog.
+- **Variantes hardcoded** en código; mover a tabla `tenants.greeting_variations` queda fuera de alcance.
+- **Tokens del system prompt** crecen ~150-300 por request. Despreciable a escala Free actual.
+
+---
+
+## Cierre de sesión anterior (2026-04-26, rev. 65) — MÓDULO CONFIGURACIÓN CERTIFICADO
 
 ### Estado: 13/13 OK · 305 tests · TypeScript OK · Lint OK
 
