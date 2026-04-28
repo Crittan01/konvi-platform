@@ -14,9 +14,14 @@ from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.contact_validators import (
+    DOCUMENT_TYPES_CO,
+    validate_document,
+    normalize_document_number,
+)
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
@@ -46,22 +51,60 @@ class ContactCreate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
     email: Optional[str] = Field(default=None, max_length=254)
     notes: Optional[str] = Field(default=None, max_length=1200)
+    # Rev. 68 — documento de identidad (Wompi customer_data.legal_id_type CO).
+    document_type: Optional[str] = Field(default=None, max_length=10)
+    document_number: Optional[str] = Field(default=None, max_length=30)
+    # Address structured: schema canónico documentado en migración 20260429000000.
+    address: Optional[dict] = Field(default=None)
     consent_given: bool = False
     consent_source: Optional[str] = None
     consent_notice_version: Optional[str] = Field(default=None, max_length=80)
     consent_evidence: dict = Field(default_factory=dict)
     consent_revoked_reason: Optional[str] = Field(default=None, max_length=500)
 
+    @field_validator("document_type")
+    @classmethod
+    def _validate_doc_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        v_upper = v.strip().upper()
+        if v_upper not in DOCUMENT_TYPES_CO:
+            raise ValueError(f"document_type inválido. Valores aceptados: {sorted(DOCUMENT_TYPES_CO)}")
+        return v_upper
+
+    @field_validator("document_number")
+    @classmethod
+    def _normalize_doc_number(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_document_number(v)
+
 
 class ContactPatch(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
     email: Optional[str] = Field(default=None, max_length=254)
     notes: Optional[str] = Field(default=None, max_length=1200)
+    document_type: Optional[str] = Field(default=None, max_length=10)
+    document_number: Optional[str] = Field(default=None, max_length=30)
+    address: Optional[dict] = Field(default=None)
     consent_given: Optional[bool] = None
     consent_source: Optional[str] = None
     consent_notice_version: Optional[str] = Field(default=None, max_length=80)
     consent_evidence: Optional[dict] = None
     consent_revoked_reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("document_type")
+    @classmethod
+    def _validate_doc_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        v_upper = v.strip().upper()
+        if v_upper not in DOCUMENT_TYPES_CO:
+            raise ValueError(f"document_type inválido. Valores aceptados: {sorted(DOCUMENT_TYPES_CO)}")
+        return v_upper
+
+    @field_validator("document_number")
+    @classmethod
+    def _normalize_doc_number(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_document_number(v)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -79,7 +122,8 @@ async def list_contacts(
         query = (
             supabase.table("contacts")
             .select(
-                "id, phone, name, email, notes, address, consent_given, consent_date, consent_source, "
+                "id, phone, name, email, notes, address, document_type, document_number, "
+                "consent_given, consent_date, consent_source, "
                 "consent_notice_version, consent_evidence, consent_actor_email, "
                 "consent_revoked_at, consent_revoked_reason, created_at"
             )
@@ -141,6 +185,12 @@ async def create_contact(
         if contact.consent_given:
             evidence.setdefault("captured_via", "api")
 
+        # Validación cruzada document_type + document_number (rev. 68).
+        from dependencies.contact_validators import validate_document
+        doc_err = validate_document(contact.document_type, contact.document_number)
+        if doc_err:
+            raise HTTPException(status_code=422, detail=doc_err)
+
         now_iso = datetime.now(timezone.utc).isoformat()
         payload = {
             "tenant_id": tenant_id,
@@ -148,6 +198,9 @@ async def create_contact(
             "name": contact.name,
             "email": contact.email.strip().lower() if contact.email else None,
             "notes": contact.notes,
+            "document_type": contact.document_type,
+            "document_number": contact.document_number,
+            "address": contact.address,
             "consent_given": contact.consent_given,
             "consent_date": now_iso if contact.consent_given else None,
             "consent_source": contact.consent_source if contact.consent_given else None,
@@ -218,6 +271,13 @@ async def patch_contact(
         data = {k: v for k, v in patch.model_dump().items() if v is not None}
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
+
+        # Rev. 68 — validación cruzada document si se incluye alguno en el patch.
+        if "document_type" in data or "document_number" in data:
+            from dependencies.contact_validators import validate_document
+            doc_err = validate_document(data.get("document_type"), data.get("document_number"))
+            if doc_err:
+                raise HTTPException(status_code=422, detail=doc_err)
 
         current_res = (
             supabase.table("contacts")
@@ -331,14 +391,18 @@ async def record_consent(
             }
             logger.info("[CONSENT] Registrado | contact=%s tenant=%s canal=%s", contact_id, tenant_id, body.channel)
         else:
-            # Revocación: anonimizar inmediatamente (Ley 1581, Art. 15)
+            # Revocación: anonimizar inmediatamente (Ley 1581, Art. 15).
+            # Rev. 68 — incluye document_type y document_number en la anonimización.
             update = {
                 "consent_given": False,
                 "consent_revoked_at": now_iso,
                 "consent_revoked_reason": "Revocación solicitada por el titular vía WhatsApp",
-                "name": None,      # anonimización inmediata
-                "address": None,   # anonimización inmediata
-                "notes": None,     # anonimización inmediata
+                "name": None,
+                "email": None,
+                "address": None,
+                "notes": None,
+                "document_type": None,
+                "document_number": None,
             }
             logger.info("[CONSENT] Revocado + anonimizado | contact=%s tenant=%s", contact_id, tenant_id)
 
@@ -391,9 +455,11 @@ async def delete_contact(
 
         update = {
             "name": None,
-            "email": None,      # Ley 1581 Art. 15 — anonimización total al eliminar
+            "email": None,            # Ley 1581 Art. 15 — anonimización total al eliminar
             "address": None,
             "notes": None,
+            "document_type": None,    # rev. 68
+            "document_number": None,  # rev. 68
             "consent_given": False,
             "consent_revoked_at": now_iso,
             "consent_revoked_reason": "Eliminación solicitada por operador",
