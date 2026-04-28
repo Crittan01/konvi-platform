@@ -252,6 +252,83 @@ def _get_genai_client() -> genai.Client:
     return _genai_client
 
 
+# ── Multimodal audio (D6 feature flag, lectura dinámica para apagable en caliente) ──
+def _multimodal_audio_enabled() -> bool:
+    raw = os.getenv("MULTIMODAL_AUDIO_ENABLED", "true")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _transcribe_audio_or_none(
+    *,
+    tenant_id: str,
+    supabase,
+    media_id: Optional[str],
+    media_mime: Optional[str],
+) -> Optional[str]:
+    """Descarga audio de Meta y pide a Gemini transcribirlo.
+
+    Retorna el texto transcrito (no vacío) o None si:
+      - feature flag apagado
+      - mime no soportado
+      - falla descarga
+      - falla transcripción Gemini
+    En cualquier fallo, el caller debe caer al gate de no-texto humanizado.
+    """
+    if not _multimodal_audio_enabled():
+        return None
+    from services.meta_media import (
+        fetch_media_bytes,
+        is_supported_audio_mime,
+        MediaDownloadError,
+    )
+    if not media_id:
+        return None
+    if not is_supported_audio_mime(media_mime):
+        logger.info("[MULTIMODAL] mime no soportado: %s — fallback a gate texto", media_mime)
+        return None
+    # Reusa el access_token de WhatsApp del tenant (mismo que envía mensajes).
+    try:
+        from whatsapp_sender import _get_tenant_wa_credentials  # noqa: WPS433
+        _, access_token = _get_tenant_wa_credentials(tenant_id, supabase)
+    except Exception as exc:
+        logger.warning("[MULTIMODAL] no se pudo resolver access_token tenant=%s: %s", tenant_id, exc)
+        return None
+    if not access_token:
+        return None
+    try:
+        audio_bytes, mime_resolved = await fetch_media_bytes(media_id, access_token)
+    except MediaDownloadError as exc:
+        logger.info("[MULTIMODAL] descarga falló tenant=%s media_id=%s: %s", tenant_id, media_id, exc)
+        return None
+    # Llamada Gemini multimodal: transcribir el audio en español.
+    try:
+        client = _get_genai_client()
+        audio_part = genai_types.Part(
+            inline_data=genai_types.Blob(mime_type=mime_resolved or media_mime, data=audio_bytes)
+        )
+        prompt = (
+            "Transcribe el siguiente audio en español. "
+            "Si está en otro idioma, transcribe en el idioma original. "
+            "Responde SOLO con el texto transcrito, sin comentarios ni meta-información."
+        )
+        resp = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[prompt, audio_part],
+        )
+        text = (getattr(resp, "text", "") or "").strip()
+        if not text:
+            logger.info("[MULTIMODAL] Gemini retornó transcripción vacía tenant=%s", tenant_id)
+            return None
+        logger.info(
+            "[MULTIMODAL] audio procesado tenant=%s mime=%s bytes=%s transcripcion_chars=%s",
+            tenant_id, mime_resolved or media_mime, len(audio_bytes), len(text),
+        )
+        return text
+    except Exception as exc:
+        logger.warning("[MULTIMODAL] Gemini transcripción falló tenant=%s: %s", tenant_id, exc, exc_info=True)
+        return None
+
+
 # ─── Schema de Output Estructurado ────────────────────────────────────────────
 
 class OrchestratorOutput(BaseModel):
@@ -1525,7 +1602,7 @@ def _build_store_info_section(
     has_fisica  = store_type in ("fisica", "fisica_virtual")
     has_virtual = store_type in ("virtual", "fisica_virtual")
 
-    lines: list[str] = [f"\nINFORMACIÓN COMERCIAL DE {tenant_name.upper()}:"]
+    lines: list[str] = [f"\nSOBRE LA TIENDA — INFORMACIÓN COMERCIAL DE {tenant_name.upper()}:"]
 
     if has_fisica:
         # Usar sedes configuradas por el tenant; fallback a shipping_origin si no hay
@@ -1845,8 +1922,22 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
   • Tras respuesta general o saludo: "¿En qué te puedo ayudar?"
 """
 
+    # Role/comportamiento del agente IA (cómo responde) — ortogonal a la
+    # identidad del negocio (qué es / por qué existe), que vive en
+    # tenants.mision/vision/valores y se inyecta en store_location_section.
+    role_desc = (ai_agent.get("role_description") or "").strip()
+    if not role_desc:
+        # Default sensato: si el tenant tiene misión configurada, role queda
+        # alineado a ella; sino, asistente comercial genérico.
+        role_desc = (
+            f"Asistente comercial de {tenant_name}, alineado a su misión y valores."
+            if (tenant_mision or "").strip()
+            else f"Asistente comercial cordial de {tenant_name}."
+        )
+
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
-Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
+COMPORTAMIENTO DEL AGENTE: {role_desc}
+(La identidad del negocio — misión, visión, valores — está abajo en "SOBRE LA TIENDA".)
 {tono_instruccion}
 {_HUMAN_STYLE_GUIDE}
 [ESTADO DE MÁQUINA (FSM): {display_state}]
@@ -2121,7 +2212,43 @@ async def build_and_run_orchestration(
             if contact_record.get("consent_given") else None
         )
 
-        # Gate 1: no-texto — advertir primero; escalar solo si insiste.
+        # Gate 1: no-texto.
+        # Multimodal: si es audio y feature está activo, transcribimos con Gemini
+        # y dejamos que el flow normal procese el texto. Si falla, continuamos
+        # al gate humanizado de advertencia (comportamiento legacy).
+        if content_type == "audio":
+            media_row = (
+                supabase.table("messages")
+                .select("media_id, media_mime")
+                .eq("id", message_id)
+                .eq("tenant_id", tenant_id)
+                .limit(1)
+                .execute()
+            )
+            mrow = (media_row.data or [{}])[0]
+            transcription = await _transcribe_audio_or_none(
+                tenant_id=tenant_id,
+                supabase=supabase,
+                media_id=mrow.get("media_id"),
+                media_mime=mrow.get("media_mime"),
+            )
+            if transcription:
+                # Persistir la transcripción en el mismo registro para trazabilidad
+                # (content vacío "[Audio recibido]" → content="[Audio] {transcripcion}")
+                try:
+                    (
+                        supabase.table("messages")
+                        .update({"content": f"[Audio] {transcription}"})
+                        .eq("id", message_id)
+                        .eq("tenant_id", tenant_id)
+                        .execute()
+                    )
+                except Exception:
+                    pass
+                # Continuar el flow normal con la transcripción como content y type=text
+                content = transcription
+                content_type = "text"
+
         if content_type != "text":
             if _had_non_text_warning(history):
                 logger.info(

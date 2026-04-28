@@ -3,10 +3,9 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+# Solo el sender del orchestrator es canónico (rev. 67 — el legacy fue eliminado).
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
 
-from integrations import whatsapp_sender as api_sender
 import whatsapp_sender as orch_sender
 
 
@@ -34,29 +33,6 @@ class _FakeAsyncClient:
 
 
 class WhatsAppCredentialTests(unittest.IsolatedAsyncioTestCase):
-    async def test_api_sender_returns_none_without_connected_tenant_credentials(self):
-        with patch.object(api_sender, "_get_tenant_wa_credentials", return_value=("", "")):
-            result = await api_sender.send_whatsapp_text(
-                to_phone="+573001112233",
-                text="hola",
-                tenant_id="tenant-1",
-                supabase=object(),
-            )
-        self.assertIsNone(result)
-
-    async def test_api_sender_uses_tenant_credentials(self):
-        with (
-            patch.object(api_sender, "_get_tenant_wa_credentials", return_value=("phone-id", "access-token")),
-            patch.object(api_sender.httpx, "AsyncClient", _FakeAsyncClient),
-        ):
-            result = await api_sender.send_whatsapp_text(
-                to_phone="+573001112233",
-                text="hola",
-                tenant_id="tenant-1",
-                supabase=object(),
-            )
-        self.assertEqual(result, "wamid-1")
-
     async def test_orchestrator_sender_returns_false_when_disconnected(self):
         with patch.object(orch_sender, "_get_tenant_wa_credentials", return_value=("", "")):
             ok = await orch_sender.send_whatsapp_message(

@@ -207,10 +207,10 @@ export default async function SettingsPage() {
           {/* Filosofía del negocio — alimenta automáticamente al bot */}
           {isOwner && (
             <FormSection id="section-filosofia" icon={Sparkles} title="Filosofía del negocio"
-              description="Define la identidad de tu marca. El asistente IA usa estos datos para comunicarse con coherencia y personalidad.">
+              description="Define la IDENTIDAD de tu marca: qué hace tu negocio, por qué existe y cómo se expresa. El asistente IA inyecta estos datos automáticamente para hablar con coherencia.">
               <div className="flex items-center gap-1.5 mb-1 text-[11px] font-medium text-primary/70 bg-primary/5 border border-primary/15 rounded-lg px-3 py-2">
                 <Bot className="h-3.5 w-3.5 shrink-0" />
-                El asistente IA usa estos datos automáticamente en cada conversación
+                Identidad del negocio (qué/por qué). El COMPORTAMIENTO del bot (cómo responde, ejemplos) se configura en IA y Conocimiento → Agentes IA.
               </div>
               <form action={saveFilosofia} className="space-y-4">
                 {/* Tono de comunicación */}
