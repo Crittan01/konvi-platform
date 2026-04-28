@@ -311,9 +311,14 @@ class OrchestratorWorker:
                 meta_message_id = None
 
             if meta_message_id:
-                self._mark_outbound_sent(tenant_id, message_id, str(meta_message_id))
+                # Meta ya entregó. ACK pgmq sí o sí (NO podemos reenviar y duplicar al cliente).
+                # Si DB falla, _mark_outbound_sent registra ack_pending para reconciliar después.
+                ack_ok = self._mark_outbound_sent(tenant_id, message_id, str(meta_message_id))
                 self._ack_whatsapp_outbound_message(msg_id)
-                self._metrics["wa_outbound_sent"] += 1
+                if ack_ok:
+                    self._metrics["wa_outbound_sent"] += 1
+                else:
+                    self._metrics["wa_outbound_ack_pending"] = self._metrics.get("wa_outbound_ack_pending", 0) + 1
                 continue
 
             if read_ct >= max(1, WHATSAPP_OUTBOUND_MAX_ATTEMPTS):
@@ -530,22 +535,66 @@ class OrchestratorWorker:
         except Exception as exc:
             logger.error("No se pudo ACK outbound msg_id=%s: %s", msg_id, exc)
 
-    def _mark_outbound_sent(self, tenant_id: str, message_id: str, meta_message_id: str) -> None:
-        (
-            self.supabase.table("messages")
-            .update(
-                {
-                    "meta_message_id": meta_message_id,
-                    "processing_status": "processed",
-                    "processed": True,
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
-                    "last_error": None,
-                }
-            )
-            .eq("id", message_id)
-            .eq("tenant_id", tenant_id)
-            .execute()
+    def _mark_outbound_sent(self, tenant_id: str, message_id: str, meta_message_id: str) -> bool:
+        """Marca outbound como processed con retry transaccional.
+
+        Razón B2: Meta ya recibió el mensaje (tenemos meta_message_id). Si el
+        UPDATE en DB falla, NO podemos reenviar a Meta sin duplicar al cliente.
+        Reintentamos UPDATE 3 veces con backoff. Si todos fallan, fallback a
+        marcar el mensaje como 'ack_pending' (estado de reconciliación) — el
+        worker NO reintentará el envío a Meta.
+        """
+        backoffs_ms = [100, 300, 1000]
+        for attempt, delay in enumerate(backoffs_ms, start=1):
+            try:
+                (
+                    self.supabase.table("messages")
+                    .update(
+                        {
+                            "meta_message_id": meta_message_id,
+                            "processing_status": "processed",
+                            "processed": True,
+                            "processed_at": datetime.now(timezone.utc).isoformat(),
+                            "last_error": None,
+                        }
+                    )
+                    .eq("id", message_id)
+                    .eq("tenant_id", tenant_id)
+                    .execute()
+                )
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "outbound.ack_db_retry attempt=%s/%s message_id=%s err=%s",
+                    attempt, len(backoffs_ms), message_id, exc,
+                )
+                if attempt < len(backoffs_ms):
+                    time.sleep(delay / 1000.0)
+        # Los 3 retries fallaron: dejar el mensaje en ack_pending para reconciliar manualmente.
+        logger.error(
+            "outbound.ack_pending tenant=%s message_id=%s meta_message_id=%s — DB UPDATE falló 3 veces",
+            tenant_id, message_id, meta_message_id,
         )
+        try:
+            (
+                self.supabase.table("messages")
+                .update(
+                    {
+                        "meta_message_id": meta_message_id,
+                        "processing_status": "ack_pending",
+                        "last_error": "ack_pending: meta entregó, db update falló",
+                    }
+                )
+                .eq("id", message_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+        except Exception as exc:
+            logger.critical(
+                "outbound.ack_pending_also_failed message_id=%s err=%s — requiere reconciliación manual",
+                message_id, exc,
+            )
+        return False
 
     def _mark_outbound_failed(self, tenant_id: str, message_id: str, reason: str) -> None:
         if not tenant_id or not message_id:
