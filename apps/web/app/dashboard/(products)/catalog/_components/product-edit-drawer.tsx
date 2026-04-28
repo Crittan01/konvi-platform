@@ -283,17 +283,18 @@ export function ProductEditDrawer({
           <Section icon={ArrowUpDown} title="Inventario — Registrar movimiento" defaultOpen={false}>
             <p className="text-xs text-muted-foreground">Usa <strong>+</strong> para entradas (compras, devoluciones) y <strong>−</strong> para salidas (mermas, errores). Cada movimiento queda registrado.</p>
             <div className="rounded-lg border border-border/60 divide-y divide-border/40 overflow-hidden">
-              <div className="grid grid-cols-[1fr_52px_1fr_64px] gap-2 px-3 py-1.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase">
-                <span>Variante</span><span className="text-right">Actual</span><span>Motivo (obligatorio)</span><span className="text-center">+/−</span>
+              <div className="grid grid-cols-[1fr_52px_1fr_56px_44px] gap-2 px-3 py-1.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase">
+                <span>Variante</span><span className="text-right">Actual</span><span>Motivo (obligatorio)</span><span className="text-center">+/−</span><span />
               </div>
               {vars.map(v => (
-                <form key={v.id} action={adjustStockAction} className="grid grid-cols-[1fr_52px_1fr_64px] gap-2 items-center px-3 py-2">
+                <form key={v.id} action={adjustStockAction} className="grid grid-cols-[1fr_52px_1fr_56px_44px] gap-2 items-center px-3 py-2">
                   <input type="hidden" name="variation_id" value={v.id} />
                   <input type="hidden" name="product_id" value={product.id} />
                   <span className="text-xs font-medium truncate">{fmtAttrs(v.attributes)}</span>
                   <span className={`text-xs font-mono text-right tabular-nums ${v.stock_quantity === 0 ? 'text-destructive' : v.stock_quantity <= threshold ? 'text-amber-500' : 'text-muted-foreground'}`}>{v.stock_quantity} u.</span>
                   <Input name="reason" placeholder="Ej: Compra proveedor..." required className="h-7 text-xs" />
                   <Input name="delta" type="number" placeholder="±0" required className="h-7 text-xs font-mono text-center" />
+                  <SubmitButton size="sm" pendingText="..." savedText="✓" className="h-7 w-10 p-0 text-xs">OK</SubmitButton>
                 </form>
               ))}
             </div>

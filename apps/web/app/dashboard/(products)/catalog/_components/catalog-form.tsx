@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, Loader2, Zap, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Loader2, Zap, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/utils/supabase/client'
@@ -28,6 +28,183 @@ function attrsToObj(attrs: Attr[]): Record<string, string> {
   const obj: Record<string, string> = {}
   for (const a of attrs) if (a.key.trim() && a.value.trim()) obj[a.key.trim()] = a.value.trim()
   return obj
+}
+
+// ─── Generador de combinaciones (trabaja con estado local, sin product_id) ────
+
+function cartesian(defs: { name: string; values: string[] }[]): Record<string, string>[] {
+  return defs.reduce<Record<string, string>[]>((acc, def) => {
+    if (!def.values.length) return acc
+    if (!acc.length) return def.values.map(v => ({ [def.name]: v }))
+    return acc.flatMap(combo => def.values.map(v => ({ ...combo, [def.name]: v })))
+  }, [])
+}
+
+function normalize(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
+}
+
+function suggestPrefix(title: string): string {
+  const stop = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'o', 'u', 'con', 'en', 'a'])
+  const words = title.trim().split(/\s+/).filter(w => !stop.has(w.toLowerCase()))
+  return words.slice(0, 3).map(w => normalize(w).slice(0, 3)).join('-')
+}
+
+function InlineMatrixBuilder({ onGenerate, onClose, productTitle }: {
+  onGenerate: (variants: VariantDraft[]) => void
+  onClose: () => void
+  productTitle: string
+}) {
+  const [defs, setDefs] = useState([{ name: '', values: [''] }])
+  const [skuPrefix, setSkuPrefix] = useState(() => suggestPrefix(productTitle))
+  const [prefixEdited, setPrefixEdited] = useState(false)
+  const [bulkPrice, setBulkPrice] = useState('')
+  const [bulkStock, setBulkStock] = useState('0')
+  const [preview, setPreview] = useState<Record<string, string>[] | null>(null)
+
+  const addDef = () => setDefs(d => [...d, { name: '', values: [''] }])
+  const updateName = (i: number, name: string) => setDefs(d => d.map((def, idx) => idx === i ? { ...def, name } : def))
+  const addValue = (i: number) => setDefs(d => d.map((def, idx) => idx === i ? { ...def, values: [...def.values, ''] } : def))
+  const updateValue = (di: number, vi: number, val: string) =>
+    setDefs(d => d.map((def, idx) => idx === di ? { ...def, values: def.values.map((v, j) => j === vi ? val : v) } : def))
+  const removeValue = (di: number, vi: number) =>
+    setDefs(d => d.map((def, idx) => idx === di ? { ...def, values: def.values.filter((_, j) => j !== vi) } : def))
+
+  const handleGenerate = () => {
+    const valid = defs.map(d => ({ name: d.name.trim(), values: d.values.map(v => v.trim()).filter(Boolean) })).filter(d => d.name && d.values.length)
+    const combos = cartesian(valid)
+    if (!combos.length) return
+    setPreview(combos)
+  }
+
+  const handleConfirm = () => {
+    if (!preview) return
+    const price = parseFloat(bulkPrice) || 0
+    const stock = parseInt(bulkStock) || 0
+    const generated: VariantDraft[] = preview.map(attrs => {
+      const suffix = Object.values(attrs).map(v => normalize(v).slice(0, 6)).join('-')
+      const rawSku = skuPrefix ? `${skuPrefix}-${suffix}` : suffix
+      return {
+        ...DEFAULT_VARIANT,
+        attrs: Object.entries(attrs).map(([key, value]) => ({ key, value })),
+        sku: rawSku.slice(0, 50),
+        price, stock,
+      }
+    })
+    onGenerate(generated)
+  }
+
+  return (
+    <div className="rounded-xl border border-border/40 bg-muted/10 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b border-border/40">
+        <p className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Generador de variantes</p>
+        <button type="button" onClick={onClose}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
+      </div>
+      <div className="p-4 space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Define los atributos y sus opciones. El sistema crea todas las combinaciones automáticamente.
+        </p>
+
+        {/* Atributos */}
+        {defs.map((def, di) => (
+          <div key={di} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Input value={def.name} onChange={e => updateName(di, e.target.value)}
+                placeholder="Atributo (Ej: Volumen, Color, Talla)" className="h-8 text-xs font-semibold" />
+            </div>
+            <div className="flex flex-wrap gap-1.5 pl-2">
+              {def.values.map((val, vi) => (
+                <div key={vi} className="flex items-center gap-1">
+                  <Input value={val} onChange={e => updateValue(di, vi, e.target.value)}
+                    placeholder={`Opción ${vi + 1}`} className="h-7 text-xs w-24" />
+                  {def.values.length > 1 && (
+                    <button type="button" onClick={() => removeValue(di, vi)}
+                      className="text-muted-foreground hover:text-destructive"><X className="h-3 w-3" /></button>
+                  )}
+                </div>
+              ))}
+              <button type="button" onClick={() => addValue(di)}
+                className="h-7 px-2 text-[11px] text-primary border border-primary/30 rounded-md hover:bg-primary/10">
+                + opción
+              </button>
+            </div>
+          </div>
+        ))}
+
+        <button type="button" onClick={addDef}
+          className="text-[11px] text-primary hover:underline flex items-center gap-1">
+          <Plus className="h-3 w-3" /> Otro atributo
+        </button>
+
+        {/* Prefijo SKU + Precio + Stock */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/30">
+          <div className="sm:col-span-2">
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">
+              Prefijo SKU
+              <span className="ml-1 normal-case font-normal text-muted-foreground/70">— se añade antes de cada variante</span>
+            </label>
+            <div className="flex items-center gap-1.5 mt-1">
+              <Input value={skuPrefix}
+                onChange={e => { setSkuPrefix(normalize(e.target.value).slice(0, 20)); setPrefixEdited(true) }}
+                className="h-8 text-xs font-mono" placeholder="Ej: ACE-LAV" maxLength={20} />
+              <span className="text-[10px] text-muted-foreground shrink-0">-[variante]</span>
+              {productTitle && (
+                <button type="button"
+                  onClick={() => { setSkuPrefix(suggestPrefix(productTitle)); setPrefixEdited(false) }}
+                  className="text-[10px] text-primary/70 hover:text-primary shrink-0 underline underline-offset-2">
+                  ↺ del título
+                </button>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">Precio para todas</label>
+            <Input type="number" step="50" min="50" value={bulkPrice}
+              onChange={e => setBulkPrice(e.target.value)} className="h-8 text-xs font-mono mt-1" placeholder="0" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">Stock para todas</label>
+            <Input type="number" min="0" value={bulkStock}
+              onChange={e => setBulkStock(e.target.value)} className="h-8 text-xs font-mono mt-1" />
+          </div>
+        </div>
+
+        {!preview ? (
+          <button type="button" onClick={handleGenerate}
+            className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-medium rounded-lg bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-colors">
+            <Zap className="h-3.5 w-3.5" /> Vista previa de combinaciones
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground">{preview.length} variantes que se crearán:</p>
+            <div className="rounded-lg border border-border/40 divide-y divide-border/30 max-h-40 overflow-y-auto text-xs">
+              <div className="grid grid-cols-2 px-3 py-1.5 bg-muted/30 font-semibold text-muted-foreground uppercase text-[10px]">
+                <span>Variante</span><span>SKU generado</span>
+              </div>
+              {preview.map((combo, i) => {
+                const suffix = Object.values(combo).map(v => normalize(v).slice(0, 6)).join('-')
+                const sku = (skuPrefix ? `${skuPrefix}-${suffix}` : suffix).slice(0, 50)
+                return (
+                  <div key={i} className="grid grid-cols-2 px-3 py-1.5 text-muted-foreground">
+                    <span>{Object.entries(combo).map(([k, v]) => `${k}: ${v}`).join(' · ')}</span>
+                    <span className="font-mono text-foreground">{sku}</span>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={handleConfirm}
+                className="inline-flex items-center gap-1.5 h-8 px-4 text-xs font-medium rounded-lg bg-foreground text-background hover:bg-foreground/80 transition-colors">
+                Agregar {preview.length} variantes
+              </button>
+              <button type="button" onClick={() => setPreview(null)}
+                className="text-xs text-muted-foreground hover:text-foreground px-3">Volver</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 // ─── Variante individual ──────────────────────────────────────────────────────
@@ -260,18 +437,14 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
         </div>
 
         {showMatrix && (
-          <div className="p-3 bg-muted/20 rounded-xl border border-border/40 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase">Generador de variantes</p>
-              <button type="button" onClick={() => setShowMatrix(false)}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Define los atributos con sus opciones y el sistema crea todas las combinaciones. Ej: Color [Rojo, Azul] × Talla [S, M, L] = 6 variantes.
-            </p>
-            <p className="text-[11px] text-amber-500/80 bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2">
-              Para usar el generador, primero guarda el producto y luego abre el drawer de edición → Variantes.
-            </p>
-          </div>
+          <InlineMatrixBuilder
+            productTitle={title}
+            onGenerate={generated => {
+              setVariants(generated)
+              setShowMatrix(false)
+            }}
+            onClose={() => setShowMatrix(false)}
+          />
         )}
 
         <div className="space-y-3">
