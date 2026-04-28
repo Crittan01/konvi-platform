@@ -27,6 +27,21 @@ def _extract_interactive_payload(msg: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in result.items() if v is not None}
 
 
+def _extract_media_metadata(msg: Dict[str, Any], msg_type: str) -> Dict[str, Optional[str]]:
+    """Extrae media_id y mime_type de mensajes media de Meta.
+
+    Estos campos son necesarios para que el orquestador pueda descargar el
+    media y enviarlo a Gemini multimodal (audio).
+    """
+    if msg_type not in {"audio", "image", "video", "document", "sticker"}:
+        return {"media_id": None, "media_mime": None}
+    media_obj = msg.get(msg_type, {}) or {}
+    return {
+        "media_id": media_obj.get("id"),
+        "media_mime": media_obj.get("mime_type"),
+    }
+
+
 def _extract_message_content(msg: Dict[str, Any], msg_type: str) -> str:
     """Retorna contenido legible para Inbox, incluso en mensajes no-texto."""
     if msg_type == "text":
@@ -94,6 +109,7 @@ def parse_webhook_payloads(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
                     message_id = msg.get("id")
                     msg_type = msg.get("type", "text")
                     content = _extract_message_content(msg, msg_type)
+                    media_meta = _extract_media_metadata(msg, msg_type)
                     msg_context = msg.get("context", {}) or {}
                     parsed_payload = {
                         "timestamp": msg.get("timestamp"),
@@ -114,6 +130,8 @@ def parse_webhook_payloads(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
                             "meta_message_id": message_id,
                             "content_type": msg_type,
                             "content": content,
+                            "media_id": media_meta["media_id"],
+                            "media_mime": media_meta["media_mime"],
                             "payload": parsed_payload,
                         }
                     )
