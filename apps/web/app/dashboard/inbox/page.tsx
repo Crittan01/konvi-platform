@@ -191,7 +191,8 @@ export default function InboxPage() {
   const [contextPanelOpen, setContextPanelOpen] = useState(true)
   const [convContext, setConvContext] = useState<ConvContext | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
-  const [productSearch, setProductSearch] = useState('')
+  const [productSearchForm, setProductSearchForm]       = useState('')  // búsqueda en mini-form de pedido
+  const [productSearchCatalog, setProductSearchCatalog] = useState('')  // búsqueda en catálogo informativo
   const [showAllOrders, setShowAllOrders] = useState(false)  // B2: paginación pedidos
 
   // --- Mini-form crear pedido ---
@@ -254,7 +255,19 @@ export default function InboxPage() {
     }
 
     setConversationsLoadError(null)
-    const rows = (data as Conversation[] | null) ?? []
+    type RawRow = Omit<Conversation, 'last_message'> & {
+      messages?: Array<{ content: string; direction: string; created_at: string }>
+    }
+    const rows = ((data ?? []) as RawRow[]).map(r => {
+      const msgs = r.messages
+      return {
+        ...r,
+        messages: undefined,
+        last_message: msgs && msgs.length > 0
+          ? msgs.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+          : null,
+      } as Conversation
+    })
     setConversations(rows)
     setLoading(false)
 
@@ -432,7 +445,11 @@ export default function InboxPage() {
         try {
           return await fetch(`/api/conversations/${selectedId}/status`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+              'Idempotency-Key': `status:${selectedId}:${status}:${Date.now()}`,
+            },
             body: JSON.stringify({ status }),
             signal: ctrl.signal,
           })
@@ -583,11 +600,16 @@ export default function InboxPage() {
     }
   }
 
-  // ── Productos filtrados en contextPanel ────────────────────────────────────
+  // ── Productos filtrados — dos listas independientes por búsqueda separada ──
+  const filteredProductsForm = (convContext?.products ?? []).filter(p =>
+    productSearchForm === '' ||
+    p.title.toLowerCase().includes(productSearchForm.toLowerCase()) ||
+    (p.product_variations ?? []).some(v => v.sku?.toLowerCase().includes(productSearchForm.toLowerCase()))
+  )
   const filteredProducts = (convContext?.products ?? []).filter(p =>
-    productSearch === '' ||
-    p.title.toLowerCase().includes(productSearch.toLowerCase()) ||
-    (p.product_variations ?? []).some(v => v.sku?.toLowerCase().includes(productSearch.toLowerCase()))
+    productSearchCatalog === '' ||
+    p.title.toLowerCase().includes(productSearchCatalog.toLowerCase()) ||
+    (p.product_variations ?? []).some(v => v.sku?.toLowerCase().includes(productSearchCatalog.toLowerCase()))
   )
 
   // ── WA desconectado ────────────────────────────────────────────────────────
@@ -835,12 +857,25 @@ export default function InboxPage() {
                         : 'bg-primary text-primary-foreground rounded-tr-sm border-transparent'
                     }`}>
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                      <p className={`text-[11px] mt-1 flex items-center gap-1 ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
+                      <p className={`text-[11px] mt-1 flex items-center gap-1.5 flex-wrap ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
                         {timeAgo(msg.created_at)}
                         {!isInbound && (
                           msg.processed
                             ? <CheckCheck className="h-3 w-3" />
                             : <Check className="h-3 w-3" />
+                        )}
+                        {/* Estado de procesamiento — visible para asesor, ayuda a diagnosticar */}
+                        {!isInbound && msg.processing_status === 'failed' && (
+                          <span className="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded-full"
+                            title={msg.skip_reason ?? 'Error al procesar'}>
+                            ✕ Error
+                          </span>
+                        )}
+                        {!isInbound && msg.processing_status === 'skipped' && (
+                          <span className="text-[10px] bg-muted/40 text-muted-foreground/80 px-1.5 py-0.5 rounded-full"
+                            title={msg.skip_reason ?? 'Omitido por el bot'}>
+                            — Omitido
+                          </span>
                         )}
                       </p>
                     </div>
@@ -1040,13 +1075,13 @@ export default function InboxPage() {
                     <input
                       type="text"
                       placeholder="Buscar producto..."
-                      value={productSearch}
-                      onChange={e => setProductSearch(e.target.value)}
+                      value={productSearchForm}
+                      onChange={e => setProductSearchForm(e.target.value)}
                       className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                   <div className="max-h-40 overflow-y-auto space-y-1">
-                    {filteredProducts.map(product =>
+                    {filteredProductsForm.map(product =>
                       (product.product_variations ?? []).map(v => {
                         const label = variationLabel(v)
                         const sel = selectedVariations.find(x => x.variationId === v.id)
@@ -1178,12 +1213,12 @@ export default function InboxPage() {
                   <input
                     type="text"
                     placeholder="Buscar producto o SKU..."
-                    value={productSearch}
-                    onChange={e => setProductSearch(e.target.value)}
+                    value={productSearchCatalog}
+                    onChange={e => setProductSearchCatalog(e.target.value)}
                     className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   />
-                  {productSearch && (
-                    <button onClick={() => setProductSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  {productSearchCatalog && (
+                    <button onClick={() => setProductSearchCatalog('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">
                       <X className="h-3 w-3 text-muted-foreground" />
                     </button>
                   )}
@@ -1196,7 +1231,7 @@ export default function InboxPage() {
                 </div>
               ) : filteredProducts.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  {productSearch ? 'Sin coincidencias' : 'No hay productos activos'}
+                  {productSearchCatalog ? 'Sin coincidencias' : 'No hay productos activos'}
                 </p>
               ) : (
                 <div className="space-y-2">
