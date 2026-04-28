@@ -49,7 +49,7 @@ CONSENT_QUESTION_TEMPLATE = (
 )
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
     "¡Perfecto! Antes de enviarte el link, ¿deseas crear tu pedido ahora?\n\n"
-    "Con Wompi puedes pagar con:\n"
+    "Puedes pagar con:\n"
     "• Tarjetas\n"
     "• Billeteras digitales\n"
     "• Transferencias\n"
@@ -242,47 +242,6 @@ QUERY_STOPWORDS = {
     # Etiquetas de consulta: no deben forzar mismatch cuando el SKU sí coincide.
     "sku", "referencia", "referencias", "ref", "codigo",
 }
-GREETING_ALLOWED_TOKENS = {
-    "hola",
-    "holi",
-    "buenas",
-    "buenos",
-    "buen",
-    "dias",
-    "dia",
-    "tardes",
-    "noches",
-    "hello",
-    "hey",
-    "alo",
-    "saludos",
-    "que",
-    "tal",
-    "por",
-    "favor",
-    "bot",
-}
-ACK_ALLOWED_TOKENS = {
-    "gracias",
-    "muchas",
-    "ok",
-    "oki",
-    "okey",
-    "vale",
-    "dale",
-    "listo",
-    "perfecto",
-    "genial",
-    "entendido",
-    "bien",
-    "super",
-    "excelente",
-    "de",
-    "nada",
-    "por",
-    "favor",
-}
-
 def _get_genai_client() -> genai.Client:
     """Singleton lazy del cliente Gemini (nuevo SDK google-genai)."""
     global _genai_client
@@ -626,54 +585,10 @@ async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
     }
 
 
-def _normalize_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text or "")
-    normalized = normalized.encode("ascii", "ignore").decode("ascii")
-    normalized = normalized.lower()
-    return " ".join(normalized.split())
-
-
-def _tokenize_text(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", _normalize_text(text))
-
-
-def _detect_deterministic_smalltalk_intent(query_text: str) -> Optional[str]:
-    tokens = _tokenize_text(query_text)
-    if not tokens:
-        return None
-    token_set = set(tokens)
-
-    if len(tokens) <= 6 and token_set.issubset(GREETING_ALLOWED_TOKENS):
-        return "greeting"
-    if len(tokens) <= 6 and token_set.issubset(ACK_ALLOWED_TOKENS):
-        return "acknowledgement"
-    return None
+from text_utils import normalize_text as _normalize_text, tokenize_text as _tokenize_text  # noqa: E402
 
 
 _NON_TEXT_WARNING_MARKER = "solo puedo atender mensajes de texto"
-
-_GREETING_VARIATIONS = [
-    "¡Hola! ¿En qué te ayudo hoy?",
-    "¡Buenas! ¿En qué puedo ayudarte?",
-    "¡Hola! ¿Qué necesitas hoy?",
-    "¡Hola! ¿Cómo puedo ayudarte?",
-]
-_GREETING_WITH_NAME_VARIATIONS = [
-    "¡Hola, {name}! ¿En qué te ayudo hoy?",
-    "¡Buenas, {name}! ¿En qué puedo ayudarte?",
-    "¡Hola de nuevo, {name}! ¿En qué estamos?",
-    "¡Qué gusto atenderte, {name}! ¿Cómo puedo ayudarte?",
-]
-_ACK_VARIATIONS = [
-    "Con gusto. Si quieres, te ayudo con productos, stock o costo de envío.",
-    "Claro. Estoy aquí para lo que necesites.",
-    "¡De nada! Cualquier consulta con gusto.",
-]
-_ACK_WITH_NAME_VARIATIONS = [
-    "Con gusto, {name}. Si quieres, te ayudo con productos, stock o costo de envío.",
-    "Claro, {name}. Estoy aquí para lo que necesites.",
-    "¡De nada, {name}! Cualquier consulta con gusto.",
-]
 
 
 def _had_non_text_warning(history: list[dict]) -> bool:
@@ -684,29 +599,6 @@ def _had_non_text_warning(history: list[dict]) -> bool:
         if _NON_TEXT_WARNING_MARKER in str(msg.get("content") or "").lower():
             return True
     return False
-
-
-def _is_conversation_start(history: list[dict]) -> bool:
-    """Retorna True si la conversación acaba de comenzar (sin mensajes previos o muy pocos)."""
-    text_outbounds = [
-        m for m in (history or [])
-        if str(m.get("direction") or "").lower() == "outbound"
-    ]
-    return len(text_outbounds) == 0
-
-
-def _deterministic_smalltalk_response(
-    intent: str,
-    first_name: Optional[str] = None,
-    seed: int = 0,
-) -> str:
-    if intent == "acknowledgement":
-        if first_name:
-            return _ACK_WITH_NAME_VARIATIONS[seed % len(_ACK_WITH_NAME_VARIATIONS)].format(name=first_name)
-        return _ACK_VARIATIONS[seed % len(_ACK_VARIATIONS)]
-    if first_name:
-        return _GREETING_WITH_NAME_VARIATIONS[seed % len(_GREETING_WITH_NAME_VARIATIONS)].format(name=first_name)
-    return _GREETING_VARIATIONS[seed % len(_GREETING_VARIATIONS)]
 
 
 def _is_variant_query(query_text: str) -> bool:
@@ -842,11 +734,6 @@ _CORRECTION_PROMPT: dict[str, str] = {
     "name":    "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
     "address": "Entendido 👍 Dame tu dirección correcta, por favor.",
 }
-
-
-def _has_product_snapshot(history: list[dict]) -> bool:
-    """Retorna True si ya existe un context_snapshot en el historial."""
-    return any(m.get("content_type") == "context_snapshot" for m in (history or []))
 
 
 def _save_product_snapshot(
@@ -1400,19 +1287,192 @@ def _extract_quantity_from_text(text: str) -> int:
     return 1
 
 
-def _format_cop(cents: int) -> str:
-    """Formatea centavos COP a string legible: 1350000 → '$13.500 COP'"""
-    pesos = cents // 100
-    return f"${pesos:,.0f} COP".replace(",", ".")
+from text_utils import format_cents_cop as _format_cop  # noqa: E402
 
 
 _TONO_INSTRUCCIONES: dict[str, str] = {
-    "formal":      "TONO: Formal y respetuoso. Tutear solo si el cliente lo hace primero.",
-    "profesional": "TONO: Profesional y preciso. Sin coloquialismos.",
-    "amigable":    "TONO: Amigable y cercano. Tutear al cliente.",
-    "cercano":     "TONO: Muy cercano, casi como un amigo. Tutear siempre.",
-    "juvenil":     "TONO: Joven y dinámico, puedes usar emojis con moderación. Tutear siempre.",
+    "formal": (
+        "TONO: Formal y respetuoso. Trate de usted al cliente; tutee solo si el cliente lo hace primero.\n"
+        "Saluda así: \"Buenas tardes, ¿en qué puedo ayudarle?\". Confirma así: \"Perfecto, le confirmo enseguida.\".\n"
+        "Cierra así: \"Quedo atento.\". Evita coloquialismos, jergas y emojis.\n"
+        "Ejemplo natural: \"Le confirmo que el producto está disponible. ¿Para qué ciudad sería el envío?\""
+    ),
+    "profesional": (
+        "TONO: Profesional y preciso. Tono cordial pero claro, sin coloquialismos.\n"
+        "Saluda así: \"Hola, ¿en qué puedo ayudarte?\". Confirma así: \"Perfecto, lo reviso.\".\n"
+        "Usa frases breves. Evita muletillas y exclamaciones excesivas.\n"
+        "Ejemplo natural: \"Tenemos disponibilidad. Confírmame ciudad y te paso la cotización.\""
+    ),
+    "amigable": (
+        "TONO: Amigable y cercano. Tutea al cliente desde el inicio.\n"
+        "Saluda así: \"¡Hola! ¿En qué te puedo ayudar?\". Confirma así: \"Listo, eso lo manejamos.\".\n"
+        "Usa contracciones naturales (\"está\", \"vamos\", \"aquí\"). Un emoji puntual está bien (👋 😊).\n"
+        "Ejemplo natural: \"¡Sí! Lo tenemos disponible. Cuéntame para qué ciudad y te cotizo el envío.\""
+    ),
+    "cercano": (
+        "TONO: Muy cercano, casi como un amigo. Tutea siempre y conversa con calidez.\n"
+        "Saluda así: \"¡Hola! ¿Cómo estás? ¿En qué te ayudo?\". Confirma así: \"Listo, ya te ayudo con eso.\".\n"
+        "Permite expresiones colombianas naturales (\"vale\", \"con gusto\", \"de una\"). 1-2 emojis está bien.\n"
+        "Ejemplo natural: \"¡Claro que sí! Eso lo tenemos. ¿Para dónde te lo enviaríamos?\""
+    ),
+    "juvenil": (
+        "TONO: Joven, dinámico y energético. Tutea siempre, usa frases cortas, emojis con moderación.\n"
+        "Saluda así: \"¡Hey! 👋 ¿Qué necesitas?\". Confirma así: \"¡Listo! Eso lo tengo.\".\n"
+        "Es válido un emoji por mensaje (no más de 2). Evita textitos infantilizados o sobreuso de signos.\n"
+        "Ejemplo natural: \"¡Sí lo tenemos! 🙌 ¿Para qué ciudad sería?\""
+    ),
 }
+
+
+# Guía de estilo humano que aplica a TODOS los tonos. Inyectado al system prompt.
+# Razón: evitar que el LLM caiga en fórmulas robóticas o repetitivas, asegurar
+# variación natural entre mensajes, y mantener registro adaptado al cliente.
+_HUMAN_STYLE_GUIDE = """
+GUÍA DE ESTILO HUMANO (aplica siempre, encima del tono):
+- Nunca uses fórmulas robóticas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida".
+- No repitas la misma estructura sintáctica en mensajes consecutivos: varía inicios, transiciones y cierres.
+- Adáptate al registro del cliente: si escribe corto e informal, responde corto e informal; si escribe formal, mantén formalidad.
+- Confirma comprensión rotando expresiones: "Listo", "Perfecto", "Entendido", "Ya veo", "Claro" — no repitas la misma dos veces seguidas.
+- Para respuestas conversacionales cortas, usa prosa natural con `\\n\\n` entre ideas. Evita listas con bullets a menos que el cliente pida opciones explícitas.
+- Si el cliente usa emojis, puedes responder con emojis con moderación; si no los usa, modera el uso.
+- Sé empático cuando hay fricción (sin stock, pago fallido, demora): reconoce, ofrece alternativa, no pidas disculpa formularia.
+- Frases prohibidas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida y será atendida".
+"""
+
+
+# Salvaguarda determinística cuando Gemini retorna requires_human=True para
+# saludos/off_topic con response_text vacío. 5 variaciones por tono, rotativas
+# por (conversation_id + day_of_year). Si first_name está disponible, prefijar.
+_SAFETY_GREETING_BANK: dict[str, list[str]] = {
+    "formal": [
+        "Buenas, soy {agent} de {tenant}. ¿En qué puedo ayudarle?",
+        "Hola, soy {agent} de {tenant}. Cuénteme cómo puedo asistirle.",
+        "Buen día, soy {agent} de {tenant}. ¿Qué necesita hoy?",
+        "Hola, le saluda {agent} de {tenant}. ¿En qué le ayudo?",
+        "Bienvenido a {tenant}, soy {agent}. Estoy a sus órdenes.",
+    ],
+    "profesional": [
+        "Hola, soy {agent} de {tenant}. ¿En qué puedo ayudarte?",
+        "Hola, soy {agent} de {tenant}. Cuéntame qué necesitas.",
+        "Hola, soy {agent} de {tenant}. ¿Sobre qué te ayudo?",
+        "Hola, te saluda {agent} de {tenant}. ¿Qué necesitas hoy?",
+        "Hola, {agent} de {tenant} por aquí. ¿En qué te apoyo?",
+    ],
+    "amigable": [
+        "¡Hola! Soy {agent} de {tenant} 😊 ¿En qué te ayudo?",
+        "¡Hola! Soy {agent} de {tenant}. Cuéntame, ¿qué necesitas?",
+        "¡Hola! Acá {agent} de {tenant}. ¿En qué te puedo ayudar?",
+        "¡Hola! Soy {agent} de {tenant}. ¿Qué se te ofrece hoy?",
+        "¡Hey, hola! Soy {agent} de {tenant}. ¿Cómo te ayudo?",
+    ],
+    "cercano": [
+        "¡Hola! ¿Cómo estás? Soy {agent} de {tenant} 👋 Cuéntame.",
+        "¡Hola! Soy {agent} de {tenant}. ¿En qué te ayudo?",
+        "¡Hey! Acá {agent} de {tenant}. Dime, ¿qué necesitas?",
+        "¡Hola! Soy {agent} de {tenant}. ¿En qué te echo una mano?",
+        "¡Qué tal! Soy {agent} de {tenant}. Cuéntame qué buscas.",
+    ],
+    "juvenil": [
+        "¡Hey! 👋 Soy {agent} de {tenant}. ¿Qué necesitas?",
+        "¡Holaaa! Soy {agent} de {tenant} 🙌 Cuéntame.",
+        "¡Hey! Acá {agent} de {tenant}. ¿En qué te ayudo?",
+        "¡Hola! Soy {agent} de {tenant} ✨ ¿Qué buscas?",
+        "¡Qué más! Soy {agent} de {tenant}. Dime, ¿qué necesitas?",
+    ],
+}
+
+
+def _safety_greeting_response(
+    *,
+    agent_name: str,
+    tenant_name: str,
+    first_name: Optional[str],
+    tono: str,
+    conversation_id: str,
+) -> str:
+    """Retorna saludo seguro variado cuando Gemini falla en intent=greeting/off_topic.
+
+    - Rotación: hash(conversation_id + day_of_year) % 5 → mismo conv recibe la misma
+      variante en el mismo día, pero rota entre días.
+    - Si first_name (con consent) presente: prefijar "¡Hola, {first_name}! ".
+    - Tono inválido o ausente → fallback a "amigable".
+    """
+    import hashlib
+    from datetime import datetime, timezone, timedelta
+
+    bank = _SAFETY_GREETING_BANK.get(tono) or _SAFETY_GREETING_BANK["amigable"]
+    co_tz = timezone(timedelta(hours=-5))
+    day_of_year = datetime.now(co_tz).timetuple().tm_yday
+    seed_input = f"{conversation_id}|{day_of_year}".encode("utf-8")
+    idx = int(hashlib.md5(seed_input).hexdigest(), 16) % len(bank)
+    template = bank[idx]
+    base = template.format(agent=agent_name or "tu asistente", tenant=tenant_name or "la tienda")
+    if first_name:
+        # Personalización: anteponer saludo con nombre solo si la variante
+        # empieza con "¡Hola" / "Hola" / "Buenas" / "Buen día" / "Hey" / "Qué tal".
+        # En otros casos (ej. "Bienvenido a..."), inyectar nombre dentro.
+        if base.lower().startswith(("¡hola", "hola", "buenas", "buen día", "¡hey", "hey", "¡qué", "qué tal")):
+            # Mantener el saludo y agregar nombre tras la primera coma o reemplazar "Hola"
+            base = base.replace("¡Hola!", f"¡Hola, {first_name}!", 1)
+            base = base.replace("¡Hey!", f"¡Hey, {first_name}!", 1)
+            base = base.replace("¡Holaaa!", f"¡Holaaa, {first_name}!", 1)
+            base = base.replace("¡Qué más!", f"¡Qué más, {first_name}!", 1)
+            if first_name not in base:
+                # Para "Hola, ..." / "Buenas, ..." / "Buen día, ..."
+                if "," in base:
+                    head, tail = base.split(",", 1)
+                    base = f"{head}, {first_name},{tail}"
+    return base
+
+
+def _pick_variant(variants: list[str], *, seed: str) -> str:
+    """Selecciona una variante de forma estable basada en seed (hash determinístico)."""
+    import hashlib
+    if not variants:
+        return ""
+    idx = int(hashlib.md5(seed.encode("utf-8")).hexdigest(), 16) % len(variants)
+    return variants[idx]
+
+
+# Variantes humanas para mensajes determinísticos templated.
+# Razón: evitar que el cliente reciba siempre la misma string robótica.
+# Selección por seed = conversation_id + day_of_year (consistente en el día).
+_CANCEL_SUCCESS_VARIANTS = [
+    "Listo, cancelé tu pedido. 😊\n\nCuando quieras volver a cotizar, aquí estoy.",
+    "Hecho, ya cancelé el pedido.\n\nSi cambias de idea o quieres ver otra cosa, me avisas.",
+    "Perfecto, lo cancelo. 👍\n\nPuedes volver a consultar el catálogo cuando gustes.",
+]
+_CANCEL_NONE_VARIANTS = [
+    "No tienes un pedido activo para cancelar en este momento. ¿En qué más te ayudo?",
+    "No veo ningún pedido pendiente para cancelar. ¿Hay algo más en lo que te apoye?",
+    "Por aquí no aparece pedido activo. ¿Qué necesitas?",
+]
+_REACTIVATION_VARIANTS = [
+    "¡Hola de nuevo! 😊 Hace un rato que no hablábamos. ¿En qué te puedo ayudar hoy?",
+    "¡Hola! Ha pasado un tiempo desde tu última consulta. Cuéntame, ¿qué necesitas?",
+    "¡Hey! Por aquí estoy de nuevo. ¿En qué te ayudo?",
+]
+# Correcciones de datos: 2 variantes por campo (rotación por seed).
+_CORRECTION_PROMPT_VARIANTS: dict[str, list[str]] = {
+    "email": [
+        "Entendido 👍 ¿Cuál es tu correo electrónico correcto?",
+        "Listo, lo corregimos. ¿Me compartes el correo correcto?",
+    ],
+    "name": [
+        "Entendido 👍 ¿Cuál es tu nombre completo correcto?",
+        "Sin problema. ¿Me confirmas tu nombre completo?",
+    ],
+    "address": [
+        "Entendido 👍 Dame tu dirección correcta, por favor.",
+        "Listo, lo ajustamos. ¿Me compartes la dirección correcta?",
+    ],
+}
+
+
+def _today_seed(conversation_id: str) -> str:
+    from datetime import datetime, timezone, timedelta
+    co_tz = timezone(timedelta(hours=-5))
+    return f"{conversation_id}|{datetime.now(co_tz).timetuple().tm_yday}"
 
 
 def _is_outside_support_hours(support_schedule: dict) -> bool:
@@ -1776,15 +1836,19 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
 - El usuario está consultando, no cerrando compra.
 - NO pidas consentimiento ni datos personales en este modo.
 - Responde breve con datos reales de catálogo/KB.
+- Si el cliente saluda sin preguntar nada concreto: PRESÉNTATE brevemente usando el catálogo.
+  Ejemplo: "¡Hola! Puedo ayudarte con [tipo de productos que aparecen en CATÁLOGO ACTUAL], precios y envíos. ¿Qué necesitas?"
+  Si el catálogo está vacío o dice "No hay productos disponibles", omite la mención de productos.
 - OBLIGATORIO: termina SIEMPRE con UNA pregunta de siguiente paso natural (nunca cortes sin ofrecer continuidad):
   • Tras responder precio o disponibilidad: "¿Te gustaría cotizar el envío o tienes otra consulta?"
   • Tras responder características del producto: "¿Te interesa saber el costo de envío a tu ciudad?"
-  • Tras respuesta general: "¿Hay algo más en lo que te pueda ayudar?"
+  • Tras respuesta general o saludo: "¿En qué te puedo ayudar?"
 """
 
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 Misión/Personalidad: {ai_agent.get('role_description', 'Ayudar al cliente')}.
 {tono_instruccion}
+{_HUMAN_STYLE_GUIDE}
 [ESTADO DE MÁQUINA (FSM): {display_state}]
 {store_location_section}
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
@@ -2116,16 +2180,11 @@ async def build_and_run_orchestration(
         # F3B Gate: comando "cancelar" — cancela pedido pending_payment y resetea FSM implícito
         if _normalize_text_simple(content).strip() in _CANCEL_TOKENS:
             cancelled = _cancel_pending_payment_order(supabase, conversation_id, tenant_id)
+            _seed = _today_seed(conversation_id)
             if cancelled:
-                reply = (
-                    "Entendido, tu pedido ha sido cancelado. 😊\n\n"
-                    "Puedes consultar el catálogo cuando quieras y volver a cotizar."
-                )
+                reply = _pick_variant(_CANCEL_SUCCESS_VARIANTS, seed=_seed)
             else:
-                reply = (
-                    "No hay un pedido activo para cancelar en este momento. "
-                    "¿En qué más te puedo ayudar?"
-                )
+                reply = _pick_variant(_CANCEL_NONE_VARIANTS, seed=_seed)
             await _send_outbound_text(
                 supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
                 text=reply,
@@ -2143,9 +2202,8 @@ async def build_and_run_orchestration(
                 "[ORCH] Ventana de conversación expirada (>%sh) | conv=%s — reiniciando con mensaje de reactivación",
                 CONVERSATION_WINDOW_HOURS, conversation_id,
             )
-            _reactivation_msg = (
-                "¡Hola! 😊 Ha pasado un tiempo desde tu última consulta. "
-                "Estoy aquí para ayudarte de nuevo. ¿En qué te puedo asistir hoy?"
+            _reactivation_msg = _pick_variant(
+                _REACTIVATION_VARIANTS, seed=_today_seed(conversation_id)
             )
             await _send_outbound_text(
                 supabase=supabase,
@@ -2188,36 +2246,20 @@ async def build_and_run_orchestration(
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
-        # Gate 2: saludo de inicio de conversación (personalizado si hay nombre con consentimiento)
-        # Se activa cuando no hay outbounds previos y el mensaje es un saludo o el primero del cliente.
-        smalltalk_intent = _detect_deterministic_smalltalk_intent(content)
-        if _is_conversation_start(history):
-            seed = abs(hash(content)) % 4
-            greeting_text = _deterministic_smalltalk_response("greeting", first_name, seed)
-            await _send_outbound_text(
-                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                text=greeting_text,
-            )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-            return
-
-        # Smalltalk determinístico en conversación activa (saludos / agradecimientos)
-        if smalltalk_intent:
-            seed = abs(hash(content)) % 4
-            await _send_outbound_text(
-                supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                text=_deterministic_smalltalk_response(smalltalk_intent, first_name, seed),
-            )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-            return
-
         # ── 2. Obtener catálogo, RAG KB y Config. AI (paralelo; historial ya cargado) ──
+        # NOTA: ya no hay gates determinísticos pre-Gemini para saludos/agradecimientos.
+        # Todo mensaje pasa al agente configurado (con su nombre, tono, catálogo y KB)
+        # para mantener consistencia de marca desde el primer mensaje.
         catalog, kb_docs, ai_agent = await __import__('asyncio').gather(
             get_tenant_catalog(supabase, tenant_id),
             get_tenant_kb_rag(supabase, tenant_id, content),
             _get_tenant_ai_agent(supabase, tenant_id)
         )
         kb_text = format_kb_for_prompt(kb_docs)
+        logger.info(
+            "[CTX] tenant=%s | catalog=%d productos | kb_docs=%d | agent='%s'",
+            tenant_id, len(catalog), len(kb_docs), ai_agent.get("name", "?"),
+        )
 
         # ── 2.5 Detección determinística de revocación (ANTES del LLM) ─────────
         # Prioridad máxima: el titular siempre puede revocar el consentimiento.
@@ -2352,7 +2394,11 @@ async def build_and_run_orchestration(
             correction_field = _detect_correction_intent(content)
             if correction_field:
                 _clear_contact_field(supabase, contact_id, tenant_id, correction_field)
-                reply = _CORRECTION_PROMPT.get(correction_field, "Entendido. ¿Qué dato quieres corregir?")
+                _variants = _CORRECTION_PROMPT_VARIANTS.get(correction_field) or [
+                    "Sin problema. ¿Qué dato quieres corregir?",
+                    "Listo, ¿qué dato actualizo?",
+                ]
+                reply = _pick_variant(_variants, seed=_today_seed(conversation_id))
                 await _send_outbound_text(
                     supabase=supabase,
                     conversation_id=conversation_id,
@@ -2400,7 +2446,7 @@ async def build_and_run_orchestration(
             ),
         )
         raw_json = response.text
-        logger.debug(f"[GEMINI] Raw response: {raw_json}")
+        logger.info(f"[GEMINI] Raw: {raw_json}")
 
         # ── 5. Parsear output estructurado ────────────────────────────────────
         import json
@@ -2412,23 +2458,29 @@ async def build_and_run_orchestration(
             f"requires_human={parsed.requires_human}"
         )
 
-        # Salvaguarda: si LLM pide takeover en un saludo/agradecimiento simple,
-        # degradamos a respuesta determinística para evitar escalamientos espurios.
-        if parsed.requires_human:
-            smalltalk_intent = _detect_deterministic_smalltalk_intent(content)
-            if smalltalk_intent:
-                parsed.requires_human = False
-                parsed.should_respond = True
-                parsed.intent_detected = "greeting"
-                _st_seed = abs(hash(content)) % 4
-                parsed.response_text = parsed.response_text or _deterministic_smalltalk_response(
-                    smalltalk_intent, first_name, _st_seed
+        # Salvaguarda: si LLM pide takeover para saludo/off_topic, no escalar.
+        # Confiamos en la respuesta de Gemini (response_text); si vino vacía, generamos
+        # un saludo seguro variado por tono + conversation_id (5 variaciones rotativas).
+        if parsed.requires_human and parsed.intent_detected in {"greeting", "off_topic"}:
+            parsed.requires_human = False
+            parsed.should_respond = True
+            if not parsed.response_text:
+                agent_name = ai_agent.get("name", "el asistente")
+                first_name_safe = None
+                if contact_record and contact_record.get("consent_given"):
+                    raw_name = (contact_record.get("name") or "").strip()
+                    first_name_safe = raw_name.split()[0] if raw_name else None
+                parsed.response_text = _safety_greeting_response(
+                    agent_name=agent_name,
+                    tenant_name=tenant_name,
+                    first_name=first_name_safe,
+                    tono=str(tenant_tono or "amigable"),
+                    conversation_id=conversation_id,
                 )
-                logger.warning(
-                    "[ORCH] requires_human ignorado para smalltalk de bajo riesgo "
-                    "(intent=%s). Se responde automáticamente.",
-                    smalltalk_intent,
-                )
+            logger.info(
+                "[ORCH] requires_human ignorado para intent=%s en %s — respuesta automática",
+                parsed.intent_detected, display_state,
+            )
 
         # Salvaguarda de escalación espuria en modo consulta.
         if parsed.requires_human and display_state in {"CATALOG_MODE", "NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}:
@@ -2534,10 +2586,13 @@ async def build_and_run_orchestration(
                         contact_id=contact_id,
                     )
                     if ticket_number and parsed.response_text:
-                        parsed.response_text = (
-                            parsed.response_text.rstrip()
-                            + f"\n\n📋 Tu caso quedó registrado con el número *#{ticket_number}*."
-                        )
+                        _ticket_variants = [
+                            f"\n\n📋 Quedó registrado tu caso con el número *#{ticket_number}*.",
+                            f"\n\n📋 Tu reclamo ya está abierto con el ticket *#{ticket_number}*. Un asesor lo revisa.",
+                            f"\n\n📋 Listo, tu caso queda con número *#{ticket_number}* para seguimiento.",
+                        ]
+                        _ticket_suffix = _pick_variant(_ticket_variants, seed=str(ticket_number))
+                        parsed.response_text = parsed.response_text.rstrip() + _ticket_suffix
 
         # ── 8.5 Actualizar datos del contacto ─────────────────────────────────
         if contact_id and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email):

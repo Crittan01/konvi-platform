@@ -115,18 +115,7 @@ class PackageEstimateDecision:
     ambiguous_product_titles: list[str] = field(default_factory=list)
 
 
-def _normalize_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text or "")
-    normalized = normalized.encode("ascii", "ignore").decode("ascii")
-    return " ".join(normalized.lower().split())
-
-
-def _normalize_phone(phone: str) -> str:
-    """Normaliza teléfono para comparación: elimina '+' inicial y espacios.
-    Cubre WhatsApp (sin '+') vs contactos registrados con '+' y/o espacios.
-    Ej: '+57 3125835649' -> '573125835649'
-    """
-    return re.sub(r"[\s+]", "", str(phone or "")).strip()
+from text_utils import normalize_text as _normalize_text, normalize_phone as _normalize_phone  # noqa: E402
 
 
 def _tokenize_words(text: str) -> set[str]:

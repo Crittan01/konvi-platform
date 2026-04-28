@@ -249,12 +249,19 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
         _enqueue_payment_failed_msg(supabase, conversation_id=conversation_id, tenant_id=tenant_id, order_id=order_id)
 
 
+_PAYMENT_FAILED_VARIANTS = [
+    "Hmm, tu pago del pedido *#{short_id}* no se completó. 😕\n\nEscríbenos *asesor* y te ayudamos a finalizar la compra.",
+    "El pago del pedido *#{short_id}* no pasó esta vez.\n\nEscribe *asesor* y te apoyamos para terminar la compra. 🙏",
+    "Tu pago del pedido *#{short_id}* quedó pendiente. \n\nEscríbenos *asesor* y vemos juntos cómo destrabarlo.",
+]
+
+
 def _enqueue_payment_failed_msg(supabase, *, conversation_id: str, tenant_id: str, order_id: str) -> None:
+    """Encola mensaje de pago fallido. 3 variantes rotativas por order_id (estable)."""
+    import hashlib
     short_id = order_id[:8].upper()
-    text = (
-        f"⚠️ Tu pago del pedido *#{short_id}* no pudo procesarse.\n\n"
-        f"Escríbenos *asesor* y te ayudamos a completar tu compra. 🙏"
-    )
+    idx = int(hashlib.md5(order_id.encode("utf-8")).hexdigest(), 16) % len(_PAYMENT_FAILED_VARIANTS)
+    text = _PAYMENT_FAILED_VARIANTS[idx].format(short_id=short_id)
     _enqueue_outbound_text(supabase, conversation_id=conversation_id, tenant_id=tenant_id, text=text)
 
 

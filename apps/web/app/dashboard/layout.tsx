@@ -16,30 +16,7 @@ export default async function DashboardLayout({
 
   const meta = (user?.app_metadata ?? {}) as { role?: string; tenant_id?: string }
   const role = meta.role ?? 'operator'
-
-  // Cargar nombre y logo del tenant
-  let tenantName: string | null = null
-  let tenantLogoUrl: string | null = null
-  if (meta.tenant_id) {
-    const { data: tenantData } = await supabase
-      .from('tenants')
-      .select('name, logo_url')
-      .eq('id', meta.tenant_id)
-      .single()
-    tenantName = tenantData?.name ?? null
-    tenantLogoUrl = tenantData?.logo_url ?? null
-  }
-
-  // Conversaciones con agente humano requerido — badge en sidebar
-  let inboxBadge = 0
-  if (meta.tenant_id) {
-    const { count } = await supabase
-      .from('conversations')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', meta.tenant_id)
-      .eq('status', 'human_takeover')
-    inboxBadge = count ?? 0
-  }
+  const tenantId = meta.tenant_id
 
   const logoutAction = async () => {
     'use server'
@@ -48,45 +25,40 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
+  // ── Ronda 2: todas las queries del tenant en paralelo ─────────────────────
+  let tenantName: string | null = null
+  let tenantLogoUrl: string | null = null
+  let inboxBadge = 0
   let meliBadge = 0
   let planCode = 'enterprise'
   const planCapabilities: Record<string, boolean> = {}
-  const integrations = {
-    whatsapp: false,
-    envia: false,
-    mercadolibre: false,
-  }
-  if (meta.tenant_id) {
-    const { data: listings } = await supabase
-      .from('marketplace_listings')
-      .select('status')
-      .eq('tenant_id', meta.tenant_id)
-      .eq('provider', 'mercadolibre')
-    meliBadge = getMarketplaceBadgeCount(listings ?? [])
+  const integrations = { whatsapp: false, envia: false, mercadolibre: false }
 
-    const { data: integrationRows } = await supabase
-      .from('tenant_integrations')
-      .select('provider, status')
-      .eq('tenant_id', meta.tenant_id)
-      .in('provider', ['whatsapp', 'envia', 'mercadolibre'])
+  if (tenantId) {
+    const [tenantRes, inboxRes, meliRes, integRes, subRes] = await Promise.all([
+      supabase.from('tenants').select('name, logo_url').eq('id', tenantId).single(),
+      supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover'),
+      supabase.from('marketplace_listings').select('status').eq('tenant_id', tenantId).eq('provider', 'mercadolibre'),
+      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'envia', 'mercadolibre']),
+      supabase.from('tenant_subscriptions').select('plan_code').eq('tenant_id', tenantId).maybeSingle(),
+    ])
 
-    for (const row of integrationRows ?? []) {
-      const provider = (row as { provider?: string }).provider
+    tenantName    = tenantRes.data?.name ?? null
+    tenantLogoUrl = tenantRes.data?.logo_url ?? null
+    inboxBadge    = inboxRes.count ?? 0
+    meliBadge     = getMarketplaceBadgeCount(meliRes.data ?? [])
+    planCode      = subRes.data?.plan_code ?? 'enterprise'
+
+    for (const row of integRes.data ?? []) {
+      const provider  = (row as { provider?: string }).provider
       const connected = (row as { status?: string }).status === 'connected'
-      if (provider === 'whatsapp') integrations.whatsapp = connected
-      if (provider === 'envia') integrations.envia = connected
+      if (provider === 'whatsapp')     integrations.whatsapp     = connected
+      if (provider === 'envia')        integrations.envia        = connected
       if (provider === 'mercadolibre') integrations.mercadolibre = connected
     }
 
+    // ── Ronda 3: capabilities depende del planCode anterior ─────────────────
     try {
-      const { data: sub } = await supabase
-        .from('tenant_subscriptions')
-        .select('plan_code')
-        .eq('tenant_id', meta.tenant_id)
-        .maybeSingle()
-
-      planCode = sub?.plan_code ?? 'enterprise'
-
       const { data: caps } = await supabase
         .from('plan_capabilities')
         .select('capability_key, enabled')
@@ -98,8 +70,7 @@ export default async function DashboardLayout({
         planCapabilities[key] = (row as { enabled?: boolean }).enabled !== false
       }
     } catch {
-      // Fail-open UX: si plan tables no están disponibles temporalmente, no bloquear navegación.
-      planCode = 'enterprise'
+      // Fail-open: si plan_capabilities no está disponible, no bloquear navegación.
     }
   }
 

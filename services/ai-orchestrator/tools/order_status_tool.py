@@ -104,10 +104,7 @@ class OrderStatusResult:
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _normalize_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text or "")
-    normalized = normalized.encode("ascii", "ignore").decode("ascii")
-    return " ".join(normalized.lower().split())
+from text_utils import normalize_text as _normalize_text  # noqa: E402
 
 
 def _tokenize(text: str) -> set[str]:
@@ -196,7 +193,16 @@ def _build_order_response(order: dict, items_count: int, tracking: Optional[dict
         if tracking.get("estimated_delivery"):
             lines.append(f"Entrega estimada: {_format_tracking_date(tracking['estimated_delivery'])}")
     elif status_raw in {"shipped", "processing"}:
-        lines.append("Aún no tenemos número de guía disponible. ¿Quieres que un asesor te ayude?")
+        # Variantes humanas para "guía no disponible". Selección estable por order_id.
+        import hashlib as _h
+        _order_id = (order.get("id") or "")[:8]
+        _tracking_unavailable = [
+            "Todavía no nos llega la guía del transportador. Apenas llegue te la paso 📦",
+            "Aún no tenemos número de guía. ¿Quieres que te conecte con un asesor para revisarlo?",
+            "El transportador aún no nos comparte la guía. Si la necesitas urgente, dime y te paso con un asesor.",
+        ]
+        _idx = int(_h.md5(_order_id.encode("utf-8")).hexdigest(), 16) % len(_tracking_unavailable) if _order_id else 0
+        lines.append(_tracking_unavailable[_idx])
 
     if status_raw == "delivered":
         lines.append("¿Recibiste todo bien? Si hay algún problema, con gusto te ayudo.")
