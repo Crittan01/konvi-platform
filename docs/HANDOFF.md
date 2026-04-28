@@ -14,7 +14,7 @@ tienen prioridad.
 - Tenant Console: ✅ live (fases 1–11.5 completas)
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
-- DB canónica: `supabase/migrations/` (62 migraciones — rev. 66)
+- DB canónica: `supabase/migrations/` (69 migraciones — rev. 68)
 - **Fase C Inbox (pagos Wompi)**: ✅ implementada y validada en sandbox (2026-04-24)
 
 ## Cierre de auditoría (2026-04-21)

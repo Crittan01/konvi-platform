@@ -1,6 +1,29 @@
-# Próximos Pasos — Estado 2026-04-28
+# Próximos Pasos — Estado 2026-04-29
 
-## Cierre sesión actual (2026-04-28, rev. 67) — INBOX CERTIFICADO
+## Cierre sesión actual (2026-04-29, rev. 68) — COHERENCIA CORE DEL BOT
+
+- ✅ Eliminada duplicación de misión en system prompt (D1).
+- ✅ Placeholders humanos en `after_hours_message` UI Settings.
+- ✅ `tenants.escalation_role` configurable + UI dropdown + bot lo usa en escalaciones.
+- ✅ KB: 6 categorías canónicas (faq, negocio, politicas, productos, envios, pagos) con CHECK constraint, migración bulk legacy → faq, guía colapsable por categoría en UI.
+- ✅ Estado del bot ampliado: 4 → 8 checks (Identidad, Tono, Sedes, Catálogo, KB, Indexación, Agente IA, Pasarela+Courier) con tooltips.
+- ✅ Contactos: `document_type` + `document_number` con CHECK Wompi-CO + index parcial; schema canónico `address` JSONB documentado; validators Python (length por tipo, normalización); endpoints API + anonimización Ley 1581 actualizadas.
+- ✅ FSM aterrizado rev. 68: orden CONSENT → EMAIL → NAME → DOCUMENT → DIRECTION → READY_FOR_SUMMARY. `extracted_document_type/number` en `OrchestratorOutput`. `_clear_contact_field('document')` limpia ambos. Categoría `document` en flujo de corrección.
+- ✅ Cart summary pre-shipping: instrucción en NEEDS_SHIPPING_CITY al LLM para resumir + ofrecer agregar más antes de cotizar.
+- ✅ Contexto cliente conocido: `_load_customer_context_block()` carga pedidos activos + reclamos abiertos al system prompt.
+- ✅ Wompi `customer_data` completo: `_build_customer_data()` arma email/full_name/phone(+57)/legal_id+type. Call sites actualizados (orders, wompi_webhook retry).
+- ✅ Envia `district`: mapeado desde `address.neighborhood` en `_coerce_origin/_coerce_destination`.
+- ✅ 41 tests nuevos · 452 total · validate.sh 13/13 OK.
+
+### Riesgos abiertos / pendientes (rev. 68)
+
+- **Frontend Contacts UI** (no bloqueante): el form `/dashboard/contacts` no muestra aún `document_type/number` ni dirección estructurada con `building_type`. El bot conversacional ya los captura por WhatsApp; la UI manual es backlog para sesión futura. Cuando se aborde, ya está el schema canónico documentado y los validators TS quedan pendientes (`apps/web/lib/validators/document.ts`, `address.ts`).
+- **F7 cart abandonment** (BLOQUEADO): requiere plantilla Meta aprobada. INTERVENCION HUMANA al priorizar.
+- **F8 multimodal imagen**: aplazado tras audio (rev. 67).
+
+---
+
+## Cierre sesión anterior (2026-04-28, rev. 67) — INBOX CERTIFICADO
 
 - ✅ WS-A Frontend Inbox: timestamp lateral fix, badge unread, banner ventana 24h, tooltips estados, Idempotency-Key end-to-end, dedupe realtime, render emojis WhatsApp.
 - ✅ WS-B Compliance Meta: ventana 24h enforced backend (422 + códigos accionables), ACK transaccional outbound (retry + ack_pending status).
