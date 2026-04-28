@@ -185,3 +185,33 @@ RL_WRITE_DEFAULT = build_rate_limit_dependency(
 RL_SEND_MESSAGE = build_rate_limit_dependency(
     RateLimitRule(bucket="conversation.send", limit=SEND_LIMIT_PER_MINUTE, window_seconds=60)
 )
+
+
+def webhook_rate_limit_check(
+    supabase: Client | None,
+    *,
+    ip: str,
+    bucket: str,
+    limit: int,
+    window_seconds: int = 60,
+) -> tuple[bool, int]:
+    """Rate-limit por IP para webhooks externos (sin tenant_id, sin auth).
+
+    Reusa la RPC distribuida cuando está disponible y degrada a in-memory si falla.
+    Devuelve (allowed, retry_after_seconds). Si el limiter está deshabilitado,
+    siempre permite. Diseñado para llamarse desde dependencias de webhook donde
+    cada milisegundo cuenta (MeLi exige respuesta ≤500ms).
+    """
+    if not RATE_LIMIT_ENABLED:
+        return True, 0
+    key = f"{bucket}:{ip}"
+    if RATE_LIMIT_DISTRIBUTED and supabase is not None:
+        try:
+            allowed, _remaining, reset_in = _distributed_hit(
+                supabase, key, limit, window_seconds
+            )
+            return allowed, reset_in
+        except Exception as exc:
+            logger.warning("[RL] webhook RPC falló (%s) — fallback in-memory", exc)
+    allowed, _remaining, reset_in = _local_limiter.hit(key, limit, window_seconds)
+    return allowed, reset_in
