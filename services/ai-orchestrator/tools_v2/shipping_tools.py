@@ -75,9 +75,18 @@ async def handle_quote_shipping(
     if not ctx.cart.items:
         return {"ok": False, "error": "empty_cart"}
 
-    city_text = str(args.get("city_text") or "").strip()
-    if not city_text:
+    city_text_raw = str(args.get("city_text") or "").strip()
+    if not city_text_raw:
         return {"ok": False, "error": "city_text_required"}
+    # Dedup: SDK Gemini ocasionalmente concatena el arg dos veces
+    # ('BogotaBogota' → 'Bogota'). Mismo bug observado en email/name/doc.
+    from tools_v2.customer_tools import _dedup_repeated_string
+    city_text = _dedup_repeated_string(city_text_raw)
+    if city_text != city_text_raw:
+        logger.info(
+            "[shipping_tools.quote] dedup city_text %r → %r",
+            city_text_raw, city_text,
+        )
 
     # 1. Resolver destino con DANE
     try:
