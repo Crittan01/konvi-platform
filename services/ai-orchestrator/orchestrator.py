@@ -1570,6 +1570,25 @@ def _resolve_display_state(
     return "CATALOG_MODE"
 
 
+def _format_phone_for_summary(phone: Optional[str]) -> str:
+    """Formatea el celular para mostrar en el resumen.
+
+    El celular se captura automáticamente del WhatsApp (no se pide por chat),
+    pero se muestra para que el cliente confirme que es el correcto antes
+    de generar el link de pago. Envía y Wompi requieren este dato.
+    """
+    if not phone:
+        return ""
+    digits = re.sub(r"\D", "", str(phone))
+    if not digits:
+        return ""
+    if digits.startswith("57") and len(digits) == 12:
+        return f"+57 {digits[2:5]} {digits[5:8]} {digits[8:]}"
+    if len(digits) == 10:
+        return f"+57 {digits[:3]} {digits[3:6]} {digits[6:]}"
+    return f"+{digits}" if not str(phone).startswith("+") else str(phone)
+
+
 def _format_address_for_summary(address: Optional[dict]) -> str:
     """Renderiza la dirección persistida en una sola línea legible para el resumen."""
     if not isinstance(address, dict):
@@ -1666,17 +1685,20 @@ def _build_order_summary_text(
     contact = contact_record if isinstance(contact_record, dict) else {}
     name = str(contact.get("name") or "").strip()
     email = str(contact.get("email") or "").strip()
+    phone = _format_phone_for_summary(contact.get("phone"))
     doc_t = str(contact.get("document_type") or "").strip().upper()
     doc_n = str(contact.get("document_number") or "").strip()
     address_line = _format_address_for_summary(contact.get("address"))
 
-    if any([name, email, doc_t and doc_n, address_line]):
+    if any([name, email, phone, doc_t and doc_n, address_line]):
         lines.append("")
         lines.append("*Datos de envío:*")
         if name:
             lines.append(f"• Nombre: {name}")
         if email:
             lines.append(f"• Correo: {email}")
+        if phone:
+            lines.append(f"• Celular: {phone}")
         if doc_t and doc_n:
             lines.append(f"• Documento: {doc_t} {doc_n}")
         if address_line:
@@ -3237,12 +3259,36 @@ async def build_and_run_orchestration(
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
-        shipping_result = await handle_shipping_quote_if_applicable(
-            supabase=supabase,
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            query_text=content,
-        )
+        # No re-cotizar envío cuando ya estamos en flujo de recolección de datos.
+        # Razón: el cliente puede enviar texto que coincida con nombres de ciudad
+        # ("Cristian Camilo *Garzón* Tamayo" → ciudad Garzón, Huila) sin querer
+        # cambiar destino. El gate es CONTEXTUAL — no un diccionario de ciudades.
+        #
+        # Señales de recolección activa:
+        #   1. consent_given=True → ya pasamos consent, en NEEDS_EMAIL/NAME/DOCUMENT/DIRECTION.
+        #   2. último outbound fue la pregunta de consent → próximo inbound es
+        #      respuesta a consent (yes/no) o datos personales, NO ciudad.
+        #
+        # Si el cliente legítimamente quiere cambiar destino debe usar correction
+        # explícita (GAP-1) o reabrir con "cambia el envío a Medellín".
+        _consent_given = bool(contact_record and contact_record.get("consent_given"))
+        _last_oc_consent = _last_outbound_was_consent_question(history or [])
+        if _consent_given or _last_oc_consent:
+            shipping_result = type(
+                "_NoOp", (),
+                {"handled": False, "response_text": None, "requires_human": False},
+            )()
+            logger.info(
+                "[SHIPPING_QUOTE][SKIP] consent_given=%s last_oc_consent=%s — no re-cotizar durante recolección",
+                _consent_given, _last_oc_consent,
+            )
+        else:
+            shipping_result = await handle_shipping_quote_if_applicable(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                query_text=content,
+            )
         if shipping_result.handled:
             if shipping_result.response_text:
                 # Si es la primera respuesta del bot en la conversación,

@@ -256,6 +256,16 @@ async def create_payment_link(
     customer_data = _build_customer_data(contact)
     if customer_data:
         payload["customer_data"] = customer_data
+        logger.info(
+            "[WOMPI] payment_link customer_data fields=%s order=%s",
+            sorted(customer_data.keys()),
+            order_id,
+        )
+    else:
+        logger.warning(
+            "[WOMPI] payment_link sin customer_data — checkout pedirá datos al cliente. order=%s",
+            order_id,
+        )
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = await client.post(
