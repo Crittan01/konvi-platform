@@ -3118,6 +3118,40 @@ async def build_and_run_orchestration(
 
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
         if parsed.should_respond and parsed.response_text:
+            # Bug 16 — Gate "compras previas?": si el cliente expresa reclamo
+            # y NO tiene NINGUNA orden con este número, en vez de escalar
+            # respondemos preguntando si usó otro número. Así evitamos escalar
+            # a humano por ruido y reducimos falsos positivos en SLA.
+            # Debe ejecutarse ANTES del envío para sobreescribir el response_text
+            # del LLM (que típicamente dice "te paso con un asesor").
+            if (
+                parsed.intent_detected in _COMPLAINT_INTENTS
+                and parsed.requires_human
+                and contact_id
+            ):
+                try:
+                    _orders_count_res = (
+                        supabase.table("orders")
+                        .select("id", count="exact")
+                        .eq("tenant_id", tenant_id)
+                        .eq("contact_id", contact_id)
+                        .execute()
+                    )
+                    _orders_count = int(getattr(_orders_count_res, "count", 0) or 0)
+                except Exception:
+                    _orders_count = -1
+                if _orders_count == 0:
+                    parsed.response_text = (
+                        "No veo compras registradas con este número de WhatsApp. "
+                        "¿Realizaste tu pedido con otro número o tienes el código de orden? "
+                        "Así te ayudo a resolver lo antes posible."
+                    )
+                    parsed.requires_human = False
+                    logger.info(
+                        "[GATE-COMPRAS] complaint sin órdenes contact=%s — postpone escalación",
+                        contact_id,
+                    )
+
             # Re-evaluar FSM con datos que el LLM acaba de extraer del current
             # inbound. Si el FSM avanza a un NEEDS_X siguiente, OVERRIDE el
             # response_text con el prompt determinístico — evita el bug donde
@@ -3172,33 +3206,6 @@ async def build_and_run_orchestration(
             )
 
         # ── 8. Escalar a humano si es necesario ───────────────────────────────
-        # Bug 16 — Gate "compras previas?": si el cliente expresa reclamo
-        # y NO tiene NINGUNA orden con este número de WhatsApp, en vez de escalar
-        # directo, preguntar si usó otro número. Evita escalar a humano por ruido.
-        if (
-            parsed.intent_detected in _COMPLAINT_INTENTS
-            and parsed.requires_human
-            and contact_id
-        ):
-            try:
-                _orders_count_res = (
-                    supabase.table("orders")
-                    .select("id", count="exact")
-                    .eq("tenant_id", tenant_id)
-                    .eq("contact_id", contact_id)
-                    .execute()
-                )
-                _orders_count = int(getattr(_orders_count_res, "count", 0) or 0)
-            except Exception:
-                _orders_count = -1  # no bloquear si falla la consulta
-            if _orders_count == 0:
-                parsed.response_text = (
-                    "No veo compras registradas con este número de WhatsApp. "
-                    "¿Realizaste tu pedido con otro número o tienes el código de orden? "
-                    "Así te ayudo a resolver lo antes posible."
-                )
-                parsed.requires_human = False  # postpone escalación
-
         if parsed.requires_human:
             _set_conversation_status(
                 supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
