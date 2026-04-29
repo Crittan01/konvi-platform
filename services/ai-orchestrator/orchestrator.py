@@ -39,13 +39,10 @@ CONVERSATION_WINDOW_HOURS = int(os.getenv("CONVERSATION_WINDOW_HOURS", "24"))
 # ── Consentimiento Ley 1581 de 2012 ──────────────────────────────────────────
 CONSENT_TEXT_VERSION = "v2026-04"
 CONSENT_QUESTION_TEMPLATE = (
-    "Para continuar, necesito guardar tu nombre y dirección de entrega "
-    "para procesar tu pedido y coordinar el envío.\n\n"
-    "Puedes solicitar la eliminación de tus datos escribiendo "
-    "*eliminar mis datos* en cualquier momento.\n\n"
-    "¿Nos autorizas?\n"
-    "• *Sí* (continuamos registrando tus datos)\n"
-    "• *No* (continuamos sin registrar tus datos)"
+    "Para continuar con tu pedido necesito guardar tus datos personales "
+    "(nombre, correo, documento y dirección) y así procesar el envío.\n\n"
+    "Si en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n"
+    "¿Me autorizas?"
 )
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
     "Listo, te genero el link de pago.\n\n"
@@ -2820,9 +2817,9 @@ async def build_and_run_orchestration(
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
                     text=(
-                        "Por el momento solo puedo atender mensajes de texto. "
+                        "Por ahora solo puedo atender mensajes de texto. 😊\n\n"
                         f"Si necesitas que un {tenant_escalation_role} revise lo que enviaste, "
-                        f"escríbeme *{tenant_escalation_role}* y te contactamos. 😊"
+                        f"dímelo y te conecto con él."
                     ),
                 )
                 _mark_message_processing(
