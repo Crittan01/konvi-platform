@@ -453,17 +453,33 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
                 {"stock_quantity": new_stock}
             ).eq("id", variation_id).eq("tenant_id", tenant_id).execute()
 
-            # Registrar movimiento
+            # Registrar movimiento (con order_id para auditoría/idempotencia).
             supabase.table("stock_movements").insert({
                 "tenant_id": tenant_id,
                 "variation_id": variation_id,
+                "order_id": order_id,
                 "delta": -quantity,
                 "new_stock": new_stock,
                 "reason": "sale",
             }).execute()
 
-            # Sync stock a MeLi si hay listing activo vinculado
-            asyncio.ensure_future(sync_meli_stock(variation_id, new_stock, supabase))
+            # Sync stock a MeLi si hay listing activo vinculado.
+            # Se invoca desde context sync (background task del webhook Wompi).
+            # asyncio.ensure_future requiere un event loop activo — si no está,
+            # programar la tarea sin bloquear el decrement de los demás items.
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(sync_meli_stock(variation_id, new_stock, supabase))
+            except RuntimeError:
+                # Sin event loop activo (background sync) — ejecutar fire-and-forget
+                # en un nuevo loop dedicado, sin bloquear el resto del decrement.
+                try:
+                    asyncio.run(sync_meli_stock(variation_id, new_stock, supabase))
+                except Exception as meli_err:
+                    logger.warning(
+                        "[STOCK] Sync MeLi falló para variation=%s (no bloquea decrement): %s",
+                        variation_id, meli_err,
+                    )
 
     except Exception as e:
         # No fallar la confirmación del pedido si el stock no se puede decrementar

@@ -1308,6 +1308,34 @@ def _has_shipping_been_quoted(history: list[dict]) -> bool:
     return False
 
 
+def _has_shipping_been_quoted_in_conversation(
+    supabase: Client, conversation_id: str
+) -> bool:
+    """Versión DB que verifica TODA la conversación (no limitada por
+    CONVERSATION_HISTORY_LIMIT). Usar cuando el history en memoria pueda
+    estar truncado y haya shipping marker antes de los últimos N mensajes.
+    """
+    if not conversation_id:
+        return False
+    try:
+        # ILIKE sobre outbound. PostgREST acepta `or=` con varios markers.
+        for marker in ("economica", "Económica", "Económica", "Envío de"):
+            r = (
+                supabase.table("messages")
+                .select("id", count="exact")
+                .eq("conversation_id", conversation_id)
+                .eq("direction", "outbound")
+                .ilike("content", f"%{marker}%")
+                .limit(1)
+                .execute()
+            )
+            if int(getattr(r, "count", 0) or 0) > 0:
+                return True
+    except Exception as exc:
+        logger.warning("[FSM] error verificando shipping quoted DB conv=%s: %s", conversation_id, exc)
+    return False
+
+
 def _has_carrier_been_selected(history: list[dict]) -> bool:
     """
     Detecta si el cliente seleccionó explícitamente un carrier.
@@ -1583,6 +1611,113 @@ def _extract_shipping_cost_from_history(history: list[dict]) -> Optional[int]:
                     except ValueError:
                         continue
     return None
+
+
+def _build_verified_multi_product_context(
+    catalog: list,
+    history: list[dict],
+) -> Optional[dict]:
+    """Variante multi-producto: detecta 2+ productos con cantidad explícita en
+    history (ej "2 aceites de coco y 1 sérum") y suma subtotales de cada uno
+    a su variante específica. Devuelve None si no hay multi-producto.
+    """
+    if not catalog or not history:
+        return None
+    full_text = ""
+    for msg in history[:25]:
+        if str(msg.get("direction") or "").lower() == "inbound":
+            full_text += " " + str(msg.get("content") or "")
+    norm = _normalize_text(full_text)
+    norm_tokens_set = set(re.findall(r"[a-z0-9ñ]+", norm))
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+
+    items_summary: list[dict] = []
+    seen_titles: set[str] = set()
+    has_explicit_qty = False
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        norm_title = _normalize_text(title)
+        if norm_title in seen_titles:
+            continue
+        title_words = set(re.findall(r"[a-z0-9ñ]+", norm_title)) - _stop
+        if norm_title in norm:
+            pass
+        elif title_words and len(title_words & norm_tokens_set) >= 2:
+            pass
+        else:
+            continue
+        seen_titles.add(norm_title)
+        # Cantidad cerca del título
+        sig_tokens = [t for t in title_words if len(t) > 3]
+        qty = 1
+        explicit = False
+        if sig_tokens:
+            pat = r"(\d+)\s+(?:[a-zñáéíóú]+s?\s+){0,3}(" + "|".join(re.escape(t) for t in sig_tokens) + ")"
+            m = re.search(pat, norm)
+            if m:
+                try:
+                    qty = int(m.group(1))
+                    explicit = True
+                except ValueError:
+                    pass
+        # Variante específica
+        variants = prod.get("variants") or []
+        chosen_var = None
+        for v in variants:
+            attrs = v.get("attributes") or {}
+            if not isinstance(attrs, dict):
+                continue
+            for av in attrs.values():
+                av_n = _normalize_text(str(av or "")).strip()
+                if av_n and av_n in norm:
+                    chosen_var = v
+                    break
+            if chosen_var:
+                break
+        if not chosen_var and variants:
+            chosen_var = min(
+                (v for v in variants if (v.get("stock") or 0) > 0 and v.get("price")),
+                key=lambda v: float(v.get("price") or 0),
+                default=None,
+            )
+        if not chosen_var:
+            continue
+        unit_price = float(chosen_var.get("price") or 0)
+        if unit_price <= 0:
+            continue
+        items_summary.append({
+            "product_id": prod.get("id"),
+            "variation_id": chosen_var.get("id"),
+            "title": title,
+            "variant_label": chosen_var.get("label"),
+            "quantity": qty,
+            "unit_price_cents": int(round(unit_price * 100)),
+        })
+        if explicit:
+            has_explicit_qty = True
+
+    if len(items_summary) < 2 or not has_explicit_qty:
+        return None
+
+    subtotal_cents = sum(it["unit_price_cents"] * it["quantity"] for it in items_summary)
+    shipping_cents = _extract_shipping_cost_from_history(history) or 0
+    return {
+        "items": items_summary,
+        # Para retro-compat con payment_link_tool single-product
+        "product_id": items_summary[0]["product_id"],
+        "variation_id": items_summary[0]["variation_id"],
+        "product_name": " + ".join(
+            f"{it['quantity']}x {it['title']}" for it in items_summary[:3]
+        ),
+        "variant_label": None,
+        "unit_price_cents": items_summary[0]["unit_price_cents"],
+        "quantity": sum(it["quantity"] for it in items_summary),
+        "subtotal_cents": subtotal_cents,
+        "shipping_cost_cents": shipping_cents,
+        "total_cents": subtotal_cents + shipping_cents,
+    }
 
 
 def _build_verified_order_context(
@@ -2472,6 +2607,23 @@ def _humanize_name_in_text(text: str, contact_name: Optional[str], extracted_nam
             first_name,
         ))
 
+    # Post-procesador defensivo: si el texto contiene un saludo con un nombre
+    # de 3+ palabras capitalizadas seguido de signo de exclamación o coma,
+    # acortarlo al primer nombre. Cubre casos donde el LLM emitió el nombre
+    # completo y `contact_name`/`extracted_name` no están disponibles
+    # (el LLM no los extrajo, o se persisten más tarde).
+    _greeting_re = re.compile(
+        r"(¡?(?:gracias|hola|perfecto|listo|claro|entendido|bienvenido|bienvenida)[,\s]+)"
+        r"((?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+){2,4}[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)"
+        r"([!,\.])",
+        flags=re.IGNORECASE,
+    )
+    def _shorten_full_name(m: re.Match[str]) -> str:
+        full = m.group(2)
+        first = full.split()[0].capitalize()
+        return f"{m.group(1)}{first}{m.group(3)}"
+    text = _greeting_re.sub(_shorten_full_name, text)
+
     if not patterns:
         return text
 
@@ -2750,9 +2902,24 @@ async def build_and_run_orchestration(
         )
         if shipping_result.handled:
             if shipping_result.response_text:
+                # Si es la primera respuesta del bot en la conversación,
+                # prefijar saludo natural — el cliente abrió con "Hola" + pedido
+                # combinado y el tool determinístico no incluye saludo.
+                _resp_text = shipping_result.response_text
+                _outbound_count = sum(
+                    1 for m in (history or [])
+                    if str(m.get("direction") or "").lower() == "outbound"
+                    and str(m.get("content_type") or "text") != "context_snapshot"
+                )
+                if _outbound_count == 0:
+                    _first_name_greet = _extract_first_name(
+                        contact_record.get("name") if isinstance(contact_record, dict) else None
+                    )
+                    _greet = f"¡Hola, {_first_name_greet}! " if _first_name_greet else "¡Hola! "
+                    _resp_text = f"{_greet}\n\n{_resp_text}"
                 await _send_outbound_text(
                     supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                    text=shipping_result.response_text,
+                    text=_resp_text,
                 )
             if shipping_result.requires_human:
                 _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
@@ -2856,6 +3023,11 @@ async def build_and_run_orchestration(
         # F3A: si la ventana de 24h expiró, buying_intent del historial no aplica
         buying_intent = False if _window_expired else _has_buying_intent(content, history_for_prompt)
         shipping_quoted = _has_shipping_been_quoted(history_for_prompt)
+        # En conversaciones largas el history en memoria está truncado a
+        # CONVERSATION_HISTORY_LIMIT. Si shipping_quoted=False allí, verificar en
+        # DB la conversación completa antes de degradar el FSM a NEEDS_SHIPPING_CITY.
+        if not shipping_quoted:
+            shipping_quoted = _has_shipping_been_quoted_in_conversation(supabase, conversation_id)
         # Si ya cotizamos envío, el intent de compra persiste — _has_buying_intent
         # solo mira últimos 6 mensajes y se "pierde" en conversaciones largas
         # tras la captura de consent/email/name/document/address.
@@ -2930,6 +3102,57 @@ async def build_and_run_orchestration(
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
             return
+
+        # Bypass LLM: cuando display_state es AWAITING_ORDER_CONFIRMATION y el
+        # cliente confirma explícito ("Sí, confirmo", "dale"), generar el link
+        # de pago de forma determinística sin pasar por el LLM. El LLM en
+        # contextos largos a veces emite intent=other y requires_human=True,
+        # forzando escalación falsa cuando todo está listo para cerrar.
+        history_for_bypass = _history_without_current_inbound(history or [], content)
+        _aff = _is_affirmative_confirmation(content)
+        _last_oc = _last_outbound_was_order_confirmation_question(history_for_bypass)
+        logger.info(
+            "[BYPASS] display_state=%s aff=%s last_oc=%s",
+            display_state, _aff, _last_oc,
+        )
+        if (
+            display_state == "AWAITING_ORDER_CONFIRMATION"
+            and _aff
+            and _last_oc
+        ):
+            verified_ctx_bypass = (
+                _build_verified_multi_product_context(catalog, history_for_bypass)
+                or _build_verified_order_context(catalog, history_for_bypass)
+            )
+            if verified_ctx_bypass and verified_ctx_bypass.get("total_cents", 0) > 0:
+                pl_result = await handle_payment_link_if_applicable(
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                    conversation_id=conversation_id,
+                    contact_name=contact_record.get("name") if contact_record else None,
+                    total_in_cents=verified_ctx_bypass["total_cents"],
+                    shipping_cost_cents=verified_ctx_bypass.get("shipping_cost_cents"),
+                    notes=None,
+                    supabase=supabase,
+                    verified_ctx=verified_ctx_bypass,
+                )
+                if pl_result and pl_result.response_text:
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=pl_result.response_text,
+                    )
+                    _mark_message_processing(
+                        supabase,
+                        message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+                    logger.info(
+                        "[ORCH][BYPASS] AWAITING_ORDER_CONFIRMATION + afirmativo → payment_link directo conv=%s",
+                        conversation_id,
+                    )
+                    return
 
         # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
         if display_state == "READY_FOR_SUMMARY" and contact_id:
@@ -3064,6 +3287,27 @@ async def build_and_run_orchestration(
         # debe ser AWAITING_ORDER_CONFIRMATION o READY_FOR_SUMMARY. Si todavía
         # está en NEEDS_CONSENT/EMAIL/NAME/DOCUMENT/DIRECTION, NO crear orden —
         # el flujo de recolección de datos debe completarse primero.
+        # Si el LLM emitió order_ack pero no incluyó total (caso multi-producto
+        # donde el LLM no calcula bien), intentar fallback al verified_ctx
+        # (calculado determinísticamente desde history + catálogo).
+        if (
+            parsed.intent_detected == "order_acknowledgment"
+            and not parsed.total_in_cents
+            and display_state in {"AWAITING_ORDER_CONFIRMATION", "READY_FOR_SUMMARY"}
+        ):
+            # Probar primero multi-producto, luego single
+            verified_ctx_fallback = (
+                _build_verified_multi_product_context(catalog, history_for_prompt)
+                or _build_verified_order_context(catalog, history_for_prompt)
+            )
+            if verified_ctx_fallback and verified_ctx_fallback.get("total_cents", 0) > 0:
+                parsed.total_in_cents = verified_ctx_fallback["total_cents"]
+                parsed.shipping_cost_cents = verified_ctx_fallback.get("shipping_cost_cents")
+                logger.info(
+                    "[PAYMENT_LINK] LLM emitió total=null — fallback a verified_ctx=%s",
+                    parsed.total_in_cents,
+                )
+
         if (
             parsed.intent_detected == "order_acknowledgment"
             and parsed.total_in_cents
