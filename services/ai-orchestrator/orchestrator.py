@@ -48,14 +48,10 @@ CONSENT_QUESTION_TEMPLATE = (
     "• *No* (continuamos sin registrar tus datos)"
 )
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
-    "¡Perfecto! Antes de enviarte el link, ¿deseas crear tu pedido ahora?\n\n"
-    "Puedes pagar con:\n"
-    "• Tarjetas\n"
-    "• Billeteras digitales\n"
-    "• Transferencias\n"
-    "• Efectivo\n"
-    "• Créditos\n\n"
-    "Si deseas continuar, responde *Sí, crear pedido*."
+    "Listo, te genero el link de pago.\n\n"
+    "Por Wompi puedes pagar con tarjeta, PSE, Nequi, Daviplata, Bancolombia, "
+    "y otras opciones más.\n\n"
+    "¿Confirmas que armamos el pedido?"
 )
 _CONSENT_QUESTION_MARKERS = (
     "nos autorizas",
@@ -79,10 +75,14 @@ _ORDER_CONFIRMATION_MARKERS = (
     "procedemos a crear",
     "crear el pedido",
     "deseas crear tu pedido ahora",
+    "te genero el link de pago",
+    "te genero el link",
     "enviarte el link de pago",
     "link de pago ahora",
     "generando tu pedido",
     "creamos el pedido",
+    "armamos el pedido",
+    "confirmas que armamos",
 )
 _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re.IGNORECASE)
 
@@ -143,6 +143,7 @@ def _record_consent(
                 "consent_source": "whatsapp",
                 "consent_channel": "whatsapp",
                 "consent_text_version": CONSENT_TEXT_VERSION,
+                "consent_notice_version": CONSENT_TEXT_VERSION,
                 "consent_revoked_at": None,
                 "consent_revoked_reason": None,
                 "consent_evidence": {
@@ -416,11 +417,12 @@ def _load_customer_context_block(
         active_orders = []
 
     try:
+        # NOTA: tabla `claims` usa `customer_id` como FK al contacto (no `contact_id`).
         claims_res = (
             supabase.table("claims")
             .select("id, ticket_number, status, created_at")
             .eq("tenant_id", tenant_id)
-            .eq("contact_id", contact_id)
+            .eq("customer_id", contact_id)
             .eq("status", "open")
             .order("created_at", desc=True)
             .limit(3)
@@ -635,7 +637,12 @@ class OrchestratorOutput(BaseModel):
     )
     extracted_direction: Optional[dict] = Field(
         default=None,
-        description="Objeto JSON de la dirección. Obligatorios: 'street', 'city' (normalizando fonemas, ej: boogta -> Bogotá D.C.). El 'department' debes deducirlo internamente de la ciudad. Condición: Si mencionan 'edificio' o 'conjunto', pide el apto/torre. Llena 'details' si aplica."
+        description=(
+            "Dirección estructurada con claves canónicas rev. 68: "
+            "street, number, city, neighborhood, building_type (casa|edificio|conjunto), "
+            "tower (solo conjunto), apartment, complex_name (nombre del edificio/conjunto), "
+            "reference (punto de referencia). 'additional_info' queda solo para residuos legacy."
+        ),
     )
     extracted_email: Optional[str] = Field(
         default=None,
@@ -1313,10 +1320,11 @@ def _has_carrier_been_selected(history: list[dict]) -> bool:
         "economica", "rapida", "deprisa", "servientrega", "coordinadora", "tcc",
         "dhl", "fedex", "interrapidisimo", "mensajeros", "urbanos",
     )
-    # "continuamos" es el marcador definitivo — aparece en TODA respuesta de shipping_quote_tool
-    # (tanto "¿Con cuál continuamos?" como "¿Continuamos con la opción Económica?").
-    # "economica"/"rapida" solos también aparecen en resúmenes, NO son suficientes.
-    _quote_outbound_markers = ("continuamos",)
+    # Marker específico de shipping_quote_tool ("¿Con cuál continuamos?" o
+    # "¿Continuamos con la opción Económica?" o "¿Continuamos?"). El "?"
+    # diferencia del consent template ("continuamos registrando tus datos"
+    # — sin signo de pregunta) y evita el falso positivo.
+    _quote_outbound_markers = ("continuamos con", "cual continuamos", "continuamos?")
 
     hist = list(history or [])
     # Encontrar el índice del outbound de cotización más reciente
@@ -1490,6 +1498,15 @@ def _resolve_display_state(
             return "NEEDS_SHIPPING_CITY"
         if not carrier_selected:
             return "AWAITING_CARRIER_SELECTION"
+        # Recolección de datos (rev. 68 FSM) NUNCA se salta por una pregunta de
+        # confirmación previa. Si faltan consent/email/name/document/direction
+        # devolvemos el estado correspondiente — Wompi customer_data exige el
+        # documento, y saltarlo deja el checkout sin legal_id pre-poblado.
+        if transaction_state in {
+            "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
+            "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
+        }:
+            return transaction_state
         if order_confirm_pending:
             return "AWAITING_ORDER_CONFIRMATION"
         return transaction_state
@@ -1716,6 +1733,7 @@ _TONO_INSTRUCCIONES: dict[str, str] = {
 _HUMAN_STYLE_GUIDE = """
 GUÍA DE ESTILO HUMANO (aplica siempre, encima del tono):
 - Nunca uses fórmulas robóticas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida".
+- NO RE-SALUDES dentro de la misma conversación. "¡Hola!" SOLO en el primer mensaje saliente. Si ya hubo intercambio previo, abre con conector ("Claro", "Listo", "Perfecto", "Entendido", "Genial") o entra directo al contenido — nunca con "¡Hola!".
 - No repitas la misma estructura sintáctica en mensajes consecutivos: varía inicios, transiciones y cierres.
 - Adáptate al registro del cliente: si escribe corto e informal, responde corto e informal; si escribe formal, mantén formalidad.
 - Confirma comprensión rotando expresiones: "Listo", "Perfecto", "Entendido", "Ya veo", "Claro" — no repitas la misma dos veces seguidas.
@@ -2130,6 +2148,12 @@ def _build_system_prompt(
         buying_intent=buying_intent,
         shipping_quoted=shipping_quoted,
     )
+    logger.debug(
+        "[FSM] display_state=%s buying_intent=%s shipping_quoted=%s contact_email=%r contact_consent=%r",
+        display_state, buying_intent, shipping_quoted,
+        (contact_record or {}).get("email"),
+        (contact_record or {}).get("consent_given"),
+    )
 
     if display_state == "NEEDS_SHIPPING_CITY":
         state_instruction = """
@@ -2312,14 +2336,19 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
   "extracted_name": "Nombre Cliente o null",
   "extracted_email": "email@dominio.com o null",
   "extracted_direction": {{
-    "street": "Calle y número o null",
-    "number": "Número/interior/apto o null",
+    "street": "Dirección COMPLETA (calle/carrera + número), ej 'Calle 100 #15-20' o 'Carrera 7 #32-18' o null. NO la separes en partes.",
+    "number": null,
     "city": "SOLO ciudad (ej: Bogota, Medellin, Cali)",
+    "neighborhood": "barrio del cliente, ej 'Chicó', 'El Poblado', 'Granada' o null",
     "building_type": "casa|edificio|conjunto o null",
-    "tower": "torre/bloque o null",
-    "apartment": "apartamento o null",
-    "additional_info": "detalle adicional o null"
+    "tower": "SOLO si building_type=conjunto: nombre/número de la torre o bloque, ej 'Torre 3' o null",
+    "apartment": "número de apartamento (ej '502'), aplica si building_type es edificio o conjunto, o null",
+    "complex_name": "SOLO si building_type=edificio o conjunto: nombre del edificio/conjunto, ej 'Torre Norte', 'Edificio Avantgarde' o null",
+    "reference": "punto de referencia o portería, ej 'Frente al parque', 'Al lado del Éxito' o null",
+    "additional_info": null
   }},
+  "extracted_document_type": "CC|CE|NIT|PP|TI|OTHER o null si no se mencionó documento",
+  "extracted_document_number": "solo dígitos sin puntos/espacios, ej '1234567890' o null",
   "total_in_cents": null,
   "shipping_cost_cents": null
 }}"""
@@ -2784,9 +2813,21 @@ async def build_and_run_orchestration(
         # F3A: si la ventana de 24h expiró, buying_intent del historial no aplica
         buying_intent = False if _window_expired else _has_buying_intent(content, history_for_prompt)
         shipping_quoted = _has_shipping_been_quoted(history_for_prompt)
+        # Si ya cotizamos envío, el intent de compra persiste — _has_buying_intent
+        # solo mira últimos 6 mensajes y se "pierde" en conversaciones largas
+        # tras la captura de consent/email/name/document/address.
+        if not buying_intent and not _window_expired and shipping_quoted:
+            buying_intent = True
+        # FSM evalúa con el mensaje actual incluido — para detectar
+        # selección de carrier o consent en el inbound corriente que aún
+        # no está persistido. history_for_prompt mantiene la versión sin
+        # el actual para no duplicarlo en el contexto del LLM.
+        history_for_fsm = list(history_for_prompt) + [
+            {"direction": "inbound", "content": content}
+        ]
         display_state = _resolve_display_state(
             contact_record=contact_record,
-            history=history_for_prompt,
+            history=history_for_fsm,
             buying_intent=buying_intent,
             shipping_quoted=shipping_quoted,
         )
@@ -2969,10 +3010,17 @@ async def build_and_run_orchestration(
                 parsed.should_respond = True
 
         payment_link_result = None
+        # El LLM emite intent=order_acknowledgment cuando el cliente confirma cierre
+        # transaccional. requires_human depende del estilo del LLM y NO debe
+        # condicionar la generación del link — si hay total claro, generamos.
+        # PERO solo si el FSM de datos del cliente ya está listo: display_state
+        # debe ser AWAITING_ORDER_CONFIRMATION o READY_FOR_SUMMARY. Si todavía
+        # está en NEEDS_CONSENT/EMAIL/NAME/DOCUMENT/DIRECTION, NO crear orden —
+        # el flujo de recolección de datos debe completarse primero.
         if (
             parsed.intent_detected == "order_acknowledgment"
-            and parsed.requires_human
             and parsed.total_in_cents
+            and display_state in {"AWAITING_ORDER_CONFIRMATION", "READY_FOR_SUMMARY"}
         ):
             order_confirmation_prompted = _last_outbound_was_order_confirmation_question(history_for_prompt)
             if not order_confirmation_prompted:
