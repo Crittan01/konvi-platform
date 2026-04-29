@@ -1,0 +1,200 @@
+"""Handlers de tools de datos del cliente (Ley 1581 + Wompi customer_data).
+
+Tools cubiertos:
+  - ``record_consent``         → escribe ``contacts.consent_given``
+  - ``set_customer_email``     → valida + persiste
+  - ``set_customer_name``      → persiste tal como lo escribió el cliente
+  - ``set_customer_document``  → tipo + número juntos (regla Wompi)
+  - ``set_customer_address``   → estructurada con building_type obligatorio
+
+Ningún handler escribe a DB sin verificar ``consent_given=True`` (excepto
+``record_consent`` mismo). Regla Ley 1581 art. 4°.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from typing import Optional
+
+from supabase import Client
+
+from core.context import ConversationContext
+
+logger = logging.getLogger("orchestrator.tools_v2.customer")
+
+
+_EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", re.IGNORECASE)
+_VALID_DOC_TYPES = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
+_VALID_BUILDING_TYPES = {"casa", "edificio", "conjunto"}
+
+
+def _ensure_contact(supabase: Client, ctx: ConversationContext) -> Optional[str]:
+    """Asegura que existe un row en ``contacts`` para el customer_phone.
+
+    Si existe, devuelve su id. Si no, lo crea con el mínimo y devuelve el id.
+    """
+    if ctx.contact_id:
+        return ctx.contact_id
+
+    # Crear contacto mínimo para poder asociar consent + datos posteriores.
+    norm = re.sub(r"[\s+]", "", ctx.customer_phone or "")
+    res = (
+        supabase.table("contacts")
+        .upsert(
+            {"tenant_id": ctx.tenant_id, "phone": norm},
+            on_conflict="tenant_id,phone",
+        )
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        return None
+    return rows[0].get("id")
+
+
+async def handle_record_consent(
+    *, ctx: ConversationContext, args: dict, supabase: Client,
+) -> dict:
+    given = bool(args.get("given"))
+    contact_id = _ensure_contact(supabase, ctx)
+    if not contact_id:
+        return {"ok": False, "error": "could_not_create_contact"}
+
+    update = {"consent_given": given}
+    if given:
+        # Marca temporal — útil para auditoría Ley 1581 art. 8°.
+        update["consent_at"] = "now()"
+
+    supabase.table("contacts").update(update).eq("id", contact_id).execute()
+    logger.info(
+        "[customer_tools.consent] contact=%s given=%s", contact_id, given,
+    )
+    return {"ok": True, "contact_id": contact_id, "consent_given": given}
+
+
+def _gate_consent(ctx: ConversationContext) -> Optional[dict]:
+    """Returns error dict if consent is missing; None if OK."""
+    cr = ctx.contact_record or {}
+    if not cr.get("consent_given"):
+        return {
+            "ok": False,
+            "error": "consent_required",
+            "message": (
+                "No se puede persistir datos sin consent_given=True (Ley 1581)."
+            ),
+        }
+    return None
+
+
+async def handle_set_customer_email(
+    *, ctx: ConversationContext, args: dict, supabase: Client,
+) -> dict:
+    err = _gate_consent(ctx)
+    if err:
+        return err
+    email = str(args.get("email") or "").strip().lower()
+    if not _EMAIL_REGEX.match(email):
+        return {"ok": False, "error": "invalid_email_format"}
+    if not ctx.contact_id:
+        return {"ok": False, "error": "no_contact_id"}
+    supabase.table("contacts").update({"email": email}).eq("id", ctx.contact_id).execute()
+    logger.info("[customer_tools.email] contact=%s", ctx.contact_id)
+    return {"ok": True, "email": email}
+
+
+async def handle_set_customer_name(
+    *, ctx: ConversationContext, args: dict, supabase: Client,
+) -> dict:
+    err = _gate_consent(ctx)
+    if err:
+        return err
+    full_name = " ".join(str(args.get("full_name") or "").split())
+    if not full_name:
+        return {"ok": False, "error": "name_required"}
+    if not ctx.contact_id:
+        return {"ok": False, "error": "no_contact_id"}
+    supabase.table("contacts").update({"name": full_name}).eq("id", ctx.contact_id).execute()
+    logger.info("[customer_tools.name] contact=%s", ctx.contact_id)
+    return {"ok": True, "full_name": full_name}
+
+
+async def handle_set_customer_document(
+    *, ctx: ConversationContext, args: dict, supabase: Client,
+) -> dict:
+    err = _gate_consent(ctx)
+    if err:
+        return err
+    doc_type = str(args.get("document_type") or "").strip().upper()
+    doc_num_raw = str(args.get("document_number") or "").strip()
+    doc_num = re.sub(r"[\s.\-]", "", doc_num_raw)
+    if doc_type not in _VALID_DOC_TYPES:
+        return {"ok": False, "error": f"invalid_document_type ({doc_type})"}
+    if not doc_num or not doc_num.isdigit():
+        return {"ok": False, "error": "invalid_document_number"}
+    if not ctx.contact_id:
+        return {"ok": False, "error": "no_contact_id"}
+    supabase.table("contacts").update({
+        "document_type": doc_type,
+        "document_number": doc_num,
+    }).eq("id", ctx.contact_id).execute()
+    logger.info(
+        "[customer_tools.document] contact=%s type=%s",
+        ctx.contact_id, doc_type,
+    )
+    return {"ok": True, "document_type": doc_type, "document_number": doc_num}
+
+
+async def handle_set_customer_address(
+    *, ctx: ConversationContext, args: dict, supabase: Client,
+) -> dict:
+    err = _gate_consent(ctx)
+    if err:
+        return err
+    if not ctx.contact_id:
+        return {"ok": False, "error": "no_contact_id"}
+
+    street = str(args.get("street") or "").strip()
+    city = str(args.get("city") or "").strip()
+    building_type = str(args.get("building_type") or "").strip().lower()
+    apartment = str(args.get("apartment") or "").strip()
+    tower = str(args.get("tower") or "").strip()
+
+    if not street:
+        return {"ok": False, "error": "street_required"}
+    if not city:
+        return {"ok": False, "error": "city_required"}
+    if building_type not in _VALID_BUILDING_TYPES:
+        return {"ok": False, "error": "building_type_required"}
+    if building_type in {"edificio", "conjunto"} and not apartment:
+        return {"ok": False, "error": "apartment_required_for_building_type"}
+    if building_type == "conjunto" and not tower:
+        return {"ok": False, "error": "tower_required_for_conjunto"}
+
+    addr: dict = {
+        "street": street,
+        "city": city,
+        "building_type": building_type,
+    }
+    for opt_key in ("apartment", "tower", "complex_name", "neighborhood", "reference"):
+        v = (args.get(opt_key) or "").strip() if isinstance(args.get(opt_key), str) else None
+        if v:
+            addr[opt_key] = v
+
+    # Enrichment DANE — reutiliza el resolver del shipping_quote_tool.
+    try:
+        from tools.shipping_quote_tool import _resolve_destination_from_query
+        dest, _ = _resolve_destination_from_query(city)
+        if dest:
+            addr["city"] = dest["city"]
+            addr["state"] = dest["state"]
+            addr["country"] = "CO"
+            addr["dane_code"] = dest["dane_code"]
+    except Exception as exc:
+        logger.warning("[customer_tools.address] DANE lookup failed: %s", exc)
+
+    supabase.table("contacts").update({"address": addr}).eq("id", ctx.contact_id).execute()
+    logger.info(
+        "[customer_tools.address] contact=%s city=%s type=%s",
+        ctx.contact_id, addr["city"], building_type,
+    )
+    return {"ok": True, "address": addr}
