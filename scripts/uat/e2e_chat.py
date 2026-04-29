@@ -178,8 +178,36 @@ def cmd_send(args):
     print(f"    HTTP {status} {body_resp.strip()}")
 
     if args.wait > 0:
-        print(f"\n... esperando {args.wait}s a que el worker procese ...")
-        time.sleep(args.wait)
+        # Espera activa hasta que el último inbound del cliente esté processed
+        # Y haya un outbound posterior. Garantiza ordenamiento secuencial real.
+        sb = _supabase()
+        deadline = time.time() + args.wait
+        last_outbound_count = 0
+        last_inbound_processed = False
+        while time.time() < deadline:
+            time.sleep(2)
+            conv = _find_conversation(sb, args.tenant_id, args.phone)
+            if not conv:
+                continue
+            res = (
+                sb.table("messages")
+                .select("direction, processing_status, created_at")
+                .eq("conversation_id", conv["id"])
+                .order("created_at", desc=False)
+                .execute()
+            )
+            msgs = res.data or []
+            inbound_msgs = [m for m in msgs if m.get("direction") == "inbound"]
+            outbound_count = sum(1 for m in msgs if m.get("direction") == "outbound" and m.get("processing_status") != "skipped")
+            last_in = inbound_msgs[-1] if inbound_msgs else None
+            if last_in and last_in.get("processing_status") == "processed":
+                last_inbound_processed = True
+                # Esperar también un nuevo outbound (no skipped)
+                if outbound_count > last_outbound_count:
+                    break
+                last_outbound_count = outbound_count
+        if not last_inbound_processed:
+            print(f"... timeout {args.wait}s: el último inbound NO terminó de procesarse")
         cmd_state(args)
 
 

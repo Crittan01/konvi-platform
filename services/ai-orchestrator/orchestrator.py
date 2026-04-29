@@ -1365,8 +1365,15 @@ def _has_carrier_been_selected(history: list[dict]) -> bool:
             continue  # Pregunta nunca es selección
         if has_carrier and is_short:
             return True  # Mencionó el carrier explícitamente
-        if is_single_option and is_short and content_n.strip() in _affirmative_short:
-            return True  # Opción única: "sí" confirma la única opción presentada
+        if is_single_option and is_short:
+            # "Sí, dale" / "ok claro" / "listo" — quitar comas/signos y verificar
+            # token por token contra el set afirmativo.
+            cleaned = re.sub(r"[,\.!\?;:]+", " ", content_n).strip()
+            cleaned_tokens = [t for t in cleaned.split() if t]
+            if cleaned_tokens and all(t in _affirmative_short for t in cleaned_tokens):
+                return True
+            if any(t in _affirmative_short for t in cleaned_tokens) and len(cleaned_tokens) <= 3:
+                return True
     return False
 
 
@@ -2148,7 +2155,7 @@ def _build_system_prompt(
         buying_intent=buying_intent,
         shipping_quoted=shipping_quoted,
     )
-    logger.debug(
+    logger.info(
         "[FSM] display_state=%s buying_intent=%s shipping_quoted=%s contact_email=%r contact_consent=%r",
         display_state, buying_intent, shipping_quoted,
         (contact_record or {}).get("email"),
@@ -2925,7 +2932,11 @@ async def build_and_run_orchestration(
             ai_agent=ai_agent,
             contact_record=contact_record,
             query_text=content,
-            history=history_for_prompt,
+            # FSM/carrier-detection lee history_for_fsm (incluye el inbound
+            # actual) para que la instrucción al LLM refleje el estado tras
+            # procesar el current. El catálogo/KB siguen leyendo history_for_prompt
+            # para no contaminar contexto del LLM con duplicado.
+            history=history_for_fsm,
             buying_intent=buying_intent,
             shipping_quoted=shipping_quoted,
             tenant_shipping_origin=tenant_shipping_origin,
@@ -3071,6 +3082,46 @@ async def build_and_run_orchestration(
 
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
         if parsed.should_respond and parsed.response_text:
+            # Re-evaluar FSM con datos que el LLM acaba de extraer del current
+            # inbound. Si el FSM avanza a un NEEDS_X siguiente, OVERRIDE el
+            # response_text con el prompt determinístico — evita el bug donde
+            # el LLM, tras capturar el nombre en NEEDS_NAME, salta directo
+            # a pedir dirección sin pasar por NEEDS_DOCUMENT.
+            if display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME", "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}:
+                _sim_contact: dict = dict(contact_record or {})
+                if parsed.extracted_email:
+                    _sim_contact["email"] = str(parsed.extracted_email).strip().lower()
+                if parsed.extracted_name:
+                    _sim_contact["name"] = " ".join(str(parsed.extracted_name).split())
+                if parsed.extracted_document_type and parsed.extracted_document_number:
+                    _doc_t = str(parsed.extracted_document_type).strip().upper()
+                    _doc_n = re.sub(r"[\s.]", "", str(parsed.extracted_document_number).strip())
+                    if _doc_t in {"CC", "CE", "NIT", "PP", "TI", "OTHER"} and _doc_n:
+                        _sim_contact["document_type"] = _doc_t
+                        _sim_contact["document_number"] = _doc_n
+                if _has_real_address_data(parsed.extracted_direction):
+                    _sim_contact["address"] = _merge_address_data(
+                        _sim_contact.get("address"), parsed.extracted_direction
+                    )
+                _new_state = _determine_transactional_state(_sim_contact)
+                # Solo override si el LLM brincó pasos (avanzó más de uno o saltó NEEDS_DOCUMENT).
+                _state_order = {"NEEDS_CONSENT": 0, "NEEDS_EMAIL": 1, "NEEDS_NAME": 2,
+                                "NEEDS_DOCUMENT": 3, "NEEDS_DIRECTION": 4, "READY_FOR_SUMMARY": 5}
+                if (
+                    _new_state in _state_order
+                    and _state_order.get(_new_state, 0) - _state_order.get(display_state, 0) >= 1
+                    and _new_state != "READY_FOR_SUMMARY"
+                ):
+                    _first_name_sim = _extract_first_name(_sim_contact.get("name"))
+                    _ack_prefix = f"Gracias, {_first_name_sim}." if _first_name_sim else "Listo."
+                    parsed.response_text = (
+                        f"{_ack_prefix}\n\n{_build_next_data_request_prompt(_sim_contact)}"
+                    )
+                    logger.info(
+                        "[FSM][POST] override LLM: %s → %s (datos extraídos)",
+                        display_state, _new_state,
+                    )
+
             # Fallback: si el LLM no extrajo el nombre pero el cliente lo acaba de dar, detectarlo
             name_for_humanize = parsed.extracted_name or _try_extract_name_from_message(content, display_state)
             parsed.response_text = _humanize_name_in_text(
