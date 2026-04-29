@@ -53,11 +53,14 @@ export default function AddressSelector({
   return (
     <div className="space-y-2">
       <div className="space-y-1">
-        <Label className="text-xs">Dirección</Label>
+        <Label className="text-xs">
+          Dirección {showBuildingDetails && <span className="text-destructive">*</span>}
+        </Label>
         <Input
           name={`${fieldPrefix}_street`}
           defaultValue={defaultValue.street ?? ''}
           placeholder="Ej: Calle 100 #15-20 / Carrera 7 #32-18"
+          required={showBuildingDetails}
           className="h-8 text-xs"
         />
       </div>
@@ -71,7 +74,9 @@ export default function AddressSelector({
 
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <Label className="text-xs">Departamento</Label>
+          <Label className="text-xs">
+            Departamento {showBuildingDetails && <span className="text-destructive">*</span>}
+          </Label>
           <input type="hidden" name={`${fieldPrefix}_state`} value={dptoNombre} />
           <Select
             value={dptoCode || undefined}
@@ -89,7 +94,9 @@ export default function AddressSelector({
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs">Ciudad / Municipio</Label>
+          <Label className="text-xs">
+            Ciudad / Municipio {showBuildingDetails && <span className="text-destructive">*</span>}
+          </Label>
           <input type="hidden" name={`${fieldPrefix}_city`} value={city} />
           <input type="hidden" name={`${fieldPrefix}_dane_code`} value={daneCode} />
           <Select
@@ -117,18 +124,23 @@ export default function AddressSelector({
       {showBuildingDetails && (
         <>
           <div className="space-y-1">
-            <Label className="text-xs">Barrio</Label>
+            <Label className="text-xs">
+              Barrio <span className="text-destructive">*</span>
+            </Label>
             <Input
               name={`${fieldPrefix}_neighborhood`}
               defaultValue={defaultValue.neighborhood ?? ''}
               placeholder="Chapinero / El Poblado / Granada"
+              required
               className="h-8 text-xs"
             />
             <p className="text-[10px] text-muted-foreground">Carriers (Coordinadora, Servientrega) lo usan para optimizar zona.</p>
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Tipo de vivienda</Label>
+            <Label className="text-xs">
+              Tipo de vivienda <span className="text-destructive">*</span>
+            </Label>
             <input type="hidden" name={`${fieldPrefix}_building_type`} value={buildingType} />
             <div className="flex gap-2">
               {BUILDING_TYPES.map(bt => (

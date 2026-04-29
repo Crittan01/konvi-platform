@@ -189,43 +189,63 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Nombre</Label>
-                  <Input name="name" placeholder="Juan García" />
+                  <Label className="text-xs">
+                    Nombre completo <span className="text-destructive">*</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(Wompi y Envia lo requieren)</span>
+                  </Label>
+                  <Input name="name" placeholder="Juan García López" required />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Email</Label>
-                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" />
+                  <Label className="text-xs">
+                    Correo electrónico <span className="text-destructive">*</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(Wompi customer_data)</span>
+                  </Label>
+                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required />
                 </div>
-                {/* Rev. 69 — Documento de identidad (Wompi pre-fill checkout) */}
+                {/* Documento de identidad — Wompi PSE/Bancolombia lo exigen en checkout */}
                 <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-xs">Tipo doc.</Label>
+                    <Label className="text-xs">
+                      Tipo doc. <span className="text-destructive">*</span>
+                    </Label>
                     <select
                       name="document_type"
                       defaultValue=""
+                      required
                       className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-xs"
                     >
-                      <option value="">—</option>
-                      <option value="CC">CC</option>
-                      <option value="CE">CE</option>
-                      <option value="NIT">NIT</option>
-                      <option value="PP">PP</option>
-                      <option value="TI">TI</option>
+                      <option value="">— Selecciona —</option>
+                      <option value="CC">CC (Cédula)</option>
+                      <option value="CE">CE (Extranjería)</option>
+                      <option value="NIT">NIT (Empresa)</option>
+                      <option value="PP">PP (Pasaporte)</option>
+                      <option value="TI">TI (Tarjeta Identidad)</option>
                       <option value="OTHER">Otro</option>
                     </select>
                   </div>
                   <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">Número doc.</Label>
-                    <Input name="document_number" placeholder="1.234.567.890" />
+                    <Label className="text-xs">
+                      Número doc. <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      name="document_number"
+                      placeholder="1.234.567.890"
+                      required
+                      pattern="[\d.\-]+"
+                      title="Solo dígitos, puntos o guion (DV NIT)"
+                    />
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Notas</Label>
-                  <Input name="notes" placeholder="Cliente frecuente..." />
+                  <Label className="text-xs flex items-center gap-1">
+                    <MapPin className="h-3 w-3" /> Dirección de entrega <span className="text-destructive">*</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(Envia exige street + city + state + postal)</span>
+                  </Label>
+                  <AddressSelector fieldPrefix="addr" showBuildingDetails />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
-                  <AddressSelector fieldPrefix="addr" showBuildingDetails />
+                  <Label className="text-xs">Notas internas (opcional)</Label>
+                  <Input name="notes" placeholder="Cliente frecuente..." />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="space-y-1">
