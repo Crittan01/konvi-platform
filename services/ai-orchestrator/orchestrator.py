@@ -81,6 +81,10 @@ _ORDER_CONFIRMATION_MARKERS = (
     "creamos el pedido",
     "armamos el pedido",
     "confirmas que armamos",
+    # Marcador del resumen determinístico (Bug C). Permite que la confirmación
+    # del cliente al resumen ("Si, confirmo") avance directo a payment link.
+    "generar tu link de pago",
+    "datos estan correctos para generar",
 )
 _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re.IGNORECASE)
 # Versión search-friendly (sin ^$) para extraer email embebido en texto libre.
@@ -1425,6 +1429,16 @@ def _normalize_building_type(value: Optional[str]) -> str:
 
 
 def _missing_address_fields(direction: Optional[dict]) -> list[str]:
+    """Campos requeridos para que la dirección quede lista para envío.
+
+    Reglas alineadas al formulario Contactos (Wompi/Envía):
+      - street: obligatorio.
+      - city: obligatorio.
+      - building_type: obligatorio (casa | edificio | conjunto). Sin esto no
+        sabemos si necesitamos torre/apartamento.
+      - apartment: obligatorio si building_type ∈ {edificio, conjunto}.
+      - tower:     obligatorio si building_type = conjunto.
+    """
     address = direction if isinstance(direction, dict) else {}
     street = str(address.get("street") or "").strip()
     city = str(address.get("city") or "").strip()
@@ -1437,11 +1451,11 @@ def _missing_address_fields(direction: Optional[dict]) -> list[str]:
         missing.append("Calle y número")
     if not city:
         missing.append("Ciudad")
-    # Compatibilidad runtime: no bloquear avance si el tipo de vivienda no fue
-    # informado aún. Solo endurecemos validación cuando sí se reporta el tipo.
-    if building_type == "edificio" and not apartment:
+    if not building_type:
+        missing.append("Tipo de vivienda (casa, edificio o conjunto)")
+    elif building_type == "edificio" and not apartment:
         missing.append("Apartamento")
-    if building_type == "conjunto":
+    elif building_type == "conjunto":
         if not tower:
             missing.append("Torre")
         if not apartment:
@@ -1528,6 +1542,14 @@ def _resolve_display_state(
     carrier_selected = _has_carrier_been_selected(history or [])
     order_confirm_pending = _last_outbound_was_order_confirmation_question(history or [])
 
+    # Inferencia: si el cliente ya autorizó el tratamiento de datos (consent_given),
+    # significa que el flujo pasó por AWAITING_CARRIER_SELECTION → NEEDS_CONSENT,
+    # por lo que el carrier necesariamente fue seleccionado antes (no volvemos a
+    # exigirlo aunque el inbound de selección haya quedado fuera del history en
+    # memoria por CONVERSATION_HISTORY_LIMIT en conversaciones largas).
+    if not carrier_selected and isinstance(contact_record, dict) and contact_record.get("consent_given"):
+        carrier_selected = True
+
     if buying_intent:
         if not shipping_quoted:
             return "NEEDS_SHIPPING_CITY"
@@ -1546,6 +1568,123 @@ def _resolve_display_state(
             return "AWAITING_ORDER_CONFIRMATION"
         return transaction_state
     return "CATALOG_MODE"
+
+
+def _format_address_for_summary(address: Optional[dict]) -> str:
+    """Renderiza la dirección persistida en una sola línea legible para el resumen."""
+    if not isinstance(address, dict):
+        return ""
+    parts: list[str] = []
+    street = str(address.get("street") or "").strip()
+    if street:
+        parts.append(street)
+    btype = _normalize_building_type(address.get("building_type"))
+    sub_parts: list[str] = []
+    if btype == "conjunto":
+        tower = str(address.get("tower") or "").strip()
+        apt = str(address.get("apartment") or "").strip()
+        complex_name = str(address.get("complex_name") or "").strip()
+        if complex_name:
+            sub_parts.append(complex_name)
+        if tower:
+            sub_parts.append(f"Torre {tower}" if not tower.lower().startswith("torre") else tower)
+        if apt:
+            sub_parts.append(f"Apto {apt}")
+    elif btype == "edificio":
+        apt = str(address.get("apartment") or "").strip()
+        complex_name = str(address.get("complex_name") or "").strip()
+        if complex_name:
+            sub_parts.append(complex_name)
+        if apt:
+            sub_parts.append(f"Apto {apt}")
+    if sub_parts:
+        parts.append(", ".join(sub_parts))
+    neighborhood = str(address.get("neighborhood") or "").strip()
+    if neighborhood:
+        parts.append(neighborhood)
+    city = str(address.get("city") or "").strip()
+    if city:
+        parts.append(city)
+    return " — ".join(parts)
+
+
+def _build_order_summary_text(
+    *,
+    contact_record: dict,
+    verified_ctx: Optional[dict],
+    catalog: Optional[list] = None,
+    history: Optional[list[dict]] = None,
+) -> Optional[str]:
+    """Resumen estructurado determinístico antes de la confirmación final.
+
+    Usa verified_ctx (single o multi-producto) + datos del contacto. NO delega
+    al LLM. Si no hay contexto verificable retorna None y dejamos que el LLM
+    componga el mensaje (degradación segura).
+    """
+    if not verified_ctx:
+        verified_ctx = (
+            _build_verified_multi_product_context(catalog or [], history or [])
+            or _build_verified_order_context(catalog or [], history or [])
+        )
+    if not verified_ctx or not verified_ctx.get("total_cents"):
+        return None
+
+    items = verified_ctx.get("items")
+    lines: list[str] = ["📋 *Resumen de tu pedido:*", ""]
+    if isinstance(items, list) and items:
+        lines.append("*Productos:*")
+        for it in items:
+            qty = int(it.get("quantity") or 1)
+            title = str(it.get("title") or "Producto").strip()
+            variant = str(it.get("variant_label") or "").strip()
+            line_total = int(it.get("unit_price_cents") or 0) * qty
+            label = f"• {qty}x {title}"
+            if variant and variant.lower() not in {"estandar", "estándar"}:
+                label += f" ({variant})"
+            label += f": {_format_cop(line_total)}"
+            lines.append(label)
+    else:
+        title = str(verified_ctx.get("product_name") or "Producto")
+        variant = str(verified_ctx.get("variant_label") or "").strip()
+        qty = int(verified_ctx.get("quantity") or 1)
+        line_total = int(verified_ctx.get("unit_price_cents") or 0) * qty
+        label = f"• {qty}x {title}"
+        if variant and variant.lower() not in {"estandar", "estándar"}:
+            label += f" ({variant})"
+        label += f": {_format_cop(line_total)}"
+        lines.append("*Productos:*")
+        lines.append(label)
+
+    subtotal = int(verified_ctx.get("subtotal_cents") or 0)
+    shipping = int(verified_ctx.get("shipping_cost_cents") or 0)
+    total = int(verified_ctx.get("total_cents") or 0)
+    lines.append("")
+    lines.append(f"Subtotal: {_format_cop(subtotal)}")
+    lines.append(f"Envío: {_format_cop(shipping)}")
+    lines.append(f"*TOTAL: {_format_cop(total)}*")
+
+    contact = contact_record if isinstance(contact_record, dict) else {}
+    name = str(contact.get("name") or "").strip()
+    email = str(contact.get("email") or "").strip()
+    doc_t = str(contact.get("document_type") or "").strip().upper()
+    doc_n = str(contact.get("document_number") or "").strip()
+    address_line = _format_address_for_summary(contact.get("address"))
+
+    if any([name, email, doc_t and doc_n, address_line]):
+        lines.append("")
+        lines.append("*Datos de envío:*")
+        if name:
+            lines.append(f"• Nombre: {name}")
+        if email:
+            lines.append(f"• Correo: {email}")
+        if doc_t and doc_n:
+            lines.append(f"• Documento: {doc_t} {doc_n}")
+        if address_line:
+            lines.append(f"• Dirección: {address_line}")
+
+    lines.append("")
+    lines.append("¿Confirmas que los datos están correctos para generar tu link de pago?")
+    return "\n".join(lines)
 
 
 def _build_next_data_request_prompt(contact_record: dict) -> str:
@@ -2449,14 +2588,16 @@ ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DOCUMENTO DE IDENTIDAD.
         state_instruction = """
 ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DIRECCIÓN DE ENTREGA.
 - Ya tenemos nombre y email.
-- Solicita con formato visual:
+- Campos OBLIGATORIOS de la dirección (no avances mientras falte alguno):
   • Calle y número
   • Ciudad
-  • Tipo de vivienda: casa, edificio o conjunto
-  • Dato opcional: barrio, referencia o portería
-- Si es edificio: apartamento obligatorio.
-- Si es conjunto: torre y apartamento obligatorios.
-- Si da datos parciales, pide solo lo que falta.
+  • Tipo de vivienda: *casa* | *edificio* | *conjunto*
+  • Si es *edificio*: número de apartamento.
+  • Si es *conjunto*: torre y número de apartamento.
+  • Opcional: nombre del conjunto/edificio, barrio, referencia.
+- Si el cliente da datos parciales, pide SOLO lo que falte (no repitas todo).
+- NO digas "te genero el link de pago" ni "armamos el pedido" mientras falten campos
+  obligatorios — primero se completa la dirección.
 """
     elif display_state == "READY_FOR_SUMMARY":
         # Calcular contexto verificado desde datos reales (no delegar al LLM)
@@ -3578,21 +3719,66 @@ async def build_and_run_orchestration(
                     if _doc_t in {"CC", "CE", "NIT", "PP", "TI", "OTHER"} and _doc_n:
                         _sim_contact["document_type"] = _doc_t
                         _sim_contact["document_number"] = _doc_n
-                if _has_real_address_data(parsed.extracted_direction):
+                # SIEMPRE mergear el fragmento de dirección extraído (aunque sea
+                # parcial: solo building_type, solo apartment, etc.). Antes
+                # bloqueábamos con _has_real_address_data, lo que dejaba el
+                # _sim_contact desincronizado del estado real persistido en DB
+                # y el FSM se evaluaba sobre datos viejos.
+                if isinstance(parsed.extracted_direction, dict) and any(
+                    v for v in parsed.extracted_direction.values() if v
+                ):
                     _sim_contact["address"] = _merge_address_data(
                         _sim_contact.get("address"), parsed.extracted_direction
                     )
                 _new_state = _determine_transactional_state(_sim_contact)
-                # Solo override si el LLM brincó pasos (avanzó más de uno o saltó NEEDS_DOCUMENT).
                 _state_order = {"NEEDS_CONSENT": 0, "NEEDS_EMAIL": 1, "NEEDS_NAME": 2,
                                 "NEEDS_DOCUMENT": 3, "NEEDS_DIRECTION": 4, "READY_FOR_SUMMARY": 5}
-                if (
+
+                # Hard-lock NEEDS_DIRECTION: si seguimos en este estado tras el
+                # merge, faltan campos obligatorios — SIEMPRE override con la
+                # pregunta determinística de los faltantes. Sin esto, el LLM
+                # puede emitir "te genero el link de pago" con la dirección
+                # incompleta (caso real reportado: building_type=conjunto sin
+                # tower/apartment).
+                if display_state == "NEEDS_DIRECTION" and _new_state == "NEEDS_DIRECTION":
+                    parsed.response_text = _build_address_request_prompt(
+                        _sim_contact, _extract_first_name(_sim_contact.get("name"))
+                    )
+                    parsed.requires_human = False
+                    parsed.should_respond = True
+                    parsed.intent_detected = "product_inquiry"
+                    logger.info(
+                        "[FSM][POST] hard-lock NEEDS_DIRECTION: faltan %s",
+                        _missing_address_fields(_sim_contact.get("address")),
+                    )
+                # READY_FOR_SUMMARY recién alcanzado: inyectar resumen
+                # determinístico en vez de delegar al LLM. Esto garantiza que
+                # el cliente vea siempre el desglose antes de confirmar.
+                elif (
+                    _new_state == "READY_FOR_SUMMARY"
+                    and display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
+                                          "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}
+                ):
+                    _summary = _build_order_summary_text(
+                        contact_record=_sim_contact,
+                        verified_ctx=None,
+                        catalog=catalog,
+                        history=history_for_prompt,
+                    )
+                    if _summary:
+                        parsed.response_text = _summary
+                        parsed.requires_human = False
+                        parsed.should_respond = True
+                        parsed.intent_detected = "product_inquiry"
+                        logger.info(
+                            "[FSM][POST] override READY_FOR_SUMMARY con resumen determinístico"
+                        )
+                # Avance intermedio NEEDS_X → NEEDS_Y: solicitar el siguiente dato.
+                elif (
                     _new_state in _state_order
                     and _state_order.get(_new_state, 0) - _state_order.get(display_state, 0) >= 1
                     and _new_state != "READY_FOR_SUMMARY"
                 ):
-                    # _build_next_data_request_prompt ya incluye "Gracias, {name}."
-                    # cuando aplica — usarlo TAL CUAL evita duplicar el saludo.
                     parsed.response_text = _build_next_data_request_prompt(_sim_contact)
                     logger.info(
                         "[FSM][POST] override LLM: %s → %s (datos extraídos)",
