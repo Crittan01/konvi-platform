@@ -103,6 +103,7 @@ class FsmNeedsDocumentTests(unittest.TestCase):
                     "city": "Bogotá",
                     "state": "DC",
                     "dane_code": "11001000",
+                    "building_type": "casa",
                 },
             }),
             "READY_FOR_SUMMARY",
