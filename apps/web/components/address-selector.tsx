@@ -57,20 +57,17 @@ export default function AddressSelector({
         <Input
           name={`${fieldPrefix}_street`}
           defaultValue={defaultValue.street ?? ''}
-          placeholder="Calle 15 # 100-20 / Cra 7 # 32-18"
+          placeholder="Ej: Calle 100 #15-20 / Carrera 7 #32-18"
           className="h-8 text-xs"
         />
       </div>
-
-      <div className="space-y-1">
-        <Label className="text-xs">Número / Apto (opcional)</Label>
-        <Input
-          name={`${fieldPrefix}_number`}
-          defaultValue={defaultValue.number ?? ''}
-          placeholder="Apto 301"
-          className="h-8 text-xs"
-        />
-      </div>
+      {/* Campo legacy `number` preservado oculto por compatibilidad con
+          contactos antiguos que lo tenían separado. No se expone al operador. */}
+      <input
+        type="hidden"
+        name={`${fieldPrefix}_number`}
+        defaultValue={defaultValue.number ?? ''}
+      />
 
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
