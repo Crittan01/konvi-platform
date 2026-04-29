@@ -2016,6 +2016,65 @@ def _pick_variant(variants: list[str], *, seed: str) -> str:
     return variants[idx]
 
 
+# Bug 30 — frases que indican que el bot anuncia handover a humano. Si el
+# response_text del LLM contiene una de estas pero requires_human=False,
+# el cliente queda en limbo (texto promete asesor pero status=bot_active).
+# La salvaguarda fuerza requires_human=True para que la escalación real ocurra.
+_HANDOVER_PHRASES: tuple[str, ...] = (
+    "te paso con",
+    "te paso a",
+    "te conecto con",
+    "te transfiero",
+    "te derivo",
+    "te canalizo",
+    "paso a un asesor",
+    "paso al asesor",
+    "te comunicare con",
+    "te comunico con",
+    "lo paso con",
+    "lo conecto con",
+    "te atendera un",
+    "te atendera una",
+    "te ayudara un asesor",
+    "te ayudara una asesora",
+    "te ayudara nuestro",
+    "te ayudara nuestra",
+    "te ayudara de inmediato",
+    "te contactara un",
+    "te contactara una",
+    "un asesor te ayudara",
+    "una asesora te ayudara",
+    "un asesor te atendera",
+    "una asesora te atendera",
+    "un especialista te",
+    "una especialista te",
+    "un consultor te",
+    "una consultora te",
+    "un agente te",
+    "una agente te",
+    "asesor humano",
+)
+
+
+def _response_promises_handover(text: str) -> bool:
+    """True si el response_text anuncia traspaso a humano (asesor/agente/especialista).
+
+    Usa _normalize_text (sin acentos, lowercase) para robustez. Bug 30 — si el
+    LLM emite este texto pero requires_human=False, el cliente queda en limbo:
+    el mensaje promete asesor pero el status sigue bot_active.
+    """
+    if not text:
+        return False
+    try:
+        from tools.shipping_quote_tool import _normalize_text  # noqa: WPS433
+    except Exception:
+        return False
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return any(phrase in normalized for phrase in _HANDOVER_PHRASES)
+
+
 # Variantes humanas para mensajes determinísticos templated.
 # Razón: evitar que el cliente reciba siempre la misma string robótica.
 # Selección por seed = conversation_id + day_of_year (consistente en el día).
@@ -2316,7 +2375,11 @@ def _build_system_prompt(
 - ESTRICTO: NO INVENTES INFORMACIÓN, PRECIOS, NI POLÍTICAS que no estén explícitas arriba.
 - Si falta un dato para responder (producto, variante, ciudad), pide precisión antes de escalar.
 - Escala a humano solo cuando el usuario insista sin resolución, haya molestia, reclamo o riesgo transaccional.
-- NUNCA des consejos médicos, legales o financieros.
+- CONSULTAS DE SALUD/LEGAL/FINANZAS: NO des consejos clínicos, diagnósticos ni dosis específicas. PERO antes de escalar, SIEMPRE intenta primero esta secuencia (en un solo mensaje corto):
+  1. Comparte beneficios reales del producto que aparezcan en su descripción del catálogo (ej. "según su descripción, este aceite es regenerador celular y ayuda a reducir cicatrices").
+  2. Recomienda consultar al profesional adecuado (dermatólogo, médico, abogado, contador) como complemento — nunca como reemplazo.
+  3. Cierra con una pregunta abierta del producto: "¿Te gustaría conocer más beneficios o cotizar el envío?".
+- NO escales a humano en la PRIMERA pregunta médica/legal/financiera. Solo escala si el cliente INSISTE en hablar con una persona o expresa molestia tras tu respuesta.
 """
 
     consent_template = CONSENT_QUESTION_TEMPLATE
@@ -3544,6 +3607,26 @@ async def build_and_run_orchestration(
                 name_for_humanize,
             )
             parsed.response_text = _format_whatsapp_response_text(parsed.response_text)
+
+            # Bug 30 — sincronizar texto y status. Si el response_text promete
+            # handover ("te paso con un asesor") pero requires_human=False, el
+            # cliente queda en limbo: el mensaje anuncia escalación que nunca
+            # ocurre. Forzamos requires_human=True para que el bloque de
+            # escalación más abajo realmente cambie status a human_takeover.
+            # No aplicamos cuando ya generamos payment_link (flujo transaccional
+            # válido) ni cuando el texto fue reescrito por gates determinísticos.
+            if (
+                not parsed.requires_human
+                and not payment_link_result
+                and _response_promises_handover(parsed.response_text)
+            ):
+                parsed.requires_human = True
+                logger.info(
+                    "[ESCALATION_SYNC] response_text promete handover — "
+                    "forzando requires_human=True (conv=%s)",
+                    conversation_id,
+                )
+
             await _send_outbound_text(
                 supabase=supabase,
                 conversation_id=conversation_id,
