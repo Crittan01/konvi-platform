@@ -74,6 +74,65 @@ def _response_promises_handover(text: str) -> bool:
 _MAX_TOOL_ITERATIONS = 5
 
 
+def _format_for_whatsapp(text: str) -> str:
+    """Adapta Markdown estándar del LLM al formato de WhatsApp Cloud API.
+
+    WhatsApp soporta un subset propio:
+      - **negrita** se renderiza como `*negrita*` (UN asterisco).
+      - listas con bullet usan `• ` (no `* `).
+      - sangrías con espacios al inicio salen visualmente desplazadas.
+
+    Transformaciones aplicadas:
+      1. `**X**` → `*X*` (Markdown bold → WhatsApp bold).
+      2. Líneas que empiezan con `* ` o `- ` → `• `.
+      3. Sangrías de 4+ espacios al inicio de bullet → quitar (lista plana).
+      4. Sub-bullets de listas anidadas → `  • ` (2 espacios + bullet).
+      5. Items principales separados por `\n\n` cuando hay múltiples bullets.
+      6. Trim + colapsar 3+ saltos a 2.
+
+    Ref oficial WhatsApp Cloud API formatting:
+      https://developers.facebook.com/docs/whatsapp/cloud-api/messages/text-messages
+    """
+    if not text:
+        return text
+    import re as _re
+    s = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # 1) Markdown bold → WhatsApp bold.
+    s = _re.sub(r"\*\*([^\n*]+?)\*\*", r"*\1*", s)
+
+    # 2 + 3) Líneas con bullet markdown ('* X' o '- X') a '• X', preservando
+    # un nivel de indentación para sub-listas (2 espacios).
+    out_lines: list[str] = []
+    for raw_line in s.split("\n"):
+        line = raw_line.rstrip()
+        # Detectar bullet markdown con sangría
+        m = _re.match(r"^(\s*)[\*\-]\s+(.*)$", line)
+        if m:
+            indent = m.group(1)
+            content = m.group(2)
+            # Indent ≥4 → sub-bullet (2 espacios). 0-3 → top-level (sin indent).
+            new_indent = "  " if len(indent) >= 4 else ""
+            out_lines.append(f"{new_indent}• {content}")
+        else:
+            out_lines.append(line)
+    s = "\n".join(out_lines)
+
+    # 4) Separar items principales con línea en blanco. Casos:
+    #    - top-level seguido de top-level: `• X\n• Y` → `• X\n\n• Y`.
+    #    - sub-bullet seguido de top-level: `  • X\n• Y` → `  • X\n\n• Y`
+    #      (típico al cerrar un grupo de presentaciones y empezar otro producto).
+    s = _re.sub(r"(^• [^\n]+)\n(• )", r"\1\n\n\2", s, flags=_re.MULTILINE)
+    s = _re.sub(r"(^  • [^\n]+)\n(• )", r"\1\n\n\2", s, flags=_re.MULTILINE)
+
+    # 5) Asegurar línea en blanco antes/después de pregunta final.
+    s = _re.sub(r"([.!?])\s+(¿)", r"\1\n\n\2", s)
+
+    # 6) Trim + colapsar 3+ saltos a 2.
+    s = _re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s
+
+
 def _facts_from_cart_and_contact(
     *, cart: Any, contact: dict, last_outbound_consent: bool,
     last_outbound_confirm: bool,
@@ -403,8 +462,12 @@ class Coordinator:
             return
 
         if result.text:
+            # Adaptar Markdown estándar del LLM al formato de WhatsApp Cloud
+            # API: ** → *, '* X' → '• X', sangrías razonables, separación
+            # entre items principales.
+            formatted = _format_for_whatsapp(result.text)
             await send_outbound_text(
-                ctx.conversation_id, ctx.tenant_id, result.text,
+                ctx.conversation_id, ctx.tenant_id, formatted,
             )
 
         # Bug 30 — sincronizar texto y status. Si el response_text del LLM
