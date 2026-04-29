@@ -622,7 +622,12 @@ def _resolve_product_for_quote(
         return products[0], []
 
     # 1) Buscar coincidencia explícita en query actual.
-    explicit_matches: list[dict] = []
+    # Separar match COMPLETO del título (norm_title in query) de match parcial
+    # por tokens. Si hay un único match completo, ese gana — incluso si otros
+    # productos comparten tokens genéricos (ej "Aceite Esencial de Lavanda"
+    # gana sobre los otros esenciales que comparten "aceite"+"esencial").
+    full_matches: list[dict] = []
+    token_matches: list[dict] = []
     normalized_query = _normalize_text(query_text)
     query_tokens = _tokenize_words(normalized_query)
     for product in products:
@@ -632,16 +637,20 @@ def _resolve_product_for_quote(
         normalized_title = _normalize_text(title)
         title_tokens = _product_title_tokens(title)
         if normalized_title and normalized_title in normalized_query:
-            explicit_matches.append(product)
-            continue
-        # Evitar empates por artículos genéricos: requerimos >=2 tokens de título.
-        if len(title_tokens & query_tokens) >= 2:
-            explicit_matches.append(product)
+            full_matches.append(product)
+        elif len(title_tokens & query_tokens) >= 2:
+            token_matches.append(product)
 
-    if len(explicit_matches) == 1:
-        return explicit_matches[0], []
-    if len(explicit_matches) > 1:
-        return None, [str(p.get("title") or "").strip() for p in explicit_matches[:3]]
+    if len(full_matches) == 1:
+        return full_matches[0], []
+    if len(full_matches) > 1:
+        # Match completo de varios títulos en la misma query — caso raro.
+        return None, [str(p.get("title") or "").strip() for p in full_matches[:3]]
+
+    if len(token_matches) == 1:
+        return token_matches[0], []
+    if len(token_matches) > 1:
+        return None, [str(p.get("title") or "").strip() for p in token_matches[:3]]
 
     # 2) Resolver por contexto conversacional reciente con score.
     message_window = [query_text]
