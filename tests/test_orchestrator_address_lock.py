@@ -128,6 +128,7 @@ class OrderSummaryTests(unittest.TestCase):
         contact = {
             "name": "Cristian Camilo Garzon Tamayo",
             "email": "crittan01@gmail.com",
+            "phone": "573125835649",
             "document_type": "CC",
             "document_number": "1032414179",
             "address": {
@@ -161,6 +162,8 @@ class OrderSummaryTests(unittest.TestCase):
         self.assertIn("TOTAL", summary)
         self.assertIn("Cristian", summary)
         self.assertIn("crittan01@gmail.com", summary)
+        self.assertIn("Celular", summary)
+        self.assertIn("+57 312 583 5649", summary)
         self.assertIn("CC 1032414179", summary)
         self.assertIn("Torre 5", summary)
         self.assertIn("Apto 502", summary)
