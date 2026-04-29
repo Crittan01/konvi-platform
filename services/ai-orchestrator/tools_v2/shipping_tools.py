@@ -62,12 +62,6 @@ def _build_api_auth_token(tenant_id: str) -> Optional[str]:
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
-def _cube_root_scale(dim_cm: float, total_qty: int) -> float:
-    if total_qty <= 1:
-        return dim_cm
-    return dim_cm * (total_qty ** (1.0 / 3.0))
-
-
 async def handle_quote_shipping(
     *,
     ctx: ConversationContext,
@@ -124,17 +118,24 @@ async def handle_quote_shipping(
         logger.exception("[shipping_tools.quote] origin lookup failed")
         return {"ok": False, "error": str(exc)}
 
-    # 3. Construir paquete sumando ítems del carrito.
+    # 3. Construir packages — UN ITEM POR BULTO físico, no consolidar.
+    #    Práctica oficial Envia + DHL: el carrier calcula chargeable_weight
+    #    como Σ max(peso_físico, peso_volumétrico) por paquete y suma.
+    #    Consolidar dimensiones en una caja virtual (suma o cube-root scale)
+    #    es subóptimo: el divisor volumétrico depende del carrier (lo decide
+    #    Envia internamente al cotizar). NO debemos pre-calcular volumétrico.
+    #    Ref: https://help.envia.com/en/volumetric-weight/
+    #         https://www.dhl.com/.../calculating-chargeable-weights.html
     products_for_shipping = _get_tenant_products_for_shipping_quote(supabase, ctx.tenant_id)
     var_index: dict[str, tuple[dict, dict]] = {}
     for prod in products_for_shipping:
         for v in (prod.get("product_variations") or []):
             var_index[str(v.get("id"))] = (prod, v)
 
-    weight_kg = 0.0
-    max_l = max_w = max_h = 0.0
-    total_qty = 0
+    parcels: list[dict] = []
     summaries: list[str] = []
+    total_qty = 0
+    item_subtotal_cents = 0
 
     for item in ctx.cart.items:
         prod_var = var_index.get(item.variation_id)
@@ -142,34 +143,42 @@ async def handle_quote_shipping(
             prod, var = prod_var
         else:
             prod, var = {}, {}
-        w = float(var.get("weight_kg") or DEFAULT_WEIGHT_KG)
-        l_cm = float(var.get("length_cm") or DEFAULT_LENGTH_CM)
-        wd_cm = float(var.get("width_cm") or DEFAULT_WIDTH_CM)
-        h_cm = float(var.get("height_cm") or DEFAULT_HEIGHT_CM)
-        weight_kg += max(w, 0.05) * item.quantity
-        max_l = max(max_l, l_cm)
-        max_w = max(max_w, wd_cm)
-        max_h = max(max_h, h_cm)
-        total_qty += item.quantity
+        # Dimensiones reales por variante (con defaults conservadores).
+        w = max(float(var.get("weight_kg") or DEFAULT_WEIGHT_KG), 0.05)
+        l_cm = max(float(var.get("length_cm") or DEFAULT_LENGTH_CM), 1.0)
+        wd_cm = max(float(var.get("width_cm") or DEFAULT_WIDTH_CM), 1.0)
+        h_cm = max(float(var.get("height_cm") or DEFAULT_HEIGHT_CM), 1.0)
 
         title = str(prod.get("title") or "Producto")
         var_label = ", ".join(
             f"{k}: {v}" for k, v in (var.get("attributes") or {}).items()
         ) or var.get("sku") or ""
+
+        # Un parcel POR UNIDAD del item: el carrier hace bin-packing internamente
+        # si el cliente declara N items separados. Cuando quantity > 1, replicamos
+        # el parcel `quantity` veces — Envia API soporta nativamente esto y
+        # cobra por chargeable weight real, no por dimensiones inventadas.
+        parcel_template = {
+            "weight": round(w, 3),
+            "length": round(l_cm, 1),
+            "width": round(wd_cm, 1),
+            "height": round(h_cm, 1),
+            "content": title[:80] or "Mercancía general",
+            "amount": int(round((item.unit_price_cents / 100) * 1)),  # valor declarado por unidad
+            "insuranceAmount": 0,
+        }
+        for _ in range(item.quantity):
+            parcels.append(dict(parcel_template))
+
+        total_qty += item.quantity
+        item_subtotal_cents += item.line_total_cents
         summaries.append(
             f"{item.quantity}x {title} ({var_label})" if var_label
             else f"{item.quantity}x {title}"
         )
 
-    package = {
-        "weight": round(max(weight_kg, 0.05), 3),
-        "length": round(max(_cube_root_scale(max_l, total_qty), 1.0), 1),
-        "width": round(max(_cube_root_scale(max_w, total_qty), 1.0), 1),
-        "height": round(max(_cube_root_scale(max_h, total_qty), 1.0), 1),
-        "amount": max(total_qty, 1),
-        "content": " + ".join(summaries[:3])[:120] or "Mercancía general",
-        "insuranceAmount": 0,
-    }
+    if not parcels:
+        return {"ok": False, "error": "empty_cart"}
 
     # 4. POST /api/v1/shipping/quote (API gateway con Vault).
     token = _build_api_auth_token(ctx.tenant_id)
@@ -179,7 +188,7 @@ async def handle_quote_shipping(
     payload = {
         "origin": origin,
         "destination": dest,
-        "parcels": [package],
+        "parcels": parcels,
     }
     headers = {
         "Authorization": f"Bearer {token}",

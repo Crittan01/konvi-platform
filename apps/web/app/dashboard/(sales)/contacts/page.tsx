@@ -110,7 +110,12 @@ export default async function ContactsPage({
     const docType = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'].includes(docTypeRaw) ? docTypeRaw : null
     const docNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
     const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 10)
-    if (digits.length !== 10) return
+    if (digits.length !== 10) {
+      // Antes: `return` silencioso. Ahora levantamos error visible para que
+      // el operador entienda por qué no se persistió. El cliente del form
+      // ya valida con HTML5 + zod-mirror; este es el último guardrail.
+      throw new Error('Teléfono inválido. Debe tener 10 dígitos en Colombia.')
+    }
     await sb.from('contacts').insert({
       tenant_id:     m.tenant_id,
       phone:         `+57${digits}`,
@@ -123,6 +128,11 @@ export default async function ContactsPage({
       consent_given: consentGiven,
       consent_date:  consentGiven ? nowIso : null,
       consent_source: consentGiven ? consentSource : null,
+      // `consent_channel` (Ley 1581 + migración 20260423000000_contacts_consent_v2):
+      // canal por el que el titular dio el consentimiento. En el form web
+      // siempre es 'dashboard_console'. Antes quedaba en su default 'manual'
+      // generando inconsistencia con `consent_source` (que sí se llenaba).
+      consent_channel: consentGiven ? 'dashboard_console' : null,
       consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
       consent_evidence: {
         created_via: 'dashboard_contacts',
@@ -213,6 +223,8 @@ export default async function ContactsPage({
       consent_given: consentGiven,
       consent_date: effectiveConsentDate,
       consent_source: consentSource || prev?.consent_source || null,
+      // Igual que en addContact: persistimos consent_channel para Ley 1581.
+      consent_channel: consentGiven ? 'dashboard_console' : null,
       consent_notice_version: consentNoticeVersion || prev?.consent_notice_version || null,
       consent_evidence: mergedEvidence,
       consent_actor_email: u?.email ?? null,

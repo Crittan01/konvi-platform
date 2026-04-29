@@ -169,6 +169,7 @@ export default function AddressSelector({
                   name={`${fieldPrefix}_apartment`}
                   defaultValue={defaultValue.apartment ?? ''}
                   placeholder="401"
+                  required
                   className="h-8 text-xs"
                 />
               </div>
@@ -193,6 +194,7 @@ export default function AddressSelector({
                     name={`${fieldPrefix}_tower`}
                     defaultValue={defaultValue.tower ?? ''}
                     placeholder="Torre 3"
+                    required
                     className="h-8 text-xs"
                   />
                 </div>
@@ -202,6 +204,7 @@ export default function AddressSelector({
                     name={`${fieldPrefix}_apartment`}
                     defaultValue={defaultValue.apartment ?? ''}
                     placeholder="401"
+                    required
                     className="h-8 text-xs"
                   />
                 </div>

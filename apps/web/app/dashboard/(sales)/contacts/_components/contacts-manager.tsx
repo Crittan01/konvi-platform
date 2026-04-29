@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import AddressSelector from '@/components/address-selector'
+import { validateColombianDocument } from '@/lib/validators/document'
+import { validateAddress, type StructuredAddress, type BuildingType } from '@/lib/validators/address'
 
 type ContactAddress = {
   street?: string; number?: string; city?: string
@@ -93,13 +95,56 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     currentPage * ITEMS_PER_PAGE
   )
 
+  // Validación cliente-side espejo del backend (services/api/dependencies/contact_validators.py).
+  // Reglas oficiales: validateColombianDocument + validateAddress + addressRequiredFields.
+  // Bloquea el submit ANTES de enviar al server para feedback inmediato.
+  const validateFormData = (fd: FormData): string | null => {
+    // 1) Documento: tipo + número juntos o ambos vacíos
+    const docType = (fd.get('document_type') as string) || ''
+    const docNumber = (fd.get('document_number') as string) || ''
+    const docResult = validateColombianDocument(docType, docNumber)
+    if (!docResult.ok) return docResult.error || 'Documento inválido'
+
+    // 2) Address: building_type + sub-campos según tipo
+    const addr: StructuredAddress = {
+      street: (fd.get('addr_street') as string) || '',
+      neighborhood: (fd.get('addr_neighborhood') as string) || '',
+      city: (fd.get('addr_city') as string) || '',
+      state: (fd.get('addr_state') as string) || '',
+      dane_code: (fd.get('addr_dane_code') as string) || '',
+      building_type: ((fd.get('addr_building_type') as string) || null) as BuildingType | null,
+      tower: (fd.get('addr_tower') as string) || '',
+      apartment: (fd.get('addr_apartment') as string) || '',
+    }
+    // Solo valido address si hay AL MENOS un campo de address presente
+    // (el form permite crear contactos sin dirección — el bot la pide después).
+    const hasAnyAddr = !!(addr.street || addr.city || addr.building_type)
+    if (hasAnyAddr) {
+      const addrResult = validateAddress(addr)
+      if (!addrResult.ok) {
+        return `Faltan campos de la dirección: ${addrResult.missing.join(', ')}.`
+      }
+    }
+    return null
+  }
+
   const handleAdd = (fd: FormData) => {
+    const error = validateFormData(fd)
+    if (error) {
+      window.alert(`No se puede guardar: ${error}`)
+      return
+    }
     startTransition(async () => {
       await addAction(fd)
     })
   }
 
   const handleEdit = (fd: FormData) => {
+    const error = validateFormData(fd)
+    if (error) {
+      window.alert(`No se puede actualizar: ${error}`)
+      return
+    }
     startTransition(async () => {
       await editAction(fd)
     })
@@ -173,7 +218,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
               <h2 className="font-semibold text-base mb-4">Agregar Contacto</h2>
               <form action={handleAdd} className="space-y-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Teléfono *</Label>
+                  <Label className="text-xs">Teléfono <span className="text-destructive">*</span></Label>
                   <div className="flex">
                     <span className="inline-flex items-center px-2.5 h-9 border border-r-0 border-input rounded-l-md text-xs text-muted-foreground bg-muted select-none shrink-0">+57</span>
                     <Input
