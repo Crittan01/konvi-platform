@@ -23,7 +23,63 @@ from core.context import ConversationContext
 logger = logging.getLogger("orchestrator.tools_v2.customer")
 
 
-_EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", re.IGNORECASE)
+# TLD limitado a 2-6 chars (cubre .com, .co, .org, .info, .museum, etc.).
+# Antes era {2,} y permitía aberraciones tipo `gmail.comcrittan` cuando el LLM
+# concatena el email. La defensa en profundidad incluye este regex estricto
+# + el extractor _extract_first_email para casos edge.
+_EMAIL_REGEX = re.compile(
+    r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,6}$", re.IGNORECASE,
+)
+
+
+_EMAIL_GREEDY_REGEX = re.compile(
+    # Local part + @ + domain.tld donde TLD es 2-6 alfa y NO continúa con
+    # más alfanum (eso sería el inicio del email duplicado por el LLM).
+    r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,6}(?![A-Za-z0-9])",
+)
+
+
+def _extract_first_email(text: str) -> Optional[str]:
+    """Extrae el PRIMER email del string. Robusto contra concatenación
+    duplicada del LLM ('x@y.comx@y.com' → 'x@y.com').
+
+    Estrategia (defensa en profundidad):
+      1. _dedup_repeated_string — si el LLM concatenó EXACTAMENTE 2x el
+         email, lo reduce a 1x.
+      2. Match estricto _EMAIL_REGEX sobre el resultado.
+      3. Si falla, búsqueda lazy con boundary _EMAIL_GREEDY_REGEX para
+         emails embebidos en frases ('mi correo es x@y.com').
+    """
+    if not text:
+        return None
+    s = _dedup_repeated_string(text.strip())
+    if _EMAIL_REGEX.match(s):
+        return s.lower()
+    m = _EMAIL_GREEDY_REGEX.search(s)
+    if m:
+        candidate = m.group(0).lower()
+        if _EMAIL_REGEX.match(candidate):
+            return candidate
+    return None
+
+
+def _dedup_repeated_string(s: str) -> str:
+    """Si una cadena es exactamente N veces la misma sub-cadena (N>=2),
+    devuelve la sub-cadena. Defensa contra LLM que concatena duplicados.
+    Ej: 'Juan PerezJuan Perez' → 'Juan Perez'.
+    """
+    s = (s or "").strip()
+    if not s:
+        return s
+    n = len(s)
+    for half in (n // 2, n // 3):
+        if half == 0:
+            continue
+        if n % half == 0:
+            chunk = s[:half]
+            if chunk * (n // half) == s:
+                return chunk
+    return s
 _VALID_DOC_TYPES = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
 _VALID_BUILDING_TYPES = {"casa", "edificio", "conjunto"}
 
@@ -60,12 +116,12 @@ async def handle_record_consent(
     if not contact_id:
         return {"ok": False, "error": "could_not_create_contact"}
 
-    # `consent_given` es la columna canónica (no usamos consent_at — no
-    # existe en el schema vigente). Auditoría temporal vive en
-    # contacts_consent_log si el tenant lo configuró (no en este turno).
-    supabase.table("contacts").update(
-        {"consent_given": given}
-    ).eq("id", contact_id).execute()
+    # `consent_given` + `consent_channel='whatsapp_bot'` (Ley 1581 — el canal
+    # debe documentarse). Schema canónico de migración 20260423000000_contacts_consent_v2.
+    supabase.table("contacts").update({
+        "consent_given": given,
+        "consent_channel": "whatsapp_bot" if given else None,
+    }).eq("id", contact_id).execute()
     logger.info(
         "[customer_tools.consent] contact=%s given=%s", contact_id, given,
     )
@@ -92,9 +148,26 @@ async def handle_set_customer_email(
     err = _gate_consent(ctx)
     if err:
         return err
-    email = str(args.get("email") or "").strip().lower()
-    if not _EMAIL_REGEX.match(email):
-        return {"ok": False, "error": "invalid_email_format"}
+    email_raw = args.get("email") or ""
+    email_str = str(email_raw).strip().lower()
+    # Defensa contra LLM que duplica/envuelve el email. Si el match estricto
+    # falla, extraer el PRIMER email válido del string (parsing robusto
+    # cortando en el primer '@').
+    if not _EMAIL_REGEX.match(email_str):
+        extracted = _extract_first_email(email_str)
+        if extracted and _EMAIL_REGEX.match(extracted):
+            logger.info(
+                "[customer_tools.email] LLM emitió %r — extraído %r",
+                email_str, extracted,
+            )
+            email_str = extracted
+        else:
+            logger.warning(
+                "[customer_tools.email] invalid_email_format args=%r normalized=%r",
+                email_raw, email_str,
+            )
+            return {"ok": False, "error": "invalid_email_format", "received": email_raw}
+    email = email_str
     if not ctx.contact_id:
         return {"ok": False, "error": "no_contact_id"}
     supabase.table("contacts").update({"email": email}).eq("id", ctx.contact_id).execute()
@@ -108,7 +181,13 @@ async def handle_set_customer_name(
     err = _gate_consent(ctx)
     if err:
         return err
-    full_name = " ".join(str(args.get("full_name") or "").split())
+    full_name_raw = " ".join(str(args.get("full_name") or "").split())
+    # Dedup defensivo contra LLM que concatena el nombre dos veces.
+    full_name = _dedup_repeated_string(full_name_raw)
+    if full_name != full_name_raw:
+        logger.info(
+            "[customer_tools.name] dedup '%s' → '%s'", full_name_raw, full_name,
+        )
     if not full_name:
         return {"ok": False, "error": "name_required"}
     if not ctx.contact_id:
@@ -127,6 +206,13 @@ async def handle_set_customer_document(
     doc_type = str(args.get("document_type") or "").strip().upper()
     doc_num_raw = str(args.get("document_number") or "").strip()
     doc_num = re.sub(r"[\s.\-]", "", doc_num_raw)
+    # Dedup contra LLM que concatena el número dos veces.
+    doc_num_dedup = _dedup_repeated_string(doc_num)
+    if doc_num_dedup != doc_num:
+        logger.info(
+            "[customer_tools.document] dedup %r → %r", doc_num, doc_num_dedup,
+        )
+    doc_num = doc_num_dedup
     if doc_type not in _VALID_DOC_TYPES:
         return {"ok": False, "error": f"invalid_document_type ({doc_type})"}
     if not doc_num or not doc_num.isdigit():

@@ -133,7 +133,17 @@ class Coordinator:
                 history, ["nos autorizas", "me autorizas"],
             )
             last_oc_confirm = self._last_outbound_matched(
-                history, ["confirmas que armamos", "armamos el pedido"],
+                history,
+                [
+                    "confirmas que armamos",
+                    "armamos el pedido",
+                    # Marker del resumen determinístico (render_summary
+                    # termina con "¿Confirmas que los datos están correctos
+                    # para generar tu link de pago?").
+                    "generar tu link de pago",
+                    "datos están correctos",
+                    "datos estan correctos",
+                ],
             )
             facts = _facts_from_cart_and_contact(
                 cart=cart, contact=contact_record,
