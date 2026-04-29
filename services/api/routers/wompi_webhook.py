@@ -252,18 +252,33 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
 
 
 _PAYMENT_FAILED_VARIANTS = [
-    "Hmm, tu pago del pedido *#{short_id}* no se completó. 😕\n\nEscríbenos *asesor* y te ayudamos a finalizar la compra.",
-    "El pago del pedido *#{short_id}* no pasó esta vez.\n\nEscribe *asesor* y te apoyamos para terminar la compra. 🙏",
-    "Tu pago del pedido *#{short_id}* quedó pendiente. \n\nEscríbenos *asesor* y vemos juntos cómo destrabarlo.",
+    "Hmm, tu pago del pedido *#{short_id}* no se completó. 😕\n\nSi quieres, te conecto con un {role} para terminar la compra juntos.",
+    "El pago del pedido *#{short_id}* no pasó esta vez. 🙏\n\nDime si prefieres que un {role} te acompañe a destrabarlo o intentarlo de nuevo.",
+    "Tu pago del pedido *#{short_id}* quedó pendiente.\n\n¿Te gustaría que un {role} te ayude a finalizar la compra?",
 ]
 
 
+def _get_tenant_escalation_role(supabase, tenant_id: str) -> str:
+    """Lee tenants.escalation_role (asesor/especialista/consultor/agente).
+    Default 'asesor' si no está configurado o falla la consulta.
+    """
+    try:
+        r = supabase.table("tenants").select("escalation_role").eq("id", tenant_id).limit(1).execute()
+        if r.data and r.data[0].get("escalation_role"):
+            return str(r.data[0]["escalation_role"]).strip().lower() or "asesor"
+    except Exception:
+        pass
+    return "asesor"
+
+
 def _enqueue_payment_failed_msg(supabase, *, conversation_id: str, tenant_id: str, order_id: str) -> None:
-    """Encola mensaje de pago fallido. 3 variantes rotativas por order_id (estable)."""
+    """Encola mensaje de pago fallido. 3 variantes rotativas por order_id (estable).
+    Usa el escalation_role configurado por tenant (asesor/especialista/consultor/agente)."""
     import hashlib
     short_id = order_id[:8].upper()
     idx = int(hashlib.md5(order_id.encode("utf-8")).hexdigest(), 16) % len(_PAYMENT_FAILED_VARIANTS)
-    text = _PAYMENT_FAILED_VARIANTS[idx].format(short_id=short_id)
+    role = _get_tenant_escalation_role(supabase, tenant_id)
+    text = _PAYMENT_FAILED_VARIANTS[idx].format(short_id=short_id, role=role)
     _enqueue_outbound_text(supabase, conversation_id=conversation_id, tenant_id=tenant_id, text=text)
 
 
