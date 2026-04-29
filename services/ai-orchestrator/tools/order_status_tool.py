@@ -111,6 +111,16 @@ def _tokenize(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", _normalize_text(text)))
 
 
+_COMPLAINT_TOKENS = frozenset({
+    "reclamo", "reclamos", "queja", "quejas", "molesto", "molesta",
+    "molestos", "molestas", "indignado", "indignada", "enojado", "enojada",
+    "frustrado", "frustrada", "decepcionado", "decepcionada",
+    "demandar", "demanda", "exijo", "exigir", "garantia", "garantía",
+    "devolucion", "devolución", "devolver", "reembolso", "reembolsar",
+    "estafa", "fraude", "robo", "engano", "engaño",
+})
+
+
 def is_order_status_query(text: str) -> bool:
     """
     Detecta si el mensaje es una consulta de estado de pedido.
@@ -125,6 +135,12 @@ def is_order_status_query(text: str) -> bool:
 
     # Evitar falsos positivos en frases de catálogo.
     if tokens & _NOT_ORDER_STATUS_TOKENS:
+        return False
+
+    # Si el cliente expresa reclamo/queja/garantía/devolución, NO es consulta
+    # de status — es escalación o reclamo formal. Cede precedencia al LLM
+    # para que detecte intent=complaint y dispare requires_human/ticket.
+    if tokens & _COMPLAINT_TOKENS:
         return False
 
     has_subject = bool(tokens & _ORDER_STATUS_SUBJECT_TOKENS)

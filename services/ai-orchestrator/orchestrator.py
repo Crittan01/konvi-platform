@@ -1625,13 +1625,33 @@ def _build_verified_order_context(
             if str(msg.get("direction") or "").lower() != "inbound":
                 continue
             c = _normalize_text(str(msg.get("content") or ""))
+            c_tokens = set(c.replace(",", " ").replace(".", " ").split())
             for v in variants:
                 lbl_clean = _clean_label(str(v.get("label") or ""))
+                # 1) Match completo del label (ej "presentacion 100g" en "...presentacion 100g...")
                 if lbl_clean and lbl_clean in c:
                     unit_price = float(v.get("price") or unit_price)
                     variant_label = str(v.get("label"))
-                    variation_id = v.get("id")  # ID real de DB
+                    variation_id = v.get("id")
                     break
+                # 2) Match por VALOR del attribute (ej "100g" cuando el cliente dice
+                #    "quiero el de 100g" sin nombrar el atributo "Presentación").
+                attrs = v.get("attributes") or {}
+                if isinstance(attrs, dict):
+                    matched = False
+                    for av in attrs.values():
+                        av_norm = _normalize_text(str(av or "")).strip()
+                        if not av_norm:
+                            continue
+                        # token-level match para evitar substring trampa (ej "10g" en "100g")
+                        if av_norm in c_tokens or av_norm in c.split():
+                            unit_price = float(v.get("price") or unit_price)
+                            variant_label = str(v.get("label"))
+                            variation_id = v.get("id")
+                            matched = True
+                            break
+                    if matched:
+                        break
             if variant_label:
                 break
         # Si no se detectó variante específica, usar la más barata disponible con su ID
@@ -2284,12 +2304,28 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
     if not role_desc:
         role_desc = f"Asistente comercial cordial de {tenant_name}."
 
+    # Personalización por cliente conocido — el bot debe saludar por nombre
+    # cuando hay contact con consent y el cliente solo está saludando.
+    _kc_first_name = _extract_first_name(
+        contact_record.get("name") if isinstance(contact_record, dict) else None
+    )
+    known_customer_block = ""
+    if _kc_first_name and isinstance(contact_record, dict) and contact_record.get("consent_given"):
+        known_customer_block = (
+            f"\nCLIENTE CONOCIDO: {_kc_first_name}.\n"
+            f"- Si el cliente solo saluda ('hola', 'buenas'), salúdalo por su primer nombre "
+            f"(ej. \"¡Hola, {_kc_first_name}!\") — es cliente recurrente y aprecia ese reconocimiento.\n"
+            f"- En el resto de la conversación, usa el primer nombre con moderación (1-2 veces máximo "
+            f"para no sonar artificial).\n"
+        )
+
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 COMPORTAMIENTO DEL AGENTE: {role_desc}
 (La identidad del negocio — misión, visión, valores — está abajo en "SOBRE LA TIENDA".)
 {tono_instruccion}
 {_HUMAN_STYLE_GUIDE}
 [ESTADO DE MÁQUINA (FSM): {display_state}]
+{known_customer_block}
 {customer_context_block}
 {store_location_section}
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
@@ -3112,11 +3148,9 @@ async def build_and_run_orchestration(
                     and _state_order.get(_new_state, 0) - _state_order.get(display_state, 0) >= 1
                     and _new_state != "READY_FOR_SUMMARY"
                 ):
-                    _first_name_sim = _extract_first_name(_sim_contact.get("name"))
-                    _ack_prefix = f"Gracias, {_first_name_sim}." if _first_name_sim else "Listo."
-                    parsed.response_text = (
-                        f"{_ack_prefix}\n\n{_build_next_data_request_prompt(_sim_contact)}"
-                    )
+                    # _build_next_data_request_prompt ya incluye "Gracias, {name}."
+                    # cuando aplica — usarlo TAL CUAL evita duplicar el saludo.
+                    parsed.response_text = _build_next_data_request_prompt(_sim_contact)
                     logger.info(
                         "[FSM][POST] override LLM: %s → %s (datos extraídos)",
                         display_state, _new_state,
@@ -3138,6 +3172,33 @@ async def build_and_run_orchestration(
             )
 
         # ── 8. Escalar a humano si es necesario ───────────────────────────────
+        # Bug 16 — Gate "compras previas?": si el cliente expresa reclamo
+        # y NO tiene NINGUNA orden con este número de WhatsApp, en vez de escalar
+        # directo, preguntar si usó otro número. Evita escalar a humano por ruido.
+        if (
+            parsed.intent_detected in _COMPLAINT_INTENTS
+            and parsed.requires_human
+            and contact_id
+        ):
+            try:
+                _orders_count_res = (
+                    supabase.table("orders")
+                    .select("id", count="exact")
+                    .eq("tenant_id", tenant_id)
+                    .eq("contact_id", contact_id)
+                    .execute()
+                )
+                _orders_count = int(getattr(_orders_count_res, "count", 0) or 0)
+            except Exception:
+                _orders_count = -1  # no bloquear si falla la consulta
+            if _orders_count == 0:
+                parsed.response_text = (
+                    "No veo compras registradas con este número de WhatsApp. "
+                    "¿Realizaste tu pedido con otro número o tienes el código de orden? "
+                    "Así te ayudo a resolver lo antes posible."
+                )
+                parsed.requires_human = False  # postpone escalación
+
         if parsed.requires_human:
             _set_conversation_status(
                 supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER

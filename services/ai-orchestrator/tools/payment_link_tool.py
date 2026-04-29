@@ -117,7 +117,9 @@ async def handle_payment_link_if_applicable(
     shipping_cost = (shipping_cost_cents or 0) / 100
     products_amount = total_amount - shipping_cost
 
-    order_notes = notes or f"Pedido conversacional — Total: ${total_amount:,.0f} COP"
+    # Formato Colombia: separador miles punto, sin centavos.
+    _total_co = f"${int(round(total_amount)):,}".replace(",", ".")
+    order_notes = notes or f"Pedido conversacional — Total: {_total_co} COP"
 
     # ── 2. Construir ítems del pedido ─────────────────────────────────────────
     # Si hay contexto verificado (producto + variante detectados desde catálogo + historial),
