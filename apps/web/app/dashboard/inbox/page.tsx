@@ -540,7 +540,18 @@ export default function InboxPage() {
         }
       })
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+
+    // Polling de seguridad cada 20s. Si Realtime falla por RLS,
+    // race u otros motivos, el polling recoge la conversación nueva sin
+    // requerir F5 manual. La query es liviana (50 conversaciones max).
+    const pollInterval = setInterval(() => {
+      loadConversations()
+    }, 20000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(pollInterval)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadConversations])
 
