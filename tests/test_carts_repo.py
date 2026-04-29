@@ -177,11 +177,13 @@ class CreateOpenCartTests(unittest.TestCase):
 class AddItemTests(unittest.TestCase):
     def test_calls_rpc_with_correct_args(self):
         sb = _SBFake()
+        # RPC ahora devuelve OUT params con prefijo `out_` (rev. fix
+        # 20260501000001) — el repo los normaliza al nombre sin prefijo.
         sb.rpc_response = [{
-            "cart_id": "cart-1",
-            "new_version": 4,
-            "subtotal_cents": 11150000,
-            "total_cents": 11850000,
+            "out_cart_id": "cart-1",
+            "out_new_version": 4,
+            "out_subtotal_cents": 11150000,
+            "out_total_cents": 11850000,
         }]
         repo = CartsRepo(sb)
         result = repo.add_item(
@@ -195,6 +197,7 @@ class AddItemTests(unittest.TestCase):
         self.assertEqual(sb.rpc_args["args"]["p_quantity"], 1)
         self.assertEqual(sb.rpc_args["args"]["p_expected_version"], 3)
         self.assertEqual(result["new_version"], 4)
+        self.assertEqual(result["subtotal_cents"], 11150000)
 
     def test_invalid_quantity_raises_value_error(self):
         repo = CartsRepo(_SBFake())

@@ -227,7 +227,20 @@ class CartsRepo:
             rows = res.data or []
             if not rows:
                 raise CartNotFound(f"cart {cart_id} not found for tenant {tenant_id}")
-            return rows[0]
+            row = rows[0]
+            # Normalizar nombres OUT del RPC (prefijo `out_` desde rev. fix
+            # del 2026-05-01). Mantener compat hacia atrás por si algún test
+            # mockea con los nombres viejos.
+            return {
+                "cart_id": row.get("out_cart_id") or row.get("cart_id"),
+                "new_version": row.get("out_new_version") or row.get("new_version"),
+                "subtotal_cents": row.get("out_subtotal_cents")
+                    if row.get("out_subtotal_cents") is not None
+                    else row.get("subtotal_cents"),
+                "total_cents": row.get("out_total_cents")
+                    if row.get("out_total_cents") is not None
+                    else row.get("total_cents"),
+            }
         except CartError:
             raise
         except Exception as exc:
