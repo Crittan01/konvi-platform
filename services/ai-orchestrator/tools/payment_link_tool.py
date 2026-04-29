@@ -168,6 +168,40 @@ async def handle_payment_link_if_applicable(
             tenant_id,
         )
 
+    # ── 2.5. Pre-validación de stock (Bug 26 — soft-check antes de generar link) ──
+    # No es soft-reserve atómica (eso requeriría tabla stock_reservations + lock),
+    # pero al menos rechaza el link si en este momento alguna variante tiene
+    # stock < quantity. Reduce el riesgo de oversell por checkout simultáneo.
+    insufficient: list[str] = []
+    for it in items_to_persist:
+        var_id = it.get("variation_id")
+        qty_needed = int(it.get("quantity") or 1)
+        if not var_id or qty_needed <= 0:
+            continue
+        try:
+            r = supabase.table("product_variations").select(
+                "sku, stock_quantity"
+            ).eq("id", var_id).single().execute()
+            if r.data and int(r.data.get("stock_quantity") or 0) < qty_needed:
+                sku = r.data.get("sku") or var_id[:8]
+                insufficient.append(
+                    f"{sku} (pediste {qty_needed}, hay {r.data.get('stock_quantity')})"
+                )
+        except Exception as exc:
+            logger.warning("[PAYMENT_LINK] No pude validar stock variation=%s: %s", var_id, exc)
+    if insufficient:
+        return PaymentLinkResult(
+            checkout_url="",
+            order_id="",
+            amount_in_cents=0,
+            expires_at="",
+            response_text=(
+                "Lo siento, justo en este momento nos quedamos sin stock suficiente de:\n"
+                + "\n".join(f"• {x}" for x in insufficient)
+                + "\n\n¿Quieres ajustar las cantidades o ver alternativas?"
+            ),
+        )
+
     # ── 3. Crear orden en Core API (pending_payment) ──────────────────────────
     order_payload = {
         "contact_id": contact_id,

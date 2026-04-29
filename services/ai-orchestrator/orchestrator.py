@@ -3473,8 +3473,14 @@ async def build_and_run_orchestration(
                         parsed.response_text = parsed.response_text.rstrip() + _ticket_suffix
 
         # ── 8.5 Actualizar datos del contacto ─────────────────────────────────
+        # Bug 27 (Ley 1581 Colombia): NO persistir datos personales (name, email,
+        # address, document) si el cliente no ha dado consentimiento explícito.
+        # Solo persistir cuando contact.consent_given == True. El cliente puede
+        # mencionar datos en su pitch pero el bot los retiene en el contexto
+        # de la conversación sin escribirlos en DB hasta que autorice.
+        _consent_ok = bool(contact_record and contact_record.get("consent_given"))
         _has_doc_extract = bool(parsed.extracted_document_type or parsed.extracted_document_number)
-        if contact_id and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email or _has_doc_extract):
+        if contact_id and _consent_ok and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email or _has_doc_extract):
             update_data = {}
             if parsed.extracted_email and _EMAIL_REGEX.match(str(parsed.extracted_email).strip()):
                 update_data["email"] = str(parsed.extracted_email).strip().lower()
