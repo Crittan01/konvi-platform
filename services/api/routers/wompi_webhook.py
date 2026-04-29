@@ -58,6 +58,12 @@ def _process_wompi_event(payload: dict) -> None:
 
     txn = payload.get("data", {}).get("transaction", {})
     txn_id = txn.get("id", "")
+    # Identificador único del evento. Wompi no expone formalmente `event.id`
+    # en docs públicas — el `signature.checksum` es la mejor alternativa
+    # (cambia con cada payload exacto). Si el merchant ya procesó este
+    # checksum, el evento es duplicado.
+    sig = payload.get("signature", {}) or {}
+    event_uid = (sig.get("checksum") or "").strip()
     txn_status = txn.get("status", "")
     amount_in_cents = txn.get("amount_in_cents", 0)
     payment_link_id = txn.get("payment_link_id")
@@ -87,6 +93,40 @@ def _process_wompi_event(payload: dict) -> None:
     if not verify_event_signature(payload, events_key):
         logger.warning("[WOMPI] firma_invalida event=%s link=%s tenant=%s", event_name, payment_link_id, tenant_id_for_sig)
         return
+
+    # ── 3.5. Dedup de eventos duplicados por checksum (Wompi reintenta en
+    # 30m/3h/24h cuando merchant responde no-2xx; la firma SHA256 del payload
+    # es el identificador más confiable porque no se documenta `event.id`
+    # estable). INSERT con ON CONFLICT DO NOTHING — si la fila ya existía,
+    # `data` viene vacía y descartamos el evento.
+    if event_uid and tenant_id_for_sig:
+        try:
+            supabase.table("wompi_events_seen").insert({
+                "event_id": event_uid,
+                "tenant_id": tenant_id_for_sig,
+                "event_type": event_name,
+                "transaction_id": txn_id or None,
+                "reference": wompi_reference or None,
+                "status": txn_status or None,
+            }).execute()
+        except Exception as exc:
+            # Confiamos SOLO en la excepción de PK duplicada para descartar.
+            # Postgres levanta SQLSTATE 23505; postgrest mapea a APIError con
+            # "duplicate key" en el mensaje.
+            msg = str(exc)
+            if "duplicate key" in msg or "23505" in msg:
+                logger.info(
+                    "[WOMPI] evento_duplicado checksum=%s txn=%s — descartado por dedup",
+                    event_uid[:12], txn_id,
+                )
+                return
+            # Cualquier otro error (red, schema, mock test sin tabla): NO
+            # bloquear procesamiento — la idempotencia upstream (orden ya
+            # confirmed → skip) protege de doble decremento.
+            logger.warning(
+                "[WOMPI] dedup_check_failed checksum=%s err=%s — continúa procesamiento",
+                event_uid[:12], exc,
+            )
 
     # ── 4. Registrar/actualizar pago en tabla payments (idempotente por txn_id) ─
     try:
@@ -156,6 +196,16 @@ def _process_wompi_event(payload: dict) -> None:
             logger.error("[WOMPI] error_notificacion conv=%s order=%s error=%s", conversation_id, order_id, e)
     else:
         logger.info("[WOMPI] sin_conversation_id order=%s — sin notificación WhatsApp", order_id)
+
+    # ── 8. Marcar el evento como procesado (audit trail). Si falla este UPDATE
+    # no es crítico — el dedup ya bloqueó duplicados al inicio.
+    if event_uid:
+        try:
+            supabase.table("wompi_events_seen").update(
+                {"processed_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("event_id", event_uid).execute()
+        except Exception as exc:
+            logger.warning("[WOMPI] dedup_mark_processed_failed checksum=%s err=%s", event_uid[:12], exc)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

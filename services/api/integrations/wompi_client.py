@@ -112,39 +112,68 @@ def verify_event_signature(payload: dict, events_key: str) -> bool:
     return valid
 
 
+# Tipos de documento ACEPTADOS oficialmente por Wompi en customer_data
+# para Colombia (https://docs.wompi.co/docs/colombia/medios-de-pago-pse/).
+# La doc pública lista CC, CE, NIT explícitamente. PP/TI/OTHER NO aparecen
+# en la sección PSE — los mapeamos a CC para que pre-llene en lugar de
+# generar HTTP 422 cuando el método de pago es PSE/Bancolombia.
+_WOMPI_LEGAL_ID_TYPES_OFFICIAL = {"CC", "CE", "NIT"}
+_WOMPI_LEGAL_ID_TYPES_FALLBACK = {"PP": "CC", "TI": "CC", "OTHER": "CC"}
+
+
 def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
     """Construye el bloque customer_data Wompi a partir del contacto.
 
-    Rev. 68 — pre-popula el checkout Wompi para reducir abandono. Wompi acepta
-    todos los campos como opcionales pero PSE/Bancolombia los requieren en
-    práctica. Incluimos solo los campos que tienen valor (Wompi rechaza
-    explícitamente campos null).
+    Reglas (verificadas con auditoría agentes 2026-04-29):
+      - Solo se incluyen claves con valor (Wompi devuelve 422 ante nulls
+        explícitos en strings — confirmado empíricamente).
+      - ``legal_id_type`` se restringe a CC/CE/NIT (los únicos documentados
+        oficialmente para PSE). PP/TI/OTHER se mapean a CC para pre-fill;
+        el cliente puede cambiarlo en el checkout si aplica.
+      - ``phone_number_prefix`` separado (ej. ``+57``) según schema oficial.
 
-    legal_id_type debe ser uno de: CC, CE, NIT, PP, TI, OTHER (para Colombia).
+    Ref: https://docs.wompi.co/docs/colombia/widget-checkout-web/
     """
     if not contact:
         return None
     cd: dict = {}
-    # Email (lowercase, ya normalizado en contacts.py)
-    if email := (contact.get("email") or "").strip():
+
+    # Email (lowercase normalizado upstream)
+    email = (contact.get("email") or "").strip()
+    if email:
         cd["email"] = email
-    # Nombre completo
-    if full_name := (contact.get("name") or "").strip():
+
+    full_name = (contact.get("name") or "").strip()
+    if full_name:
         cd["full_name"] = full_name
+
     # Teléfono Wompi: split prefix + number. WhatsApp guarda con + (ej. +573001234567).
-    if phone := (contact.get("phone") or "").strip():
+    phone = (contact.get("phone") or "").strip()
+    if phone:
         digits = phone.lstrip("+").lstrip("0")
         if digits.startswith("57") and len(digits) >= 12:
             cd["phone_number_prefix"] = "+57"
             cd["phone_number"] = digits[2:]
         else:
+            # Fallback: solo number sin prefix. Wompi puede aceptarlo o ignorarlo
+            # según el método. No agregar prefix=null porque Wompi rechaza nulls.
             cd["phone_number"] = digits
-    # Documento: ambos juntos o ninguno (regla Wompi).
-    doc_type = (contact.get("document_type") or "").strip().upper()
-    doc_num  = (contact.get("document_number") or "").strip()
-    if doc_type and doc_num:
+
+    # Documento: ambos juntos o ninguno (regla Wompi confirmada en doc).
+    doc_type_raw = (contact.get("document_type") or "").strip().upper()
+    doc_num = (contact.get("document_number") or "").strip()
+    if doc_type_raw and doc_num:
+        if doc_type_raw in _WOMPI_LEGAL_ID_TYPES_OFFICIAL:
+            doc_type = doc_type_raw
+        else:
+            doc_type = _WOMPI_LEGAL_ID_TYPES_FALLBACK.get(doc_type_raw, "CC")
+            logger.info(
+                "[WOMPI] legal_id_type=%s no oficial — mapeando a %s para pre-fill",
+                doc_type_raw, doc_type,
+            )
         cd["legal_id"] = doc_num
         cd["legal_id_type"] = doc_type
+
     return cd or None
 
 
