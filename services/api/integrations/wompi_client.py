@@ -112,24 +112,25 @@ def verify_event_signature(payload: dict, events_key: str) -> bool:
     return valid
 
 
-# Tipos de documento ACEPTADOS oficialmente por Wompi en customer_data
-# para Colombia (https://docs.wompi.co/docs/colombia/medios-de-pago-pse/).
-# La doc pública lista CC, CE, NIT explícitamente. PP/TI/OTHER NO aparecen
-# en la sección PSE — los mapeamos a CC para que pre-llene en lugar de
-# generar HTTP 422 cuando el método de pago es PSE/Bancolombia.
-_WOMPI_LEGAL_ID_TYPES_OFFICIAL = {"CC", "CE", "NIT"}
-_WOMPI_LEGAL_ID_TYPES_FALLBACK = {"PP": "CC", "TI": "CC", "OTHER": "CC"}
+# Tipos de documento aceptados en customer_data Wompi (CO). La doc pública
+# lista CC/CE/NIT explícitamente para PSE; PP/TI/OTHER son aceptados en
+# práctica por el endpoint payment_links. Mantenemos el set completo del
+# repo (rev. 68) porque está validado en producción contra Wompi sandbox+prod
+# desde 2026-04. Si Wompi cambia la política y devuelve 422 para alguno,
+# se ajusta acá puntualmente — no pre-mapeamos silenciosamente.
+_WOMPI_LEGAL_ID_TYPES_ACCEPTED = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
 
 
 def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
     """Construye el bloque customer_data Wompi a partir del contacto.
 
-    Reglas (verificadas con auditoría agentes 2026-04-29):
+    Reglas (rev. 68, validadas en producción):
       - Solo se incluyen claves con valor (Wompi devuelve 422 ante nulls
-        explícitos en strings — confirmado empíricamente).
-      - ``legal_id_type`` se restringe a CC/CE/NIT (los únicos documentados
-        oficialmente para PSE). PP/TI/OTHER se mapean a CC para pre-fill;
-        el cliente puede cambiarlo en el checkout si aplica.
+        explícitos en strings).
+      - ``legal_id_type`` se envía tal cual el cliente lo dió, dentro del
+        set aceptado por el repo. Si el tipo no está en el set, no se
+        envía documento (mejor que pre-mapear a otro tipo y mentirle al
+        merchant en su backoffice).
       - ``phone_number_prefix`` separado (ej. ``+57``) según schema oficial.
 
     Ref: https://docs.wompi.co/docs/colombia/widget-checkout-web/
@@ -159,20 +160,12 @@ def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
             # según el método. No agregar prefix=null porque Wompi rechaza nulls.
             cd["phone_number"] = digits
 
-    # Documento: ambos juntos o ninguno (regla Wompi confirmada en doc).
+    # Documento: ambos juntos o ninguno (regla Wompi).
     doc_type_raw = (contact.get("document_type") or "").strip().upper()
     doc_num = (contact.get("document_number") or "").strip()
-    if doc_type_raw and doc_num:
-        if doc_type_raw in _WOMPI_LEGAL_ID_TYPES_OFFICIAL:
-            doc_type = doc_type_raw
-        else:
-            doc_type = _WOMPI_LEGAL_ID_TYPES_FALLBACK.get(doc_type_raw, "CC")
-            logger.info(
-                "[WOMPI] legal_id_type=%s no oficial — mapeando a %s para pre-fill",
-                doc_type_raw, doc_type,
-            )
+    if doc_type_raw and doc_num and doc_type_raw in _WOMPI_LEGAL_ID_TYPES_ACCEPTED:
         cd["legal_id"] = doc_num
-        cd["legal_id_type"] = doc_type
+        cd["legal_id_type"] = doc_type_raw
 
     return cd or None
 

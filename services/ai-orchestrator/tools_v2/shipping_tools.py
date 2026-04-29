@@ -118,24 +118,23 @@ async def handle_quote_shipping(
         logger.exception("[shipping_tools.quote] origin lookup failed")
         return {"ok": False, "error": str(exc)}
 
-    # 3. Construir packages — UN ITEM POR BULTO físico, no consolidar.
-    #    Práctica oficial Envia + DHL: el carrier calcula chargeable_weight
-    #    como Σ max(peso_físico, peso_volumétrico) por paquete y suma.
-    #    Consolidar dimensiones en una caja virtual (suma o cube-root scale)
-    #    es subóptimo: el divisor volumétrico depende del carrier (lo decide
-    #    Envia internamente al cotizar). NO debemos pre-calcular volumétrico.
-    #    Ref: https://help.envia.com/en/volumetric-weight/
-    #         https://www.dhl.com/.../calculating-chargeable-weights.html
+    # 3. Construir parcel consolidado — 1 parcel con `amount=total_qty`.
+    #    Mantener paridad con el patrón del monolito (services/.../tools/
+    #    shipping_quote_tool.py:_build_quote_payload) que YA FUNCIONA en
+    #    producción contra Envia + carriers CO. El API gateway valida
+    #    `Parcel.amount: int >= 1` (servicios/api/routers/shipping.py:234)
+    #    interpretándolo como "número de unidades del bulto", no valor
+    #    monetario. Carrier hace volumetric internamente.
     products_for_shipping = _get_tenant_products_for_shipping_quote(supabase, ctx.tenant_id)
     var_index: dict[str, tuple[dict, dict]] = {}
     for prod in products_for_shipping:
         for v in (prod.get("product_variations") or []):
             var_index[str(v.get("id"))] = (prod, v)
 
-    parcels: list[dict] = []
-    summaries: list[str] = []
+    weight_kg = 0.0
+    max_l = max_w = max_h = 0.0
     total_qty = 0
-    item_subtotal_cents = 0
+    summaries: list[str] = []
 
     for item in ctx.cart.items:
         prod_var = var_index.get(item.variation_id)
@@ -143,42 +142,37 @@ async def handle_quote_shipping(
             prod, var = prod_var
         else:
             prod, var = {}, {}
-        # Dimensiones reales por variante (con defaults conservadores).
         w = max(float(var.get("weight_kg") or DEFAULT_WEIGHT_KG), 0.05)
         l_cm = max(float(var.get("length_cm") or DEFAULT_LENGTH_CM), 1.0)
         wd_cm = max(float(var.get("width_cm") or DEFAULT_WIDTH_CM), 1.0)
         h_cm = max(float(var.get("height_cm") or DEFAULT_HEIGHT_CM), 1.0)
 
+        # Sumar pesos por unidad; mantener máx de cada dimensión.
+        # Patrón estándar para envío consolidado en una caja contenedora.
+        weight_kg += w * item.quantity
+        max_l = max(max_l, l_cm)
+        max_w = max(max_w, wd_cm)
+        max_h = max(max_h, h_cm)
+        total_qty += item.quantity
+
         title = str(prod.get("title") or "Producto")
         var_label = ", ".join(
             f"{k}: {v}" for k, v in (var.get("attributes") or {}).items()
         ) or var.get("sku") or ""
-
-        # Un parcel POR UNIDAD del item: el carrier hace bin-packing internamente
-        # si el cliente declara N items separados. Cuando quantity > 1, replicamos
-        # el parcel `quantity` veces — Envia API soporta nativamente esto y
-        # cobra por chargeable weight real, no por dimensiones inventadas.
-        parcel_template = {
-            "weight": round(w, 3),
-            "length": round(l_cm, 1),
-            "width": round(wd_cm, 1),
-            "height": round(h_cm, 1),
-            "content": title[:80] or "Mercancía general",
-            "amount": int(round((item.unit_price_cents / 100) * 1)),  # valor declarado por unidad
-            "insuranceAmount": 0,
-        }
-        for _ in range(item.quantity):
-            parcels.append(dict(parcel_template))
-
-        total_qty += item.quantity
-        item_subtotal_cents += item.line_total_cents
         summaries.append(
             f"{item.quantity}x {title} ({var_label})" if var_label
             else f"{item.quantity}x {title}"
         )
 
-    if not parcels:
-        return {"ok": False, "error": "empty_cart"}
+    parcel = {
+        "weight": round(max(weight_kg, 0.05), 3),
+        "length": round(max(max_l, 1.0), 1),
+        "width": round(max(max_w, 1.0), 1),
+        "height": round(max(max_h, 1.0), 1),
+        "amount": max(total_qty, 1),  # cantidad de unidades, NO valor
+        "content": (" + ".join(summaries[:3]))[:120] or "Mercancía general",
+        "insuranceAmount": 0,
+    }
 
     # 4. POST /api/v1/shipping/quote (API gateway con Vault).
     token = _build_api_auth_token(ctx.tenant_id)
@@ -188,7 +182,7 @@ async def handle_quote_shipping(
     payload = {
         "origin": origin,
         "destination": dest,
-        "parcels": parcels,
+        "parcels": [parcel],
     }
     headers = {
         "Authorization": f"Bearer {token}",
@@ -295,6 +289,36 @@ async def handle_quote_shipping(
     except CartConflict:
         return {"ok": False, "error": "concurrent_update", "retry": True}
 
+    # 5. Soft-reserve de stock — Stripe Checkout pattern.
+    # Reservamos al `quote_shipping_ok` (señal fuerte de intención: el cliente
+    # ya dio ciudad y vio el costo total). TTL 35 min. Si algún item se quedó
+    # sin stock entre `add_item_to_cart` y este punto, devolvemos al LLM la
+    # lista de variantes insuficientes para que negocie con el cliente.
+    # Doc: supabase/migrations/20260502000000_stock_reservations.sql
+    reservations: list[dict] = []
+    insufficient_stock: list[str] = []
+    try:
+        items_to_reserve = [
+            {"variation_id": item.variation_id, "qty": item.quantity}
+            for item in ctx.cart.items
+        ]
+        reservations, insufficient_stock = repo.reserve_stock_for_cart(
+            tenant_id=ctx.tenant_id,
+            cart_id=ctx.cart.id,
+            conversation_id=ctx.conversation_id,
+            items=items_to_reserve,
+            ttl_minutes=35,
+        )
+        if insufficient_stock:
+            logger.warning(
+                "[shipping_tools.quote] %d items sin stock suficiente: %s",
+                len(insufficient_stock), insufficient_stock,
+            )
+    except Exception as exc:
+        # No bloqueamos la cotización si la reserva falla — el merchant
+        # decidirá manualmente. Solo logueamos.
+        logger.warning("[shipping_tools.quote] reserve_stock failed: %s", exc)
+
     return {
         "ok": True,
         "destination": {
@@ -313,6 +337,8 @@ async def handle_quote_shipping(
             "price_cents": _price_cents(fastest),
             "delivery_days": _delivery_days(fastest),
         } if fastest else None,
+        "stock_reservations": reservations,
+        "stock_insufficient": insufficient_stock,
     }
 
 
