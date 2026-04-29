@@ -227,12 +227,16 @@ async def handle_confirm_order(
         ]},
     )
     if not pl:
+        # NO prometer asesor en el message — eso fuerza al cliente a esperar
+        # un humano que quizá no llega. En cambio, mensaje técnico neutro:
+        # el orquestador puede reintentar o el cliente puede pedir
+        # explícitamente hablar con alguien (que sí dispara escalate_to_human).
         return {
             "ok": False,
             "error": "payment_link_failed",
             "message": (
-                "No pude generar tu link de pago automáticamente. "
-                "Te paso con un asesor para finalizar tu pedido."
+                "Tuve un problema técnico generando tu link de pago. "
+                "Por favor, intentémoslo en un momento."
             ),
         }
 

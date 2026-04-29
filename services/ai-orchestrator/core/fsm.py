@@ -217,6 +217,14 @@ ALLOWED_TOOLS_BY_STATE: dict[State, frozenset[str]] = {
     }),
     State.AWAITING_ORDER_CONFIRMATION: frozenset({
         "confirm_order", "cancel_order",
+        # Cliente puede cambiar de opinión y querer agregar/quitar items o
+        # corregir un dato antes de confirmar. NO restringir solo a confirm/
+        # cancel — eso causa que el LLM con mode=ANY confirme cuando el
+        # cliente está pidiendo agregar otra cosa.
+        "add_item_to_cart", "remove_item_from_cart",
+        "set_customer_email", "set_customer_name",
+        "set_customer_document", "set_customer_address",
+        "render_summary", "search_catalog", "get_product_image",
     }),
 }
 
