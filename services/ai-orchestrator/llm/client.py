@@ -96,17 +96,47 @@ def invoke_llm(
         "temperature": temperature,
     }
 
+    # gemini-2.5-flash habilita "thinking" por default — el modelo gasta
+    # tokens en razonamiento interno antes de emitir output. En flujos
+    # transaccionales cortos (tool_use o respuesta breve) esto se manifiesta
+    # como `finish=STOP` con `text=None` y `function_calls=[]` cuando el
+    # budget se agota antes del output. Lo desactivamos.
+    # Ref: https://ai.google.dev/gemini-api/docs/thinking
+    try:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+    except Exception:
+        pass
+
+    # Deshabilitar AFC (Automatic Function Calling) del SDK. AFC ejecuta
+    # function_calls internamente y solo expone el resultado final, lo que
+    # rompe nuestro coordinator (que necesita ver y ejecutar las llamadas
+    # explícitamente con acceso a Supabase, repos, etc.). Sin disable, en
+    # mode=ANY el SDK puede entrar en bucles internos y devolver texto.
+    # Ref: https://ai.google.dev/gemini-api/docs/function-calling
+    try:
+        config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
+            disable=True,
+        )
+    except Exception:
+        pass
+
     if allowed_tools is not None and allowed_tools:
         tool_specs = get_tool_specs(allowed_tools)
         if tool_specs:
+            # La restricción de qué tools puede ver el modelo se hace via el
+            # array `tools` (le pasamos solo las permitidas en este estado).
+            # `allowed_function_names` es un mecanismo SECUNDARIO que solo
+            # acepta Gemini cuando `mode in {ANY, VALIDATED}` — con AUTO/NONE
+            # el API rechaza con INVALID_ARGUMENT.
+            # Ref: https://ai.google.dev/gemini-api/docs/function-calling
             config_kwargs["tools"] = [
                 types.Tool(function_declarations=tool_specs)
             ]
+            fc_kwargs: dict = {"mode": tool_mode}
+            if tool_mode.upper() in {"ANY", "VALIDATED"}:
+                fc_kwargs["allowed_function_names"] = sorted(allowed_tools)
             config_kwargs["tool_config"] = types.ToolConfig(
-                function_calling_config=types.FunctionCallingConfig(
-                    mode=tool_mode,
-                    allowed_function_names=sorted(allowed_tools),
-                )
+                function_calling_config=types.FunctionCallingConfig(**fc_kwargs)
             )
         else:
             logger.warning(
@@ -121,7 +151,20 @@ def invoke_llm(
         contents=contents,
         config=config,
     )
+    # Diagnóstico temporal: dump del response cuando no hay function_calls
+    # ni text — útil para debuggear mode=ANY que retorna vacío.
     turn = parse_response(response)
+    if not turn.function_calls and not turn.text:
+        logger.warning(
+            "[llm.client] respuesta vacía — raw=%s",
+            getattr(response, "to_json_dict", lambda: str(response))(),
+        )
+    elif tool_mode and tool_mode.upper() == "ANY" and not turn.function_calls:
+        logger.warning(
+            "[llm.client] mode=ANY pero LLM emitió texto sin tool — "
+            "candidates=%s",
+            getattr(response, "candidates", None),
+        )
     logger.info(
         "[llm.client] model=%s finish=%s n_calls=%d has_text=%s",
         model, turn.finish_reason.value, len(turn.function_calls),

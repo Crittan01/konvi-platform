@@ -261,13 +261,32 @@ class CartsRepo:
         cart_id: str,
         shipping_meta: dict,
         shipping_cents: int,
-        expected_version: int,
+        expected_version: Optional[int] = None,
     ) -> int:
         """Persiste metadatos de envío + costo y bumpea version.
+
+        Si ``expected_version`` es None, se hace UPDATE sin check optimista
+        (read-current + apply). Útil cuando un mismo turn ejecuta múltiples
+        tools que tocan el cart y la versión cached del context queda stale
+        rápidamente.
 
         Retorna el nuevo ``version``. Levanta :class:`CartConflict` si la
         version esperada no coincide (update afectó 0 filas).
         """
+        if expected_version is None:
+            # Leer el version actual y reintentar; si la fila desaparece
+            # (CASCADE, etc.), levantar CartNotFound.
+            cur = (
+                self._sb.table("conversation_carts")
+                .select("version")
+                .eq("id", cart_id)
+                .eq("tenant_id", tenant_id)
+                .single()
+                .execute()
+            )
+            if not cur.data:
+                raise CartNotFound(f"cart {cart_id} not found for tenant {tenant_id}")
+            expected_version = int(cur.data["version"])
         res = (
             self._sb.table("conversation_carts")
             .update(

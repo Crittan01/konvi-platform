@@ -252,32 +252,33 @@ class Coordinator:
                 logger.warning("[coord] tool sin handler: %s", fc.name)
                 results.append({"ok": False, "error": "tool_not_implemented"})
                 continue
+            # Inspección de la firma del handler para pasar SOLO los kwargs
+            # que acepta. Más limpio que catch-TypeError encadenado.
+            import inspect
+            sig = inspect.signature(handler)
+            params = sig.parameters
+            kwargs: dict = {"ctx": ctx, "args": fc.args or {}}
+            if "repo" in params:
+                kwargs["repo"] = self._carts_repo
+            if "supabase" in params:
+                kwargs["supabase"] = self._sb
             try:
-                result = await handler(
-                    ctx=ctx,
-                    args=fc.args or {},
-                    repo=self._carts_repo,
-                    supabase=self._sb,
-                )
-            except TypeError:
-                # Algunos handlers no aceptan 'repo' o 'supabase' — los
-                # llamamos solo con lo que necesiten.
-                try:
-                    result = await handler(
-                        ctx=ctx, args=fc.args or {}, supabase=self._sb,
-                    )
-                except TypeError:
-                    try:
-                        result = await handler(ctx=ctx, args=fc.args or {}, repo=self._carts_repo)
-                    except TypeError:
-                        result = await handler(ctx=ctx, args=fc.args or {})
+                result = await handler(**kwargs)
             except Exception as exc:
                 logger.exception("[coord] tool '%s' execution failed", fc.name)
                 result = {"ok": False, "error": str(exc)}
             results.append(result if isinstance(result, dict) else {"ok": True, "value": result})
-            logger.info(
-                "[coord] tool=%s ok=%s", fc.name, result.get("ok") if isinstance(result, dict) else True,
-            )
+            if isinstance(result, dict):
+                ok = result.get("ok")
+                if ok is False:
+                    logger.warning(
+                        "[coord] tool=%s ok=False detail=%s",
+                        fc.name, {k: v for k, v in result.items() if k != "ok"},
+                    )
+                else:
+                    logger.info("[coord] tool=%s ok=%s", fc.name, ok)
+            else:
+                logger.info("[coord] tool=%s value-only", fc.name)
         return results
 
     async def _reinvoke_llm_with_results(
@@ -306,11 +307,16 @@ class Coordinator:
             })
 
         try:
+            # Tras ejecutar tools, usar AUTO en la re-invocación. Si dejamos
+            # mode=ANY el modelo entra en bucle (siempre obligado a llamar
+            # tool, aunque ya haya logrado lo que el cliente pidió). AUTO
+            # permite que emita el texto de confirmación al cliente.
+            # Ref: https://ai.google.dev/gemini-api/docs/function-calling
             turn = invoke_llm(
                 system_instruction=specialist.build_system_instruction(ctx),
                 contents=contents,
                 allowed_tools=tools_for_state(ctx.fsm_state),
-                tool_mode=specialist.tool_mode,
+                tool_mode="AUTO",
             )
         except Exception as exc:
             logger.exception("[coord] reinvoke failed")

@@ -2,7 +2,7 @@
 
 Tools cubiertos:
   - ``quote_shipping``  → cotiza con Envia desde el carrito persistido (NO
-    re-deriva del history). Persiste rate_id + costo en
+    re-deriva del history). Persiste rates + costo en
     ``conversation_carts.shipping_meta`` + ``shipping_cents``.
   - ``select_carrier``  → confirma elección entre Económica/Rápida.
 
@@ -10,13 +10,21 @@ Diferencia fundamental con la versión vieja:
   - Lee ``ctx.cart.items`` como fuente de verdad. El paquete se calcula
     sumando peso y dimensiones de las variantes reales del carrito.
   - NO hay regex sobre el historial. NO hay falsos positivos por apellidos
-    que coincidan con ciudad ("Garzón" ≠ destino).
+    que coincidan con ciudad.
+
+Llama el endpoint ``/api/v1/shipping/quote`` del API gateway (que tiene
+acceso al Vault con credenciales Envia por tenant). El orquestador NO
+importa ``envia_client`` directamente — esa dependencia vive en el API.
 """
 from __future__ import annotations
 
 import logging
+import os
+import uuid
 from typing import Any, Optional
 
+import httpx
+import jwt
 from supabase import Client
 
 from core.context import ConversationContext
@@ -25,9 +33,36 @@ from persistence.carts_repo import CartsRepo, CartConflict
 logger = logging.getLogger("orchestrator.tools_v2.shipping")
 
 
+API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+SHIPPING_REQUEST_TIMEOUT_SECONDS = int(os.getenv("SHIPPING_REQUEST_TIMEOUT_SECONDS", "20"))
+
+
+def _build_api_auth_token(tenant_id: str) -> Optional[str]:
+    """Construye un JWT compatible con el middleware del API gateway.
+
+    Replica el patrón de ``shipping_quote_tool._build_api_auth_token`` y
+    ``payment_link_tool._build_api_auth_token`` para mantener una sola
+    convención de auth interno.
+    """
+    if not SUPABASE_JWT_SECRET:
+        return None
+    import time
+    now = int(time.time())
+    payload = {
+        "aud": "authenticated",
+        "sub": "orchestrator",
+        "role": "authenticated",
+        "email": "orchestrator@system.local",
+        "iat": now,
+        "exp": now + 300,
+        "app_metadata": {"tenant_id": tenant_id, "role": "owner"},
+        "user_metadata": {},
+    }
+    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+
+
 def _cube_root_scale(dim_cm: float, total_qty: int) -> float:
-    """Escala una dimensión por raíz cúbica del total — patrón existente
-    en shipping_quote_tool original (multi-producto)."""
     if total_qty <= 1:
         return dim_cm
     return dim_cm * (total_qty ** (1.0 / 3.0))
@@ -89,19 +124,17 @@ async def handle_quote_shipping(
         logger.exception("[shipping_tools.quote] origin lookup failed")
         return {"ok": False, "error": str(exc)}
 
-    # 3. Construir paquete sumando ítems del carrito (peso + dimensiones).
-    #    Lookup de pesos/dims por variation_id desde tabla product_variations.
+    # 3. Construir paquete sumando ítems del carrito.
+    products_for_shipping = _get_tenant_products_for_shipping_quote(supabase, ctx.tenant_id)
+    var_index: dict[str, tuple[dict, dict]] = {}
+    for prod in products_for_shipping:
+        for v in (prod.get("product_variations") or []):
+            var_index[str(v.get("id"))] = (prod, v)
+
     weight_kg = 0.0
     max_l = max_w = max_h = 0.0
     total_qty = 0
     summaries: list[str] = []
-
-    products_for_shipping = _get_tenant_products_for_shipping_quote(supabase, ctx.tenant_id)
-    var_index = {
-        str(v.get("id")): (prod, v)
-        for prod in products_for_shipping
-        for v in (prod.get("product_variations") or [])
-    }
 
     for item in ctx.cart.items:
         prod_var = var_index.get(item.variation_id)
@@ -120,71 +153,124 @@ async def handle_quote_shipping(
         total_qty += item.quantity
 
         title = str(prod.get("title") or "Producto")
-        var_label = (
-            ", ".join(f"{k}: {v}" for k, v in (var.get("attributes") or {}).items())
-            or var.get("sku") or ""
-        )
+        var_label = ", ".join(
+            f"{k}: {v}" for k, v in (var.get("attributes") or {}).items()
+        ) or var.get("sku") or ""
         summaries.append(
-            f"{item.quantity}x {title} ({var_label})"
-            if var_label else f"{item.quantity}x {title}"
+            f"{item.quantity}x {title} ({var_label})" if var_label
+            else f"{item.quantity}x {title}"
         )
 
     package = {
-        "weight_kg": round(max(weight_kg, 0.05), 3),
-        "length_cm": round(_cube_root_scale(max_l, total_qty), 1),
-        "width_cm": round(_cube_root_scale(max_w, total_qty), 1),
-        "height_cm": round(_cube_root_scale(max_h, total_qty), 1),
+        "weight": round(max(weight_kg, 0.05), 3),
+        "length": round(max(_cube_root_scale(max_l, total_qty), 1.0), 1),
+        "width": round(max(_cube_root_scale(max_w, total_qty), 1.0), 1),
+        "height": round(max(_cube_root_scale(max_h, total_qty), 1.0), 1),
+        "amount": max(total_qty, 1),
+        "content": " + ".join(summaries[:3])[:120] or "Mercancía general",
+        "insuranceAmount": 0,
     }
 
-    # 4. Llamar Envia client (re-uso del existente, sin tocar)
-    try:
-        from integrations.envia_client import quote_shipment_sync  # type: ignore
-    except Exception:
-        # Path alternativo — algunos entornos lo importan diferente
-        try:
-            from services.envia_client import quote_shipment_sync  # type: ignore
-        except Exception as exc:
-            logger.exception("[shipping_tools.quote] envia client import failed")
-            return {"ok": False, "error": "envia_client_unavailable"}
+    # 4. POST /api/v1/shipping/quote (API gateway con Vault).
+    token = _build_api_auth_token(ctx.tenant_id)
+    if not token:
+        return {"ok": False, "error": "auth_token_unavailable"}
+
+    payload = {
+        "origin": origin,
+        "destination": dest,
+        "parcels": [package],
+    }
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": f"v2-quote-{uuid.uuid4()}",
+    }
 
     try:
-        rates = quote_shipment_sync(
-            tenant_id=ctx.tenant_id,
-            origin=origin,
-            destination=dest,
-            packages=[{
-                "weight": package["weight_kg"],
-                "length": package["length_cm"],
-                "width": package["width_cm"],
-                "height": package["height_cm"],
-                "content": "Productos varios",
-                "amount": ctx.cart.subtotal_cents / 100.0,
-            }],
-            supabase=supabase,
-        )
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(SHIPPING_REQUEST_TIMEOUT_SECONDS),
+        ) as client:
+            resp = await client.post(
+                f"{API_URL}/api/v1/shipping/quote",
+                json=payload, headers=headers,
+            )
+            body = resp.json() if resp.content else {}
     except Exception as exc:
-        logger.exception("[shipping_tools.quote] envia call failed")
-        return {"ok": False, "error": f"envia_failed: {exc}"}
+        logger.exception("[shipping_tools.quote] HTTP call failed")
+        return {"ok": False, "error": f"shipping_api_failed: {exc}"}
 
-    if not rates:
-        return {"ok": False, "error": "no_rates_available"}
+    if resp.status_code not in (200, 201):
+        detail = (body or {}).get("detail", "")
+        logger.warning(
+            "[shipping_tools.quote] API respondió %s: %s",
+            resp.status_code, detail,
+        )
+        return {
+            "ok": False,
+            "error": "shipping_api_error",
+            "status_code": resp.status_code,
+            "detail": detail,
+        }
 
-    cheapest = min(rates, key=lambda r: float(r.get("totalPrice") or r.get("total") or 0))
-    fastest = min(rates, key=lambda r: int(r.get("deliveryEstimate") or r.get("days") or 99))
+    highlights = (body or {}).get("highlights") or {}
+    rates_raw = (body or {}).get("rates") or []
+    cheapest = highlights.get("cheapest")
+    fastest = highlights.get("fastest")
 
-    # Persistir en cart.shipping_meta + shipping_cents.
-    cheapest_cents = int(round(float(cheapest.get("totalPrice") or 0) * 100))
+    if not cheapest and not fastest:
+        return {
+            "ok": False,
+            "error": "no_rates_returned",
+            "message": "No hay opciones de envío disponibles para este destino.",
+        }
+
+    # API gateway responde en snake_case: total_price, delivery_estimate.
+    # El campo carrier viene como string en `carrier`/`carrierDescription`
+    # según el camino del normalizador. Ref:
+    # services/api/routers/shipping.py:577-591
+    def _price_cents(rate: dict) -> int:
+        v = (
+            rate.get("total_price")
+            or rate.get("totalPrice")
+            or rate.get("total")
+            or rate.get("price")
+            or 0
+        )
+        return int(round(float(v) * 100))
+
+    def _delivery_days(rate: dict) -> int:
+        """Extrae días estimados. La API puede devolver un int (ej. 2),
+        un string formato '2-6 días' o el string 'mañana'/'hoy'.
+        Usamos el límite inferior del rango como conservador.
+        """
+        raw = (
+            rate.get("delivery_estimate")
+            or rate.get("deliveryEstimate")
+            or rate.get("days")
+            or 0
+        )
+        if isinstance(raw, (int, float)):
+            return int(raw)
+        import re as _re
+        m = _re.search(r"\d+", str(raw))
+        return int(m.group(0)) if m else 0
+
+    cheapest_cents = _price_cents(cheapest) if cheapest else 0
+
+    # Persistir rates en cart.shipping_meta
     shipping_meta = {
-        "city": dest["city"],
-        "state": dest["state"],
-        "dane_code": dest["dane_code"],
+        "city": dest.get("city"),
+        "state": dest.get("state"),
+        "dane_code": dest.get("dane_code"),
         "rates": [
             {
                 "carrier": str(r.get("carrier") or r.get("carrierService") or ""),
-                "price_cents": int(round(float(r.get("totalPrice") or 0) * 100)),
-                "delivery_days": int(r.get("deliveryEstimate") or r.get("days") or 0),
+                "price_cents": _price_cents(r),
+                "delivery_days": _delivery_days(r),
+                "tag": r.get("tag"),
             }
-            for r in rates
+            for r in rates_raw[:6]
         ],
         "selected_carrier": None,
     }
@@ -194,27 +280,30 @@ async def handle_quote_shipping(
             tenant_id=ctx.tenant_id,
             cart_id=ctx.cart.id,
             shipping_meta=shipping_meta,
-            shipping_cents=cheapest_cents,  # default mínimo, cliente confirma luego
-            expected_version=ctx.cart.version,
+            shipping_cents=cheapest_cents,
+            expected_version=None,  # read-current dentro del repo
         )
     except CartConflict:
         return {"ok": False, "error": "concurrent_update", "retry": True}
 
     return {
         "ok": True,
-        "destination": dest,
-        "package": package,
+        "destination": {
+            "city": dest.get("city"),
+            "state": dest.get("state"),
+            "dane_code": dest.get("dane_code"),
+        },
         "products_summary": summaries,
         "cheapest": {
             "carrier": cheapest.get("carrier") or cheapest.get("carrierService"),
             "price_cents": cheapest_cents,
-            "delivery_days": cheapest.get("deliveryEstimate") or cheapest.get("days"),
-        },
+            "delivery_days": _delivery_days(cheapest),
+        } if cheapest else None,
         "fastest": {
             "carrier": fastest.get("carrier") or fastest.get("carrierService"),
-            "price_cents": int(round(float(fastest.get("totalPrice") or 0) * 100)),
-            "delivery_days": fastest.get("deliveryEstimate") or fastest.get("days"),
-        },
+            "price_cents": _price_cents(fastest),
+            "delivery_days": _delivery_days(fastest),
+        } if fastest else None,
     }
 
 
@@ -224,11 +313,17 @@ async def handle_select_carrier(
     args: dict,
     repo: CartsRepo,
 ) -> dict:
-    """Confirma elección de carrier; persiste en cart.shipping_meta.selected_carrier
-    y actualiza shipping_cents al precio del seleccionado.
-    """
-    choice = str(args.get("carrier_choice") or "").strip().lower()
+    """Confirma elección de carrier; persiste en cart.shipping_meta.selected_carrier."""
+    raw_choice = str(args.get("carrier_choice") or "").strip().lower()
+    # Normalizar acentos: el LLM puede emitir 'rápida' o 'rapida'.
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", raw_choice)
+    choice = "".join(c for c in nfkd if not unicodedata.combining(c))
     if choice not in {"economica", "rapida"}:
+        logger.warning(
+            "[shipping_tools.select] choice inválido raw=%r normalized=%r",
+            raw_choice, choice,
+        )
         return {"ok": False, "error": "invalid_carrier_choice"}
     if not ctx.cart or not ctx.cart.is_open:
         return {"ok": False, "error": "no_open_cart"}
@@ -240,7 +335,7 @@ async def handle_select_carrier(
 
     if choice == "economica":
         chosen = min(rates, key=lambda r: int(r.get("price_cents") or 0))
-    else:
+    else:  # rapida
         chosen = min(rates, key=lambda r: int(r.get("delivery_days") or 99))
 
     sm["selected_carrier"] = {
@@ -256,12 +351,9 @@ async def handle_select_carrier(
             cart_id=ctx.cart.id,
             shipping_meta=sm,
             shipping_cents=int(chosen.get("price_cents") or 0),
-            expected_version=ctx.cart.version,
+            expected_version=None,  # read-current dentro del repo
         )
     except CartConflict:
         return {"ok": False, "error": "concurrent_update", "retry": True}
 
-    return {
-        "ok": True,
-        "selected": sm["selected_carrier"],
-    }
+    return {"ok": True, "selected": sm["selected_carrier"]}

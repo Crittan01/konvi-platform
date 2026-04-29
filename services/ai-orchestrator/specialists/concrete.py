@@ -112,7 +112,10 @@ Tu trabajo:
 
 class CarrierSelectionSpecialist(BaseSpecialist):
     state: State = State.AWAITING_CARRIER_SELECTION
-    tool_mode: str = "AUTO"
+    # mode=ANY fuerza al modelo a invocar select_carrier o quote_shipping —
+    # en este estado no tiene sentido responder texto libre. Doc Gemini:
+    # https://ai.google.dev/gemini-api/docs/function-calling#function-calling-modes
+    tool_mode: str = "ANY"
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
         rates_hint = ""
@@ -139,9 +142,25 @@ Tu trabajo:
 # ── NEEDS_CONSENT ────────────────────────────────────────────────────────────
 
 
+_CONSENT_QUESTION = (
+    "Para procesar tu pedido necesito guardar tus datos personales "
+    "(nombre, correo, documento, dirección).\n\n"
+    "Si en algún momento prefieres que los borre, solo dímelo.\n\n"
+    "¿Me autorizas?"
+)
+
+
 class ConsentSpecialist(BaseSpecialist):
     state: State = State.NEEDS_CONSENT
-    tool_mode: str = "AUTO"
+    tool_mode: str = "ANY"  # tras el preflight, el cliente está respondiendo
+
+    def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        # Primera vez en el estado: el bot debe PEDIR consent. Detectamos
+        # por el último outbound — si no es la pregunta de consent, la
+        # emitimos determinísticamente sin pasar por el LLM.
+        if not ctx.last_outbound_was_consent_question:
+            return TurnResult.text(_CONSENT_QUESTION)
+        return None
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
         return f"""Estado: NEEDS_CONSENT — ya hay carrier elegido, ahora hay que solicitar autorización Ley 1581 antes de pedir datos personales.
@@ -157,17 +176,27 @@ Tu trabajo (UNA acción por turno):
 # ── NEEDS_EMAIL ──────────────────────────────────────────────────────────────
 
 
+def _last_outbound_text(ctx: ConversationContext) -> str:
+    for m in reversed(ctx.history or []):
+        if str(m.get("direction") or "").lower() == "outbound":
+            return str(m.get("content") or "").lower()
+    return ""
+
+
 class EmailSpecialist(BaseSpecialist):
     state: State = State.NEEDS_EMAIL
-    tool_mode: str = "AUTO"
+    tool_mode: str = "ANY"
+
+    def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        last = _last_outbound_text(ctx)
+        # Si el bot NO pidió email todavía, pedirlo determinísticamente.
+        if "correo" not in last and "email" not in last:
+            return TurnResult.text("¡Perfecto! ¿Cuál es tu correo electrónico?")
+        return None
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
-        return f"""Estado: NEEDS_EMAIL — falta el correo electrónico del cliente.
-
-Tu trabajo:
-- Si el mensaje contiene un email válido: invoca set_customer_email.
-- Si no, pídelo: "¿Cuál es tu correo electrónico?"
-- NO pidas otros datos en este paso.
+        return f"""Estado: NEEDS_EMAIL — el bot ya pidió email, el cliente está respondiendo.
+Invoca set_customer_email con el valor que envió. Si parece malformado, igualmente envíalo — el handler valida.
 {_COMMON_RULES}"""
 
 
@@ -176,15 +205,17 @@ Tu trabajo:
 
 class NameSpecialist(BaseSpecialist):
     state: State = State.NEEDS_NAME
-    tool_mode: str = "AUTO"
+    tool_mode: str = "ANY"
+
+    def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        last = _last_outbound_text(ctx)
+        if "nombre" not in last:
+            return TurnResult.text("Gracias. ¿Cuál es tu nombre completo?")
+        return None
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
-        return f"""Estado: NEEDS_NAME — falta el nombre completo del cliente.
-
-Tu trabajo:
-- Si el mensaje parece nombre completo (2+ palabras alfa): invoca set_customer_name con full_name como lo escribió.
-- Si no, pide: "¿Cuál es tu nombre completo?"
-- En el siguiente turno saluda con SOLO el primer nombre (ej. "Gracias, Cristian.").
+        return f"""Estado: NEEDS_NAME — el bot pidió nombre completo, cliente está respondiendo.
+Invoca set_customer_name con full_name = el texto del cliente tal cual.
 {_COMMON_RULES}"""
 
 
@@ -193,18 +224,22 @@ Tu trabajo:
 
 class DocumentSpecialist(BaseSpecialist):
     state: State = State.NEEDS_DOCUMENT
-    tool_mode: str = "AUTO"
+    tool_mode: str = "ANY"
+
+    def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        last = _last_outbound_text(ctx)
+        if "documento" not in last and "cédula" not in last and "cedula" not in last:
+            return TurnResult.text(
+                "Para procesar tu pago, necesito tu documento de identidad.\n\n"
+                "¿Qué tipo es: CC, CE, NIT, PP o TI? Y luego indícame el número, por favor."
+            )
+        return None
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
-        return f"""Estado: NEEDS_DOCUMENT — falta tipo + número de documento (Wompi customer_data).
-
+        return f"""Estado: NEEDS_DOCUMENT — bot pidió documento, cliente responde.
 Tipos válidos Colombia: CC, CE, NIT, PP, TI, OTHER.
-
-Tu trabajo:
-- Si el mensaje contiene tipo + número (ej. "CC 1032414179"): invoca set_customer_document.
-- Si solo tipo: pide número.
-- Si solo número: pide tipo.
-- Si nada: pídelo: "¿Qué tipo de documento (CC/CE/NIT/PP/TI) y cuál es el número?"
+Invoca set_customer_document con document_type y document_number extraídos del mensaje.
+Si solo dio número o solo tipo, pasa lo que tengas — el handler responde error y el sistema pide el faltante.
 {_COMMON_RULES}"""
 
 
@@ -213,23 +248,33 @@ Tu trabajo:
 
 class AddressSpecialist(BaseSpecialist):
     state: State = State.NEEDS_DIRECTION
-    tool_mode: str = "AUTO"
+    tool_mode: str = "ANY"
+
+    def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        last = _last_outbound_text(ctx)
+        if "dirección" not in last and "direccion" not in last:
+            return TurnResult.text(
+                "Para la entrega, compárteme:\n"
+                "• Calle y número\n"
+                "• Ciudad\n"
+                "• Tipo de vivienda: *casa*, *edificio* o *conjunto*\n"
+                "• Si es *edificio*: apartamento\n"
+                "• Si es *conjunto*: torre y apartamento"
+            )
+        return None
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
-        return f"""Estado: NEEDS_DIRECTION — falta la dirección estructurada del cliente.
+        return f"""Estado: NEEDS_DIRECTION — bot pidió dirección, cliente está respondiendo.
 
-Campos OBLIGATORIOS:
+Campos OBLIGATORIOS para set_customer_address:
   - street (calle y número)
   - city
   - building_type: casa | edificio | conjunto
-  - apartment (si edificio o conjunto)
-  - tower (si conjunto)
+  - apartment (si building_type ∈ edificio/conjunto)
+  - tower (si building_type = conjunto)
 
-Tu trabajo:
-- Si el mensaje tiene TODOS los campos requeridos según building_type: invoca set_customer_address.
-- Si faltan campos: pide SOLO los que falten — no repitas los que ya diste.
-- NO digas "te genero el link de pago" ni "armamos el pedido" mientras falten campos.
-- Si el cliente dice "es un conjunto" o "edificio" sin torre/apto: pide explícitamente esos sub-campos.
+Invoca set_customer_address con los datos que tengas. El handler valida y
+responde error específico si falta algo (ej. "tower_required_for_conjunto").
 {_COMMON_RULES}"""
 
 

@@ -10,7 +10,6 @@ Cada specialist concreto:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Optional
 
 from core.context import ConversationContext, TurnResult
@@ -20,16 +19,20 @@ from llm.client import invoke_llm
 logger = logging.getLogger("orchestrator.specialists.base")
 
 
-@dataclass
 class BaseSpecialist:
     """Base abstracta — usar via subclase.
 
     Los specialists son objetos sin estado mutable. Pueden instanciarse una
     vez y reusarse a lo largo del proceso.
+
+    NOTA: NO es ``@dataclass`` porque el ``__init__`` generado por dataclass
+    sobreescribe los class-attributes (``state``, ``tool_mode``) overrideados
+    en subclases con los defaults de la base. Mantenemos clase regular y los
+    overrides se respetan a través del MRO.
     """
 
-    state: State = State.CATALOG_MODE  # override en subclase
-
+    # Override en subclase. Class attributes — las subclases los reemplazan.
+    state: State = State.CATALOG_MODE
     # Modo del FunctionCalling: ``AUTO`` = LLM decide; ``ANY`` = forzar call;
     # ``NONE`` = solo texto.
     tool_mode: str = "AUTO"

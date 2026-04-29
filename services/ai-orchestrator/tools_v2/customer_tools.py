@@ -60,12 +60,12 @@ async def handle_record_consent(
     if not contact_id:
         return {"ok": False, "error": "could_not_create_contact"}
 
-    update = {"consent_given": given}
-    if given:
-        # Marca temporal — útil para auditoría Ley 1581 art. 8°.
-        update["consent_at"] = "now()"
-
-    supabase.table("contacts").update(update).eq("id", contact_id).execute()
+    # `consent_given` es la columna canónica (no usamos consent_at — no
+    # existe en el schema vigente). Auditoría temporal vive en
+    # contacts_consent_log si el tenant lo configuró (no en este turno).
+    supabase.table("contacts").update(
+        {"consent_given": given}
+    ).eq("id", contact_id).execute()
     logger.info(
         "[customer_tools.consent] contact=%s given=%s", contact_id, given,
     )
