@@ -30,6 +30,13 @@ logger = logging.getLogger("orchestrator.llm.client")
 # Modelo por defecto. Se respeta `LLM_MODEL` env var para A/B testing.
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
+# Modelo de fallback cuando el principal devuelve 503/UNAVAILABLE persistente
+# tras los retries. ``gemini-2.5-flash-lite`` tiene menos demanda y es más
+# rápido aunque menos capaz; suficiente para mantener la conversación viva
+# durante un pico del modelo principal.
+# Ref: https://ai.google.dev/gemini-api/docs/troubleshooting (sección rate limits)
+FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+
 # Temperatura conservadora — flujos transaccionales no quieren creatividad
 # extra. Configurable via env para experimentación.
 DEFAULT_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
@@ -146,13 +153,60 @@ def invoke_llm(
 
     config = types.GenerateContentConfig(**config_kwargs)
 
-    response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config,
-    )
-    # Diagnóstico temporal: dump del response cuando no hay function_calls
-    # ni text — útil para debuggear mode=ANY que retorna vacío.
+    # Retry con backoff para errores transitorios + fallback a modelo
+    # alternativo si los retries fallan. Pattern documentado:
+    # https://ai.google.dev/gemini-api/docs/troubleshooting
+    import time
+    response = None
+    models_to_try = [model]
+    if FALLBACK_MODEL and FALLBACK_MODEL != model:
+        models_to_try.append(FALLBACK_MODEL)
+
+    for model_idx, current_model in enumerate(models_to_try):
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=contents,
+                    config=config,
+                )
+                if model_idx > 0:
+                    logger.info(
+                        "[llm.client] fallback exitoso a model=%s tras 503 en %s",
+                        current_model, models_to_try[0],
+                    )
+                break  # éxito — salir del loop interno
+            except Exception as exc:
+                msg = str(exc)
+                transient = (
+                    "503" in msg or "UNAVAILABLE" in msg
+                    or "429" in msg or "RESOURCE_EXHAUSTED" in msg
+                    or "DEADLINE_EXCEEDED" in msg
+                )
+                if not transient:
+                    raise  # no retry para errores no transitorios
+                if attempt < 2:
+                    backoff = 1.5 * (2 ** attempt)  # 1.5s, 3s
+                    logger.warning(
+                        "[llm.client] %s transient attempt=%d backoff=%.1fs err=%s",
+                        current_model, attempt + 1, backoff,
+                        msg.split('\n')[0][:120],
+                    )
+                    time.sleep(backoff)
+                else:
+                    # Último intento de este modelo. Si hay fallback disponible,
+                    # cambiamos al siguiente; si no, propagamos.
+                    if model_idx + 1 < len(models_to_try):
+                        logger.warning(
+                            "[llm.client] %s falló 3 veces — cambio a fallback %s",
+                            current_model, models_to_try[model_idx + 1],
+                        )
+                    else:
+                        raise
+        else:
+            continue  # el loop interno no rompió → probar siguiente modelo
+        break  # éxito
+
     turn = parse_response(response)
     if not turn.function_calls and not turn.text:
         logger.warning(

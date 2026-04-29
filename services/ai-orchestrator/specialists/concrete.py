@@ -150,17 +150,37 @@ _CONSENT_QUESTION = (
 )
 
 
+def _inbound_lower(ctx: ConversationContext) -> str:
+    return (ctx.content or "").strip().lower()
+
+
+def _is_short_yes_no(text: str) -> bool:
+    """Detecta una respuesta corta afirmativa o negativa al consent."""
+    s = text.strip().lower()
+    if not s or len(s.split()) > 4:
+        return False
+    yes_no = {
+        "si", "sí", "no", "ok", "dale", "claro", "perfecto", "listo",
+        "autorizo", "si autorizo", "sí autorizo", "no autorizo",
+        "acepto", "no acepto", "yes", "yep", "nope",
+    }
+    return s in yes_no
+
+
 class ConsentSpecialist(BaseSpecialist):
     state: State = State.NEEDS_CONSENT
-    tool_mode: str = "ANY"  # tras el preflight, el cliente está respondiendo
+    tool_mode: str = "ANY"
 
     def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
-        # Primera vez en el estado: el bot debe PEDIR consent. Detectamos
-        # por el último outbound — si no es la pregunta de consent, la
-        # emitimos determinísticamente sin pasar por el LLM.
-        if not ctx.last_outbound_was_consent_question:
-            return TurnResult.text(_CONSENT_QUESTION)
-        return None
+        # Si el bot ya pidió consent, dejamos al LLM (mode=ANY) procesar.
+        if ctx.last_outbound_was_consent_question:
+            return None
+        # Si el cliente "se adelantó" y mandó respuesta afirmativa/negativa
+        # corta antes de la pregunta, dejamos también al LLM (no perdemos
+        # el turno emitiendo la pregunta de consent).
+        if _is_short_yes_no(_inbound_lower(ctx)):
+            return None
+        return TurnResult.text(_CONSENT_QUESTION)
 
     def build_system_instruction(self, ctx: ConversationContext) -> str:
         return f"""Estado: NEEDS_CONSENT — ya hay carrier elegido, ahora hay que solicitar autorización Ley 1581 antes de pedir datos personales.
@@ -183,13 +203,23 @@ def _last_outbound_text(ctx: ConversationContext) -> str:
     return ""
 
 
+_EMAIL_INBOUND_REGEX = __import__("re").compile(
+    r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b", __import__("re").IGNORECASE,
+)
+
+
 class EmailSpecialist(BaseSpecialist):
     state: State = State.NEEDS_EMAIL
     tool_mode: str = "ANY"
 
     def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        # Si el inbound del cliente trae un email reconocible, NO emitir
+        # preflight — dejamos al LLM extraer y llamar set_customer_email
+        # en el mismo turno. Evita perder turnos cuando el cliente se
+        # adelanta o cuando el LLM acaba de cambiar de estado.
+        if _EMAIL_INBOUND_REGEX.search(ctx.content or ""):
+            return None
         last = _last_outbound_text(ctx)
-        # Si el bot NO pidió email todavía, pedirlo determinísticamente.
         if "correo" not in last and "email" not in last:
             return TurnResult.text("¡Perfecto! ¿Cuál es tu correo electrónico?")
         return None
@@ -203,11 +233,23 @@ Invoca set_customer_email con el valor que envió. Si parece malformado, igualme
 # ── NEEDS_NAME ───────────────────────────────────────────────────────────────
 
 
+def _looks_like_full_name(text: str) -> bool:
+    """Heurística: 2+ palabras alfabéticas (no solo dígitos, no email)."""
+    s = (text or "").strip()
+    if not s or "@" in s or any(ch.isdigit() for ch in s):
+        return False
+    parts = [p for p in s.split() if p.isalpha() or all(c.isalpha() or c == "." for c in p)]
+    return len(parts) >= 2
+
+
 class NameSpecialist(BaseSpecialist):
     state: State = State.NEEDS_NAME
     tool_mode: str = "ANY"
 
     def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        # Si el inbound parece nombre completo, pasar al LLM para extraerlo.
+        if _looks_like_full_name(ctx.content or ""):
+            return None
         last = _last_outbound_text(ctx)
         if "nombre" not in last:
             return TurnResult.text("Gracias. ¿Cuál es tu nombre completo?")
@@ -222,11 +264,19 @@ Invoca set_customer_name con full_name = el texto del cliente tal cual.
 # ── NEEDS_DOCUMENT ───────────────────────────────────────────────────────────
 
 
+_DOC_INBOUND_REGEX = __import__("re").compile(
+    r"\b(CC|CE|NIT|PP|TI)\b\s*[:\-]?\s*\d{3,}|\b\d{6,}\b", __import__("re").IGNORECASE,
+)
+
+
 class DocumentSpecialist(BaseSpecialist):
     state: State = State.NEEDS_DOCUMENT
     tool_mode: str = "ANY"
 
     def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        # Si el inbound parece tener tipo+número de documento, pasarlo al LLM.
+        if _DOC_INBOUND_REGEX.search(ctx.content or ""):
+            return None
         last = _last_outbound_text(ctx)
         if "documento" not in last and "cédula" not in last and "cedula" not in last:
             return TurnResult.text(
@@ -246,11 +296,21 @@ Si solo dio número o solo tipo, pasa lo que tengas — el handler responde erro
 # ── NEEDS_DIRECTION ──────────────────────────────────────────────────────────
 
 
+_ADDRESS_HINTS_REGEX = __import__("re").compile(
+    r"\b(calle|carrera|cra|cl\b|avenida|av\b|diagonal|transversal|conjunto|"
+    r"edificio|casa|torre|apto|apartamento|barrio|bogot|medell|cali)",
+    __import__("re").IGNORECASE,
+)
+
+
 class AddressSpecialist(BaseSpecialist):
     state: State = State.NEEDS_DIRECTION
     tool_mode: str = "ANY"
 
     def preflight(self, ctx: ConversationContext) -> Optional[TurnResult]:
+        # Si el inbound trae pistas de dirección, pasarlo al LLM.
+        if _ADDRESS_HINTS_REGEX.search(ctx.content or ""):
+            return None
         last = _last_outbound_text(ctx)
         if "dirección" not in last and "direccion" not in last:
             return TurnResult.text(
