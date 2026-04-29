@@ -421,6 +421,140 @@ class CartsRepo:
             )
         return int(rows[0]["version"])
 
+    # ── Soft-reserve helpers (RPCs de stock_reservations) ───────────────────
+    #
+    # Diseño Stripe Checkout pattern: reservar al confirmar intención fuerte
+    # (quote_shipping_ok), consumir al pagar, liberar al cancelar. TTL 35 min
+    # alineado con PENDING_PAYMENT_TTL_MINUTES.
+    # Schema: supabase/migrations/20260502000000_stock_reservations.sql
+
+    def reserve_stock_for_cart(
+        self,
+        *,
+        tenant_id: str,
+        cart_id: str,
+        conversation_id: str,
+        items: list[dict],  # [{variation_id, qty}]
+        ttl_minutes: int = 35,
+    ) -> tuple[list[dict], list[str]]:
+        """Reserva stock para todos los items del cart de forma atómica por item.
+
+        Retorna ``(reservations, insufficient)``:
+          - ``reservations``: lista de dicts ``{variation_id, reservation_id, expires_at}``
+          - ``insufficient``: lista de variation_id donde no había stock suficiente
+
+        Si algún item falla, los anteriores quedan reservados (caller decide
+        si los libera o sigue con los disponibles). Cada llamada a la RPC
+        es atómica con FOR NO KEY UPDATE.
+        """
+        reservations: list[dict] = []
+        insufficient: list[str] = []
+        for it in items:
+            variation_id = str(it.get("variation_id") or "").strip()
+            qty = int(it.get("qty") or 0)
+            if not variation_id or qty <= 0:
+                continue
+            try:
+                res = self._sb.rpc(
+                    "rpc_stock_reserve",
+                    {
+                        "p_tenant_id": tenant_id,
+                        "p_variation_id": variation_id,
+                        "p_qty": qty,
+                        "p_cart_id": cart_id,
+                        "p_conversation_id": conversation_id,
+                        "p_ttl_minutes": ttl_minutes,
+                    },
+                ).execute()
+                rows = res.data or []
+                if rows:
+                    row = rows[0]
+                    reservations.append({
+                        "variation_id": variation_id,
+                        "reservation_id": row.get("out_reservation_id"),
+                        "expires_at": row.get("out_expires_at"),
+                        "available_after": row.get("out_available_after"),
+                    })
+            except Exception as exc:
+                msg = str(exc)
+                if "insufficient_stock" in msg or "P0001" in msg:
+                    logger.info(
+                        "[carts_repo] insufficient stock var=%s qty=%d: %s",
+                        variation_id, qty, msg,
+                    )
+                    insufficient.append(variation_id)
+                else:
+                    logger.exception(
+                        "[carts_repo] reserve_stock failed var=%s: %s",
+                        variation_id, exc,
+                    )
+                    insufficient.append(variation_id)
+        return reservations, insufficient
+
+    def consume_reservations_for_order(
+        self,
+        *,
+        cart_id: str,
+        order_id: str,
+    ) -> int:
+        """Convierte todas las reservas activas del cart en stock_movements.
+
+        Llamar cuando Wompi confirma APPROVED. Decrementa stock_quantity
+        real y marca la reserva como ``consumed``. Retorna el conteo
+        de reservas consumidas exitosamente.
+        """
+        # Listar reservas activas del cart
+        res = (
+            self._sb.table("stock_reservations")
+            .select("id")
+            .eq("cart_id", cart_id)
+            .eq("status", "active")
+            .execute()
+        )
+        reservation_ids = [r["id"] for r in (res.data or [])]
+        consumed = 0
+        for rid in reservation_ids:
+            try:
+                self._sb.rpc(
+                    "rpc_stock_reservation_consume",
+                    {"p_reservation_id": rid, "p_order_id": order_id},
+                ).execute()
+                consumed += 1
+            except Exception as exc:
+                logger.warning(
+                    "[carts_repo] consume reservation=%s failed: %s",
+                    rid, exc,
+                )
+        return consumed
+
+    def release_reservations_for_cart(self, *, cart_id: str) -> int:
+        """Libera todas las reservas activas del cart (cancelación/abandono).
+
+        Retorna el conteo de reservas liberadas.
+        """
+        res = (
+            self._sb.table("stock_reservations")
+            .select("id")
+            .eq("cart_id", cart_id)
+            .eq("status", "active")
+            .execute()
+        )
+        reservation_ids = [r["id"] for r in (res.data or [])]
+        released = 0
+        for rid in reservation_ids:
+            try:
+                self._sb.rpc(
+                    "rpc_stock_reservation_release",
+                    {"p_reservation_id": rid},
+                ).execute()
+                released += 1
+            except Exception as exc:
+                logger.warning(
+                    "[carts_repo] release reservation=%s failed: %s",
+                    rid, exc,
+                )
+        return released
+
     # ── Helpers internos ─────────────────────────────────────────────────────
 
     def _fetch_items(self, *, tenant_id: str, cart_id: str) -> list[CartItem]:

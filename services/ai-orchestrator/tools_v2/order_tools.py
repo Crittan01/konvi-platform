@@ -265,6 +265,18 @@ async def handle_cancel_order(
 ) -> dict:
     if not ctx.cart:
         return {"ok": True, "message": "no había carrito activo"}
+    # Liberar reservas de stock activas del cart antes de cerrar.
+    # Otros clientes podrán comprarlas inmediatamente.
+    try:
+        released = repo.release_reservations_for_cart(cart_id=ctx.cart.id)
+        if released > 0:
+            logger.info(
+                "[order_tools.cancel] liberadas %d reservas del cart=%s",
+                released, ctx.cart.id,
+            )
+    except Exception as exc:
+        logger.warning("[order_tools.cancel] release reservations failed: %s", exc)
+
     try:
         repo.transition_status(
             tenant_id=ctx.tenant_id,

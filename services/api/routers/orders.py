@@ -410,13 +410,103 @@ async def create_payment_link(
         raise HTTPException(status_code=500, detail=f"Error al generar link de pago: {e}")
 
 
+def _consume_cart_reservations_if_any(
+    supabase: Client, order_id: str, tenant_id: str,
+) -> int:
+    """Si el pedido vino del flujo conversacional con soft-reserve activa,
+    consume las reservas (decrementa stock + audita). Retorna el número de
+    reservas consumidas. Si retorna 0, el caller debe usar el decrement
+    directo (caso pedidos creados manualmente sin reservas previas).
+
+    Diseño: orders→conversation_id→conversation_carts→stock_reservations.
+    """
+    try:
+        # 1) Conversation_id del order (puede ser null en pedidos manuales)
+        order_res = (
+            supabase.table("orders")
+            .select("conversation_id")
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        conv_id = (order_res.data or {}).get("conversation_id")
+        if not conv_id:
+            return 0
+
+        # 2) Cart abierto/checkout asociado a la conversación
+        cart_res = (
+            supabase.table("conversation_carts")
+            .select("id")
+            .eq("conversation_id", conv_id)
+            .eq("tenant_id", tenant_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        carts = cart_res.data or []
+        if not carts:
+            return 0
+        cart_id = carts[0]["id"]
+
+        # 3) Listar reservas activas del cart y consumirlas vía RPC
+        res_list = (
+            supabase.table("stock_reservations")
+            .select("id")
+            .eq("cart_id", cart_id)
+            .eq("status", "active")
+            .execute()
+        )
+        reservation_ids = [r["id"] for r in (res_list.data or [])]
+        consumed = 0
+        for rid in reservation_ids:
+            try:
+                supabase.rpc(
+                    "rpc_stock_reservation_consume",
+                    {"p_reservation_id": rid, "p_order_id": order_id},
+                ).execute()
+                consumed += 1
+            except Exception as exc:
+                logger.warning(
+                    "[STOCK] consume reservation=%s failed: %s", rid, exc,
+                )
+        # 4) Marcar cart como converted
+        if consumed > 0:
+            try:
+                supabase.table("conversation_carts").update({
+                    "status": "converted",
+                    "converted_order_id": order_id,
+                }).eq("id", cart_id).execute()
+            except Exception:
+                pass
+        return consumed
+    except Exception as exc:
+        logger.warning("[STOCK] reservations consume probe failed: %s", exc)
+        return 0
+
+
 def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str) -> None:
     """
     Decrementa stock de las variantes incluidas en el pedido al confirmarlo.
     Inserta registros en stock_movements para auditoría.
     Si una variante no tiene suficiente stock, se decrementa igualmente
     (permitir negativo — el operador verá el alerta de bajo stock).
+
+    Si el pedido tiene reservas activas (flujo conversacional con
+    soft-reserve), las consume vía RPC en lugar de decremento directo
+    para evitar doble descuento. Si no hay reservas, sigue el path viejo.
     """
+    consumed_reservations = _consume_cart_reservations_if_any(
+        supabase, order_id, tenant_id,
+    )
+    if consumed_reservations > 0:
+        logger.info(
+            "[STOCK] orden %s consumió %d reservas activas — skip decrement directo",
+            order_id, consumed_reservations,
+        )
+        return
+
     try:
         items_result = (
             supabase.table("order_items")
