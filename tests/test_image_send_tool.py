@@ -106,6 +106,7 @@ class HandleImageRequestTests(unittest.TestCase):
         products = [{
             "id": "p1",
             "title": "Aceite de Argán",
+            "description": "Aceite de argán puro prensado en frío. Rico en vitamina E.",
             "cover_image_url": "https://cdn.example.com/cover-argan.jpg",
             "product_variations": [
                 {"id": "v1", "sku": "ARG-30", "attributes": {"Volumen": "30ml"},
@@ -121,6 +122,9 @@ class HandleImageRequestTests(unittest.TestCase):
         self.assertEqual(r.image_link, "https://cdn.example.com/argan-60.jpg")
         self.assertIn("Aceite de Argán", r.image_caption)
         self.assertIn("$82.000", r.image_caption)
+        # Caption debe incluir descripción del producto + CTA conversacional
+        self.assertIn("vitamina E", r.image_caption)
+        self.assertIn("cotizar", r.image_caption.lower())
 
     def test_product_without_image_returns_honest_text(self):
         products = [{

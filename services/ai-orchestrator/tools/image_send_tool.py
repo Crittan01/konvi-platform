@@ -109,11 +109,14 @@ def _format_pesos_co(amount: object) -> str:
 
 
 def _get_tenant_products_with_images(supabase: Client, tenant_id: str) -> list[dict]:
-    """Carga productos activos con cover_image_url + variants (image_url, price)."""
+    """Carga productos activos con cover_image_url + description + variants
+    (image_url, price). description se usa para enriquecer captions y
+    honest fallbacks con beneficios reales del producto.
+    """
     res = (
         supabase.table("products")
         .select(
-            "id, title, cover_image_url, "
+            "id, title, description, cover_image_url, "
             "product_variations(id, sku, attributes, stock_quantity, "
             "price, image_url)"
         )
@@ -123,6 +126,18 @@ def _get_tenant_products_with_images(supabase: Client, tenant_id: str) -> list[d
         .execute()
     )
     return res.data or []
+
+
+# Meta v21.0 limita caption a 1024 chars. Dejamos margen para CTA + título.
+_MAX_DESCRIPTION_IN_CAPTION = 600
+
+
+def _truncate_description(desc: str, max_chars: int = _MAX_DESCRIPTION_IN_CAPTION) -> str:
+    """Trunca preservando frase completa cuando es posible."""
+    if not desc or len(desc) <= max_chars:
+        return desc.strip() if desc else ""
+    cut = desc[:max_chars].rsplit(".", 1)
+    return (cut[0] + ".").strip() if len(cut) > 1 and len(cut[0]) > 50 else desc[:max_chars].strip() + "…"
 
 
 async def handle_image_request_if_applicable(
@@ -192,8 +207,11 @@ async def handle_image_request_if_applicable(
     )
     title = _clean_product_title(str(product.get("title") or "Producto"))
 
+    description = _truncate_description(str(product.get("description") or ""))
+
     if image_link:
-        # Construir caption con título + variante + precio (cuando aplica).
+        # Caption enriquecido: título destacado + variante + precio + descripción
+        # con beneficios reales + CTA conversacional. Meta caption max 1024.
         variant_label = (
             _variation_label(best_variation)
             if isinstance(best_variation, dict) and best_variation
@@ -202,15 +220,31 @@ async def handle_image_request_if_applicable(
         price = (
             best_variation.get("price") if isinstance(best_variation, dict) else None
         )
-        parts = [title]
+        header_parts = [f"*{title}*"]
+        line2_parts: list[str] = []
         if variant_label and variant_label.strip().lower() not in {"estandar", "estándar"}:
-            parts.append(variant_label)
-        caption = " — ".join(parts)
+            line2_parts.append(variant_label)
         if price:
-            caption = f"{caption} — {_format_pesos_co(price)}"
+            line2_parts.append(_format_pesos_co(price))
+        caption_lines = [" ".join(header_parts)]
+        if line2_parts:
+            caption_lines.append(" — ".join(line2_parts))
+        if description:
+            caption_lines.append("")
+            caption_lines.append(description)
+        caption_lines.append("")
+        caption_lines.append(
+            "¿Quieres saber más detalles, ver otra presentación o cotizar el envío?"
+        )
+        caption = "\n".join(caption_lines)
+        # Garantizar límite Meta (1024 chars) por seguridad.
+        if len(caption) > 1024:
+            caption = caption[:1020] + "…"
         logger.info(
-            "[IMAGE_SEND] Foto disponible producto=%s variation=%s",
-            title, (best_variation.get("sku") if isinstance(best_variation, dict) else None),
+            "[IMAGE_SEND] Foto disponible producto=%s variation=%s caption_len=%d",
+            title,
+            (best_variation.get("sku") if isinstance(best_variation, dict) else None),
+            len(caption),
         )
         return ImageSendResult(
             handled=True,
@@ -218,7 +252,8 @@ async def handle_image_request_if_applicable(
             image_caption=caption,
         )
 
-    # Sin imagen en DB → respuesta honesta (sin inventar URL).
+    # Sin imagen en DB → respuesta honesta enriquecida con descripción real
+    # (sin inventar URL ni reusar imagen de otro producto).
     logger.info(
         "[IMAGE_SEND] Producto encontrado sin imagen cargada: %s", title
     )
@@ -229,13 +264,16 @@ async def handle_image_request_if_applicable(
         if isinstance(attrs, dict) and attrs:
             label = ", ".join(f"{k}: {v}" for k, v in attrs.items())
             presentations.append(label)
-    pres_text = ""
+    parts = [f"Aún no tengo foto del *{title}* cargada en el catálogo."]
+    if description:
+        parts.append("")
+        parts.append(description)
     if presentations:
-        pres_text = f" Tengo presentaciones de: {', '.join(presentations[:3])}."
+        parts.append("")
+        parts.append(f"Presentaciones disponibles: {', '.join(presentations[:3])}.")
+    parts.append("")
+    parts.append("¿Te cuento más beneficios o cotizo el envío a tu ciudad?")
     return ImageSendResult(
         handled=True,
-        response_text=(
-            f"Aún no tengo foto del *{title}* cargada en el catálogo.{pres_text} "
-            "¿Quieres que te cuente más sobre sus beneficios o que te cotice el envío?"
-        ),
+        response_text="\n".join(parts),
     )
