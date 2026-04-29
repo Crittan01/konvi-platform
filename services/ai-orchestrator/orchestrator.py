@@ -12,6 +12,7 @@ from tools.catalog_tool import get_tenant_catalog
 from tools.payment_link_tool import handle_payment_link_if_applicable
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
 from tools.shipping_quote_tool import handle_shipping_quote_if_applicable
+from tools.image_send_tool import handle_image_request_if_applicable
 from tools.order_status_tool import handle_order_status_if_applicable
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
@@ -2958,6 +2959,55 @@ async def build_and_run_orchestration(
                 _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
                 logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
                 return
+
+        # ── 2.7 Petición de foto del producto (F8.B) ────────────────────────
+        # Cliente pide "mándame foto", "muéstrame imagen", "tienes foto del X".
+        # Evaluado ANTES de shipping_quote para no confundir "foto del jabón
+        # enviado a Bogotá" con cotización.
+        image_result = await handle_image_request_if_applicable(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            query_text=content,
+            recent_messages=history or [],
+        )
+        if image_result.handled:
+            if image_result.image_link:
+                _meta_id = await send_whatsapp_message(
+                    tenant_id=tenant_id,
+                    supabase=supabase,
+                    to_phone=customer_phone_raw or "",
+                    image_link=image_result.image_link,
+                    image_caption=image_result.image_caption,
+                )
+                # Persistir outbound como content_type=image (Inbox lo renderiza).
+                try:
+                    supabase.table("messages").insert({
+                        "conversation_id": conversation_id,
+                        "tenant_id": tenant_id,
+                        "direction": "outbound",
+                        "content_type": "image",
+                        "content": image_result.image_caption or "",
+                        "media_url": image_result.image_link,
+                        "meta_message_id": _meta_id,
+                        "processed": True,
+                        "processing_status": "processed",
+                    }).execute()
+                except Exception as exc:
+                    logger.warning("[IMAGE_SEND] persist outbound falló: %s", exc)
+                logger.info(
+                    "[IMAGE_SEND] foto enviada conv=%s link=%s",
+                    conversation_id, image_result.image_link,
+                )
+            elif image_result.response_text:
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=image_result.response_text,
+                )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            return
 
         shipping_result = await handle_shipping_quote_if_applicable(
             supabase=supabase,
