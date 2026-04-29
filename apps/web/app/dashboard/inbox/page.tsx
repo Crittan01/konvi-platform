@@ -29,6 +29,7 @@ interface Message {
   direction: 'inbound' | 'outbound'
   content: string
   content_type: string
+  media_url?: string | null
   created_at: string
   processed: boolean
   processing_status?: 'pending' | 'processed' | 'skipped' | 'failed'
@@ -396,7 +397,7 @@ export default function InboxPage() {
     setHasMoreMessages(true)
     supabase
       .from('messages')
-      .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
+      .select('id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason')
       .eq('conversation_id', selectedId)
       // Excluir snapshots de contexto interno (R-13) — no se renderizan al cliente.
       .neq('content_type', 'context_snapshot')
@@ -473,7 +474,7 @@ export default function InboxPage() {
       if (sinceLastEvent > 8000) {
         supabase
           .from('messages')
-          .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
+          .select('id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason')
           .eq('conversation_id', selectedId)
           .neq('content_type', 'context_snapshot')
           .order('created_at', { ascending: false })
@@ -572,7 +573,7 @@ export default function InboxPage() {
     try {
       const { data, error } = await supabase
         .from('messages')
-        .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
+        .select('id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason')
         .eq('conversation_id', selectedId)
         .neq('content_type', 'context_snapshot')
         .lt('created_at', oldest.created_at)
@@ -1154,7 +1155,19 @@ export default function InboxPage() {
                         ? 'bg-card text-foreground rounded-tl-sm'
                         : 'bg-primary text-primary-foreground rounded-tr-sm border-transparent'
                     }`}>
-                      <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                      {msg.content_type === 'image' && msg.media_url ? (
+                        <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
+                          <img
+                            src={msg.media_url}
+                            alt={msg.content || 'imagen del producto'}
+                            className="rounded-lg max-w-full max-h-72 object-contain border border-border/40 bg-background/30"
+                            loading="lazy"
+                          />
+                        </a>
+                      ) : null}
+                      {msg.content && (
+                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                      )}
                       <p className={`text-[11px] mt-1 flex items-center gap-1.5 flex-wrap ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
                         {timeAgo(msg.created_at)}
                         {!isInbound && (

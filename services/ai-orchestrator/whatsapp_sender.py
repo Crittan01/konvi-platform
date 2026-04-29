@@ -43,8 +43,19 @@ async def send_whatsapp_message(
     tenant_id: str,
     supabase: Client,
     to_phone: str,
-    text: str,
+    text: Optional[str] = None,
+    image_link: Optional[str] = None,
+    image_caption: Optional[str] = None,
 ) -> Optional[str]:
+    """Envía un mensaje WhatsApp al cliente.
+
+    Modo TEXTO (default, backwards-compat): pasar `text`.
+    Modo IMAGEN (F8.B): pasar `image_link` (URL HTTPS) y opcionalmente
+    `image_caption`. Meta v21.0 exige HTTPS y MIME image/jpeg|png|webp.
+
+    Si se pasan ambos, IMAGEN tiene prioridad — el caller debe enviar texto
+    como mensaje separado si lo necesita.
+    """
     phone_id, access_token = _get_tenant_wa_credentials(tenant_id, supabase)
 
     if not phone_id or not access_token:
@@ -55,13 +66,42 @@ async def send_whatsapp_message(
         return None
 
     clean_phone = to_phone.lstrip("+").replace(" ", "").replace("-", "")
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": clean_phone,
-        "type": "text",
-        "text": {"preview_url": False, "body": text},
-    }
+
+    if image_link:
+        # F8.B.1 — payload type=image. Meta exige link HTTPS público.
+        if not image_link.startswith("https://"):
+            logger.error(
+                "[META API] image_link debe ser HTTPS (Meta v21.0 lo exige). Recibido=%s",
+                image_link,
+            )
+            return None
+        image_obj: dict = {"link": image_link}
+        if image_caption:
+            image_obj["caption"] = image_caption
+        payload: dict = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": clean_phone,
+            "type": "image",
+            "image": image_obj,
+        }
+        msg_kind = "image"
+    elif text is not None:
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": clean_phone,
+            "type": "text",
+            "text": {"preview_url": False, "body": text},
+        }
+        msg_kind = "text"
+    else:
+        logger.error(
+            "[META API] send_whatsapp_message requiere `text` o `image_link` para tenant=%s",
+            tenant_id,
+        )
+        return None
+
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -74,10 +114,16 @@ async def send_whatsapp_message(
 
         if response.status_code == 200:
             message_id = response.json().get("messages", [{}])[0].get("id", "unknown")
-            logger.info("[META API] Mensaje enviado | to=%s | meta_message_id=%s", clean_phone, message_id)
+            logger.info(
+                "[META API] Mensaje enviado | type=%s | to=%s | meta_message_id=%s",
+                msg_kind, clean_phone, message_id,
+            )
             return message_id
         else:
-            logger.error("[META API] Error | status=%s | body=%s", response.status_code, response.text)
+            logger.error(
+                "[META API] Error type=%s | status=%s | body=%s",
+                msg_kind, response.status_code, response.text,
+            )
             return None
 
     except httpx.TimeoutException:
