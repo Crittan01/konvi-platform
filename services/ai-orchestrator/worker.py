@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
+from orchestrator_v2_adapter import run_orchestration as _run_orchestration_router
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
 from whatsapp_sender import send_whatsapp_message
@@ -158,7 +159,11 @@ class OrchestratorWorker:
                     )
                     continue
 
-                await build_and_run_orchestration(
+                # Router con feature flag USE_NEW_ORCHESTRATOR.
+                # Default off → monolito (build_and_run_orchestration).
+                # Si ON → Coordinator nuevo con fallback automático al
+                # monolito en caso de excepción no controlada.
+                await _run_orchestration_router(
                     supabase=self.supabase,
                     message_id=msg["id"],
                     tenant_id=msg["tenant_id"],
