@@ -82,6 +82,8 @@ _ORDER_CONFIRMATION_MARKERS = (
     "confirmas que armamos",
 )
 _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re.IGNORECASE)
+# Versión search-friendly (sin ^$) para extraer email embebido en texto libre.
+_EMAIL_SEARCH_REGEX = re.compile(r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b", flags=re.IGNORECASE)
 
 
 def _normalize_text_simple(text: str) -> str:
@@ -2496,7 +2498,8 @@ CATÁLOGO ACTUAL ({tenant_name}):
 
 REGLAS DE EXTRACCIÓN Y CIERRE DE COMPRA (CRÍTICO — aplica siempre):
 - Cuando el cliente da su dirección (calle, barrio, apto), extráela y estructúrala en extracted_direction.
-- Cuando el cliente da nombre, email o dirección, extráelos.
+- Cuando el cliente da nombre, email, dirección o documento, extráelos.
+- IMPORTANTE: si el cliente YA mencionó nombre, email, dirección o documento en CUALQUIER mensaje previo del historial, extráelos también — vale incluso si el mensaje actual no los contiene. El sistema solo persiste tras autorización del cliente, así que la extracción debe seguir disponible para reutilizarse después del consentimiento.
 - Si mencionas el nombre del cliente en conversación, usa solo primer nombre.
 - En línea de resumen "Nombre:" usa nombre completo.
 - Cuando confirmas creación de pedido y haya montos claros, entrega total_in_cents y shipping_cost_cents.
@@ -2891,6 +2894,71 @@ async def build_and_run_orchestration(
                 text=_reactivation_msg,
             )
 
+        # ── 2.5 Respuesta de consentimiento (ANTES de cualquier tool determinístico) ──
+        # Si el último mensaje del bot fue la pregunta de consentimiento, el
+        # cliente está respondiendo Sí/No — manejarlo aquí. Si dejamos pasar,
+        # shipping_quote_tool puede interceptar "Sí autorizo" como confirmación
+        # de carrier / cotización por el contexto previo.
+        recent_history_for_consent = history[-4:] if history else []
+        if contact_id and _last_outbound_was_consent_question(recent_history_for_consent):
+            if _detect_consent_yes(content):
+                _record_consent(supabase, contact_id, tenant_id, given=True, conversation_id=conversation_id)
+                # Bug 27 (Ley 1581) recovery: el cliente posiblemente mencionó
+                # datos personales antes del consent — ahora que autorizó,
+                # extraerlos del history y persistirlos sin tener que pedirlos
+                # de nuevo. Email vía regex (determinístico). Nombre/dirección
+                # quedan para el próximo turn del LLM (regla en system prompt).
+                _pii_recovered: dict = {}
+                _full_inbound = " ".join(
+                    str(m.get("content") or "") for m in (history or [])
+                    if str(m.get("direction") or "").lower() == "inbound"
+                )
+                _email_m = _EMAIL_SEARCH_REGEX.search(_full_inbound) if _full_inbound else None
+                if _email_m:
+                    _pii_recovered["email"] = _email_m.group(0).lower()
+                if _pii_recovered:
+                    try:
+                        supabase.table("contacts").update(_pii_recovered).eq("id", contact_id).execute()
+                        logger.info("[CONSENT][PII] Recuperado del history: %s", list(_pii_recovered.keys()))
+                    except Exception as exc:
+                        logger.warning("[CONSENT][PII] Error persistiendo recovery: %s", exc)
+
+                refreshed_contact_id, refreshed_contact_record = _fetch_contact_for_phone(
+                    supabase=supabase,
+                    tenant_id=tenant_id,
+                    customer_phone_raw=customer_phone_raw,
+                )
+                if refreshed_contact_id:
+                    contact_id = refreshed_contact_id
+                if refreshed_contact_record:
+                    contact_record = refreshed_contact_record
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=_build_next_data_request_prompt(contact_record),
+                )
+                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                logger.info("[CONSENT] Aceptado | conversation=%s contact=%s", conversation_id, contact_id)
+                return
+            elif _detect_consent_no(content):
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=(
+                        "Entendido, no guardo tus datos. 🙏\n\n"
+                        "Sin embargo, para cerrar la compra y enviarte el pedido, "
+                        "Wompi y la transportadora necesitan al menos tu nombre, "
+                        "correo, documento y dirección. Si cambias de idea avísame "
+                        f"y los registramos de forma segura, o te conecto con un {tenant_escalation_role} "
+                        "que te ayude por otra vía."
+                    ),
+                )
+                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
+                return
+
         shipping_result = await handle_shipping_quote_if_applicable(
             supabase=supabase,
             tenant_id=tenant_id,
@@ -2973,47 +3041,6 @@ async def build_and_run_orchestration(
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
             return
-
-        # ── 2.6 Respuesta de consentimiento (ANTES del LLM) ───────────────────
-        # Si el último mensaje del bot fue la pregunta de consentimiento, el
-        # cliente está respondiendo Sí/No — manejarlo determinísticamente.
-        recent_history_for_consent = history[-4:] if history else []
-        if contact_id and _last_outbound_was_consent_question(recent_history_for_consent):
-            if _detect_consent_yes(content):
-                _record_consent(supabase, contact_id, tenant_id, given=True, conversation_id=conversation_id)
-
-                refreshed_contact_id, refreshed_contact_record = _fetch_contact_for_phone(
-                    supabase=supabase,
-                    tenant_id=tenant_id,
-                    customer_phone_raw=customer_phone_raw,
-                )
-                if refreshed_contact_id:
-                    contact_id = refreshed_contact_id
-                if refreshed_contact_record:
-                    contact_record = refreshed_contact_record
-
-                await _send_outbound_text(
-                    supabase=supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    text=_build_next_data_request_prompt(contact_record),
-                )
-                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-                logger.info("[CONSENT] Aceptado | conversation=%s contact=%s", conversation_id, contact_id)
-                return
-            elif _detect_consent_no(content):
-                await _send_outbound_text(
-                    supabase=supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    text=(
-                        "Entendido. Podemos continuar con tu pedido sin guardar tus datos personales.\n\n"
-                        "Si quieres, te cotizo el envío. Solo dime la ciudad de entrega."
-                    ),
-                )
-                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-                logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
-                return
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
         history_for_prompt = _history_without_current_inbound(history or [], content)
