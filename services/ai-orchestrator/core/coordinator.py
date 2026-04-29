@@ -35,6 +35,40 @@ from tools_v2.registry import get_handler
 logger = logging.getLogger("orchestrator.core.coordinator")
 
 
+# Frases que indican que el bot anuncia handover a humano. Si el response_text
+# las contiene pero el coordinator NO emitió escalation real (no se invocó
+# escalate_to_human), el cliente queda en limbo. La salvaguarda fuerza
+# set_human_takeover. Replicado del monolito viejo (orchestrator.py).
+_HANDOVER_PHRASES: tuple[str, ...] = (
+    "te paso con", "te paso a", "te conecto con", "te transfiero",
+    "te derivo", "te canalizo", "te comunico con", "te comunicare con",
+    "paso a un asesor", "paso al asesor", "lo paso con", "lo conecto con",
+    "te atendera un", "te atendera una",
+    "te ayudara un asesor", "te ayudara una asesora",
+    "te ayudara nuestro", "te ayudara nuestra",
+    "te ayudara de inmediato",
+    "te contactara un", "te contactara una",
+    "un asesor te ayudara", "una asesora te ayudara",
+    "un asesor te atendera", "una asesora te atendera",
+    "un especialista te", "una especialista te",
+    "un consultor te", "una consultora te",
+    "un agente te", "una agente te",
+    "asesor humano",
+)
+
+
+def _response_promises_handover(text: str) -> bool:
+    """True si ``text`` anuncia traspaso a humano. Normaliza acentos y
+    lowercase para robustez.
+    """
+    if not text:
+        return False
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", text.lower())
+    normalized = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return any(phrase in normalized for phrase in _HANDOVER_PHRASES)
+
+
 # Cap de iteraciones cuando el LLM hace múltiples function_calls encadenados.
 # Doc oficial Gemini no fija un límite duro — 5 cubre los flujos reales.
 _MAX_TOOL_ITERATIONS = 5
@@ -372,6 +406,25 @@ class Coordinator:
             await send_outbound_text(
                 ctx.conversation_id, ctx.tenant_id, result.text,
             )
+
+        # Bug 30 — sincronizar texto y status. Si el response_text del LLM
+        # promete handover ("te paso con un asesor", "te transfiero", etc.)
+        # pero el coordinator NO emitió ESCALATE (no se invocó
+        # escalate_to_human tool), el cliente queda en limbo: el mensaje
+        # anuncia escalación que nunca ocurre. Forzamos human_takeover.
+        # Defensa idéntica a orchestrator.py:_response_promises_handover
+        # del monolito viejo.
+        if (
+            result.kind != TurnDecisionKind.ESCALATE
+            and result.text
+            and _response_promises_handover(result.text)
+        ):
+            set_human_takeover(ctx.conversation_id)
+            logger.info(
+                "[coord] escalation_sync conv=%s — response_text promete asesor",
+                ctx.conversation_id,
+            )
+            return
 
         if result.kind == TurnDecisionKind.ESCALATE:
             set_human_takeover(ctx.conversation_id)
