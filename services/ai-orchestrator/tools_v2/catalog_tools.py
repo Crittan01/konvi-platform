@@ -21,6 +21,26 @@ def _normalize(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c)).strip()
 
 
+def _stem_es(word: str) -> str:
+    """Stem básico español para matching catálogo: elimina plural y
+    sufijos comunes. No es Snowball completo — heurística suficiente
+    para nombres de producto.
+      jabones → jabon, artesanales → artesanal, cocos → coco
+    """
+    w = word.strip().lower()
+    if len(w) <= 3:
+        return w
+    # Plurales en -es (artesanales → artesanal, jabones → jabon)
+    if w.endswith("es") and len(w) > 4:
+        return w[:-2]
+    # Plurales en -s (cocos → coco)
+    if w.endswith("s") and len(w) > 3 and w[-2] not in "aeiou":
+        return w[:-1]
+    if w.endswith("s") and len(w) > 4:
+        return w[:-1]
+    return w
+
+
 async def handle_search_catalog(
     *,
     ctx: ConversationContext,
@@ -37,14 +57,18 @@ async def handle_search_catalog(
         return {"ok": False, "error": "query obligatorio"}
 
     q_norm = _normalize(query)
-    q_tokens = {t for t in q_norm.split() if len(t) >= 3}
+    q_tokens_raw = [t for t in q_norm.split() if len(t) >= 3]
+    # Stem para tolerar plurales: 'jabones artesanales' ↔ 'jabon artesanal'
+    q_stems = {_stem_es(t) for t in q_tokens_raw}
 
     matches: list[dict] = []
     for prod in ctx.catalog or []:
         title = str(prod.get("title") or "")
         title_norm = _normalize(title)
-        title_tokens = {t for t in title_norm.split() if len(t) >= 3}
-        if q_norm in title_norm or len(q_tokens & title_tokens) >= 1:
+        title_stems = {_stem_es(t) for t in title_norm.split() if len(t) >= 3}
+        # Match si la query (normalizada) aparece en el título OR si hay
+        # ≥1 stem compartido. El stemming evita misses por plural/singular.
+        if q_norm in title_norm or (q_stems & title_stems):
             variants = []
             for v in prod.get("variants") or []:
                 variants.append({
