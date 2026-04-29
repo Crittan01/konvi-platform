@@ -1948,6 +1948,22 @@ _SAFETY_GREETING_BANK: dict[str, list[str]] = {
 }
 
 
+def _co_time_of_day_greeting() -> tuple[str, str]:
+    """Retorna (saludo_apropiado, etiqueta) según la hora actual en Colombia
+    (UTC-5, sin DST). Usado por el bot para saludar naturalmente:
+      - 05:00 a 11:59 → "Buenos días" (mañana)
+      - 12:00 a 18:59 → "Buenas tardes" (tarde)
+      - 19:00 a 04:59 → "Buenas noches" (noche)
+    """
+    co_tz = timezone(timedelta(hours=-5))
+    hour = datetime.now(co_tz).hour
+    if 5 <= hour < 12:
+        return ("Buenos días", "mañana")
+    if 12 <= hour < 19:
+        return ("Buenas tardes", "tarde")
+    return ("Buenas noches", "noche")
+
+
 def _safety_greeting_response(
     *,
     agent_name: str,
@@ -2454,12 +2470,20 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
             f"para no sonar artificial).\n"
         )
 
+    _greet_phrase, _greet_label = _co_time_of_day_greeting()
+    time_aware_greeting_block = (
+        f"\nHORA LOCAL ({_greet_label}, Colombia UTC-5): saluda con "
+        f"\"{_greet_phrase}\" en el primer mensaje al cliente. "
+        f"Después en la conversación NO repitas el saludo.\n"
+    )
+
     return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
 COMPORTAMIENTO DEL AGENTE: {role_desc}
 (La identidad del negocio — misión, visión, valores — está abajo en "SOBRE LA TIENDA".)
 {tono_instruccion}
 {_HUMAN_STYLE_GUIDE}
 [ESTADO DE MÁQUINA (FSM): {display_state}]
+{time_aware_greeting_block}
 {known_customer_block}
 {customer_context_block}
 {store_location_section}
@@ -3030,7 +3054,11 @@ async def build_and_run_orchestration(
                     _first_name_greet = _extract_first_name(
                         contact_record.get("name") if isinstance(contact_record, dict) else None
                     )
-                    _greet = f"¡Hola, {_first_name_greet}! " if _first_name_greet else "¡Hola! "
+                    _td_greet, _ = _co_time_of_day_greeting()
+                    if _first_name_greet:
+                        _greet = f"{_td_greet}, {_first_name_greet}. "
+                    else:
+                        _greet = f"{_td_greet}. "
                     _resp_text = f"{_greet}\n\n{_resp_text}"
                 await _send_outbound_text(
                     supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
