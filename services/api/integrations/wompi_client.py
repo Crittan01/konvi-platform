@@ -183,6 +183,15 @@ def create_payment_link_sync(
     customer_data = _build_customer_data(contact)
     if customer_data:
         payload["customer_data"] = customer_data
+        logger.info(
+            "[WOMPI] payment_link customer_data fields=%s",
+            sorted(customer_data.keys()),
+        )
+    else:
+        logger.warning(
+            "[WOMPI] payment_link sin customer_data — checkout pedirá datos al cliente. order=%s",
+            order_id,
+        )
 
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = client.post(

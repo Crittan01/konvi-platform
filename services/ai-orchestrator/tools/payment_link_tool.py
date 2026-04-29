@@ -122,28 +122,46 @@ async def handle_payment_link_if_applicable(
     order_notes = notes or f"Pedido conversacional — Total: {_total_co} COP"
 
     # ── 2. Construir ítems del pedido ─────────────────────────────────────────
-    # Si hay contexto verificado (producto + variante detectados desde catálogo + historial),
-    # usar IDs y precios reales para que _decrement_stock_on_confirm funcione.
-    # Fallback a ítem genérico si no hay contexto verificado.
-    if verified_ctx and verified_ctx.get("product_name"):
+    # Multi-producto (rev. 71): si verified_ctx tiene 'items' (lista), persistir
+    # cada uno como order_item separado para que el cliente vea el desglose
+    # correcto y el stock se decremente por variante al confirmar pago.
+    items_to_persist: list[dict] = []
+    if verified_ctx and isinstance(verified_ctx.get("items"), list) and verified_ctx["items"]:
+        for it in verified_ctx["items"]:
+            title_parts = [str(it.get("title") or "Producto")]
+            if it.get("variant_label"):
+                title_parts.append(str(it["variant_label"]))
+            line_item = {
+                "title": " — ".join(title_parts),
+                "unit_price": max(int(it.get("unit_price_cents") or 0) / 100, 0.01),
+                "quantity": int(it.get("quantity") or 1),
+            }
+            if it.get("product_id"):
+                line_item["product_id"] = it["product_id"]
+            if it.get("variation_id"):
+                line_item["variation_id"] = it["variation_id"]
+            items_to_persist.append(line_item)
+    elif verified_ctx and verified_ctx.get("product_name"):
+        # Single-product (caso rev. 70 — un único producto + variante).
         item_title = verified_ctx["product_name"]
         if verified_ctx.get("variant_label"):
             item_title += f" — {verified_ctx['variant_label']}"
-        item = {
+        line_item = {
             "title": item_title,
             "unit_price": max(verified_ctx["unit_price_cents"] / 100, 0.01),
             "quantity": verified_ctx.get("quantity", 1),
         }
         if verified_ctx.get("product_id"):
-            item["product_id"] = verified_ctx["product_id"]
+            line_item["product_id"] = verified_ctx["product_id"]
         if verified_ctx.get("variation_id"):
-            item["variation_id"] = verified_ctx["variation_id"]
+            line_item["variation_id"] = verified_ctx["variation_id"]
+        items_to_persist.append(line_item)
     else:
-        item = {
+        items_to_persist.append({
             "title": "Pedido conversacional",
             "unit_price": max(products_amount, 0.01),
             "quantity": 1,
-        }
+        })
         logger.warning(
             "[PAYMENT_LINK] Sin contexto verificado — ítem genérico sin variation_id. "
             "Stock NO será decrementado al confirmar pago. tenant=%s",
@@ -157,7 +175,7 @@ async def handle_payment_link_if_applicable(
         "shipping_cost": shipping_cost,
         "notes": order_notes,
         "payment_link": True,  # → status=pending_payment
-        "items": [item],
+        "items": items_to_persist,
     }
 
     order_id = None

@@ -759,6 +759,79 @@ def _build_product_disambiguation_text(product_titles: list[str]) -> str:
     )
 
 
+def _resolve_multiple_products_with_quantities(
+    products: list[dict],
+    query_text: str,
+    recent_messages: list[dict],
+) -> list[tuple[dict, int]]:
+    """Detecta múltiples productos mencionados explícitamente en query/history
+    con sus cantidades. Devuelve [] si no hay >= 2 productos distintos —
+    deja que el single-product resolver tome el control.
+
+    Útil para que la cotización Envia sume peso/dimensiones de TODO el carrito
+    cuando el cliente pide ej. "2 aceites de coco y 1 sérum de vitamina C".
+    """
+    if not products or len(products) < 2:
+        return []
+    full_text = (query_text or "")
+    for msg in (recent_messages or [])[:6]:
+        if str(msg.get("direction") or "").lower() == "inbound":
+            full_text += "\n" + str(msg.get("content") or "")
+    norm_text = _normalize_text(full_text)
+    norm_text_tokens = _tokenize_words(norm_text)
+
+    matched: list[tuple[dict, int, bool]] = []  # (product, qty, qty_es_explicito)
+    seen_titles: set[str] = set()
+    for product in products:
+        title = str(product.get("title") or "").strip()
+        if not title:
+            continue
+        norm_title = _normalize_text(title)
+        if norm_title in seen_titles:
+            continue
+        title_tokens = _product_title_tokens(title)
+        if norm_title and norm_title in norm_text:
+            pass
+        elif title_tokens and len(title_tokens & norm_text_tokens) >= 2:
+            pass
+        else:
+            continue
+        seen_titles.add(norm_title)
+        explicit_qty = _extract_quantity_near_phrase(norm_text, list(title_tokens))
+        matched.append((product, explicit_qty if explicit_qty > 0 else 1, explicit_qty > 0))
+
+    # Solo activar multi cuando hay 2+ productos Y al menos uno tiene cantidad
+    # explícita en el texto (ej "2 aceites... 1 sérum"). Si solo aparecen nombres
+    # sin números, dejar que el single-resolver pida desambiguación.
+    if len(matched) < 2 or not any(is_explicit for _, _, is_explicit in matched):
+        return []
+    return [(p, q) for p, q, _ in matched]
+
+
+def _extract_quantity_near_phrase(norm_text: str, phrase_tokens: list[str]) -> int:
+    """Busca un número justo antes (o muy cerca) de cualquiera de los tokens del
+    nombre del producto. Ej: '2 aceites de coco virgen' con tokens incluyendo
+    'aceite' o 'coco' → 2.
+    """
+    if not phrase_tokens:
+        return 0
+    sig_tokens = [t for t in phrase_tokens if len(t) > 3]
+    if not sig_tokens:
+        sig_tokens = phrase_tokens
+    pattern = (
+        r"(\d+)\s+(?:[a-zñáéíóú]+s?\s+){0,3}("
+        + "|".join(re.escape(t) for t in sig_tokens)
+        + r")"
+    )
+    m = re.search(pattern, norm_text)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return 0
+    return 0
+
+
 def _estimate_package_from_inventory(
     supabase: Client,
     tenant_id: str,
@@ -790,6 +863,54 @@ def _estimate_package_from_inventory(
     except Exception as exc:
         logger.warning("No se pudo cargar catálogo para estimar paquete shipping tenant=%s: %s", tenant_id, exc)
         products = []
+
+    # Multi-producto: si el cliente pidió 2+ productos, sumar peso y dimensiones.
+    # Bug 18 — antes solo se cotizaba un producto y el cliente terminaba pagando
+    # un envío sub-dimensionado.
+    multi_items = _resolve_multiple_products_with_quantities(products, query_text, recent_messages)
+    if len(multi_items) >= 2:
+        total_weight = 0.0
+        max_length = 0.0
+        max_width = 0.0
+        max_height = 0.0
+        total_quantity = 0
+        product_summaries: list[str] = []
+        for prod, qty in multi_items:
+            best_var = _select_best_variation_for_query(prod, query_text, recent_messages) or {}
+            w = _safe_float(best_var.get("weight_kg")) or DEFAULT_WEIGHT_KG
+            l_cm = _safe_float(best_var.get("length_cm")) or DEFAULT_LENGTH_CM
+            wd_cm = _safe_float(best_var.get("width_cm")) or DEFAULT_WIDTH_CM
+            h_cm = _safe_float(best_var.get("height_cm")) or DEFAULT_HEIGHT_CM
+            total_weight += max(w, 0.05) * max(qty, 1)
+            max_length = max(max_length, l_cm)
+            max_width = max(max_width, wd_cm)
+            max_height = max(max_height, h_cm)
+            total_quantity += max(qty, 1)
+            title = _clean_product_title(str(prod.get("title") or ""))
+            label = _variation_label(best_var) if best_var else None
+            qstr = f"{qty}x" if qty > 1 else "1x"
+            if label:
+                product_summaries.append(f"{qstr} {title} ({label})")
+            else:
+                product_summaries.append(f"{qstr} {title}")
+        logger.info(
+            "[SHIPPING_QUOTE] Multi-producto detectado: %s items totales (%d productos distintos)",
+            total_quantity, len(multi_items),
+        )
+        return PackageEstimateDecision(
+            package=PackageEstimate(
+                weight_kg=round(max(total_weight, 0.05), 3),
+                length_cm=_scale_dimension(max_length, total_quantity),
+                width_cm=_scale_dimension(max_width, total_quantity),
+                height_cm=_scale_dimension(max_height, total_quantity),
+                quantity=total_quantity,
+                product_title=" + ".join(product_summaries[:3]) + (
+                    f" + {len(product_summaries)-3} más" if len(product_summaries) > 3 else ""
+                ),
+                variant_label=None,
+                source="multi",
+            )
+        )
 
     product, ambiguous_titles = _resolve_product_for_quote(
         products=products,
@@ -955,7 +1076,20 @@ def _build_quote_response_text(
         if package.variant_label and package.variant_label.strip().lower() not in {"estandar", "estándar", ""}:
             product_label += f" ({package.variant_label})"
 
-    header = f"Envío de {qty_label}{product_label} a {destination_city}:"
+    # Multi-producto: header con lista de items con bullets para legibilidad.
+    if package.source == "multi":
+        items_text = package.product_title or ""
+        # product_title viene como "2x A + 1x B + 1x C" — convertir a bullets.
+        if " + " in items_text:
+            items_lines = "\n".join(f"• {item.strip()}" for item in items_text.split(" + "))
+        else:
+            items_lines = f"• {items_text}" if items_text else ""
+        header = (
+            f"Envío de tu pedido ({package.quantity} unidades) a {destination_city}:\n"
+            f"{items_lines}"
+        )
+    else:
+        header = f"Envío de {qty_label}{product_label} a {destination_city}:"
     cheapest_line = _format_rate_line("Económica", cheapest)
     lines = [header, cheapest_line]
 

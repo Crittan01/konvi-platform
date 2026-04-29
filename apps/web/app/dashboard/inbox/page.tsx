@@ -398,6 +398,8 @@ export default function InboxPage() {
       .from('messages')
       .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
       .eq('conversation_id', selectedId)
+      // Excluir snapshots de contexto interno (R-13) — no se renderizan al cliente.
+      .neq('content_type', 'context_snapshot')
       // DESC para traer los 100 MÁS RECIENTES (no los 100 más antiguos)
       // Se revierten en el then() para mostrar en orden cronológico (asc visual)
       .order('created_at', { ascending: false })
@@ -430,11 +432,14 @@ export default function InboxPage() {
       }, (payload) => {
         lastRealtimeAt.current = Date.now()
         if (payload.eventType === 'INSERT') {
+          const newMsg = payload.new as Message & { content_type?: string }
+          // R-13: snapshots de contexto interno NO se renderizan al cliente.
+          if (newMsg.content_type === 'context_snapshot') return
           // A6: dedupe por id para evitar duplicado entre realtime y polling fallback.
           setMessages(prev =>
-            prev.some(m => m.id === (payload.new as Message).id)
+            prev.some(m => m.id === newMsg.id)
               ? prev
-              : [...prev, payload.new as Message]
+              : [...prev, newMsg as Message]
           )
           setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
           // A1: optimistic update del timestamp lateral — el trigger DB
@@ -470,6 +475,7 @@ export default function InboxPage() {
           .from('messages')
           .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
           .eq('conversation_id', selectedId)
+          .neq('content_type', 'context_snapshot')
           .order('created_at', { ascending: false })
           .limit(100)
           .then(({ data, error }) => {
@@ -568,6 +574,7 @@ export default function InboxPage() {
         .from('messages')
         .select('id, direction, content, content_type, created_at, processed, processing_status, skip_reason')
         .eq('conversation_id', selectedId)
+        .neq('content_type', 'context_snapshot')
         .lt('created_at', oldest.created_at)
         .order('created_at', { ascending: false })
         .limit(50)
