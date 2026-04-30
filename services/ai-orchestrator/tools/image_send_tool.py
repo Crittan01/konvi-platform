@@ -39,11 +39,43 @@ _IMAGE_REQUEST_TOKENS: frozenset[str] = frozenset({
     "muestra",
 })
 _IMAGE_REQUEST_PHRASES: tuple[str, ...] = (
-    "como se ve", "como luce", "como es",
+    "como se ve", "como luce",
+    # Rev. 82: "como es" REMOVIDO — matcheaba como substring en saludos
+    # tipo "como estan / como estás / como estuvo" y derrailaba la
+    # conversación pre-LLM. Si en el futuro reincorporamos esta frase,
+    # debe ir con word-boundary regex (ver _phrase_matches_with_boundary).
     "tienes foto", "tienen foto", "hay foto",
     "puedes enviarme", "puedes mandarme",
     "puedes enviar", "puedes mandar",
 )
+
+
+def _phrase_matches_with_boundary(phrase: str, normalized: str) -> bool:
+    """Rev. 82: matching con word boundaries para evitar que una frase
+    matchee como prefijo/sufijo de una palabra más larga.
+
+    Ej: ``"como es"`` NO matchea en ``"como estan"`` con boundary, sí
+    matchea en ``"como es?"`` o ``"como es eso"``.
+
+    Implementación: padeamos texto y frase con espacios y exigimos que
+    la frase aparezca rodeada de inicio/fin de cadena, espacios, o
+    signos de puntuación comunes en español.
+    """
+    if not phrase or not normalized:
+        return False
+    # Reemplazar puntuación común por espacio para que las fronteras
+    # funcionen sin escapar regex.
+    padded = " " + _re_punct_to_space(normalized) + " "
+    return f" {phrase} " in padded
+
+
+import re as _re
+
+_PUNCT_RE = _re.compile(r"[¿?¡!.,;:]")
+
+
+def _re_punct_to_space(text: str) -> str:
+    return _PUNCT_RE.sub(" ", text)
 # Si la query contiene tokens transaccionales fuertes, NO activar
 # (el cliente quiere comprar, no solo ver).
 _TRANSACTIONAL_OVERRIDE_TOKENS: frozenset[str] = frozenset({
@@ -69,8 +101,10 @@ def is_image_request_query(text: str) -> bool:
     if not normalized:
         return False
     tokens = set(re.findall(r"[a-z0-9ñ]+", normalized))
+    # Rev. 82: matching de frases con word-boundary (evita que "como es"
+    # matchee dentro de "como estan").
     has_image_tokens = bool(tokens & _IMAGE_REQUEST_TOKENS) or any(
-        p in normalized for p in _IMAGE_REQUEST_PHRASES
+        _phrase_matches_with_boundary(p, normalized) for p in _IMAGE_REQUEST_PHRASES
     )
     has_transactional = bool(tokens & _TRANSACTIONAL_OVERRIDE_TOKENS)
     # Prioridad imagen cuando ambos están — cliente quiere ver antes de comprar.
