@@ -3,10 +3,10 @@
     "number": 1,
     "name": "Primer contacto + saludo",
     "status": "PASS",
-    "message": "Bot respondió en 1 mensaje(s) (121 chars)",
+    "message": "Bot respondió en 1 mensaje(s) (182 chars)",
     "evidence": {
       "outbound_count": 1,
-      "preview": "¡Hola! Buenos días. Soy Sara Camila de KAIU Living Natural.\n\n¿En qué puedo ayudarte hoy con nuestros productos naturales"
+      "preview": "¡Hola! Soy Sara Camila de KAIU Living Natural. Puedo ayudarte con información sobre nuestros productos naturales para el"
     },
     "error": null
   },
@@ -16,7 +16,7 @@
     "status": "PASS",
     "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
     "evidence": {
-      "sample": "¡Buenos días! 👋 En KAIU Living Natural tenemos una variedad de productos naturales para tu cuidado.\n\nContamos con aceite"
+      "sample": "¡Buenos días! Soy Sara Camila de KAIU Living Natural. Tenemos una variedad de productos naturales como aceites vegetales"
     },
     "error": null
   }
