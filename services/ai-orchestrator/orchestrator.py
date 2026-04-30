@@ -1716,19 +1716,67 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
     return " — ".join(parts)
 
 
+def _verified_ctx_from_cart(cart: dict) -> Optional[dict]:
+    """Rev. 80: convierte el cart en DB (output de cart_tool.get_cart_with_items)
+    al schema de verified_ctx que espera _build_order_summary_text.
+
+    Devuelve None si el cart está vacío o requiere re-cotización.
+    """
+    if not cart:
+        return None
+    items = cart.get("items") or []
+    if not items:
+        return None
+    if cart.get("requires_requote"):
+        # Cart cambió post-cotización, NO debemos generar resumen estancado.
+        return None
+    subtotal = int(cart.get("subtotal_cents") or 0)
+    shipping = int(cart.get("shipping_cents") or 0)
+    total = int(cart.get("total_cents") or (subtotal + shipping))
+    out_items = []
+    for it in items:
+        v = it.get("variation") or {}
+        p = it.get("product") or {}
+        title = p.get("title") or p.get("name") or "Producto"
+        variant_label = v.get("label") or v.get("presentation") or ""
+        out_items.append({
+            "variation_id": it.get("variation_id"),
+            "product_id": it.get("product_id"),
+            "title": title,
+            "variant_label": variant_label,
+            "quantity": int(it.get("quantity") or 1),
+            "unit_price_cents": int(it.get("unit_price_cents") or 0),
+        })
+    return {
+        "items": out_items,
+        "subtotal_cents": subtotal,
+        "shipping_cost_cents": shipping,
+        "total_cents": total,
+        "_source": "cart_db",
+    }
+
+
 def _build_order_summary_text(
     *,
     contact_record: dict,
     verified_ctx: Optional[dict],
     catalog: Optional[list] = None,
     history: Optional[list[dict]] = None,
+    cart_from_db: Optional[dict] = None,
 ) -> Optional[str]:
     """Resumen estructurado determinístico antes de la confirmación final.
 
-    Usa verified_ctx (single o multi-producto) + datos del contacto. NO delega
-    al LLM. Si no hay contexto verificable retorna None y dejamos que el LLM
+    Rev. 80 — Prioridad de fuentes:
+      1. cart_from_db (DB SoT) si tiene items y NO requiere recotización.
+      2. verified_ctx provisto por el caller.
+      3. Fallback: history-parsing (DEPRECATED rev. 80, queda como red de
+         seguridad cuando el cart-en-DB no está disponible).
+
+    Si no hay contexto verificable retorna None y dejamos que el LLM
     componga el mensaje (degradación segura).
     """
+    if not verified_ctx and cart_from_db:
+        verified_ctx = _verified_ctx_from_cart(cart_from_db)
     if not verified_ctx:
         verified_ctx = (
             _build_verified_multi_product_context(catalog or [], history or [])
@@ -4312,16 +4360,100 @@ async def build_and_run_orchestration(
                 # READY_FOR_SUMMARY recién alcanzado: inyectar resumen
                 # determinístico en vez de delegar al LLM. Esto garantiza que
                 # el cliente vea siempre el desglose antes de confirmar.
+                # Rev. 80: priorizar cart-en-DB como fuente de verdad para el
+                # resumen — evita que el resolver de history pierda items.
                 elif (
                     _new_state == "READY_FOR_SUMMARY"
                     and display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
                                           "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}
                 ):
+                    _cart_for_summary = None
+                    try:
+                        from tools.cart_tool import (
+                            get_cart_with_items, ensure_cart, add_item,
+                        )
+                        _cart_for_summary = get_cart_with_items(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                        )
+                        # Rev. 80 — Populate-on-demand: si el cart en DB
+                        # está vacío, intentar extraer items del history
+                        # resolver y persistirlos. Esto permite que turnos
+                        # subsiguientes (ej. cliente dice "Bogotá" tras
+                        # haber dado "1 Coco + 2 Lavanda" antes) tengan el
+                        # cart completo aunque el último mensaje no
+                        # mencione productos.
+                        if (not _cart_for_summary
+                                or not (_cart_for_summary.get("items") or [])):
+                            _ctx_from_history = (
+                                _build_verified_multi_product_context(
+                                    catalog or [], history_for_prompt or []
+                                )
+                                or _build_verified_order_context(
+                                    catalog or [], history_for_prompt or []
+                                )
+                            )
+                            _ctx_items = (_ctx_from_history or {}).get("items") or []
+                            if not _ctx_items and _ctx_from_history:
+                                # Single-product: convertirlo en lista de un item.
+                                _single = _ctx_from_history
+                                if _single.get("variation_id"):
+                                    _ctx_items = [{
+                                        "product_id": _single.get("product_id"),
+                                        "variation_id": _single.get("variation_id"),
+                                        "quantity": int(_single.get("quantity") or 1),
+                                        "unit_price_cents": int(_single.get("unit_price_cents") or 0),
+                                    }]
+                            if _ctx_items:
+                                _cart_obj = ensure_cart(
+                                    supabase,
+                                    conversation_id=conversation_id,
+                                    tenant_id=tenant_id,
+                                    contact_id=contact_id,
+                                )
+                                _cart_id_str = _cart_obj.get("id") if _cart_obj else None
+                                for _it in _ctx_items:
+                                    if (not _cart_id_str
+                                            or not _it.get("product_id")
+                                            or not _it.get("variation_id")):
+                                        continue
+                                    try:
+                                        add_item(
+                                            supabase,
+                                            cart_id=_cart_id_str,
+                                            tenant_id=tenant_id,
+                                            product_id=_it["product_id"],
+                                            variation_id=_it["variation_id"],
+                                            quantity=int(_it.get("quantity") or 1),
+                                            unit_price_cents=int(_it.get("unit_price_cents") or 0),
+                                        )
+                                    except Exception as _add_err:
+                                        logger.warning(
+                                            "[CART] add_item falló durante populate: %s",
+                                            _add_err,
+                                        )
+                                _cart_for_summary = get_cart_with_items(
+                                    supabase,
+                                    conversation_id=conversation_id,
+                                    tenant_id=tenant_id,
+                                )
+                                logger.info(
+                                    "[CART] populate-on-demand: cart=%s items=%s",
+                                    (_cart_for_summary or {}).get("id", "?")[:8] if _cart_for_summary else "none",
+                                    len((_cart_for_summary or {}).get("items") or []),
+                                )
+                    except Exception as _cart_err:
+                        logger.warning(
+                            "[CART] populate/get falló (rev. 80, fallback): %s",
+                            _cart_err,
+                        )
                     _summary = _build_order_summary_text(
                         contact_record=_sim_contact,
                         verified_ctx=None,
                         catalog=catalog,
                         history=history_for_prompt,
+                        cart_from_db=_cart_for_summary,
                     )
                     if _summary:
                         parsed.response_text = _summary

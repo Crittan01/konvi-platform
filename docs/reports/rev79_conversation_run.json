@@ -1,38 +1,23 @@
 [
   {
-    "number": 15,
-    "name": "Promesa de link cumplida",
+    "number": 1,
+    "name": "Primer contacto + saludo",
     "status": "PASS",
-    "message": "Bot bloqueó link y pidió datos faltantes (FSM enforcement OK)",
+    "message": "Bot respondió en 1 mensaje(s) (121 chars)",
     "evidence": {
-      "turns": 7,
-      "promised_link": false,
-      "link_delivered": false,
-      "fsm_enforced_data": true,
-      "consent_given": false,
-      "transcript_tail": [
-        {
-          "client": "Sí, esa opción",
-          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
-        },
-        {
-          "client": "Sí acepto, guarden mis datos",
-          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
-        },
-        {
-          "client": "crittan01@gmail.com",
-          "bot": ""
-        }
-      ]
+      "outbound_count": 1,
+      "preview": "¡Hola! Buenos días. Soy Sara Camila de KAIU Living Natural.\n\n¿En qué puedo ayudarte hoy con nuestros productos naturales"
     },
     "error": null
   },
   {
-    "number": 16,
-    "name": "Wompi APPROVED simulation",
-    "status": "SKIP",
-    "message": "Sin contact_id — S15 no creó orden",
-    "evidence": {},
+    "number": 7,
+    "name": "Formato canónico WhatsApp",
+    "status": "PASS",
+    "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
+    "evidence": {
+      "sample": "¡Buenos días! 👋 En KAIU Living Natural tenemos una variedad de productos naturales para tu cuidado.\n\nContamos con aceite"
+    },
     "error": null
   }
 ]
