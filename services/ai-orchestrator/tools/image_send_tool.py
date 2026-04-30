@@ -76,6 +76,66 @@ _PUNCT_RE = _re.compile(r"[¿?¡!.,;:]")
 
 def _re_punct_to_space(text: str) -> str:
     return _PUNCT_RE.sub(" ", text)
+
+
+# Rev. 82.b — tokens de saludo/cortesía. Si una query consta SOLO de
+# estos tokens, es un saludo neutral y NO debe activar el flow de imagen
+# vía followup-detector (cliente no está respondiendo a la disambig).
+_GREETING_ONLY_TOKENS: frozenset[str] = frozenset({
+    "hola", "ola",
+    "buenas", "buenos",
+    "tardes", "noches", "dias", "mañana", "mananas",
+    "como", "que", "tal", "todo",
+    "estas", "estan", "estuvo", "estuvieron", "estamos", "estoy",
+    "saludos", "saludo",
+    "señor", "señora", "sr", "sra", "señorita",
+    "y", "a", "de", "el", "la", "los", "las",
+    "gracias",  # "Hola gracias"
+    "ahi", "ahí",
+    # cortesías frecuentes:
+    "espero", "esperando",
+})
+
+
+def _query_is_only_greeting(text: str) -> bool:
+    """True si la query consiste exclusivamente en tokens de saludo /
+    cortesía / palabras vacías. En ese caso NO debe disparar followup
+    de imagen aunque el bot haya preguntado antes.
+
+    Bug rev. 82.b: tras el bot preguntar disambig de imagen, cualquier
+    inbound del cliente (incluido un saludo neutral) re-disparaba el
+    flow. Esta función gatekeepea ese caso.
+    """
+    if not text:
+        return True
+    normalized = _normalize_text(text)
+    tokens = [t for t in _re.findall(r"[a-z0-9ñ]+", normalized) if t]
+    if not tokens:
+        return True
+    return all(t in _GREETING_ONLY_TOKENS for t in tokens)
+
+
+# Rev. 82.b — si el bot ya preguntó la disambig N veces sin que el
+# cliente identifique producto, abandonar el intent y dejar al LLM
+# tomar el control.
+_MAX_DISAMBIGUATION_ROUNDS = 2
+
+
+def _count_disambiguation_rounds(recent_messages: list[dict]) -> int:
+    """Cuenta cuántas veces consecutivas el bot ha preguntado la
+    disambig de imagen en outbounds recientes."""
+    count = 0
+    for msg in reversed(recent_messages or []):
+        direction = str(msg.get("direction") or "").lower()
+        if direction == "outbound":
+            content_norm = _normalize_text(str(msg.get("content") or ""))
+            if _IMAGE_DISAMBIGUATION_MARKER in content_norm:
+                count += 1
+            else:
+                break  # outbound que NO es disambig rompe la racha
+        elif direction == "inbound":
+            continue
+    return count
 # Si la query contiene tokens transaccionales fuertes, NO activar
 # (el cliente quiere comprar, no solo ver).
 _TRANSACTIONAL_OVERRIDE_TOKENS: frozenset[str] = frozenset({
@@ -188,8 +248,24 @@ async def handle_image_request_if_applicable(
     Si NO hay intent de foto → handled=False (delega).
     """
     if not is_image_request_query(query_text):
-        # Followup: si el bot acaba de preguntar "¿de cuál producto querés ver
-        # foto?" y el cliente respondió con solo el nombre, mantener el intent.
+        # Rev. 82.b — gates de salida del followup detector:
+        #
+        # 1) Si el query es SOLO saludo/cortesía (e.g. "Hola como estan?"),
+        #    NO mantener el intent de imagen. El cliente no está respondiendo
+        #    a la disambig, está saludando neutralmente.
+        if _query_is_only_greeting(query_text):
+            return ImageSendResult(handled=False)
+        # 2) Si el bot ya preguntó la disambig 2+ veces seguidas sin que el
+        #    cliente identifique producto, abandonar intent y dejar al LLM
+        #    tomar el control (evita loop infinito).
+        if _count_disambiguation_rounds(recent_messages or []) >= _MAX_DISAMBIGUATION_ROUNDS:
+            logger.info(
+                "[IMAGE_SEND] disambig rounds >= %d, abandono intent y delego al LLM",
+                _MAX_DISAMBIGUATION_ROUNDS,
+            )
+            return ImageSendResult(handled=False)
+        # 3) Followup legítimo: bot pidió producto, cliente dio nombre →
+        #    mantener intent.
         if not is_followup_to_image_disambiguation(recent_messages or []):
             return ImageSendResult(handled=False)
 

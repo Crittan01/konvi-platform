@@ -11,13 +11,238 @@
     "error": null
   },
   {
+    "number": 2,
+    "name": "Consulta catálogo",
+    "status": "PASS",
+    "message": "Bot listó productos en 1 mensaje(s)",
+    "evidence": {
+      "outbound_count": 1,
+      "preview": "¡hola! 👋 en kaiu living natural tenemos una variedad de productos para el cuidado personal, todos elaborados con ingredientes 100% naturales. manejamos aceites vegetales y esenciales, jabones artesana"
+    },
+    "error": null
+  },
+  {
+    "number": 3,
+    "name": "KB cita de fuentes",
+    "status": "FAIL",
+    "message": "Bot respondió sobre KB pero no incluyó cita de fuente (rev. 78 F3)",
+    "evidence": {
+      "sample": "Aceptamos devoluciones dentro de los 15 días calendario siguientes a la entrega, siempre que el producto esté sin usar, con empaque original y en perfectas condiciones. Para iniciar una devolución, escríbenos por WhatsApp con tu número de pedido y el motivo. Ten en cuenta que no aceptamos devolucion"
+    },
+    "error": null
+  },
+  {
+    "number": 4,
+    "name": "Out-of-domain",
+    "status": "FAIL",
+    "message": "Bot inventó datos meteorológicos — alucinación detectada",
+    "evidence": {
+      "sample": "¡hola! soy sara camila de kaiu living natural. aquí en bogotá está soleado y fresco, ¡un día perfecto para cuidarnos con lo mejor de la naturaleza! 😊 ¿en qué te puedo ayudar hoy?"
+    },
+    "error": null
+  },
+  {
+    "number": 5,
+    "name": "Foto producto",
+    "status": "PASS",
+    "message": "Bot fallback explicativo tras 2 turnos",
+    "evidence": {
+      "image_sent": false,
+      "turns": 2,
+      "matched_rules": [
+        "[Q+ctx] prio=35 kws=('presentación', 'presentacion') q='¿te cuento más beneficios o cotizo el envío a tu ciudad?'"
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 6,
+    "name": "Datos desordenados (turn-by-turn)",
+    "status": "FAIL",
+    "message": "Tras 6 turnos adaptativos, no se creó contact_row",
+    "evidence": {
+      "turns": 6,
+      "matched_rules": [
+        "[Q] prio=20 kws=('presentación', 'presentacion') q='¿cuál de estas presentaciones te gustaría?'",
+        "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='¿para qué ciudad sería el envío?'",
+        "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
+        "[Q] prio=25 kws=('aceptas', 'tratamiento de datos') q='¿me autorizas?'",
+        "[Q] prio=50 kws=('correo', 'email') q='¿cuál es tu correo electrónico?'"
+      ],
+      "transcript_tail": [
+        {
+          "client": "Sí, esa opción",
+          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
+        },
+        {
+          "client": "Sí acepto, guarden mis datos",
+          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+        },
+        {
+          "client": "Soy Cristian Garzón, correo crittan01@gmail.com, CC 1032414179, dirección Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
+          "bot": ""
+        }
+      ]
+    },
+    "error": null
+  },
+  {
     "number": 7,
     "name": "Formato canónico WhatsApp",
     "status": "PASS",
     "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
     "evidence": {
-      "sample": "¡Hola! 👋\n\nEn KAIU Living Natural tenemos una variedad de productos para el cuidado personal, todos elaborados con ingred"
+      "sample": "¡Hola! 👋 En KAIU Living Natural tenemos una variedad de productos para el cuidado personal, todos elaborados con ingredi"
     },
+    "error": null
+  },
+  {
+    "number": 8,
+    "name": "Revocación adaptativa",
+    "status": "PASS",
+    "message": "Contacto eliminado (revocación procesada)",
+    "evidence": {
+      "setup_turns": 5,
+      "transcript_tail": [
+        {
+          "client": "Sí, esa opción",
+          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
+        },
+        {
+          "client": "Sí acepto, guarden mis datos",
+          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+        }
+      ],
+      "outbound_after_revoke": 1
+    },
+    "error": null
+  },
+  {
+    "number": 9,
+    "name": "Happy path completo",
+    "status": "FAIL",
+    "message": "Tras 8 turnos, contact_row no creado",
+    "evidence": {
+      "transcript_tail": [
+        {
+          "client": "Sí, esa opción",
+          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
+        },
+        {
+          "client": "Sí acepto, guarden mis datos",
+          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+        },
+        {
+          "client": "crittan01@gmail.com",
+          "bot": ""
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 10,
+    "name": "Cancelación mid-flow",
+    "status": "FAIL",
+    "message": "Bot no acusó recibo — siguió vendiendo",
+    "evidence": {
+      "setup_turns": 7,
+      "preview": ""
+    },
+    "error": null
+  },
+  {
+    "number": 11,
+    "name": "Escalación a humano",
+    "status": "PASS",
+    "message": "Bot reconoció la petición de asesor",
+    "evidence": {
+      "preview": "claro, te paso con un asesor que te ayudará de inmediato."
+    },
+    "error": null
+  },
+  {
+    "number": 12,
+    "name": "Address conjunto residencial",
+    "status": "FAIL",
+    "message": "Bot no preguntó por torre/apto y no se registraron",
+    "evidence": {
+      "asked_tower": false,
+      "address_db": {},
+      "turns": 3
+    },
+    "error": null
+  },
+  {
+    "number": 13,
+    "name": "Multi-producto + volumetría",
+    "status": "PASS",
+    "message": "Cotización=True, multi-producto reconocido=True",
+    "evidence": {
+      "turns": 5,
+      "transcript_tail": [
+        {
+          "client": "30 ml por favor",
+          "bot": "Perfecto, el *Sérum de Vitamina C* de 30ml. \n\nAhora, para el *Jabón Artesanal de Coco*, ¿cuál presentación te gustaría? Lo tenemos en 60g, 100g o 150g."
+        },
+        {
+          "client": "La de 60 gramos por favor",
+          "bot": "Listo, entonces serían 2 *Jabones Artesanales de Coco* de 60g y 1 *Sérum de Vitamina C* de 30ml.\n\n¿Te gustaría cotizar el envío a tu ciudad?"
+        },
+        {
+          "client": "Sí, cotiza por favor",
+          "bot": "¡Claro! Para cotizar el envío, por favor, indícame tu ciudad y departamento."
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 14,
+    "name": "Cambio ciudad de envío",
+    "status": "PASS",
+    "message": "Bot re-cotizó a Medellín",
+    "evidence": {
+      "setup_turns": 6,
+      "re_quoted_amount": true,
+      "preview": "envío de 1 unidad de jabón artesanal de coco (presentación: 60g) a medellín:\n\n* *económica*: deprisa estandar | $13.140 | entrega 04/05/2026\n* *rápida*: fedex express® | $31.450 | entrega 01/05/2026\n\n¿con cuál continuamos? (*económica* o *r"
+    },
+    "error": null
+  },
+  {
+    "number": 15,
+    "name": "Promesa de link cumplida",
+    "status": "SKIP",
+    "message": "Conversación no llegó al punto de confirmación en 6 turnos",
+    "evidence": {
+      "turns": 6,
+      "promised_link": false,
+      "link_delivered": false,
+      "fsm_enforced_data": false,
+      "consent_given": false,
+      "transcript_tail": [
+        {
+          "client": "Sí, cotiza por favor",
+          "bot": "Perfecto.\n\n¿A qué ciudad te gustaría que lo enviemos?"
+        },
+        {
+          "client": "Bogotá",
+          "bot": "¡Claro! El envío de tu Jabón Artesanal de Coco (60g) a Bogotá tiene un costo de $6.740 COP y la entrega estimada es de 1 a 2 días hábiles.\n\n¿Confirmas para generar tu link de pago?"
+        },
+        {
+          "client": "Sí confirmo",
+          "bot": ""
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 16,
+    "name": "Wompi APPROVED simulation",
+    "status": "SKIP",
+    "message": "Sin contact_id — S15 no creó orden",
+    "evidence": {},
     "error": null
   }
 ]
