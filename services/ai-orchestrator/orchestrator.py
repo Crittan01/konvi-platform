@@ -141,6 +141,51 @@ def _detect_sensitive_payment_data(text: str) -> tuple[bool, str]:
     return False, ""
 
 
+# Rev. 86 — Detector de intent de UPDATE de datos personales.
+# UX cliente conocido: tras ver el resumen, puede pedir cambiar dirección
+# (envío a oficina), correo, etc. Sin este detector, el LLM podría no
+# entrar al sub-flow correcto.
+_DATA_UPDATE_PHRASES = (
+    "cambia mi direccion", "cambia la direccion", "cambiar la direccion",
+    "cambiar mi direccion", "actualizar direccion", "actualizar la direccion",
+    "envialo a", "enviar a otra", "enviar a la oficina", "envia a la oficina",
+    "diferente direccion", "otra direccion", "mismo de antes no",
+    "cambia mi correo", "actualizar correo", "nuevo correo",
+    "cambia mi celular", "cambia mi telefono", "actualizar telefono",
+    "cambia mis datos", "actualizar mis datos", "actualizar datos",
+    "modificar datos", "no es esa direccion", "esa direccion no",
+    "envia a otro lado", "ahora vivo en", "ahora estoy en",
+)
+
+
+def _detect_data_update_intent(text: str) -> Optional[str]:
+    """Rev. 86 — True (con campo afectado) si el cliente quiere actualizar
+    un dato personal antes de confirmar el pedido.
+
+    Returns:
+        None — no detect intent
+        "address" — quiere cambiar dirección
+        "email" — quiere cambiar correo
+        "phone" — quiere cambiar celular
+        "general" — quiere cambiar algún dato sin especificar cuál
+
+    Usado en `READY_FOR_SUMMARY` para entrar a sub-flow de UPDATE en vez
+    de generar payment_link directo.
+    """
+    if not text:
+        return None
+    normalized = _normalize_text_simple(text)
+    if not any(phrase in normalized for phrase in _DATA_UPDATE_PHRASES):
+        return None
+    if any(k in normalized for k in ("direccion", "envialo", "enviar a", "envia a", "vivo en", "estoy en", "oficina")):
+        return "address"
+    if "correo" in normalized:
+        return "email"
+    if any(k in normalized for k in ("celular", "telefono")):
+        return "phone"
+    return "general"
+
+
 # Rev. 83: detección de cancelación de pedido. UX: el cliente que cancela
 # NO debe ser escalado a humano (sería molesto). Bot acusa recibo cordial,
 # cierra el cart, deja la puerta abierta para volver.
@@ -1610,6 +1655,27 @@ def _last_outbound_was_order_confirmation_question(history: list[dict]) -> bool:
             content_norm = _normalize_text(str(msg.get("content") or ""))
             return any(marker in content_norm for marker in _ORDER_CONFIRMATION_MARKERS)
     return False
+
+
+def _detect_building_type_from_text(text: str) -> Optional[str]:
+    """Rev. 86 — Si el LLM olvida setear building_type pero el cliente
+    menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa' en el
+    texto, lo inferimos para que el FSM exija los campos correctos.
+
+    Returns: "conjunto" | "edificio" | "casa" | None
+    """
+    if not text:
+        return None
+    normalized = _normalize_text_simple(text)
+    if any(kw in normalized for kw in ("conjunto", "unidad residencial", "torres del", "torre ")):
+        return "conjunto"
+    if any(kw in normalized for kw in ("edificio", "apartamento", "apto ", "apto.", " apto", "piso ", "torre")):
+        # "torre" sola es ambigua, pero si NO hay 'conjunto' en el texto,
+        # asumimos edificio.
+        return "edificio"
+    if "casa" in normalized:
+        return "casa"
+    return None
 
 
 def _normalize_building_type(value: Optional[str]) -> str:
@@ -3234,6 +3300,33 @@ REGLAS DE CUMPLIMIENTO META BUSINESS POLICY (rev. 84 — CRÍTICO):
 - MENORES DE EDAD: si el cliente menciona ser menor (<18), o pide productos que requieran ser adulto, o el contexto sugiere que es menor: "Para procesar pedidos necesito que un adulto autorizado realice la compra. ¿Puedes pedirle a tu madre/padre/tutor que continúe contigo?".
 
 {strict_rules}
+CLIENTE CONOCIDO vs CLIENTE NUEVO (rev. 86):
+- "Cliente conocido" = `customer_context` no vacío (tiene `name`, `consent_given=true` y/o pedidos previos).
+- "Cliente nuevo" = sin `customer_context` o `consent_given=false`.
+
+PARA CLIENTE CONOCIDO:
+- Saludo SIEMPRE por primer nombre. Ej: "¡Hola, *Cristian*! 👋 Bienvenido(a) de nuevo a *{tenant_name}*. ¿Qué buscas hoy?"
+- NO repreguntes consent (ya está dado).
+- NO repreguntes nombre, correo, documento, dirección — los datos están en DB.
+- En el RESUMEN PRE-CONFIRMACIÓN incluye sus datos guardados con cita visual de dirección y pregunta SIEMPRE: "¿Confirmas estos datos o quieres actualizar alguno (dirección, correo, documento)?". Esto cubre que el cliente pueda querer envío a otra dirección esta vez.
+- Si el cliente tiene `last_cart` abandonado (<7 días en `customer_context`) → en el primer turno de intent transaccional, OFRECE retomar: "Veo que tenías *X items* en tu carrito reciente. ¿Lo retomamos o nuevo pedido?".
+- Si el cliente tiene `last_orders` con frecuencia ≥ 3 compras del mismo kit → ofrece reorder rápido: "¿Repetir tu kit habitual (*X*)?".
+- Si tiene `pending_payment_orders` → "Tienes un pedido pendiente de pago (*$X COP* desde fecha). ¿Lo retomas o creas uno nuevo?".
+- Si tiene `open_claims` → "Tienes un reclamo en curso (*#ID*). ¿Es sobre eso o algo nuevo?".
+- Marca / introducción: NO la repitas en cada saludo. Solo si el cliente la pide ("recuérdame qué venden", "qué tienen ahora").
+- Tono: conciso, asume contexto. Menos explicaciones que con cliente nuevo.
+
+PARA CLIENTE NUEVO:
+- Saludo: "¡Hola! 👋 Soy *{ai_agent.get('name', 'el asistente')}* de *{tenant_name}*. ¿En qué te ayudo?".
+- Explica brevemente qué hace la tienda en el primer turno transaccional.
+- FSM completo de captura: consent → email → name → document → address.
+- Tono: explicativo, paso a paso, paciente.
+
+MODO UPDATE DE DATOS (cliente conocido en pre-confirmación):
+- Si tras mostrar el resumen el cliente dice "cambia dirección", "envía a la oficina", "actualiza mi correo" o similar → entras a modo UPDATE.
+- Pide SOLO el campo a cambiar. NO vuelvas al FSM completo.
+- Tras recibir el dato nuevo, regresa a READY_FOR_SUMMARY con el dato actualizado y vuelve a preguntar confirmación.
+
 REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 - Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
 - Frustración, molestia, urgencia alta, lenguaje agresivo → ESCALAR.
@@ -3251,6 +3344,12 @@ ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
 - Si YA cotizaste envío o YA tienes los datos personales, no repitas la pregunta de envío.
 - RESPETA TU ESTADO ACTUAL. Si el FSM dice NEEDS_NAME pide nombre, etc.
 - EN EL MISMO MENSAJE → intent=order_acknowledgment aplica cuando el usuario confirma cierre transaccional.
+
+AVANCE OBLIGATORIO DEL FSM (rev. 86 — fix S6/S9):
+- TRAS confirmar carrier de envío + ciudad, el siguiente turno DEBE pedir el primer dato faltante del FSM (consent / email / name / document / address). NO sigas conversando o re-explicando productos.
+- El cliente conocido salta la captura — pasa directo a READY_FOR_SUMMARY (resumen + pregunta confirmar/actualizar).
+- El cliente nuevo entra a NEEDS_CONSENT, no improvises preguntas adicionales.
+- NUNCA pidas dos datos en el mismo turno (1 pregunta → 1 respuesta del cliente).
 
 {state_instruction}
 
@@ -3333,11 +3432,88 @@ Patrón canónico — listado de catálogo:
 
 ¿Te interesa alguno en particular?
 
-Reglas de aplicación:
+Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universal):
 - Cuando hay UN solo item, igual envuelve en sección con título en negrita.
-- Para respuestas conversacionales cortas (saludo, agradecimiento, micro-pregunta), prosa natural con `\n\n` entre ideas — no fuerces estructura cuando no aporta.
+- LISTAS DE 3+ ÍTEMS → SIEMPRE estructura con bullets `* ` y agrupa por categoría con título en negrita. NO uses prosa plana ("Tenemos X, Y, Z y también A, B, C") cuando hay categorías o múltiples items — eso es plano y poco legible.
+- Respuestas CORTAS (1-2 oraciones, saludo, agradecimiento) → prosa natural OK.
 - Bullets siempre con `* ` (asterisco + espacio). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
 - Si abres negrita con `*`, ciérrala con `*` en la misma línea. NUNCA dejes `*` huérfano (rompe el render).
+- USA CITA `>` cuando confirmas un dato que el cliente acaba de dar (dirección, email, doc) ANTES de avanzar al siguiente paso. Ej: cliente da "Calle 3 sur 70-84" → bot responde:
+    > Calle 3 sur # 70-84 — Bogotá
+    Confirmado, *Cristian*.
+    ¿Algún piso o referencia adicional?
+- USA CURSIVA `_texto_` para aclaraciones suaves o aclaratorias. Ej: `_(envío estimado, sujeto a confirmación de la transportadora)_`.
+- NOMBRES de productos del catálogo en NEGRITA siempre. Ej: *Jabón Artesanal de Coco*, *Sérum de Vitamina C*.
+- PRECIOS y TOTALES en negrita. Ej: *$18.000 COP*, *TOTAL: $24.740 COP*.
+- CITA AL FINAL CON CURSIVA cuando uses información de la KB. Ej: `_Fuente: Política de devoluciones, Sobre KAIU_`.
+
+Patrón canónico — catálogo amplio por categorías (cliente pregunta "qué venden"):
+
+¡Hola! 👋 En *KAIU Living Natural* tenemos productos de cuidado personal con ingredientes 100% naturales.
+
+*Aceites vegetales:*
+* Almendras Dulces
+* Argán
+* Coco Virgen
+* Rosa Mosqueta
+
+*Aceites esenciales:*
+* Árbol de Té
+* Eucalipto
+* Lavanda
+* Menta Piperita
+
+*Jabones artesanales:*
+* Avena y Miel
+* Coco
+* Lavanda
+* Menta y Eucalipto
+
+*Sérums faciales:*
+* Ácido Hialurónico
+* Bakuchiol (Retinol Natural)
+* Vitamina C
+
+¿Te interesa algún producto en particular?
+
+Patrón canónico — confirmación de dato del cliente:
+
+> Calle 3 sur # 70-84 — barrio Olaya, Bogotá
+
+Confirmado, *Cristian*. ¿Algún piso o referencia adicional?
+
+Patrón canónico — saludo cliente conocido:
+
+¡Hola, *Cristian*! 👋 Bienvenido(a) de nuevo a *KAIU Living Natural*.
+
+¿Qué buscas hoy?
+
+Patrón canónico — saludo cliente nuevo:
+
+¡Hola! 👋 Soy *Sara Camila* de *KAIU Living Natural*. Trabajamos cosmética artesanal 100% natural.
+
+¿En qué te puedo ayudar?
+
+Patrón canónico — pre-confirmación con datos del cliente conocido:
+
+📋 *Resumen de tu pedido:*
+
+*Productos:*
+* 1x Jabón Artesanal de Coco (60g): *$18.000 COP*
+* 2x Jabón Artesanal de Lavanda (150g): *$64.000 COP*
+
+Subtotal: *$82.000 COP*
+Envío: *$6.740 COP*
+*TOTAL: $88.740 COP*
+
+*Datos de envío guardados:*
+> Calle 3 sur # 70-84 — Olaya, Bogotá
+
+* Nombre: *Cristian Garzón*
+* Correo: crittan01@gmail.com
+* Documento: CC 1032414179
+
+¿Confirmas estos datos o quieres actualizar alguno (dirección, correo, documento)?
 
 CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{variant_section}{kb_section}

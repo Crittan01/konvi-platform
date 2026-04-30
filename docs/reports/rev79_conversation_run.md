@@ -1,31 +1,31 @@
-# Rev. 79 — Conversational E2E (2026-04-30T18:27:25+00:00)
+# Rev. 79 — Conversational E2E (2026-04-30T19:06:00+00:00)
 
 **Resumen**: 10 PASS · 4 FAIL · 2 SKIP
 
 | # | Escenario | Status | Mensaje |
 |---|---|---|---|
-| 1 | Primer contacto + saludo | ✅ PASS | Bot respondió en 1 mensaje(s) (182 chars) |
+| 1 | Primer contacto + saludo | ✅ PASS | Bot respondió en 1 mensaje(s) (119 chars) |
 | 2 | Consulta catálogo | ✅ PASS | Bot listó productos en 1 mensaje(s) |
 | 3 | KB cita de fuentes | ✅ PASS | Respuesta KB incluye cita explícita |
 | 4 | Out-of-domain | ✅ PASS | Bot no alucinó respuesta sobre clima |
 | 5 | Foto producto | ✅ PASS | Bot fallback explicativo tras 2 turnos |
-| 6 | Datos desordenados (turn-by-turn) | ❌ FAIL | Tras 9 turnos adaptativos, no se creó contact_row |
+| 6 | Datos desordenados (turn-by-turn) | ❌ FAIL | Tras 8 turnos adaptativos, no se creó contact_row |
 | 7 | Formato canónico WhatsApp | ✅ PASS | Outbound sin `**` ni `• ` (rev. 77 normaliza al canon) |
 | 8 | Revocación adaptativa | ✅ PASS | Contacto eliminado (revocación procesada) |
-| 9 | Happy path completo | ❌ FAIL | Tras 9 turnos, contact_row no creado |
+| 9 | Happy path completo | ❌ FAIL | Tras 10 turnos, contact_row no creado |
 | 10 | Cancelación mid-flow | ✅ PASS | Bot reconoció la cancelación |
 | 11 | Escalación a humano | ✅ PASS | Bot reconoció la petición de asesor |
 | 12 | Address conjunto residencial | ❌ FAIL | Bot no preguntó por torre/apto y no se registraron |
 | 13 | Multi-producto + volumetría | ✅ PASS | Cotización=True, multi-producto reconocido=True |
 | 14 | Cambio ciudad de envío | ❌ FAIL | Bot no reconoció el cambio de ciudad |
-| 15 | Promesa de link cumplida | ⏭️ SKIP | Conversación no llegó al punto de confirmación en 3 turnos |
+| 15 | Promesa de link cumplida | ⏭️ SKIP | Conversación no llegó al punto de confirmación en 2 turnos |
 | 16 | Wompi APPROVED simulation | ⏭️ SKIP | Sin contact_id — S15 no creó orden |
 
 ### S1 — Primer contacto + saludo
 ```json
 {
   "outbound_count": 1,
-  "preview": "¡Hola! Buenas tardes. Soy Sara Camila de KAIU Living Natural. Puedo ayudarte con nuestros productos naturales para el cu"
+  "preview": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n¿En qué te puedo ayudar?"
 }
 ```
 
@@ -33,7 +33,7 @@
 ```json
 {
   "outbound_count": 1,
-  "preview": "¡hola! 👋 claro que sí. en kaiu living natural tenemos una línea de cuidado personal con ingredientes 100% naturales. \n\nofrecemos aceites vegetales como almendras dulces, argán, coco virgen y rosa mosq"
+  "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa mosqueta\n\n*aceites esenciales:*\n* ár"
 }
 ```
 
@@ -65,29 +65,28 @@
 ### S6 — Datos desordenados (turn-by-turn)
 ```json
 {
-  "turns": 9,
+  "turns": 8,
   "matched_rules": [
-    "[Q] prio=5 kws=('para qué tipo de piel', 'tipo de piel') q='¿y qué tipo de piel tienes?'",
-    "[Q] prio=1 kws=('?', '¿') q='¿y qué tipo de piel tienes?'",
-    "[Q] prio=15 kws=('¿deseas cotizar', 'deseas cotizar') q='¿te gustaría cotizar el envío?'",
-    "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='claro, ¿a qué ciudad y departamento necesitas que te lo envi'",
-    "[Q] prio=18 kws=('continuemos con tu pedido', 'continuemos con la compra') q='¿te gustaría continuar con la compra?'",
-    "[Q] prio=50 kws=('correo', 'email') q='para continuar, ¿me podrías confirmar tu nombre completo, po'",
-    "[Q] prio=20 kws=('¿confirmas', 'confirmas que') q='¿confirmas que los datos están correctos para generar tu lin'",
-    "[Q+ctx] prio=20 kws=('presentación', 'presentacion') q='¿confirmas para generar tu link de pago?'"
+    "[Q] prio=1 kws=('?', '¿') q='¿es para el rostro, el cuerpo, o tienes alguna necesidad esp'",
+    "[Q+ctx] prio=20 kws=('presentación', 'presentacion') q='000 cop*  ¿cuál te gustaría llevar?'",
+    "[Q] prio=15 kws=('¿deseas cotizar', 'deseas cotizar') q='¿te gustaría cotizar el envío a tu ciudad?'",
+    "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='claro, ¿para qué ciudad sería el envío?'",
+    "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
+    "[Q] prio=25 kws=('aceptas', 'tratamiento de datos') q='¿me autorizas?'",
+    "[Q] prio=50 kws=('correo', 'email') q='¿cuál es tu correo electrónico?'"
   ],
   "transcript_tail": [
     {
+      "client": "Sí, esa opción",
+      "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
+    },
+    {
+      "client": "Sí acepto, guarden mis datos",
+      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+    },
+    {
       "client": "Soy Cristian Garzón, correo crittan01@gmail.com, CC 1032414179, dirección Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
-      "bot": "¡Claro, Cristian! Ya tengo tus datos: Cristian, correo crittan01@gmail.com, CC 1032414179, dirección Calle 3 sur 70-84, barrio Olaya, casa, en Bogotá. El envío tiene un costo de $6.740 COP.\n\n¿Confirmas que los datos están correctos para generar tu link de pago?"
-    },
-    {
-      "client": "Sí confirmo",
-      "bot": "¡Genial, Cristian! Tu pedido está listo para generarse. El total es de $24.740 COP (Jabón Artesanal de Coco 60g: $18.000 + Envío: $6.740).\n\n¿Confirmas para generar tu link de pago?"
-    },
-    {
-      "client": "La de 60 gramos por favor",
-      "bot": "¡Genial, Cristian! Tu pedido está listo para generarse. El total es de $24.740 COP (Jabón Artesanal de Coco 60g: $18.000 + Envío: $6.740).\n\n¿Confirmas para generar tu link de pago?"
+      "bot": ""
     }
   ]
 }
@@ -96,14 +95,14 @@
 ### S7 — Formato canónico WhatsApp
 ```json
 {
-  "sample": "¡Hola! 👋\n\nEn KAIU Living Natural tenemos una variedad de productos para el cuidado de tu piel y bienestar. Manejamos ace"
+  "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n*Aceites vegetales:*\n* Al"
 }
 ```
 
 ### S8 — Revocación adaptativa
 ```json
 {
-  "setup_turns": 7,
+  "setup_turns": 8,
   "transcript_tail": [
     {
       "client": "Sí acepto, guarden mis datos",
@@ -123,16 +122,16 @@
 {
   "transcript_tail": [
     {
-      "client": "Sí confirmo",
-      "bot": "Perfecto. Para generar tu link de pago, necesito algunos datos.\n\n📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x Jabón Artesanal de Coco (Presentación: 60g): $18.000 COP\n\nSubtotal: $18.000 COP\nEnvío a Bogotá: $6.740 COP\n*TOTAL: $24.740 COP*\n\n¿Cuál es tu nombre completo, por favor?"
+      "client": "crittan01@gmail.com",
+      "bot": "¡Genial, crittan01@gmail.com!\n\nAhora, para finalizar tu pedido, ¿me podrías confirmar tu nombre completo y tipo y número de documento, por favor?"
     },
     {
       "client": "Cristian Garzón",
-      "bot": "Listo, Cristian.\n\n¿Cuál es tu correo electrónico?"
+      "bot": "¡Perfecto, Cristian! Ya tengo tu nombre y correo: crittan01@gmail.com.\n\nPara finalizar tu pedido, ¿me podrías confirmar tu tipo y número de documento, por favor?"
     },
     {
-      "client": "crittan01@gmail.com",
-      "bot": "Perfecto, crittan01@gmail.com.\n\n¿Y cuál es tu número de celular, por favor?"
+      "client": "CC 1032414179",
+      "bot": "¡Perfecto, Cristian! Ya tengo tu nombre y correo: crittan01@gmail.com.\n\nPara finalizar tu pedido, ¿me podrías confirmar tu tipo y número de documento, por favor?"
     }
   ]
 }
@@ -141,7 +140,7 @@
 ### S10 — Cancelación mid-flow
 ```json
 {
-  "setup_turns": 6,
+  "setup_turns": 7,
   "preview": "entendido, cancelo tu pedido. 🙏\n\nno hay problema, cuando quieras retomar la compra aquí estaré para ayudarte. ¡que tengas un excelente día!"
 }
 ```
@@ -165,19 +164,19 @@
 ### S13 — Multi-producto + volumetría
 ```json
 {
-  "turns": 6,
+  "turns": 5,
   "transcript_tail": [
     {
-      "client": "Sí, cotiza por favor",
-      "bot": "Claro, Para, ¿me podrías decir a qué ciudad iría tu pedido?"
+      "client": "Sigamos con la compra por favor",
+      "bot": "Listo, entonces serían 2 *Jabones Artesanales de Coco* de 60g.\n\n¿Qué presentación del *Sérum de Vitamina C* te gustaría llevar, el de 15ml o el de 30ml?"
+    },
+    {
+      "client": "30 ml por favor",
+      "bot": "Perfecto, entonces serían 2 *Jabones Artesanales de Coco* de 60g y 1 *Sérum de Vitamina C* de 30ml.\n\n¿Para qué ciudad sería el envío y así te cotizo el costo?"
     },
     {
       "client": "Bogotá",
-      "bot": "Perfecto, tu pedido sería:\n\n* 2x Jabón Artesanal de Coco (60g): $36.000 COP\n* 1x Sérum de Vitamina C (30ml): $85.000 COP\n\nEl envío a Bogotá tiene un costo de $7.000 COP y tarda de 1 a 2 días hábiles en llegar.\n\n¿Confirmas para generar tu link de pago?"
-    },
-    {
-      "client": "Sí confirmo",
-      "bot": "¡Genial! Ya confirmo tu pedido. En un momento te envío el link de pago para que puedas finalizar tu compra."
+      "bot": "Para cotizar envío con precisión, confirma el producto: Sérum de Vitamina C / Jabón Artesanal de Coco. Con eso te paso de inmediato la opción más económica y la más rápida."
     }
   ]
 }
@@ -186,16 +185,16 @@
 ### S14 — Cambio ciudad de envío
 ```json
 {
-  "setup_turns": 7,
+  "setup_turns": 3,
   "re_quoted_amount": false,
-  "preview": ""
+  "preview": "¡claro!\n\n¿a qué ciudad necesitas que te lo envíe para cotizar el envío?"
 }
 ```
 
 ### S15 — Promesa de link cumplida
 ```json
 {
-  "turns": 3,
+  "turns": 2,
   "promised_link": false,
   "link_delivered": false,
   "fsm_enforced_data": false,
@@ -203,15 +202,11 @@
   "transcript_tail": [
     {
       "client": "Hola, quiero comprar un jabón artesanal de coco",
-      "bot": "¡Buenas tardes! Qué chévere que te interese nuestro Jabón Artesanal de Coco. 😊\n\nCuéntame, ¿para qué tipo de piel lo buscas o qué uso le quieres dar? Así te puedo ayudar a elegir la presentación ideal.\n\nLo tenemos en:\n* 60g por *$18.000*\n* 100g por *$24.000*\n* 150g por *$32.000*\n\n"
+      "bot": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\nClaro, tenemos el Jabón Artesanal de Coco.\n\n¿Lo quieres para el rostro o el cuerpo?\n\n¿Y tu piel es seca, grasa o sensible?"
     },
     {
       "client": "Sigamos con la compra por favor",
-      "bot": "¡Claro! Para continuar con la compra, necesito que me confirmes la ciudad a la que debemos enviar tu Jabón Artesanal de Coco. Así puedo cotizarte el envío."
-    },
-    {
-      "client": "Sí, continuemos por favor",
-      "bot": "Perfecto, para cotizarte el envío y seguir con la compra, por favor, dime la ciudad a la que quieres que enviemos tu Jabón Artesanal de Coco. 😊"
+      "bot": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\nClaro, tenemos el *Jabón Artesanal de Coco*.\n\n¿Lo quieres para el rostro o el cuerpo?\n\n¿Y tu piel es seca, grasa o sensible?"
     }
   ]
 }
