@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
+from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from dependencies.idempotency import (
     abort_idempotency,
@@ -103,6 +104,7 @@ async def list_orders(
 
 
 @router.post("/", response_model=dict, status_code=201)
+@audit_log(entity_type="order", action="created")
 async def create_order(
     order: OrderCreate,
     request: Request,
@@ -240,9 +242,11 @@ async def get_order(
 
 
 @router.patch("/{order_id}", response_model=dict)
+@audit_log(entity_type="order", action="updated")
 async def patch_order(
     order_id: str,
     patch: OrderPatch,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -304,8 +308,10 @@ async def patch_order(
 
 
 @router.post("/{order_id}/payment-link", response_model=dict)
+@audit_log(entity_type="order", action="payment_link_created")
 async def create_payment_link(
     order_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),

@@ -146,8 +146,9 @@ def _process_wompi_event(payload: dict) -> None:
 
     if txn_status != WOMPI_TXN_APPROVED:
         logger.info("[WOMPI] pago_no_aprobado txn_id=%s status=%s", txn_id, txn_status)
-        # Para DECLINED/ERROR/VOIDED: si la orden sigue en pending_payment, ofrecer reintento
+        # Para DECLINED/ERROR/VOIDED: liberar reservas activas + ofrecer reintento.
         if txn_status in WOMPI_RETRY_STATUSES and order_id:
+            _release_stock_reservations_for_order(supabase, order_id=order_id, txn_status=txn_status)
             _maybe_offer_payment_retry(supabase, order_id=order_id, txn_status=txn_status)
         return
 
@@ -209,6 +210,41 @@ def _process_wompi_event(payload: dict) -> None:
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _release_stock_reservations_for_order(supabase, *, order_id: str, txn_status: str) -> None:
+    """
+    Rev. 78 — Libera reservas activas vinculadas a la conversación de la orden
+    cuando Wompi notifica DECLINED/VOIDED/ERROR. Sin esto, el stock queda
+    bloqueado hasta el TTL 35min aunque el pago ya falló definitivamente.
+
+    Idempotente: el RPC solo afecta filas status='active'.
+    """
+    order = _get_order_by_id(supabase, order_id)
+    if not order:
+        return
+    conversation_id = order.get("conversation_id")
+    if not conversation_id:
+        logger.info(
+            "[WOMPI] release_skip order=%s — sin conversation_id, no hay reservas a liberar",
+            order_id,
+        )
+        return
+    try:
+        res = supabase.rpc(
+            "rpc_stock_reservation_release_by_conversation",
+            {"p_conversation_id": conversation_id},
+        ).execute()
+        released = res.data if isinstance(res.data, int) else (res.data or 0)
+        logger.info(
+            "[WOMPI] reservas_liberadas order=%s conv=%s status=%s count=%s",
+            order_id, conversation_id, txn_status, released,
+        )
+    except Exception as exc:
+        logger.error(
+            "[WOMPI] error_liberando_reservas order=%s conv=%s err=%s",
+            order_id, conversation_id, exc,
+        )
+
 
 def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> None:
     """

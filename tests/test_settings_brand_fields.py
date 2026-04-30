@@ -6,7 +6,7 @@ Cubre:
 - valores: acepta texto, max 280, rechaza >280
 - tono_comunicacion: acepta valores válidos, rechaza inválidos
 - support_schedule: acepta dict
-- after_hours_message y cutoff_message: texto libre
+- after_hours_message: texto libre
 - _is_outside_support_hours: lógica correcta
 """
 import sys
@@ -57,9 +57,12 @@ class TenantPatchBrandFieldsTests(unittest.TestCase):
         p = TenantPatch(after_hours_message="Estamos fuera de horario. Te atendemos mañana.")
         self.assertIsNotNone(p.after_hours_message)
 
-    def test_cutoff_message_accepted(self):
-        p = TenantPatch(cutoff_message="Pedidos antes de las 2PM salen el mismo día.")
-        self.assertIsNotNone(p.cutoff_message)
+    def test_cutoff_message_removed_in_rev_71(self):
+        # Rev. 71 — cutoff_message era columna huérfana sin UI; se eliminó del modelo.
+        # Si un cliente quiere comunicar política de cut-off, va en KB categoría=envios.
+        self.assertNotIn("cutoff_message", TenantPatch.model_fields)
+        # business_hours también eliminado: el horario textual se deriva de support_schedule.
+        self.assertNotIn("business_hours", TenantPatch.model_fields)
 
 
 class IsOutsideSupportHoursTests(unittest.TestCase):

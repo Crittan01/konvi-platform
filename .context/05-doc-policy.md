@@ -18,6 +18,10 @@ Todo agente y desarrollador debe respetar estas normas antes de crear, modificar
 | **L3** | `docs/integrations/` | Diseño de conectores externos | Con nuevas integraciones o cambios de fase |
 | **L3** | `docs/HANDOFF.md` | Estado operativo, credenciales, lecciones | Con cambios de infra o credenciales |
 | **L3** | `docs/tech/` | Matrices técnicas, hardening y validaciones | Con cambios de contratos runtime |
+| **L1** | `.context/06-contracts.md` | Contratos runtime (FSM, Wompi, Envia, fuentes que consume el bot) | Con cambios en runtime/contracts |
+| **L1** | `.context/07-schema-canonical.md` | Snapshot del schema DB live (rev. 72+) | Regenerable con `scripts/dump_schema_canonical.py` |
+| **L1** | `.context/08-domain-coherence-matrix.md` | Matriz Front↔API↔DB↔Tests↔Docs por dominio | Con cualquier rev. que cierre/abra drift arquitectural |
+| **L1** | `.context/09-bot-flowchart.md` | Flowchart canónico del bot conversacional (FSM + tools + guards + async). | Con cualquier cambio en FSM/tools/guards |
 | **L4** | `docs/roadmap/` | Fases de implementación y estado | Con avance formal de fases |
 | **L4** | `docs/risks/` | Preguntas abiertas y registro de riesgos | Con nuevas decisiones o riesgos detectados |
 | **L5** | `AGENTS.md` | Índice rápido y quick context para agentes IA | Solo si L1 o L2 cambian significativamente |
@@ -100,6 +104,37 @@ Los siguientes archivos fueron eliminados en sesiones previas. No recrear ni enl
 | docs/product/admin-ui-modules.md | 2026-04-14 | Redundante con `.context/01-state.md` |
 | docs/architecture/nav-architecture.md | 2026-04-14 | Redundante con `.context/00-product.md` |
 | .agents/rules/nav-architecture.md | 2026-04-14 | Reemplazado por regla `06-frontend-best-practices.md` |
+
+---
+
+## Las migraciones SQL NO son fuente de verdad (rev. 72)
+
+Los archivos en `supabase/migrations/` son **history reproducible** (necesarios
+para replicar el schema en otros entornos), pero NO son la spec viva del
+sistema. La fuente de verdad operacional es:
+
+1. **DB live** — vista por `information_schema` en el proyecto Supabase linked.
+2. **Contratos en código vivo** — Pydantic models en `services/api/routers/*`,
+   types TS en `apps/web/`, server actions, helpers de orchestrator.
+3. **`.context/07-schema-canonical.md`** — snapshot regenerable de la DB live.
+
+### Reglas de mantenimiento
+
+- Al detectar divergencia entre cualquiera de estas y una migración antigua,
+  **ajustar la canónica viva** y, si aplica, generar una migración nueva
+  forward-only que refleje la decisión.
+- **Nunca** modificar migraciones aplicadas (otros entornos las re-ejecutan).
+- Las migraciones tienen valor histórico (auditoría de evolución del schema)
+  y de replicabilidad (un nuevo entorno se levanta corriéndolas en orden).
+- Para detectar drift live↔fixture: `python3.11 scripts/dump_schema_canonical.py --diff`.
+- Para regenerar fixture tras cambio aprobado: `python3.11 scripts/dump_schema_canonical.py`.
+
+### Tests de coherencia (golden file)
+
+`tests/test_coherence_pact.py` valida que cada Pydantic model de write
+(Create/Patch) en routers tenga sus campos como columnas reales en la tabla
+correspondiente. Si un agente futuro agrega un campo huérfano (no en DB), el
+test rompe con mensaje claro indicando dominio + campo.
 
 ---
 

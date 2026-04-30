@@ -95,7 +95,8 @@ class WompiPaymentLinkEndpointTests(unittest.IsolatedAsyncioTestCase):
         })
 
         result = await orders.create_payment_link(
-            order_id="order-123",
+                request=MagicMock(),
+                order_id="order-123",
             tenant_id="tenant-1",
             supabase=supabase,
             _role="owner",
@@ -117,6 +118,7 @@ class WompiPaymentLinkEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as ctx:
             await orders.create_payment_link(
+                request=MagicMock(),
                 order_id="order-missing",
                 tenant_id="tenant-1",
                 supabase=supabase,
@@ -139,6 +141,7 @@ class WompiPaymentLinkEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as ctx:
             await orders.create_payment_link(
+                request=MagicMock(),
                 order_id="order-123",
                 tenant_id="tenant-1",
                 supabase=supabase,
@@ -161,6 +164,7 @@ class WompiPaymentLinkEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as ctx:
             await orders.create_payment_link(
+                request=MagicMock(),
                 order_id="order-123",
                 tenant_id="tenant-1",
                 supabase=supabase,
@@ -182,6 +186,7 @@ class WompiPaymentLinkEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as ctx:
             await orders.create_payment_link(
+                request=MagicMock(),
                 order_id="order-123",
                 tenant_id="tenant-1",
                 supabase=supabase,

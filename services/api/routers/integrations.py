@@ -13,10 +13,11 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from supabase import Client
+from dependencies.audit import audit_log
 from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, get_current_role
 from vault_helper import VaultHelper
 from dependencies.plans import PLAN_INTEGRATIONS_MELI
@@ -87,8 +88,10 @@ async def list_integrations(
 # ── Envia ──────────────────────────────────────────────────────────────────
 
 @router.post("/envia", response_model=dict, status_code=201)
+@audit_log(entity_type="integration", action="connected")
 async def connect_envia(
     body: EnviaConnect,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
@@ -147,7 +150,9 @@ async def connect_envia(
 
 
 @router.delete("/envia", status_code=204)
+@audit_log(entity_type="integration", action="disconnected")
 async def disconnect_envia(
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),
@@ -273,7 +278,9 @@ async def meli_oauth_callback(
 
 
 @router.delete("/meli", status_code=204)
+@audit_log(entity_type="integration", action="disconnected")
 async def disconnect_meli(
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     role: str = Depends(get_current_role),

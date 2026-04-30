@@ -48,3 +48,25 @@ Esta VM es dedicada 100% al proyecto. Todas las herramientas del sistema se inst
 | Supabase CLI | binario estático `/usr/local/bin/` | `curl releases GitHub → sudo mv /usr/local/bin/supabase` |
 
 **Regla operativa:** ejecutar servicios/tests Python con `python3.11` hasta alinear el alias `python3` al runtime objetivo.
+
+## Servicios — VM local (Render en freeze)
+
+Render se mantiene en **freeze** hasta que se retome producción. Toda prueba corre en VM local con un `Makefile` orquestador.
+
+| Comando | Acción |
+|---|---|
+| `make -C /home/ansible/commerce-ops-local up` | Levanta api + connector + orchestrator + web + tunnels ngrok |
+| `make -C /home/ansible/commerce-ops-local down` | Para todo |
+| `make -C /home/ansible/commerce-ops-local restart` | Reinicia todo |
+| `make -C /home/ansible/commerce-ops-local stop-orchestrator` | Para solo el orchestrator (ej. para recargar código) |
+| `make -C /home/ansible/commerce-ops-local start-orchestrator` | Levanta solo el orchestrator |
+| `make -C /home/ansible/commerce-ops-local status` | Estado de procesos |
+| `make -C /home/ansible/commerce-ops-local print-urls` | URLs de webhooks ngrok |
+
+**Ubicaciones:**
+
+- Logs: `/home/ansible/commerce-ops-local/logs/{orchestrator,api,connector,web}.log`
+- PIDs: `/home/ansible/commerce-ops-local/pids/`
+- `.env` que cargan los servicios: `/home/ansible/workspaces/commerce-ops-platform/.env` (raíz del repo)
+
+**Importante** — cambios de código en `services/ai-orchestrator/*.py` requieren reiniciar el orchestrator. Cambios en `.env` (env vars) son leídos al inicio del proceso, **excepto los flags hot-reload** (ver `USE_NEW_ORCHESTRATOR` que se relee por cada llamada).

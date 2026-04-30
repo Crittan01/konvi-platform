@@ -1,5 +1,214 @@
 # Próximos Pasos — Estado 2026-04-30
 
+## Rev. 75 — V2 cancelado (decisión arquitectónica)
+
+**Contexto**: el experimento V2 modular (`core/` + `specialists/` + `tools_v2/` + `llm/` + adapter) nació en commit `b153054` el 2026-04-29 00:42 y vivió 22 horas. En ese tiempo recibió 8 commits de fixes calientes (`fix(orchestrator-v2): runtime fixes contra Gemini real`, `retry+fallback LLM`, `cliente puede continuar comprando tras resumen`, etc.), señalando que estaba en estabilización temprana.
+
+**Datos comparativos:**
+
+| Sistema | Nacimiento | Edad | Commits |
+|---|---|---|---|
+| V1 `orchestrator.py` | 2026-04-07 | 22 días | 37 (incluye fixes rev. 70-73) |
+| V2 modular | 2026-04-29 00:42 | ~22 horas | 8 (1 inicial + 7 fixes calientes) |
+
+**Por qué se canceló:**
+1. V2 dependía del monolito V1 (vía adapter + delegaciones inversas: `_maybe_load_cart_recovery`, `_log_bot_sources`, `_record_consent`). No era refactor — era capa adicional.
+2. Tener dos sistemas paralelos = duplicación + dos veces el costo de mantenimiento + confusión arquitectural.
+3. La instinct del usuario fue correcta: "vamos a tener 150 versiones?".
+4. V2 no tenía 24h de soak time. Recomendar "consolidar en V2" era irresponsable.
+
+**Lo que se eliminó (rev. 75):**
+- `services/ai-orchestrator/orchestrator_v2_adapter.py`
+- `services/ai-orchestrator/core/`
+- `services/ai-orchestrator/specialists/`
+- `services/ai-orchestrator/tools_v2/`
+- `services/ai-orchestrator/llm/`
+- `services/ai-orchestrator/persistence/` (carts_repo era V2-only)
+- 9 archivos de tests V2 (`test_v2_parity.py`, `test_orchestrator_v2_adapter.py`, `test_carts_repo*.py`, `test_core_*.py`, `test_llm_*.py`, `test_tools_v2_cart.py`)
+- `.context/10-v1-v2-parity-audit.md` (auditoría obsoleta)
+- `USE_NEW_ORCHESTRATOR=true` → `false` en `.env`
+
+**Lo que queda:**
+- `services/ai-orchestrator/orchestrator.py` (4.247 líneas, V1 maduro con todos los fixes rev. 70-73 vigentes).
+- `worker.py` llama directo a `orchestrator.build_and_run_orchestration` (sin adapter).
+- 599 tests verde · validate.sh 13/13.
+
+**Si en el futuro se prioriza modularidad:**
+- Refactor orgánico de `orchestrator.py` a módulos por dominio (`fsm/`, `prompt/`, `outbound/`, etc.) sobre el código que YA funciona en producción.
+- Sin segundo path paralelo.
+- Sin feature flag.
+- Sin adapter.
+- Suite rev. 73 (599 tests) sirve de regression.
+
+---
+
+## Rev. 74 — Completar V2 + cutover (CANCELADO en rev. 75 — ver arriba)
+
+> **Estado actual (cierre rev. 74):** Fases A + B + C ejecutadas. Fase D (cutover gradual) y Fase E (decomisar V1) son operacionales — pendientes de activación humana.
+>
+> **Auditoría completa:** ver `.context/10-v1-v2-parity-audit.md` (matriz V1↔V2). 10 gaps críticos cerrados en V2.
+>
+> **Lectura previa obligatoria antes de cutover:** `.context/09-bot-flowchart.md` + `.context/10-v1-v2-parity-audit.md`.
+
+### Fase A — Cerrar gaps críticos en V2 ✅ EJECUTADA
+
+Los 10 gaps críticos están cerrados. Los helpers viven en `core/coordinator.py` (módulo + clase), `core/fsm.py` (FsmFacts + determine_state), `core/context.py` (ConversationContext) y `specialists/base.py` (`_augment_system_instruction`):
+
+| # | Gap rev. 70-73 | Implementación V2 |
+|---|---|---|
+| A.1 | `_LIE_PHRASES` anti-alucinación | `core/coordinator._LIE_PHRASES` + `_contains_lie_phrase()` aplicado en `_apply_result` antes de `send_outbound_text` |
+| A.2 | Cart-change detection | `core/coordinator._cart_changed_since_last_quote_in_history()` + `FsmFacts.cart_changed_since_last_quote` + branch en `determine_state` |
+| A.3 | Skip por data-collection-question | `Coordinator._last_outbound_matched()` con markers de email/nombre/doc/dirección + `ConversationContext.last_outbound_was_data_collection_question` |
+| A.4 | Cart recovery (rev. 70) | `Coordinator._maybe_load_cart_recovery()` delega al loader del monolito V1 (`orchestrator._load_cart_recovery_block`) hasta decomisar — `ctx.cart_recovery_block` se inyecta en specialist via `_augment_system_instruction` |
+| A.5 | `bot_source_log` insert | `Coordinator._log_bot_sources()` delega al helper del monolito V1 (`orchestrator._log_bot_sources`) con cooldown lazy ya construido en V1 |
+| A.6 | Reset 24h | `core/coordinator._is_conversation_window_expired()` + `FsmFacts.is_window_expired` + branch en `determine_state` |
+| A.7 | After-hours CONTEXTO TEMPORAL | `BaseSpecialist._augment_system_instruction()` inyecta bloque cuando `ctx.is_outside_business_hours=True`, derivado de `_is_outside_business_hours(support_schedule)` |
+| A.8 | Revocación "eliminar mis datos" | `Coordinator._detect_revocation_intent()` GATE 0 antes del specialist; delega al `orchestrator._record_consent` para anonimización Ley 1581 |
+| A.9 | MEDIA_WARN | `Coordinator` GATE 1 para `content_type ∈ {image, video, sticker}`. Si ya advertido → escalation; si no → mensaje + processed |
+| A.10 | `_humanize_name_in_text` | `core/coordinator._humanize_name_in_text()` aplicado en `_apply_result` antes del format WhatsApp |
+
+### Fase B — Verificación gaps moderados ✅ EJECUTADA
+
+Lectura confirmó:
+- Specialists V2 son cortos por diseño; los bloques transversales (anti-alucinación, after-hours, cart-recovery) ahora se inyectan vía `BaseSpecialist._augment_system_instruction()` en cada turno.
+- `tools_v2/order_tools.handle_render_summary` reusa la lógica determinística de V1 — verificación visual confirmó CTA correcto.
+- Customer context (pedidos activos, reclamos) NO se carga al `ctx` V2 todavía. Esto es deuda menor: el LLM tiene los tools `search_catalog` / `answer_kb` / `order_status` para cubrir on-demand.
+- Tono y sedes: V2 reusa `tenant_meta` de V1 loader. Los specialists no inyectan filosofía — deuda menor para post-cutover.
+
+### Fase C — Tests V2 ✅ EJECUTADA
+
+`tests/test_v2_parity.py` — 28 tests cubriendo:
+- FSM con flags rev. 73 (cart-change, ventana 24h).
+- Detectores: LIE_PHRASES, humanize_name, revocation, MEDIA_WARN.
+- `_facts_from_cart_and_contact` propaga nuevos flags.
+- `BaseSpecialist._augment_system_instruction` inyecta bloques cuando aplica.
+- `tools_for_state` cubre los 10 estados.
+
+Total suite: **709 tests OK** (681 → 709, +28 nuevos rev. 74).
+
+### Fase D — Cutover gradual (PENDIENTE — operacional, INTERVENCION HUMANA)
+
+**Pre-requisitos cumplidos:**
+- ✅ Gaps críticos cerrados en V2 (Fase A).
+- ✅ Tests V2 verdes (Fase C, 28/28).
+- ✅ V1 sigue como red de seguridad (fallback automático en adapter).
+
+**Contexto operacional (rev. 74):**
+- **Render está en FREEZE** — no se desplega allá hasta retomar producción comercial.
+- **Toda prueba corre en VM local** levantada con `make -C /home/ansible/commerce-ops-local up`.
+- **`USE_NEW_ORCHESTRATOR=true` ya está en `.env`** del repo. Toma efecto en el siguiente mensaje del bot — el adapter lee la var en cada llamada (hot-reload, sin restart).
+- **Pero** los cambios de código rev. 74 (`core/coordinator.py`, `core/fsm.py`, etc.) requieren reiniciar el orchestrator local para cargarse en memoria. El flag solo enruta al código que ya está cargado.
+
+**Checklist de activación (operador, VM local):**
+
+1. **Confirmar flag en `.env`:**
+   ```bash
+   grep USE_NEW_ORCHESTRATOR /home/ansible/workspaces/commerce-ops-platform/.env
+   # Debe imprimir: USE_NEW_ORCHESTRATOR=true
+   ```
+
+2. **Reiniciar orchestrator local** para cargar código rev. 74 en memoria:
+   ```bash
+   make -C /home/ansible/commerce-ops-local stop-orchestrator
+   make -C /home/ansible/commerce-ops-local start-orchestrator
+   # o equivalente:
+   # make -C /home/ansible/commerce-ops-local restart  (reinicia todo)
+   ```
+
+3. **Verificar que arrancó sin errores:**
+   ```bash
+   tail -n 50 /home/ansible/commerce-ops-local/logs/orchestrator.log
+   # Buscar líneas: "OrchestratorWorker started" + "[coord]" o "[v2_adapter]"
+   ```
+
+4. **Validación inmediata (primer mensaje):**
+   - Enviar 1 mensaje de prueba al WhatsApp del tenant dev (`+573125835649`).
+   - Tail los logs: `tail -f /home/ansible/commerce-ops-local/logs/orchestrator.log`.
+   - Buscar línea `[coord] tenant=... conv=... state=... cart_items=N outside_hours=... window_expired=... cart_changed=...` (V2 corriendo).
+   - Si aparece `[v2_adapter] coordinator falló — fallback a monolito`: V2 lanzó excepción → fallback OK al cliente, pero hay bug que investigar.
+
+5. **Validación corrida E2E** (un solo cliente, una sesión completa):
+   - Saludo → "¿Qué tienes?" → bot lista catálogo (CATALOG_MODE).
+   - "Quiero 1 jabón de coco" → bot agrega (cart-tool).
+   - "Cotizar a Bogotá" → bot cotiza (shipping-tool).
+   - Elegir Económica → consent → email → name → document → dirección → resumen → confirmar.
+   - Verificar link Wompi generado.
+
+6. **Validación corridas anti-alucinación (rev. 73 paridad):**
+   - Re-ejecutar caso del log `615a9902`: cliente conocido, agregar producto post-cotización.
+   - **Esperado**: bot re-cotiza con peso real. Si dice "Coordinadora $17.730 sigue siendo" sin haber re-cotizado → bug.
+   - Decir "ok, gracias" tras resumen → **esperado**: bot pide CTA explícito ("¿Confirmas para generar tu link de pago?"), NO afirma "tu pedido será entregado".
+
+7. **Si todo OK 24h continuas en uso real**: V2 estable en local. Cuando Render se retome, basta con setear `USE_NEW_ORCHESTRATOR=true` en el dashboard de Render (sin redeploy — hot-reload).
+
+8. **Si aparece bug**:
+   ```bash
+   # Editar .env: USE_NEW_ORCHESTRATOR=false
+   # Próximo mensaje cae a V1 monolito (sin restart necesario).
+   # Investigar logs, fix V2, restart orchestrator, repetir desde paso 4.
+   ```
+
+**Comandos útiles (VM local):**
+
+```bash
+# Estado de servicios
+make -C /home/ansible/commerce-ops-local status
+
+# Logs en vivo
+tail -f /home/ansible/commerce-ops-local/logs/orchestrator.log
+
+# Logs de api / connector
+tail -f /home/ansible/commerce-ops-local/logs/api.log
+tail -f /home/ansible/commerce-ops-local/logs/connector.log
+
+# URLs de webhooks (ngrok)
+make -C /home/ansible/commerce-ops-local print-urls
+
+# Reiniciar todo
+make -C /home/ansible/commerce-ops-local restart
+
+# Bajar todo
+make -C /home/ansible/commerce-ops-local down
+```
+
+### Fase E — Decomisar V1 (PENDIENTE — solo tras Fase D estable)
+
+**NO ejecutar antes de 7 días sin fallback.** El monolito V1 es la red de seguridad.
+
+Pasos cuando se priorice:
+
+1. **Mover loaders compartidos** que V2 reusa (vía adapter):
+   - `get_tenant_catalog` → `services/loaders/catalog_loader.py`
+   - `get_tenant_kb_rag` → ya está en `tools/kb_tool.py` (sin movimiento)
+   - `_get_conversation_history` → `services/loaders/history_loader.py`
+   - `_fetch_contact_for_phone` → `services/loaders/contact_loader.py`
+   - `_load_cart_recovery_block` → `customer_context/cart_recovery.py` o tool en `tools_v2/`
+   - `_log_bot_sources` + `_bot_log_available` → `services/audit_logger.py`
+   - `_record_consent` → `services/consent.py`
+   - `_send_outbound_text` → ya existe en `whatsapp_sender.py` o equivalente
+
+2. **Actualizar `orchestrator_v2_adapter.py` _run_v2()`** para importar de los nuevos módulos en vez de `import orchestrator as monolith`.
+
+3. **Eliminar `orchestrator.py`** (4.247 líneas).
+
+4. **Simplificar `worker.py`**: importar Coordinator directo, eliminar el adapter (ya no hay path V1).
+
+5. **Eliminar `orchestrator_v2_adapter.py`**.
+
+6. **Validar**: suite tests verde, validate.sh 13/13.
+
+### Estimación total ejecutada
+
+- Fase A (gaps críticos): ✅ ~3h reales (estimado 6h).
+- Fase B (verificación): ✅ ~1h.
+- Fase C (tests): ✅ ~1h (28 tests deterministas, sin mocks de Gemini).
+- Fase D (cutover): pendiente, 2-7 días monitoring.
+- Fase E (decomisar): pendiente, ~3h tras Fase D.
+
+---
+
+# Próximos Pasos — Estado 2026-04-30
+
 ## Cierre sesión actual (2026-04-30, rev. 70) — F7-LITE CART RECOVERY
 
 - ✅ **F7-lite cart recovery reactivo**: `_load_cart_recovery_block` inyecta carrito previo cancelado (TTL `CART_RECOVERY_LOOKBACK_DAYS` default 7d) al system prompt con re-validación stock+precio actual por variante. Marca "disponible" / "precio cambió" / "SIN STOCK" / "variante removida". Total recalculado al precio actual.

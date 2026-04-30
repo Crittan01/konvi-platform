@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook
+from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base
 from dependencies.auth import get_current_tenant
 
 logger = logging.getLogger("api.startup")
@@ -86,6 +86,10 @@ app.include_router(marketplace.router, prefix="/api/v1")
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
+# Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
+app.include_router(claims.router, prefix="/api/v1/claims")
+app.include_router(purchases.router, prefix="/api/v1/purchases")
+app.include_router(knowledge_base.router, prefix="/api/v1/knowledge-base")
 
 @app.get("/health")
 def health_check():

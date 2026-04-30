@@ -24,9 +24,10 @@ Nota: patch_variation dispara sync_meli_stock si stock_quantity cambia y hay lis
 import logging
 import asyncio
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from supabase import Client
+from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from routers.marketplace import sync_meli_stock
 
@@ -108,8 +109,10 @@ async def list_products(
 
 
 @router.post("/", response_model=dict, status_code=201)
+@audit_log(entity_type="product", action="created")
 async def create_product(
     product: ProductCreate,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -181,9 +184,11 @@ async def get_product(
 
 
 @router.patch("/{product_id}", response_model=dict)
+@audit_log(entity_type="product", action="updated")
 async def patch_product(
     product_id: str,
     product: ProductPatch,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -212,10 +217,12 @@ async def patch_product(
 
 
 @router.patch("/{product_id}/variations/{variation_id}", response_model=dict)
+@audit_log(entity_type="variation", action="updated")
 async def patch_variation(
     product_id: str,
     variation_id: str,
     variation: VariationPatch,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -267,9 +274,11 @@ async def patch_variation(
 
 
 @router.post("/{product_id}/variations", response_model=dict, status_code=201)
+@audit_log(entity_type="variation", action="created")
 async def add_variation(
     product_id: str,
     variation: VariationCreate,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -317,9 +326,11 @@ async def add_variation(
 
 
 @router.delete("/{product_id}/variations/{variation_id}", status_code=204)
+@audit_log(entity_type="variation", action="deleted")
 async def delete_variation(
     product_id: str,
     variation_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -362,8 +373,10 @@ async def delete_variation(
 
 
 @router.delete("/{product_id}", status_code=204)
+@audit_log(entity_type="product", action="deleted")
 async def deactivate_product(
     product_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),

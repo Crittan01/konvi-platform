@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
-from orchestrator_v2_adapter import run_orchestration as _run_orchestration_router
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
 from whatsapp_sender import send_whatsapp_message
@@ -159,11 +158,14 @@ class OrchestratorWorker:
                     )
                     continue
 
-                # Router con feature flag USE_NEW_ORCHESTRATOR.
-                # Default off → monolito (build_and_run_orchestration).
-                # Si ON → Coordinator nuevo con fallback automático al
-                # monolito en caso de excepción no controlada.
-                await _run_orchestration_router(
+                # Rev. 75 — V2 cancelado, llamada directa al orquestador único.
+                # Razón: V2 modular era experimento de 22h (commit b153054)
+                # con dependencias cruzadas hacia el monolito V1 maduro
+                # (22 días + 37 commits + fixes rev. 70-73). Quedarse con
+                # ambos era deuda incremental sin payoff claro. Cuando se
+                # quiera modularidad, se refactoriza V1 orgánicamente sobre
+                # código probado.
+                await build_and_run_orchestration(
                     supabase=self.supabase,
                     message_id=msg["id"],
                     tenant_id=msg["tenant_id"],
@@ -363,6 +365,12 @@ class OrchestratorWorker:
             self.supabase.rpc("cleanup_expired_meli_webhook_dedup").execute()
         except Exception:
             pass  # La función puede no existir si la migración rev. 69 no está aplicada
+
+        # Rev. 71 — cleanup del bot_source_log (TTL 30 días, append-only).
+        try:
+            self.supabase.rpc("cleanup_expired_bot_source_log", {"retention_days": 30}).execute()
+        except Exception:
+            pass  # La función puede no existir si la migración rev. 71 no está aplicada
 
         try:
             res = self.supabase.rpc(

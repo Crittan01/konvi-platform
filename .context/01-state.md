@@ -1,7 +1,8 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-30 (rev. 70)
-**Fuente de verdad**: código en el repo (`develop`) + migraciones en `supabase/migrations/`.
+**Última actualización**: 2026-04-29 (rev. 77 · formato visual canónico WhatsApp con citas)
+**Fuente de verdad**: DB live (Supabase `xmelwnhhphksbpdjmbbp`) + contratos en código.
+**Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
 
 ---
@@ -11,15 +12,473 @@
 - **Tenant Console**: ✅ Live (fases 1–11.5 completas)
 - **Platform Console**: ❌ fuera de alcance (bloqueante OQ-P01)
 - **Backend**: ✅ API + Connector WhatsApp + AI Orchestrator operativos
-- **Inbox**: ✅ Certificado (rev. 67) — compliance Meta ventana 24h, multimodal audio
-- **Coherencia core del bot**: ✅ Certificado (rev. 68) — Wompi customer_data + Envia district + FSM aterrizado
-- **Riesgos abiertos cerrados**: ✅ Certificado (rev. 69) — DV NIT, lazy customer context, MeLi alert+distributed dedup, rate-limit user-aware, frontend contacts UI completo
-- **F7-lite cart recovery**: ✅ Implementado (rev. 70) — bot recupera carrito previo cancelado al volver el cliente, con re-validación stock+precio
-- **DB**: ✅ contrato endurecido (72 migraciones aplicadas)
+- **Render**: 🧊 **EN FREEZE** — no se desplega allá hasta retomar producción. Toda prueba corre en VM local.
+- **VM local**: levantada con `make -C /home/ansible/commerce-ops-local up` (api + connector + orchestrator + web + tunnels ngrok). Reiniciar orchestrator tras cambios de código en `services/ai-orchestrator/`: `make -C /home/ansible/commerce-ops-local restart` (o `stop-orchestrator + start-orchestrator`).
+- **Inbox**: ✅ Certificado (rev. 67/72) — compliance Meta + `content_type` tipado
+- **Coherencia bot**: ✅ Re-certificado (rev. 71)
+- **Coherencia arquitectural Front↔API↔DB**: ✅ Re-certificado (rev. 72) — 4 drifts críticos cerrados (Claims/Compras/KB/Audit)
+- **F7-lite cart recovery**: ✅ Implementado (rev. 70)
+- **DB**: ✅ 74 migraciones aplicadas. Sin drift schema↔migrations.
 
 ---
 
-## Cierre de sesión actual (2026-04-30, rev. 70) — F7-LITE CART RECOVERY
+## Cierre de sesión actual (2026-04-29, rev. 77) — FORMATO VISUAL CANÓNICO WHATSAPP
+
+### Estado: 13/13 OK · 619 tests · TypeScript OK · Lint OK · UAT validado
+
+Patrón visual canónico definido (matchea ejemplo del usuario) — TODOS los mensajes del bot ahora siguen estructura consistente con bullets + negrita + espaciado + citas.
+
+### Cambios
+
+- **System prompt** (`services/ai-orchestrator/orchestrator.py:3076-3147`): sección "FORMATO WhatsApp" reescrita con:
+  - Sintaxis oficial WhatsApp (negrita / cursiva / tachado / monoespacio / cita).
+  - 3 patrones canónicos completos (resumen, cotización, catálogo) que el LLM puede imitar literal.
+  - Reglas explícitas: títulos de sección en negrita, bullets `•`, valores importantes en negrita, líneas en blanco entre bloques, pregunta separada, máximo 1 emoji por mensaje.
+  - Sección dedicada a citas (`> texto`) con casos de uso: confirmar dato del cliente, citar política/KB literal, referenciar pedido previo. Una línea max, sin anidar.
+
+- **`_format_whatsapp_response_text`** (rev. 77): post-process robustecido.
+  - `**bold**` (Markdown) → `*bold*` (WhatsApp).
+  - `* item`, `- item`, `· item`, `+ item` al inicio de línea → `• item` (canónico).
+  - `:•` pegado → `:\n•`.
+  - Bullet+pregunta y frase+pregunta → líneas en blanco.
+  - 3+ saltos consecutivos colapsados a 2.
+  - Citas `>` se preservan tal cual.
+
+### Aclaración técnica honesta
+
+En la conversación previa afirmé erróneamente que WhatsApp NO soporta `*` o `-` como bullets. **Falso**. WhatsApp moderno (2024+) sí los acepta como bullet nativo. Lo verifiqué con el FAQ oficial que pasó el usuario:
+  https://faq.whatsapp.com/539178204879377
+
+El bot canoniza `•` por consistencia visual con el ejemplo aprobado, pero el LLM puede emitir `*`, `-` o `•` indistintamente — el post-process unifica todos a `•`.
+
+### Tests rev. 77 — 14 nuevos en `tests/test_rev77_whatsapp_format.py`
+
+| Cluster | Tests |
+|---|---|
+| Bullets (`*`, `-`, `·`, `+` → `•`) | 5 |
+| Bold inline NO confundido con bullet | 1 |
+| Markdown `**bold**` → `*bold*` | 2 |
+| Espaciado (newline después `:`, antes `¿`) | 4 |
+| Patrón canónico preservado (idempotente) | 1 |
+| LLM emite Markdown estándar → normalizado | 1 |
+
+### UAT E2E real con formato nuevo (parcial)
+
+- ✅ Saludo: prosa natural sin bullets.
+- ✅ Catálogo de 4 jabones: cada producto con título en negrita + 3 bullets con presentaciones + precios en negrita + línea en blanco entre productos + pregunta final separada.
+- ✅ Citas en confirmaciones: `> dirección` + respuesta + pregunta.
+- ⚠️ Resumen final no testeado en este UAT (mensaje cliente quedó "skipped" por bug aparte de detección de comando), pero el patrón ya estaba validado en rev. 76.
+
+### Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| [services/ai-orchestrator/orchestrator.py](services/ai-orchestrator/orchestrator.py) | Sección FORMATO WhatsApp (rev. 77) + `_format_whatsapp_response_text` robustecido |
+| [tests/test_rev77_whatsapp_format.py](tests/test_rev77_whatsapp_format.py) | NUEVO — 14 tests (BulletNormalization, BoldNormalization, Spacing, CanonicalSummaryFormat) |
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 76) — UAT E2E REAL + BUG FIX
+
+### Estado: 13/13 OK · 605 tests · TypeScript OK · Lint OK · UAT E2E ejecutado en VM local
+
+### UAT E2E real ejecutado (`scripts/uat/e2e_chat.py`)
+
+Replicado el flujo del log UAT 615a9902 (motivó rev. 73). Ejecución real contra orchestrator local + Meta API + Supabase live:
+
+| Turno | Inbound | Outbound del bot | Verdict |
+|---|---|---|---|
+| 1 | "Hola buen día" | Saludo de Sara Camila | ✅ |
+| 2 | "Información del jabón de Coco y lavanda" | Catálogo con presentaciones y precios | ✅ |
+| 3 | "Deseo 1 de Coco de 60gr y 2 de lavanda de 150gr" | Carrito armado con 3 items | ✅ |
+| 4 | "Cotizamos envío a Bogotá" | shipping_quote_tool emite Económica + Rápida con marcadores `Continuamos` (rev. 73) | ✅ |
+| 5 | "Puedo agregar un sérum de vitamina C de 30ml?" | Bot pregunta re-cotizar (cart_changed_since_last_quote disparado, rev. 73) | ✅ |
+| ... | (flow simple) | Carrier → consent → email → name → document → dirección → resumen | ✅ |
+| Resumen | bot envía resumen completo con CTA | "¿Confirmas que los datos están correctos para generar tu link de pago?" | ✅ |
+| **Crítico rev. 76** | **"Ok, gracias"** | **"Listo, Cristian. ¿Confirmas para generar tu link de pago?"** (NO se desfasó re-cotizando) | 🟢 **REV. 76 CERTIFICADO** |
+| Final | "Sí confirmo" | "Perfecto, Cristian, te genero tu link de pago" + intent=order_acknowledgment + orden creada en DB | ✅ |
+
+**Orden creada en DB** (verificado): `6f01a660-aa44-402c-bf5d-9b94eb8879e4`, status `pending_payment`, total $24.740 ($18.000 Coco + $6.740 envío Cabify Express).
+
+### Bug detectado y corregido en UAT (rev. 76)
+
+**Bug**: tras enviar resumen final con CTA "¿Confirmas... generar tu link de pago?", cliente respondía "Ok, gracias" y el `shipping_quote_tool` interpretaba como follow-up afirmativo a oferta de envío (porque el resumen contiene la palabra "Envío:" + costo). Bot pedía cotizar producto de nuevo, conversación se desfasaba.
+
+**Causa raíz**: rev. 73 implementó guards `_last_outbound_was_consent_question` y `_last_outbound_was_data_collection_question` para skip de shipping followup, pero NO cubrió el caso "último outbound = resumen final con CTA de pago".
+
+**Fix rev. 76** ([services/ai-orchestrator/tools/shipping_quote_tool.py:347-363](services/ai-orchestrator/tools/shipping_quote_tool.py#L347)):
+```python
+summary_markers = [
+    "resumen de tu pedido",
+    "datos estan correctos", "datos están correctos",
+    "generar tu link de pago", "para generar tu link",
+    "tu link de pago", "subtotal:",
+]
+if any(m in outbound_text for m in summary_markers):
+    return False
+```
+
+**Test unit** (`tests/test_rev76_summary_guard.py` — 6 tests):
+- "Ok, gracias" tras resumen → NO dispara followup ✅
+- "Sí" tras resumen → NO dispara followup ✅
+- Resumen con `Subtotal:` → bloquea followup ✅
+- Followup legítimo ("¿Te gustaría cotizar?" → "Sí") → SIGUE funcionando ✅
+
+### Archivos modificados rev. 76
+
+| Archivo | Cambio |
+|---|---|
+| [services/ai-orchestrator/tools/shipping_quote_tool.py](services/ai-orchestrator/tools/shipping_quote_tool.py) | `summary_markers` guard en `_is_shipping_followup_query` |
+| [tests/test_rev76_summary_guard.py](tests/test_rev76_summary_guard.py) | NUEVO — 6 tests cubriendo el bug detectado |
+
+### Bugs adicionales detectados en UAT (NO bloqueantes — documentados para futuras rev.)
+
+1. **Multi-product re-quote post-cart-change**: cuando cliente agrega producto post-cotización (rev. 73 detecta cambio), al pedir re-cotizar el `_resolve_multiple_products_with_quantities` falla y pide al cliente elegir UN producto. Síntoma: bot pide "confirma el producto: X / Y" en bucle. Workaround: cliente debe nombrar producto explícito.
+2. **Variant detection imperfecta**: cliente pide "Lavanda 150gr", bot a veces cotiza "Lavanda 60g". Variabilidad LLM en variant inference.
+3. **After-hours mal aplicado a shipping**: bot intentó escalar a humano por estar fuera de horario cuando `shipping_quote_tool` debería correr 24/7. El after-hours debería aplicar solo a queries de soporte humano, no a tools transaccionales.
+4. **Wompi 401 Unauthorized en VM local**: `tenant_integrations.credentials` para provider=wompi tiene credenciales inválidas/revocadas en sandbox. Bug de configuración, no del bot. La orden se persiste OK, solo el link Wompi falla. Re-conectar Wompi en `/dashboard/integrations`.
+
+### Suite final
+
+- 605 tests OK (599 → 605, +6 rev. 76 summary guard).
+- `validate.sh` 13/13 OK.
+- UAT E2E ejecutado contra VM local — orchestrator V1 con todos los fixes rev. 70-76.
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 75) — V2 CANCELADO + UN SOLO ORQUESTADOR
+
+### Estado: 13/13 OK · 599 tests · TypeScript OK · Lint OK · 1 implementación
+
+Decisión arquitectónica del usuario tras revisar la cronología real:
+
+| Sistema | Edad | Commits | Estado |
+|---|---|---|---|
+| V1 `orchestrator.py` | 22 días | 37 | Maduro, con fixes rev. 70-73 vigentes |
+| V2 modular (canceled) | 22 horas | 8 (incluye 7 fixes calientes) | Experimento sin soak time |
+
+V2 dependía del monolito V1 (adapter + delegaciones cruzadas en cart_recovery, bot_source_log, _record_consent), agregando deuda en lugar de eliminarla. La rev. 74 que cerré con paridad V1↔V2 era el camino menos malo, pero la decisión correcta era cancelar el experimento.
+
+### Lo que se eliminó
+
+- **Código V2**: `core/`, `specialists/`, `tools_v2/`, `llm/`, `persistence/`, `orchestrator_v2_adapter.py`.
+- **Tests V2**: 9 archivos (`test_v2_parity.py`, `test_orchestrator_v2_adapter.py`, `test_carts_repo*.py`, `test_core_*.py`, `test_llm_*.py`, `test_tools_v2_cart.py`).
+- **Doc V2**: `.context/10-v1-v2-parity-audit.md`.
+- **Flag**: `USE_NEW_ORCHESTRATOR=true` → `false` en `.env`.
+
+### Lo que queda
+
+- 1 implementación: `services/ai-orchestrator/orchestrator.py` (4.247 líneas) con todos los fixes rev. 70-73.
+- `worker.py` llama directo a `build_and_run_orchestration` (sin adapter).
+- Suite tests: 599 OK (709 → 599, eliminados 110 tests V2-only).
+- `validate.sh`: 13/13 OK.
+
+### Verificación post-cleanup
+
+- `grep -rln "from core\.\|from specialists\.\|from tools_v2\.\|from llm\.\|orchestrator_v2_adapter\|persistence\.carts_repo" services/ tests/ scripts/` → 0 referencias residuales.
+- Suite tests: `python3.11 -m unittest discover -s tests` → 599 OK.
+- Validate: `bash scripts/validate.sh` → 13/13 OK.
+
+### Si en el futuro se quiere modularidad
+
+Refactor orgánico de `orchestrator.py` a módulos por dominio (`fsm/`, `prompt/`, `outbound/`, etc.) **sobre el código que ya funciona**. Sin segundo path paralelo. Sin feature flag. Sin adapter. La suite de 599 tests sirve de regression.
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 74) — PARIDAD V1↔V2 (CANCELADO en rev. 75)
+
+### Estado: 13/13 OK · 709 tests · TypeScript OK · Lint OK · 10 gaps V2 cerrados
+
+Hallazgo previo (rev. 74 cancelada original): el refactor mecánico de V1 monolito a `fsm/`, `prompt/`, `outbound/` quedaba sin sentido al descubrir que **V2 modular ya estaba construido** en `core/` + `specialists/` + `tools_v2/` + `llm/` con feature flag `USE_NEW_ORCHESTRATOR` + fallback automático a V1. La rev. 74 se redefinió como **completar V2 + tests + cutover**.
+
+### Fases ejecutadas (A + B + C)
+
+- **Fase A** ✅ — 10 gaps críticos rev. 70-73 cerrados en V2:
+  1. Anti-alucinación `_LIE_PHRASES` post-process en `core/coordinator._apply_result`.
+  2. Cart-change detection (`_cart_changed_since_last_quote_in_history` + `FsmFacts.cart_changed_since_last_quote`).
+  3. Skip por data-collection-question (markers en `Coordinator._last_outbound_matched`).
+  4. Cart recovery rev. 70 (loader delega al monolito + `ctx.cart_recovery_block` inyectado en specialist).
+  5. `bot_source_log` insert (delega al helper monolito).
+  6. Reset 24h (`_is_conversation_window_expired` + `FsmFacts.is_window_expired` + branch en `determine_state`).
+  7. After-hours CONTEXTO TEMPORAL en `BaseSpecialist._augment_system_instruction`.
+  8. Detector revocación Ley 1581 (`_detect_revocation_intent` GATE 0 antes del specialist).
+  9. MEDIA_WARN gate para image/video/sticker.
+  10. `_humanize_name_in_text` en `_apply_result`.
+
+- **Fase B** ✅ — verificación lectura V2:
+  - Specialists deliberadamente cortos; bloques transversales ahora vienen de `_augment_system_instruction`.
+  - `tools_v2/order_tools.handle_render_summary` reusa lógica determinística.
+  - Customer context (pedidos activos, reclamos abiertos) NO se carga al ctx V2 — deuda menor (LLM tiene tools para cubrir on-demand).
+
+- **Fase C** ✅ — 28 tests V2 paridad en `tests/test_v2_parity.py`:
+  - FSM con flags rev. 73 (cart-change, ventana 24h).
+  - Detectores: LIE_PHRASES, humanize_name, revocation, MEDIA_WARN.
+  - `_facts_from_cart_and_contact` propaga flags.
+  - `BaseSpecialist._augment_system_instruction` inyecta bloques cuando aplica.
+
+### Pendientes (operacionales — INTERVENCION HUMANA)
+
+- **Fase D — Cutover gradual**: `USE_NEW_ORCHESTRATOR=true` en Render dashboard del servicio orchestrator. Monitoring 7 días sin fallback. Checklist completo en `04-next-steps.md`.
+- **Fase E — Decomisar V1**: solo tras Fase D estable. Mover loaders compartidos a `services/loaders/`, eliminar `orchestrator.py` (4.247 líneas) + `orchestrator_v2_adapter.py`, simplificar `worker.py`.
+
+### Archivos modificados rev. 74
+
+| Archivo | Cambio |
+|---|---|
+| [services/ai-orchestrator/core/fsm.py](services/ai-orchestrator/core/fsm.py) | `FsmFacts.cart_changed_since_last_quote` + `is_window_expired`. `determine_state` con branches para reset 24h y cart-change. |
+| [services/ai-orchestrator/core/context.py](services/ai-orchestrator/core/context.py) | `ConversationContext` extendido con 6 flags rev. 70-73 (data-question, outside-hours, window-expired, cart-changed, cart-recovery-block, after-hours-message). |
+| [services/ai-orchestrator/core/coordinator.py](services/ai-orchestrator/core/coordinator.py) | `_LIE_PHRASES` + `_contains_lie_phrase`, `_humanize_name_in_text`, `_detect_revocation_intent`, `_MEDIA_WARN`, `_cart_changed_since_last_quote_in_history`, `_is_conversation_window_expired`, `_is_outside_business_hours`. GATES 0/1 antes del specialist. `_apply_result` con LIE_PHRASES + humanize. Helpers `_handle_revocation`, `_maybe_load_cart_recovery`, `_log_bot_sources` (delegación a V1). |
+| [services/ai-orchestrator/specialists/base.py](services/ai-orchestrator/specialists/base.py) | Nuevo `_augment_system_instruction(ctx, base)`: inyecta anti-alucinación + after-hours + cart-recovery a cualquier specialist. `BaseSpecialist.run` lo aplica antes de `invoke_llm`. |
+| [tests/test_v2_parity.py](tests/test_v2_parity.py) | NUEVO — 28 tests deterministas (sin Gemini mocks). |
+| [.context/04-next-steps.md](.context/04-next-steps.md) | Plan rev. 74 marcado como ejecutado A+B+C; checklist Fase D detallado. |
+| [.context/10-v1-v2-parity-audit.md](.context/10-v1-v2-parity-audit.md) | Auditoría que originó este trabajo (sin cambio). |
+
+### Verificación
+
+- `bash scripts/validate.sh` → 13/13 OK.
+- Suite tests: 709 OK (681 + 28 V2 parity).
+- Sintaxis: `core/coordinator.py`, `core/fsm.py`, `core/context.py`, `specialists/base.py` ✅.
+- V1 monolito (`orchestrator.py`) intacto — sigue como path default + fallback de seguridad.
+
+### Riesgos abiertos (paridad V2)
+
+- **Customer context loader pendiente**: V2 ctx no carga pedidos activos / reclamos abiertos. Mitigación: el LLM puede invocar tools `order_status` y `answer_kb` on-demand. Cuando se priorice, agregar a `core/context.ConversationContext` un campo `customer_context_block` similar al existente en V1 (`_load_customer_context_block`).
+- **Tono y filosofía no inyectados**: V2 specialists no reciben `tono_comunicacion` ni `mision/vision/valores` directamente en system_instruction. Mitigación: post-cutover, agregar al `_augment_system_instruction` o a cada specialist.
+- **Tests sin mocks de tools**: los 28 tests cubren lógica determinística pero no validan que los handlers `tools_v2/*` ejecuten correctamente con DB mock. Mitigación: agregar tests E2E con `Coordinator.handle_inbound_message` mockando supabase + Gemini cuando se priorice.
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 73) — COHERENCIA FSM CLIENTE CONOCIDO + ANTI-ALUCINACIÓN
+
+### Estado: 13/13 OK · 681 tests · TypeScript OK · Lint OK
+
+Análisis del log UAT 2026-04-29 conv `615a9902` reveló bugs estructurales del FSM
+para clientes conocidos (`consent_given=True` de sesión anterior). El bot inventaba
+cotización de envío, asumía carrier sin que el cliente lo eligiera, y al "Ok, gracias"
+del cliente cerraba con "Tu pedido será entregado en 2 días" SIN haber generado orden ni link Wompi.
+
+### Fixes (6)
+
+- **Fix 1+2 — Eliminar shortcuts por `consent_given` histórico** ([orchestrator.py:1545-1554](services/ai-orchestrator/orchestrator.py#L1545)):
+  - Removido el shortcut `carrier_selected = True` cuando `consent_given=True`. El carrier es per-pedido, no per-cliente.
+  - El skip del `shipping_quote_tool` ahora dispara SOLO si el último outbound fue una pregunta de consent o de recolección de datos personales (vía nuevo `_last_outbound_was_data_collection_question`). No por `consent_given` histórico.
+
+- **Fix 3 — Detectar cart-change post-cotización** ([orchestrator.py:`_cart_changed_since_last_quote`](services/ai-orchestrator/orchestrator.py)):
+  - Si tras un outbound de cotización aparece un outbound del bot con frase de adición ("agregué", "listo agregué", "añadí"), invalida `shipping_quoted=False` para forzar nueva cotización con peso/dimensiones reales.
+
+- **Fix 4 — Guard anti-resumen sin shipping verificado**:
+  - En `READY_FOR_SUMMARY`, si `_extract_shipping_cost_from_history` retorna 0 (no hay cotización emitida por shipping_quote_tool en outbounds — el LLM la inventó), degradar el FSM a `AWAITING_CARRIER_SELECTION` para forzar nueva cotización antes de armar resumen.
+
+- **Fix 5 — Anti-alucinación transaccional**:
+  - Sección "REGLAS ANTI-ALUCINACIÓN TRANSACCIONAL" agregada al system prompt: prohibe afirmar pedido creado/entrega/carrier sin tool verificado.
+  - Post-process detector `_LIE_PHRASES` en handler: si el LLM emite "tu pedido será entregado", "ya seleccioné el envío con X", etc. SIN que `payment_link_result` haya corrido, se reemplaza por CTA seguro.
+
+- **Fix 6 — Resumen completo**:
+  - El bloque CONTEXTO VERIFICADO incluye dirección de entrega cuando hay `contact.address`.
+  - El CTA del resumen pasa de "¿Confirmas que los datos están correctos?" → "¿Confirmas para generarte el link de pago?". Mensaje explícito sobre el siguiente paso.
+  - `AWAITING_ORDER_CONFIRMATION` actualizado: el bot dice "Perfecto, te genero tu link de pago" (no afirma pedido creado hasta que payment_link_tool emite el link real).
+
+### Tests nuevos (13)
+
+`tests/test_rev73_flow_coherence.py`:
+- `CarrierSelectionPerOrderTests` — cliente conocido sin carrier explícito → `AWAITING_CARRIER_SELECTION` (no salta).
+- `CartChangeDetectionTests` — cotización + adición posterior → True; otros casos → False.
+- `DataCollectionDetectorTests` — markers de email/nombre/dirección detectados; outbounds normales no falso-positivo.
+- `AntiHallucinationPhrasesTests` — 9 frases prohibidas detectadas (case + accent insensitive); 4 frases seguras no falso-positivo.
+
+### Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| [services/ai-orchestrator/orchestrator.py](services/ai-orchestrator/orchestrator.py) | `_resolve_display_state` (eliminar shortcut), `_last_outbound_was_data_collection_question` (NUEVO), `_cart_changed_since_last_quote` (NUEVO), guard anti-resumen, system prompt rev. 73, post-process `_LIE_PHRASES` |
+| [tests/test_rev73_flow_coherence.py](tests/test_rev73_flow_coherence.py) | 13 tests nuevos (NUEVO) |
+| [.context/09-bot-flowchart.md](.context/09-bot-flowchart.md) | Flowchart canónico del bot (NUEVO) — contrato visual del comportamiento esperado. Documenta cobertura V1/V2 por nodo. |
+| [.context/10-v1-v2-parity-audit.md](.context/10-v1-v2-parity-audit.md) | Auditoría de paridad V1 monolito ↔ V2 modular (NUEVO). Identifica 10 gaps críticos que bloquean el cutover `USE_NEW_ORCHESTRATOR=true`. **Cancela el plan rev. 74 mecánico original** y lo reemplaza por plan de cutover real (Fases A-E). |
+| [.context/04-next-steps.md](.context/04-next-steps.md) | Plan rev. 74 redefinido — completar V2 + tests + cutover gradual. |
+| [.context/05-doc-policy.md](.context/05-doc-policy.md) | Jerarquía L1 ampliada con `09-bot-flowchart.md` y `10-v1-v2-parity-audit.md`. |
+
+### Verificación
+- Suite Python: 681 OK (668 + 13 rev. 73).
+- `bash scripts/validate.sh`: 13/13 OK.
+
+### Validación contra el log original
+
+Re-ejecutando mentalmente el log con el código rev. 73:
+1. Cliente "Cotizamos envío a Bogotá" → `_last_oc_consent=False`, `_last_oc_data=False` → **shipping_quote_tool corre** y emite "Envío a Bogotá: $XX con Coordinadora. ¿Continuamos con la opción Económica?" (con marker — no LLM).
+2. Cliente "Puedo agregar serum?" → `_cart_changed_since_last_quote` no aplica aún; bot agrega.
+3. Bot dice "¡Listo! Agregué el Sérum a tu carrito" → marker de adición detectado en próximo turno.
+4. Cliente "Cuál es el total?" → `shipping_quoted=False` (invalidado por cart-change) → bot **re-cotiza con peso real** (60g + 2×150g + serum).
+5. Cliente confirma con "sí" tras nueva cotización → carrier_selected=True → `READY_FOR_SUMMARY` con dirección.
+6. Resumen completo + "¿Confirmas para generarte el link de pago?".
+7. Cliente "Sí" → `intent=order_acknowledgment` + `payment_link_tool` corre → link Wompi real emitido.
+8. **Si en cualquier punto el cliente dice "ok, gracias"**, el LLM ya no puede emitir "tu pedido será entregado" — el post-process lo bloquea.
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 72) — AUDITORÍA COHERENCIAL Front↔API↔DB
+
+### Estado: 13/13 OK · 668 tests · TypeScript OK · Lint OK · 74 migraciones · 0 drift schema
+
+Auditoría profunda solicitada por usuario por sospecha de divergencia entre
+las 78 migraciones SQL históricas y la realidad del sistema. Hallazgo: la DB
+live SÍ está sincronizada con migraciones (no hay drift schema). El drift real
+estaba entre **Frontend ↔ API ↔ DB** en dominios específicos donde la lógica
+bypaseaba la API. Cerrados los 4 drifts críticos + 2 moderados.
+
+### Drifts críticos cerrados (4)
+
+- **D1 Reclamos**: nuevo `services/api/routers/claims.py` con CRUD + `@audit_log`. `apps/web/.../claims/actions.ts` ahora llama API en vez de Supabase directo.
+- **D2 Compras**: nuevo `services/api/routers/purchases.py` con suppliers + POs + WAC determinístico server-side al recibir. Idempotente. `apps/web/.../purchases/actions.ts` refactorizado.
+- **D3 Knowledge Base**: nuevo `services/api/routers/knowledge_base.py` con embedding server-side via `dependencies/embeddings.py`. `GEMINI_API_KEY` eliminada del scope `commerce-ops-web` (cierra riesgo de exposición). Movida a `commerce-ops-api`. Endpoint `/{id}/reindex` para reintento.
+- **D4 Auditoría**: nuevo decorator `@audit_log(entity_type=..., action=...)` en `services/api/dependencies/audit.py`. Aplicado a 17+ endpoints de mutation (orders, contacts, products, variations, claims, purchases, kb, settings, team, integrations). Fire-and-forget — falla silente si DB cae.
+
+### Drifts moderados cerrados (2 + 1 postpuesto)
+
+- **M1 DANE central**: nuevo `services/api/dependencies/dane.py` con `sanitize_dane_code`/`co_dane_codes`/`is_valid_dane`. `routers/shipping.py` re-exporta como aliases.
+- **M2 `content_type` tipado**: union type `MessageContentType` en `apps/web/app/dashboard/inbox/page.tsx`.
+- **M3 AI Agents router**: postpuesto explícitamente (read-mostly hoy).
+
+### Tests nuevos (32)
+
+- `tests/test_audit_decorator.py` — 14 tests (decorator + helpers).
+- `tests/test_coherence_pact.py` — 18 tests "pact" Pydantic ↔ DB live (golden file).
+
+### Infraestructura nueva
+
+- `services/api/dependencies/audit.py` — decorator + helper `write_audit_event`.
+- `services/api/dependencies/embeddings.py` — `embed_text` + `embed_kb_document` (Gemini).
+- `services/api/dependencies/dane.py` — sanitización CO centralizada.
+- `services/api/requirements.txt` — `google-genai==1.47.0` agregado.
+- `scripts/dump_schema_canonical.py` — genera `tests/fixtures/db_schema_canonical.json` desde DB live (con flag `--diff` para detectar drift).
+- `tests/fixtures/db_schema_canonical.json` — golden file (25 tablas, 1983 líneas).
+
+### Documentación nueva/actualizada
+
+- `.context/07-schema-canonical.md` (NUEVO) — shape de DB live; regenerable.
+- `.context/08-domain-coherence-matrix.md` (NUEVO) — matriz por dominio (estado ✅/⚠️/🔴).
+- `.context/05-doc-policy.md` — sección "Las migraciones SQL NO son fuente de verdad".
+- `.context/06-contracts.md` — endpoints nuevos + `@audit_log`.
+
+### Archivos modificados (resumen)
+
+| Capa | Archivos |
+|---|---|
+| Routers nuevos | `services/api/routers/claims.py` `purchases.py` `knowledge_base.py` |
+| Routers modificados | `orders.py` `contacts.py` `products.py` `settings.py` `integrations.py` `shipping.py` |
+| Frontend refactor | `apps/web/.../claims/actions.ts` `.../purchases/actions.ts` `.../knowledge-base/page.tsx` `.../inbox/page.tsx` |
+| Infra | `render.yaml` (GEMINI_API_KEY mover de web → api) · `apps/web/.env.example` · `services/api/main.py` |
+| Tests | `test_audit_decorator.py` `test_coherence_pact.py` (nuevos); `test_wompi_payment_link_endpoint.py` (request kwarg added) |
+
+### Coherencia global
+
+Pre-rev. 72: ~65-70%. Post-rev. 72: **~95%**. Único pendiente: M3 (AI Agents
+router, postpuesto). Ver matriz completa en `.context/08-domain-coherence-matrix.md`.
+
+### Verificación realizada
+
+- `bash scripts/validate.sh` → 13/13 OK.
+- Suite tests: 668 OK.
+- `python3.11 scripts/dump_schema_canonical.py` → fixture generado (25 tablas).
+- `grep -r "GEMINI_API_KEY" apps/web/` → solo refs en `app/api/insights` y `app/api/ai/preview` (SSR Routes Next.js, no client-side; documentadas como deuda técnica).
+
+---
+
+## Cierre de sesión anterior (2026-04-29, rev. 71) — COHERENCIA TOTAL DEL BOT
+
+### Estado: 13/13 OK · 636 tests · TypeScript OK · Lint OK · 74 migraciones aplicadas
+
+Auditoría profunda del bot conversacional (back/front/DB). El usuario reportó múltiples gaps de coherencia y la pregunta "¿el bot realmente usa lo que el tenant configura?". La auditoría reveló 7 gaps reales (G1-G7) más 3 nuevos de DB (N1-N3): columnas duplicadas, default agent name mismatch, store_locations sin shape coherente con shipping_origin. Esta sesión cierra todos los gaps con visión 0% alucinación.
+
+### WS-0 · Barrido coherencia legacy
+
+- **Columnas legacy en `tenants`**: `business_hours` (texto libre — reemplazada por `support_schedule` jsonb desde rev. 65), `cutoff_message` y `dispatch_lead_time` (orphan: existían en API/orchestrator pero NO en UI). Ahora orchestrator deriva horario textual desde `support_schedule` vía `_format_support_schedule_text` (ISO 1-7 alineado con DaysSelector). Las 3 columnas se eliminan vía migración pendiente `20260501000000_drop_legacy_tenant_columns.sql` (IH).
+- **Coherencia de defaults agent name**: DB default `'Vendedor Oficial'` (migración 20260412), pero código tenía hardcoded `'Bot Asistente'` en 3 lugares y readiness check validaba contra el segundo → falso positivo "personalizado" siempre. Alineado: defaults código y readiness check tolera ambos.
+- **API contract**: `TenantPatch` saca `business_hours` y `cutoff_message`; `StoreLocation` agrega `is_primary`.
+
+### WS-A · Coherencia core del system prompt
+
+- **G2 — `after_hours_message` en system prompt**: ahora cuando el tenant está fuera de horario, se inyecta sección "CONTEXTO TEMPORAL" al LLM con instrucción de seguir atendiendo (catálogo/cotización/datos/pago) y NO decir "te conecto ahora" — registrar solicitud y prometer respuesta del próximo turno. El `after_hours_message` se entrega como referencia de tono, no copy literal.
+- **G3 — Identidad legal del negocio**: `nit`, `email_contacto`, `telefono_contacto` se cargan en orchestrator e inyectan al system prompt bajo guard "úsalos SOLO si el cliente lo pregunta". Si el cliente pregunta "¿cuál es su NIT?" el bot responde con verdad; antes alucinaba o escalaba.
+- **G4 — Modo de operación explícito**: `_build_store_info_section` agrega línea explícita "Modo de operación: atención presencial / solo virtual / mixta" al inicio. Antes el bot lo inferia del shape de sedes.
+- **G5 — Sede principal**: nuevo campo `is_primary: bool` dentro de objeto sede en `store_locations[]` JSONB. Una sola sede puede serlo. UI: radio button por sede con highlight visual; agregar/eliminar mantiene exactamente una principal. Server action sanitiza defensivamente. Bot la rotula "(principal)" y la menciona primero.
+- **G6 — KB pre-RAG por categoría**: `kb_tool.py` ahora detecta categorías con regex léxico (`pagos|envios|politicas|productos|negocio|garantia`). Si el query del cliente toca tema crítico, fuerza inyección del top-1 doc de esa categoría aunque el RAG semántico no la priorice. Si la categoría está VACÍA (tenant no configuró), inyecta `_missing_category_marker` con instrucción explícita "NO INVENTES — escala con cordialidad". Anti-alucinación.
+- **`CATEGORY_LABELS`** corregido a las 6 canónicas (`faq, negocio, politicas, productos, envios, pagos`); legacy "politica"/"producto"/"general" eliminados.
+- **`format_kb_for_prompt`** reordena por canonical_order y renderiza markers con `⚠️` distintivo.
+
+### WS-B · UX KB + Estado del bot
+
+- **G7 — Guía KB visible por categoría seleccionada**: nuevo `NewDocForm` (client component) muestra inline placeholder + doYes/doNo de la categoría actual (no colapsada). Categorías vacías marcadas con `⚠️ vacía` en el dropdown; default a la primera vacía para empujar al tenant a llenarla. Collapsible secundario muestra todas las otras.
+- **Readiness card 8 → 10 checks**: nuevos checks (9) "Identidad legal del negocio" — alerta si NIT/email/teléfono vacíos; (10) "KB cobertura crítica" — alerta si politicas/envios/pagos están en 0 docs.
+- **Sanitization de defaults**: `DEFAULT_AGENT_NAMES = {'Bot Asistente', 'Vendedor Oficial'}` cubre ambos defaults históricos.
+
+### WS-B.3 · Append-only logging — `bot_source_log`
+
+- Nueva tabla `bot_source_log` (migración pendiente IH `20260501000001`) con append-only por interacción del bot. Registra:
+  - `injected_*` (catalog/kb/store_info/business_identity/customer_context/cart_recovery/after_hours)
+  - `kb_categories_used[]` y `kb_missing_categories[]`
+  - `fsm_state`, `intent_detected`, `requires_human`, `prompt_chars`
+  - Sin PII — solo metadata estructural.
+- TTL 30 días vía `cleanup_expired_bot_source_log` ejecutada en worker.
+- RLS por tenant. Auditable vía SQL desde Tenant Console (UI elaborada queda para iteración 2 — D3 híbrido).
+
+### Archivos modificados (resumen)
+
+| Capa | Archivo | Cambio |
+|---|---|---|
+| Orchestrator | `services/ai-orchestrator/orchestrator.py` | `_format_support_schedule_text`, `_build_store_info_section` (firma + identidad legal + is_primary + modo), `_build_system_prompt` (after_hours_section + new params), `_log_bot_sources`, alineación default agent |
+| KB tool | `services/ai-orchestrator/tools/kb_tool.py` | Reescritura `get_tenant_kb_rag` con boost por categoría + missing markers; CATEGORY_LABELS canónicas; `format_kb_for_prompt` con orden estable |
+| Worker | `services/ai-orchestrator/worker.py` | Cleanup periódico de `bot_source_log` |
+| API | `services/api/routers/settings.py` | TenantPatch saca `business_hours`/`cutoff_message`; StoreLocation agrega `is_primary` |
+| Web Settings | `apps/web/app/dashboard/(settings-group)/settings/page.tsx` + `actions.ts` + `store-presence-form.tsx` | UI radio is_primary, sanitize one-only-primary, drop legacy `business_hours` y `saveHorario` |
+| Web KB | `apps/web/app/dashboard/(ai)/knowledge-base/page.tsx` + `new-doc-form.tsx` (NUEVO) | Guía visible por categoría seleccionada + tracking de empty categories |
+| Web AI Agents | `apps/web/app/dashboard/(ai)/ai-agents/page.tsx` + `readiness-card.tsx` | 10 checks (identidad legal + KB cobertura crítica), defaults alineados |
+| Tests | `tests/test_rev71_coherence.py` (NUEVO 25), `tests/test_kb_tool.py` (actualizado canónicas), `tests/test_settings_brand_fields.py` (cutoff/business_hours assert removed) | 25 nuevos · suite total 634 → 659 |
+| Migraciones (pendientes IH) | `20260501000000_drop_legacy_tenant_columns.sql`, `20260501000001_bot_source_log.sql` | DROP legacy + tabla append-only |
+
+### Migraciones aplicadas en sesión (rev. 71)
+
+Las 2 migraciones se aplicaron en transacción durante la sesión, preservando info útil:
+
+- **`20260501000000_drop_legacy_tenant_columns.sql`** ✅ aplicada (drop business_hours / cutoff_message / dispatch_lead_time).
+- **`20260501000001_bot_source_log.sql`** ✅ aplicada (tabla append-only + RLS + RPC cleanup).
+- **Migración de info**: el contenido útil de `cutoff_message` + `dispatch_lead_time` del único tenant se consolidó en un nuevo doc KB categoría `envios` titulado "Tiempos de despacho y cut-off". `business_hours` era texto redundante con `support_schedule` — descartado. Ver script de aplicación en `/tmp/apply_rev71_migrations.sql` (transaccional).
+
+### N3 — Decisión de producto resuelta (best practice)
+
+**Distinción conceptual canonizada en system prompt:**
+
+- `tenants.shipping_origin` (jsonb, 9 keys con dane_code/postal_code) = **bodega operacional** desde donde sale el paquete vía Envia. NO necesariamente pública. El bot solo expone **ciudad/estado** al cliente — la dirección exacta NUNCA llega al LLM (dato operacional sensible).
+- `tenants.store_locations[]` (jsonb, 5+ keys con is_primary) = **sedes públicas de atención al cliente**. Acá sí va street/phone/email para "¿dónde están?" / "¿puedo recoger?".
+
+`_build_store_info_section` (rev. 71) inyecta dos secciones separadas con instrucción explícita al LLM para distinguirlas. Si una sede pública es también la bodega, el tenant configura ambas con la misma dirección (acepta duplicación menor por claridad operativa). Multi-warehouse queda como problema futuro Fase 13+.
+
+### Riesgo abierto resuelto: lazy detection de bot_source_log
+
+`_log_bot_sources` ahora envuelve el insert con `_bot_log_available()`:
+- Probe inicial detecta si la tabla existe.
+- Si NO existe → `_BOT_LOG_AVAILABLE=False` con cooldown 15 min antes de re-probar.
+- Si insert falla con "relation does not exist" → invalida cache.
+- Evita round-trips inútiles a Supabase si la migración no está aplicada.
+- Cubre el caso de aplicar migración con servicio caliente (re-detecta dentro de 15 min).
+
+### Hallazgos de DB (validados con audit agregado, sin PII)
+
+- 1 tenant en dev. `mision/vision/valores/after_hours_message/email_contacto/telefono_contacto/sedes(2)/shipping_origin` → poblados.
+- `nit` vacío para el único tenant. `tono` y `escalation_role` en defaults (amigable / asesor).
+- KB: 8 docs (faq=7, negocio=1). **0 docs en `politicas/envios/pagos/productos`** — exactamente el caso que activa el missing-category marker rev. 71.
+- `store_locations` shape (5 keys: city, name, phone, state, street) divergente de `shipping_origin` (9 keys con dane_code/postal_code). Documentado, no resuelto en rev. 71 (decisión de producto pendiente).
+- Default `ai_agents.name = 'Vendedor Oficial'`, `role_description` baked-in genérico de 80 chars — readiness ahora detecta correctamente.
+
+### Riesgos abiertos / postpuestos (rev. 71)
+
+- **N3** ✅ resuelto: distinción canonizada bodega vs sedes públicas en system prompt.
+- **bot_source_log lazy detection** ✅ resuelto: cooldown 15 min, sin round-trips si tabla ausente.
+- **Postpuestos a producción**: B4 (anti-hibernation), B5 (Wompi prod), C3 (DR Supabase).
+- **Bloqueados por terceros**: F7-email (SMTP propio), F7-full (templates Meta aprobadas), F8 (multimodal imagen, aplazado tras audio).
+
+---
+
+## Cierre de sesión anterior (2026-04-30, rev. 70) — F7-LITE CART RECOVERY
 
 ### Estado: 13/13 OK · 496 tests · TypeScript OK · Lint OK · 72 migraciones
 
