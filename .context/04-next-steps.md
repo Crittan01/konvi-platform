@@ -1,5 +1,9 @@
 # Próximos Pasos — Estado 2026-04-30
 
+## ADRs activos
+
+- [docs/adr/0001-llm-tier-strategy.md](../docs/adr/0001-llm-tier-strategy.md) — Decisión rev. 81: AI Studio paid + cascada `flash → flash-lite → degraded` + model router. **NO** multi-API-key, **NO** Vertex AI por ahora. Contiene **triggers concretos** (§7) para revisitar la decisión cuando: tasa de cascada >10%, degraded >1%, tráfico >500 RPM/tenant, o 5+ tenants productivos. Validar estos umbrales antes de cualquier rev de scaling LLM.
+
 ## Rev. 75 — V2 cancelado (decisión arquitectónica)
 
 **Contexto**: el experimento V2 modular (`core/` + `specialists/` + `tools_v2/` + `llm/` + adapter) nació en commit `b153054` el 2026-04-29 00:42 y vivió 22 horas. En ese tiempo recibió 8 commits de fixes calientes (`fix(orchestrator-v2): runtime fixes contra Gemini real`, `retry+fallback LLM`, `cliente puede continuar comprando tras resumen`, etc.), señalando que estaba en estabilización temprana.
