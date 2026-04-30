@@ -4099,12 +4099,22 @@ async def build_and_run_orchestration(
         )
         user_context = _build_user_context(history, content)
 
-        # ── 4. Llamar a Gemini con cascada (rev. 81) ───────────────────────
+        # ── 4. Llamar a Gemini con cascada + model router (rev. 81) ────────
         # Ref: https://googleapis.github.io/python-genai/
-        # Rev. 81: wrap en generate_with_cascade — flash → flash-lite →
-        # respuesta degradada con escalación humana ante 503/429 sostenidos.
+        # Rev. 81: cascada flash → flash-lite → degraded ante 503/429.
+        # Rev. 81 model-routing: clasifica intent (simple|transactional) y
+        # elige el modelo primario. Saludos/FAQ/info usan lite (cheap),
+        # cart/pago/resumen usan flash (precision). Reduce costos ~50-60%.
         from llm_invoke import generate_with_cascade, degraded_response_text
+        from llm_router import classify_intent, model_pair_for
         client = _get_genai_client()
+
+        _intent_class = classify_intent(content, display_state, history_for_prompt)
+        _primary_model, _fallback_model = model_pair_for(_intent_class)
+        logger.info(
+            "[ROUTER] intent=%s primary=%s fallback=%s",
+            _intent_class, _primary_model, _fallback_model,
+        )
 
         def _invoke_gemini(model_name: str):
             return client.models.generate_content(
@@ -4117,7 +4127,11 @@ async def build_and_run_orchestration(
                 ),
             )
 
-        cascade = generate_with_cascade(_invoke_gemini)
+        cascade = generate_with_cascade(
+            _invoke_gemini,
+            primary_model=_primary_model,
+            fallback_model=_fallback_model,
+        )
         if cascade.degraded:
             # Todos los intentos fallaron con transitorios — degradar a
             # respuesta canned con requires_human=true para escalar.

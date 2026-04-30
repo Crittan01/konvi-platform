@@ -26,9 +26,14 @@ class CascadeIntegrationTests(unittest.TestCase):
             "Falta import de cascada en orchestrator",
         )
         self.assertIn(
-            "cascade = generate_with_cascade(_invoke_gemini)",
+            "cascade = generate_with_cascade(",
             src,
             "Falta invocación de generate_with_cascade",
+        )
+        self.assertIn(
+            "from llm_router import classify_intent, model_pair_for",
+            src,
+            "Falta integración del model router",
         )
         self.assertIn(
             "if cascade.degraded:",
