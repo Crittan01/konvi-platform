@@ -187,7 +187,7 @@ def scenario_3_kb_citation(phone: str, tenant_id: str) -> ScenarioResult:
     _hard_reset(phone, tenant_id)
     t0 = _now_iso()
     _send_inbound(phone, tenant_id, "¿Cuál es la política de devoluciones?")
-    outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)
+    outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=60)
     if not outs:
         time.sleep(8)
         t0 = _now_iso()
@@ -211,9 +211,9 @@ def scenario_4_out_of_domain(phone: str, tenant_id: str) -> ScenarioResult:
     _hard_reset(phone, tenant_id)
     t0 = _now_iso()
     _send_inbound(phone, tenant_id, "¿Cómo está el clima en Bogotá?")
-    outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=25)
+    outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)
     if not outs:
-        return ScenarioResult(4, "Out-of-domain", FAIL, "Sin outbound tras 25s")
+        return ScenarioResult(4, "Out-of-domain", FAIL, "Sin outbound tras 45s")
     text = " ".join(o.get("content") or "" for o in outs).lower()
     # Bot debe NO inventar datos meteorológicos. Acepta: redirección a
     # productos, escalación, "no tengo esa información".
@@ -505,14 +505,15 @@ class ConversationDriver:
         return None
 
     def run(self, opening: str) -> DriverResult:
-        # Primer turno con timeout más generoso (cold path) y un retry si
-        # el bot no responde — el orchestrator a veces tarda al despertar.
+        # Rev. 83: timeouts incrementados para tolerar cascada Gemini con
+        # multiple retries (attempts=3+ puede tomar 30-50s totales).
+        # Cold path (primer turno) y turnos subsequent ambos con retry-on-empty.
         ok, bot, _raws = _send_and_read(self.phone, self.tenant_id, opening,
-                                         timeout_s=45)
+                                         timeout_s=60)
         if not ok or not bot:
-            time.sleep(5)
+            time.sleep(8)
             ok, bot, _raws = _send_and_read(self.phone, self.tenant_id, opening,
-                                             timeout_s=45)
+                                             timeout_s=60)
         self.transcript.append({"client": opening, "bot": bot[:280]})
         turns = 1
         while turns < self.max_turns:
@@ -524,7 +525,14 @@ class ConversationDriver:
             reply, _label = resolved
             turns += 1
             ok, bot, _raws = _send_and_read(self.phone, self.tenant_id, reply,
-                                             timeout_s=40)
+                                             timeout_s=60)
+            # Rev. 83: retry-on-empty también en turnos subsequent.
+            # La cascada puede hacer un turno tomar 30-50s; un timeout
+            # falso reportaría bot="" cuando en realidad sí responde.
+            if not ok or not bot:
+                time.sleep(8)
+                ok, bot, _raws = _send_and_read(self.phone, self.tenant_id, reply,
+                                                 timeout_s=45)
             self.transcript.append({"client": reply, "bot": bot[:280]})
         return DriverResult(turns=turns, transcript=self.transcript,
                             last_bot=bot, matched_rule_history=self.matched)
