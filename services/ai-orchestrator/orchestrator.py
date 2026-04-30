@@ -3444,6 +3444,25 @@ ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
 - RESPETA TU ESTADO ACTUAL. Si el FSM dice NEEDS_NAME pide nombre, etc.
 - EN EL MISMO MENSAJE → intent=order_acknowledgment aplica cuando el usuario confirma cierre transaccional.
 
+ASESORÍA VOLUNTARIA (rev. 88 — UX requested by user):
+- NUNCA hagas preguntas obligatorias de asesoramiento. Si quieres ofrecer ayuda, hazlo VOLUNTARIA y CONDICIONAL.
+- INCORRECTO (interrogatorio): "¿Lo necesitas para el rostro o el cuerpo?" "¿Qué tipo de piel tienes?"
+- CORRECTO (voluntario): "Si deseas, puedo asesorarte si lo buscas para rostro o cuerpo, o según tu tipo de piel (seca/grasa/sensible). Si prefieres, dime cuál presentación te llevas y avanzamos."
+- El cliente debe sentirse libre de decir "solo quiero la 60g" sin tener que justificar nada.
+
+POST-SELECCIÓN MULTI-PATH (rev. 88 — UX requested by user):
+- Tras el cliente seleccionar un producto/presentación, ofrece SIEMPRE 3+ caminos abiertos. NO interrogues con datos personales todavía.
+- Patrón canónico:
+  Listo, *1x Jabón Artesanal de Coco (60g)* por *$18.000 COP*.
+
+  ¿Te ayudo con algo más?
+  * Asesoría sobre el producto (si tienes dudas)
+  * Agregar más productos al carrito
+  * Cotizar envío
+
+  O dime si prefieres avanzar directo.
+- Aplica también post-cotización (continuar / ver más opciones / agregar más) y post-info (comprar / ver más / volver).
+
 AVANCE OBLIGATORIO DEL FSM (rev. 86 — fix S6/S9):
 - TRAS confirmar carrier de envío + ciudad, el siguiente turno DEBE pedir el primer dato faltante del FSM (consent / email / name / document / address). NO sigas conversando o re-explicando productos.
 - El cliente conocido salta la captura — pasa directo a READY_FOR_SUMMARY (resumen + pregunta confirmar/actualizar).
@@ -3535,8 +3554,22 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 - Cuando hay UN solo item, igual envuelve en sección con título en negrita.
 - LISTAS DE 3+ ÍTEMS → SIEMPRE estructura con bullets `* ` y agrupa por categoría con título en negrita. NO uses prosa plana ("Tenemos X, Y, Z y también A, B, C") cuando hay categorías o múltiples items — eso es plano y poco legible.
 - Respuestas CORTAS (1-2 oraciones, saludo, agradecimiento) → prosa natural OK.
-- Bullets siempre con `* ` (asterisco + espacio). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
+- Bullets siempre con `* ` (asterisco + ESPACIO + texto). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
 - Si abres negrita con `*`, ciérrala con `*` en la misma línea. NUNCA dejes `*` huérfano (rompe el render).
+- ❌ INCORRECTO (bullet sin espacio, malformado):
+    *Aceites vegetales: Almendras, Argán
+    *Jabones artesanales: Coco, Lavanda
+- ✅ CORRECTO (bullet con espacio):
+    * Aceites vegetales: Almendras, Argán
+    * Jabones artesanales: Coco, Lavanda
+- ✅ TAMBIÉN CORRECTO (sección + items):
+    *Aceites vegetales:*
+    * Almendras
+    * Argán
+
+    *Jabones artesanales:*
+    * Coco
+    * Lavanda
 - USA CITA `>` cuando confirmas un dato que el cliente acaba de dar (dirección, email, doc) ANTES de avanzar al siguiente paso. Ej: cliente da "Calle 3 sur 70-84" → bot responde:
     > Calle 3 sur # 70-84 — Bogotá
     Confirmado, *Cristian*.
@@ -3801,6 +3834,19 @@ def _format_whatsapp_response_text(text: str) -> str:
 
     # 2. Markdown bold doble → simple (WhatsApp usa `*texto*`).
     formatted = re.sub(r"\*\*([^\n*]+?)\*\*", r"*\1*", formatted)
+
+    # 2.b — Rev. 88: bullet malformado al inicio de línea.
+    # El LLM a veces produce `*Texto:` (asterisco pegado a palabra, sin
+    # espacio, sin cerrar) intentando dar formato bold pero quedando como
+    # bullet roto. Detección: línea inicia con `*` + carácter de palabra Y
+    # NO tiene `*` de cierre en la misma línea.
+    # Convertimos a bullet canónico `* Texto:` agregando el espacio.
+    # Preservamos `*texto*` (bold válido cerrado) intacto.
+    formatted = re.sub(
+        r"(?m)^\*(?=\w)([^*\n]+?)$",
+        r"* \1",
+        formatted,
+    )
 
     # 3. Bullets variantes al inicio de línea → `* ` (formato nativo WhatsApp).
     # Detecta `• `, `- `, `· `, `+ ` con espacio al inicio (con o sin sangría).
