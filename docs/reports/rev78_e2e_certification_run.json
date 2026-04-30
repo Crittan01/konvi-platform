@@ -116,7 +116,7 @@
     "number": 9,
     "name": "Coherencia validators",
     "status": "PASS",
-    "message": "TS y Python coinciden en campos requeridos por building_type",
+    "message": "TS↔Python coinciden en address required-fields y regex email",
     "evidence": {
       "casa": [
         "city",
@@ -141,7 +141,8 @@
         "state",
         "street",
         "tower"
-      ]
+      ],
+      "email_pattern_mirrored": true
     },
     "error": null
   },
