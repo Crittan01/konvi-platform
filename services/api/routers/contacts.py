@@ -50,7 +50,14 @@ CONSENT_SOURCES = {
 class ContactCreate(BaseModel):
     phone: str = Field(..., min_length=8, max_length=20, pattern=r"^\+?[1-9]\d{7,19}$")
     name: Optional[str] = Field(default=None, max_length=120)
-    email: Optional[str] = Field(default=None, max_length=254)
+    # Rev. 79 — regex E-mail RFC 5322 simplificada (suficiente para evitar
+    # basura tipo "abc"). El cliente HTML5 ya valida con <input type="email">,
+    # pero la API directa también debe rechazar.
+    email: Optional[str] = Field(
+        default=None,
+        max_length=254,
+        pattern=r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$",
+    )
     notes: Optional[str] = Field(default=None, max_length=1200)
     # Rev. 68 — documento de identidad (Wompi customer_data.legal_id_type CO).
     document_type: Optional[str] = Field(default=None, max_length=10)
@@ -81,7 +88,11 @@ class ContactCreate(BaseModel):
 
 class ContactPatch(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
-    email: Optional[str] = Field(default=None, max_length=254)
+    email: Optional[str] = Field(
+        default=None,
+        max_length=254,
+        pattern=r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$",
+    )
     notes: Optional[str] = Field(default=None, max_length=1200)
     document_type: Optional[str] = Field(default=None, max_length=10)
     document_number: Optional[str] = Field(default=None, max_length=30)

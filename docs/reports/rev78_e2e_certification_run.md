@@ -1,4 +1,4 @@
-# Rev. 78 — Run E2E Certification (2026-04-30T03:01:51+00:00)
+# Rev. 78 — Run E2E Certification (2026-04-30T03:08:22+00:00)
 
 **Resumen**: ✅ PASS · 12/12 PASS · 0 FAIL · 0 SKIP
 
@@ -13,7 +13,7 @@
 | 7 | Envia logística | ✅ PASS | EnviaClient expone 6 métodos requeridos (rates + label + tracking) |
 | 8 | Multimodal | ✅ PASS | image_send_tool expone handler de petición de imagen |
 | 9 | Coherencia validators | ✅ PASS | TS y Python coinciden en campos requeridos por building_type |
-| 10 | Regex matrix | ✅ PASS | Document + phone validators pasan (3 válidos, 5 rechazados). HALLAZGO: ContactCreate.email solo tiene max_length=254 (sin regex) |
+| 10 | Regex matrix | ✅ PASS | Document + phone + email validators pasan (6 válidos, 12 rechazados) |
 | 11 | Cart abandonment | ✅ PASS | 0 carts revisados, transiciones consistentes |
 | 12 | Wompi events integrity | ✅ PASS | Sin eventos recientes (tabla vacía o nuevo deploy) |
 
@@ -139,7 +139,7 @@
 ### Evidencia D10 — Regex matrix
 ```json
 {
-  "email_gap": "ContactCreate.email solo tiene max_length=254 (sin regex)",
+  "email_regex": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}$",
   "phone_regex": "^\\+?[1-9]\\d{7,19}$"
 }
 ```
