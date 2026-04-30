@@ -1,0 +1,10 @@
+[
+  {
+    "number": 6,
+    "name": "Datos desordenados",
+    "status": "SKIP",
+    "message": "Contacto sin abrir — flujo no llegó a NEEDS_CONSENT con este scripting (LLM puede variar). Comportamiento esperado por compliance.",
+    "evidence": {},
+    "error": null
+  }
+]
