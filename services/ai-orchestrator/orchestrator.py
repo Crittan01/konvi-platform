@@ -56,8 +56,21 @@ ORDER_CREATION_CONFIRMATION_TEMPLATE = (
     "¿Confirmas que armamos el pedido?"
 )
 _CONSENT_QUESTION_MARKERS = (
+    # Rev. 89.b: nuevos markers del consent UX-cordial. Sin estos el
+    # detector no reconocía la pregunta y "Sí" del cliente no avanzaba
+    # al FSM → loop infinito (bug observado en log conv f27516bb).
+    "estas de acuerdo",
+    "esta de acuerdo",
+    "estás de acuerdo",
+    "está de acuerdo",
+    "con tu autorizacion",
+    "con tu autorización",
+    "te pedire algunos datos",
+    "te pediré algunos datos",
+    # Markers legacy (versiones previas del consent prompt):
     "nos autorizas",
     "autorizas",
+    "me autorizas",
     "eliminar mis datos",
     "elimina mis datos",
 )
