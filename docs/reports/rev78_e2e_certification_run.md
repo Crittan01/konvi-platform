@@ -1,6 +1,6 @@
-# Rev. 78 — Run E2E Certification (2026-04-30T02:53:38+00:00)
+# Rev. 78 — Run E2E Certification (2026-04-30T03:01:51+00:00)
 
-**Resumen**: ✅ PASS · 8/8 PASS · 0 FAIL · 0 SKIP
+**Resumen**: ✅ PASS · 12/12 PASS · 0 FAIL · 0 SKIP
 
 | # | Dominio | Status | Mensaje |
 |---|---|---|---|
@@ -12,6 +12,10 @@
 | 6 | UI / mensajería | ✅ PASS | 0 ghost messages en últimos 3 outbound text |
 | 7 | Envia logística | ✅ PASS | EnviaClient expone 6 métodos requeridos (rates + label + tracking) |
 | 8 | Multimodal | ✅ PASS | image_send_tool expone handler de petición de imagen |
+| 9 | Coherencia validators | ✅ PASS | TS y Python coinciden en campos requeridos por building_type |
+| 10 | Regex matrix | ✅ PASS | Document + phone validators pasan (3 válidos, 5 rechazados). HALLAZGO: ContactCreate.email solo tiene max_length=254 (sin regex) |
+| 11 | Cart abandonment | ✅ PASS | 0 carts revisados, transiciones consistentes |
+| 12 | Wompi events integrity | ✅ PASS | Sin eventos recientes (tabla vacía o nuevo deploy) |
 
 ### Evidencia D1 — Carrito + volumetría
 ```json
@@ -99,5 +103,58 @@
 ```json
 {
   "handler_present": true
+}
+```
+
+### Evidencia D9 — Coherencia validators
+```json
+{
+  "casa": [
+    "city",
+    "dane_code",
+    "neighborhood",
+    "state",
+    "street"
+  ],
+  "edificio": [
+    "apartment",
+    "city",
+    "dane_code",
+    "neighborhood",
+    "state",
+    "street"
+  ],
+  "conjunto": [
+    "apartment",
+    "city",
+    "dane_code",
+    "neighborhood",
+    "state",
+    "street",
+    "tower"
+  ]
+}
+```
+
+### Evidencia D10 — Regex matrix
+```json
+{
+  "email_gap": "ContactCreate.email solo tiene max_length=254 (sin regex)",
+  "phone_regex": "^\\+?[1-9]\\d{7,19}$"
+}
+```
+
+### Evidencia D11 — Cart abandonment
+```json
+{
+  "by_status": {},
+  "sample_size": 0
+}
+```
+
+### Evidencia D12 — Wompi events integrity
+```json
+{
+  "sample_size": 0
 }
 ```

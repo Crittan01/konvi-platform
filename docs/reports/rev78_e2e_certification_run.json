@@ -111,5 +111,70 @@
       "handler_present": true
     },
     "error": null
+  },
+  {
+    "number": 9,
+    "name": "Coherencia validators",
+    "status": "PASS",
+    "message": "TS y Python coinciden en campos requeridos por building_type",
+    "evidence": {
+      "casa": [
+        "city",
+        "dane_code",
+        "neighborhood",
+        "state",
+        "street"
+      ],
+      "edificio": [
+        "apartment",
+        "city",
+        "dane_code",
+        "neighborhood",
+        "state",
+        "street"
+      ],
+      "conjunto": [
+        "apartment",
+        "city",
+        "dane_code",
+        "neighborhood",
+        "state",
+        "street",
+        "tower"
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 10,
+    "name": "Regex matrix",
+    "status": "PASS",
+    "message": "Document + phone validators pasan (3 válidos, 5 rechazados). HALLAZGO: ContactCreate.email solo tiene max_length=254 (sin regex)",
+    "evidence": {
+      "email_gap": "ContactCreate.email solo tiene max_length=254 (sin regex)",
+      "phone_regex": "^\\+?[1-9]\\d{7,19}$"
+    },
+    "error": null
+  },
+  {
+    "number": 11,
+    "name": "Cart abandonment",
+    "status": "PASS",
+    "message": "0 carts revisados, transiciones consistentes",
+    "evidence": {
+      "by_status": {},
+      "sample_size": 0
+    },
+    "error": null
+  },
+  {
+    "number": 12,
+    "name": "Wompi events integrity",
+    "status": "PASS",
+    "message": "Sin eventos recientes (tabla vacía o nuevo deploy)",
+    "evidence": {
+      "sample_size": 0
+    },
+    "error": null
   }
 ]
