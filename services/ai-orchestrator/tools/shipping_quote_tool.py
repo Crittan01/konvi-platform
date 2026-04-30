@@ -858,6 +858,74 @@ def _extract_quantity_near_phrase(norm_text: str, phrase_tokens: list[str]) -> i
     return 0
 
 
+def _estimate_package_from_cart_if_available(
+    supabase: Client,
+    tenant_id: str,
+    conversation_id: str,
+) -> Optional["PackageEstimateDecision"]:
+    """Rev. 81 (A.3 + B) — si el cart en DB tiene items, construye el
+    PackageEstimate directamente desde sus dims (saltando disambiguation).
+
+    Devuelve None si no hay cart con items — el caller cae al resolver
+    de inventario tradicional.
+    """
+    try:
+        from tools.cart_tool import get_cart_with_items, compute_shipping_inputs
+    except Exception as exc:
+        logger.warning("[SHIPPING_QUOTE] cart_tool no disponible: %s", exc)
+        return None
+
+    try:
+        cart = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning("[SHIPPING_QUOTE] get_cart_with_items falló: %s", exc)
+        return None
+
+    items = (cart or {}).get("items") or []
+    if not items:
+        return None
+
+    inputs = compute_shipping_inputs(cart)
+    weight_kg = max(float(inputs.get("billable_weight_kg") or 0.0), 0.05)
+    dims = inputs.get("package_dims") or {}
+    L = float(dims.get("length_cm") or 0.0) or DEFAULT_LENGTH_CM
+    W = float(dims.get("width_cm") or 0.0) or DEFAULT_WIDTH_CM
+    H = float(dims.get("height_cm") or 0.0) or DEFAULT_HEIGHT_CM
+    total_qty = sum(int(it.get("quantity") or 1) for it in items)
+
+    summaries: list[str] = []
+    for it in items[:3]:
+        p = it.get("product") or {}
+        v = it.get("variation") or {}
+        title = _clean_product_title(str(p.get("title") or p.get("name") or "Producto"))
+        label = v.get("label") or v.get("presentation") or ""
+        qty = int(it.get("quantity") or 1)
+        qstr = f"{qty}x" if qty > 1 else "1x"
+        summaries.append(f"{qstr} {title}" + (f" ({label})" if label else ""))
+    title_str = " + ".join(summaries) + (
+        f" + {len(items) - 3} más" if len(items) > 3 else ""
+    )
+
+    logger.info(
+        "[SHIPPING_QUOTE] cart-as-SoT: %d items, billable=%skg, dims=%sx%sx%s",
+        total_qty, weight_kg, L, W, H,
+    )
+    return PackageEstimateDecision(
+        package=PackageEstimate(
+            weight_kg=round(weight_kg, 3),
+            length_cm=L,
+            width_cm=W,
+            height_cm=H,
+            quantity=total_qty,
+            product_title=title_str,
+            variant_label=None,
+            source="cart_db",
+        )
+    )
+
+
 def _estimate_package_from_inventory(
     supabase: Client,
     tenant_id: str,
@@ -1382,12 +1450,21 @@ async def handle_shipping_quote_if_applicable(
                 ),
             )
 
-        package_decision = _estimate_package_from_inventory(
+        # Rev. 81 — Si hay cart-en-DB con items, lo usamos como fuente de
+        # verdad para peso/dims (cart-as-SoT). Esto evita doble confirmación
+        # cuando el cliente ya consolidó su carrito en turnos previos.
+        package_decision = _estimate_package_from_cart_if_available(
             supabase=supabase,
             tenant_id=tenant_id,
-            query_text=query_text,
-            recent_messages=recent_messages,
+            conversation_id=conversation_id,
         )
+        if package_decision is None:
+            package_decision = _estimate_package_from_inventory(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                query_text=query_text,
+                recent_messages=recent_messages,
+            )
         if package_decision.ambiguous_product_titles:
             # Contar cuántas veces ya pedimos confirmación del producto (stall detection)
             stall_count = sum(

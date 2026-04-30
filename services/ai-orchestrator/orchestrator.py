@@ -4099,20 +4099,40 @@ async def build_and_run_orchestration(
         )
         user_context = _build_user_context(history, content)
 
-        # ── 4. Llamar a Gemini (nuevo SDK google-genai) ───────────────────────
+        # ── 4. Llamar a Gemini con cascada (rev. 81) ───────────────────────
         # Ref: https://googleapis.github.io/python-genai/
+        # Rev. 81: wrap en generate_with_cascade — flash → flash-lite →
+        # respuesta degradada con escalación humana ante 503/429 sostenidos.
+        from llm_invoke import generate_with_cascade, degraded_response_text
         client = _get_genai_client()
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=user_context,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.3,
-                response_mime_type="application/json",
-            ),
-        )
-        raw_json = response.text
-        logger.info(f"[GEMINI] Raw: {raw_json}")
+
+        def _invoke_gemini(model_name: str):
+            return client.models.generate_content(
+                model=model_name,
+                contents=user_context,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.3,
+                    response_mime_type="application/json",
+                ),
+            )
+
+        cascade = generate_with_cascade(_invoke_gemini)
+        if cascade.degraded:
+            # Todos los intentos fallaron con transitorios — degradar a
+            # respuesta canned con requires_human=true para escalar.
+            raw_json = degraded_response_text()
+            logger.error(
+                "[GEMINI] degradado tras %d intentos | last_err=%s",
+                cascade.attempts, (cascade.last_error or "")[:160],
+            )
+        else:
+            response = cascade.response
+            raw_json = response.text
+            logger.info(
+                f"[GEMINI] model={cascade.model_used} attempts={cascade.attempts} | "
+                f"Raw: {raw_json}"
+            )
 
         # ── 5. Parsear output estructurado ────────────────────────────────────
         import json
