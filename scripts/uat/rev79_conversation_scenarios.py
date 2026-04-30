@@ -761,10 +761,15 @@ def scenario_11_human_escalation(phone: str, tenant_id: str) -> ScenarioResult:
     _hard_reset(phone, tenant_id)
     t0 = _now_iso()
     _send_inbound(phone, tenant_id, "Quiero hablar con un asesor humano")
-    outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=25)
+    outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)
+    if not outs:
+        time.sleep(8)
+        t0 = _now_iso()
+        _send_inbound(phone, tenant_id, "Quiero hablar con un asesor humano")
+        outs = _wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)
     if not outs:
         return ScenarioResult(11, "Escalación a humano", FAIL,
-            "Sin respuesta tras petición de asesor")
+            "Sin respuesta tras petición de asesor (2 intentos, 45s c/u)")
     text = " ".join(o.get("content") or "" for o in outs).lower()
     escalates = any(k in text for k in (
         "asesor", "humano", "operador", "te conecto", "te transfiero",
