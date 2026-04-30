@@ -61,6 +61,86 @@ _REVOCATION_TOKENS = {"eliminar mis datos", "borra mis datos", "elimina mis dato
                       "borrar mis datos", "quiero ser eliminado", "no guardes mis datos",
                       "eliminar mi informacion", "elimina mi informacion"}
 
+# Rev. 84 — Guardrails de cumplimiento Meta Business Policy.
+#
+# Cita oficial (https://business.whatsapp.com/policy):
+#   "Healthcare: Telemedicine and health data prohibited in non-compliant
+#    systems"
+#   "Personal data: Cannot collect/share full payment card numbers, bank
+#    accounts, ID documents"
+#
+# Estas detecciones corren PRE-LLM con respuestas determinísticas para
+# garantizar cumplimiento sin depender de la disciplina del modelo.
+
+# P0 — crisis de salud mental: escalación INMEDIATA con mensaje de
+# seguridad. Lista conservadora; falsos positivos son mejor que falsos
+# negativos en este caso.
+_MENTAL_HEALTH_CRISIS_PHRASES = (
+    "me quiero matar", "me voy a matar", "quiero matarme",
+    "voy a suicidarme", "suicidarme", "suicidio",
+    "voy a morir", "quiero morir", "no quiero vivir", "no quiero seguir viviendo",
+    "no quiero seguir aqui",  # _normalize_text_simple strip accents → "aqui"
+    "hacerme dano", "hacer dano", "hacerme daño", "hacer daño",
+    "lastimarme", "cortarme",
+    "no aguanto mas",
+    "acabar con mi vida", "acabar con todo",
+    "me quitare la vida",
+    "pensamientos suicidas", "tentado a suicidarme",
+)
+
+# Detección de números potencialmente sensibles que el cliente NO debería
+# enviar al chat (Wompi maneja datos de pago en su widget).
+# Patrones cubiertos:
+#   • Tarjeta de crédito: 13-19 dígitos consecutivos (con o sin espacios/guiones)
+#   • CVV explícito: "cvv 123", "cvc: 456"
+import re as _re_meta
+# CVV: keyword + hasta 6 chars no-dígitos + 3-4 dígitos. Cubre "cvv 123",
+# "cvv es 123", "cvc: 456", "código de seguridad es 789".
+_CVV_RE = _re_meta.compile(
+    r"(?:cvv|cvc|cvn|c[oó]digo\s+de\s+seguridad)\D{0,6}\d{3,4}",
+    _re_meta.IGNORECASE,
+)
+
+
+def _detect_mental_health_crisis(text: str) -> bool:
+    """True si el texto sugiere crisis de salud mental (autolesión / suicidio).
+
+    Diseño conservador: la prioridad es NO ignorar un caso real.
+    Falsos positivos derivan en escalación humana, que el agente humano
+    puede manejar correctamente. Falsos negativos son inaceptables.
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+    return any(phrase in normalized for phrase in _MENTAL_HEALTH_CRISIS_PHRASES)
+
+
+def _detect_sensitive_payment_data(text: str) -> tuple[bool, str]:
+    """True si el cliente envió datos sensibles que NO deben procesarse en chat.
+
+    Returns:
+        (detected, reason) — `reason` describe qué tipo se detectó para log.
+
+    NOTA: el sistema sí pide y guarda `document_number` (CC), eso es
+    aceptable y necesario. Lo que NO debe pasar:
+      • Números de tarjeta de crédito en chat (Wompi widget seguro).
+      • CVV en chat.
+      • Cuentas bancarias completas en chat.
+    """
+    if not text:
+        return False, ""
+    if _CVV_RE.search(text):
+        return True, "cvv_detected"
+    # Tarjeta de crédito: secuencia de 13-19 dígitos en el texto, posibly
+    # separada por espacios o guiones. Cédulas colombianas son 8-12 dígitos
+    # → no gatillarán este detector.
+    # Pattern: dígito inicial (no precedido por dígito) + 12-18 dígitos más
+    # (cada uno con opcional espacio/guión antes) + no seguido por dígito.
+    if _re_meta.search(r"(?<!\d)\d(?:[ \-]?\d){12,18}(?!\d)", text):
+        return True, "credit_card_pattern"
+    return False, ""
+
+
 # Rev. 83: detección de cancelación de pedido. UX: el cliente que cancela
 # NO debe ser escalado a humano (sería molesto). Bot acusa recibo cordial,
 # cierra el cart, deja la puerta abierta para volver.
@@ -3142,6 +3222,17 @@ REGLAS ANTI-IMPROVISACIÓN GENERAL (rev. 83):
 - Si el cliente pregunta sobre cualquiera de los temas anteriores, responde EXACTAMENTE con esta plantilla (adaptando solo el nombre del tenant): "No tengo información sobre eso — soy asesor virtual de {tenant_name} y solo puedo ayudarte con nuestros productos, envíos y pedidos. ¿Te interesa algo de la tienda?".
 - NUNCA respondas como si fueras un asistente de IA de propósito general. Eres asesor de la tienda — nada más.
 - Pregunta sobre clima, hora, fechas calendario, ubicación geográfica o eventos del mundo real → out-of-domain → plantilla anterior + opcional escalación si insiste.
+
+REGLAS DE CUMPLIMIENTO META BUSINESS POLICY (rev. 84 — CRÍTICO):
+- Pregunta sobre SALUD / MEDICINA / DIAGNÓSTICOS (ej. "¿este jabón cura mi acné?", "¿sirve para alergias?", "tengo dermatitis", "cuál es bueno para mi enfermedad"):
+  • NO recomendar tratamientos. NO afirmar efectos terapéuticos.
+  • Responder: "Nuestros productos son cosmética natural sin propiedades medicinales certificadas. Para condiciones de piel específicas, te recomiendo consultar con un dermatólogo o profesional de la salud. Yo solo puedo darte información sobre composición y cuidado del producto."
+  • Si insiste 2+ veces buscando consejo médico → ESCALAR a humano (requires_human=true).
+- Pregunta LEGAL (contratos, demandas, rights, procesos): "Para asuntos legales necesitas consultar con un abogado. Yo solo puedo ayudarte con productos y pedidos."
+- Pregunta FINANCIERA personal (inversiones, créditos, hipotecas, asesoría financiera): "Para asesoría financiera personal, consulta con un asesor financiero certificado. Mi alcance es productos y pedidos de {tenant_name}."
+- DATOS SENSIBLES: NUNCA pidas ni aceptes en el chat: número completo de tarjeta de crédito/débito, CVV, contraseñas, número de cuenta bancaria. Si el cliente los envía, dí: "Por tu seguridad, no envíes esos datos acá. Wompi los pedirá de forma segura cuando generemos tu link de pago."
+- MENORES DE EDAD: si el cliente menciona ser menor (<18), o pide productos que requieran ser adulto, o el contexto sugiere que es menor: "Para procesar pedidos necesito que un adulto autorizado realice la compra. ¿Puedes pedirle a tu madre/padre/tutor que continúe contigo?".
+
 {strict_rules}
 REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 - Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
@@ -3906,6 +3997,63 @@ async def build_and_run_orchestration(
             "[CTX] tenant=%s | catalog=%d productos | kb_docs=%d | agent='%s'",
             tenant_id, len(catalog), len(kb_docs), ai_agent.get("name", "?"),
         )
+
+        # ── 2.4 Crisis de salud mental (rev. 84 P0 · Meta compliance) ─────────
+        # Prioridad MÁXIMA — antes de cualquier otra lógica. Mensaje de
+        # seguridad + escalación inmediata. NO procesa por LLM (riesgo de
+        # respuesta inapropiada). El humano evaluará el caso.
+        if _detect_mental_health_crisis(content):
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Lamento mucho que estés pasando por esto. 💛\n\n"
+                    "Tu bienestar es lo más importante. Por favor contacta "
+                    "una línea de apoyo profesional ahora mismo:\n\n"
+                    "• Colombia — Línea de la vida 106 (Bogotá) o 123 "
+                    "(emergencias nacionales)\n"
+                    "• Acude a urgencias o a un servicio de salud mental "
+                    "en tu localidad.\n\n"
+                    "Te conecto también con un asesor humano de inmediato."
+                ),
+            )
+            try:
+                supabase.table("conversations").update({
+                    "status": "human_takeover",
+                    "human_takeover_reason": "mental_health_crisis",
+                }).eq("id", conversation_id).execute()
+            except Exception as _crisis_err:
+                logger.error("[CRISIS] no pude marcar takeover: %s", _crisis_err)
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.warning(
+                "[CRISIS] Mental health crisis detectada conv=%s — escalación inmediata",
+                conversation_id,
+            )
+            return
+
+        # ── 2.45 Datos sensibles (rev. 84 · Meta compliance PCI) ───────────────
+        # Cliente envió tarjeta de crédito o CVV en el chat. NO procesar
+        # por LLM (queda en logs/history). Advertir y guiar al widget Wompi.
+        _is_sensitive, _sensitive_reason = _detect_sensitive_payment_data(content)
+        if _is_sensitive:
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "🔒 Por tu seguridad, **no envíes** datos de tarjeta o "
+                    "CVV por este chat — no son canales seguros.\n\n"
+                    "Cuando generemos tu link de pago, Wompi te pedirá esos "
+                    "datos en su widget cifrado. Yo nunca los necesito acá."
+                ),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.warning(
+                "[PCI] Datos sensibles detectados conv=%s reason=%s — bot advirtió y descartó",
+                conversation_id, _sensitive_reason,
+            )
+            return
 
         # ── 2.5 Detección determinística de revocación (ANTES del LLM) ─────────
         # Prioridad máxima: el titular siempre puede revocar el consentimiento.

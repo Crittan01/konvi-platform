@@ -13,6 +13,10 @@ logger = logging.getLogger("orchestrator.worker")
 
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "3"))
 MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "5"))
+# Rev. 85 — debounce/coalescing window. Si el cliente envía múltiples
+# mensajes rápidos, esperamos esta ventana antes de procesar para juntar
+# en un solo input al LLM (no perder contexto al ver solo el último msg).
+MESSAGE_COALESCE_WINDOW_SECONDS = int(os.getenv("MESSAGE_COALESCE_WINDOW_SECONDS", "5"))
 HUMAN_TAKEOVER_QUEUE_ENABLED = os.getenv("HUMAN_TAKEOVER_QUEUE_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -105,12 +109,111 @@ class OrchestratorWorker:
         await self._release_expired_pending_payment_orders()
         await self._anti_hibernation_ping_if_due()
 
+    async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
+        """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente.
+
+        Si una conversación tiene un mensaje que llegó hace <5s, esperamos
+        el resto de la ventana antes de procesar — eso da tiempo a que
+        lleguen mensajes adicionales del cliente que quería continuar.
+
+        Cuando hay 2+ mensajes pendientes de la misma conversación tras la
+        ventana, los unimos en un solo input al LLM (separados por `\n\n`)
+        y marcamos los anteriores como `processed` con metadata indicando
+        que fueron coalesced. El último mensaje original es el que pasa
+        al orchestrator con el contenido combinado.
+
+        Esto evita el bug observado donde "Hola" como último msg después
+        de un flujo de compra hacía al bot resetear al saludo y perder
+        el contexto previo.
+        """
+        if not pending:
+            return pending
+        # Agrupar por conversation_id manteniendo orden cronológico
+        from collections import OrderedDict
+        by_conv: dict = OrderedDict()
+        for m in pending:
+            by_conv.setdefault(m["conversation_id"], []).append(m)
+
+        # Si hay solo una conv y todos los mensajes son recientes, vale
+        # la pena esperar la ventana para que lleguen más.
+        max_age = 0.0
+        now = datetime.now(timezone.utc)
+        for msgs in by_conv.values():
+            for m in msgs:
+                ts = m.get("created_at")
+                if not ts:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    age = (now - dt).total_seconds()
+                    if age > max_age:
+                        max_age = age
+                except (ValueError, TypeError):
+                    continue
+        if max_age < MESSAGE_COALESCE_WINDOW_SECONDS:
+            wait_more = MESSAGE_COALESCE_WINDOW_SECONDS - max_age
+            logger.info(
+                "[COALESCE] mensajes recientes (max_age=%.1fs); esperando %.1fs",
+                max_age, wait_more,
+            )
+            await asyncio.sleep(wait_more)
+            # Re-fetch tras la espera para capturar nuevos pendings.
+            re_result = (
+                self.supabase.table("messages")
+                .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
+                .eq("direction", "inbound")
+                .eq("processing_status", "pending")
+                .order("created_at", desc=False)
+                .limit(10)
+                .execute()
+            )
+            pending = re_result.data or pending
+            by_conv.clear()
+            for m in pending:
+                by_conv.setdefault(m["conversation_id"], []).append(m)
+
+        # Ahora coalescer cada conv que tenga 2+ mensajes
+        coalesced: list[dict] = []
+        for conv_id, msgs in by_conv.items():
+            if len(msgs) >= 2:
+                # Marcar los anteriores como processed (coalesced)
+                older_ids = [m["id"] for m in msgs[:-1]]
+                try:
+                    self.supabase.table("messages").update({
+                        "processing_status": "processed",
+                        "processed": True,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                        "skip_reason": "coalesced_into_next",
+                    }).in_("id", older_ids).execute()
+                except Exception as exc:
+                    logger.warning("[COALESCE] no pude marcar coalesced: %s", exc)
+                # El último msg lleva el content combinado
+                last = dict(msgs[-1])
+                combined = "\n\n".join(str(m.get("content") or "") for m in msgs)
+                last["content"] = combined
+                logger.info(
+                    "[COALESCE] conv=%s coalesce %d mensajes en uno (chars=%d)",
+                    conv_id[:8], len(msgs), len(combined),
+                )
+                coalesced.append(last)
+            else:
+                coalesced.extend(msgs)
+        return coalesced
+
     async def _poll_inbound_messages(self):
-        """Busca mensajes inbound pendientes y los orquesta."""
+        """Busca mensajes inbound pendientes y los orquesta.
+
+        Rev. 85 — Coalescing: agrupa por conversation_id. Si una conv
+        tiene múltiples mensajes pendientes (cliente envió varios
+        seguidos), espera la ventana de debounce y los junta en un solo
+        input al LLM. Evita que el último mensaje (típicamente "Hola"
+        o follow-up corto) domine el contexto y haga al bot perder el
+        flujo previo.
+        """
         # Selección de mensajes pendientes — hasta 10 por ciclo para no saturar
         result = (
             self.supabase.table("messages")
-            .select("id, tenant_id, conversation_id, content, content_type, processing_attempts")
+            .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
             .eq("direction", "inbound")
             .eq("processing_status", "pending")
             .order("created_at", desc=False)
@@ -124,6 +227,11 @@ class OrchestratorWorker:
         self._metrics["inbound_seen"] += len(pending)
 
         logger.info(f"📬 {len(pending)} mensaje(s) pendiente(s) encontrado(s)")
+
+        # Rev. 85 — Coalesce: agrupar por conversation_id. Si la conv tiene
+        # mensajes muy recientes (<5s), esperar el resto de la ventana para
+        # capturar mensajes adicionales que lleguen mientras esperamos.
+        pending = await self._coalesce_pending_by_conversation(pending)
 
         # Procesar en secuencia para no sobrecargar la API de Gemini
         for msg in pending:
