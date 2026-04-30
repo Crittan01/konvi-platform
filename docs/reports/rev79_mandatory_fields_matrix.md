@@ -12,13 +12,13 @@
 | Campo | DB column | Pydantic API | TS form | FSM bot | Wompi customer_data | Envia destination | Obligatorio para… |
 |---|---|---|---|---|---|---|---|
 | **Nombre completo** | `contacts.name` (TEXT, max 120) | `name: Optional[str]` (max 120) | input text | `NEEDS_NAME` step | `full_name` (opcional pero recomendado) | `name` (req. para guía) | Pago + guía Envia |
-| **Correo electrónico** | `contacts.email` (TEXT, max 254) | `email: Optional[str]` (max 254, **sin regex**) ⚠️ | input email (HTML5) | `NEEDS_EMAIL` step | `email` (opcional) | `email` (recomendado) | Pago Wompi (recibo) |
+| **Correo electrónico** | `contacts.email` (TEXT, max 254) | `email: Optional[str]` (max 254 + regex `^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$`) | input email (HTML5) | `NEEDS_EMAIL` step | `email` (opcional) | `email` (recomendado) | Pago Wompi (recibo) |
 | **Teléfono** | `contacts.phone` (TEXT, regex `^\+?[1-9]\d{7,19}$`) | `phone: str` (req., regex) | — (viene de WhatsApp) | implícito (= número WhatsApp) | `phone_number` + `phone_number_prefix` | `phone` (req. para guía) | Identificación + guía |
 | **Tipo de documento** | `contacts.document_type` (TEXT, CHECK CC/CE/NIT/PP/TI/OTHER) | `document_type` (Pydantic enum) | select | `NEEDS_DOCUMENT` step | `legal_id_type` (opcional) | — | Pago Wompi |
 | **Número documento** | `contacts.document_number` (TEXT, normalizado sin puntos) | `document_number` (str, NIT con DV módulo-11 DIAN) | input text | `NEEDS_DOCUMENT` step | `legal_id` (opcional) | — | Pago Wompi |
 
 **Hallazgos**:
-- ⚠️ **Email sin regex**: `services/api/routers/contacts.py:53` solo valida `max_length=254`. Cualquier string es aceptado. El cliente HTML5 (`<input type="email">`) sí valida, pero la API directa no.
+- ✅ **Email con regex (rev. 79)**: pattern aplicado en `ContactCreate.email` y `ContactPatch.email` rechaza `"abc"`, `"@x.co"`, `"a@b"`, `"a@b..co"`, `"a b@c.co"`. Verificado en harness D10.
 - ✅ **Teléfono con regex** (`^\+?[1-9]\d{7,19}$`): obligatorio en API, formato E.164 colombiano `+57XXXXXXXXXX`.
 - ✅ **NIT con DV verificado**: módulo-11 oficial DIAN en `contact_validators._calculate_nit_dv`.
 
@@ -68,9 +68,9 @@ conjunto  → street + neighborhood + city + state + dane_code + apartment + tow
 |---|---|---|---|
 | `consent_given` | BOOLEAN | Al aceptar TyC | Default `false` |
 | `consent_given_at` | TIMESTAMPTZ | NOW() al aceptar | (= "tos_accepted_at" semántico) |
-| `consent_text_version` | TEXT | Versión del aviso legal vigente | (= "tos_version" semántico) |
+| `consent_text_version` | TEXT | **CANÓNICO (rev. 79)** — versión del aviso legal vigente | (= "tos_version" semántico) |
 | `consent_source` / `consent_channel` | TEXT | "whatsapp" / "web_form" / "manual_console" / etc. | Auditoría canal de captación |
-| `consent_notice_version` | TEXT (max 80) | Mismo que text_version (campo legacy paralelo) | Consolidar en futura rev |
+| `consent_notice_version` | TEXT (max 80) | **DEPRECADO (rev. 79)** — mantener por backward compat; nuevo código debe escribir solo `consent_text_version` | A retirar en migración futura |
 | `consent_evidence` | JSONB | Evidencia (mensaje WhatsApp, IP, timestamp UI, etc.) | Default `{}` |
 | `consent_actor_email` | TEXT | Email del operador que registró consentimiento manual | Solo en captura console |
 | `consent_revoked_at` | TIMESTAMPTZ | NOW() cuando cliente revoca | NULL si nunca revocó |
@@ -125,7 +125,21 @@ Todos los campos son **opcionales** desde la perspectiva de Wompi (si no los env
 | `postalCode` | DANE municipal o "000000" | tolerado vacío en CO |
 | `dane_code` | `address.dane_code` (Envia lo usa para CO) | ✅ |
 
-**Hallazgo**: Envia.com **no expone docs públicas accesibles** desde el sandbox actual. Toda verificación es empírica. Recomendación: cuando los docs vuelvan, validar formalmente y registrar versión consultada.
+**Hallazgo (rev. 79 confirmado)**: Envia.com **no expone docs públicas accesibles** desde el sandbox actual.
+
+URLs intentadas (todas fallan con 404 o ECONNREFUSED desde nuestro entorno):
+- `https://api-docs.envia.com/`
+- `https://docs.envia.com/`
+- `https://docs.envia.com/api/intro`
+- `https://docs.envia.com/api/labels`
+- `https://envia.com/docs/api`
+
+**Política de validación adoptada**: contrato Envia se valida empíricamente vía:
+1. Implementación canónica en código: `services/api/integrations/envia_client.py` y `services/ai-orchestrator/tools/shipping_quote_tool.py`.
+2. Registros operativos: `bot_source_log` (rev. 71) — cada cotización exitosa demuestra que el payload actual es aceptado por la API.
+3. Cuando los docs oficiales vuelvan a estar accesibles, validar formato de payload `/ship/rate` y `/ship/generate`, registrar versión consultada, y actualizar esta sección.
+
+Owner del seguimiento: cualquier rev futura que toque el cliente Envia debe re-intentar el WebFetch a las URLs anteriores y registrar el resultado.
 
 ---
 
@@ -202,8 +216,8 @@ Leyenda: ✅ obligatorio · ⚪ opcional · — no aplica
 
 | # | Hallazgo | Prioridad | Acción |
 |---|---|---|---|
-| 1 | Email API sin regex (solo max_length) | M | Agregar `pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"` o `EmailStr` de Pydantic en `ContactCreate.email`. Espejo en TS. |
-| 2 | `consent_text_version` y `consent_notice_version` son redundantes | L | Consolidar en una sola columna o documentar la diferencia. |
-| 3 | Docs Envia.com no accesibles | L | Cuando vuelvan, validar formato de payload y registrar versión consultada en este doc. |
-| 4 | Carrito abandonado sin TTL explícito | M | Definir cron que marque `conversation_carts.status='abandoned'` después de N días sin actividad. |
+| 1 | Email API sin regex | ~~M~~ | ✅ **Cerrado rev. 79** — `pattern` agregado en `ContactCreate.email` y `ContactPatch.email` (`services/api/routers/contacts.py`). Verificado por D10 del harness. |
+| 2 | `consent_text_version` y `consent_notice_version` redundantes | ~~L~~ | ✅ **Documentado rev. 79** — `consent_text_version` declarado canónico; `consent_notice_version` deprecado (mantener por compat). Ver §3 de este doc. |
+| 3 | Docs Envia.com no accesibles | ~~L~~ | ✅ **Política adoptada rev. 79** — validación empírica vía `bot_source_log` + reintento documentado. Ver §5. |
+| 4 | Carrito abandonado sin TTL | ~~M~~ | ✅ **Cerrado rev. 79** — migración `20260504000000_carts_abandonment_cron.sql`: función `fn_expire_abandoned_carts()` + schedule pg_cron horario. Política: 7 días sin actividad → `status='abandoned'`. |
 | 5 | "Compatibilidad química/alimentos" | — | No aplica al tenant actual (cosmética artesanal). Documentado out of scope. |

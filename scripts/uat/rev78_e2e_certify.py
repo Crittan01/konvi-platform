@@ -473,18 +473,39 @@ def domain_10_regex_matrix() -> DomainResult:
         if phone_re.match(p):
             failures.append(f"Phone inválido aceptado: {p!r}")
 
-    # Email — registramos hallazgo: NO hay regex actualmente.
-    email_gap = "ContactCreate.email solo tiene max_length=254 (sin regex)"
+    # Email regex (rev. 79 F-EMAIL): valida en ContactCreate y ContactPatch.
+    email_re = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$")
+    valid_emails = ["a@b.co", "user.name+tag@sub.example.com", "X.Y_Z-9@host.io"]
+    invalid_emails = ["", "abc", "abc@", "@x.co", "a@b", "a b@c.co", "a@b..co"]
+    for e in valid_emails:
+        if not email_re.match(e):
+            failures.append(f"Email válido rechazado: {e!r}")
+    for e in invalid_emails:
+        if email_re.match(e):
+            failures.append(f"Email inválido aceptado: {e!r}")
+
+    # Cross-check: confirmar que ContactCreate.email tiene pattern.
+    try:
+        from routers.contacts import ContactCreate
+        email_field = ContactCreate.model_fields.get("email")
+        meta = email_field.metadata if email_field else []
+        has_pattern = any(getattr(m, "pattern", None) for m in meta)
+        if not has_pattern:
+            failures.append("ContactCreate.email sin pattern (regex no aplicada)")
+    except Exception as exc:
+        failures.append(f"No pude introspeccionar ContactCreate: {exc}")
 
     if failures:
         return DomainResult(10, "Regex matrix", FAIL,
             f"{len(failures)} casos fallaron",
-            evidence={"failures": failures, "email_gap": email_gap})
+            evidence={"failures": failures})
 
     return DomainResult(10, "Regex matrix", PASS,
-        f"Document + phone validators pasan ({len(valid_phones)} válidos, "
-        f"{len(invalid_phones)} rechazados). HALLAZGO: {email_gap}",
-        evidence={"email_gap": email_gap, "phone_regex": phone_re.pattern})
+        f"Document + phone + email validators pasan "
+        f"({len(valid_emails) + len(valid_phones)} válidos, "
+        f"{len(invalid_emails) + len(invalid_phones)} rechazados)",
+        evidence={"email_regex": email_re.pattern,
+                  "phone_regex": phone_re.pattern})
 
 
 # ─── Dominio 11 — Cart abandonment (rev. 79) ──────────────────────────────────

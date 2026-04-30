@@ -149,9 +149,9 @@
     "number": 10,
     "name": "Regex matrix",
     "status": "PASS",
-    "message": "Document + phone validators pasan (3 válidos, 5 rechazados). HALLAZGO: ContactCreate.email solo tiene max_length=254 (sin regex)",
+    "message": "Document + phone + email validators pasan (6 válidos, 12 rechazados)",
     "evidence": {
-      "email_gap": "ContactCreate.email solo tiene max_length=254 (sin regex)",
+      "email_regex": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}$",
       "phone_regex": "^\\+?[1-9]\\d{7,19}$"
     },
     "error": null
