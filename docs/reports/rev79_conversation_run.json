@@ -1,75 +1,26 @@
 [
   {
-    "number": 1,
-    "name": "Primer contacto + saludo",
+    "number": 15,
+    "name": "Promesa de link cumplida",
     "status": "PASS",
-    "message": "Bot respondió en 1 mensaje(s) (34 chars)",
+    "message": "Bot bloqueó link y pidió datos faltantes (FSM enforcement OK)",
     "evidence": {
-      "outbound_count": 1,
-      "preview": "Cuéntame, ¿en qué te puedo ayudar?"
-    },
-    "error": null
-  },
-  {
-    "number": 2,
-    "name": "Consulta catálogo",
-    "status": "PASS",
-    "message": "Bot listó productos en 1 mensaje(s)",
-    "evidence": {
-      "outbound_count": 1,
-      "preview": "¡buenos días! 👋 en kaiu living natural tenemos una variedad de productos naturales para tu cuidado personal. manejamos aceites vegetales, aceites esenciales, sérums faciales y jabones artesanales.\n\n¿h"
-    },
-    "error": null
-  },
-  {
-    "number": 3,
-    "name": "KB cita de fuentes",
-    "status": "PASS",
-    "message": "Respuesta KB incluye cita explícita",
-    "evidence": {
-      "preview": "¡Hola! Con gusto te cuento sobre nuestra política de devoluciones.\n\nAceptamos devoluciones y cambios dentro de los *15 días calendario* después de la entrega, siempre que el producto esté sin usar, co"
-    },
-    "error": null
-  },
-  {
-    "number": 4,
-    "name": "Out-of-domain",
-    "status": "PASS",
-    "message": "Bot no alucinó respuesta sobre clima",
-    "evidence": {
-      "preview": "¿de cuál producto te gustaría ver foto? cuéntame su nombre y te muestro la que tengo cargada."
-    },
-    "error": null
-  },
-  {
-    "number": 5,
-    "name": "Foto producto",
-    "status": "PASS",
-    "message": "Bot fallback explicativo tras 1 turnos",
-    "evidence": {
-      "image_sent": false,
-      "turns": 1,
-      "matched_rules": []
-    },
-    "error": null
-  },
-  {
-    "number": 6,
-    "name": "Datos desordenados (turn-by-turn)",
-    "status": "FAIL",
-    "message": "Tras 2 turnos adaptativos, no se creó contact_row",
-    "evidence": {
-      "turns": 2,
-      "matched_rules": [
-        "prio=1 kws=('?', '¿') q='000*  ¿Cuál te gustaría llevar?'"
-      ],
+      "turns": 7,
+      "promised_link": false,
+      "link_delivered": false,
+      "fsm_enforced_data": true,
+      "consent_given": false,
       "transcript_tail": [
         {
-          "client": "Hola, quiero comprar un jabón artesanal de coco",
-          "bot": "¡Buenos días! 👋\n\nClaro, el *Jabón Artesanal de Coco* lo tenemos en varias presentaciones:\n* 60g por *$18.000*\n* 100g por *$24.000*\n* 150g por *$32.000*\n\n¿Cuál te gustaría llevar?"
+          "client": "Sí, esa opción",
+          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
         },
         {
-          "client": "Sigamos con la compra por favor",
+          "client": "Sí acepto, guarden mis datos",
+          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+        },
+        {
+          "client": "crittan01@gmail.com",
           "bot": ""
         }
       ]
@@ -77,123 +28,11 @@
     "error": null
   },
   {
-    "number": 7,
-    "name": "Formato canónico WhatsApp",
-    "status": "PASS",
-    "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
-    "evidence": {
-      "sample": "¡Hola! Soy Sara Camila de KAIU Living Natural. Tenemos una variedad de productos naturales para el cuidado personal.\n\nCo"
-    },
-    "error": null
-  },
-  {
-    "number": 8,
-    "name": "Revocación adaptativa",
-    "status": "PASS",
-    "message": "Contacto eliminado (revocación procesada)",
-    "evidence": {
-      "setup_turns": 5,
-      "transcript_tail": [
-        {
-          "client": "Sí, cotiza por favor",
-          "bot": "Claro, ¿para qué ciudad sería el envío?"
-        },
-        {
-          "client": "Bogotá",
-          "bot": "No pude cotizar el envio ahora mismo. Te apoyo con un asesor experto."
-        }
-      ],
-      "outbound_after_revoke": 0
-    },
-    "error": null
-  },
-  {
-    "number": 9,
-    "name": "Happy path completo",
-    "status": "FAIL",
-    "message": "Tras 5 turnos, contact_row no creado",
-    "evidence": {
-      "transcript_tail": [
-        {
-          "client": "La de 60 gramos por favor",
-          "bot": "Listo, el Jabón Artesanal de Coco de 60g tiene un costo de *$18.000*.\n\n¿Te gustaría cotizar el envío a tu ciudad?"
-        },
-        {
-          "client": "Sí, cotiza por favor",
-          "bot": "Perfecto.\n\n📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x Jabón Artesanal de Coco (Presentación: 60g): *$18.000 COP*\n\nSubtotal: *$18.000 COP*\n\n¿Quieres agregar algo más a tu pedido o seguimos con el envío? Si es así, cuéntame para qué ciudad sería."
-        },
-        {
-          "client": "No, eso es todo",
-          "bot": ""
-        }
-      ]
-    },
-    "error": null
-  },
-  {
-    "number": 10,
-    "name": "Cancelación mid-flow",
+    "number": 16,
+    "name": "Wompi APPROVED simulation",
     "status": "SKIP",
-    "message": "Setup avanzó solo 1 turnos — no llegó a estado pre-cancelación",
-    "evidence": {
-      "transcript_tail": [
-        {
-          "client": "Hola, quiero comprar un jabón artesanal de coco",
-          "bot": ""
-        }
-      ]
-    },
-    "error": null
-  },
-  {
-    "number": 11,
-    "name": "Escalación a humano",
-    "status": "FAIL",
-    "message": "Sin respuesta tras petición de asesor",
+    "message": "Sin contact_id — S15 no creó orden",
     "evidence": {},
-    "error": null
-  },
-  {
-    "number": 12,
-    "name": "Address conjunto residencial",
-    "status": "FAIL",
-    "message": "Bot no preguntó por torre/apto y no se registraron",
-    "evidence": {
-      "asked_tower": false,
-      "address_db": {},
-      "turns": 1
-    },
-    "error": null
-  },
-  {
-    "number": 13,
-    "name": "Multi-producto + volumetría",
-    "status": "FAIL",
-    "message": "Cotización=False, multi-producto reconocido=False",
-    "evidence": {
-      "turns": 1,
-      "transcript_tail": [
-        {
-          "client": "Hola, quiero comprar 2 jabones artesanales de coco y 1 sérum de vitamina C",
-          "bot": ""
-        }
-      ]
-    },
-    "error": null
-  },
-  {
-    "number": 14,
-    "name": "Cambio ciudad de envío",
-    "status": "SKIP",
-    "message": "Setup paró en turn 1 — sin contexto de cotización previa",
-    "evidence": {
-      "transcript_tail": [
-        {
-          "client": "Hola, quiero comprar un jabón artesanal de coco",
-          "bot": ""
-        }
-      ]
-    },
     "error": null
   }
 ]

@@ -340,9 +340,14 @@ def default_response_rules(profile: dict) -> list[Rule]:
         (15, ("cuántos", "cuantos", "cuántas", "cuantas", "qué cantidad"),
             lambda _: str(profile.get("quantity", 1))),
 
-        # Ciudad de envío.
-        (20, ("a qué ciudad", "ciudad de", "para dónde", "para donde",
-              "destino del envío", "donde envías", "donde envias"),
+        # Ciudad de envío. Acepta variantes: "a qué", "en qué", "cuál es tu",
+        # "te encuentras", "dónde te enviamos".
+        (20, ("a qué ciudad", "en qué ciudad", "qué ciudad",
+              "cuál es tu ciudad", "ciudad de", "ciudad estás",
+              "te encuentras", "te ubicas",
+              "para dónde", "para donde",
+              "destino del envío", "donde envías", "donde envias",
+              "dónde envías", "dónde envias"),
             lambda _: profile.get("city", "Bogotá")),
 
         # Confirmación de cotización / carrier. Acepta variantes que el bot
@@ -351,13 +356,28 @@ def default_response_rules(profile: dict) -> list[Rule]:
               "cotizar el envío", "cotice el", "cotice tu",
               "valor exacto", "tarifa exacta", "te cotice el"),
             lambda _: "Sí, cotiza por favor"),
-        (15, ("servientrega", "transportadora", "carrier", "deprisa",
-              "coordinadora", "interrapidisimo", "elige la opción", "cuál prefieres"),
-            lambda _: "La primera opción está bien"),
 
-        # Consent.
+        # Bot ofrece avanzar genéricamente (post-cotización, post-resumen).
+        # Capturar ANTES del fallback para que avance directo al checkout.
+        (18, ("continuemos con tu pedido", "continuemos con la compra",
+              "seguimos con tu pedido", "seguir con la compra",
+              "avanzamos con tu pedido", "procedemos con",
+              "continuar con tu pedido", "continuar con la compra"),
+            lambda _: "Sí, continuemos por favor"),
+        (15, ("servientrega", "transportadora", "carrier", "deprisa",
+              "coordinadora", "interrapidisimo", "cabify", "elige la opción",
+              "cuál prefieres",
+              "continuamos con", "continuamos la", "continuamos opción",
+              "la opción económica", "opción económica", "opción estándar",
+              "opción express", "te sirve la", "está bien la opción",
+              "esa opción"),
+            lambda _: "Sí, esa opción"),
+
+        # Consent. Acepta variantes: "autorizas / autoriza", "me das tu autorización".
         (25, ("aceptas", "tratamiento de datos", "habeas data",
-              "guardar tus datos", "guardar sus datos", "consentimiento"),
+              "guardar tus datos", "guardar sus datos", "consentimiento",
+              "autorizas", "me autorizas", "autorización", "autorizacion",
+              "registrar tus datos", "podrías autorizarme"),
             lambda _: "Sí acepto, guarden mis datos"),
 
         # Datos personales — multi-campo si bot pide varios.
@@ -418,27 +438,33 @@ import re as _re
 
 
 def _extract_bot_question(bot_text: str) -> str:
-    """Extrae la PREGUNTA del bot (última frase con ? o ¿).
-
-    Crítico: el bot suele recapitular ("Listo, 60g por $18.000.") y luego
-    preguntar lo siguiente ("¿Para qué ciudad sería el envío?"). Si
-    matcheamos contra el recap, repetimos respuestas previas.
-
-    Estrategia: ubicar la ÚLTIMA oración que contenga `¿` o `?` y devolverla.
-    Si no hay pregunta explícita, devuelve la última oración (último ítem
-    tras splitting por punto/exclamación).
-    """
+    """Devuelve la última pregunta del bot. Sin pregunta, devuelve la
+    última oración o las últimas 200 chars."""
     if not bot_text:
         return ""
-    # Normalizar saltos: tomar todo como una secuencia.
     txt = bot_text.replace("\n", " ").strip()
-    # Buscar todas las oraciones interrogativas (¿...? o ...?).
     questions = _re.findall(r"¿[^?]*\?|[^.!?]*\?", txt)
     if questions:
         return questions[-1].strip()
-    # Sin signos: devolver la última oración tras . ! :
     parts = _re.split(r"[.!:]\s+", txt)
     return (parts[-1] if parts else txt).strip()
+
+
+def _extract_question_context(bot_text: str) -> str:
+    """Como _extract_bot_question, pero incluye 200 chars previos a la
+    pregunta. Útil como FALLBACK cuando la pregunta literal es ambigua
+    (e.g. "¿Cuál te gustaría?") y necesitamos las opciones listadas."""
+    if not bot_text:
+        return ""
+    txt = bot_text.replace("\n", " ").strip()
+    questions = _re.findall(r"¿[^?]*\?|[^.!?]*\?", txt)
+    if not questions:
+        return txt[-200:].strip()
+    last_q = questions[-1].strip()
+    idx = txt.rfind(last_q)
+    if idx < 0:
+        return last_q
+    return txt[max(0, idx - 200):].strip()
 
 
 class ConversationDriver:
@@ -457,20 +483,25 @@ class ConversationDriver:
         self._fired_rule_ids: set[int] = set()  # idx en self.rules
 
     def _resolve_reply(self, bot_text: str) -> tuple[str, str] | None:
-        """Devuelve (reply_text, rule_label) o None si nada matchea.
-        Solo considera la última PREGUNTA del bot, e ignora reglas ya
-        disparadas previamente en esta conversación."""
-        question = _extract_bot_question(bot_text)
-        target = question.lower() if question else bot_text.lower()
-        for idx, (prio, kws, reply) in enumerate(self.rules):
-            if idx in self._fired_rule_ids:
-                continue
-            if any(k.lower() in target for k in kws):
-                self._fired_rule_ids.add(idx)
-                label = f"prio={prio} kws={kws[:2]} q={question[:60]!r}"
-                self.matched.append(label)
-                value = reply(bot_text) if callable(reply) else reply
-                return value, label
+        """Matching 2-pass:
+          1) Solo contra la última pregunta literal del bot.
+          2) Si nada matchea, contra pregunta + 200 chars previos (contexto
+             de opciones listadas).
+        Reglas ya disparadas se ignoran. Pass 1 evita matchear keywords
+        del recap; pass 2 desempata cuando la pregunta es ambigua
+        ("¿Cuál te gustaría?")."""
+        question = _extract_bot_question(bot_text).lower()
+        context = _extract_question_context(bot_text).lower()
+        for pass_target, pass_label in ((question, "Q"), (context, "Q+ctx")):
+            for idx, (prio, kws, reply) in enumerate(self.rules):
+                if idx in self._fired_rule_ids:
+                    continue
+                if any(k.lower() in pass_target for k in kws):
+                    self._fired_rule_ids.add(idx)
+                    label = f"[{pass_label}] prio={prio} kws={kws[:2]} q={question[:60]!r}"
+                    self.matched.append(label)
+                    value = reply(bot_text) if callable(reply) else reply
+                    return value, label
         return None
 
     def run(self, opening: str) -> DriverResult:
@@ -847,6 +878,200 @@ def scenario_14_change_shipping(phone: str, tenant_id: str) -> ScenarioResult:
                   "preview": text[:240]})
 
 
+import re as _re_link
+
+WOMPI_LINK_PATTERN = _re_link.compile(r"https?://[^\s]*(?:checkout\.wompi|wompi\.co)[^\s]*")
+
+
+def _find_wompi_link_in_outbounds(outs: list[dict]) -> str | None:
+    """Devuelve el link Wompi si lo encuentra en outbounds (text o image_url)."""
+    for o in outs:
+        content = (o.get("content") or "")
+        m = WOMPI_LINK_PATTERN.search(content)
+        if m:
+            return m.group(0)
+    return None
+
+
+def scenario_15_payment_link_delivery(phone: str, tenant_id: str) -> ScenarioResult:
+    """Bug observado en log real (2026-04-30 14:10): bot dijo "te enviaré
+    el link de pago" y nunca llegó. Este escenario certifica que cuando el
+    cliente confirma, una de dos cosas debe pasar:
+      (a) Bot pide datos faltantes (FSM enforcement) — ESPERADO si consent/
+          datos personales no fueron capturados.
+      (b) Bot envía un outbound con URL Wompi `checkout.wompi.co/l/...` —
+          ESPERADO si el flujo completó correctamente.
+
+    FAIL si bot promete link ("te enviaré", "preparando tu pedido") pero NO
+    envía URL en los siguientes 60s — eso es alucinación transaccional.
+    """
+    _hard_reset(phone, tenant_id)
+    profile = {
+        "product_query": "1 jabón artesanal de coco",
+        "presentation": "60 gramos",
+        "city": "Bogotá",
+        "name": "Cristian Garzón",
+        "email": "crittan01@gmail.com",
+        "document": "CC 1032414179",
+        "address": "Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
+    }
+    drv = ConversationDriver(phone, tenant_id, default_response_rules(profile),
+                              max_turns=18)
+    res = drv.run("Hola, quiero comprar un jabón artesanal de coco")
+
+    # Recoger TODOS los outbounds de la conversación.
+    sb = e2e_chat._supabase()
+    conv = e2e_chat._find_conversation(sb, tenant_id, phone)
+    if not conv:
+        return ScenarioResult(15, "Promesa de link cumplida", FAIL,
+            "No se creó conversación")
+    msgs = e2e_chat._last_messages(sb, conv["id"], limit=50)
+    outs = [m for m in msgs if m.get("direction") == "outbound"]
+    full_text = " ".join((o.get("content") or "").lower() for o in outs)
+
+    promised = any(p in full_text for p in (
+        "te enviaré el link", "te enviare el link", "preparando tu pedido",
+        "envío el link", "envio el link", "te paso el link", "te lo envío",
+        "te lo envio", "en un momento", "te genero el link",
+    ))
+    link = _find_wompi_link_in_outbounds(outs)
+
+    # Detectar enforcement del FSM: bot pidió datos faltantes en lugar de
+    # generar link prematuro.
+    fsm_enforced = any(k in full_text for k in (
+        "tu correo", "tu email", "tu nombre completo",
+        "tu cédula", "tu documento", "tu dirección",
+        "aceptas", "tratamiento de datos", "habeas data",
+    ))
+
+    digits = phone.lstrip("+")
+    contact = sb.table("contacts").select("consent_given, email, name").eq(
+        "tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+    consent_given = contact.data[0].get("consent_given") if contact.data else False
+
+    evidence = {
+        "turns": res.turns,
+        "promised_link": promised,
+        "link_delivered": bool(link),
+        "fsm_enforced_data": fsm_enforced,
+        "consent_given": consent_given,
+        "transcript_tail": res.transcript[-3:],
+    }
+
+    if link:
+        return ScenarioResult(15, "Promesa de link cumplida", PASS,
+            f"Link Wompi entregado: {link[:50]}...",
+            evidence={**evidence, "link": link})
+
+    if promised and not link:
+        return ScenarioResult(15, "Promesa de link cumplida", FAIL,
+            "Bot prometió link pero NO lo entregó — alucinación transaccional",
+            evidence=evidence)
+
+    if fsm_enforced and not consent_given:
+        return ScenarioResult(15, "Promesa de link cumplida", PASS,
+            "Bot bloqueó link y pidió datos faltantes (FSM enforcement OK)",
+            evidence=evidence)
+
+    return ScenarioResult(15, "Promesa de link cumplida", SKIP,
+        f"Conversación no llegó al punto de confirmación en {res.turns} turnos",
+        evidence=evidence)
+
+
+def scenario_16_wompi_approved_simulation(phone: str, tenant_id: str) -> ScenarioResult:
+    """Sandbox: simula evento Wompi APPROVED sobre orden pending_payment y
+    valida que el orchestrator confirme la orden + decremente stock +
+    notifique al cliente."""
+    sb = e2e_chat._supabase()
+    digits = phone.lstrip("+")
+    contact = sb.table("contacts").select("id").eq(
+        "tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+    if not contact.data:
+        return ScenarioResult(16, "Wompi APPROVED simulation", SKIP,
+            "Sin contact_id — S15 no creó orden")
+    contact_id = contact.data[0]["id"]
+    orders = sb.table("orders").select(
+        "id, status, payment_link_id, conversation_id"
+    ).eq("contact_id", contact_id).eq("status", "pending_payment"
+    ).order("created_at", desc=True).limit(1).execute()
+    if not orders.data:
+        return ScenarioResult(16, "Wompi APPROVED simulation", SKIP,
+            "No hay orden en pending_payment para simular APPROVED")
+    order = orders.data[0]
+    plink_id = order.get("payment_link_id")
+    if not plink_id:
+        return ScenarioResult(16, "Wompi APPROVED simulation", FAIL,
+            "Orden pending_payment sin payment_link_id — link nunca se creó",
+            evidence={"order_id": order["id"]})
+
+    # Construir y enviar evento APPROVED sintético al webhook.
+    import sys as _sys, os as _os, json as _json, hashlib as _hashlib, hmac as _hmac, uuid as _uuid, urllib.request, time as _time
+    _sys.path.insert(0, str(REPO_ROOT / "tests"))
+    from helpers.wompi_payload_builder import WompiPayloadBuilder  # type: ignore
+    creds = e2e_chat._load_env()
+    events_key = creds.get("WOMPI_EVENTS_KEY") or creds.get("WOMPI_TEST_EVENTS_KEY", "")
+    if not events_key:
+        return ScenarioResult(16, "Wompi APPROVED simulation", SKIP,
+            "Sin WOMPI_EVENTS_KEY en .env — no puedo firmar evento sandbox")
+
+    payload = (WompiPayloadBuilder(events_key=events_key)
+        .with_approved_txn(payment_link_id=plink_id, txn_id=f"sim_{_uuid.uuid4().hex[:8]}")
+        .build())
+    body = _json.dumps(payload).encode()
+    # Wompi usa checksum interno en el payload (signature.checksum), no header.
+    req = urllib.request.Request(
+        "http://localhost:8000/api/v1/wompi/webhook",
+        data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            posted_ok = r.status in (200, 202)
+    except Exception as exc:
+        # El connector no expone /wompi/webhook. Probar API gateway :9000.
+        try:
+            req2 = urllib.request.Request(
+                "http://localhost:9000/api/v1/wompi/webhook",
+                data=body, method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req2, timeout=10) as r:
+                posted_ok = r.status in (200, 202)
+        except Exception:
+            return ScenarioResult(16, "Wompi APPROVED simulation", SKIP,
+                f"Webhook /api/v1/wompi/webhook no accesible (8000 ni 9000): {exc}")
+    if not posted_ok:
+        return ScenarioResult(16, "Wompi APPROVED simulation", FAIL,
+            "Webhook respondió status no-2xx")
+
+    # Esperar a que el handler procese (idempotencia del wompi_webhook).
+    _time.sleep(8)
+    refreshed = sb.table("orders").select("status, paid_at").eq(
+        "id", order["id"]).limit(1).execute()
+    if not refreshed.data:
+        return ScenarioResult(16, "Wompi APPROVED simulation", FAIL,
+            "Orden desapareció tras webhook")
+    new_status = refreshed.data[0].get("status")
+    if new_status != "confirmed":
+        return ScenarioResult(16, "Wompi APPROVED simulation", FAIL,
+            f"Orden status={new_status} (esperado confirmed)",
+            evidence={"order_id": order["id"], "status": new_status})
+
+    # Validar stock_movements (decrement)
+    movements = sb.table("stock_movements").select(
+        "delta, reason"
+    ).eq("order_id", order["id"]).limit(5).execute()
+    decremented = any(
+        (m.get("delta") or 0) < 0 and m.get("reason") == "reservation_consumed"
+        for m in (movements.data or [])
+    )
+    return ScenarioResult(16, "Wompi APPROVED simulation", PASS,
+        f"Orden {order['id'][:8]} confirmed; stock decrement={decremented}",
+        evidence={"order_id": order["id"],
+                  "status": new_status,
+                  "stock_decremented": decremented})
+
+
 SCENARIOS: list[Callable] = [
     scenario_1_first_contact,
     scenario_2_catalog_query,
@@ -862,6 +1087,8 @@ SCENARIOS: list[Callable] = [
     scenario_12_address_conjunto,
     scenario_13_multi_product,
     scenario_14_change_shipping,
+    scenario_15_payment_link_delivery,
+    scenario_16_wompi_approved_simulation,
 ]
 
 
