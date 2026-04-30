@@ -3,10 +3,10 @@
     "number": 1,
     "name": "Primer contacto + saludo",
     "status": "PASS",
-    "message": "Bot respondió en 1 mensaje(s) (119 chars)",
+    "message": "Bot respondió en 1 mensaje(s) (81 chars)",
     "evidence": {
       "outbound_count": 1,
-      "preview": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n¿En qué te puedo ayudar?"
+      "preview": "¡Buenas tardes! Soy Sara Camila de KAIU Living Natural.\n\n¿En qué te puedo ayudar?"
     },
     "error": null
   },
@@ -17,7 +17,7 @@
     "message": "Bot listó productos en 1 mensaje(s)",
     "evidence": {
       "outbound_count": 1,
-      "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\ntenemos varias líneas:\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa mosqueta\n\n*a"
+      "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\ntenemos varias líneas de productos:\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa"
     },
     "error": null
   },
@@ -63,9 +63,9 @@
     "evidence": {
       "turns": 9,
       "matched_rules": [
-        "[Q] prio=1 kws=('?', '¿') q='cuéntame,  ¿para qué lo quieres usar?'",
-        "[Q] prio=15 kws=('cuántos', 'cuantos') q='000 cop*  ¿cuál te gustaría llevar y cuántos?'",
-        "[Q] prio=20 kws=('presentación', 'presentacion') q='perfecto, ¿cuál presentación del *jabón artesanal de coco* t'",
+        "[Q] prio=1 kws=('?', '¿') q='000 cop*  ¿cuál te gustaría llevar?'",
+        "[Q] prio=20 kws=('presentación', 'presentacion') q='claro, para, ¿cuál presentación del *jabón artesanal de coco'",
+        "[Q] prio=10 kws=('agregar otro', 'algo más') q='¿te ayudo con algo más?'",
         "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='¿para qué ciudad sería el envío?'",
         "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
         "[Q] prio=25 kws=('aceptas', 'tratamiento de datos') q='¿me autorizas?'",
@@ -83,7 +83,7 @@
         },
         {
           "client": "Sí confirmo",
-          "bot": "Perfecto, Cristian. Te genero tu link de pago."
+          "bot": "Perfecto, te genero tu link de pago."
         }
       ]
     },
@@ -95,7 +95,7 @@
     "status": "PASS",
     "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
     "evidence": {
-      "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n*Aceites vegetales:*\n* Al"
+      "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\nTenemos varias líneas:\n\n*"
     },
     "error": null
   },
@@ -105,7 +105,7 @@
     "status": "PASS",
     "message": "Contacto eliminado (revocación procesada)",
     "evidence": {
-      "setup_turns": 7,
+      "setup_turns": 8,
       "transcript_tail": [
         {
           "client": "Sí acepto, guarden mis datos",
@@ -124,20 +124,20 @@
     "number": 9,
     "name": "Happy path completo",
     "status": "FAIL",
-    "message": "Tras 12 turnos, contact_row no creado",
+    "message": "Tras 11 turnos, contact_row no creado",
     "evidence": {
       "transcript_tail": [
         {
           "client": "crittan01@gmail.com",
-          "bot": "Entendido, crittan01@gmail.com. \n\nAhora, ¿cuál es tu número de documento de identidad y qué tipo es (CC, CE, TI, etc.)?"
+          "bot": "Perfecto, Ya. Ahora, por favor, regálame tu nombre completo."
+        },
+        {
+          "client": "Cristian Garzón",
+          "bot": "Listo, *Cristian*. Ahora, ¿cuál es tu número de documento de identidad y qué tipo es (CC, CE, TI, etc.)?"
         },
         {
           "client": "CC 1032414179",
-          "bot": "📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x Jabón Artesanal de Coco (60g): *$18.000 COP*\n\nSubtotal: *$18.000 COP*\nEnvío: *$6.740 COP*\n*TOTAL: $24.740 COP*\n\n*Datos de envío:*\n> Calle 3 sur # 70-84 — barrio Olaya, Bogotá (casa)\n* Nombre: *Cristian Garzón*\n* Correo: crittan01@gmail"
-        },
-        {
-          "client": "Olaya",
-          "bot": "Entendido, Cristian. El barrio es Olaya.\n\n¿Confirmas que los datos están correctos para generar tu link de pago?"
+          "bot": "📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x *Jabón Artesanal de Coco* (60g): *$18.000 COP*\n\nSubtotal: *$18.000 COP*\nEnvío a Bogotá: *$6.740 COP*\n*TOTAL: $24.740 COP*\n\n*Datos de envío:*\n> Cristian\n> crittan01@gmail.com\n> CC 1032414179\n> Bogotá\n\n¿Confirmas que los datos están corr"
         }
       ]
     },
@@ -149,7 +149,7 @@
     "status": "PASS",
     "message": "Bot reconoció la cancelación",
     "evidence": {
-      "setup_turns": 7,
+      "setup_turns": 8,
       "preview": "entendido, cancelo tu pedido. 🙏\n\nno hay problema, cuando quieras retomar la compra aquí estaré para ayudarte. ¡que tengas un excelente día!"
     },
     "error": null
@@ -157,9 +157,11 @@
   {
     "number": 11,
     "name": "Escalación a humano",
-    "status": "FAIL",
-    "message": "Sin respuesta tras petición de asesor",
-    "evidence": {},
+    "status": "PASS",
+    "message": "Bot reconoció la petición de asesor",
+    "evidence": {
+      "preview": "claro, te paso con un asesor que te ayudará de inmediato."
+    },
     "error": null
   },
   {
@@ -170,7 +172,7 @@
     "evidence": {
       "asked_tower": false,
       "address_db": {},
-      "turns": 7
+      "turns": 8
     },
     "error": null
   },
@@ -192,7 +194,7 @@
         },
         {
           "client": "Sigamos con la compra por favor",
-          "bot": ""
+          "bot": "Listo.\n\n¿Cuál es tu correo electrónico?"
         }
       ]
     },
@@ -201,12 +203,12 @@
   {
     "number": 14,
     "name": "Cambio ciudad de envío",
-    "status": "FAIL",
-    "message": "Bot no reconoció el cambio de ciudad",
+    "status": "PASS",
+    "message": "Bot re-cotizó a Medellín",
     "evidence": {
-      "setup_turns": 7,
-      "re_quoted_amount": false,
-      "preview": "entendido. para poder seguir con la compra y generar tu pedido, necesito que me digas tu correo electrónico, por favor."
+      "setup_turns": 6,
+      "re_quoted_amount": true,
+      "preview": "envío de 1 unidad de jabón artesanal de coco (presentación: 60g) a medellín:\n\n* *económica*: deprisa estandar | $13.140 | entrega 04/05/2026\n* *rápida*: fedex express® | $31.450 | entrega 01/05/2026\n\n¿con cuál continuamos? (*económica* o *r"
     },
     "error": null
   },
