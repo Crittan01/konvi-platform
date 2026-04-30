@@ -157,6 +157,8 @@ Owner del seguimiento: cualquier rev futura que toque el cliente Envia debe re-i
 
 **Datos desordenados**: el FSM evalúa el estado MÍNIMO faltante en cada turno. Si el cliente da "Calle 10, soy Juan, mi correo es x@y.com" (3 campos en 1 mensaje), el LLM extrae los 3 y `_resolve_display_state` salta al siguiente faltante. Si el LLM falla extracción, hard-lock en orchestrator.py:4295 fuerza pregunta determinística por el siguiente campo.
 
+**Limitación observada (rev. 79 conversational E2E S6)**: la extracción multi-campo solo opera cuando la conversación ya pasó por `NEEDS_CONSENT`. Si el cliente, sin haber dado consentimiento explícito, dispara un mensaje con todos los datos de una, el bot **no** abre el `contacts` row porque la persistencia exige `consent_given=true` (ver orchestrator.py:4437–4440). La transición correcta requiere primer turno: buying intent → catálogo → consent → datos. Documentado como comportamiento esperado por compliance, no un bug.
+
 ---
 
 ## 7. Persistencia de carrito (abandono)
