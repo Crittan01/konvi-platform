@@ -159,6 +159,13 @@ Owner del seguimiento: cualquier rev futura que toque el cliente Envia debe re-i
 
 **Limitación observada (rev. 79 conversational E2E S6)**: la extracción multi-campo solo opera cuando la conversación ya pasó por `NEEDS_CONSENT`. Si el cliente, sin haber dado consentimiento explícito, dispara un mensaje con todos los datos de una, el bot **no** abre el `contacts` row porque la persistencia exige `consent_given=true` (ver orchestrator.py:4437–4440). La transición correcta requiere primer turno: buying intent → catálogo → consent → datos. Documentado como comportamiento esperado por compliance, no un bug.
 
+**Hallazgo crítico (rev. 79 conversational E2E, runs múltiples)**: el bot LLM (Gemini-2.5-flash) es **excesivamente conversacional** — añade preguntas retóricas ("¿para qué tipo de piel lo buscas?", "¿qué uso le quieres dar?", "¿tienes alguna otra consulta?") antes de avanzar el FSM hacia consent / data capture / payment. En el harness E2E:
+
+- **7/7 escenarios single-turn pasan al 100%**: saludo, catálogo, KB-cita, out-of-domain, foto, formato canónico, revocación.
+- **0/5 escenarios multi-turn alcanzan el cierre de venta** en runs consecutivos: happy-path, datos desordenados, address conjunto, multi-producto, escalación humana.
+
+El driver adaptativo `ConversationDriver` (rev79_conversation_scenarios.py) reacciona a la PREGUNTA real del bot, pero el bot no progresa al FSM en una cantidad razonable de turnos (< 14). Recomendación de producto: revisar el system prompt del orchestrator (orchestrator.py:~3076) para que ANTES de hacer preguntas conversacionales abiertas, el bot evalúe si ya tiene producto + ciudad + presentación y avance directo a NEEDS_CONSENT. La conversación adicional encarece (LLM cost) y reduce conversion rate.
+
 ---
 
 ## 7. Persistencia de carrito (abandono)
