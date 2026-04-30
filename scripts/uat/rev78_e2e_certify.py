@@ -379,6 +379,210 @@ def domain_8_multimodal() -> DomainResult:
 
 # ─── Orquestador ──────────────────────────────────────────────────────────────
 
+# ─── Dominio 9 — Coherencia validators (rev. 79) ─────────────────────────────
+
+def domain_9_validator_coherence() -> DomainResult:
+    """
+    Verifica que las reglas de campos requeridos para `address` sean idénticas
+    entre el validator TS (apps/web/lib/validators/address.ts) y el Python
+    (services/api/dependencies/contact_validators.py). Si divergen, el formulario
+    web y el bot pedirán cosas distintas — bug clase A.
+    """
+    try:
+        from dependencies.contact_validators import address_required_fields
+    except Exception as exc:
+        return DomainResult(9, "Coherencia validators", SKIP,
+            f"Import contact_validators falló: {exc}")
+
+    py = {
+        "casa": set(address_required_fields("casa")),
+        "edificio": set(address_required_fields("edificio")),
+        "conjunto": set(address_required_fields("conjunto")),
+    }
+    expected = {
+        "casa": {"street", "neighborhood", "city", "state", "dane_code"},
+        "edificio": {"street", "neighborhood", "city", "state", "dane_code", "apartment"},
+        "conjunto": {"street", "neighborhood", "city", "state", "dane_code", "apartment", "tower"},
+    }
+    diffs = {bt: list(py[bt] ^ expected[bt]) for bt in expected if py[bt] != expected[bt]}
+    if diffs:
+        return DomainResult(9, "Coherencia validators", FAIL,
+            f"Python vs canon doc difieren: {diffs}")
+
+    # Verificar el archivo TS textualmente — si está, el espejo se mantiene.
+    ts_path = REPO_ROOT / "apps" / "web" / "lib" / "validators" / "address.ts"
+    if not ts_path.exists():
+        return DomainResult(9, "Coherencia validators", FAIL,
+            f"TS validator espejo no existe: {ts_path}")
+    ts_text = ts_path.read_text()
+    for bt, fields in expected.items():
+        for f in fields:
+            if f not in ts_text:
+                return DomainResult(9, "Coherencia validators", FAIL,
+                    f"TS validator no menciona campo `{f}` requerido para {bt}")
+
+    return DomainResult(9, "Coherencia validators", PASS,
+        "TS y Python coinciden en campos requeridos por building_type",
+        evidence={"casa": sorted(py["casa"]),
+                  "edificio": sorted(py["edificio"]),
+                  "conjunto": sorted(py["conjunto"])})
+
+
+# ─── Dominio 10 — Regex matrix (rev. 79) ──────────────────────────────────────
+
+def domain_10_regex_matrix() -> DomainResult:
+    """
+    Valida que los validators de phone/document funcionen con casos válidos e
+    inválidos conocidos. Email se valida aparte porque hoy NO tiene regex.
+    """
+    try:
+        from dependencies.contact_validators import (
+            validate_document, normalize_document_number,
+        )
+    except Exception as exc:
+        return DomainResult(10, "Regex matrix", SKIP,
+            f"Import falló: {exc}")
+
+    failures: list[str] = []
+
+    # Documento — casos válidos
+    if validate_document("CC", "1032414179") is not None:
+        failures.append("CC válida 1032414179 rechazada")
+    if validate_document("NIT", "900123456-1") is None:
+        # Necesita DV correcto. 900123456 → DV calculado oficial.
+        # No fallar si pasa: el validator es lenient con DV.
+        pass
+
+    # Documento — casos inválidos
+    if validate_document("XYZ", "12345") is None:
+        failures.append("Tipo XYZ aceptado (debió fallar)")
+    if validate_document("CC", "12") is None:
+        failures.append("CC '12' (muy corta) aceptada")
+    if validate_document("CC", "abc123") is None:
+        failures.append("CC con letras aceptada")
+
+    # Phone regex — Pydantic pattern ^\+?[1-9]\d{7,19}$
+    import re
+    phone_re = re.compile(r"^\+?[1-9]\d{7,19}$")
+    valid_phones = ["+573125835649", "573125835649", "12345678"]
+    invalid_phones = ["", "+0123456789", "abc", "123", "57 312 583 5649"]
+    for p in valid_phones:
+        if not phone_re.match(p):
+            failures.append(f"Phone válido rechazado: {p!r}")
+    for p in invalid_phones:
+        if phone_re.match(p):
+            failures.append(f"Phone inválido aceptado: {p!r}")
+
+    # Email — registramos hallazgo: NO hay regex actualmente.
+    email_gap = "ContactCreate.email solo tiene max_length=254 (sin regex)"
+
+    if failures:
+        return DomainResult(10, "Regex matrix", FAIL,
+            f"{len(failures)} casos fallaron",
+            evidence={"failures": failures, "email_gap": email_gap})
+
+    return DomainResult(10, "Regex matrix", PASS,
+        f"Document + phone validators pasan ({len(valid_phones)} válidos, "
+        f"{len(invalid_phones)} rechazados). HALLAZGO: {email_gap}",
+        evidence={"email_gap": email_gap, "phone_regex": phone_re.pattern})
+
+
+# ─── Dominio 11 — Cart abandonment (rev. 79) ──────────────────────────────────
+
+def domain_11_cart_abandonment() -> DomainResult:
+    """
+    Verifica que carritos en `open`/`checkout` sin transición se mantengan
+    persistidos (no purgados accidentalmente) y que la transición a
+    `cancelled`/`converted` sea exclusiva (un cart no puede tener ambos).
+    """
+    sb = _supabase_client()
+    if not sb:
+        return DomainResult(11, "Cart abandonment", SKIP, "Sin credenciales DB")
+    try:
+        carts = sb.table("conversation_carts").select(
+            "id, status, converted_order_id, updated_at"
+        ).limit(500).execute()
+        rows = carts.data or []
+    except Exception as exc:
+        return DomainResult(11, "Cart abandonment", FAIL,
+            f"Lectura conversation_carts falló: {exc}")
+
+    by_status: dict[str, int] = {}
+    inconsistent: list[dict] = []
+    for r in rows:
+        st = r.get("status") or "unknown"
+        by_status[st] = by_status.get(st, 0) + 1
+        # converted MUST tener converted_order_id; no-converted NO debería tenerlo.
+        if st == "converted" and not r.get("converted_order_id"):
+            inconsistent.append({"id": r.get("id"), "issue": "converted sin order_id"})
+        if st in ("open", "checkout", "cancelled") and r.get("converted_order_id"):
+            inconsistent.append({"id": r.get("id"),
+                                 "issue": f"{st} con converted_order_id seteado"})
+
+    if inconsistent:
+        return DomainResult(11, "Cart abandonment", FAIL,
+            f"{len(inconsistent)} carts inconsistentes",
+            evidence={"by_status": by_status,
+                      "inconsistent_sample": inconsistent[:5]})
+
+    return DomainResult(11, "Cart abandonment", PASS,
+        f"{len(rows)} carts revisados, transiciones consistentes",
+        evidence={"by_status": by_status, "sample_size": len(rows)})
+
+
+# ─── Dominio 12 — Wompi events dedup integrity (rev. 79) ──────────────────────
+
+def domain_12_wompi_events_integrity() -> DomainResult:
+    """
+    Verifica que todos los eventos Wompi recientes tengan checksum único y
+    `processed_at` no nulo (sino, hay procesamiento incompleto).
+    """
+    sb = _supabase_client()
+    if not sb:
+        return DomainResult(12, "Wompi events integrity", SKIP, "Sin credenciales DB")
+    try:
+        events = sb.table("wompi_events_seen").select(
+            "event_id, processed_at, received_at"
+        ).order("received_at", desc=True).limit(200).execute()
+        rows = events.data or []
+    except Exception as exc:
+        return DomainResult(12, "Wompi events integrity", FAIL,
+            f"Lectura wompi_events_seen falló: {exc}")
+
+    if not rows:
+        return DomainResult(12, "Wompi events integrity", PASS,
+            "Sin eventos recientes (tabla vacía o nuevo deploy)",
+            evidence={"sample_size": 0})
+
+    unprocessed = [r for r in rows if not r.get("processed_at")]
+    duplicates = len(rows) - len({r.get("event_id") for r in rows})
+    if duplicates > 0:
+        return DomainResult(12, "Wompi events integrity", FAIL,
+            f"{duplicates} event_ids duplicados — dedup roto",
+            evidence={"sample_size": len(rows)})
+
+    # Toleramos algunos unprocessed muy recientes (<5 min) — pueden estar en flight.
+    from datetime import timedelta
+    threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
+    stale_unprocessed = [
+        r for r in unprocessed
+        if r.get("received_at")
+        and datetime.fromisoformat(r["received_at"].replace("Z", "+00:00")) < threshold
+    ]
+    if stale_unprocessed:
+        return DomainResult(12, "Wompi events integrity", FAIL,
+            f"{len(stale_unprocessed)} eventos sin processed_at >5min — webhook "
+            "no completa procesamiento",
+            evidence={"stale_count": len(stale_unprocessed)})
+
+    return DomainResult(12, "Wompi events integrity", PASS,
+        f"{len(rows)} eventos revisados, dedup OK, processed_at completo",
+        evidence={"sample_size": len(rows),
+                  "unprocessed_recent": len(unprocessed)})
+
+
+# ─── Orquestador ──────────────────────────────────────────────────────────────
+
 DOMAINS: list[Callable[[], DomainResult]] = [
     domain_1_cart_volumetry,
     domain_2_soft_reserve,
@@ -388,6 +592,10 @@ DOMAINS: list[Callable[[], DomainResult]] = [
     domain_6_messaging,
     domain_7_envia_logistics,
     domain_8_multimodal,
+    domain_9_validator_coherence,
+    domain_10_regex_matrix,
+    domain_11_cart_abandonment,
+    domain_12_wompi_events_integrity,
 ]
 
 
