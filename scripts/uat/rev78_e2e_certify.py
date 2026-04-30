@@ -421,11 +421,25 @@ def domain_9_validator_coherence() -> DomainResult:
                 return DomainResult(9, "Coherencia validators", FAIL,
                     f"TS validator no menciona campo `{f}` requerido para {bt}")
 
+    # Rev. 79 — coherencia regex email TS↔Python.
+    py_email_pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$"
+    ts_email_path = REPO_ROOT / "apps" / "web" / "lib" / "validators" / "email.ts"
+    if not ts_email_path.exists():
+        return DomainResult(9, "Coherencia validators", FAIL,
+            f"TS email validator no existe: {ts_email_path}")
+    ts_email_text = ts_email_path.read_text()
+    if py_email_pattern not in ts_email_text:
+        return DomainResult(9, "Coherencia validators", FAIL,
+            "TS email pattern difiere del Pydantic — fix de regex no espejado",
+            evidence={"py_pattern": py_email_pattern,
+                      "ts_path": str(ts_email_path)})
+
     return DomainResult(9, "Coherencia validators", PASS,
-        "TS y Python coinciden en campos requeridos por building_type",
+        "TS↔Python coinciden en address required-fields y regex email",
         evidence={"casa": sorted(py["casa"]),
                   "edificio": sorted(py["edificio"]),
-                  "conjunto": sorted(py["conjunto"])})
+                  "conjunto": sorted(py["conjunto"]),
+                  "email_pattern_mirrored": True})
 
 
 # ─── Dominio 10 — Regex matrix (rev. 79) ──────────────────────────────────────

@@ -167,11 +167,15 @@ def _process_wompi_event(payload: dict) -> None:
     conversation_id = order.get("conversation_id")
     current_status = order.get("status", "")
 
-    # Guard idempotente: si la orden ya fue confirmada, Wompi puede reintentar el webhook
-    if current_status == "confirmed":
+    # Guard idempotente: si la orden está en estado terminal, NO la reabrimos.
+    # Estados terminales: 'confirmed' (pago OK) y 'cancelled' (cliente canceló
+    # o flujo descartó). Un APPROVED tardío (rev. 79) no debe reabrir una
+    # orden cancelada — sería incoherente con los datos del cliente.
+    TERMINAL_STATES = {"confirmed", "cancelled"}
+    if current_status in TERMINAL_STATES:
         logger.info(
-            "[WOMPI] orden_ya_confirmada order_id=%s txn_id=%s — idempotente, skip",
-            order_id, txn_id,
+            "[WOMPI] orden_estado_terminal order_id=%s txn_id=%s status=%s — idempotente, skip",
+            order_id, txn_id, current_status,
         )
         return
 

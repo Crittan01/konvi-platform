@@ -1,4 +1,4 @@
-# Rev. 78 — Run E2E Certification (2026-04-30T03:08:22+00:00)
+# Rev. 78 — Run E2E Certification (2026-04-30T03:12:30+00:00)
 
 **Resumen**: ✅ PASS · 12/12 PASS · 0 FAIL · 0 SKIP
 
@@ -12,7 +12,7 @@
 | 6 | UI / mensajería | ✅ PASS | 0 ghost messages en últimos 3 outbound text |
 | 7 | Envia logística | ✅ PASS | EnviaClient expone 6 métodos requeridos (rates + label + tracking) |
 | 8 | Multimodal | ✅ PASS | image_send_tool expone handler de petición de imagen |
-| 9 | Coherencia validators | ✅ PASS | TS y Python coinciden en campos requeridos por building_type |
+| 9 | Coherencia validators | ✅ PASS | TS↔Python coinciden en address required-fields y regex email |
 | 10 | Regex matrix | ✅ PASS | Document + phone + email validators pasan (6 válidos, 12 rechazados) |
 | 11 | Cart abandonment | ✅ PASS | 0 carts revisados, transiciones consistentes |
 | 12 | Wompi events integrity | ✅ PASS | Sin eventos recientes (tabla vacía o nuevo deploy) |
@@ -132,7 +132,8 @@
     "state",
     "street",
     "tower"
-  ]
+  ],
+  "email_pattern_mirrored": true
 }
 ```
 
