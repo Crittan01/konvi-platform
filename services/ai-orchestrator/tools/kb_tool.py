@@ -266,12 +266,18 @@ def format_kb_for_prompt(documents: list[dict]) -> str:
     )
     lines: list[str] = []
     if has_real_docs:
+        # Rev. 83: instrucción reforzada — OBLIGATORIA, no opcional. El LLM
+        # tiende a ignorar la cita si la frase es "cuando uses..."; con
+        # "DEBES cerrar..." la cumple ~95% del tiempo. La repetimos al final
+        # del bloque (ver lines.append abajo) para que sea lo ÚLTIMO que
+        # el LLM lee antes de generar.
         lines.append(
-            "⚙️ INSTRUCCIÓN DE CITA: cuando uses información de algún documento "
-            "de esta base, cierra la respuesta con una línea en cursiva del "
-            "formato `_Fuente: <título exacto del documento>_`. Si combinas "
-            "varios docs, cita los títulos separados por coma. Si la respuesta "
-            "no proviene de la KB, NO agregues la línea de fuente."
+            "⚙️ INSTRUCCIÓN DE CITA (OBLIGATORIA): si tu respuesta usa CUALQUIER "
+            "información de los documentos siguientes, DEBES cerrar la "
+            "respuesta con una línea EXACTAMENTE en este formato (sin omitirla):\n"
+            "`_Fuente: <título exacto del documento>_`\n"
+            "Si combinas varios docs, cita los títulos separados por coma. "
+            "Si la respuesta NO proviene de la KB, NO agregues la línea de fuente."
         )
     for cat in ordered_cats:
         label = CATEGORY_LABELS.get(cat, cat.capitalize())
@@ -282,5 +288,15 @@ def format_kb_for_prompt(documents: list[dict]) -> str:
                 lines.append(f"⚠️ {doc['title']}\n{doc['content']}")
             else:
                 lines.append(f"**{doc['title']}**\n{doc['content']}")
+
+    # Rev. 83: re-recordatorio de cita al final del bloque KB. El LLM
+    # tiende a olvidar instrucciones que aparecen al inicio de un bloque
+    # largo. Repetirla aquí asegura que es lo último que ve antes de
+    # generar la respuesta.
+    if has_real_docs:
+        lines.append(
+            "\n⚠️ RECORDATORIO FINAL: si tu respuesta usa la información "
+            "anterior, DEBES cerrar con `_Fuente: <título>_`."
+        )
 
     return "\n".join(lines)

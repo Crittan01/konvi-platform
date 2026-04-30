@@ -60,6 +60,22 @@ _CONSENT_QUESTION_MARKERS = (
 _REVOCATION_TOKENS = {"eliminar mis datos", "borra mis datos", "elimina mis datos",
                       "borrar mis datos", "quiero ser eliminado", "no guardes mis datos",
                       "eliminar mi informacion", "elimina mi informacion"}
+
+# Rev. 83: detección de cancelación de pedido. UX: el cliente que cancela
+# NO debe ser escalado a humano (sería molesto). Bot acusa recibo cordial,
+# cierra el cart, deja la puerta abierta para volver.
+# Solo escalar si el cliente lo PIDE explícitamente (ver _detect_human_handoff).
+_CANCEL_INTENT_PHRASES = (
+    "cancela mi pedido", "cancelar mi pedido", "cancela el pedido",
+    "cancela la compra", "cancelar la compra",
+    "ya no quiero", "ya no me interesa", "ya no lo quiero",
+    "mejor cancela", "mejor no", "mejor déjalo", "mejor dejalo",
+    "olvidalo", "olvídalo", "olvida la compra",
+    "no me interesa la compra", "no quiero comprar",
+    "déjalo así", "dejalo asi",
+    "cancela todo", "cancelar todo",
+    "no lo voy a comprar", "no voy a comprar",
+)
 _CONSENT_YES_TOKENS = {"si", "sí", "yes", "dale", "ok", "claro", "acepto", "autorizo", "afirmativo", "listo", "de acuerdo"}
 _CONSENT_NO_TOKENS = {"no", "nope", "negativo", "no gracias", "prefiero no", "nunca", "jamas", "rechazo", "no autorizo"}
 _CONSENT_YES_PHRASES = {"por supuesto", "de una", "hágale", "hagale", "claro que si"}
@@ -101,6 +117,19 @@ def _detect_revocation_intent(text: str) -> bool:
     """Retorna True si el mensaje es una solicitud de eliminación de datos."""
     normalized = _normalize_text_simple(text)
     return any(token in normalized for token in _REVOCATION_TOKENS)
+
+
+def _detect_cancel_intent(text: str) -> bool:
+    """Rev. 83 — True si el cliente quiere cancelar su pedido / compra.
+
+    NO escalamos a humano por esto (UX): el bot acusa recibo cordial,
+    cierra el cart, deja la puerta abierta. Solo si el cliente PIDE
+    explícitamente un asesor, ahí sí escalamos (otro detector).
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+    return any(phrase in normalized for phrase in _CANCEL_INTENT_PHRASES)
 
 
 def _detect_consent_yes(text: str) -> bool:
@@ -3107,6 +3136,12 @@ REGLAS ANTI-ALUCINACIÓN TRANSACCIONAL (CRÍTICAS — rev. 73):
 - NUNCA confirmes carrier de envío con un nombre específico ("Coordinadora", "Servientrega", "Deprisa", "TCC") sin que ese nombre haya aparecido en un outbound previo del bot derivado de shipping_quote_tool.
 - NUNCA inventes ni redondees costos de envío, totales o ETA. Si el bloque CONTEXTO VERIFICADO no trae los valores, NO los emitas — pide al cliente confirmar ciudad para cotizar.
 - Si el cliente dice "ok, gracias", "listo", "vale" o similar después del resumen, eso NO es confirmación de pago. Pregunta explícitamente: "¿Confirmas para generar tu link de pago?".
+
+REGLAS ANTI-IMPROVISACIÓN GENERAL (rev. 83):
+- NO inventes datos del mundo real fuera de tu dominio: clima, hora actual, ubicación geográfica de ciudades, eventos, noticias, deportes, política, salud no relacionada con productos, traducciones, tareas escolares, código, recetas no relacionadas con tus productos.
+- Si el cliente pregunta sobre cualquiera de los temas anteriores, responde EXACTAMENTE con esta plantilla (adaptando solo el nombre del tenant): "No tengo información sobre eso — soy asesor virtual de {tenant_name} y solo puedo ayudarte con nuestros productos, envíos y pedidos. ¿Te interesa algo de la tienda?".
+- NUNCA respondas como si fueras un asistente de IA de propósito general. Eres asesor de la tienda — nada más.
+- Pregunta sobre clima, hora, fechas calendario, ubicación geográfica o eventos del mundo real → out-of-domain → plantilla anterior + opcional escalación si insiste.
 {strict_rules}
 REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 - Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
@@ -3889,6 +3924,44 @@ async def build_and_run_orchestration(
             )
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
+            return
+
+        # ── 2.6 Detección determinística de cancelación (rev. 83) ──────────────
+        # UX: cliente desiste de la compra → bot acusa recibo cordial, cierra
+        # el cart, deja la puerta abierta. NO escalamos a humano (sería
+        # molesto si solo cambió de opinión). Si el cliente quiere asesor,
+        # tiene su propio detector explícito.
+        if _detect_cancel_intent(content):
+            # Cerrar cart en DB si existe (cart-as-SoT rev. 80).
+            try:
+                from tools.cart_tool import get_cart_with_items
+                _existing_cart = get_cart_with_items(
+                    supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                )
+                if _existing_cart and _existing_cart.get("id"):
+                    supabase.table("conversation_carts").update(
+                        {"status": "cancelled"}
+                    ).eq("id", _existing_cart["id"]).execute()
+                    logger.info(
+                        "[CANCEL] cart=%s marcado cancelled tras intent del cliente",
+                        _existing_cart["id"][:8],
+                    )
+            except Exception as _cart_err:
+                logger.warning("[CANCEL] no pude cerrar cart: %s", _cart_err)
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Entendido, cancelo tu pedido. 🙏\n\n"
+                    "No hay problema, cuando quieras retomar la compra aquí "
+                    "estaré para ayudarte. ¡Que tengas un excelente día!"
+                ),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.info("[CANCEL] Cancelación procesada (sin escalación) | conversation=%s", conversation_id)
             return
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
