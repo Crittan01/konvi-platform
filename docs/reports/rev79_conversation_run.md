@@ -1,6 +1,6 @@
-# Rev. 79 — Conversational E2E (2026-04-30T21:11:03+00:00)
+# Rev. 79 — Conversational E2E (2026-04-30T22:07:30+00:00)
 
-**Resumen**: 11 PASS · 4 FAIL · 1 SKIP
+**Resumen**: 11 PASS · 3 FAIL · 2 SKIP
 
 | # | Escenario | Status | Mensaje |
 |---|---|---|---|
@@ -9,16 +9,16 @@
 | 3 | KB cita de fuentes | ✅ PASS | Respuesta KB incluye cita explícita |
 | 4 | Out-of-domain | ✅ PASS | Bot no alucinó respuesta sobre clima |
 | 5 | Foto producto | ✅ PASS | Bot fallback explicativo tras 2 turnos |
-| 6 | Datos desordenados (turn-by-turn) | ❌ FAIL | Tras 8 turnos adaptativos, no se creó contact_row |
+| 6 | Datos desordenados (turn-by-turn) | ❌ FAIL | Tras 7 turnos adaptativos, no se creó contact_row |
 | 7 | Formato canónico WhatsApp | ✅ PASS | Outbound sin `**` ni `• ` (rev. 77 normaliza al canon) |
 | 8 | Revocación adaptativa | ✅ PASS | Contacto eliminado (revocación procesada) |
-| 9 | Happy path completo | ❌ FAIL | Tras 5 turnos, contact_row no creado |
+| 9 | Happy path completo | ❌ FAIL | Tras 7 turnos, contact_row no creado |
 | 10 | Cancelación mid-flow | ✅ PASS | Bot reconoció la cancelación |
 | 11 | Escalación a humano | ✅ PASS | Bot reconoció la petición de asesor |
 | 12 | Address conjunto residencial | ❌ FAIL | Bot no preguntó por torre/apto y no se registraron |
 | 13 | Multi-producto + volumetría | ✅ PASS | Cotización=True, multi-producto reconocido=True |
-| 14 | Cambio ciudad de envío | ❌ FAIL | Bot no reconoció el cambio de ciudad |
-| 15 | Promesa de link cumplida | ✅ PASS | Bot bloqueó link y pidió datos faltantes (FSM enforcement OK) |
+| 14 | Cambio ciudad de envío | ✅ PASS | Bot re-cotizó a Medellín |
+| 15 | Promesa de link cumplida | ⏭️ SKIP | Conversación no llegó al punto de confirmación en 7 turnos |
 | 16 | Wompi APPROVED simulation | ⏭️ SKIP | Sin contact_id — S15 no creó orden |
 
 ### S1 — Primer contacto + saludo
@@ -33,7 +33,7 @@
 ```json
 {
   "outbound_count": 1,
-  "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa mosqueta\n\n*aceites esenciales:*\n* ár"
+  "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\n*aceites vegetales:*\n* aceite de almendras dulces\n* aceite de argán\n* aceite de coco virgen\n* aceite de r"
 }
 ```
 
@@ -65,28 +65,27 @@
 ### S6 — Datos desordenados (turn-by-turn)
 ```json
 {
-  "turns": 8,
+  "turns": 7,
   "matched_rules": [
-    "[Q] prio=20 kws=('presentación', 'presentacion') q='000*  ¿cuál presentación te gustaría llevar?'",
+    "[Q] prio=1 kws=('?', '¿') q='000 cop*  ¿cuál te gustaría llevar?'",
+    "[Q] prio=20 kws=('presentación', 'presentacion') q='¿cuál presentación del *jabón artesanal de coco* te gustaría'",
     "[Q] prio=10 kws=('agregar otro', 'algo más') q='¿te ayudo con algo más?'",
     "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='¿para qué ciudad sería el envío?'",
     "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
-    "[Q] prio=25 kws=('aceptas', 'tratamiento de datos') q='¿me autorizas?'",
-    "[Q] prio=50 kws=('correo', 'email') q='¿cuál es tu correo electrónico?'",
-    "[Q] prio=20 kws=('¿confirmas', 'confirmas que') q='com * celular: +57 312 583 5649 * documento: cc 1032414179 *'"
+    "[Q+ctx] prio=50 kws=('correo', 'email') q='🙏  ¿estás de acuerdo?'"
   ],
   "transcript_tail": [
     {
-      "client": "Sí acepto, guarden mis datos",
-      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+      "client": "Bogotá",
+      "bot": "Envío de 1 unidad de Jabón Artesanal de Coco (Presentación: 60g) a Bogotá D.C.:\n\n* *Económica*: Cabify Express | $6.740 | entrega 30/04/2026\n\n¿Continuamos con la opción *Económica*?"
+    },
+    {
+      "client": "Sí, esa opción",
+      "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo?"
     },
     {
       "client": "Soy Cristian Garzón, correo crittan01@gmail.com, CC 1032414179, dirección Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
-      "bot": "📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x Jabón Artesanal de Coco: $18.000 COP\n\nSubtotal: $18.000 COP\nEnvío: $6.740 COP\n*TOTAL: $24.740 COP*\n\n*Datos de envío:*\n* Nombre: Cristian Garzón\n* Correo: crittan01@gmail.com\n* Celular: +57 312 583 5649\n* Documento: CC 1032414179\n* Dire"
-    },
-    {
-      "client": "Sí confirmo",
-      "bot": "Perfecto, *Cristian*. Te genero tu link de pago."
+      "bot": ""
     }
   ]
 }
@@ -95,7 +94,7 @@
 ### S7 — Formato canónico WhatsApp
 ```json
 {
-  "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n*Aceites vegetales:*\n* Al"
+  "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n*Aceites vegetales:*\n* Ac"
 }
 ```
 
@@ -105,12 +104,12 @@
   "setup_turns": 7,
   "transcript_tail": [
     {
-      "client": "Sí acepto, guarden mis datos",
-      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+      "client": "Sí, esa opción",
+      "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo?"
     },
     {
-      "client": "Sigamos con la compra por favor",
-      "bot": ""
+      "client": "Sí acepto, guarden mis datos",
+      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
     }
   ],
   "outbound_after_revoke": 1
@@ -122,16 +121,16 @@
 {
   "transcript_tail": [
     {
+      "client": "Bogotá",
+      "bot": "Envío de 1 unidad de Jabón Artesanal de Coco (Presentación: 60g) a Bogotá D.C.:\n\n* *Económica*: Cabify Express | $6.740 | entrega 30/04/2026\n\n¿Continuamos con la opción *Económica*?"
+    },
+    {
+      "client": "Sí, esa opción",
+      "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo?"
+    },
+    {
       "client": "Sigamos con la compra por favor",
-      "bot": "Perfecto.\n\n¿Cuál presentación del *Jabón Artesanal de Coco* te gustaría llevar? (60g, 100g o 150g)"
-    },
-    {
-      "client": "La de 60 gramos por favor",
-      "bot": "Listo, *1x Jabón Artesanal de Coco (60g)* por *$18.000 COP*.\n\n¿Te ayudo con algo más?\n* Asesoría sobre el producto (si tienes dudas)\n* Agregar más productos al carrito\n* Cotizar envío\n\nO dime si prefieres avanzar directo."
-    },
-    {
-      "client": "No, eso es todo",
-      "bot": "Tienes *1x Jabón Artesanal de Coco (60g)* por *$18.000 COP*.\n\n¿Quieres agregar algo más a tu pedido o seguimos con el envío?"
+      "bot": ""
     }
   ]
 }
@@ -140,7 +139,7 @@
 ### S10 — Cancelación mid-flow
 ```json
 {
-  "setup_turns": 8,
+  "setup_turns": 4,
   "preview": "entendido, cancelo tu pedido. 🙏\n\nno hay problema, cuando quieras retomar la compra aquí estaré para ayudarte. ¡que tengas un excelente día!"
 }
 ```
@@ -164,19 +163,19 @@
 ### S13 — Multi-producto + volumetría
 ```json
 {
-  "turns": 6,
+  "turns": 8,
   "transcript_tail": [
     {
-      "client": "Sigamos con la compra por favor",
-      "bot": "Perfecto, entonces sería:\n* 2x *Jabón Artesanal de Coco* (60g): *$36.000 COP*\n* 1x *Sérum de Vitamina C* (30ml): *$85.000 COP*\n\nSubtotal: *$121.000 COP*\n\n¿Quieres agregar algo más a tu pedido o te cotizo el envío?"
-    },
-    {
-      "client": "Sí, cotiza por favor",
-      "bot": "Claro, ¿a qué ciudad necesitas que te cotice el envío?"
-    },
-    {
       "client": "Bogotá",
-      "bot": "Para cotizar envío con precisión, confirma el producto: Jabón Artesanal de Coco / Sérum de Vitamina C. Con eso te paso de inmediato la opción más económica y la más rápida."
+      "bot": "Claro, para Bogotá el envío tiene un costo de $6.740 COP y la entrega estimada es de 1 a 2 días hábiles.\n\n¿Confirmas para generar tu link de pago?"
+    },
+    {
+      "client": "Sí confirmo",
+      "bot": "Listo, para continuar con tu compra y generar el link de pago, necesito tu consentimiento para procesar tus datos personales (nombre, dirección, email, teléfono) con el fin de gestionar tu pedido y envío.\n\n¿Estás de acuerdo?"
+    },
+    {
+      "client": "Sí acepto, guarden mis datos",
+      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
     }
   ]
 }
@@ -186,30 +185,30 @@
 ```json
 {
   "setup_turns": 7,
-  "re_quoted_amount": false,
-  "preview": "¡perfecto!\n\n¿cuál es tu correo electrónico?"
+  "re_quoted_amount": true,
+  "preview": "envío de 1 unidad de jabón artesanal de coco (presentación: 60g) a medellín:\n\n* *económica*: deprisa estandar | $13.140 | entrega 04/05/2026\n* *rápida*: fedex express® | $31.450 | entrega 01/05/2026\n\n¿con cuál continuamos? (*económica* o *r"
 }
 ```
 
 ### S15 — Promesa de link cumplida
 ```json
 {
-  "turns": 9,
+  "turns": 7,
   "promised_link": false,
   "link_delivered": false,
-  "fsm_enforced_data": true,
+  "fsm_enforced_data": false,
   "consent_given": false,
   "transcript_tail": [
     {
-      "client": "Sí acepto, guarden mis datos",
-      "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
+      "client": "Bogotá",
+      "bot": "Envío de 1 unidad de Jabón Artesanal de Coco (Presentación: 60g) a Bogotá D.C.:\n\n* *Económica*: Cabify Express | $6.740 | entrega 30/04/2026\n\n¿Continuamos con la opción *Económica*?"
     },
     {
-      "client": "crittan01@gmail.com",
-      "bot": "Gracias. Para continuar, compárteme tu nombre completo."
+      "client": "Sí, esa opción",
+      "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo?"
     },
     {
-      "client": "Cristian Garzón",
+      "client": "Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
       "bot": ""
     }
   ]
