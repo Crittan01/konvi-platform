@@ -1,7 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { saveTenant, savePresenciaDigital, saveHorario, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
+import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
 import {
@@ -38,7 +38,6 @@ type Tenant = {
   store_type?: 'fisica' | 'virtual' | 'fisica_virtual' | null
   social_links?: SocialLinks | null
   store_locations?: StoreLocation[] | null
-  business_hours?: string | null
   mision?: string | null
   vision?: string | null
   valores?: string | null
@@ -92,7 +91,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, business_hours, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
+      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -390,7 +389,7 @@ export default async function SettingsPage() {
             }
             const sedesCount    = (tenant?.store_locations as unknown[])?.length ?? 0
             const socialCount   = Object.values(tenant?.social_links ?? {}).filter(Boolean).length
-            const hasHorario    = !!(tenant?.support_schedule) || !!tenant?.business_hours?.trim()
+            const hasHorario    = !!(tenant?.support_schedule)
             const hasDespacho   = !!tenant?.shipping_origin?.city
             const hasFilosofia  = !!(tenant?.mision || tenant?.valores)
 

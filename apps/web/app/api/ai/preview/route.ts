@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
   const tenant  = tenantRes.data
   const catalog = (catalogRes.data ?? []) as Array<{ name: string; description?: string; product_variations?: Array<{ price: number; stock_quantity: number; attributes?: Record<string, string> }> }>
   const agent  = agentRes.data ?? {
-    name: 'Bot Asistente',
+    name: 'Vendedor Oficial',
     role_description: 'Eres el asistente de ventas. Ayuda al cliente cordialmente.',
     strict_guardrails: true,
   }

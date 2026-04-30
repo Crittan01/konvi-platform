@@ -333,7 +333,7 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
         return False
 
     outbound_text = _normalize_text(str(last_outbound.get("content") or ""))
-    
+
     # Evitar interceptar como "shipping followup" si el bot acaba de pedir
     # datos personales/dirección (FSM de cierre de compra).
     personal_data_markers = [
@@ -342,6 +342,23 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
         "se encuentra esta direccion", "correo electronico", "barrio", "torre", "apartamento"
     ]
     if any(m in outbound_text for m in personal_data_markers):
+        return False
+
+    # Rev. 76 — guard adicional: NO interceptar como followup de envío si el
+    # último outbound es el resumen final con CTA de pago. Antes el detector
+    # malinterpretaba "Ok, gracias" tras el resumen como "sí cotiza" porque
+    # el resumen contiene la palabra "envío" + un costo.
+    # Detectado en UAT E2E real (conv c2043f98 turn 12).
+    summary_markers = [
+        "resumen de tu pedido",
+        "datos estan correctos",
+        "datos están correctos",
+        "generar tu link de pago",
+        "para generar tu link",
+        "tu link de pago",
+        "subtotal:",
+    ]
+    if any(m in outbound_text for m in summary_markers):
         return False
 
     has_separator = "/" in query_text or "," in query_text

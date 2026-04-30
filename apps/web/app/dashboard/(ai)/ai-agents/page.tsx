@@ -28,10 +28,10 @@ export default async function AiAgentsPage() {
   const [{ data }, { data: tenant }, { data: kbStats }, { data: catalogStats }, { data: integrations }] = await Promise.all([
     supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle(),
     supabase.from('tenants').select(
-      'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin'
+      'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin, nit, email_contacto, telefono_contacto'
     ).eq('id', tenantId).maybeSingle(),
     supabase.from('kb_documents')
-      .select('is_active, embedding')
+      .select('is_active, embedding, category')
       .eq('tenant_id', tenantId),
     supabase.from('products')
       .select('id', { count: 'exact', head: false })
@@ -44,13 +44,21 @@ export default async function AiAgentsPage() {
       .in('provider', ['wompi', 'envia']),
   ])
 
-  const kbDocs     = (kbStats ?? []) as Array<{ is_active: boolean; embedding: string | null }>
+  const kbDocs     = (kbStats ?? []) as Array<{ is_active: boolean; embedding: string | null; category: string }>
   const activeDocs  = kbDocs.filter(d => d.is_active).length
   const indexedDocs = kbDocs.filter(d => d.is_active && d.embedding).length
   const totalDocs   = kbDocs.length
 
+  // Rev. 71 — cobertura crítica por categoría: el bot anti-aluci necesita
+  // mínimo 1 doc activo en politicas/envios/pagos para responder con verdad.
+  const kbCriticalCoverage = {
+    politicas: kbDocs.filter(d => d.is_active && d.category === 'politicas').length,
+    envios:    kbDocs.filter(d => d.is_active && d.category === 'envios').length,
+    pagos:     kbDocs.filter(d => d.is_active && d.category === 'pagos').length,
+  }
+
   const agent = data || {
-    name: 'Bot Asistente',
+    name: 'Vendedor Oficial',
     role_description: 'Eres el agente de atención al cliente de esta tienda por WhatsApp. Te encargas de asistir e informar cordialmente.',
     strict_guardrails: true
   }
@@ -63,6 +71,9 @@ export default async function AiAgentsPage() {
     (tenant?.shipping_origin && (tenant.shipping_origin as { city?: string })?.city)
   ) && !!tenant?.support_schedule
   const hasCatalog = Array.isArray(catalogStats) && catalogStats.length > 0
+  // Rev. 71 — identidad legal mínima para que el bot responda con verdad si
+  // el cliente pregunta (NIT/email/teléfono corporativo).
+  const hasIdentidadLegal = !!(tenant?.nit || tenant?.email_contacto || tenant?.telefono_contacto)
   const integrationsRows = (integrations ?? []) as Array<{ provider: string; status: string }>
   const wompiConnected = integrationsRows.some(i => i.provider === 'wompi' && i.status === 'connected')
   const enviaConnected = integrationsRows.some(i => i.provider === 'envia' && i.status === 'connected')
@@ -74,7 +85,7 @@ export default async function AiAgentsPage() {
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
 
-    const name = (formData.get('name') as string).trim() || 'Bot Asistente'
+    const name = (formData.get('name') as string).trim() || 'Vendedor Oficial'
     const role_description = (formData.get('role_description') as string).trim() || 'Asistente de ventas.'
     const strict_guardrails = formData.get('strict_guardrails') !== null
 
@@ -119,6 +130,8 @@ export default async function AiAgentsPage() {
         hasPrompt={!!agent.role_description && agent.role_description.length > 20}
         wompiConnected={wompiConnected}
         enviaConnected={enviaConnected}
+        hasIdentidadLegal={hasIdentidadLegal}
+        kbCriticalCoverage={kbCriticalCoverage}
       />
 
       <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-background p-6">

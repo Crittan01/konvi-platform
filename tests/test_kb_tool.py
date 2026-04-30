@@ -38,7 +38,8 @@ class TestFormatKbForPrompt(unittest.TestCase):
         self.assertEqual(format_kb_for_prompt([]), "")
 
     def test_single_doc_formats_correctly(self):
-        docs = [{"title": "Política de envíos", "content": "Enviamos en 3 días.", "category": "politica"}]
+        # Rev. 71 — canónicas: politicas (plural), productos (plural).
+        docs = [{"title": "Política de envíos", "content": "Enviamos en 3 días.", "category": "politicas"}]
         result = format_kb_for_prompt(docs)
         self.assertIn("Políticas", result)
         self.assertIn("Política de envíos", result)
@@ -47,7 +48,7 @@ class TestFormatKbForPrompt(unittest.TestCase):
     def test_groups_by_category(self):
         docs = [
             {"title": "FAQ 1", "content": "Resp 1", "category": "faq"},
-            {"title": "Política 1", "content": "Texto pol", "category": "politica"},
+            {"title": "Política 1", "content": "Texto pol", "category": "politicas"},
             {"title": "FAQ 2", "content": "Resp 2", "category": "faq"},
         ]
         result = format_kb_for_prompt(docs)
@@ -63,7 +64,8 @@ class TestFormatKbForPrompt(unittest.TestCase):
         self.assertIn("Custom_cat", result)
 
     def test_all_known_categories_have_labels(self):
-        for cat in ["faq", "politica", "negocio", "producto", "general"]:
+        # Rev. 71 — 6 canónicas: faq, negocio, politicas, productos, envios, pagos.
+        for cat in ["faq", "negocio", "politicas", "productos", "envios", "pagos"]:
             docs = [{"title": "T", "content": "C", "category": cat}]
             result = format_kb_for_prompt(docs)
             self.assertIn(CATEGORY_LABELS[cat], result)
@@ -99,12 +101,14 @@ class TestGetTenantKbRag(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
 
     async def test_rag_path_calls_rpc(self):
-        docs = [{"title": "Envíos", "content": "3 días", "category": "politica"}]
+        # Rev. 71 — el query NO debe disparar trigger léxico de categoría
+        # (envío/pago/etc.), para que el flow sea solo semántico sin boost.
+        docs = [{"title": "Hola", "content": "Saludo", "category": "faq"}]
         sb = _mock_supabase(docs)
         mock_vector = [0.1] * 3072
         with patch("tools.kb_tool.GEMINI_API_KEY", "test-key"), \
              patch("tools.kb_tool._embed_query_vector", return_value=mock_vector):
-            result = await get_tenant_kb_rag(sb, TENANT_ID, "¿Cuánto demora el envío?")
+            result = await get_tenant_kb_rag(sb, TENANT_ID, "buenas, una pregunta general")
         sb.rpc.assert_called_once_with(
             "match_kb_documents",
             {

@@ -90,34 +90,9 @@ def _normalize_state(state: str, country: str) -> str:
     return _CO_STATE_CODES.get(state, state[:3].upper())
 
 
-def _sanitize_dane_code(raw: Optional[str]) -> str:
-    """
-    Limpia un DANE dejando únicamente dígitos.
-    Ejemplos:
-    - "11001"        -> "11001"
-    - "11001-000"    -> "11001000"
-    - " 11 001 "     -> "11001"
-    """
-    if not raw:
-        return ""
-    digits = re.sub(r"\D", "", str(raw))
-    return digits
-
-
-def _co_dane_codes(raw: Optional[str]) -> tuple[str, str]:
-    """
-    Normaliza DANE para runtime CO:
-    - Entrada UI habitual: 5 dígitos municipio (ej. 11001)
-    - Payload Envia efectivo por carrier: 8 dígitos (stat_8digit, ej. 11001000)
-    """
-    digits = _sanitize_dane_code(raw)
-    if len(digits) == 5:
-        return digits, f"{digits}000"
-    if len(digits) == 8:
-        # Canoniza cualquier variante de 8 dígitos al patrón municipal stat_8digit.
-        base5 = digits[:5]
-        return base5, f"{base5}000"
-    return "", ""
+# Rev. 72 — sanitización DANE centralizada en `dependencies/dane.py`.
+# Aliases locales para no romper call-sites históricos en este módulo.
+from dependencies.dane import sanitize_dane_code as _sanitize_dane_code, co_dane_codes as _co_dane_codes  # noqa: E402,F401
 
 
 async def _validate_co_address_with_envia(_client: EnviaClient, addr: "Address", label: str) -> None:

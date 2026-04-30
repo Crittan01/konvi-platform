@@ -1,5 +1,11 @@
 import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 
+// Rev. 71 — Lista de defaults conocidos. Si el nombre del agente coincide con
+// cualquiera de estos, el check considera "no personalizado". Cubre el default
+// histórico ('Bot Asistente') y el default real de DB ('Vendedor Oficial',
+// migración 20260412000000_ai_agents_and_vectors.sql).
+const DEFAULT_AGENT_NAMES = new Set(['Bot Asistente', 'Vendedor Oficial'])
+
 interface ReadinessItem {
   label: string
   ok: boolean
@@ -22,13 +28,25 @@ interface Props {
   hasCatalog?:        boolean
   wompiConnected?:    boolean
   enviaConnected?:    boolean
+  // Rev. 71 — checks ampliados a 10
+  hasIdentidadLegal?: boolean   // NIT / email_contacto / telefono_contacto
+  kbCriticalCoverage?: {
+    politicas: number  // # docs activos
+    envios:    number
+    pagos:     number
+  }
 }
 
 export function ReadinessCard({
   hasFilosofia, totalDocs, activeDocs, indexedDocs, agentName, hasPrompt,
   hasTono = false, hasSedesHorario = false, hasCatalog = false,
   wompiConnected = false, enviaConnected = false,
+  hasIdentidadLegal = false,
+  kbCriticalCoverage = { politicas: 0, envios: 0, pagos: 0 },
 }: Props) {
+  const criticalEmpty = (['politicas', 'envios', 'pagos'] as const).filter(
+    k => kbCriticalCoverage[k] === 0
+  )
   const items: ReadinessItem[] = [
     {
       label: 'Identidad del negocio',
@@ -80,12 +98,30 @@ export function ReadinessCard({
     },
     {
       label: 'Agente IA — comportamiento',
-      ok: hasPrompt && agentName !== 'Bot Asistente',
-      detail: hasPrompt && agentName !== 'Bot Asistente'
+      ok: hasPrompt && !DEFAULT_AGENT_NAMES.has(agentName),
+      detail: hasPrompt && !DEFAULT_AGENT_NAMES.has(agentName)
         ? `"${agentName}" con directrices personalizadas`
         : 'Usando configuración por defecto',
       tooltip: 'Define cómo se comporta tu bot en ventas: nombre, qué ofrece primero, cómo cierra. La identidad del negocio (misión) va aparte en Configuración.',
       link: '/dashboard/ai-agents',
+    },
+    {
+      label: 'Identidad legal del negocio',
+      ok: hasIdentidadLegal,
+      detail: hasIdentidadLegal
+        ? 'NIT / email / teléfono corporativo configurados'
+        : 'Faltan datos de identidad — el bot no podrá responder NIT, email o teléfono si el cliente lo pregunta',
+      tooltip: 'NIT, email_contacto y telefono_contacto se inyectan al system prompt bajo guard "solo si el cliente lo pregunta". Sin ellos, el bot no tiene una verdad a la cual responder.',
+      link: hasIdentidadLegal ? undefined : '/dashboard/settings#section-identidad',
+    },
+    {
+      label: 'KB cobertura crítica (Políticas / Envíos / Pagos)',
+      ok: criticalEmpty.length === 0,
+      detail: criticalEmpty.length === 0
+        ? 'Las 3 categorías críticas tienen al menos un documento'
+        : `Faltan: ${criticalEmpty.join(', ')} — el bot escalará en vez de responder`,
+      tooltip: 'Si un cliente pregunta sobre pagos/envíos/políticas y el KB no tiene documentos de esa categoría, el bot detecta el vacío y escala con cordialidad en vez de inventar (anti-alucinación rev. 71).',
+      link: criticalEmpty.length === 0 ? undefined : '/dashboard/knowledge-base',
     },
     {
       label: 'Pasarela y courier',

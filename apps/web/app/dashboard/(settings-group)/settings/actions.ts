@@ -74,11 +74,29 @@ export async function savePresenciaDigital(formData: FormData) {
 
   const store_type = (formData.get('store_type') as string) || 'fisica'
 
-  let store_locations: object[] = []
+  let store_locations: Record<string, unknown>[] = []
   try {
     const raw = formData.get('store_locations') as string
     if (raw) store_locations = JSON.parse(raw)
   } catch { /* keep empty */ }
+
+  // Rev. 71 — Sanitización defensiva de is_primary:
+  //  · Coerce a boolean (evita "true"/"false" strings).
+  //  · Garantiza exactamente UNA sede con is_primary=true. Si ninguna lo es, la primera hereda.
+  if (Array.isArray(store_locations) && store_locations.length > 0) {
+    let primaryAssigned = false
+    store_locations = store_locations.map((loc) => {
+      const isPrimary = loc?.is_primary === true || loc?.is_primary === 'true'
+      if (isPrimary && !primaryAssigned) {
+        primaryAssigned = true
+        return { ...loc, is_primary: true }
+      }
+      return { ...loc, is_primary: false }
+    })
+    if (!primaryAssigned) {
+      store_locations[0] = { ...store_locations[0], is_primary: true }
+    }
+  }
 
   const social_links: Record<string, string> = {}
   for (const red of ['instagram', 'facebook', 'tiktok', 'youtube', 'website']) {
@@ -87,14 +105,6 @@ export async function savePresenciaDigital(formData: FormData) {
   }
 
   await updateTenant(tenantId, { store_type, store_locations, social_links })
-  revalidatePath('/dashboard/settings')
-}
-
-// saveHorario mantenida por compatibilidad — usa saveHorarioAsesor para el nuevo flujo
-export async function saveHorario(formData: FormData) {
-  const tenantId = await getOwnerTenantId()
-  const business_hours = (formData.get('business_hours') as string)?.trim() || null
-  await updateTenant(tenantId, { business_hours })
   revalidatePath('/dashboard/settings')
 }
 

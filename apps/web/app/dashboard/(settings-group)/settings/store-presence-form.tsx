@@ -8,7 +8,12 @@ import { Check, Loader2, Plus, Trash2 } from 'lucide-react'
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
 
 type StoreType = 'fisica' | 'virtual' | 'fisica_virtual'
-type Location = { name: string; city: string; state: string; street: string; phone?: string; email?: string }
+type Location = {
+  name: string; city: string; state: string; street: string;
+  phone?: string; email?: string;
+  // Rev. 71 — solo una sede puede ser principal; el bot la menciona primero.
+  is_primary?: boolean
+}
 type SocialLinks = { instagram?: string; facebook?: string; tiktok?: string; youtube?: string; website?: string }
 
 interface Props {
@@ -32,7 +37,7 @@ const SOCIAL_KEYS: Array<{ key: keyof SocialLinks; placeholder: string }> = [
   { key: 'website',   placeholder: 'https://minegocio.com' },
 ]
 
-const EMPTY_LOC: Location = { name: '', city: '', state: '', street: '', phone: undefined, email: undefined }
+const EMPTY_LOC: Location = { name: '', city: '', state: '', street: '', phone: undefined, email: undefined, is_primary: false }
 
 function resolveDptoCode(stateName?: string): string {
   return DEPARTAMENTOS.find(d => d.nombre === stateName)?.codigo ?? ''
@@ -41,13 +46,14 @@ function resolveDptoCode(stateName?: string): string {
 // ── Fila de sede: selectores DANE en cascada ──────────────────────────────────
 
 function SedeRow({
-  loc, index, isOnly, onChange, onRemove,
+  loc, index, isOnly, onChange, onRemove, onMarkPrimary,
 }: {
   loc: Location
   index: number
   isOnly: boolean
   onChange: (field: keyof Location, val: string) => void
   onRemove: () => void
+  onMarkPrimary: () => void
 }) {
   const [dptoCodigo, setDptoCodigo] = useState<string>(() => resolveDptoCode(loc.state))
   const municipios = useMemo(() => getMunicipiosByDpto(dptoCodigo), [dptoCodigo])
@@ -59,11 +65,24 @@ function SedeRow({
   }
 
   return (
-    <div className="rounded-lg border border-border p-3 space-y-2.5">
+    <div className={[
+      'rounded-lg border p-3 space-y-2.5 transition-colors',
+      loc.is_primary ? 'border-primary/60 bg-primary/5' : 'border-border',
+    ].join(' ')}>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
-          {index === 0 ? 'Sede principal' : `Sede ${index + 1}`}
-        </span>
+        <div className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="primary_sede"
+            checked={!!loc.is_primary}
+            onChange={onMarkPrimary}
+            className="h-3.5 w-3.5 cursor-pointer"
+            aria-label="Marcar como sede principal"
+          />
+          <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
+            {loc.is_primary ? 'Sede principal' : `Sede ${index + 1}`}
+          </span>
+        </div>
         {!isOnly && (
           <button type="button" onClick={onRemove}
             className="text-muted-foreground hover:text-destructive transition-colors">
@@ -148,9 +167,21 @@ function SedeRow({
 
 export default function StorePresenceForm({ initialStoreType, initialLocations, initialSocialLinks, action }: Props) {
   const [storeType, setStoreType] = useState<StoreType>(initialStoreType ?? 'fisica')
-  const [locs, setLocs] = useState<Location[]>(
-    initialLocations && initialLocations.length > 0 ? initialLocations : [{ ...EMPTY_LOC }]
-  )
+  const [locs, setLocs] = useState<Location[]>(() => {
+    const seed = initialLocations && initialLocations.length > 0
+      ? initialLocations
+      : [{ ...EMPTY_LOC, is_primary: true }]
+    // Garantiza exactamente UNA sede con is_primary=true (rev. 71).
+    const hasPrimary = seed.some(s => s.is_primary)
+    if (!hasPrimary && seed.length > 0) {
+      return seed.map((s, i) => ({ ...s, is_primary: i === 0 }))
+    }
+    let primarySeen = false
+    return seed.map(s => {
+      if (s.is_primary && !primarySeen) { primarySeen = true; return s }
+      return { ...s, is_primary: false }
+    })
+  })
   const [saved,        setSaved]        = useState(false)
   const [loading,      setLoading]      = useState(false)
   const [validationErr, setValidationErr] = useState<string | null>(null)
@@ -160,6 +191,22 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
 
   const updateLoc = (i: number, field: keyof Location, val: string) =>
     setLocs(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l))
+
+  const markPrimary = (i: number) =>
+    setLocs(prev => prev.map((l, idx) => ({ ...l, is_primary: idx === i })))
+
+  const removeLoc = (i: number) =>
+    setLocs(prev => {
+      const next = prev.filter((_, idx) => idx !== i)
+      // Si removimos la principal, la primera restante hereda.
+      if (next.length > 0 && !next.some(s => s.is_primary)) {
+        next[0] = { ...next[0], is_primary: true }
+      }
+      return next
+    })
+
+  const addLoc = () =>
+    setLocs(prev => [...prev, { ...EMPTY_LOC, is_primary: false }])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -230,7 +277,7 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
               {locs.length > 1 ? 'Sedes físicas' : 'Sede física'}
             </Label>
             <Button type="button" size="sm" variant="outline"
-              onClick={() => setLocs(prev => [...prev, { ...EMPTY_LOC }])}
+              onClick={addLoc}
               className="h-7 text-xs gap-1">
               <Plus className="h-3 w-3" /> Agregar sede
             </Button>
@@ -239,7 +286,8 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
             {locs.map((loc, i) => (
               <SedeRow key={i} loc={loc} index={i} isOnly={locs.length === 1}
                 onChange={(field, val) => updateLoc(i, field, val)}
-                onRemove={() => setLocs(prev => prev.filter((_, idx) => idx !== i))} />
+                onRemove={() => removeLoc(i)}
+                onMarkPrimary={() => markPrimary(i)} />
             ))}
           </div>
         </div>

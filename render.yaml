@@ -51,10 +51,10 @@ services:
         sync: false
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
-      # Requerida para generar embeddings al crear/actualizar documentos KB
-      # Sin esta variable, todos los documentos quedan sin embedding y el RAG no funciona
-      - key: GEMINI_API_KEY
-        sync: false
+      # Rev. 72 — GEMINI_API_KEY ya NO se expone al servicio web (cierra drift D3).
+      # El cálculo de embeddings KB se delegó al API service (POST /api/v1/knowledge-base).
+      # Si este servicio se redeploya con la var todavía configurada en el dashboard de
+      # Render, basta con eliminarla manualmente — no hay código que la use.
     healthCheckPath: /
     autoDeploy: true
 
@@ -107,6 +107,14 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      # Rev. 72 — Embeddings KB ahora se calculan server-side aquí (cierra drift D3).
+      # Mover el valor desde el servicio web (donde estaba antes) a este.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: GEMINI_EMBEDDING_FALLBACK_MODEL
+        value: text-embedding-004
       # ── MeLi OAuth (Fase 10) — requiere IH-007: registrar app en MeLi Developers ──
       - key: MELI_CLIENT_ID
         sync: false

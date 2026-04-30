@@ -2,53 +2,33 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { SubmitButton } from '@/components/ui/submit-button'
 import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine, AlertCircle } from 'lucide-react'
 import { DocCard } from './doc-card'
 import { TemplatesSection } from './templates-section'
 import { STARTER_TEMPLATES } from './starter-templates'
 import { IndexPendingBanner } from './index-pending-banner'
 import { KbMigrationBanner } from './kb-migration-banner'
+import { NewDocForm } from './new-doc-form'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 const MAX_DOCS    = 30
 const MAX_CONTENT = 3000
 const MAX_TITLE   = 120
 
-// Debe estar a nivel de módulo — NO dentro del componente.
-// Los server actions serializan su closure y no pueden capturar funciones del scope del componente.
-async function getGeminiEmbedding(text: string): Promise<number[] | null> {
-  const key = process.env.GEMINI_API_KEY
-  if (!key) {
-    console.error('[KB-Embed] GEMINI_API_KEY no configurada en el web service')
-    return null
-  }
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'models/gemini-embedding-001', content: { parts: [{ text }] }, outputDimensionality: 3072 }),
-      }
-    )
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      console.error(`[KB-Embed] Gemini ${res.status}: ${body.slice(0, 200)}`)
-      return null
-    }
-    const data = await res.json()
-    const values = data.embedding?.values
-    if (!values?.length) {
-      console.error('[KB-Embed] Respuesta sin values:', JSON.stringify(data).slice(0, 200))
-      return null
-    }
-    return values
-  } catch (e) {
-    console.error('[KB-Embed] Excepción llamando a Gemini:', e)
-    return null
-  }
+// Rev. 72 — los embeddings se calculan ahora server-side en el API
+// (POST /api/v1/knowledge-base). GEMINI_API_KEY ya NO se expone al
+// frontend (cierra drift D3). Helper local para autorizar las llamadas.
+async function authedApi(supabase: ReturnType<typeof createClient>, path: string, options: RequestInit = {}): Promise<Response> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token ?? ''
+  return fetch(`${CORE_API_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(options.headers ?? {}),
+    },
+  })
 }
 
 // Rev. 68 — 6 categorías canónicas con CHECK constraint en DB.
@@ -170,136 +150,117 @@ export default async function KnowledgeBasePage({
   const pendingCount = allDocs.filter(d => d.is_active && !embeddingIds.has(d.id)).length
   const atLimit      = totalCount >= MAX_DOCS
 
+  // Rev. 71 — categorías sin docs activos. Se exponen al form para destacar
+  // visualmente cuáles faltan (el bot no puede responder con verdad sin ellas).
+  const filledCategories = new Set(allDocs.filter(d => d.is_active).map(d => d.category))
+  const emptyCategories  = CATEGORIES.map(c => c.value).filter(v => !filledCategories.has(v))
+
   // ── Server Actions ─────────────────────────────────────────────────────────
 
+  // Rev. 72 — todas las server actions delegan al router /api/v1/knowledge-base.
+  // El embedding se calcula server-side en el API (GEMINI_API_KEY ya NO se expone al frontend).
   async function createDocument(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const title    = (formData.get('title') as string).trim()
     const content  = (formData.get('content') as string).trim()
-    const category = formData.get('category') as string
+    const category = (formData.get('category') as string) || 'faq'
     if (!title || !content) return
-    // Límite de caracteres
     if (content.length > MAX_CONTENT || title.length > MAX_TITLE) return
-    // Límite de documentos por tenant
-    const { count } = await sb.from('kb_documents').select('*', { count: 'exact', head: true }).eq('tenant_id', m.tenant_id)
-    if ((count ?? 0) >= MAX_DOCS) return
-
-    const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
-    await sb.from('kb_documents').insert({
-      tenant_id: m.tenant_id, title, content,
-      category: category || 'faq', is_active: true,
-      embedding: embedding ? `[${embedding.join(',')}]` : null,
+    const res = await authedApi(sb, '/api/v1/knowledge-base/', {
+      method: 'POST',
+      body: JSON.stringify({ title, content, category }),
     })
+    if (!res.ok) console.error('createDocument failed:', await res.text())
     revalidatePath('/dashboard/knowledge-base')
   }
 
   async function updateDocument(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const docId    = (formData.get('doc_id') as string).trim()
     const title    = (formData.get('title') as string).trim()
     const content  = (formData.get('content') as string).trim()
-    const category = formData.get('category') as string
+    const category = (formData.get('category') as string) || 'faq'
     if (!docId || !title || !content) return
     if (content.length > MAX_CONTENT || title.length > MAX_TITLE) return
-    const embedding = await getGeminiEmbedding(`Título: ${title}\nContenido: ${content}`)
-    await sb.from('kb_documents').update({
-      title, content,
-      category: category || 'faq',
-      embedding: embedding ? `[${embedding.join(',')}]` : null,
-      updated_at: new Date().toISOString(),
-    }).eq('id', docId).eq('tenant_id', m.tenant_id)
+    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title, content, category }),
+    })
+    if (!res.ok) console.error('updateDocument failed:', await res.text())
     redirect('/dashboard/knowledge-base')
   }
 
   async function regenerateEmbedding(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const docId = formData.get('doc_id') as string
-    const { data: doc } = await sb.from('kb_documents').select('title, content')
-      .eq('id', docId).eq('tenant_id', m.tenant_id).single()
-    if (!doc) return
-    const embedding = await getGeminiEmbedding(`Título: ${doc.title}\nContenido: ${doc.content}`)
-    if (!embedding) return
-    await sb.from('kb_documents').update({
-      embedding: `[${embedding.join(',')}]`,
-      updated_at: new Date().toISOString(),
-    }).eq('id', docId).eq('tenant_id', m.tenant_id)
+    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}/reindex`, { method: 'POST' })
+    if (!res.ok) console.error('regenerateEmbedding failed:', await res.text())
     revalidatePath('/dashboard/knowledge-base')
   }
 
   async function activateDocument(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const docId = formData.get('doc_id') as string
-    const { data: doc } = await sb.from('kb_documents')
-      .select('title, content, embedding')
-      .eq('id', docId).eq('tenant_id', m.tenant_id).single()
-    if (!doc) return
-    const needsEmbed = !doc.embedding
-    const embedding = needsEmbed
-      ? await getGeminiEmbedding(`Título: ${doc.title}\nContenido: ${doc.content}`)
-      : null
-    await sb.from('kb_documents').update({
-      is_active: true,
-      ...(embedding ? { embedding: `[${embedding.join(',')}]` } : {}),
-      updated_at: new Date().toISOString(),
-    }).eq('id', docId).eq('tenant_id', m.tenant_id)
+    // Activar = PATCH is_active=true. El backend re-genera embedding si content cambió;
+    // si solo cambia is_active, el embedding existente se conserva.
+    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: true }),
+    })
+    if (!res.ok) console.error('activateDocument failed:', await res.text())
+    // Si quedó sin embedding (ej. doc viejo creado antes de rev. 72), forzar reindex.
+    const reindex = await authedApi(sb, `/api/v1/knowledge-base/${docId}/reindex`, { method: 'POST' })
+    if (!reindex.ok) console.warn('reindex skipped:', await reindex.text())
     revalidatePath('/dashboard/knowledge-base')
   }
 
   async function desactivateDocument(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('kb_documents').update({ is_active: false })
-      .eq('id', formData.get('doc_id') as string).eq('tenant_id', m.tenant_id)
+    const docId = formData.get('doc_id') as string
+    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: false }),
+    })
+    if (!res.ok) console.error('desactivateDocument failed:', await res.text())
     revalidatePath('/dashboard/knowledge-base')
   }
 
   async function deleteDocument(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('kb_documents').delete()
-      .eq('id', formData.get('doc_id') as string).eq('tenant_id', m.tenant_id)
+    const docId = formData.get('doc_id') as string
+    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, { method: 'DELETE' })
+    if (!res.ok) console.error('deleteDocument failed:', await res.text())
     revalidatePath('/dashboard/knowledge-base')
   }
 
   async function loadSelectedTemplates(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-
     const selectedIds = formData.getAll('template_ids') as string[]
     if (!selectedIds.length) return
 
-    const tenantId = m.tenant_id
-    const toInsert = STARTER_TEMPLATES
-      .filter(t => selectedIds.includes(t.id))
-      .map(t => ({ tenant_id: tenantId, title: t.title, content: t.content, category: t.category, is_active: true }))
+    const templates = STARTER_TEMPLATES.filter(t => selectedIds.includes(t.id))
+    if (!templates.length) return
 
-    if (!toInsert.length) return
-    await sb.from('kb_documents').insert(toInsert)
+    // Rev. 72 — cada template pasa por POST /api/v1/knowledge-base que calcula
+    // embedding server-side. Serial para respetar rate-limit de Gemini y dar
+    // feedback claro si alguno excede el cap por tenant (409).
+    for (const t of templates) {
+      const res = await authedApi(sb, '/api/v1/knowledge-base/', {
+        method: 'POST',
+        body: JSON.stringify({ title: t.title, content: t.content, category: t.category }),
+      })
+      if (!res.ok) {
+        console.error(`loadSelectedTemplates: template ${t.id} failed:`, await res.text())
+        break
+      }
+    }
     revalidatePath('/dashboard/knowledge-base')
   }
 
@@ -400,51 +361,14 @@ export default async function KnowledgeBasePage({
                   <span>Límite de {MAX_DOCS} documentos alcanzado. Elimina alguno para agregar nuevos.</span>
                 </div>
               ) : (
-                <form action={createDocument} className="space-y-3 mt-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Título * <span className="text-muted-foreground font-normal">(máx {MAX_TITLE} chars)</span></Label>
-                    <Input name="title" placeholder="Política de devoluciones" required maxLength={MAX_TITLE} className="h-8 text-sm" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Categoría</Label>
-                    <select name="category"
-                      className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                      {CATEGORIES.map(c => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Contenido * <span className="text-muted-foreground font-normal">(máx {MAX_CONTENT} chars)</span></Label>
-                    <textarea name="content" rows={7} required maxLength={MAX_CONTENT}
-                      placeholder="Escribe el texto tal como quieres que la IA lo lea (ver guía abajo según la categoría que elegiste)."
-                      className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
-                    <p className="text-xs text-muted-foreground">La IA usará búsqueda semántica para encontrar el doc más relevante.</p>
-                  </div>
-                  {/* Rev. 68 — guía por categoría: qué SÍ y qué NO escribir */}
-                  <details className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-                    <summary className="cursor-pointer font-medium text-foreground/80">
-                      💡 Guía por categoría — ejemplos de qué escribir en cada una
-                    </summary>
-                    <div className="mt-2 space-y-2.5">
-                      {CATEGORIES.map(c => {
-                        const g = CATEGORY_GUIDES[c.value]
-                        if (!g) return null
-                        return (
-                          <div key={c.value} className="border-l-2 border-primary/30 pl-2.5">
-                            <p className="font-semibold text-foreground/90">{c.label}</p>
-                            <p className="text-muted-foreground italic">{g.placeholder}</p>
-                            <p className="text-emerald-600 mt-0.5">✓ Sí: <span className="text-foreground/80">{g.doYes}</span></p>
-                            <p className="text-red-500">✗ No: <span className="text-foreground/80">{g.doNo}</span></p>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </details>
-                  <SubmitButton className="w-full h-8 text-sm" pendingText="Guardando y generando embedding...">
-                    Agregar documento
-                  </SubmitButton>
-                </form>
+                <NewDocForm
+                  categories={CATEGORIES.map(c => ({ value: c.value, label: c.label }))}
+                  guides={CATEGORY_GUIDES}
+                  emptyCategories={emptyCategories}
+                  maxTitle={MAX_TITLE}
+                  maxContent={MAX_CONTENT}
+                  createDocument={createDocument}
+                />
               )}
             </div>
           </div>

@@ -130,6 +130,38 @@ def _last_outbound_was_consent_question(history: list[dict]) -> bool:
     return False
 
 
+# Rev. 73 — markers de outbounds en estado de recolección de datos personales.
+# Se usan para skipear shipping_quote_tool durante recolección activa (evita
+# malinterpretar nombres de ciudades como cambio de destino).
+_DATA_COLLECTION_QUESTION_MARKERS: tuple[str, ...] = (
+    "cual es tu correo",
+    "cual es tu email",
+    "tu correo electronico",
+    "tu nombre completo",
+    "como te llamas",
+    "tu numero de documento",
+    "tu nit",
+    "tu cedula",
+    "tu direccion exacta",
+    "direccion de entrega",
+    "donde te enviamos",
+)
+
+
+def _last_outbound_was_data_collection_question(history: list[dict]) -> bool:
+    """Retorna True si el último outbound fue una pregunta de recolección de
+    datos personales (email/nombre/documento/dirección). Distinto de consent.
+
+    Rev. 73 — reemplaza el bypass por `consent_given` histórico que causaba
+    que el cliente conocido nunca pasara por shipping_quote_tool en sesiones
+    nuevas (log 2026-04-29 conv 615a9902)."""
+    for msg in reversed(history):
+        if str(msg.get("direction") or "").lower() == "outbound":
+            content_norm = _normalize_text_simple(str(msg.get("content") or ""))
+            return any(marker in content_norm for marker in _DATA_COLLECTION_QUESTION_MARKERS)
+    return False
+
+
 def _record_consent(
     supabase: Client,
     contact_id: str,
@@ -872,6 +904,13 @@ async def _send_outbound_text(
     tenant_id: str,
     text: str,
 ) -> bool:
+    text = _format_whatsapp_response_text(text)
+    if not text or not text.strip():
+        logger.warning(
+            "[OUTBOUND] ghost_message_blocked conv=%s — texto vacío tras formato, no se envía",
+            conversation_id,
+        )
+        return False
     conv_res = (
         supabase.table("conversations")
         .select("customer_phone")
@@ -948,11 +987,13 @@ async def _get_tenant_ai_agent(supabase: Client, tenant_id: str) -> dict:
     res = supabase.table("ai_agents").select("*").eq("tenant_id", tenant_id).execute()
     if res.data:
         return res.data[0]
-    # Default agent si no ha configurado uno
+    # Default agent si no ha configurado uno — alineado con DB default de
+    # ai_agents.name ('Vendedor Oficial', migración 20260412000000) para que
+    # el readiness check detecte coherentemente "no personalizado" en cualquier path.
     return {
-        "name": "Bot Asistente",
+        "name": "Vendedor Oficial",
         "role_description": "Eres un asistente de ventas cordial básico.",
-        "strict_guardrails": True
+        "strict_guardrails": True,
     }
 
 
@@ -1340,6 +1381,51 @@ def _has_shipping_been_quoted_in_conversation(
     return False
 
 
+def _cart_changed_since_last_quote(history: list[dict]) -> bool:
+    """Rev. 73 — detecta si el cliente agregó un producto al carrito DESPUÉS del
+    último outbound de cotización de envío. Si es así, la cotización vigente
+    está stale (no refleja el peso/dimensiones actual) → forzar re-cotización.
+
+    Trigger: outbound del bot con frase de confirmación de adición ("agregué",
+    "listo agregué", "añadí", "lo agregué") después del último outbound de
+    cotización (con precio $X.XXX + palabra envío/Económica/Rápida).
+
+    Patrón típico (log 2026-04-29 conv 615a9902):
+        outbound: "El envío a Bogotá: $17.730 con Coordinadora"   # cotizar
+        outbound: "¡Listo! Agregué el Sérum a tu carrito."        # cart cambió
+        → cart_changed_since_last_quote = True → re-cotizar.
+    """
+    if not history:
+        return False
+    _quote_markers = ("economica", "rapida", "envio a", "envio de", "costo de envio")
+    _add_markers = ("agregue", "listo agregue", "anadi", "agregado", "lo agregue")
+
+    # Encontrar índice del último outbound de cotización
+    last_quote_idx = None
+    for i in range(len(history) - 1, -1, -1):
+        msg = history[i]
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content_norm = _normalize_text(str(msg.get("content") or ""))
+        # Heurística simple: contiene marker de cotización + un precio
+        has_quote_marker = any(m in content_norm for m in _quote_markers)
+        has_price = bool(re.search(r"\$\s*[\d.,]+", str(msg.get("content") or "")))
+        if has_quote_marker and has_price:
+            last_quote_idx = i
+            break
+    if last_quote_idx is None:
+        return False
+
+    # Buscar outbound de adición posterior
+    for msg in history[last_quote_idx + 1:]:
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content_norm = _normalize_text(str(msg.get("content") or ""))
+        if any(m in content_norm for m in _add_markers):
+            return True
+    return False
+
+
 def _has_carrier_been_selected(history: list[dict]) -> bool:
     """
     Detecta si el cliente seleccionó explícitamente un carrier.
@@ -1542,13 +1628,16 @@ def _resolve_display_state(
     carrier_selected = _has_carrier_been_selected(history or [])
     order_confirm_pending = _last_outbound_was_order_confirmation_question(history or [])
 
-    # Inferencia: si el cliente ya autorizó el tratamiento de datos (consent_given),
-    # significa que el flujo pasó por AWAITING_CARRIER_SELECTION → NEEDS_CONSENT,
-    # por lo que el carrier necesariamente fue seleccionado antes (no volvemos a
-    # exigirlo aunque el inbound de selección haya quedado fuera del history en
-    # memoria por CONVERSATION_HISTORY_LIMIT en conversaciones largas).
-    if not carrier_selected and isinstance(contact_record, dict) and contact_record.get("consent_given"):
-        carrier_selected = True
+    # Rev. 73 — ELIMINADO el shortcut "consent_given → carrier_selected=True".
+    # Ese shortcut causaba que el cliente conocido (con consent histórico de una
+    # sesión vieja) saltara el paso de selección de carrier en NUEVOS pedidos →
+    # el LLM inventaba carrier y precio (alucinación detectada en log
+    # 2026-04-29 conv 615a9902, $17.730 con "Coordinadora" sin que el tool
+    # corriera). carrier_selected es per-pedido, NO per-cliente. Si el history
+    # en memoria está truncado, el detector se basa en outbounds presentes;
+    # falta de carrier reabre el flujo `AWAITING_CARRIER_SELECTION` aunque sea
+    # cliente conocido — es el comportamiento correcto para que cada pedido
+    # tenga su selección de envío explícita y verificable.
 
     if buying_intent:
         if not shipping_quoted:
@@ -2310,35 +2399,84 @@ def _is_outside_support_hours(support_schedule: dict) -> bool:
         return False
 
 
+# ISO weekday 1=Lu .. 7=Do (alineado con DaysSelector y _is_outside_support_hours).
+_DAY_LABELS_ES_ISO = {1: "Lun", 2: "Mar", 3: "Mié", 4: "Jue", 5: "Vie", 6: "Sáb", 7: "Dom"}
+
+
+def _format_support_schedule_text(schedule: Optional[dict]) -> str:
+    """Deriva 'Lun a Vie de 09:00 a 18:00' desde support_schedule jsonb.
+    Reemplaza el legacy `tenants.business_hours` (texto libre, sin estructura).
+
+    Convención de días: ISO weekday 1=Lu..7=Do (alineada con DaysSelector UI
+    y con `_is_outside_support_hours`). NO mezclar con 0-6 (Python weekday())."""
+    if not schedule or not isinstance(schedule, dict):
+        return ""
+    raw_days = schedule.get("days") or []
+    open_t   = (schedule.get("open") or "").strip()
+    close_t  = (schedule.get("close") or "").strip()
+    if not raw_days or not open_t or not close_t:
+        return ""
+    days = sorted({int(d) for d in raw_days if isinstance(d, (int, float)) and 1 <= int(d) <= 7})
+    if not days:
+        return ""
+    # Si es bloque continuo (ej. Lu-Vi = [1,2,3,4,5]) → notación rango.
+    is_contiguous = all(days[i] - days[i - 1] == 1 for i in range(1, len(days)))
+    if is_contiguous and len(days) >= 2:
+        labels = f"{_DAY_LABELS_ES_ISO[days[0]]} a {_DAY_LABELS_ES_ISO[days[-1]]}"
+    else:
+        labels = ", ".join(_DAY_LABELS_ES_ISO[d] for d in days)
+    return f"{labels} de {open_t} a {close_t}"
+
+
 def _build_store_info_section(
     tenant_name: str,
     store_type: str,
     shipping_origin: dict,
     social_links: dict,
     store_locations: list,
-    business_hours: str,
+    support_schedule: Optional[dict] = None,
     mision: str = "",
     vision: str = "",
     valores: str = "",
-    cutoff_message: str = "",
-    dispatch_lead_time: str = "",
+    nit: str = "",
+    email_contacto: str = "",
+    telefono_contacto: str = "",
 ) -> str:
     """
     Construye la sección de información comercial del tenant para el system prompt.
     Adaptativa por tipo de tienda: fisica | virtual | fisica_virtual.
     Permite al bot responder sin escalar: ubicación, sedes, redes, horario.
+
+    Rev. 71 — La columna legacy `business_hours` (texto libre) se eliminó del prompt.
+    El horario textual ahora se deriva de `support_schedule` (jsonb) — fuente única.
     """
     has_fisica  = store_type in ("fisica", "fisica_virtual")
     has_virtual = store_type in ("virtual", "fisica_virtual")
 
     lines: list[str] = [f"\nSOBRE LA TIENDA — INFORMACIÓN COMERCIAL DE {tenant_name.upper()}:"]
 
+    # Modo de operación explícito (rev. 71 — antes el bot lo inferia del shape)
+    if has_fisica and has_virtual:
+        lines.append("- Modo de operación: atención presencial en sedes y venta online.")
+    elif has_virtual:
+        lines.append("- Modo de operación: solo tienda virtual (sin sedes físicas al público).")
+    elif has_fisica:
+        lines.append("- Modo de operación: atención presencial en sedes (consulta horario).")
+
     if has_fisica:
-        # Usar sedes configuradas por el tenant; fallback a shipping_origin si no hay
+        # Sedes públicas (atención al cliente). Diferentes conceptualmente del
+        # origen de despacho (`shipping_origin`) — ver bloque dedicado abajo.
         sedes = [s for s in (store_locations or []) if s.get("city") or s.get("street")]
         if sedes:
-            for sede in sedes:
+            lines.append("- Sedes públicas de atención al cliente:")
+            # Rev. 71 — sede con `is_primary=True` se rotula explícita y se ordena primero.
+            primary = [s for s in sedes if s.get("is_primary")]
+            others  = [s for s in sedes if not s.get("is_primary")]
+            ordered = (primary + others) if primary else sedes
+            for sede in ordered:
                 sede_name = sede.get("name") or "Sede"
+                if sede.get("is_primary"):
+                    sede_name = f"{sede_name} (principal)"
                 city      = sede.get("city", "")
                 state     = sede.get("state", "")
                 street    = sede.get("street", "")
@@ -2347,38 +2485,33 @@ def _build_store_info_section(
                 loc       = city
                 if state and state != city:
                     loc += f", {state}"
-                sede_line = f"- {sede_name}: {street}{', ' + loc if loc else ''}" if street else f"- {sede_name}: {loc}"
+                sede_line = f"  · {sede_name}: {street}{', ' + loc if loc else ''}" if street else f"  · {sede_name}: {loc}"
                 if phone:
                     sede_line += f" | Tel: {phone}"
                 if email:
                     sede_line += f" | Email: {email}"
                 lines.append(sede_line)
-        elif shipping_origin.get("city"):
-            city    = shipping_origin.get("city", "")
-            state   = shipping_origin.get("state", "")
-            country = shipping_origin.get("country", "Colombia")
-            street  = shipping_origin.get("street", "")
-            loc     = city
-            if state and state != city:
-                loc += f", {state}"
-            loc += f" — {country}"
-            lines.append(f"- Tienda física en: {loc}")
-            if street:
-                lines.append(f"  Dirección: {street}")
 
-    if has_virtual:
-        if has_fisica:
-            lines.append("- También operamos como tienda virtual.")
-        else:
-            lines.append("- Somos tienda virtual (sin sede física al público).")
+    # Rev. 71 — Origen de despacho (`shipping_origin`): es la BODEGA operacional
+    # desde donde sale Envia. NO es necesariamente pública — solo se entrega al
+    # LLM la ciudad/estado para que pueda responder "despachamos desde Bogotá"
+    # sin revelar la dirección exacta de la bodega (dato operacional sensible).
+    ship_city  = (shipping_origin or {}).get("city", "")
+    ship_state = (shipping_origin or {}).get("state", "")
+    if ship_city:
+        ship_loc = ship_city
+        if ship_state and ship_state != ship_city:
+            ship_loc += f", {ship_state}"
+        lines.append(f"- Origen de despacho (bodega): {ship_loc}")
 
     active_social = {k: v for k, v in (social_links or {}).items() if v}
     if active_social:
         social_parts = ", ".join(f"{k.capitalize()}: {v}" for k, v in active_social.items())
         lines.append(f"- Redes y canales digitales: {social_parts}")
 
-    if business_hours:
-        lines.append(f"- Horario de atención: {business_hours}")
+    horario_texto = _format_support_schedule_text(support_schedule)
+    if horario_texto:
+        lines.append(f"- Horario de atención: {horario_texto}")
 
     if mision:
         lines.append(f"- Misión: {mision}")
@@ -2386,19 +2519,160 @@ def _build_store_info_section(
         lines.append(f"- Visión: {vision}")
     if valores:
         lines.append(f"- Valores: {valores}")
-    if dispatch_lead_time:
-        lines.append(f"- Tiempo de despacho: {dispatch_lead_time}")
-    if cutoff_message:
-        lines.append(f"- Política de envíos: {cutoff_message}")
+
+    # Rev. 71 — Identidad legal/contacto del negocio. Solo se entrega al LLM con
+    # instrucción explícita de usarse SI EL CLIENTE PREGUNTA. Evita que el bot
+    # ofrezca proactivamente NIT/email/teléfono (sería invasivo) pero permite
+    # responder con verdad cuando lo piden ("¿cuál es su NIT?", "¿correo?").
+    identidad_lines: list[str] = []
+    if nit:
+        identidad_lines.append(f"  - NIT: {nit}")
+    if email_contacto:
+        identidad_lines.append(f"  - Email de contacto del negocio: {email_contacto}")
+    if telefono_contacto:
+        identidad_lines.append(f"  - Teléfono del negocio: {telefono_contacto}")
+    if identidad_lines:
+        lines.append("- Identidad legal y canales corporativos (úsalos SOLO si el cliente lo pregunta):")
+        lines.extend(identidad_lines)
 
     if len(lines) == 1:
         return ""  # Sin info configurada → no inyectar sección vacía
 
     lines.append(
-        "INSTRUCCIÓN: usa esta información para responder preguntas sobre ubicación, "
-        "sedes, canales digitales, redes, horario, misión o valores de la marca. NO escales por estas preguntas."
+        "INSTRUCCIÓN — DISTINGUE estos conceptos al responder (rev. 71):"
+    )
+    lines.append(
+        "  · Si el cliente pregunta '¿dónde están?' / '¿puedo recoger?' / '¿tienen tienda física?' "
+        "→ usa SEDES PÚBLICAS DE ATENCIÓN. La sede (principal) es la primera referencia."
+    )
+    lines.append(
+        "  · Si el cliente pregunta '¿desde dónde despachan?' / '¿de qué ciudad sale el envío?' "
+        "→ usa ORIGEN DE DESPACHO (solo ciudad/estado, NUNCA la dirección exacta — es bodega operacional)."
+    )
+    lines.append(
+        "  · Si el cliente pregunta '¿cuándo entregan?' / '¿en cuántos días?' "
+        "→ NO inventes; consulta KB categoría envíos o pide confirmar la cotización del carrier."
+    )
+    lines.append(
+        "Para preguntas de horario, redes, misión o valores: responde con la info de arriba. NO escales por estas preguntas."
     )
     return "\n".join(lines)
+
+
+# Estado de disponibilidad de la tabla bot_source_log (rev. 71).
+# Best-effort lazy detection: si la migración no está aplicada, evita gastar
+# round-trips a Supabase y solo reintenta cada N segundos.
+_BOT_LOG_AVAILABLE: Optional[bool] = None  # None = no chequeado aún
+_BOT_LOG_LAST_CHECK: float = 0.0
+_BOT_LOG_RECHECK_SECONDS: float = 900.0  # 15 min — cooldown tras "tabla no existe"
+
+
+def _bot_log_available(supabase) -> bool:
+    """Detecta si la tabla `bot_source_log` existe. Cachea el resultado:
+    - True estable (tabla existe): siempre True hasta restart.
+    - False con cooldown: re-verifica cada 15 min (cubre el caso de aplicar
+      migración con servicio caliente).
+    """
+    global _BOT_LOG_AVAILABLE, _BOT_LOG_LAST_CHECK
+    import time as _t
+    now = _t.monotonic()
+    if _BOT_LOG_AVAILABLE is True:
+        return True
+    if _BOT_LOG_AVAILABLE is False and (now - _BOT_LOG_LAST_CHECK) < _BOT_LOG_RECHECK_SECONDS:
+        return False
+    try:
+        supabase.table("bot_source_log").select("id").limit(1).execute()
+        _BOT_LOG_AVAILABLE = True
+        logger.info("[BOT_LOG] Tabla bot_source_log disponible — logging activado.")
+    except Exception as exc:
+        text = str(exc).lower()
+        if "does not exist" in text or "relation" in text or "404" in text:
+            if _BOT_LOG_AVAILABLE is not False:
+                logger.warning(
+                    "[BOT_LOG] Tabla bot_source_log no existe; logging inhibido. "
+                    "Aplicar migración 20260501000001_bot_source_log.sql."
+                )
+            _BOT_LOG_AVAILABLE = False
+        else:
+            # Error transitorio (red, RLS, etc.) — no marcamos como permanentemente falso.
+            logger.debug("[BOT_LOG] Probe fallido (transitorio): %s", exc)
+            _BOT_LOG_AVAILABLE = False
+    _BOT_LOG_LAST_CHECK = now
+    return _BOT_LOG_AVAILABLE is True
+
+
+def _log_bot_sources(
+    *,
+    supabase,
+    tenant_id: str,
+    conversation_id: str,
+    message_id: Optional[str],
+    fsm_state: str,
+    system_prompt: str,
+    kb_docs: list,
+    catalog_count: int,
+    customer_context_block: str,
+    is_outside_hours: bool,
+    identity_present: bool,
+    intent_detected: Optional[str],
+    requires_human: bool,
+) -> None:
+    """Inserta un registro append-only en bot_source_log con metadata de fuentes.
+    Sin PII — solo flags estructurales y agregados.
+    Rev. 71 — fundamento para auditabilidad operativa del bot.
+
+    Si la tabla no existe (migración no aplicada), inhibe el insert con cooldown
+    de 15 min para evitar round-trips inútiles."""
+    if not _bot_log_available(supabase):
+        return
+
+    kb_categories_used: list[str] = []
+    kb_missing_categories: list[str] = []
+    kb_real_count = 0
+    for d in (kb_docs or []):
+        cat = d.get("category")
+        if d.get("_synthetic_missing"):
+            if cat and cat not in kb_missing_categories:
+                kb_missing_categories.append(cat)
+        else:
+            kb_real_count += 1
+            if cat and cat not in kb_categories_used:
+                kb_categories_used.append(cat)
+
+    payload = {
+        "tenant_id":                    tenant_id,
+        "conversation_id":              conversation_id,
+        "message_id":                   message_id,
+        "fsm_state":                    fsm_state,
+        "injected_catalog":             "Producto en contexto" in system_prompt or catalog_count > 0,
+        "injected_kb":                  "INFORMACIÓN EXTRAÍDA DE LA BASE" in system_prompt,
+        "injected_store_info":          "SOBRE LA TIENDA" in system_prompt,
+        "injected_business_identity":   identity_present and "Identidad legal" in system_prompt,
+        "injected_customer_context":    bool((customer_context_block or "").strip()),
+        "injected_cart_recovery":       "CARRITO PREVIO" in system_prompt,
+        "injected_after_hours":         is_outside_hours and "FUERA DE HORARIO HUMANO" in system_prompt,
+        "kb_categories_used":           kb_categories_used,
+        "kb_missing_categories":        kb_missing_categories,
+        "kb_docs_count":                kb_real_count,
+        "catalog_products_count":       int(catalog_count),
+        "prompt_chars":                 len(system_prompt or ""),
+        "intent_detected":              intent_detected,
+        "requires_human":               bool(requires_human),
+    }
+    try:
+        supabase.table("bot_source_log").insert(payload).execute()
+    except Exception as exc:
+        # Si el insert falla con "relation does not exist", invalidamos cache
+        # — la migración pudo haber sido revertida. Cooldown re-evalúa en 15 min.
+        global _BOT_LOG_AVAILABLE, _BOT_LOG_LAST_CHECK
+        import time as _t
+        text = str(exc).lower()
+        if "does not exist" in text or "404" in text:
+            _BOT_LOG_AVAILABLE = False
+            _BOT_LOG_LAST_CHECK = _t.monotonic()
+            logger.warning("[BOT_LOG] Insert falló por tabla ausente; inhibo por 15 min.")
+        else:
+            logger.debug("[BOT_LOG] Insert falló (transitorio): %s", exc)
 
 
 def _build_system_prompt(
@@ -2415,14 +2689,17 @@ def _build_system_prompt(
     tenant_store_type: str = "fisica",
     tenant_social_links: Optional[dict] = None,
     tenant_store_locations: Optional[list] = None,
-    tenant_business_hours: str = "",
+    tenant_support_schedule: Optional[dict] = None,
     tenant_mision: str = "",
     tenant_vision: str = "",
     tenant_valores: str = "",
     tenant_tono: str = "amigable",
-    tenant_cutoff_msg: str = "",
-    tenant_dispatch_lead: str = "",
     tenant_escalation_role: str = "asesor",
+    tenant_nit: str = "",
+    tenant_email_contacto: str = "",
+    tenant_telefono_contacto: str = "",
+    tenant_after_hours_message: str = "",
+    tenant_is_outside_hours: bool = False,
     customer_context_block: str = "",
 ) -> str:
     """Construye el system prompt con FSM contextual para venta vs consulta."""
@@ -2521,13 +2798,32 @@ def _build_system_prompt(
         shipping_origin=tenant_shipping_origin or {},
         social_links=tenant_social_links or {},
         store_locations=tenant_store_locations or [],
-        business_hours=tenant_business_hours or "",
+        support_schedule=tenant_support_schedule or {},
         mision=tenant_mision or "",
         vision=tenant_vision or "",
         valores=tenant_valores or "",
-        cutoff_message=tenant_cutoff_msg or "",
-        dispatch_lead_time=tenant_dispatch_lead or "",
+        nit=tenant_nit or "",
+        email_contacto=tenant_email_contacto or "",
+        telefono_contacto=tenant_telefono_contacto or "",
     )
+
+    # Rev. 71 — CONTEXTO TEMPORAL: si estamos fuera del horario configurado,
+    # damos al LLM la indicación para tono y manejo de escalación. NO duplica
+    # la respuesta literal del tenant — el bot conserva su personalidad pero
+    # sabe que cualquier "te conecto con humano" se cumplirá en el próximo turno.
+    after_hours_section = ""
+    if tenant_is_outside_hours:
+        after_hours_section_lines = [
+            "\nCONTEXTO TEMPORAL — FUERA DE HORARIO HUMANO:",
+            f"- Estamos fuera del horario de atención humana ({_format_support_schedule_text(tenant_support_schedule) or 'no configurado'}).",
+            "- Sigue atendiendo (catálogo, cotización, captura de datos, link de pago) — el bot opera 24/7.",
+            f"- Si el cliente pide hablar con una persona, NO digas 'te conecto ahora'. Indica con cordialidad que un {tenant_escalation_role} responderá apenas inicie el próximo turno y deja registrada la solicitud.",
+        ]
+        if tenant_after_hours_message:
+            after_hours_section_lines.append(
+                f"- Mensaje guía del tenant para fuera de horario (úsalo como referencia de tono, no lo copies literal): \"{tenant_after_hours_message}\""
+            )
+        after_hours_section = "\n".join(after_hours_section_lines)
     tono_instruccion = _TONO_INSTRUCCIONES.get(tenant_tono, _TONO_INSTRUCCIONES["amigable"])
 
     strict_rules = ""
@@ -2624,37 +2920,76 @@ ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DIRECCIÓN DE ENTREGA.
     elif display_state == "READY_FOR_SUMMARY":
         # Calcular contexto verificado desde datos reales (no delegar al LLM)
         _verified_ctx = _build_verified_order_context(catalog, history)
-        if _verified_ctx:
-            _p = _verified_ctx
-            _variant_str = f" ({_p['variant_label']})" if _p.get("variant_label") else ""
-            _qty_str = f" × {_p['quantity']}" if _p["quantity"] > 1 else ""
-            _verified_block = (
-                f"\nCONTEXTO VERIFICADO DE PEDIDO (usa estos valores exactos — NO recalcules):\n"
-                f"• Producto: {_p['product_name']}{_variant_str}\n"
-                f"• Precio unitario: {_format_cop(_p['unit_price_cents'])}{_qty_str}\n"
-                f"• Subtotal productos: {_format_cop(_p['subtotal_cents'])}\n"
-                f"• Envío: {_format_cop(_p['shipping_cost_cents'])}\n"
-                f"• *TOTAL: {_format_cop(_p['total_cents'])}*\n"
+        # Rev. 73 — guard anti-alucinación: extraer shipping_cost directo del
+        # historial. Si NO hay precio cotizado por shipping_quote_tool, no hay
+        # cotización legítima y NO debemos armar resumen (el LLM inventaría
+        # totales — caso log 2026-04-29 conv 615a9902).
+        # NOTA: usamos `_extract_shipping_cost_from_history` directamente —
+        # `_verified_ctx` puede ser None por otras razones (producto no
+        # detectado en history, cliente con cambio de variante, etc.) y eso
+        # NO debe degradar el FSM si la cotización SÍ existe.
+        _shipping_extracted = _extract_shipping_cost_from_history(history) or 0
+        _has_shipping_verified = _shipping_extracted > 0
+        if not _has_shipping_verified:
+            logger.warning(
+                "[ORCH] READY_FOR_SUMMARY sin shipping verificado — degradar a AWAITING_CARRIER_SELECTION"
             )
+            display_state = "AWAITING_CARRIER_SELECTION"
+            state_instruction = """
+ESTADO ACTUAL DEL FLUJO DE VENTA: COTIZAR ENVÍO ANTES DE RESUMEN.
+- El cliente parece estar listo para confirmar datos pero NO TENEMOS un costo de envío verificado en el historial.
+- Pide la ciudad de entrega o reabrí la cotización con shipping_quote_tool.
+- NO inventes costos de envío bajo ninguna circunstancia.
+- Mensaje sugerido: "Antes de armarte el resumen, cotizo el envío con peso real. ¿A qué ciudad enviamos?"
+"""
         else:
-            _verified_block = ""
-            logger.warning("[ORCH] READY_FOR_SUMMARY sin contexto verificado — LLM calculará totales")
-
-        state_instruction = f"""
+            # Rev. 73 — incluir dirección del contacto en el bloque verificado
+            # para que el LLM la use literal en el resumen, sin inventar.
+            _verified_address = _format_address_for_summary(
+                contact_record.get("address") if isinstance(contact_record, dict) else None
+            )
+            _address_line = f"• Dirección de entrega: {_verified_address}\n" if _verified_address else ""
+            if _verified_ctx:
+                _p = _verified_ctx
+                _variant_str = f" ({_p['variant_label']})" if _p.get("variant_label") else ""
+                _qty_str = f" × {_p['quantity']}" if _p["quantity"] > 1 else ""
+                _verified_block = (
+                    f"\nCONTEXTO VERIFICADO DE PEDIDO (usa estos valores exactos — NO recalcules):\n"
+                    f"• Producto: {_p['product_name']}{_variant_str}\n"
+                    f"• Precio unitario: {_format_cop(_p['unit_price_cents'])}{_qty_str}\n"
+                    f"• Subtotal productos: {_format_cop(_p['subtotal_cents'])}\n"
+                    f"• Envío: {_format_cop(_p['shipping_cost_cents'])}\n"
+                    f"• *TOTAL: {_format_cop(_p['total_cents'])}*\n"
+                    f"{_address_line}"
+                )
+            else:
+                # Shipping verificado pero producto no detectado en history.
+                # Inyectar al menos el envío + dirección — el LLM compone los
+                # productos a partir del catálogo / historial.
+                _verified_block = (
+                    f"\nCONTEXTO VERIFICADO PARCIAL (usa estos valores exactos — NO recalcules):\n"
+                    f"• Envío: {_format_cop(_shipping_extracted)}\n"
+                    f"{_address_line}"
+                )
+            state_instruction = f"""
 ESTADO ACTUAL DEL FLUJO DE VENTA: RESUMEN Y CONFIRMACIÓN DE DATOS.
 - Ya tienes información completa. Genera el resumen con los datos del cliente (de contact_record en el contexto) y los valores de pedido.
 - OBLIGATORIO: usa los valores del bloque CONTEXTO VERIFICADO para subtotal, envío y total. NO calcules precios por tu cuenta.
-- Termina con: "¿Confirmas que los datos están correctos?"
+- INCLUYE en el resumen: productos con cantidad y precio, subtotal, envío con carrier y ETA, dirección de entrega (la que está en CONTEXTO VERIFICADO), y total general.
+- Rev. 73 — Termina SIEMPRE con CTA explícito: "¿Confirmas para generarte el link de pago?".
+  NO uses variantes ambiguas como "¿confirmas que los datos están correctos?" — el cliente debe entender que el SIGUIENTE paso es pagar.
 - NO escales a humano en este paso. Solo muestra resumen y pide confirmación.
 {_verified_block}"""
     elif display_state == "AWAITING_ORDER_CONFIRMATION":
         state_instruction = """
 ESTADO ACTUAL DEL FLUJO DE VENTA: CONFIRMACIÓN FINAL DE CREACIÓN DE PEDIDO.
-- El cliente ya confirmó datos y ahora debes confirmar creación de pedido.
-- Responde breve y marca intent_detected=order_acknowledgment.
+- El cliente ya confirmó datos y ahora debes generar pedido + link de pago.
+- Responde breve (2 líneas máx) y marca intent_detected=order_acknowledgment.
 - requires_human=true solo para activar el tool transaccional y link de pago.
 - total_in_cents DEBE ser exactamente el mismo total que mostraste en el resumen anterior. NO recalcules. Lee el total del último resumen en el historial.
 - shipping_cost_cents DEBE ser el costo de envío que aparece en el resumen anterior.
+- Rev. 73 — el texto de respuesta NO debe afirmar que el pedido ya está creado. El payment_link_tool generará el link Wompi y el cliente paga PRIMERO. El pedido pasa a 'confirmed' SOLO tras webhook Wompi APPROVED.
+- Mensaje sugerido cuando el cliente confirma: "Perfecto, te genero tu link de pago." (luego el tool emite el link).
 """
     else:
         state_instruction = """
@@ -2713,10 +3048,17 @@ COMPORTAMIENTO DEL AGENTE: {role_desc}
 {known_customer_block}
 {customer_context_block}
 {store_location_section}
+{after_hours_section}
 REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
 - Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
 - No seas repetitivo. Evita saludar en cada mensaje si ya están en conversación.
 - NUNCA envíes promociones crudas no solicitadas o texto masivo (Evita el bloqueo de la línea WABA).
+
+REGLAS ANTI-ALUCINACIÓN TRANSACCIONAL (CRÍTICAS — rev. 73):
+- NUNCA digas "tu pedido fue creado", "ya generé tu pedido", "tu pedido será entregado", "confirmaré tu compra", "ya seleccioné el envío con X" ni equivalentes a menos que un tool determinístico (payment_link_tool, order_status_tool) haya retornado éxito.
+- NUNCA confirmes carrier de envío con un nombre específico ("Coordinadora", "Servientrega", "Deprisa", "TCC") sin que ese nombre haya aparecido en un outbound previo del bot derivado de shipping_quote_tool.
+- NUNCA inventes ni redondees costos de envío, totales o ETA. Si el bloque CONTEXTO VERIFICADO no trae los valores, NO los emitas — pide al cliente confirmar ciudad para cotizar.
+- Si el cliente dice "ok, gracias", "listo", "vale" o similar después del resumen, eso NO es confirmación de pago. Pregunta explícitamente: "¿Confirmas para generar tu link de pago?".
 {strict_rules}
 REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
 - Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
@@ -2738,11 +3080,90 @@ ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
 
 {state_instruction}
 
-FORMATO WhatsApp (aplica a TODOS los mensajes):
-- Usa saltos de línea (\n) para separar ideas diferentes. Nunca pongas toda la respuesta en una sola línea si contiene más de 2 puntos.
-- Para listas o pasos, usa viñetas: "• item"
-- Usa *texto* para destacar valores importantes (total, precio).
-- Si terminas con pregunta, ponla en párrafo separado.
+FORMATO WhatsApp (aplica a TODOS los mensajes — rev. 77 patrón visual canónico):
+
+Sintaxis oficial WhatsApp:
+- *texto* → negrita (envuelve la palabra/frase con UN asterisco a cada lado).
+- _texto_ → cursiva
+- ~texto~ → tachado
+- ```texto``` → monoespacio
+- > texto → cita (al inicio de línea; WhatsApp lo renderiza con barra lateral).
+- Para viñetas: WhatsApp dice textualmente "Escribe un asterisco o guion seguido
+  de espacio". Formato canónico: `* item` (asterisco + espacio + texto). El
+  cliente WhatsApp lo renderiza con indent y espaciado correctos. El post-process
+  de este bot también acepta `- item`, `• item`, `· item` y los normaliza
+  automáticamente a `* item`.
+
+Cuándo usar citas (`> texto`):
+- Al confirmar un dato que el cliente acaba de dar, antes de avanzar al siguiente paso.
+  Ej: cliente da dirección → bot responde:
+  > Calle 3 sur # 70-84, Bogotá (casa)
+  Confirmado.
+- Al citar políticas o tiempos del KB cuando es información literal del tenant.
+  Ej:
+  > Despachamos en 1 día hábil. Pedidos antes de las 2 PM salen el mismo día.
+  ¿Confirmas para generar tu link de pago?
+- Al referirse a un pedido previo del cliente (cart recovery rev. 70).
+  Ej:
+  > Pedido pendiente del 22/04: 2x Coco 60g, 1x Lavanda 150g.
+  ¿Lo retomamos?
+- NO uses citas para todo — solo cuando el contenido se beneficia de aislamiento visual
+  (dato verificable, política textual, mensaje previo del cliente).
+- Una sola línea de cita seguida de tu respuesta. No anides múltiples `>`.
+
+Estructura visual obligatoria:
+1. TÍTULOS DE SECCIÓN en negrita seguidos de dos puntos. Ej: `*Productos:*`, `*Datos de envío:*`, `*Resumen de tu pedido:*`.
+2. ÍTEMS de lista con `* ` al inicio de cada línea (asterisco + espacio + texto). Es el formato OFICIAL WhatsApp.
+3. VALORES IMPORTANTES (precios, totales, IDs) en negrita. Ej: `*$24.740 COP*`, `*TOTAL: $X*`.
+4. LÍNEA EN BLANCO entre bloques que diferencian información distinta (productos vs totales vs datos vs pregunta).
+5. PREGUNTA final SIEMPRE en su propio párrafo, sin negrita, sin emoji.
+6. EMOJIS solo cuando aportan jerarquía visual (máximo 1 por mensaje). Ej: 📋 al inicio del resumen. NO al final ni decorativos.
+
+Patrón canónico — resumen de pedido:
+
+📋 *Resumen de tu pedido:*
+
+*Productos:*
+* 1x Producto A (Presentación: X): $18.000 COP
+* 2x Producto B (Presentación: Y): $36.000 COP
+
+Subtotal: $54.000 COP
+Envío: $6.740 COP
+*TOTAL: $60.740 COP*
+
+*Datos de envío:*
+* Nombre: Nombre Apellido
+* Correo: cliente@dominio.com
+* Celular: +57 ### ### ####
+* Documento: CC ##########
+* Dirección: Calle X # Y-Z — Ciudad
+
+¿Confirmas que los datos están correctos para generar tu link de pago?
+
+Patrón canónico — cotización de envío:
+
+*Envío de tu pedido (N unidades) a Ciudad:*
+* Nx Producto (Presentación: X)
+
+* *Económica*: Carrier | $X.XXX | entrega DD/MM/YYYY
+* *Rápida*: Carrier | $Y.YYY | entrega DD/MM/YYYY
+
+¿Con cuál continuamos? (*Económica* o *Rápida*)
+
+Patrón canónico — listado de catálogo:
+
+*Jabón Artesanal de Coco* lo tenemos en:
+* 60g por *$18.000*
+* 100g por *$24.000*
+* 150g por *$32.000*
+
+¿Te interesa alguno en particular?
+
+Reglas de aplicación:
+- Cuando hay UN solo item, igual envuelve en sección con título en negrita.
+- Para respuestas conversacionales cortas (saludo, agradecimiento, micro-pregunta), prosa natural con `\n\n` entre ideas — no fuerces estructura cuando no aporta.
+- Bullets siempre con `* ` (asterisco + espacio). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
+- Si abres negrita con `*`, ciérrala con `*` en la misma línea. NUNCA dejes `*` huérfano (rompe el render).
 
 CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{variant_section}{kb_section}
@@ -2900,12 +3321,58 @@ def _humanize_name_in_text(text: str, contact_name: Optional[str], extracted_nam
 
 
 def _format_whatsapp_response_text(text: str) -> str:
+    """Normaliza el texto del LLM al formato visual canónico WhatsApp (rev. 77).
+
+    Decisión de canon de bullet (corregida tras consulta FAQ oficial):
+      WhatsApp dice textualmente:
+        "Listas con viñetas: Escribe un asterisco o guion seguido de espacio"
+        — https://faq.whatsapp.com/539178204879377
+      Por lo tanto el formato NATIVO es `* item` (asterisco + espacio). El cliente
+      WhatsApp lo renderiza como viñeta con indent automático y espaciado correcto.
+      El caracter `•` Unicode también se ve como bullet pero es solo texto plano
+      sin tratamiento especial del cliente.
+      Esta función normaliza `•`, `-`, `·`, `+` al inicio de línea hacia `* `
+      para usar el formato nativo de WhatsApp en todos los mensajes salientes.
+
+    Reglas aplicadas:
+      1. CRLF → LF + trim.
+      2. Markdown `**bold**` → `*bold*` (WhatsApp usa un solo asterisco para negrita).
+      3. Bullets `• `, `- `, `· `, `+ ` al inicio de línea → `* ` (formato nativo).
+      4. Después de `:` con bullet pegado → newline antes del bullet.
+      5. Bullet seguido inmediatamente de pregunta `¿` → línea en blanco entre.
+      6. Frase con `.!?` seguida de `¿` → línea en blanco entre.
+      7. 3+ saltos consecutivos colapsados a 2 (máximo respiro visual).
+      8. Citas `> texto` se preservan intactas.
+
+    No invento separadores: si el LLM ya devuelve estructura limpia, queda igual.
+    """
     if not text:
         return text
     formatted = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    formatted = re.sub(r":\s*•", ":\n•", formatted)
-    formatted = re.sub(r"(•[^\n]+)\s+(¿)", r"\1\n\n\2", formatted)
+
+    # 2. Markdown bold doble → simple (WhatsApp usa `*texto*`).
+    formatted = re.sub(r"\*\*([^\n*]+?)\*\*", r"*\1*", formatted)
+
+    # 3. Bullets variantes al inicio de línea → `* ` (formato nativo WhatsApp).
+    # Detecta `• `, `- `, `· `, `+ ` con espacio al inicio (con o sin sangría).
+    # NO incluimos `* ` en el patrón porque ya está en formato canónico.
+    # NO confunde con `*texto*` (bold inline) porque exige `\s+` después del marker.
+    formatted = re.sub(
+        r"(?m)^(\s*)[•\-\·\+]\s+(?=\S)",
+        r"\1* ",
+        formatted,
+    )
+
+    # 4. Asegurar newline antes de bullet pegado a `:` (cuando LLM olvida \n).
+    formatted = re.sub(r": +\* +(?=\S)", ":\n* ", formatted)
+
+    # 5. Bullet seguido de pregunta sin separación → párrafo aparte.
+    formatted = re.sub(r"(\*\s[^\n]+)\s+(¿)", r"\1\n\n\2", formatted)
+
+    # 6. Punto/exclamación/interrogación seguida de pregunta → párrafo aparte.
     formatted = re.sub(r"([.!?])\s+(¿)", r"\1\n\n\2", formatted)
+
+    # 7. Colapsar 3+ saltos consecutivos a 2 (un párrafo de respiro, no más).
     formatted = re.sub(r"\n{3,}", "\n\n", formatted)
     return formatted
 
@@ -2956,26 +3423,30 @@ async def build_and_run_orchestration(
 
         # ── 0.5 Resolución temprana: tenant + contacto + historial ────────────────
         # Necesario antes de los gates para personalizar respuestas y verificar estado.
+        # Rev. 71 — Saca columnas legacy (business_hours/cutoff_message/dispatch_lead_time)
+        # del SELECT. El horario textual se deriva de support_schedule;
+        # cutoff_message y dispatch_lead_time eran orphan (sin UI) y se moverán a KB envios.
         tenant_res = supabase.table("tenants").select(
-            "name, shipping_origin, store_type, social_links, store_locations, business_hours, "
-            "mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, "
-            "cutoff_message, dispatch_lead_time, escalation_role"
+            "name, nit, email_contacto, telefono_contacto, "
+            "shipping_origin, store_type, social_links, store_locations, "
+            "mision, vision, valores, tono_comunicacion, "
+            "support_schedule, after_hours_message, escalation_role"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
+        tenant_nit              = tenant_row.get("nit") or ""
+        tenant_email_contacto   = tenant_row.get("email_contacto") or ""
+        tenant_telefono_contacto= tenant_row.get("telefono_contacto") or ""
         tenant_shipping_origin  = tenant_row.get("shipping_origin") or {}
         tenant_store_type       = tenant_row.get("store_type") or "fisica"
         tenant_social_links     = tenant_row.get("social_links") or {}
         tenant_store_locations  = tenant_row.get("store_locations") or []
-        tenant_business_hours   = tenant_row.get("business_hours") or ""
         tenant_mision           = tenant_row.get("mision") or ""
         tenant_vision           = tenant_row.get("vision") or ""
         tenant_valores          = tenant_row.get("valores") or ""
         tenant_tono             = tenant_row.get("tono_comunicacion") or "amigable"
         tenant_support_schedule = tenant_row.get("support_schedule") or {}
         tenant_after_hours_msg  = tenant_row.get("after_hours_message") or ""
-        tenant_cutoff_msg       = tenant_row.get("cutoff_message") or ""
-        tenant_dispatch_lead    = tenant_row.get("dispatch_lead_time") or ""
         # Rev. 68 — escalation_role configurable por tenant (default 'asesor').
         # Se usa en mensajes de escalación al humano para alinear el término al
         # lenguaje de la marca (asesor / especialista / consultor / agente).
@@ -3259,28 +3730,30 @@ async def build_and_run_orchestration(
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
-        # No re-cotizar envío cuando ya estamos en flujo de recolección de datos.
-        # Razón: el cliente puede enviar texto que coincida con nombres de ciudad
-        # ("Cristian Camilo *Garzón* Tamayo" → ciudad Garzón, Huila) sin querer
-        # cambiar destino. El gate es CONTEXTUAL — no un diccionario de ciudades.
+        # Rev. 73 — Skip de shipping_quote_tool SOLO durante recolección activa
+        # de datos personales en ESTA conversación. Se eliminó el bypass por
+        # `consent_given` histórico que rompía el flujo del cliente conocido
+        # (log 2026-04-29 conv 615a9902): un cliente con consent de sesión vieja
+        # nunca llamaba al tool determinístico → el LLM alucinaba cotización.
         #
-        # Señales de recolección activa:
-        #   1. consent_given=True → ya pasamos consent, en NEEDS_EMAIL/NAME/DOCUMENT/DIRECTION.
-        #   2. último outbound fue la pregunta de consent → próximo inbound es
-        #      respuesta a consent (yes/no) o datos personales, NO ciudad.
+        # Señales válidas de recolección activa:
+        #   1. último outbound fue la pregunta de consent → próximo inbound es
+        #      respuesta a consent (yes/no), no ciudad.
+        #   2. último outbound fue una pregunta de email/nombre/documento/dirección
+        #      → el inbound es ese dato, no una nueva intención de cotizar.
         #
-        # Si el cliente legítimamente quiere cambiar destino debe usar correction
-        # explícita (GAP-1) o reabrir con "cambia el envío a Medellín".
-        _consent_given = bool(contact_record and contact_record.get("consent_given"))
+        # Si el cliente legítimamente quiere cambiar destino reabre con
+        # "cambia el envío a Medellín" (correction explícita, GAP-1).
         _last_oc_consent = _last_outbound_was_consent_question(history or [])
-        if _consent_given or _last_oc_consent:
+        _last_oc_data_request = _last_outbound_was_data_collection_question(history or [])
+        if _last_oc_consent or _last_oc_data_request:
             shipping_result = type(
                 "_NoOp", (),
                 {"handled": False, "response_text": None, "requires_human": False},
             )()
             logger.info(
-                "[SHIPPING_QUOTE][SKIP] consent_given=%s last_oc_consent=%s — no re-cotizar durante recolección",
-                _consent_given, _last_oc_consent,
+                "[SHIPPING_QUOTE][SKIP] last_oc_consent=%s last_oc_data=%s — recolección activa",
+                _last_oc_consent, _last_oc_data_request,
             )
         else:
             shipping_result = await handle_shipping_quote_if_applicable(
@@ -3380,6 +3853,15 @@ async def build_and_run_orchestration(
         # DB la conversación completa antes de degradar el FSM a NEEDS_SHIPPING_CITY.
         if not shipping_quoted:
             shipping_quoted = _has_shipping_been_quoted_in_conversation(supabase, conversation_id)
+        # Rev. 73 — si el cliente agregó productos DESPUÉS de la cotización,
+        # invalidar la cotización vigente (peso/dimensiones cambiaron). Forzar
+        # nueva pasada por shipping_quote_tool.
+        if shipping_quoted and _cart_changed_since_last_quote(history_for_prompt):
+            logger.info(
+                "[FSM] Carrito cambió post-cotización en conv=%s → invalidando shipping_quoted",
+                conversation_id,
+            )
+            shipping_quoted = False
         # Si ya cotizamos envío, el intent de compra persiste — _has_buying_intent
         # solo mira últimos 6 mensajes y se "pierde" en conversaciones largas
         # tras la captura de consent/email/name/document/address.
@@ -3554,14 +4036,17 @@ async def build_and_run_orchestration(
             tenant_store_type=tenant_store_type,
             tenant_social_links=tenant_social_links,
             tenant_store_locations=tenant_store_locations,
-            tenant_business_hours=tenant_business_hours,
+            tenant_support_schedule=tenant_support_schedule,
             tenant_mision=tenant_mision,
             tenant_vision=tenant_vision,
             tenant_valores=tenant_valores,
             tenant_tono=tenant_tono,
-            tenant_cutoff_msg=tenant_cutoff_msg,
-            tenant_dispatch_lead=tenant_dispatch_lead,
             tenant_escalation_role=tenant_escalation_role,
+            tenant_nit=tenant_nit,
+            tenant_email_contacto=tenant_email_contacto,
+            tenant_telefono_contacto=tenant_telefono_contacto,
+            tenant_after_hours_message=tenant_after_hours_msg,
+            tenant_is_outside_hours=_is_outside_support_hours(tenant_support_schedule),
             customer_context_block=customer_context_block,
         )
         user_context = _build_user_context(history, content)
@@ -3590,6 +4075,33 @@ async def build_and_run_orchestration(
             f"should_respond={parsed.should_respond} | "
             f"requires_human={parsed.requires_human}"
         )
+
+        # Rev. 71 — Append-only log de fuentes consumidas (auditabilidad operativa).
+        # Best-effort: si falla, no bloquea la respuesta al cliente.
+        try:
+            _bot_log_state = _resolve_display_state(
+                contact_record=contact_record,
+                history=history_for_fsm,
+                buying_intent=buying_intent,
+                shipping_quoted=shipping_quoted,
+            )
+            _log_bot_sources(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                fsm_state=_bot_log_state,
+                system_prompt=system_prompt,
+                kb_docs=kb_docs,
+                catalog_count=len(catalog or []),
+                customer_context_block=customer_context_block,
+                is_outside_hours=_is_outside_support_hours(tenant_support_schedule),
+                identity_present=bool(tenant_nit or tenant_email_contacto or tenant_telefono_contacto),
+                intent_detected=parsed.intent_detected,
+                requires_human=parsed.requires_human,
+            )
+        except Exception as _log_exc:
+            logger.warning("[BOT_LOG] Falló persistencia bot_source_log: %s", _log_exc)
 
         # Salvaguarda: si LLM pide takeover para saludo/off_topic, no escalar.
         # Confiamos en la respuesta de Gemini (response_text); si vino vacía, generamos
@@ -3838,7 +4350,34 @@ async def build_and_run_orchestration(
                 contact_record.get("name") if contact_record else None,
                 name_for_humanize,
             )
-            parsed.response_text = _format_whatsapp_response_text(parsed.response_text)
+
+            # Rev. 73 — Anti-alucinación transaccional. Detectar respuestas del
+            # LLM que afirman estado transaccional sin que un tool determinístico
+            # haya corrido. Si payment_link_result no fue producido pero el texto
+            # promete pedido/entrega/carrier específico, reemplazar por CTA.
+            _LIE_PHRASES = (
+                "ya seleccione el envio",
+                "ya seleccione tu envio",
+                "tu pedido sera entregado",
+                "tu pedido fue creado",
+                "ya genere tu pedido",
+                "confirmare tu compra",
+                "tu compra ha sido confirmada",
+                "tu pedido va en camino",
+                "tu pedido esta confirmado",
+                "ya procese tu pedido",
+            )
+            _resp_norm = _normalize_text(parsed.response_text or "")
+            if not payment_link_result and any(p in _resp_norm for p in _LIE_PHRASES):
+                logger.warning(
+                    "[ANTI_HALLU] LLM intentó confirmar pedido sin payment_link en conv=%s. "
+                    "Texto original: %r",
+                    conversation_id, (parsed.response_text or "")[:200],
+                )
+                parsed.response_text = (
+                    "Antes de confirmarte el pedido necesito tu visto bueno. "
+                    "¿Confirmas para generar tu link de pago?"
+                )
 
             # Bug 30 — sincronizar texto y status. Si el response_text promete
             # handover ("te paso con un asesor") pero requires_human=False, el

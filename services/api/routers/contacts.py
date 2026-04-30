@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client
+from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from dependencies.contact_validators import (
     DOCUMENT_TYPES_CO,
@@ -148,6 +149,7 @@ async def list_contacts(
 
 
 @router.post("/", response_model=dict, status_code=201)
+@audit_log(entity_type="contact", action="created")
 async def create_contact(
     contact: ContactCreate,
     request: Request,
@@ -236,6 +238,7 @@ async def create_contact(
 
 
 @router.patch("/{contact_id}", response_model=dict)
+@audit_log(entity_type="contact", action="updated")
 async def patch_contact(
     contact_id: str,
     patch: ContactPatch,
@@ -347,9 +350,11 @@ class ConsentRequest(BaseModel):
 
 
 @router.post("/{contact_id}/consent", response_model=dict)
+@audit_log(entity_type="contact", action="consent_recorded")
 async def record_consent(
     contact_id: str,
     body: ConsentRequest,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
@@ -426,8 +431,10 @@ async def record_consent(
 # ─── Soft-delete con anonimización (Q3: retención Ley 1581) ───────────────────────
 
 @router.delete("/{contact_id}", response_model=dict)
+@audit_log(entity_type="contact", action="deleted")
 async def delete_contact(
     contact_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),

@@ -14,9 +14,10 @@ Endpoints:
 """
 import logging
 from typing import Literal, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from supabase import Client
+from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_owner_role, require_write_role
 from vault_helper import VaultHelper
 
@@ -49,12 +50,15 @@ class SocialLinks(BaseModel):
 
 
 class StoreLocation(BaseModel):
-    name:   Optional[str] = Field(default=None, max_length=80)
-    city:   Optional[str] = None
-    state:  Optional[str] = None
-    street: Optional[str] = None
-    phone:  Optional[str] = Field(default=None, pattern=r'^[0-9]{10}$')
-    email:  Optional[str] = Field(default=None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    name:       Optional[str]  = Field(default=None, max_length=80)
+    city:       Optional[str]  = None
+    state:      Optional[str]  = None
+    street:     Optional[str]  = None
+    phone:      Optional[str]  = Field(default=None, pattern=r'^[0-9]{10}$')
+    email:      Optional[str]  = Field(default=None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    # Rev. 71 — sede principal: el bot la menciona primero y la rotula como
+    # "(principal)" en el system prompt. Solo una sede debe tener is_primary=True.
+    is_primary: Optional[bool] = None
 
 
 class TenantPatch(BaseModel):
@@ -64,7 +68,6 @@ class TenantPatch(BaseModel):
     store_type:         Optional[Literal["fisica", "virtual", "fisica_virtual"]] = None
     social_links:       Optional[SocialLinks] = None
     store_locations:    Optional[list[StoreLocation]] = None
-    business_hours:     Optional[str] = None
     # Identidad legal
     nit:                Optional[str] = None
     email_contacto:     Optional[str] = Field(
@@ -82,7 +85,6 @@ class TenantPatch(BaseModel):
     # Horario de soporte y mensajes automáticos
     support_schedule:    Optional[dict] = None
     after_hours_message: Optional[str] = None
-    cutoff_message:      Optional[str] = None
 
 
 class TeamRolePatch(BaseModel):
@@ -110,10 +112,10 @@ async def get_tenant(
         result = (
             supabase.table("tenants")
             .select("id, name, status, meta_waba_id, shipping_origin, logo_url, "
-                    "store_type, social_links, store_locations, business_hours, "
+                    "store_type, social_links, store_locations, "
                     "nit, email_contacto, telefono_contacto, low_stock_threshold, "
                     "mision, vision, valores, tono_comunicacion, "
-                    "support_schedule, after_hours_message, cutoff_message, created_at")
+                    "support_schedule, after_hours_message, escalation_role, created_at")
             .eq("id", tenant_id)
             .single()
             .execute()
@@ -129,16 +131,19 @@ async def get_tenant(
 
 
 @router.patch("/tenant", response_model=dict)
+@audit_log(entity_type="settings", action="updated")
 async def patch_tenant(
     patch: TenantPatch,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_owner_role),
 ):
     """Actualiza campos del tenant. Solo owner.
     Soporta: name, meta_waba_id, shipping_origin, store_type, social_links,
-    store_locations, business_hours, nit, email_contacto, telefono_contacto,
-    low_stock_threshold."""
+    store_locations, nit, email_contacto, telefono_contacto,
+    low_stock_threshold, support_schedule, after_hours_message, escalation_role,
+    mision, vision, valores, tono_comunicacion."""
     try:
         raw = patch.model_dump()
         # Serializar objetos Pydantic anidados a dict
@@ -189,9 +194,11 @@ async def get_team(
 
 
 @router.patch("/team/{member_user_id}", response_model=dict)
+@audit_log(entity_type="team_member", action="role_changed")
 async def patch_team_member(
     member_user_id: str,
     patch: TeamRolePatch,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_owner_role),
@@ -221,8 +228,10 @@ async def patch_team_member(
 
 
 @router.delete("/team/{member_user_id}", status_code=204)
+@audit_log(entity_type="team_member", action="deleted")
 async def remove_team_member(
     member_user_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_owner_role),

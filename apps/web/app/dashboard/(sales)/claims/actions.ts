@@ -2,6 +2,17 @@
 
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { CORE_API_URL } from '@/lib/runtime-env'
+
+// Rev. 72 — los claims ahora pasan por el router API (cierra drift D1).
+// Antes este archivo escribía directo a Supabase desde RSC, sin RBAC ni audit.
+// El router /api/v1/claims valida tenant, RBAC, persiste y dispara audit_log.
+
+async function getToken(): Promise<string> {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token ?? ''
+}
 
 export async function createClaim(data: {
   order_id: string
@@ -10,56 +21,56 @@ export async function createClaim(data: {
   requested_amount?: number
   resolution_notes?: string
 }) {
-  const supabase = createClient()
-  
-  const { data: userData, error: userError } = await supabase.auth.getUser()
-  if (userError || !userData.user) return { error: 'Unauthorized' }
-  const tenantId = userData.user.app_metadata.tenant_id
+  const token = await getToken()
+  if (!token) return { error: 'Unauthorized' }
 
-  const payload: any = {
-    tenant_id: tenantId,
-    order_id: data.order_id,
-    customer_id: data.customer_id,
-    reason: data.reason,
-    status: 'open',
+  try {
+    const body: Record<string, unknown> = {
+      order_id: data.order_id,
+      customer_id: data.customer_id,
+      reason: data.reason,
+    }
+    if (data.requested_amount !== undefined) body.requested_amount = data.requested_amount
+    if (data.resolution_notes) body.resolution_notes = data.resolution_notes
+
+    const res = await fetch(`${CORE_API_URL}/api/v1/claims/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      return { error: detail || res.statusText }
+    }
+    revalidatePath('/dashboard/claims')
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Error creando reclamo'
+    return { error: msg }
   }
-  if (data.requested_amount) payload.requested_amount = data.requested_amount
-  if (data.resolution_notes) payload.resolution_notes = data.resolution_notes
-
-  const { error } = await supabase.from('claims').insert(payload)
-  
-  if (error) {
-    console.error('Error creating claim:', error)
-    return { error: error.message }
-  }
-
-  revalidatePath('/dashboard/claims')
-  return { success: true }
 }
 
 export async function updateClaimStatus(claimId: string, status: string, notes?: string) {
-  const supabase = createClient()
+  const token = await getToken()
+  if (!token) return { error: 'Unauthorized' }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser()
-  if (userError || !userData.user) return { error: 'Unauthorized' }
-  const meta = userData.user.app_metadata as { tenant_id?: string; role?: string }
-  if (!['owner', 'manager'].includes(meta.role ?? '')) return { error: 'Sin permisos para resolver reclamos' }
-  const tenantId = meta.tenant_id
+  try {
+    const body: Record<string, unknown> = { status }
+    if (notes !== undefined) body.resolution_notes = notes
 
-  const updatePayload: any = { status }
-  if (notes !== undefined) updatePayload.resolution_notes = notes
-
-  const { error } = await supabase
-    .from('claims')
-    .update(updatePayload)
-    .eq('id', claimId)
-    .eq('tenant_id', tenantId)
-
-  if (error) {
-    console.error('Error updating claim:', error)
-    return { error: error.message }
+    const res = await fetch(`${CORE_API_URL}/api/v1/claims/${claimId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      return { error: detail || res.statusText }
+    }
+    revalidatePath('/dashboard/claims')
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Error actualizando reclamo'
+    return { error: msg }
   }
-
-  revalidatePath('/dashboard/claims')
-  return { success: true }
 }

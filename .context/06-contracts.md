@@ -245,3 +245,96 @@ Reglas:
 - `20260428000001_messages_ack_pending_status.sql` — agrega `ack_pending` al CHECK constraint.
 - `20260428000002_messages_media_id.sql` — columnas `media_id` + `media_mime`.
 - `20260428000003_archive_orphan_conversations.sql` — `archived_at` + index parcial + backfill 90 días.
+
+## 16) Coherencia core del system prompt (rev. 71)
+
+**Fuentes que consume el bot por mensaje** (orden de inyección al system prompt):
+
+1. **Identidad y comportamiento**: `ai_agents.name` + `ai_agents.role_description`. Default DB `'Vendedor Oficial'` (alineado con readiness check).
+2. **Tono**: `tenants.tono_comunicacion` → bloque pre-definido en `_TONO_INSTRUCCIONES` (5 estilos).
+3. **Cliente conocido**: `_load_customer_context_block` (lazy mode rev. 69) — pedidos activos + reclamos abiertos + saludo por primer nombre si `consent_given=true`.
+4. **Carrito previo cancelado**: `_load_cart_recovery_block` (rev. 70) si trigger lazy + última `orders.status='cancelled'` <`CART_RECOVERY_LOOKBACK_DAYS`.
+5. **SOBRE LA TIENDA** (`_build_store_info_section` rev. 71):
+   - Modo de operación explícito: presencial / virtual / mixta (línea fija al inicio).
+   - Sedes con `is_primary` rotulada y ordenada primero.
+   - Horario derivado de `tenants.support_schedule` jsonb vía `_format_support_schedule_text` (ISO 1-7).
+   - Misión / visión / valores.
+   - Identidad legal: `nit`, `email_contacto`, `telefono_contacto` bajo guard "úsalos SOLO si el cliente lo pregunta".
+6. **CONTEXTO TEMPORAL** (rev. 71): si `_is_outside_support_hours(support_schedule)=true`, instrucción de seguir atendiendo PERO no decir "te conecto ahora" — registrar solicitud y prometer respuesta del próximo turno. `after_hours_message` como referencia de tono (no copy literal).
+7. **Catálogo**: condicional por FSM state.
+8. **KB pre-RAG** (rev. 71):
+   - RAG semántico (pgvector top-3, threshold 0.5).
+   - Boost determinístico: regex léxico detecta categorías triggered (`pagos|envios|politicas|productos|negocio|garantia`).
+   - Si triggered y RAG no la rankeó → `_fetch_top_doc_by_category` agrega top-1.
+   - Si triggered y categoría VACÍA → `_missing_category_marker` (con `⚠️`) instruye "NO INVENTES — escala con cordialidad".
+9. **CONTEXTO VERIFICADO**: `_build_verified_order_context` en READY_FOR_SUMMARY (totales desde catálogo DB).
+
+**KB categorías canónicas:** `faq, negocio, politicas, productos, envios, pagos`. Plurales canónicos rev. 71.
+
+**`bot_source_log` (rev. 71, IH pendiente)** — append-only por interacción. Flags `injected_*`, `kb_categories_used[]`, `kb_missing_categories[]`, `fsm_state`, `intent_detected`, `prompt_chars`. TTL 30d, RLS por tenant. Sin PII.
+
+**Readiness checks Tenant Console (10, rev. 71):**
+1. Identidad del negocio · 2. Tono · 3. Sedes y horario · 4. Catálogo · 5. KB activo · 6. Indexación · 7. Agente IA · 8. **Identidad legal NIT/email/tel** (NUEVO) · 9. **KB cobertura crítica politicas/envios/pagos** (NUEVO) · 10. Pasarela y courier.
+
+**Columnas legacy deprecadas (rev. 71, DROP pendiente IH `20260501000000`):**
+- `tenants.business_hours` (TEXT) → reemplazada por derivación de `support_schedule`.
+- `tenants.cutoff_message` (TEXT) — orphan. Migra a KB envios.
+- `tenants.dispatch_lead_time` (TEXT) — orphan. ETA viene de carrier.
+
+## 17) Routers nuevos y audit_log decorator (rev. 72)
+
+**Cierre arquitectural Front↔API↔DB.** Se agregaron 3 routers que antes
+eran bypass desde Server Actions de Next.js a Supabase directo, y un decorator
+de audit que populaba la tabla `audit_log` (vacía hasta rev. 71).
+
+### Endpoints nuevos
+
+**`/api/v1/claims`** — `services/api/routers/claims.py`
+- `GET /` (filters: status, customer_id, order_id) · `POST /` · `GET /{id}` · `PATCH /{id}` · `POST /{id}/resolve`
+- Estados: `open|in_progress|resolved|closed|cancelled`
+- RBAC: read=all, write=owner+manager.
+- Coexiste con orchestrator que también inserta claims via service_role.
+
+**`/api/v1/purchases`** — `services/api/routers/purchases.py`
+- `GET /suppliers` · `POST /suppliers`
+- `GET /` · `POST /` · `GET /{id}` · `POST /{id}/cancel` · `POST /{id}/receive`
+- Estados PO: `ordered → received | cancelled`
+- WAC determinístico al recibir: `((max(0,old_stock)*old_cost) + (po_qty*po_cost)) / (max(0,old_stock) + po_qty)`
+- Idempotente: el UPDATE 'ordered'→'received' filtra por status para evitar doble recibo.
+
+**`/api/v1/knowledge-base`** — `services/api/routers/knowledge_base.py`
+- `GET /` (filters: category, is_active) · `POST /` · `GET /{id}` · `PATCH /{id}` · `DELETE /{id}` · `POST /{id}/reindex`
+- Embedding server-side via `dependencies/embeddings.py` (Gemini 3072-dim, fallback a `text-embedding-004`).
+- Cap por tenant: 30 docs.
+- `GEMINI_API_KEY` requerida en el API service (movida desde el web service).
+- Si embedding falla, doc se persiste con `embedding=NULL` y banner UI muestra "indexing pending"; reintento con `/{id}/reindex`.
+
+### `@audit_log` decorator — `services/api/dependencies/audit.py`
+
+Patrón:
+```python
+@router.post("/", response_model=dict, status_code=201)
+@audit_log(entity_type="order", action="created")
+async def create_order(
+    order: OrderCreate,
+    request: Request,                                 # requerido para extraer JWT
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    ...
+):
+    ...
+```
+
+- Se ejecuta DESPUÉS del handler (no antes). Si el handler lanza excepción, NO se audita.
+- Si el insert al `audit_log` falla, el handler retorna OK (fire-and-forget con log warning).
+- `entity_id` se extrae en este orden: path params `*_id` (excluye `tenant_id`/`user_id`) → `result.id` → `result['id']` → None.
+- `payload`: snapshot del result (Pydantic `.model_dump(mode='json')` o dict simple).
+- Aplicado a: orders (3), contacts (4), products (3) + variations (3), claims (3), purchases (5), knowledge_base (4), settings (3), team_member (2), integrations (3) = 17+ endpoints.
+
+Acciones canónicas: `created, updated, deleted, status_changed, role_changed, connected, disconnected, payment_link_created, consent_recorded`.
+
+Entity types canónicos: `order, contact, product, variation, claim, purchase_order, supplier, kb_doc, settings, integration, team_member`.
+
+### Política rev. 72: las migraciones SQL NO son fuente de verdad
+
+Ver `.context/05-doc-policy.md`. La fuente operacional es DB live + código vivo + `.context/07-schema-canonical.md` (regenerable). Tests `tests/test_coherence_pact.py` validan paridad Pydantic↔DB.

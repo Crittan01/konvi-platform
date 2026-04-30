@@ -24,11 +24,24 @@ interface Conversation {
   last_read_at?: string | null  // A2: marca de lectura del operador actual
 }
 
+// Rev. 72 — content_type tipado (cierra drift M2). Antes era `string` libre,
+// el render condicional podía silenciosamente romperse con valores nuevos.
+// 'context_snapshot' es interno (snapshots del orchestrator); el filtro `.neq` lo excluye.
+type MessageContentType =
+  | 'text'
+  | 'image'
+  | 'audio'
+  | 'video'
+  | 'document'
+  | 'sticker'
+  | 'location'
+  | 'context_snapshot'
+
 interface Message {
   id: string
   direction: 'inbound' | 'outbound'
   content: string
-  content_type: string
+  content_type: MessageContentType
   media_url?: string | null
   created_at: string
   processed: boolean
