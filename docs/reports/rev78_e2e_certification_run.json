@@ -1,0 +1,115 @@
+[
+  {
+    "number": 1,
+    "name": "Carrito + volumetría",
+    "status": "PASS",
+    "message": "2 ítems resueltos (qtys=[2, 1]), peso total 0.350 kg",
+    "evidence": {
+      "items_count": 2,
+      "quantities": [
+        2,
+        1
+      ],
+      "total_weight_kg": 0.35
+    },
+    "error": null
+  },
+  {
+    "number": 2,
+    "name": "Soft-reserve",
+    "status": "PASS",
+    "message": "RPC F1 callable; 0 reservas activas, sin staleness",
+    "evidence": {
+      "active_total": 0,
+      "rpc_callable": true
+    },
+    "error": null
+  },
+  {
+    "number": 3,
+    "name": "Captura + legal",
+    "status": "PASS",
+    "message": "Las 10 columnas de captura/legal existen en `contacts`",
+    "evidence": {
+      "columns_verified": [
+        "consent_given",
+        "consent_given_at",
+        "consent_text_version",
+        "consent_revoked_at",
+        "consent_evidence",
+        "email",
+        "document_type",
+        "document_number",
+        "address",
+        "deleted_at"
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 4,
+    "name": "Wompi gateway",
+    "status": "PASS",
+    "message": "customer_data prepoblado con 6 campos válidos",
+    "evidence": {
+      "keys": [
+        "email",
+        "full_name",
+        "legal_id",
+        "legal_id_type",
+        "phone_number",
+        "phone_number_prefix"
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 5,
+    "name": "RAG / KB",
+    "status": "PASS",
+    "message": "Cita de fuentes solo se inyecta cuando hay docs reales",
+    "evidence": {
+      "real_doc_has_citation": true,
+      "marker_only_skips": true
+    },
+    "error": null
+  },
+  {
+    "number": 6,
+    "name": "UI / mensajería",
+    "status": "PASS",
+    "message": "0 ghost messages en últimos 3 outbound text",
+    "evidence": {
+      "sample_size": 3,
+      "text_outbound": 3
+    },
+    "error": null
+  },
+  {
+    "number": 7,
+    "name": "Envia logística",
+    "status": "PASS",
+    "message": "EnviaClient expone 6 métodos requeridos (rates + label + tracking)",
+    "evidence": {
+      "methods_present": [
+        "get_rates",
+        "generate_label",
+        "track_shipments",
+        "schedule_pickup",
+        "cancel_shipment",
+        "get_available_carriers"
+      ]
+    },
+    "error": null
+  },
+  {
+    "number": 8,
+    "name": "Multimodal",
+    "status": "PASS",
+    "message": "image_send_tool expone handler de petición de imagen",
+    "evidence": {
+      "handler_present": true
+    },
+    "error": null
+  }
+]
