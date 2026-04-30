@@ -3610,6 +3610,22 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 - Cuando hay UN solo item, igual envuelve en sección con título en negrita.
 - LISTAS DE 3+ ÍTEMS → SIEMPRE estructura con bullets `* ` y agrupa por categoría con título en negrita. NO uses prosa plana ("Tenemos X, Y, Z y también A, B, C") cuando hay categorías o múltiples items — eso es plano y poco legible.
 - Respuestas CORTAS (1-2 oraciones, saludo, agradecimiento) → prosa natural OK.
+- LISTADO TRUNCADO (rev. 90): cuando muestras varias categorías de productos (ej. cliente pregunta "qué tienen"), por cada categoría NO listes más de 3 ítems. Si la categoría tiene N>3, agrega un 4to ítem en cursiva con el conteo restante: `* _y N-3 más..._`. Esto evita abrumar al cliente y crear sensación falsa de "esos son TODOS los productos" cuando en realidad hay más. Patrón:
+
+    *Aceites vegetales:*
+    * Almendras Dulces
+    * Argán
+    * Coco Virgen
+    * _y 1 más..._
+
+    *Jabones artesanales:*
+    * Avena y Miel
+    * Coco
+    * Lavanda
+    * _y 1 más..._
+
+  Si listas UNA SOLA categoría (cliente preguntó específico "¿qué jabones tienen?"), puedes mostrar hasta 5. Si hay más, mismo patrón "y N más".
+
 - Bullets siempre con `* ` (asterisco + ESPACIO + texto). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
 - Si abres negrita con `*`, ciérrala con `*` en la misma línea. NUNCA dejes `*` huérfano (rompe el render).
 - ❌ INCORRECTO (bullet sin espacio, malformado):
@@ -4297,7 +4313,14 @@ async def build_and_run_orchestration(
         # "cambia el envío a Medellín" (correction explícita, GAP-1).
         _last_oc_consent = _last_outbound_was_consent_question(history or [])
         _last_oc_data_request = _last_outbound_was_data_collection_question(history or [])
-        if _last_oc_consent or _last_oc_data_request:
+        # Rev. 90: el SKIP por "recolección activa" no debe bloquear cambios
+        # explícitos de ubicación de envío. Si el cliente claramente pide
+        # cambiar destino ("cambia el envío a Medellín"), permitir el flow
+        # de shipping aunque el último outbound haya sido consent/data.
+        _explicit_location_change = _detect_shipping_location_change(
+            content, history or []
+        )
+        if (_last_oc_consent or _last_oc_data_request) and not _explicit_location_change:
             shipping_result = type(
                 "_NoOp", (),
                 {"handled": False, "response_text": None, "requires_human": False},
@@ -4310,7 +4333,9 @@ async def build_and_run_orchestration(
             # Rev. 87: si el cliente pide cambiar ciudad post-cotización,
             # reescribimos el query para que el shipping_quote_tool lo
             # detecte como followup de cotización a la nueva ciudad.
-            _new_city = _detect_shipping_location_change(content, history or [])
+            # `_new_city` viene del detector (calculado arriba en
+            # `_explicit_location_change`).
+            _new_city = _explicit_location_change
             _query_for_shipping = (
                 f"cotizar envío a {_new_city}"
                 if _new_city else content
