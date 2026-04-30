@@ -1657,6 +1657,105 @@ def _last_outbound_was_order_confirmation_question(history: list[dict]) -> bool:
     return False
 
 
+def _detect_shipping_location_change(text: str, history: list[dict]) -> Optional[str]:
+    """Rev. 87 — Detecta intent de cambiar ubicación de envío post-cotización.
+
+    "Ubicación" es deliberadamente amplio: cubre cambios de ciudad,
+    departamento, o incluso una dirección específica dentro de la misma
+    ciudad ("envíalo a la oficina en Bogotá") siempre que mencione una
+    ciudad reconocible.
+
+    Trigger:
+        • Texto del cliente contiene frase de cambio de envío.
+        • History reciente tiene al menos un outbound del bot con
+          cotización previa (precios, transportadora).
+        • Se menciona explícitamente una ciudad colombiana.
+
+    Returns: nombre de ciudad detectada (Title Case) o None.
+
+    Casos cubiertos:
+        "cambia el envío a Medellín"            → "Medellín"
+        "envíalo a la oficina en Cali"          → "Cali"
+        "mejor a Bucaramanga"                    → "Bucaramanga"
+        "ya no a Bogotá, mándalo a Pereira"      → "Pereira"
+        "cambia la ubicación a Manizales"        → "Manizales"
+    """
+    if not text or not history:
+        return None
+    normalized = _normalize_text_simple(text).lower()
+
+    # Frase de cambio (incluye ubicación / dirección, no solo "ciudad")
+    change_phrases = (
+        "cambia el envio", "cambiar el envio", "cambia envio",
+        "cambia la ubicacion", "cambiar ubicacion", "cambia la direccion",
+        "cambiar la direccion", "ya no a", "mejor a ", "mejor envia",
+        "envia a ", "enviar a ", "envialo a ", "envialo en",
+        "mandalo a", "mandar a ", "enviar mejor a",
+        "cambia la ciudad", "cambiar ciudad",
+    )
+    if not any(phrase in normalized for phrase in change_phrases):
+        return None
+
+    # History debe tener cotización previa (precios o transportadora)
+    has_prior_quote = False
+    for msg in history[-10:]:
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content_norm = _normalize_text_simple(str(msg.get("content") or "")).lower()
+        if any(k in content_norm for k in ("$", "transportadora", "envio:", "envio a ",
+                                            "economica", "rapida", "servientrega",
+                                            "deprisa", "coordinadora")):
+            has_prior_quote = True
+            break
+    if not has_prior_quote:
+        return None
+
+    # Extraer ciudad mencionada. Si el cliente dice "ya no a Bogotá, mándalo
+    # a Pereira", queremos Pereira (la última mencionada, no la primera).
+    cities = (
+        "bogota", "medellin", "cali", "barranquilla", "cartagena",
+        "bucaramanga", "pereira", "manizales", "ibague", "santa marta",
+        "cucuta", "monteria", "villavicencio", "pasto", "neiva", "armenia",
+        "tunja", "popayan", "valledupar", "sincelejo", "riohacha",
+    )
+    last_match: Optional[str] = None
+    last_pos = -1
+    for city in cities:
+        pos = normalized.rfind(city)
+        if pos > last_pos:
+            last_pos = pos
+            last_match = city
+    return last_match.title() if last_match else None
+
+
+def _truncate_at_first_question(text: str) -> str:
+    """Rev. 87 — Trunca el texto al primer signo de pregunta de cierre,
+    pero conservando el bloque informativo previo.
+
+    Política UX: el bot debe hacer 1 pregunta por turno para no abrumar.
+    Si el LLM produjo "Listo, X. ¿A qué ciudad? ¿Qué presentación?"
+    devolvemos solo "Listo, X. ¿A qué ciudad?" — la segunda pregunta
+    se descarta porque será regenerada en el próximo turno cuando el
+    cliente responda.
+
+    Implementación: encuentra la primera "?" después de un signo "¿"
+    o el primer "?" si no hay "¿" abridor. Trunca después.
+    """
+    if not text:
+        return text
+    # Buscar la primera pregunta completa (¿...? o ...?).
+    closing_q = text.find("?")
+    if closing_q < 0:
+        return text
+    # Conservar todo hasta e incluyendo la primera "?".
+    truncated = text[: closing_q + 1].rstrip()
+    # Si por algún motivo el corte deja la frase sin un signo de apertura
+    # adecuado, devolver el original (mejor algo largo que algo roto).
+    if not truncated:
+        return text
+    return truncated
+
+
 def _detect_building_type_from_text(text: str) -> Optional[str]:
     """Rev. 86 — Si el LLM olvida setear building_type pero el cliente
     menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa' en el
@@ -4106,11 +4205,24 @@ async def build_and_run_orchestration(
                 _last_oc_consent, _last_oc_data_request,
             )
         else:
+            # Rev. 87: si el cliente pide cambiar ciudad post-cotización,
+            # reescribimos el query para que el shipping_quote_tool lo
+            # detecte como followup de cotización a la nueva ciudad.
+            _new_city = _detect_shipping_location_change(content, history or [])
+            _query_for_shipping = (
+                f"cotizar envío a {_new_city}"
+                if _new_city else content
+            )
+            if _new_city:
+                logger.info(
+                    "[SHIPPING_LOCATION_CHANGE] cliente cambió a %s — re-quote forzado",
+                    _new_city,
+                )
             shipping_result = await handle_shipping_quote_if_applicable(
                 supabase=supabase,
                 tenant_id=tenant_id,
                 conversation_id=conversation_id,
-                query_text=content,
+                query_text=_query_for_shipping,
             )
         if shipping_result.handled:
             if shipping_result.response_text:
@@ -4703,6 +4815,57 @@ async def build_and_run_orchestration(
             )
             return
 
+        # ── 6.99 Safety net rev. 87: response_text vacío después de TODO ──────
+        # Si llegamos aquí con should_respond=True pero response_text vacío
+        # o whitespace-only, es bug del LLM (truncó output, JSON malformado,
+        # cascade degraded mal-parseada). En vez de quedar mudo, generamos
+        # respuesta determinística según el FSM state actual.
+        if parsed.should_respond and (not parsed.response_text or not parsed.response_text.strip()):
+            try:
+                _state = _resolve_display_state(
+                    contact_record=contact_record,
+                    history=history_for_fsm,
+                    buying_intent=buying_intent,
+                    shipping_quoted=shipping_quoted,
+                )
+            except Exception:
+                _state = None
+            if _state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
+                          "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}:
+                # Generar prompt determinístico según FSM
+                fallback = _build_next_data_request_prompt(
+                    contact_record or {"name": None, "email": None,
+                                       "document_type": None, "document_number": None,
+                                       "address": None, "consent_given": False}
+                )
+                parsed.response_text = fallback
+                logger.warning(
+                    "[SAFETY_NET] response_text vacío con state=%s — fallback determinístico",
+                    _state,
+                )
+            else:
+                # Genérico cordial
+                parsed.response_text = (
+                    "Disculpa, déjame procesar eso un momento. ¿Puedes "
+                    "repetirme tu última solicitud o indicarme cómo continuar?"
+                )
+                logger.warning(
+                    "[SAFETY_NET] response_text vacío sin state transaccional — fallback genérico",
+                )
+
+        # ── 6.999 Post-process rev. 87: 1 pregunta por turno ──────────────────
+        # Si el LLM produjo 2+ "?" en la respuesta, truncar al primer signo
+        # de cierre conservando el primer bloque coherente. Evita
+        # interrogatorios "¿X? ¿Y?" que sobrecargan al cliente.
+        if parsed.response_text and parsed.response_text.count("?") >= 2:
+            _truncated = _truncate_at_first_question(parsed.response_text)
+            if _truncated != parsed.response_text:
+                logger.info(
+                    "[1Q_TURN] respuesta tenía %d preguntas, trunqué al primero",
+                    parsed.response_text.count("?"),
+                )
+                parsed.response_text = _truncated
+
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
         if parsed.should_respond and parsed.response_text:
             # Bug 16 — Gate "compras previas?": si el cliente expresa reclamo
@@ -4764,6 +4927,19 @@ async def build_and_run_orchestration(
                 if isinstance(parsed.extracted_direction, dict) and any(
                     v for v in parsed.extracted_direction.values() if v
                 ):
+                    # Rev. 87 (P4 — S12 fix): si el LLM extrajo address pero
+                    # NO seteó building_type, inferirlo del texto del cliente.
+                    # Garantiza que conjuntos/edificios sean detectados y el
+                    # FSM exija torre/apto correctamente.
+                    if not parsed.extracted_direction.get("building_type"):
+                        _inferred_bt = _detect_building_type_from_text(content or "")
+                        if _inferred_bt:
+                            parsed.extracted_direction["building_type"] = _inferred_bt
+                            logger.info(
+                                "[BUILDING_TYPE_INFER] LLM omitió building_type; "
+                                "inferido '%s' del texto del cliente",
+                                _inferred_bt,
+                            )
                     _sim_contact["address"] = _merge_address_data(
                         _sim_contact.get("address"), parsed.extracted_direction
                     )
