@@ -40,10 +40,14 @@ CONVERSATION_WINDOW_HOURS = int(os.getenv("CONVERSATION_WINDOW_HOURS", "24"))
 # ── Consentimiento Ley 1581 de 2012 ──────────────────────────────────────────
 CONSENT_TEXT_VERSION = "v2026-04"
 CONSENT_QUESTION_TEMPLATE = (
-    "Para continuar con tu pedido necesito guardar tus datos personales "
-    "(nombre, correo, documento y dirección) y así procesar el envío.\n\n"
-    "Si en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n"
-    "¿Me autorizas?"
+    # Rev. 89.b — UX cordial, action-first. Cumple Habeas Data Colombia
+    # (consent previo + expreso + informado + revocable). Aprobada por
+    # el usuario en sesión rev. 89.
+    "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te "
+    "pediré algunos datos (nombre, dirección, etc.) para esta compra "
+    "y futuros pedidos.\n\n"
+    "Si en algún momento quieres que los borre, solo dímelo. 🙏\n\n"
+    "¿Estás de acuerdo?"
 )
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
     "Listo, te genero el link de pago.\n\n"
@@ -2124,6 +2128,18 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
     state = _determine_transactional_state(contact_record)
     first_name = _extract_first_name(contact_record.get("name") if isinstance(contact_record, dict) else None)
     name_prefix = f", {first_name}" if first_name else ""
+    if state == "NEEDS_CONSENT":
+        # Rev. 89.b — UX cordial cumpliendo Habeas Data Colombia (Ley
+        # 1581/2012): consent previo + expreso + informado + revocable.
+        # Tono action-first ("voy a continuar") evita que el cliente
+        # perciba la solicitud como riesgosa y abandone el carrito.
+        return (
+            "¡Perfecto! Voy a continuar con tu pedido. Con tu "
+            "autorización te pediré algunos datos (nombre, dirección, "
+            "etc.) para esta compra y futuros pedidos.\n\n"
+            "Si en algún momento quieres que los borre, solo dímelo. 🙏\n\n"
+            "¿Estás de acuerdo?"
+        )
     if state == "NEEDS_EMAIL":
         return f"¡Perfecto{name_prefix}! ¿Cuál es tu correo electrónico?"
     if state == "NEEDS_NAME":
@@ -3502,6 +3518,20 @@ Cuándo usar citas (`> texto`) — REGLA ESTRICTA (rev. 88):
        > Pedido pendiente del 22/04: 2x Coco 60g, 1x Lavanda 150g.
        ¿Lo retomamos?
 
+  4. NOTA / ACLARACIÓN contextual que el cliente debe ver pero no es
+     la respuesta principal (rev. 89 — sugerencia del usuario). Ej:
+       Tu link de pago es válido por 30 minutos.
+
+       > Nota: si el link expira, te genero uno nuevo cuando me avises.
+
+     o:
+       Envío estándar: $6.740 COP, entrega 1-2 días hábiles.
+
+       > Nota: tiempos pueden variar en festivos.
+
+     UNA sola línea de Nota, máximo. Si necesitas más texto, usa cursiva
+     `_aclaración_` en lugar de cita.
+
 ❌ NO USAR `> texto` en estos casos:
 
   • Resúmenes finales — los datos del cliente van como bullets `*` en el
@@ -4421,6 +4451,42 @@ async def build_and_run_orchestration(
             logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
             return
 
+        # ── 2.55 Sub-flow UPDATE de datos (rev. 89) ───────────────────────────
+        # Cliente conocido, en pre-confirmación, pide cambiar UN dato puntual
+        # (dirección/correo/celular). Sub-flow determinístico que pregunta
+        # SOLO ese campo. Evita volver al FSM completo y al LLM se le quita
+        # esa decisión.
+        _update_intent = _detect_data_update_intent(content)
+        if _update_intent and (contact_record or {}).get("consent_given"):
+            _prompts = {
+                "address": (
+                    "Listo. Por favor envíame la nueva dirección completa "
+                    "(calle, número, barrio, ciudad). Si es edificio o "
+                    "conjunto, incluye torre/apartamento."
+                ),
+                "email": "Listo. ¿Cuál es el correo electrónico nuevo?",
+                "phone": (
+                    "Listo. ¿Cuál es el celular nuevo? "
+                    "Recuerda incluir el indicativo del país (ej: +57 ...)."
+                ),
+                "general": (
+                    "Listo. ¿Qué dato quieres actualizar — dirección, correo, "
+                    "celular o documento? Indícamelo y lo cambio."
+                ),
+            }
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=_prompts.get(_update_intent, _prompts["general"]),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.info(
+                "[UPDATE] sub-flow activado conv=%s field=%s",
+                conversation_id, _update_intent,
+            )
+            return
+
         # ── 2.6 Detección determinística de cancelación (rev. 83) ──────────────
         # UX: cliente desiste de la compra → bot acusa recibo cordial, cierra
         # el cart, deja la puerta abierta. NO escalamos a humano (sería
@@ -5005,6 +5071,30 @@ async def build_and_run_orchestration(
                 _new_state = _determine_transactional_state(_sim_contact)
                 _state_order = {"NEEDS_CONSENT": 0, "NEEDS_EMAIL": 1, "NEEDS_NAME": 2,
                                 "NEEDS_DOCUMENT": 3, "NEEDS_DIRECTION": 4, "READY_FOR_SUMMARY": 5}
+
+                # Rev. 89 — Hard-lock TODOS los estados de captura.
+                # Si tras procesar el mensaje seguimos en NEEDS_X, la respuesta
+                # del LLM puede estar conversando (preguntas abiertas, asesoría
+                # voluntaria, etc.) en vez de pedir el dato faltante. SIEMPRE
+                # forzamos el prompt determinístico del estado actual.
+                # Esto cubre S6/S9 donde el bot se queda en NEEDS_CONSENT
+                # conversando 8-10 turnos sin pedir consent.
+                _NEEDS_X_STATES = {
+                    "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
+                    "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
+                }
+                if (display_state in _NEEDS_X_STATES
+                        and _new_state == display_state
+                        and display_state != "NEEDS_DIRECTION"):
+                    # NEEDS_CONSENT, NEEDS_EMAIL, NEEDS_NAME, NEEDS_DOCUMENT
+                    parsed.response_text = _build_next_data_request_prompt(_sim_contact)
+                    parsed.requires_human = False
+                    parsed.should_respond = True
+                    parsed.intent_detected = "data_request"
+                    logger.info(
+                        "[FSM][POST] hard-lock %s: forzando prompt determinístico (rev. 89)",
+                        display_state,
+                    )
 
                 # Hard-lock NEEDS_DIRECTION: si seguimos en este estado tras el
                 # merge, faltan campos obligatorios — SIEMPRE override con la

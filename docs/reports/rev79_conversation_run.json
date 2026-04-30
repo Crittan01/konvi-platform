@@ -3,10 +3,10 @@
     "number": 1,
     "name": "Primer contacto + saludo",
     "status": "PASS",
-    "message": "Bot respondió en 1 mensaje(s) (81 chars)",
+    "message": "Bot respondió en 1 mensaje(s) (119 chars)",
     "evidence": {
       "outbound_count": 1,
-      "preview": "¡Buenas tardes! Soy Sara Camila de KAIU Living Natural.\n\n¿En qué te puedo ayudar?"
+      "preview": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n¿En qué te puedo ayudar?"
     },
     "error": null
   },
@@ -17,7 +17,7 @@
     "message": "Bot listó productos en 1 mensaje(s)",
     "evidence": {
       "outbound_count": 1,
-      "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\ntenemos varias líneas de productos:\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa"
+      "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa mosqueta\n\n*aceites esenciales:*\n* ár"
     },
     "error": null
   },
@@ -59,12 +59,11 @@
     "number": 6,
     "name": "Datos desordenados (turn-by-turn)",
     "status": "FAIL",
-    "message": "Tras 9 turnos adaptativos, no se creó contact_row",
+    "message": "Tras 8 turnos adaptativos, no se creó contact_row",
     "evidence": {
-      "turns": 9,
+      "turns": 8,
       "matched_rules": [
-        "[Q] prio=1 kws=('?', '¿') q='000 cop*  ¿cuál te gustaría llevar?'",
-        "[Q] prio=20 kws=('presentación', 'presentacion') q='claro, para, ¿cuál presentación del *jabón artesanal de coco'",
+        "[Q] prio=20 kws=('presentación', 'presentacion') q='000*  ¿cuál presentación te gustaría llevar?'",
         "[Q] prio=10 kws=('agregar otro', 'algo más') q='¿te ayudo con algo más?'",
         "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='¿para qué ciudad sería el envío?'",
         "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
@@ -83,7 +82,7 @@
         },
         {
           "client": "Sí confirmo",
-          "bot": "Perfecto, te genero tu link de pago."
+          "bot": "Perfecto, *Cristian*. Te genero tu link de pago."
         }
       ]
     },
@@ -95,7 +94,7 @@
     "status": "PASS",
     "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
     "evidence": {
-      "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\nTenemos varias líneas:\n\n*"
+      "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n*Aceites vegetales:*\n* Al"
     },
     "error": null
   },
@@ -105,7 +104,7 @@
     "status": "PASS",
     "message": "Contacto eliminado (revocación procesada)",
     "evidence": {
-      "setup_turns": 8,
+      "setup_turns": 7,
       "transcript_tail": [
         {
           "client": "Sí acepto, guarden mis datos",
@@ -124,20 +123,20 @@
     "number": 9,
     "name": "Happy path completo",
     "status": "FAIL",
-    "message": "Tras 11 turnos, contact_row no creado",
+    "message": "Tras 5 turnos, contact_row no creado",
     "evidence": {
       "transcript_tail": [
         {
-          "client": "crittan01@gmail.com",
-          "bot": "Perfecto, Ya. Ahora, por favor, regálame tu nombre completo."
+          "client": "Sigamos con la compra por favor",
+          "bot": "Perfecto.\n\n¿Cuál presentación del *Jabón Artesanal de Coco* te gustaría llevar? (60g, 100g o 150g)"
         },
         {
-          "client": "Cristian Garzón",
-          "bot": "Listo, *Cristian*. Ahora, ¿cuál es tu número de documento de identidad y qué tipo es (CC, CE, TI, etc.)?"
+          "client": "La de 60 gramos por favor",
+          "bot": "Listo, *1x Jabón Artesanal de Coco (60g)* por *$18.000 COP*.\n\n¿Te ayudo con algo más?\n* Asesoría sobre el producto (si tienes dudas)\n* Agregar más productos al carrito\n* Cotizar envío\n\nO dime si prefieres avanzar directo."
         },
         {
-          "client": "CC 1032414179",
-          "bot": "📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x *Jabón Artesanal de Coco* (60g): *$18.000 COP*\n\nSubtotal: *$18.000 COP*\nEnvío a Bogotá: *$6.740 COP*\n*TOTAL: $24.740 COP*\n\n*Datos de envío:*\n> Cristian\n> crittan01@gmail.com\n> CC 1032414179\n> Bogotá\n\n¿Confirmas que los datos están corr"
+          "client": "No, eso es todo",
+          "bot": "Tienes *1x Jabón Artesanal de Coco (60g)* por *$18.000 COP*.\n\n¿Quieres agregar algo más a tu pedido o seguimos con el envío?"
         }
       ]
     },
@@ -172,7 +171,7 @@
     "evidence": {
       "asked_tower": false,
       "address_db": {},
-      "turns": 8
+      "turns": 7
     },
     "error": null
   },
@@ -182,19 +181,19 @@
     "status": "PASS",
     "message": "Cotización=True, multi-producto reconocido=True",
     "evidence": {
-      "turns": 8,
+      "turns": 6,
       "transcript_tail": [
         {
-          "client": "Sí, esa opción",
-          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
-        },
-        {
-          "client": "Sí acepto, guarden mis datos",
-          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
-        },
-        {
           "client": "Sigamos con la compra por favor",
-          "bot": "Listo.\n\n¿Cuál es tu correo electrónico?"
+          "bot": "Perfecto, entonces sería:\n* 2x *Jabón Artesanal de Coco* (60g): *$36.000 COP*\n* 1x *Sérum de Vitamina C* (30ml): *$85.000 COP*\n\nSubtotal: *$121.000 COP*\n\n¿Quieres agregar algo más a tu pedido o te cotizo el envío?"
+        },
+        {
+          "client": "Sí, cotiza por favor",
+          "bot": "Claro, ¿a qué ciudad necesitas que te cotice el envío?"
+        },
+        {
+          "client": "Bogotá",
+          "bot": "Para cotizar envío con precisión, confirma el producto: Jabón Artesanal de Coco / Sérum de Vitamina C. Con eso te paso de inmediato la opción más económica y la más rápida."
         }
       ]
     },
@@ -203,12 +202,12 @@
   {
     "number": 14,
     "name": "Cambio ciudad de envío",
-    "status": "PASS",
-    "message": "Bot re-cotizó a Medellín",
+    "status": "FAIL",
+    "message": "Bot no reconoció el cambio de ciudad",
     "evidence": {
-      "setup_turns": 6,
-      "re_quoted_amount": true,
-      "preview": "envío de 1 unidad de jabón artesanal de coco (presentación: 60g) a medellín:\n\n* *económica*: deprisa estandar | $13.140 | entrega 04/05/2026\n* *rápida*: fedex express® | $31.450 | entrega 01/05/2026\n\n¿con cuál continuamos? (*económica* o *r"
+      "setup_turns": 7,
+      "re_quoted_amount": false,
+      "preview": "¡perfecto!\n\n¿cuál es tu correo electrónico?"
     },
     "error": null
   },
@@ -218,22 +217,22 @@
     "status": "PASS",
     "message": "Bot bloqueó link y pidió datos faltantes (FSM enforcement OK)",
     "evidence": {
-      "turns": 7,
+      "turns": 9,
       "promised_link": false,
       "link_delivered": false,
       "fsm_enforced_data": true,
       "consent_given": false,
       "transcript_tail": [
         {
-          "client": "Sí, esa opción",
-          "bot": "Para continuar con tu pedido necesito guardar tus datos personales (nombre, correo, documento y dirección) y así procesar el envío.\n\nSi en algún momento prefieres que los borre, solo dímelo y los elimino.\n\n¿Me autorizas?"
-        },
-        {
           "client": "Sí acepto, guarden mis datos",
           "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
         },
         {
           "client": "crittan01@gmail.com",
+          "bot": "Gracias. Para continuar, compárteme tu nombre completo."
+        },
+        {
+          "client": "Cristian Garzón",
           "bot": ""
         }
       ]
