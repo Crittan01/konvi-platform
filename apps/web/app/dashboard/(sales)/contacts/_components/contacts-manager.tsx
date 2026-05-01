@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo, useTransition, useEffect } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Download, FileText, Printer } from 'lucide-react'
+import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Download, FileText, Printer, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -138,6 +138,18 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     return null
   }
 
+  // Rev. 102 — ref al form de Agregar para limpiarlo tras save exitoso.
+  // Sin esto, el operador queda con datos del último contacto guardado en
+  // los inputs, lo que confunde y genera duplicados accidentales.
+  const addFormRef = useRef<HTMLFormElement>(null)
+  const [addressResetKey, setAddressResetKey] = useState(0)
+
+  // Rev. 102 — toggle expand/collapse del panel de edición por contacto.
+  // Antes era <details>/<summary> y la opción "Editar datos" quedaba oculta
+  // como link gris pequeño. Ahora botón visible con icono Pencil.
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id)
+
   const handleAdd = (fd: FormData) => {
     const error = validateFormData(fd)
     if (error) {
@@ -146,6 +158,11 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     }
     startTransition(async () => {
       await addAction(fd)
+      // Reset form post-save. addAction lanza si la validación servidor falla
+      // (StartTransition propaga); si llegamos aquí fue ok.
+      addFormRef.current?.reset()
+      // Forzar remount del AddressSelector para limpiar su state interno.
+      setAddressResetKey(k => k + 1)
     })
   }
 
@@ -305,7 +322,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
           <div className="xl:col-span-1">
             <div className="rounded-xl border border-border bg-card p-5">
               <h2 className="font-semibold text-base mb-4">Agregar Contacto</h2>
-              <form action={handleAdd} className="space-y-3">
+              <form ref={addFormRef} action={handleAdd} className="space-y-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Teléfono <span className="text-destructive">*</span></Label>
                   <div className="flex">
@@ -375,7 +392,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                     <MapPin className="h-3 w-3" /> Dirección de entrega <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Envia exige street + city + state + postal)</span>
                   </Label>
-                  <AddressSelector fieldPrefix="addr" showBuildingDetails />
+                  <AddressSelector key={addressResetKey} fieldPrefix="addr" showBuildingDetails />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Notas internas (opcional)</Label>
@@ -507,10 +524,18 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   </div>
 
                   {canWrite && (
-                    <details className="mt-3">
-                      <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground hover:text-primary select-none transition-colors">
-                        Editar datos
-                      </summary>
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={expandedId === c.id ? 'default' : 'outline'}
+                        className="h-7 text-xs gap-1.5"
+                        onClick={() => toggleExpand(c.id)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                        {expandedId === c.id ? 'Cerrar edición' : 'Editar datos / Acciones Habeas Data'}
+                      </Button>
+                      {expandedId === c.id && (
                       <form action={handleEdit} className="mt-3 space-y-3 pt-3 border-t border-border">
                         <input type="hidden" name="contact_id" value={c.id} />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -602,85 +627,106 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           <input type="checkbox" name="consent_given" defaultChecked={c.consent_given} className="h-3.5 w-3.5 rounded" />
                           <span className="text-xs text-muted-foreground">Consentimiento Habeas Data</span>
                         </label>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Button type="submit" disabled={isPending} size="sm" variant="outline" className="h-7 text-xs gap-1.5">
-                            {isPending ? <><Loader2 className="h-3 w-3 animate-spin" />Guardando...</> : 'Guardar cambios'}
+                        {/* ── Acciones principales (guardar) ─────────────────── */}
+                        <div className="flex items-center gap-2 pt-1">
+                          <Button
+                            type="submit"
+                            disabled={isPending}
+                            size="sm"
+                            className="h-8 text-xs gap-1.5 px-3"
+                          >
+                            {isPending
+                              ? <><Loader2 className="h-3 w-3 animate-spin" />Guardando...</>
+                              : 'Guardar cambios'}
                           </Button>
-                          {sarAction && (
-                            <>
+                          <Button
+                            type="button"
+                            disabled={isPending}
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs gap-1.5 px-3 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            onClick={() => handleDeleteById(c.id)}
+                          >
+                            <Trash2 className="h-3 w-3" /> Eliminar
+                          </Button>
+                        </div>
+
+                        {/* ── Habeas Data acciones (separadas + agrupadas) ───── */}
+                        {sarAction && (
+                          <div className="pt-3 mt-3 border-t border-border space-y-2">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              <ShieldCheck className="h-3 w-3" />
+                              Habeas Data — Derechos del titular
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
                               <Button
                                 type="button"
                                 disabled={isPending}
                                 size="sm"
-                                variant="ghost"
-                                title="Habeas Data Art. 14 — Exportar todos los datos del titular en JSON"
-                                className="h-7 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                                variant="outline"
+                                title="Art. 14 — Exportar todos los datos del titular en JSON"
+                                className="h-8 text-xs gap-1.5 px-3 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
                                 onClick={() => triggerSar(c.id, 'export')}
                               >
                                 {sarRunning === `${c.id}:export`
-                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  : <Download className="h-3 w-3 mr-1" />}
-                                Reporte Habeas Data
-                              </Button>
-                              <Button
-                                type="button"
-                                disabled={isPending}
-                                size="sm"
-                                variant="ghost"
-                                title="Habeas Data Art. 19 — Portabilidad (JSON estándar)"
-                                className="h-7 text-xs text-violet-400 hover:text-violet-300 hover:bg-violet-500/10"
-                                onClick={() => triggerSar(c.id, 'portability')}
-                              >
-                                {sarRunning === `${c.id}:portability`
-                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  : <FileText className="h-3 w-3 mr-1" />}
-                                Portabilidad
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <Download className="h-3 w-3" />}
+                                Reporte (JSON)
                               </Button>
                               {sarPrintableAction && (
                                 <Button
                                   type="button"
                                   disabled={isPending}
                                   size="sm"
-                                  variant="ghost"
+                                  variant="outline"
                                   title="Reporte HTML imprimible (Cmd+P → Save as PDF)"
-                                  className="h-7 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                                  className="h-8 text-xs gap-1.5 px-3 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10"
                                   onClick={() => triggerPrintable(c.id)}
                                 >
                                   {sarRunning === `${c.id}:printable`
-                                    ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                    : <Printer className="h-3 w-3 mr-1" />}
-                                  PDF
+                                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                                    : <Printer className="h-3 w-3" />}
+                                  Reporte (PDF)
                                 </Button>
                               )}
                               <Button
                                 type="button"
                                 disabled={isPending}
                                 size="sm"
-                                variant="ghost"
-                                title="Habeas Data Art. 15 — Supresión: anonimiza PII (irreversible)"
-                                className="h-7 text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                                variant="outline"
+                                title="Art. 19 — Portabilidad (JSON estándar)"
+                                className="h-8 text-xs gap-1.5 px-3 border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
+                                onClick={() => triggerSar(c.id, 'portability')}
+                              >
+                                {sarRunning === `${c.id}:portability`
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <FileText className="h-3 w-3" />}
+                                Portabilidad
+                              </Button>
+                              <Button
+                                type="button"
+                                disabled={isPending}
+                                size="sm"
+                                variant="outline"
+                                title="Art. 15 — Supresión: anonimiza PII (irreversible)"
+                                className="h-8 text-xs gap-1.5 px-3 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
                                 onClick={() => triggerSar(c.id, 'erase')}
                               >
                                 {sarRunning === `${c.id}:erase`
-                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  : <ShieldOff className="h-3 w-3 mr-1" />}
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <ShieldOff className="h-3 w-3" />}
                                 Anonimizar
                               </Button>
-                            </>
-                          )}
-                          <Button
-                            type="button"
-                            disabled={isPending}
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                            onClick={() => handleDeleteById(c.id)}
-                          >
-                            <Trash2 className="h-3 w-3 mr-1" /> Eliminar
-                          </Button>
-                        </div>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+                              Cada acción registra evento inmutable en <code className="text-[10px]">consent_audit_log</code> (Art. 9).
+                              Anonimizar es irreversible (Art. 15).
+                            </p>
+                          </div>
+                        )}
                       </form>
-                    </details>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}

@@ -24,11 +24,12 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from supabase import Client
 
 from dependencies.auth import (
+    _extract_jwt_payload,  # type: ignore
     get_current_tenant,
     get_service_client,
     require_write_role,
@@ -193,11 +194,12 @@ def _payload_to_csv(payload: dict) -> str:
 
 @router.get("/sic-report")
 def sic_report(
+    request: Request,
     fmt: str = Query("json", alias="format", pattern="^(json|csv)$"),
     from_date: Optional[str] = Query(None, description="ISO date YYYY-MM-DD; default: 90 días atrás"),
     to_date: Optional[str] = Query(None, description="ISO date YYYY-MM-DD; default: hoy"),
     contact_id: Optional[str] = Query(None, description="UUID del titular, opcional"),
-    tenant=Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),
     sb: Client = Depends(get_service_client),
     _role=Depends(require_write_role),
     _rl: None = Depends(RL_WRITE_DEFAULT),
@@ -225,15 +227,21 @@ def sic_report(
     if from_dt > to_dt:
         raise HTTPException(status_code=400, detail="from_date debe ser anterior a to_date")
 
-    payload = _build_sic_payload(sb, tenant.tenant_id, from_dt, to_dt, contact_id)
+    payload = _build_sic_payload(sb, tenant_id, from_dt, to_dt, contact_id)
 
-    # Audit la generación del reporte (la generación misma es un evento
-    # relevante: queda registro de que el operador armó info para SIC).
-    actor_email = getattr(tenant, "email", None) or getattr(tenant, "user_email", None)
-    actor_user_id = getattr(tenant, "user_id", None)
+    # Actor desde el JWT (rev. 102 fix — get_current_tenant retorna str).
+    actor_user_id: Optional[str] = None
+    actor_email: Optional[str] = None
+    try:
+        jwt_payload = _extract_jwt_payload(request)
+        actor_user_id = jwt_payload.get("sub")
+        actor_email = jwt_payload.get("email")
+    except Exception:
+        pass
+
     try:
         sb.table("consent_audit_log").insert({
-            "tenant_id": tenant.tenant_id,
+            "tenant_id": tenant_id,
             "contact_id": contact_id,
             "event": "export_request",
             "source": "tenant_console",
@@ -251,10 +259,9 @@ def sic_report(
     except Exception as exc:
         logger.warning("[SIC] audit insert falló: %s", exc)
 
-    # Acceso PII batch — registra UNA fila resumen del scope (no per row).
     log_pii_access(
         sb,
-        tenant_id=tenant.tenant_id,
+        tenant_id=tenant_id,
         contact_id=contact_id,
         accessed_by=f"user:{actor_email}" if actor_email else "user:unknown",
         purpose="sic_report",
