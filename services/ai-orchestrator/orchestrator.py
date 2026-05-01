@@ -135,6 +135,99 @@ def _detect_mental_health_crisis(text: str) -> bool:
     return any(phrase in normalized for phrase in _MENTAL_HEALTH_CRISIS_PHRASES)
 
 
+# Rev. 92.b — Telemedicina / consultas médicas / diagnóstico.
+# Meta Business Policy:
+#   "Healthcare: Telemedicine and health data prohibited in non-compliant
+#    systems".
+# WhatsApp NO es HIPAA/GDPR-compliant para data clínica → bot NO puede
+# diagnosticar, recomendar tratamiento de condición médica, ni dar
+# advice de salud específica. Sí puede informar BENEFICIOS COSMÉTICOS
+# del producto, sin claims terapéuticos.
+#
+# Detección PRE-LLM: si el cliente menciona enfermedad/condición médica
+# o pide diagnóstico, respondemos templated redirigiendo a profesional
+# médico. Conservador con falsos positivos — mejor mandar al médico
+# que dar consejo médico ilegal.
+_MEDICAL_QUERY_PHRASES = (
+    # Enfermedades dermatológicas/sistémicas comunes
+    "acne", "rosacea", "eczema", "psoriasis", "dermatitis",
+    "vitiligo", "alopecia", "celulitis", "infeccion", "infección",
+    "herpes", "verruga", "queratosis", "melanoma", "lupus",
+    "diabetes", "hipertension", "hipertensión", "cancer", "cáncer",
+    "tumor", "asma", "hepatitis", "vih", "sida",
+    # Lenguaje de diagnóstico/tratamiento
+    "me diagnostic", "diagnosticar", "diagnostico", "diagnóstico",
+    "que enfermedad tengo", "qué enfermedad tengo",
+    "tratamiento para", "que tratamiento", "qué tratamiento",
+    "cura ", "curar ", "cura el", "cura la", "cura mi",
+    "trata el", "trata la", "trata mi", "tratar el", "tratar la",
+    "es seguro en embaraz", "puedo usar embaraz",
+    "estoy embaraz", "lactanc", "amamantar",
+    "soy alergic", "es alergic", "tengo alergia", "alergia a",
+    "sintoma", "síntoma",
+    "receta medica", "receta médica",
+    "doctor recom", "medico recom", "médico recom",
+    "que medicament", "qué medicament",
+    # Consultas tipo "este producto sirve para X enfermedad"
+    "sirve para tratar", "sirve para curar",
+    "es bueno para mi", "remedio para",
+)
+
+
+def _detect_medical_query(text: str) -> bool:
+    """True si el cliente hace consulta médica/diagnóstica que el bot
+    NO debe responder.
+
+    Cobertura Meta Business Policy + Ley 23 de 1981 Colombia (ejercicio
+    ilegal de medicina). El bot debe redirigir a profesional médico,
+    nunca afirmar que un producto cura/trata una condición clínica.
+
+    Conservador: si hay duda, redirigir es mejor que arriesgar claim
+    médico ilegal o ban de Meta.
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+    return any(phrase in normalized for phrase in _MEDICAL_QUERY_PHRASES)
+
+
+# Rev. 92.b — Solicitud de compra de medicamentos.
+# Meta Commerce Policy: "Content that attempts to buy, sell, trade,
+# donate, gift or ask for over-the-counter medicine is prohibited"
+# (mismo principio para Rx). Ningún tipo de medicamento puede
+# comerciarse en WhatsApp Business.
+#
+# KAIU vende cosmética artesanal, NO drogas. Si el cliente pide un
+# medicamento, redirigir a droguería/farmacia.
+_DRUG_PURCHASE_PHRASES = (
+    # Genéricos populares (Rx + OTC)
+    "ibuprofeno", "acetaminofen", "acetaminofén", "paracetamol",
+    "aspirina", "naproxeno", "diclofenaco", "loratadina", "cetirizina",
+    "amoxicilina", "azitromicina", "penicilina",
+    "antibiotico", "antibiótico", "antibióticos",
+    "antidepresiv", "ansiolítico", "ansiolitico",
+    "viagra", "cialis", "anticonceptiv",
+    "morfina", "tramadol", "oxicodona", "codeina", "codeína",
+    "ritalin", "metilfenidato",
+    # Genéricos genéricos
+    "medicamento", "medicamentos", "remedio para el dolor",
+    "pastilla para", "pastillas para", "tableta para",
+    "vendes medic", "venden medic",
+)
+
+
+def _detect_drug_purchase_request(text: str) -> bool:
+    """True si el cliente intenta comprar/conseguir un medicamento.
+
+    Meta Commerce Policy prohíbe la venta de Rx y OTC en WhatsApp.
+    KAIU es tienda cosmética; redirigir a droguería.
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+    return any(phrase in normalized for phrase in _DRUG_PURCHASE_PHRASES)
+
+
 def _detect_sensitive_payment_data(text: str) -> tuple[bool, str]:
     """True si el cliente envió datos sensibles que NO deben procesarse en chat.
 
@@ -4664,6 +4757,57 @@ async def build_and_run_orchestration(
             logger.warning(
                 "[PCI] Datos sensibles detectados conv=%s reason=%s — bot advirtió y descartó",
                 conversation_id, _sensitive_reason,
+            )
+            return
+
+        # ── 2.46 Consulta médica / diagnóstica (rev. 92.b · Meta Healthcare) ──
+        # Meta Business Policy prohíbe telemedicina/diagnóstico vía WhatsApp
+        # en sistemas no compliant. Aplica a TODO tenant sin importar vertical
+        # (cosmética, tech, comida, etc.) — el bot nunca diagnostica ni
+        # recomienda tratamiento médico.
+        # Cobertura legal: Ley 23 de 1981 Colombia (ejercicio ilegal de
+        # medicina sin licencia).
+        if _detect_medical_query(content):
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Soy un asesor virtual y no doy diagnósticos ni "
+                    "recomendaciones médicas — para eso consulta a tu "
+                    "profesional de salud. 🩺\n\n"
+                    "Si tienes una pregunta sobre los productos "
+                    "(características, ingredientes o beneficios generales), "
+                    "con gusto te ayudo."
+                ),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.warning(
+                "[META_HEALTHCARE] Consulta médica detectada conv=%s — bot redirigió a profesional",
+                conversation_id,
+            )
+            return
+
+        # ── 2.47 Solicitud de medicamentos (rev. 92.b · Meta Commerce) ────────
+        # Meta Commerce Policy prohíbe venta de Rx y OTC en WhatsApp en
+        # CUALQUIER tenant (Rx + OTC + suplementos). Bot redirige a
+        # droguería/farmacia con wording vertical-agnóstico.
+        if _detect_drug_purchase_request(content):
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "No comercializamos medicamentos. Para eso lo mejor "
+                    "es tu droguería o farmacia de confianza. 💊\n\n"
+                    "Si te interesa algo de nuestro catálogo, dime y te "
+                    "ayudo a encontrarlo."
+                ),
+            )
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.warning(
+                "[META_COMMERCE] Solicitud medicamento detectada conv=%s — bot rechazó cordialmente",
+                conversation_id,
             )
             return
 
