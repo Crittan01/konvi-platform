@@ -1,89 +1,32 @@
 [
   {
-    "number": 1,
-    "name": "Primer contacto + saludo",
-    "status": "PASS",
-    "message": "Bot respondió en 1 mensaje(s) (119 chars)",
-    "evidence": {
-      "outbound_count": 1,
-      "preview": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n¿En qué te puedo ayudar?"
-    },
-    "error": null
-  },
-  {
-    "number": 2,
-    "name": "Consulta catálogo",
-    "status": "PASS",
-    "message": "Bot listó productos en 1 mensaje(s)",
-    "evidence": {
-      "outbound_count": 1,
-      "preview": "¡hola! 👋 soy sara camila de kaiu living natural. trabajamos cosmética artesanal 100% natural.\n\ntenemos varias líneas:\n\n*aceites vegetales:*\n* almendras dulces\n* argán\n* coco virgen\n* rosa mosqueta\n\n*a"
-    },
-    "error": null
-  },
-  {
-    "number": 3,
-    "name": "KB cita de fuentes",
-    "status": "PASS",
-    "message": "Respuesta KB incluye cita explícita",
-    "evidence": {
-      "preview": "Aceptamos devoluciones y cambios dentro de los 15 días calendario siguientes a la entrega, siempre que el producto esté sin usar, con empaque original y en perfectas condiciones. Para iniciar una devo"
-    },
-    "error": null
-  },
-  {
-    "number": 4,
-    "name": "Out-of-domain",
-    "status": "PASS",
-    "message": "Bot no alucinó respuesta sobre clima",
-    "evidence": {
-      "preview": "no tengo información sobre eso — soy asesor virtual de kaiu living natural y solo puedo ayudarte con nuestros productos, envíos y pedidos.\n\n¿te interesa algo de la tienda?"
-    },
-    "error": null
-  },
-  {
-    "number": 5,
-    "name": "Foto producto",
-    "status": "PASS",
-    "message": "Bot fallback explicativo tras 2 turnos",
-    "evidence": {
-      "image_sent": false,
-      "turns": 2,
-      "matched_rules": [
-        "[Q+ctx] prio=35 kws=('presentación', 'presentacion') q='¿te cuento más beneficios o cotizo el envío a tu ciudad?'"
-      ]
-    },
-    "error": null
-  },
-  {
     "number": 6,
     "name": "Datos desordenados (turn-by-turn)",
     "status": "PASS",
-    "message": "Adaptativo: 4/4 campos extraídos de un volcado en 9 turnos",
+    "message": "Adaptativo: 4/4 campos extraídos de un volcado en 8 turnos",
     "evidence": {
-      "turns": 9,
+      "turns": 8,
       "matched_rules": [
-        "[Q] prio=1 kws=('?', '¿') q='000 cop*  ¿cuál te gustaría llevar?'",
-        "[Q] prio=20 kws=('presentación', 'presentacion') q='claro, para el *jabón artesanal de coco*, ¿cuál presentación'",
+        "[Q] prio=1 kws=('?', '¿') q='000*  ¿cuál te gustaría llevar?'",
+        "[Q] prio=20 kws=('presentación', 'presentacion') q='para el *jabón artesanal de coco*, ¿cuál presentación te gus'",
         "[Q] prio=10 kws=('agregar otro', 'algo más') q='¿te ayudo con algo más?'",
         "[Q] prio=20 kws=('a qué ciudad', 'en qué ciudad') q='¿para qué ciudad sería el envío?'",
         "[Q] prio=15 kws=('servientrega', 'transportadora') q='740 | entrega 30/04/2026  ¿continuamos con la opción *económ'",
         "[Q] prio=60 kws=('estás de acuerdo', 'estas de acuerdo') q='🙏  ¿estás de acuerdo?'",
-        "[Q] prio=50 kws=('¿cuál es tu correo', 'cual es tu correo') q='¿cuál es tu correo electrónico?'",
-        "[Q] prio=20 kws=('¿confirmas', 'confirmas que') q='com * celular: +57 312 583 5649 * documento: cc 1032414179 *'"
+        "[Q] prio=50 kws=('¿cuál es tu correo', 'cual es tu correo') q='¿cuál es tu correo electrónico?'"
       ],
       "transcript_tail": [
+        {
+          "client": "Sí, esa opción",
+          "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo? *SÍ* o *NO*."
+        },
         {
           "client": "Sí, acepto",
           "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
         },
         {
           "client": "Soy Cristian Garzón, correo crittan01@gmail.com, CC 1032414179, dirección Calle 3 sur 70-84, barrio Olaya, casa, Bogotá",
-          "bot": "📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x Jabón Artesanal de Coco: $18.000 COP\n\nSubtotal: $18.000 COP\nEnvío: $6.740 COP\n*TOTAL: $24.740 COP*\n\n*Datos de envío:*\n* Nombre: Cristian Garzón\n* Correo: crittan01@gmail.com\n* Celular: +57 312 583 5649\n* Documento: CC 1032414179\n* Dire"
-        },
-        {
-          "client": "Sí confirmo",
-          "bot": "Perfecto, te genero tu link de pago."
+          "bot": ""
         }
       ],
       "extracted": {
@@ -94,176 +37,5 @@
       }
     },
     "error": null
-  },
-  {
-    "number": 7,
-    "name": "Formato canónico WhatsApp",
-    "status": "PASS",
-    "message": "Outbound sin `**` ni `• ` (rev. 77 normaliza al canon)",
-    "evidence": {
-      "sample": "¡Hola! 👋 Soy Sara Camila de KAIU Living Natural. Trabajamos cosmética artesanal 100% natural.\n\n*Aceites vegetales:*\n* Ac"
-    },
-    "error": null
-  },
-  {
-    "number": 8,
-    "name": "Revocación adaptativa",
-    "status": "PASS",
-    "message": "consent_given=False (+ revoked_at registrado si aplica)",
-    "evidence": {
-      "setup_turns": 6,
-      "transcript_tail": [
-        {
-          "client": "Sí, esa opción",
-          "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo? *SÍ* o *NO*."
-        },
-        {
-          "client": "Sigamos con la compra por favor",
-          "bot": ""
-        }
-      ],
-      "outbound_after_revoke": 1,
-      "contact": {
-        "consent_given": false,
-        "consent_revoked_at": null,
-        "consent_revoked_reason": null
-      }
-    },
-    "error": null
-  },
-  {
-    "number": 9,
-    "name": "Happy path completo",
-    "status": "SKIP",
-    "message": "Conversación cubrió 9 turnos pero no llegó a crear orden — flujo posiblemente cortado en address/resumen",
-    "evidence": {
-      "turns": 9,
-      "consent_given": true,
-      "transcript_tail": [
-        {
-          "client": "Sí, esa opción",
-          "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo? *SÍ* o *NO*."
-        },
-        {
-          "client": "Sí, acepto",
-          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
-        },
-        {
-          "client": "crittan01@gmail.com",
-          "bot": ""
-        }
-      ]
-    },
-    "error": null
-  },
-  {
-    "number": 10,
-    "name": "Cancelación mid-flow",
-    "status": "PASS",
-    "message": "Bot reconoció la cancelación",
-    "evidence": {
-      "setup_turns": 7,
-      "preview": "entendido, cancelo tu pedido. 🙏\n\nno hay problema, cuando quieras retomar la compra aquí estaré para ayudarte. ¡que tengas un excelente día!"
-    },
-    "error": null
-  },
-  {
-    "number": 11,
-    "name": "Escalación a humano",
-    "status": "PASS",
-    "message": "Bot reconoció la petición de asesor",
-    "evidence": {
-      "preview": "claro, te entiendo. en este momento nuestros asesores no están disponibles, pero uno de ellos te contactará apenas inicie el próximo turno. atendemos de lunes a sábado de 8:00 am a 6:00 pm."
-    },
-    "error": null
-  },
-  {
-    "number": 12,
-    "name": "Address conjunto residencial",
-    "status": "FAIL",
-    "message": "Bot no preguntó por torre/apto y no se registraron",
-    "evidence": {
-      "asked_tower": false,
-      "address_db": {
-        "city": "Bogotá D.C.",
-        "state": "Bogotá D.C.",
-        "country": "CO",
-        "dane_code": "11001"
-      },
-      "turns": 7
-    },
-    "error": null
-  },
-  {
-    "number": 13,
-    "name": "Multi-producto + volumetría",
-    "status": "PASS",
-    "message": "Cotización=True, multi-producto reconocido=True",
-    "evidence": {
-      "turns": 8,
-      "transcript_tail": [
-        {
-          "client": "Bogotá",
-          "bot": "Envío de 1 unidad de Sérum de Vitamina C (Volumen: 30ml) a Bogotá D.C.:\n\n* *Económica*: Cabify Express | $6.740 | entrega 30/04/2026\n\n¿Continuamos con la opción *Económica*?"
-        },
-        {
-          "client": "Sí, esa opción",
-          "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo? *SÍ* o *NO*."
-        },
-        {
-          "client": "Sí, continuemos por favor",
-          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
-        }
-      ]
-    },
-    "error": null
-  },
-  {
-    "number": 14,
-    "name": "Cambio ciudad de envío",
-    "status": "PASS",
-    "message": "Bot re-cotizó a Medellín",
-    "evidence": {
-      "setup_turns": 7,
-      "re_quoted_amount": true,
-      "preview": "envío de 1 unidad de jabón artesanal de coco (presentación: 60g) a medellín:\n\n* *económica*: deprisa estandar | $13.140 | entrega 04/05/2026\n* *rápida*: fedex express® | $31.450 | entrega 01/05/2026\n\n¿con cuál continuamos? (*económica* o *r"
-    },
-    "error": null
-  },
-  {
-    "number": 15,
-    "name": "Promesa de link cumplida",
-    "status": "SKIP",
-    "message": "Conversación no llegó al punto de confirmación en 8 turnos",
-    "evidence": {
-      "turns": 8,
-      "promised_link": false,
-      "link_delivered": false,
-      "fsm_enforced_data": true,
-      "consent_given": true,
-      "transcript_tail": [
-        {
-          "client": "Sí, esa opción",
-          "bot": "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te pediré algunos datos (nombre, dirección, etc.) para esta compra y futuros pedidos.\n\nSi en algún momento quieres que los borre, solo dímelo. 🙏\n\n¿Estás de acuerdo? *SÍ* o *NO*."
-        },
-        {
-          "client": "Sí, acepto",
-          "bot": "¡Perfecto!\n\n¿Cuál es tu correo electrónico?"
-        },
-        {
-          "client": "crittan01@gmail.com",
-          "bot": ""
-        }
-      ]
-    },
-    "error": null
-  },
-  {
-    "number": 16,
-    "name": "scenario_16_wompi_approved_simulation",
-    "status": "FAIL",
-    "message": "Excepción: {'message': 'column orders.wompi_link_id does not exist', 'code': '42703', 'hint': None, 'details': None}",
-    "evidence": {},
-    "error": "Traceback (most recent call last):\n  File \"/home/ansible/workspaces/commerce-ops-platform/scripts/uat/rev79_conversation_scenarios.py\", line 1157, in run_all\n    res = fn(phone, tenant_id)\n          ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ansible/workspaces/commerce-ops-platform/scripts/uat/rev79_conversation_scenarios.py\", line 1048, in scenario_16_wompi_approved_simulation\n    ).order(\"created_at\", desc=True).limit(1).execute()\n                                              ^^^^^^^^^\n  File \"/home/ansible/.local/lib/python3.11/site-packages/postgrest/_sync/request_builder.py\", line 53, in execute\n    raise APIError(dict(json_obj))\npostgrest.exceptions.APIError: {'message': 'column orders.wompi_link_id does not exist', 'code': '42703', 'hint': None, 'details': None}\n"
   }
 ]
