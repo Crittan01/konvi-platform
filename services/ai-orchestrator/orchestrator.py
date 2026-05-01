@@ -4999,7 +4999,16 @@ async def build_and_run_orchestration(
         # ── 2.5 Detección determinística de revocación (ANTES del LLM) ─────────
         # Prioridad máxima: el titular siempre puede revocar el consentimiento.
         if _detect_revocation_intent(content):
+            phone_for_notify: Optional[str] = None
             if contact_id:
+                # Capturar phone ANTES del UPDATE para hashearlo en notificación.
+                try:
+                    p_res = supabase.table("contacts").select("phone").eq(
+                        "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+                    if p_res.data:
+                        phone_for_notify = p_res.data[0].get("phone")
+                except Exception:
+                    pass
                 _record_consent(supabase, contact_id, tenant_id, given=False, conversation_id=conversation_id)
             await _send_outbound_text(
                 supabase=supabase,
@@ -5011,6 +5020,18 @@ async def build_and_run_orchestration(
                     "Seguiré ayudándote con tu consulta sin guardar información personal."
                 ),
             )
+            # Rev. 94 — Notificar al tenant (Habeas Data Art. 9 — registro de revocación).
+            try:
+                from notifications import notify_consent_revoked
+                await notify_consent_revoked(
+                    supabase,
+                    tenant_id=tenant_id,
+                    contact_phone_hash=_hash_phone(phone_for_notify) or "",
+                    occurred_at=datetime.now(timezone.utc).isoformat(),
+                    source="whatsapp",
+                )
+            except Exception as exc:
+                logger.warning("[CONSENT] notify_consent_revoked falló: %s", exc)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
             return
