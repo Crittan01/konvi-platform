@@ -16,6 +16,7 @@ from tools.image_send_tool import handle_image_request_if_applicable
 from tools.order_status_tool import handle_order_status_if_applicable
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
+from checkout_form import CheckoutFormConductor
 from conversation_contract import (
     CONVERSATION_STATUS_BOT_ACTIVE,
     CONVERSATION_STATUS_CLOSED,
@@ -40,14 +41,16 @@ CONVERSATION_WINDOW_HOURS = int(os.getenv("CONVERSATION_WINDOW_HOURS", "24"))
 # ── Consentimiento Ley 1581 de 2012 ──────────────────────────────────────────
 CONSENT_TEXT_VERSION = "v2026-04"
 CONSENT_QUESTION_TEMPLATE = (
-    # Rev. 89.b — UX cordial, action-first. Cumple Habeas Data Colombia
-    # (consent previo + expreso + informado + revocable). Aprobada por
-    # el usuario en sesión rev. 89.
+    # Rev. 89.b + 91 — UX cordial, action-first. Cumple Habeas Data
+    # Colombia (consent previo + expreso + informado + revocable).
+    # Rev. 91: cierre con "*SÍ* o *NO*" para hacer la respuesta
+    # esperada inequívoca (caso S9 happy path: cliente decía "Sigamos"
+    # en vez de "Sí" y el detector consent_yes no disparaba).
     "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te "
     "pediré algunos datos (nombre, dirección, etc.) para esta compra "
     "y futuros pedidos.\n\n"
     "Si en algún momento quieres que los borre, solo dímelo. 🙏\n\n"
-    "¿Estás de acuerdo?"
+    "¿Estás de acuerdo? *SÍ* o *NO*."
 )
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
     "Listo, te genero el link de pago.\n\n"
@@ -274,13 +277,24 @@ def _detect_cancel_intent(text: str) -> bool:
     return any(phrase in normalized for phrase in _CANCEL_INTENT_PHRASES)
 
 
+def _tokenize_for_consent(normalized: str) -> set[str]:
+    """Rev. 91 — Tokenizador robusto para consent detection.
+
+    Strip puntuación de cada token antes de comparar contra los sets
+    `_CONSENT_YES_TOKENS` / `_CONSENT_NO_TOKENS`. Sin esto, una respuesta
+    natural como "Sí, continuemos por favor" no matchea porque el primer
+    token queda como "sí," (con coma) y el set no lo reconoce.
+    """
+    return {re.sub(r"[,.!?;:]+", "", tok) for tok in normalized.split() if tok}
+
+
 def _detect_consent_yes(text: str) -> bool:
     normalized = _normalize_text_simple(text)
     if any(phrase in normalized for phrase in _CONSENT_NO_PHRASES):
         return False
     if any(phrase in normalized for phrase in _CONSENT_YES_PHRASES):
         return True
-    tokens = set(normalized.split())
+    tokens = _tokenize_for_consent(normalized)
     return bool(tokens & _CONSENT_YES_TOKENS) and not bool(tokens & _CONSENT_NO_TOKENS)
 
 
@@ -288,7 +302,7 @@ def _detect_consent_no(text: str) -> bool:
     normalized = _normalize_text_simple(text)
     if any(phrase in normalized for phrase in _CONSENT_NO_PHRASES):
         return True
-    tokens = set(normalized.split())
+    tokens = _tokenize_for_consent(normalized)
     return bool(tokens & _CONSENT_NO_TOKENS)
 
 
@@ -2142,16 +2156,15 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
     first_name = _extract_first_name(contact_record.get("name") if isinstance(contact_record, dict) else None)
     name_prefix = f", {first_name}" if first_name else ""
     if state == "NEEDS_CONSENT":
-        # Rev. 89.b — UX cordial cumpliendo Habeas Data Colombia (Ley
-        # 1581/2012): consent previo + expreso + informado + revocable.
-        # Tono action-first ("voy a continuar") evita que el cliente
-        # perciba la solicitud como riesgosa y abandone el carrito.
+        # Rev. 89.b + 91 — UX cordial cumpliendo Habeas Data Colombia
+        # (Ley 1581/2012). Cierre con "*SÍ* o *NO*" para que
+        # la respuesta esperada sea inequívoca (S9 fix).
         return (
             "¡Perfecto! Voy a continuar con tu pedido. Con tu "
             "autorización te pediré algunos datos (nombre, dirección, "
             "etc.) para esta compra y futuros pedidos.\n\n"
             "Si en algún momento quieres que los borre, solo dímelo. 🙏\n\n"
-            "¿Estás de acuerdo?"
+            "¿Estás de acuerdo? *SÍ* o *NO*."
         )
     if state == "NEEDS_EMAIL":
         return f"¡Perfecto{name_prefix}! ¿Cuál es tu correo electrónico?"
@@ -2168,6 +2181,22 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
     if state == "READY_FOR_SUMMARY":
         return "Perfecto. Ya tengo tus datos, ¿confirmas que procedamos con el resumen final del pedido?"
     return "Listo. ¿Me confirmas los datos para continuar con tu pedido?"
+
+
+# Rev. 91 — Conductor único del checkout form. Reemplaza la lógica
+# fragmentada de SAFETY_NET + FSM POST hard-lock por un punto de
+# decisión explícito (patrón Rasa Forms / Bot Framework Dialogs).
+# La instancia se construye una sola vez por proceso porque las
+# dependencias inyectadas son funciones puras del módulo.
+_CHECKOUT_FORM_CONDUCTOR = CheckoutFormConductor(
+    determine_state=_determine_transactional_state,
+    build_prompt=_build_next_data_request_prompt,
+    build_address_prompt=_build_address_request_prompt,
+    extract_first_name=_extract_first_name,
+    merge_address=_merge_address_data,
+    detect_building_type=_detect_building_type_from_text,
+    missing_address_fields=_missing_address_fields,
+)
 
 
 def _is_affirmative_confirmation(text: str) -> bool:
@@ -4978,36 +5007,14 @@ async def build_and_run_orchestration(
             )
             return
 
-        # ── 6.99 Safety net rev. 87: response_text vacío después de TODO ──────
-        # Si llegamos aquí con should_respond=True pero response_text vacío
-        # o whitespace-only, es bug del LLM (truncó output, JSON malformado,
-        # cascade degraded mal-parseada). En vez de quedar mudo, generamos
-        # respuesta determinística según el FSM state actual.
+        # ── 6.99 Safety net (rev. 87, simplificado en rev. 91) ───────────────
+        # Si el LLM responde vacío en estados NO transaccionales (CATALOG_MODE,
+        # NEEDS_SHIPPING_CITY, AWAITING_CARRIER_SELECTION, etc.) inyectamos
+        # fallback genérico para evitar bot mudo. Los estados transaccionales
+        # (NEEDS_X) los maneja CheckoutFormConductor más abajo.
         if parsed.should_respond and (not parsed.response_text or not parsed.response_text.strip()):
-            try:
-                _state = _resolve_display_state(
-                    contact_record=contact_record,
-                    history=history_for_fsm,
-                    buying_intent=buying_intent,
-                    shipping_quoted=shipping_quoted,
-                )
-            except Exception:
-                _state = None
-            if _state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
-                          "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}:
-                # Generar prompt determinístico según FSM
-                fallback = _build_next_data_request_prompt(
-                    contact_record or {"name": None, "email": None,
-                                       "document_type": None, "document_number": None,
-                                       "address": None, "consent_given": False}
-                )
-                parsed.response_text = fallback
-                logger.warning(
-                    "[SAFETY_NET] response_text vacío con state=%s — fallback determinístico",
-                    _state,
-                )
-            else:
-                # Genérico cordial
+            if display_state not in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
+                                      "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}:
                 parsed.response_text = (
                     "Disculpa, déjame procesar eso un momento. ¿Puedes "
                     "repetirme tu última solicitud o indicarme cómo continuar?"
@@ -5065,98 +5072,49 @@ async def build_and_run_orchestration(
                         contact_id,
                     )
 
-            # Re-evaluar FSM con datos que el LLM acaba de extraer del current
-            # inbound. Si el FSM avanza a un NEEDS_X siguiente, OVERRIDE el
-            # response_text con el prompt determinístico — evita el bug donde
-            # el LLM, tras capturar el nombre en NEEDS_NAME, salta directo
-            # a pedir dirección sin pasar por NEEDS_DOCUMENT.
+            # Rev. 91 — CheckoutFormConductor: punto único de decisión post-LLM
+            # para los estados de captura (NEEDS_X). Reemplaza el SAFETY_NET
+            # parcial + el FSM POST hard-lock fragmentado. El conductor:
+            #   • Enriquece parsed.extracted_* con regex (caso S6: dump combinado).
+            #   • Override building_type si el detector textual disagree con LLM
+            #     (caso S12: cliente menciona "conjunto", LLM extrajo "casa").
+            #   • Decide si forzar prompt determinístico cuando LLM no avanza
+            #     o respondió vacío (casos S6/S9).
+            # Patrón Rasa Forms — interfaz fluida (LLM redacta), lógica de
+            # captura rígida (Python decide).
             if display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME", "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}:
-                _sim_contact: dict = dict(contact_record or {})
-                if parsed.extracted_email:
-                    _sim_contact["email"] = str(parsed.extracted_email).strip().lower()
-                if parsed.extracted_name:
-                    _sim_contact["name"] = " ".join(str(parsed.extracted_name).split())
-                if parsed.extracted_document_type and parsed.extracted_document_number:
-                    _doc_t = str(parsed.extracted_document_type).strip().upper()
-                    _doc_n = re.sub(r"[\s.]", "", str(parsed.extracted_document_number).strip())
-                    if _doc_t in {"CC", "CE", "NIT", "PP", "TI", "OTHER"} and _doc_n:
-                        _sim_contact["document_type"] = _doc_t
-                        _sim_contact["document_number"] = _doc_n
-                # SIEMPRE mergear el fragmento de dirección extraído (aunque sea
-                # parcial: solo building_type, solo apartment, etc.). Antes
-                # bloqueábamos con _has_real_address_data, lo que dejaba el
-                # _sim_contact desincronizado del estado real persistido en DB
-                # y el FSM se evaluaba sobre datos viejos.
-                if isinstance(parsed.extracted_direction, dict) and any(
-                    v for v in parsed.extracted_direction.values() if v
-                ):
-                    # Rev. 87 (P4 — S12 fix): si el LLM extrajo address pero
-                    # NO seteó building_type, inferirlo del texto del cliente.
-                    # Garantiza que conjuntos/edificios sean detectados y el
-                    # FSM exija torre/apto correctamente.
-                    if not parsed.extracted_direction.get("building_type"):
-                        _inferred_bt = _detect_building_type_from_text(content or "")
-                        if _inferred_bt:
-                            parsed.extracted_direction["building_type"] = _inferred_bt
-                            logger.info(
-                                "[BUILDING_TYPE_INFER] LLM omitió building_type; "
-                                "inferido '%s' del texto del cliente",
-                                _inferred_bt,
-                            )
-                    _sim_contact["address"] = _merge_address_data(
-                        _sim_contact.get("address"), parsed.extracted_direction
-                    )
-                _new_state = _determine_transactional_state(_sim_contact)
-                _state_order = {"NEEDS_CONSENT": 0, "NEEDS_EMAIL": 1, "NEEDS_NAME": 2,
-                                "NEEDS_DOCUMENT": 3, "NEEDS_DIRECTION": 4, "READY_FOR_SUMMARY": 5}
-
-                # Rev. 89 — Hard-lock TODOS los estados de captura.
-                # Si tras procesar el mensaje seguimos en NEEDS_X, la respuesta
-                # del LLM puede estar conversando (preguntas abiertas, asesoría
-                # voluntaria, etc.) en vez de pedir el dato faltante. SIEMPRE
-                # forzamos el prompt determinístico del estado actual.
-                # Esto cubre S6/S9 donde el bot se queda en NEEDS_CONSENT
-                # conversando 8-10 turnos sin pedir consent.
-                _NEEDS_X_STATES = {
-                    "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
-                    "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
+                form_result = _CHECKOUT_FORM_CONDUCTOR.run(
+                    inbound=content or "",
+                    parsed=parsed,
+                    contact_record=contact_record,
+                    display_state=display_state,
+                )
+                _sim_contact = form_result.sim_contact
+                _new_state = form_result.new_state
+                # Orden FSM canónico para detectar avance vs estancamiento
+                # en la rama elif de "avance intermedio".
+                _state_order = {
+                    "NEEDS_CONSENT": 0, "NEEDS_EMAIL": 1, "NEEDS_NAME": 2,
+                    "NEEDS_DOCUMENT": 3, "NEEDS_DIRECTION": 4,
+                    "READY_FOR_SUMMARY": 5,
                 }
-                if (display_state in _NEEDS_X_STATES
-                        and _new_state == display_state
-                        and display_state != "NEEDS_DIRECTION"):
-                    # NEEDS_CONSENT, NEEDS_EMAIL, NEEDS_NAME, NEEDS_DOCUMENT
-                    parsed.response_text = _build_next_data_request_prompt(_sim_contact)
+
+                if form_result.response_text:
+                    parsed.response_text = form_result.response_text
                     parsed.requires_human = False
                     parsed.should_respond = True
                     parsed.intent_detected = "data_request"
                     logger.info(
-                        "[FSM][POST] hard-lock %s: forzando prompt determinístico (rev. 89)",
-                        display_state,
+                        "[FSM][POST] conductor override display=%s new=%s",
+                        display_state, _new_state,
                     )
 
-                # Hard-lock NEEDS_DIRECTION: si seguimos en este estado tras el
-                # merge, faltan campos obligatorios — SIEMPRE override con la
-                # pregunta determinística de los faltantes. Sin esto, el LLM
-                # puede emitir "te genero el link de pago" con la dirección
-                # incompleta (caso real reportado: building_type=conjunto sin
-                # tower/apartment).
-                if display_state == "NEEDS_DIRECTION" and _new_state == "NEEDS_DIRECTION":
-                    parsed.response_text = _build_address_request_prompt(
-                        _sim_contact, _extract_first_name(_sim_contact.get("name"))
-                    )
-                    parsed.requires_human = False
-                    parsed.should_respond = True
-                    parsed.intent_detected = "product_inquiry"
-                    logger.info(
-                        "[FSM][POST] hard-lock NEEDS_DIRECTION: faltan %s",
-                        _missing_address_fields(_sim_contact.get("address")),
-                    )
                 # READY_FOR_SUMMARY recién alcanzado: inyectar resumen
                 # determinístico en vez de delegar al LLM. Esto garantiza que
                 # el cliente vea siempre el desglose antes de confirmar.
                 # Rev. 80: priorizar cart-en-DB como fuente de verdad para el
                 # resumen — evita que el resolver de history pierda items.
-                elif (
+                if (
                     _new_state == "READY_FOR_SUMMARY"
                     and display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
                                           "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}
@@ -5379,6 +5337,26 @@ async def build_and_run_orchestration(
                 if _doc_type and _doc_num and _doc_type in {"CC", "CE", "NIT", "PP", "TI", "OTHER"}:
                     update_data["document_type"] = _doc_type
                     update_data["document_number"] = _doc_num
+            # Rev. 91 — Reconciliación cross-cutting de building_type.
+            # El detector textual tiene precedencia sobre la clasificación
+            # del LLM (que tiende a errar conjunto vs casa). Caso S12: el
+            # cliente dice "conjunto Las Flores" y el LLM extrae
+            # building_type="casa" — sin esta reconciliación, el address
+            # se persiste mal y FSM nunca exige torre/apto.
+            # Esto vive aquí (capa de persistencia) en vez del conductor
+            # porque el conductor solo activa en NEEDS_X — y S12 ocurre
+            # cuando el dump llega aún en AWAITING_CARRIER_SELECTION.
+            if isinstance(parsed.extracted_direction, dict) and any(
+                parsed.extracted_direction.get(k) for k in
+                ("street", "city", "neighborhood", "building_type", "tower", "apartment")
+            ):
+                _detected_bt = _detect_building_type_from_text(content or "")
+                if _detected_bt and parsed.extracted_direction.get("building_type") != _detected_bt:
+                    logger.info(
+                        "[ADDRESS_RECONCILE] building_type LLM=%s text=%s — usando text",
+                        parsed.extracted_direction.get("building_type"), _detected_bt,
+                    )
+                    parsed.extracted_direction["building_type"] = _detected_bt
             merged_address = _merge_address_data(
                 contact_record.get("address") if isinstance(contact_record, dict) else None,
                 parsed.extracted_direction,
