@@ -79,6 +79,9 @@ app.include_router(products.router, prefix="/api/v1/products")
 app.include_router(conversations.router, prefix="/api/v1/conversations")
 app.include_router(orders.router, prefix="/api/v1/orders")
 app.include_router(contacts.router, prefix="/api/v1/contacts")
+# Rev. 93 — Habeas Data: Subject Access Request (SAR / ARCO).
+from routers import data_subject_request as _dsr  # noqa: E402
+app.include_router(_dsr.router, prefix="/api/v1/contacts")
 app.include_router(settings.router, prefix="/api/v1/settings")
 app.include_router(integrations.router, prefix="/api/v1/integrations")
 app.include_router(shipping.router, prefix="/api/v1/shipping")
