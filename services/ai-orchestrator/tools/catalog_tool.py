@@ -7,15 +7,26 @@ MAX_VARIANTS_PER_PRODUCT = 6
 
 
 def _normalize_attributes_label(attributes: dict | None, sku: str | None, fallback_index: int) -> str:
-    """Construye una etiqueta legible de variante para el prompt."""
+    """Construye una etiqueta legible de variante para el prompt.
+
+    Rev. 92.c — Si la variante tiene UN solo atributo (caso típico:
+    "Presentación: 60g", "Volumen: 30ml", "Talla: M"), devolver solo
+    el valor para evitar duplicación cuando el LLM lo cita en la
+    respuesta ("Presentaciones disponibles: Presentación: 60g, ...").
+
+    Si tiene MÚLTIPLES atributos (ej. Color + Talla), mantener
+    "Color: Rojo, Talla: M" para preservar semántica.
+    """
     if isinstance(attributes, dict) and attributes:
-        parts = []
-        for key in sorted(attributes.keys()):
-            value = attributes.get(key)
-            if value is None:
-                continue
-            parts.append(f"{key}: {value}")
-        if parts:
+        non_null = {
+            k: v for k, v in attributes.items()
+            if v is not None and str(v).strip()
+        }
+        if len(non_null) == 1:
+            # Un solo atributo → solo el valor (evita "Presentación: Presentación:").
+            return str(next(iter(non_null.values()))).strip()
+        if len(non_null) > 1:
+            parts = [f"{k}: {non_null[k]}" for k in sorted(non_null.keys())]
             return ", ".join(parts)
     if sku:
         return f"sku: {sku}"

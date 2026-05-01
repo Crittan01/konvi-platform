@@ -320,25 +320,35 @@ async def handle_image_request_if_applicable(
     description = _truncate_description(str(product.get("description") or ""))
 
     if image_link:
-        # Caption enriquecido: título destacado + variante + precio + descripción
-        # con beneficios reales + CTA conversacional. Meta caption max 1024.
-        variant_label = (
-            _variation_label(best_variation)
-            if isinstance(best_variation, dict) and best_variation
-            else None
-        )
-        price = (
-            best_variation.get("price") if isinstance(best_variation, dict) else None
-        )
-        header_parts = [f"*{title}*"]
-        line2_parts: list[str] = []
-        if variant_label and variant_label.strip().lower() not in {"estandar", "estándar"}:
-            line2_parts.append(variant_label)
-        if price:
-            line2_parts.append(_format_pesos_co(price))
-        caption_lines = [" ".join(header_parts)]
-        if line2_parts:
-            caption_lines.append(" — ".join(line2_parts))
+        # Caption enriquecido: título destacado + presentaciones + descripción
+        # + CTA. Meta caption max 1024.
+        # Rev. 92.c — listar TODAS las variantes con sus precios cuando
+        # hay >1, en vez de mostrar solo `best_variation` (que pierde
+        # info para el cliente que aún no eligió presentación).
+        all_variants = product.get("product_variations") or []
+        variant_lines: list[str] = []
+        for v in all_variants:
+            if not isinstance(v, dict):
+                continue
+            vlabel = _variation_label(v)
+            if vlabel.lower() in {"estandar", "estándar"}:
+                continue
+            vprice = v.get("price")
+            if vprice:
+                variant_lines.append(f"* {vlabel} — {_format_pesos_co(vprice)}")
+            else:
+                variant_lines.append(f"* {vlabel}")
+
+        caption_lines = [f"*{title}*"]
+        if len(variant_lines) >= 2:
+            # Multi-variant: lista bullets de todas las opciones.
+            caption_lines.append("")
+            caption_lines.extend(variant_lines[:6])  # cap visual a 6.
+        elif len(variant_lines) == 1:
+            # Variante única: una línea compacta.
+            # Re-render para evitar el bullet `* ` en single-line.
+            single = variant_lines[0].lstrip("* ").strip()
+            caption_lines.append(single)
         if description:
             caption_lines.append("")
             caption_lines.append(description)
@@ -368,19 +378,27 @@ async def handle_image_request_if_applicable(
         "[IMAGE_SEND] Producto encontrado sin imagen cargada: %s", title
     )
     variants = product.get("product_variations") or []
-    presentations = []
-    for v in variants[:4]:
-        attrs = v.get("attributes") or {}
-        if isinstance(attrs, dict) and attrs:
-            label = ", ".join(f"{k}: {v}" for k, v in attrs.items())
-            presentations.append(label)
+    presentations: list[str] = []
+    for variant in variants[:4]:
+        attrs = variant.get("attributes") or {}
+        if not isinstance(attrs, dict) or not attrs:
+            continue
+        non_null = {k: val for k, val in attrs.items() if val not in (None, "")}
+        if len(non_null) == 1:
+            # Rev. 92.c — un solo atributo → solo el valor (evita
+            # "Presentaciones disponibles: Presentación: 60g, ...").
+            presentations.append(str(next(iter(non_null.values()))).strip())
+        elif len(non_null) > 1:
+            presentations.append(
+                ", ".join(f"{k}: {non_null[k]}" for k in sorted(non_null.keys()))
+            )
     parts = [f"Aún no tengo foto del *{title}* cargada en el catálogo."]
     if description:
         parts.append("")
         parts.append(description)
     if presentations:
         parts.append("")
-        parts.append(f"Presentaciones disponibles: {', '.join(presentations[:3])}.")
+        parts.append(f"Disponible en: {', '.join(presentations[:3])}.")
     parts.append("")
     parts.append("¿Te cuento más beneficios o cotizo el envío a tu ciudad?")
     return ImageSendResult(
