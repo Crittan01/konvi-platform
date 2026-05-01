@@ -83,7 +83,8 @@ class RenderExportHtmlTests(unittest.TestCase):
             },
             "orders": [
                 {"id": "o-1", "status": "paid", "total_amount": 50000,
-                 "currency": "COP", "created_at": "2026-04-15", "paid_at": "2026-04-15"},
+                 "shipping_cost": 8000, "created_at": "2026-04-15",
+                 "updated_at": "2026-04-15"},
             ],
             "consent_history": [
                 {"event": "granted", "source": "whatsapp",
