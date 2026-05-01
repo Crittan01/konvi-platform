@@ -3639,21 +3639,29 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 - Cuando hay UN solo item, igual envuelve en sección con título en negrita.
 - LISTAS DE 3+ ÍTEMS → SIEMPRE estructura con bullets `* ` y agrupa por categoría con título en negrita. NO uses prosa plana ("Tenemos X, Y, Z y también A, B, C") cuando hay categorías o múltiples items — eso es plano y poco legible.
 - Respuestas CORTAS (1-2 oraciones, saludo, agradecimiento) → prosa natural OK.
-- LISTADO TRUNCADO (rev. 90): cuando muestras varias categorías de productos (ej. cliente pregunta "qué tienen"), por cada categoría NO listes más de 3 ítems. Si la categoría tiene N>3, agrega un 4to ítem en cursiva con el conteo restante: `* _y N-3 más..._`. Esto evita abrumar al cliente y crear sensación falsa de "esos son TODOS los productos" cuando en realidad hay más. Patrón:
+- LISTADO TRUNCADO (rev. 90 — ajustado rev. 92): cuando muestras varias categorías de productos (ej. cliente pregunta "qué tienen"), por cada categoría muestra MÁXIMO 2 ítems concretos + un 3er bullet en cursiva: `* _Entre otros..._`. Esto evita abrumar al cliente y deja claro que el catálogo tiene más opciones sin exponerlas todas. Reglas exactas:
+  • Si la categoría tiene N=1 ítem: solo muestra ese 1 (sin "Entre otros").
+  • Si la categoría tiene N=2 ítems: muestra los 2 (sin "Entre otros").
+  • Si la categoría tiene N≥3 ítems: muestra los 2 primeros + `* _Entre otros..._`.
+
+  Patrón canónico:
 
     *Aceites vegetales:*
     * Almendras Dulces
     * Argán
-    * Coco Virgen
-    * _y 1 más..._
+    * _Entre otros..._
+
+    *Aceites esenciales:*
+    * Árbol de Té
+    * Eucalipto
+    * _Entre otros..._
 
     *Jabones artesanales:*
     * Avena y Miel
     * Coco
-    * Lavanda
-    * _y 1 más..._
+    * _Entre otros..._
 
-  Si listas UNA SOLA categoría (cliente preguntó específico "¿qué jabones tienen?"), puedes mostrar hasta 5. Si hay más, mismo patrón "y N más".
+  Si listas UNA SOLA categoría (cliente preguntó específico "¿qué jabones tienen?"), puedes mostrar hasta 4 ítems concretos + `* _Entre otros..._` si hay más. Si hay solo 1, solo ese 1.
 
 - Bullets siempre con `* ` (asterisco + ESPACIO + texto). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
 - Si abres negrita con `*`, ciérrala con `*` en la misma línea. NUNCA dejes `*` huérfano (rompe el render).
@@ -3970,7 +3978,100 @@ def _format_whatsapp_response_text(text: str) -> str:
 
     # 7. Colapsar 3+ saltos consecutivos a 2 (un párrafo de respiro, no más).
     formatted = re.sub(r"\n{3,}", "\n\n", formatted)
+
+    # 8. Rev. 92 — Truncar listados de catálogo a 2 + "Entre otros" por categoría.
+    #    Ver `_truncate_category_listings` para reglas + cita marketing.
+    formatted = _truncate_category_listings(formatted)
+
     return formatted
+
+
+# ── Rev. 92 — Listado truncado determinístico ────────────────────────────────
+
+_CATEGORY_HEADER_RE = re.compile(r"^\*[^*\n]+:\*\s*$")
+_BULLET_LINE_RE = re.compile(r"^\* (?!_Entre otros)\S")
+_TRUNCATED_MARKER = "* _Entre otros..._"
+_MARKETING_CITE = (
+    "> _Tenemos muchas más referencias para ti — pregúntame por la "
+    "que te interese._ 😊"
+)
+
+
+def _truncate_category_listings(text: str) -> str:
+    """Rev. 92 — Si el outbound es un listado de catálogo, trunca cada
+    categoría a MÁXIMO 2 ítems concretos + un 3er bullet `* _Entre otros..._`
+    cuando hay ≥3 ítems en la categoría. Si al menos UNA categoría fue
+    truncada, agrega cita marketing al final.
+
+    Reglas aplicadas:
+      • Categoría = línea `*Header:*` seguida de bullets `* item`.
+      • Si la categoría tiene ≥3 bullets → corta a 2 + `* _Entre otros..._`.
+      • Si la categoría tiene ≤2 bullets → no toca.
+      • Si al menos 1 categoría fue truncada → append cita marketing.
+
+    Skip por seguridad — NUNCA trunca:
+      • Resúmenes de pedido (`📋` o `*TOTAL:` o `*Resumen`).
+      • Cotizaciones de envío (texto contiene "Económica" o "transportadora").
+      • Cualquier texto que no tenga al menos 1 cabecera de categoría.
+
+    El LLM no honra confiablemente la regla del prompt; este post-process
+    determinístico garantiza la UX.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # Skip-conditions: nunca tocamos summaries / cotizaciones / carts.
+    skip_markers = (
+        "📋", "*TOTAL:", "*Resumen", "Económica", "Rápida",
+        "transportadora", "*Datos de envío", "¿Confirmas",
+        "*Productos:*",  # Cart summary o order ack — items deben verse todos.
+    )
+    if any(marker in text for marker in skip_markers):
+        return text
+    # Skip si CUALQUIER bullet tiene prefijo cart-quantity (ej. "* 2x ...").
+    if re.search(r"(?m)^\* \d+x ", text):
+        return text
+
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    truncated_any = False
+    has_any_category = False
+
+    while i < len(lines):
+        line = lines[i]
+        if _CATEGORY_HEADER_RE.match(line):
+            has_any_category = True
+            out.append(line)
+            i += 1
+            # Recolectar bullets que siguen (saltando líneas en blanco intermedias).
+            bullets: list[str] = []
+            while i < len(lines):
+                ln = lines[i]
+                if _BULLET_LINE_RE.match(ln):
+                    bullets.append(ln)
+                    i += 1
+                    continue
+                break
+            if len(bullets) >= 3:
+                out.extend(bullets[:2])
+                out.append(_TRUNCATED_MARKER)
+                truncated_any = True
+            else:
+                out.extend(bullets)
+        else:
+            out.append(line)
+            i += 1
+
+    # Si no detectamos categorías, devolver intacto.
+    if not has_any_category:
+        return text
+
+    result = "\n".join(out)
+    if truncated_any and "Tenemos muchas más referencias" not in result:
+        # Append con doble salto antes para separar visualmente.
+        result = result.rstrip() + "\n\n" + _MARKETING_CITE
+    return result
 
 
 # ─── Core Orchestration ───────────────────────────────────────────────────────
