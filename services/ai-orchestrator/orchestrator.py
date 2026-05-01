@@ -375,6 +375,115 @@ def _detect_revocation_intent(text: str) -> bool:
     return any(token in normalized for token in _REVOCATION_TOKENS)
 
 
+# Rev. 97 — Cliente self-service Habeas Data Art. 14 (acceso a sus datos).
+# El titular puede pedir vía WhatsApp un resumen de los datos que el
+# tenant guarda sobre él. Detector pre-LLM determinístico (no se delega
+# al modelo para evitar respuestas erráticas a un derecho fundamental).
+_DATA_EXPORT_TOKENS = {
+    # "Mis datos" — pedido directo
+    "envia mis datos", "enviame mis datos", "enviar mis datos",
+    "manda mis datos", "mandame mis datos", "mandar mis datos",
+    "quiero mis datos", "necesito mis datos",
+    "dame mis datos", "comparte mis datos",
+    # "Mi informacion"
+    "envia mi informacion", "enviame mi informacion",
+    "manda mi informacion", "mandame mi informacion",
+    "quiero mi informacion", "dame mi informacion",
+    "comparte mi informacion",
+    # "Que tienen sobre mi" — consulta natural
+    "que tienen sobre mi", "que datos tienen sobre mi",
+    "que informacion tienen sobre mi", "que tienen de mi",
+    "que datos guardan sobre mi", "que informacion guardan sobre mi",
+    "que datos tienen mios", "que informacion tienen mia",
+    # Habeas Data formal (Art. 14)
+    "habeas data", "derecho de acceso", "ejercer habeas data",
+    "solicito mis datos", "acceso a mis datos personales",
+    # Portabilidad (Art. 19)
+    "portabilidad de datos", "exportar mis datos",
+}
+
+
+def _detect_data_export_intent(text: str) -> bool:
+    """Rev. 97 — True si el titular solicita ejercer derecho Art. 14 (acceso)."""
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+    # Excluir si es una revocación (que ya tiene su flujo).
+    if any(rev in normalized for rev in _REVOCATION_TOKENS):
+        return False
+    return any(token in normalized for token in _DATA_EXPORT_TOKENS)
+
+
+def _mask_value(value: Optional[str]) -> str:
+    """Mask sensible value, mostrando solo primeros 2 + últimos 4 chars."""
+    if not value:
+        return "(no registrado)"
+    s = str(value)
+    if len(s) <= 6:
+        return "*" * len(s)
+    return s[:2] + "*" * (len(s) - 6) + s[-4:]
+
+
+def _build_customer_data_summary(
+    supabase: Client, contact_id: str, tenant_id: str
+) -> str:
+    """Rev. 97 — Resumen de datos del titular para envío vía WhatsApp.
+
+    Output text-only (PDF + Meta document upload diferido a follow-up).
+    Incluye campos PII enmascarados parcialmente para que el cliente
+    confirme qué datos tenemos sin exponer doc completo en chat.
+    """
+    try:
+        c_res = supabase.table("contacts").select(
+            "name, email, phone, document_type, document_number, address, "
+            "consent_given, consent_given_at, consent_revoked_at"
+        ).eq("id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+        if not c_res.data:
+            return (
+                "No tenemos registros tuyos en el sistema. "
+                "Si crees que esto es un error, escríbenos al correo "
+                "soporte para ayudarte."
+            )
+        c = c_res.data[0]
+
+        # Conteo de orders.
+        orders_count = 0
+        try:
+            o_res = supabase.table("orders").select(
+                "id", count="exact",
+            ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).execute()
+            orders_count = int(getattr(o_res, "count", 0) or 0)
+        except Exception:
+            pass
+
+        consent_status = "Activo ✅" if c.get("consent_given") else "Revocado 🔒"
+
+        lines = [
+            "📋 *Resumen de tus datos personales*",
+            "",
+            f"• Nombre: {c.get('name') or '(no registrado)'}",
+            f"• Email: {c.get('email') or '(no registrado)'}",
+            f"• Teléfono: {_mask_value(c.get('phone'))}",
+            f"• Documento: {c.get('document_type') or '?'} {_mask_value(c.get('document_number'))}",
+            f"• Dirección: {'(registrada)' if c.get('address') else '(no registrada)'}",
+            "",
+            f"• Consentimiento: {consent_status}",
+            f"• Pedidos asociados: {orders_count}",
+            "",
+            "Si quieres el reporte completo en formato JSON, escríbele al "
+            "tenant pidiéndolo formalmente (Habeas Data Art. 14 Ley 1581/2012). "
+            "Si quieres eliminar tus datos, responde *elimina mis datos*.",
+        ]
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("[SAR] Error generando summary contact=%s: %s", contact_id, exc)
+        return (
+            "Tu solicitud quedó registrada. En 24-48h te enviaremos el "
+            "reporte completo de los datos que guardamos sobre ti "
+            "(Habeas Data Ley 1581/2012)."
+        )
+
+
 def _detect_cancel_intent(text: str) -> bool:
     """Rev. 83 — True si el cliente quiere cancelar su pedido / compra.
 
@@ -5034,6 +5143,56 @@ async def build_and_run_orchestration(
                 logger.warning("[CONSENT] notify_consent_revoked falló: %s", exc)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
+            return
+
+        # ── 2.6 Detección Habeas Data Art. 14 (cliente pide SUS datos) ──────────
+        # Rev. 97 — El titular puede ejercer derecho de acceso vía WhatsApp.
+        # El bot responde con resumen de datos + audit log + notifica al tenant.
+        if _detect_data_export_intent(content) and contact_id:
+            summary_text = _build_customer_data_summary(supabase, contact_id, tenant_id)
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=summary_text,
+            )
+            # Audit append-only (Art. 9).
+            try:
+                phone_for_audit = None
+                p_res = supabase.table("contacts").select("phone").eq(
+                    "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+                if p_res.data:
+                    phone_for_audit = p_res.data[0].get("phone")
+                _log_consent_event(
+                    supabase,
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                    phone=phone_for_audit,
+                    event="export_request",
+                    source="whatsapp",
+                    conversation_id=conversation_id,
+                    evidence={
+                        "via": "self_service",
+                        "channel": "whatsapp",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("[SAR] audit log falló: %s", exc)
+            # Notificar al tenant (Art. 9 — registro de SAR).
+            try:
+                from notifications import notify_sar_received
+                await notify_sar_received(
+                    supabase,
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                    sar_type="export",
+                    reason="Cliente solicitó datos vía WhatsApp",
+                )
+            except Exception as exc:
+                logger.warning("[SAR] notify_sar_received falló: %s", exc)
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.info("[SAR] Export self-service procesado | conversation=%s", conversation_id)
             return
 
         # ── 2.55 Sub-flow UPDATE de datos (rev. 89) ───────────────────────────
