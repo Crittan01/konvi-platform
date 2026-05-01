@@ -56,7 +56,7 @@ services:
       # Si este servicio se redeploya con la var todavía configurada en el dashboard de
       # Render, basta con eliminarla manualmente — no hay código que la use.
     healthCheckPath: /
-    autoDeploy: true
+    autoDeploy: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # 2. WHATSAPP CONNECTOR — FastAPI Webhook Gateway
@@ -83,7 +83,7 @@ services:
       - key: ALLOWED_ORIGINS
         sync: false
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeploy: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # 3. CORE API — FastAPI REST Gateway (Fase 6 ✅)
@@ -165,7 +165,7 @@ services:
       # Las llaves de Wompi se ingresan por tenant en Ajustes → Integraciones → Wompi.
       # No se necesitan env vars globales para Wompi.
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeploy: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # 4. AI ORCHESTRATOR — Web Service con worker en thread de fondo
