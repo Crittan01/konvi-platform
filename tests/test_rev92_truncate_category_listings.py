@@ -127,7 +127,7 @@ class TruncateCategoryListingsTests(unittest.TestCase):
             "* _Entre otros..._\n"
             "\n"
             "> _Tenemos muchas más referencias para ti — pregúntame por la "
-            "que te interese._ 😊"
+            "que te interese._"
         )
         out = _truncate_category_listings(text)
         # Ya estaba truncado, no se modifica.
