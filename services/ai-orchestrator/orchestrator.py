@@ -49,7 +49,7 @@ CONSENT_QUESTION_TEMPLATE = (
     "¡Perfecto! Voy a continuar con tu pedido. Con tu autorización te "
     "pediré algunos datos (nombre, dirección, etc.) para esta compra "
     "y futuros pedidos.\n\n"
-    "Si en algún momento quieres que los borre, solo dímelo. 🙏\n\n"
+    "Si en algún momento quieres que los borre, solo dímelo. \n\n"
     "¿Estás de acuerdo? *SÍ* o *NO*."
 )
 ORDER_CREATION_CONFIRMATION_TEMPLATE = (
@@ -2256,7 +2256,7 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
             "¡Perfecto! Voy a continuar con tu pedido. Con tu "
             "autorización te pediré algunos datos (nombre, dirección, "
             "etc.) para esta compra y futuros pedidos.\n\n"
-            "Si en algún momento quieres que los borre, solo dímelo. 🙏\n\n"
+            "Si en algún momento quieres que los borre, solo dímelo. \n\n"
             "¿Estás de acuerdo? *SÍ* o *NO*."
         )
     if state == "NEEDS_EMAIL":
@@ -4432,7 +4432,7 @@ async def build_and_run_orchestration(
             else:
                 await _send_outbound_text(
                     supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                    text=f"Entendido, te conecto con un {tenant_escalation_role}. ¡Un momento! 🙏",
+                    text=f"Entendido, te conecto con un {tenant_escalation_role}. ¡Un momento! ",
                 )
             _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
@@ -4526,7 +4526,7 @@ async def build_and_run_orchestration(
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
                     text=(
-                        "Entendido, no guardo tus datos. 🙏\n\n"
+                        "Entendido, no guardo tus datos. \n\n"
                         "Sin embargo, para cerrar la compra y enviarte el pedido, "
                         "Wompi y la transportadora necesitan al menos tu nombre, "
                         "correo, documento y dirección. Si cambias de idea avísame "
@@ -4713,7 +4713,7 @@ async def build_and_run_orchestration(
                 conversation_id=conversation_id,
                 tenant_id=tenant_id,
                 text=(
-                    "Lamento mucho que estés pasando por esto. 💛\n\n"
+                    "Lamento mucho que estés pasando por esto. \n\n"
                     "Tu bienestar es lo más importante. Por favor contacta "
                     "una línea de apoyo profesional ahora mismo:\n\n"
                     "• Colombia — Línea de la vida 106 (Bogotá) o 123 "
@@ -4747,7 +4747,7 @@ async def build_and_run_orchestration(
                 conversation_id=conversation_id,
                 tenant_id=tenant_id,
                 text=(
-                    "🔒 Por tu seguridad, **no envíes** datos de tarjeta o "
+                    "Por tu seguridad, **no envíes** datos de tarjeta o "
                     "CVV por este chat — no son canales seguros.\n\n"
                     "Cuando generemos tu link de pago, Wompi te pedirá esos "
                     "datos en su widget cifrado. Yo nunca los necesito acá."
@@ -4775,7 +4775,7 @@ async def build_and_run_orchestration(
                 text=(
                     "Soy un asesor virtual y no doy diagnósticos ni "
                     "recomendaciones médicas — para eso consulta a tu "
-                    "profesional de salud. 🩺\n\n"
+                    "profesional de salud. \n\n"
                     "Si tienes una pregunta sobre los productos "
                     "(características, ingredientes o beneficios generales), "
                     "con gusto te ayudo."
@@ -4799,7 +4799,7 @@ async def build_and_run_orchestration(
                 tenant_id=tenant_id,
                 text=(
                     "No comercializamos medicamentos. Para eso lo mejor "
-                    "es tu droguería o farmacia de confianza. 💊\n\n"
+                    "es tu droguería o farmacia de confianza. \n\n"
                     "Si te interesa algo de nuestro catálogo, dime y te "
                     "ayudo a encontrarlo."
                 ),
@@ -4895,7 +4895,7 @@ async def build_and_run_orchestration(
                 conversation_id=conversation_id,
                 tenant_id=tenant_id,
                 text=(
-                    "Entendido, cancelo tu pedido. 🙏\n\n"
+                    "Entendido, cancelo tu pedido. \n\n"
                     "No hay problema, cuando quieras retomar la compra aquí "
                     "estaré para ayudarte. ¡Que tengas un excelente día!"
                 ),
