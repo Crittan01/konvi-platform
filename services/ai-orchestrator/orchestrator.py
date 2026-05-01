@@ -3983,7 +3983,74 @@ def _format_whatsapp_response_text(text: str) -> str:
     #    Ver `_truncate_category_listings` para reglas + cita marketing.
     formatted = _truncate_category_listings(formatted)
 
+    # 9. Rev. 92 — Realzar citas KB. Convierte `_Fuente: X_` (etiqueta
+    #    colgada en cursiva) en blockquote `> Fuente: X` + agrega CTA
+    #    invitacional. Mejora UX cuando no hay URL pública del doc.
+    formatted = _enhance_kb_citation(formatted)
+
     return formatted
+
+
+# ── Rev. 92 — Realzado de cita KB ────────────────────────────────────────────
+
+_KB_CITE_RE = re.compile(r"_Fuente:\s*([^\n_]+?)_")
+_KB_CITE_CTA = (
+    "Si quieres que te amplíe algún punto o que te envíe el documento "
+    "completo, házmelo saber."
+)
+
+
+def _enhance_kb_citation(text: str) -> str:
+    """Rev. 92 — Si la respuesta tiene `_Fuente: TITLE_` (cita KB en
+    cursiva del LLM rev. 78), transforma el bloque final a:
+
+        <cuerpo de la respuesta>
+
+        <CTA invitacional>
+
+        > Fuente: TITLE
+
+    Garantiza separadores `\\n\\n` (párrafo) antes del CTA y antes del
+    blockquote — el LLM tiende a pegar el cite directo al cuerpo sin
+    blank line.
+
+    Razones del cambio:
+      • Cita en cursiva sin URL = etiqueta colgada (cliente no puede
+        consultar el documento).
+      • Blockquote (`>`) separa visualmente y se identifica como
+        referencia.
+      • CTA invita al cliente a profundizar dentro del mismo chat.
+
+    Idempotente: si ya hay `> Fuente:` o el CTA, no duplica.
+    """
+    if not text or "_Fuente:" not in text:
+        return text
+    if "> Fuente:" in text:
+        return text
+    match = _KB_CITE_RE.search(text)
+    if not match:
+        return text
+    title = match.group(1).strip()
+    if not title:
+        return text
+    cta_present = "házmelo saber" in text or "hazmelo saber" in text
+
+    # Construir el bloque final con separadores explícitos.
+    blocks: list[str] = []
+    if not cta_present:
+        blocks.append(_KB_CITE_CTA)
+    blocks.append(f"> Fuente: {title}")
+    final_block = "\n\n".join(blocks)
+
+    # Trim whitespace alrededor del cite original para evitar
+    # acumulación de saltos (\n\n\n) tras la sustitución.
+    before = text[:match.start()].rstrip()
+    after = text[match.end():].lstrip()
+
+    result = before + "\n\n" + final_block
+    if after:
+        result += "\n\n" + after
+    return result
 
 
 # ── Rev. 92 — Listado truncado determinístico ────────────────────────────────
