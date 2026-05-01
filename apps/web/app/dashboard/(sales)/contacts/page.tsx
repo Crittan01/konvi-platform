@@ -5,6 +5,26 @@ import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
+// Rev. 102 — module-level scope.
+// Bug previo: estaban definidas DENTRO de ContactsPage; los server actions
+// inline (addContact/editContact) capturaban CONSENT_SOURCES y
+// normalizeDaneCode en su closure. Cuando Next serializaba el action para
+// pasarlo como prop al ContactsManager (Client Component), intentaba
+// serializar Set.has → "Functions cannot be passed directly to Client
+// Components" digest 3617361344. Mover a module scope resuelve: las
+// server actions referencian el binding del módulo (resoluble en runtime),
+// no un closure capturado en el render.
+const CONSENT_SOURCES = new Set([
+  'manual_console', 'whatsapp', 'web_form', 'phone_call',
+  'in_person', 'import', 'other',
+])
+
+const normalizeDaneCode = (raw?: string | null) => {
+  const digits = String(raw ?? '').replace(/\D/g, '')
+  if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
+  return digits.slice(0, 5)
+}
+
 type Contact = {
   id: string
   phone: string
@@ -28,12 +48,6 @@ export default async function ContactsPage({
 }: {
   searchParams?: { q?: string; consent?: string }
 }) {
-  const normalizeDaneCode = (raw?: string | null) => {
-    const digits = String(raw ?? '').replace(/\D/g, '')
-    if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
-    return digits.slice(0, 5)
-  }
-
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
@@ -42,7 +56,6 @@ export default async function ContactsPage({
   const canWrite = role === 'owner' || role === 'manager'
 
   const consentFilter = searchParams?.consent ?? 'all'
-  const CONSENT_SOURCES = new Set(['manual_console', 'whatsapp', 'web_form', 'phone_call', 'in_person', 'import', 'other'])
 
   let contacts: Contact[] = []
 
