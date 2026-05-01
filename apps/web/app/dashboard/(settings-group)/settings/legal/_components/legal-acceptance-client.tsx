@@ -60,22 +60,22 @@ export default function LegalAcceptanceClient({
               key={docId}
               className={`rounded-xl border px-4 py-3 ${
                 accepted
-                  ? 'border-emerald-500/30 bg-emerald-500/5'
-                  : 'border-amber-500/30 bg-amber-500/5'
+                  ? 'border-emerald-700/40 bg-emerald-700/5'
+                  : 'border-amber-700/40 bg-amber-700/5'
               }`}
             >
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div className="flex-1">
                   <div className="font-semibold text-foreground flex items-center gap-2">
                     {accepted
-                      ? <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      : <AlertCircle className="h-4 w-4 text-amber-400" />}
+                      ? <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                      : <AlertCircle className="h-4 w-4 text-amber-700" />}
                     {labels.label}
                     <span className="text-xs font-normal text-muted-foreground">({version})</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">{labels.description}</p>
                   {accepted && acceptance && (
-                    <p className="text-xs text-emerald-400 mt-1.5">
+                    <p className="text-xs text-emerald-700 mt-1.5">
                       ✓ Aceptado por <strong>{acceptance.accepted_by_email || '(usuario)'}</strong>
                       {' · '}
                       {new Date(acceptance.accepted_at).toLocaleString('es-CO', {
@@ -89,7 +89,7 @@ export default function LegalAcceptanceClient({
                     href={labels.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                    className="text-xs text-blue-700 hover:underline flex items-center gap-1"
                   >
                     Leer documento <ExternalLink className="h-3 w-3" />
                   </a>
@@ -100,7 +100,7 @@ export default function LegalAcceptanceClient({
                       disabled={busy}
                       size="sm"
                       variant="outline"
-                      className="h-8 text-xs gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                      className="h-8 text-xs gap-1.5 border-emerald-700/50 text-emerald-700 hover:bg-emerald-700/10"
                     >
                       {busy
                         ? <><Loader2 className="h-3 w-3 animate-spin" />Aceptando...</>
@@ -136,7 +136,7 @@ export default function LegalAcceptanceClient({
         </details>
       )}
 
-      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-xs text-blue-400">
+      <div className="rounded-xl border border-blue-700/40 bg-blue-700/5 px-4 py-3 text-xs text-blue-700">
         <strong>¿Por qué aceptar?</strong> El DPA documenta que tú (tenant) eres el Responsable
         del tratamiento ante SIC y la plataforma es Encargado. Sin aceptación formal, una
         eventual auditoría podría cuestionar la cadena de responsabilidad. La aceptación es

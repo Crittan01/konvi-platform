@@ -127,7 +127,7 @@ export default async function RetentionPoliciesPage() {
         </p>
       </div>
 
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+      <div className="rounded-xl border border-amber-700/40 bg-amber-700/5 px-4 py-3 text-sm text-amber-700">
         <strong>Importante:</strong> los cambios aplican el siguiente domingo a las 03:xx UTC.
         Los audit logs ({'consent_audit_log'}) son append-only por ley y NO se purgan automáticamente.
       </div>

@@ -72,7 +72,7 @@ export default function RetentionPoliciesForm({
           <div
             key={entity}
             className={`rounded-xl border px-4 py-3 ${
-              isOverridden ? 'border-blue-500/30 bg-blue-500/5' : 'border-border bg-card/30'
+              isOverridden ? 'border-blue-700/40 bg-blue-700/5' : 'border-border bg-card/30'
             }`}
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -80,7 +80,7 @@ export default function RetentionPoliciesForm({
                 <div className="font-semibold text-foreground flex items-center gap-2">
                   {labels.label}
                   {isOverridden && (
-                    <span className="text-xs font-normal text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                    <span className="text-xs font-normal text-blue-700 bg-blue-700/10 px-1.5 py-0.5 rounded">
                       Override per-tenant
                     </span>
                   )}
@@ -89,7 +89,7 @@ export default function RetentionPoliciesForm({
                 <p className="text-xs text-muted-foreground/70 mt-0.5">
                   Default global: <strong>{def?.ttl_days ?? '?'} días · {def?.action ?? '?'}</strong>
                   {isOverridden && (
-                    <> → Tu tenant: <strong className="text-blue-400">{effectiveTtl} días · {effectiveAction}</strong></>
+                    <> → Tu tenant: <strong className="text-blue-700">{effectiveTtl} días · {effectiveAction}</strong></>
                   )}
                 </p>
               </div>
@@ -144,7 +144,7 @@ export default function RetentionPoliciesForm({
                     disabled={busy}
                     size="sm"
                     variant="ghost"
-                    className="h-8 text-xs text-amber-400 hover:bg-amber-500/10 gap-1.5"
+                    className="h-8 text-xs text-amber-700 hover:bg-amber-700/10 gap-1.5"
                   >
                     <Trash2 className="h-3 w-3" />
                     Volver al default
