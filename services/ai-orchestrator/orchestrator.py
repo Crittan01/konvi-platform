@@ -5130,17 +5130,25 @@ async def build_and_run_orchestration(
                 ),
             )
             # Rev. 94 — Notificar al tenant (Habeas Data Art. 9 — registro de revocación).
+            # Rev. 100 — distinguir excepciones de retornos False (todos fallaron).
             try:
                 from notifications import notify_consent_revoked
-                await notify_consent_revoked(
+                ok = await notify_consent_revoked(
                     supabase,
                     tenant_id=tenant_id,
                     contact_phone_hash=_hash_phone(phone_for_notify) or "",
                     occurred_at=datetime.now(timezone.utc).isoformat(),
                     source="whatsapp",
                 )
+                if not ok:
+                    # Audit gap — el evento queda en consent_audit_log pero el
+                    # tenant no fue alertado. Visible en Render logs.
+                    logger.error(
+                        "[CONSENT] notify_consent_revoked returned False tenant=%s — todos los recipients fallaron",
+                        tenant_id,
+                    )
             except Exception as exc:
-                logger.warning("[CONSENT] notify_consent_revoked falló: %s", exc)
+                logger.error("[CONSENT] notify_consent_revoked excepción: %s", exc)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
             return
@@ -5180,17 +5188,23 @@ async def build_and_run_orchestration(
             except Exception as exc:
                 logger.warning("[SAR] audit log falló: %s", exc)
             # Notificar al tenant (Art. 9 — registro de SAR).
+            # Rev. 100 — distinguir excepción de False semantics.
             try:
                 from notifications import notify_sar_received
-                await notify_sar_received(
+                ok = await notify_sar_received(
                     supabase,
                     tenant_id=tenant_id,
                     contact_id=contact_id,
                     sar_type="export",
                     reason="Cliente solicitó datos vía WhatsApp",
                 )
+                if not ok:
+                    logger.error(
+                        "[SAR] notify_sar_received returned False tenant=%s — todos los recipients fallaron",
+                        tenant_id,
+                    )
             except Exception as exc:
-                logger.warning("[SAR] notify_sar_received falló: %s", exc)
+                logger.error("[SAR] notify_sar_received excepción: %s", exc)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[SAR] Export self-service procesado | conversation=%s", conversation_id)
             return

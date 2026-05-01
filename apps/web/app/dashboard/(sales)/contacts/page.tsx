@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { ShieldCheck, Users } from 'lucide-react'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
+import { CORE_API_URL } from '@/lib/runtime-env'
 
 type Contact = {
   id: string
@@ -249,6 +250,59 @@ export default async function ContactsPage({
     revalidatePath('/dashboard/contacts')
   }
 
+  // Rev. 100 — SAR (Subject Access Request) Habeas Data Art. 14.
+  // Server action proxy al endpoint /api/v1/contacts/{id}/data-subject-request.
+  // Devuelve { ok, payload } para que el cliente serialice y descargue.
+  async function sarAction(formData: FormData): Promise<{
+    ok: boolean
+    status: number
+    type: string
+    payload?: unknown
+    error?: string
+  }> {
+    'use server'
+    const sb = createClient()
+    const { data: { session } } = await sb.auth.getSession()
+    const m = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    const sarType = String(formData.get('sar_type') || 'export')
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, status: 403, type: sarType, error: 'No tienes permisos (owner/manager).' }
+    }
+    const contactId = String(formData.get('contact_id') || '')
+    if (!contactId) {
+      return { ok: false, status: 400, type: sarType, error: 'contact_id requerido.' }
+    }
+    const reason = (formData.get('reason') as string) || undefined
+    const token = session?.access_token
+    if (!token) {
+      return { ok: false, status: 401, type: sarType, error: 'Sesión expirada — recarga la página.' }
+    }
+    try {
+      const res = await fetch(
+        `${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(contactId)}/data-subject-request`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ type: sarType, reason }),
+          cache: 'no-store',
+        },
+      )
+      const text = await res.text()
+      let payload: unknown
+      try { payload = JSON.parse(text) } catch { payload = text }
+      // Si fue erase, refrescamos la lista (PII anonimizada).
+      if (res.ok && (sarType === 'erase' || sarType === 'rectify')) {
+        revalidatePath('/dashboard/contacts')
+      }
+      return { ok: res.ok, status: res.status, type: sarType, payload }
+    } catch (e) {
+      return { ok: false, status: 502, type: sarType, error: e instanceof Error ? e.message : 'Network error' }
+    }
+  }
+
   // ── UI ─────────────────────────────────────────────────────────────────────
 
   return (
@@ -280,12 +334,13 @@ export default async function ContactsPage({
         </span>
       </div>
 
-      <ContactsManager 
+      <ContactsManager
         initialContacts={contacts}
         canWrite={canWrite}
         addAction={addContact}
         editAction={editContact}
         deleteAction={deleteContact}
+        sarAction={sarAction}
       />
     </div>
   )

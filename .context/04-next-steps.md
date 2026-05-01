@@ -1,8 +1,29 @@
-# Próximos Pasos — Estado 2026-04-30
+# Próximos Pasos — Estado 2026-05-01 (rev. 100)
 
 ## ADRs activos
 
 - [docs/adr/0001-llm-tier-strategy.md](../docs/adr/0001-llm-tier-strategy.md) — Decisión rev. 81: AI Studio paid + cascada `flash → flash-lite → degraded` + model router. **NO** multi-API-key, **NO** Vertex AI por ahora. Contiene **triggers concretos** (§7) para revisitar la decisión cuando: tasa de cascada >10%, degraded >1%, tráfico >500 RPM/tenant, o 5+ tenants productivos. Validar estos umbrales antes de cualquier rev de scaling LLM.
+- [docs/adr/0002-meta-business-policy-compliance.md](../docs/adr/0002-meta-business-policy-compliance.md) — rev. 84/85: detectores pre-LLM healthcare + drugs + sensitive payment. Conservador con falsos positivos.
+- [docs/adr/0003-habeas-data-compliance-strategy.md](../docs/adr/0003-habeas-data-compliance-strategy.md) — rev. 93–99: cumplimiento Habeas Data Ley 1581/2012 end-to-end. Decisiones D1-D7, alternativas A1-A4, follow-ups F1-F7.
+
+---
+
+## Backlog rev. 100 — ADR-0003 follow-ups (Habeas Data)
+
+| ID | Tarea | Prioridad | Estado |
+|---|---|---|---|
+| F1 | Generación de PDF para SAR export (WeasyPrint + Meta document upload) | Media | Backlog |
+| F2 | Tokenización completa de `document_number` con Vault (rev. 96 dejó hash + last4 aditivo) | Media | Backlog |
+| F3 | Migración de `audit_log` legacy a `consent_audit_log` (deduplicar) | Baja | Backlog |
+| F4 | UI Tenant Console: configuración retention per-tenant | Media | Backlog |
+| F5 | Reporte SIC pre-cocinado (CSV + JSON formal) | Alta si hay queja SIC | Backlog |
+| F6 | Detector self-service de **rectificación** vía WhatsApp | Baja | Backlog |
+| F7 | UI click-wrap legal acceptance (DPA + privacy + subprocessors). La migración `tenant_legal_acceptance` ya existe; falta el frontend. | Media | Backlog |
+
+## INTERVENCION HUMANA — H7/H8 desde rev. 100
+
+- **H7 (P0)** — Rotar credenciales del proyecto Supabase `xmelwnhhphksbpdjmbbp`: service_role key, anon key, DB password, Meta App Secret, Wompi sandbox keys. Razón: el commit histórico `be739a4` (2026-04-06) tenía un `.env` con plaintext de estos secretos; aunque `488c6c6` ya removió el archivo del tracking, la historia git permanece pushed a GitHub.
+- **H8 (opcional)** — `git filter-repo --path .env --invert-paths` para remover el archivo de TODA la historia. Destructivo: reescribe hashes; requiere coordinación con clones locales. Alternativa: solo rotar (H7) y aceptar que los secretos viejos quedan en historia (inutilizables tras rotación).
 
 ## Rev. 75 — V2 cancelado (decisión arquitectónica)
 

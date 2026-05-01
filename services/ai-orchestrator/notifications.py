@@ -254,17 +254,33 @@ async def _notify_tenant_event(
         return True
 
     sent_any = False
+    failed_recipients: list[str] = []
+    attempted = 0
     for row in rows:
         config = dict(row.get("config") or {})
         recipient = str(config.get("to_email") or config.get("recipient") or "").strip()
         if not recipient:
             continue
+        attempted += 1
         ok = await _send_email_via_resend(
             to=recipient, subject=subject, html=html_body,
         )
         if ok:
             sent_any = True
-    return sent_any or not rows  # OK si no había rows, OK si al menos uno se envió.
+        else:
+            failed_recipients.append(recipient)
+    # Rev. 100 — semantics explícita:
+    #   • Sin recipients configurados → True (no-op aceptable, no es fallo).
+    #   • Al menos 1 envío OK → True.
+    #   • Todos los envíos fallaron → False + log ERROR explícito.
+    #     (Art. 9 audit gap potencial — el caller debe re-intentar o escalar).
+    if attempted > 0 and not sent_any:
+        logger.error(
+            "[NOTIFY] tenant=%s event=%s ALL %d recipients failed: %s",
+            tenant_id, event_type, attempted, failed_recipients,
+        )
+        return False
+    return True
 
 
 async def dispatch_human_takeover_event(supabase: Client, payload: dict[str, Any]) -> bool:

@@ -73,6 +73,17 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    # Rev. 100 — CSP defensivo + HSTS para clientes HTTPS.
+    # CSP `default-src 'none'` porque la API solo sirve JSON, no HTML.
+    # `connect-src 'self'` permite que un browser en el mismo origin la consuma.
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'none'; connect-src 'self'; frame-ancestors 'none'",
+    )
+    # HSTS: idempotente. El browser solo lo respeta sobre HTTPS (Render lo es).
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+    )
     return response
 
 app.include_router(products.router, prefix="/api/v1/products")
