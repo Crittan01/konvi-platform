@@ -373,24 +373,39 @@ def default_response_rules(profile: dict) -> list[Rule]:
               "esa opción"),
             lambda _: "Sí, esa opción"),
 
-        # Consent. Acepta variantes: "autorizas / autoriza", "me das tu autorización".
-        (25, ("aceptas", "tratamiento de datos", "habeas data",
+        # Consent (prio ALTA, debe disparar antes que reglas de datos
+        # cuando el consent question menciona "nombre, dirección, etc."
+        # como ejemplos en su cuerpo). Cubre el nuevo template rev. 91
+        # ("¿Estás de acuerdo? Responde *SÍ* o *NO*") + variantes legacy.
+        (60, ("estás de acuerdo", "estas de acuerdo", "está de acuerdo",
+              "esta de acuerdo", "responde *sí*", "responde sí o no",
+              "aceptas", "tratamiento de datos", "habeas data",
               "guardar tus datos", "guardar sus datos", "consentimiento",
               "autorizas", "me autorizas", "autorización", "autorizacion",
               "registrar tus datos", "podrías autorizarme"),
-            lambda _: "Sí acepto, guarden mis datos"),
+            lambda _: "Sí, acepto"),
 
-        # Datos personales — multi-campo si bot pide varios.
-        (30, ("correo", "email"),
+        # Datos personales — phrasings ESPECÍFICOS que el bot usa cuando
+        # pide UN dato concreto (no menciones genéricas en el cuerpo de
+        # otros mensajes). Patrón: "cuál es tu X" / "compárteme tu X" /
+        # "para procesar tu pago" / "para la entrega".
+        (30, ("cuál es tu correo", "cual es tu correo",
+              "compárteme tu correo", "comparteme tu correo",
+              "tu email", "tu correo electrónico", "tu correo electronico"),
             lambda _: profile.get("email", "crittan01@gmail.com")),
-        (30, ("nombre completo", "tu nombre", "cómo te llamas", "como te llamas"),
+        (30, ("nombre completo", "compárteme tu nombre", "comparteme tu nombre",
+              "cómo te llamas", "como te llamas", "cuál es tu nombre"),
             lambda _: profile.get("name", "Cristian Garzón")),
-        (30, ("cédula", "cedula", "tipo de documento", "tu nit", "documento"),
+        (30, ("para procesar tu pago", "tipo de documento", "tu nit",
+              "tu cédula", "tu cedula",
+              "cédula (cc)", "cedula (cc)"),
             lambda _: profile.get("document", "CC 1032414179")),
-        (30, ("dirección", "direccion", "donde te enviamos", "domicilio"),
+        (30, ("para la entrega", "para completar la dirección",
+              "donde te enviamos", "tu dirección de", "tu direccion de",
+              "compárteme la dirección", "comparteme la direccion"),
             lambda _: profile.get("address",
                 "Calle 3 sur 70-84, barrio Olaya, casa, Bogotá")),
-        (28, ("barrio", "qué barrio"),
+        (28, ("qué barrio", "cuál es el barrio"),
             lambda _: profile.get("neighborhood", "Olaya")),
 
         # Carrito secundario.
@@ -556,12 +571,26 @@ def scenario_6_disordered_data(phone: str, tenant_id: str) -> ScenarioResult:
     # Override: cuando el bot pida CUALQUIERA de los 4 datos personales,
     # respondemos con el VOLCADO COMPLETO en un solo mensaje. Esa es la
     # "data desordenada" que estamos validando.
+    # IMPORTANTE: la regla del dump NO debe disparar al consent question.
+    # El consent question dice "te pediré algunos datos (nombre, dirección,
+    # etc.)" → si solo filtráramos por "nombre"/"dirección", el dump
+    # llegaría ANTES del "Sí" al consent y la FSM nunca avanza. Por eso:
+    #   • Una regla de prioridad ALTA (60) responde "Sí" al consent question
+    #     (matchers exclusivos del consent: "estás de acuerdo", "autorizas").
+    #   • La regla del dump (50) dispara solo cuando el bot pide el dato
+    #     CONCRETO post-consent ("¿cuál es tu correo?", "compárteme tu
+    #     nombre completo", "para procesar tu pago", "para la entrega").
     DATA_DUMP = (f"Soy {profile['name']}, correo {profile['email']}, "
                  f"{profile['document']}, dirección {profile['address']}")
     rules = [r for r in rules if r[0] != 30] + [
-        (50, ("correo", "email", "nombre completo", "tu nombre",
-              "cédula", "cedula", "documento",
-              "dirección", "direccion", "donde te enviamos"),
+        (60, ("estás de acuerdo", "estas de acuerdo", "está de acuerdo",
+              "autorizas"),
+            lambda _: "Sí, acepto"),
+        (50, ("¿cuál es tu correo", "cual es tu correo",
+              "compárteme tu nombre", "comparteme tu nombre",
+              "para procesar tu pago",
+              "para la entrega", "para completar la dirección",
+              "donde te enviamos"),
             lambda _: DATA_DUMP),
     ]
     drv = ConversationDriver(phone, tenant_id, rules, max_turns=14)
@@ -571,7 +600,7 @@ def scenario_6_disordered_data(phone: str, tenant_id: str) -> ScenarioResult:
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select(
         "name, email, document_number, address, consent_given"
-    ).eq("tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+    ).eq("tenant_id", tenant_id).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
 
     evidence = {
         "turns": res.turns,
@@ -652,7 +681,7 @@ def scenario_8_revoke(phone: str, tenant_id: str) -> ScenarioResult:
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select(
         "consent_given, consent_revoked_at, consent_revoked_reason"
-    ).eq("tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+    ).eq("tenant_id", tenant_id).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
     evidence = {"setup_turns": res.turns,
                 "transcript_tail": res.transcript[-2:],
                 "outbound_after_revoke": len(outs)}
@@ -693,13 +722,13 @@ def scenario_9_happy_path_full(phone: str, tenant_id: str) -> ScenarioResult:
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select("id, consent_given").eq(
-        "tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+        "tenant_id", tenant_id).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
     if not contact.data:
         return ScenarioResult(9, "Happy path completo", FAIL,
             f"Tras {res.turns} turnos, contact_row no creado",
             evidence={"transcript_tail": res.transcript[-3:]})
     contact_id = contact.data[0]["id"]
-    orders = sb.table("orders").select("id, status, total_cents").eq(
+    orders = sb.table("orders").select("id, status, total_amount").eq(
         "contact_id", contact_id).order("created_at", desc=True).limit(1).execute()
     evidence = {"turns": res.turns,
                 "consent_given": contact.data[0].get("consent_given"),
@@ -810,13 +839,23 @@ def scenario_12_address_conjunto(phone: str, tenant_id: str) -> ScenarioResult:
     rules = [r for r in rules if r[0] != 30 or "dirección" not in str(r[1])]
     rules.append((35, ("dirección", "direccion", "donde te enviamos",
                        "domicilio"), reply_address))
+    # Rev. 91: rule separada para el follow-up cuando el bot detecta
+    # conjunto y pide torre/apto (la rule prio 35 ya se consumió en el
+    # primer turn de address). Esta rule responde con la address
+    # completada y marca state['asked_tower']=True.
+    def reply_torre_apto(bot_text: str) -> str:
+        state["asked_tower"] = True
+        return completed_address
+    rules.append((40, ("torre", "número de apartamento",
+                       "número del apto", "qué torre", "torre y apartamento"),
+                  reply_torre_apto))
     drv = ConversationDriver(phone, tenant_id, rules, max_turns=16)
     res = drv.run("Hola, quiero comprar un jabón artesanal de coco")
 
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select("address").eq(
-        "tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+        "tenant_id", tenant_id).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
     addr = (contact.data[0].get("address") if contact.data else None) or {}
     has_tower = bool(addr.get("tower"))
     has_apt = bool(addr.get("apartment"))
@@ -959,7 +998,7 @@ def scenario_15_payment_link_delivery(phone: str, tenant_id: str) -> ScenarioRes
 
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select("consent_given, email, name").eq(
-        "tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+        "tenant_id", tenant_id).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
     consent_given = contact.data[0].get("consent_given") if contact.data else False
 
     evidence = {
@@ -998,23 +1037,23 @@ def scenario_16_wompi_approved_simulation(phone: str, tenant_id: str) -> Scenari
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select("id").eq(
-        "tenant_id", tenant_id).eq("phone", "+" + digits).limit(1).execute()
+        "tenant_id", tenant_id).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
     if not contact.data:
         return ScenarioResult(16, "Wompi APPROVED simulation", SKIP,
             "Sin contact_id — S15 no creó orden")
     contact_id = contact.data[0]["id"]
     orders = sb.table("orders").select(
-        "id, status, payment_link_id, conversation_id"
+        "id, status, wompi_link_id, conversation_id"
     ).eq("contact_id", contact_id).eq("status", "pending_payment"
     ).order("created_at", desc=True).limit(1).execute()
     if not orders.data:
         return ScenarioResult(16, "Wompi APPROVED simulation", SKIP,
             "No hay orden en pending_payment para simular APPROVED")
     order = orders.data[0]
-    plink_id = order.get("payment_link_id")
+    plink_id = order.get("wompi_link_id")
     if not plink_id:
         return ScenarioResult(16, "Wompi APPROVED simulation", FAIL,
-            "Orden pending_payment sin payment_link_id — link nunca se creó",
+            "Orden pending_payment sin wompi_link_id — link nunca se creó",
             evidence={"order_id": order["id"]})
 
     # Construir y enviar evento APPROVED sintético al webhook.
@@ -1028,7 +1067,7 @@ def scenario_16_wompi_approved_simulation(phone: str, tenant_id: str) -> Scenari
             "Sin WOMPI_EVENTS_KEY en .env — no puedo firmar evento sandbox")
 
     payload = (WompiPayloadBuilder(events_key=events_key)
-        .with_approved_txn(payment_link_id=plink_id, txn_id=f"sim_{_uuid.uuid4().hex[:8]}")
+        .with_approved_txn(wompi_link_id=plink_id, txn_id=f"sim_{_uuid.uuid4().hex[:8]}")
         .build())
     body = _json.dumps(payload).encode()
     # Wompi usa checksum interno en el payload (signature.checksum), no header.
