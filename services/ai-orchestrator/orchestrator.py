@@ -77,9 +77,27 @@ _CONSENT_QUESTION_MARKERS = (
     "eliminar mis datos",
     "elimina mis datos",
 )
-_REVOCATION_TOKENS = {"eliminar mis datos", "borra mis datos", "elimina mis datos",
-                      "borrar mis datos", "quiero ser eliminado", "no guardes mis datos",
-                      "eliminar mi informacion", "elimina mi informacion"}
+_REVOCATION_TOKENS = {
+    # Variantes "X mis datos"
+    "eliminar mis datos", "elimina mis datos",
+    "borrar mis datos", "borra mis datos",
+    # Variantes "X todos mis datos" (rev. 92.e — caso real S8)
+    "eliminar todos mis datos", "elimina todos mis datos",
+    "borrar todos mis datos", "borra todos mis datos",
+    # Variantes "X toda mi informacion"
+    "eliminar mi informacion", "elimina mi informacion",
+    "eliminar toda mi informacion", "elimina toda mi informacion",
+    "borrar mi informacion", "borra mi informacion",
+    "borrar toda mi informacion", "borra toda mi informacion",
+    # Otros fraseos naturales
+    "quiero ser eliminado", "no guardes mis datos",
+    "no quieras guardar mis datos", "no quiero que guardes",
+    "quiero borrar mis datos", "quiero eliminar mis datos",
+    "olvida mis datos", "olvida toda mi info",
+    # Habeas Data formal
+    "revoco el consentimiento", "revoco mi consentimiento",
+    "retiro el consentimiento",
+}
 
 # Rev. 84 — Guardrails de cumplimiento Meta Business Policy.
 #
@@ -440,6 +458,94 @@ def _last_outbound_was_data_collection_question(history: list[dict]) -> bool:
     return False
 
 
+def _hash_phone(phone: Optional[str]) -> Optional[str]:
+    """Rev. 93 — Hash sha256 del phone para `consent_audit_log.phone_hash`.
+
+    Permite lookup post-anonimización del contact sin exponer el phone.
+    """
+    if not phone:
+        return None
+    import hashlib as _hashlib
+    normalized = re.sub(r"[\s+\-]", "", str(phone))
+    return _hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _log_consent_event(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    contact_id: Optional[str],
+    phone: Optional[str],
+    event: str,                    # 'granted' | 'revoked' | etc.
+    source: str = "whatsapp",
+    conversation_id: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
+    actor_email: Optional[str] = None,
+    evidence: Optional[dict] = None,
+) -> None:
+    """Rev. 93 — INSERT en consent_audit_log (append-only, Art. 9).
+
+    Falla silently con log warning — un fallo del audit log NO debe
+    abortar la operación principal de consent. La tabla tiene triggers
+    anti-tamper, así que no hay forma de "fix" un row mal escrito; el
+    siguiente intento crea un row nuevo correcto.
+    """
+    try:
+        row = {
+            "tenant_id": tenant_id,
+            "contact_id": contact_id,
+            "phone_hash": _hash_phone(phone),
+            "event": event,
+            "source": source,
+            "conversation_id": conversation_id,
+            "actor_user_id": actor_user_id,
+            "actor_email": actor_email,
+            "evidence": evidence or {},
+        }
+        supabase.table("consent_audit_log").insert(row).execute()
+    except Exception as e:
+        logger.warning(
+            "[CONSENT_AUDIT] No se pudo registrar evento %s contact=%s: %s",
+            event, contact_id, e,
+        )
+
+
+def _log_pii_access(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    contact_id: str,
+    accessed_by: str,              # 'user:<email>' | 'agent:orchestrator' | 'integration:wompi'
+    purpose: str,                  # 'inbox_view' | 'wompi_checkout' | 'data_export' | etc.
+    fields_accessed: list[str],
+    actor_user_id: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> None:
+    """Rev. 93 — INSERT en pii_access_log (append-only, Art. 9).
+
+    Llamar cuando un actor explícitamente lee PII del contacto (NO en
+    cada SELECT sistémico — solo en lecturas con propósito específico).
+    """
+    try:
+        row = {
+            "tenant_id": tenant_id,
+            "contact_id": contact_id,
+            "accessed_by": accessed_by,
+            "actor_user_id": actor_user_id,
+            "purpose": purpose,
+            "fields_accessed": fields_accessed,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+        }
+        supabase.table("pii_access_log").insert(row).execute()
+    except Exception as e:
+        logger.warning(
+            "[PII_ACCESS] No se pudo registrar acceso contact=%s: %s",
+            contact_id, e,
+        )
+
+
 def _record_consent(
     supabase: Client,
     contact_id: str,
@@ -447,8 +553,24 @@ def _record_consent(
     given: bool,
     conversation_id: str,
 ) -> None:
-    """Registra consentimiento o revocación directamente en DB (sin HTTP round-trip)."""
+    """Registra consentimiento o revocación directamente en DB (sin HTTP round-trip).
+
+    Rev. 93: además del UPDATE en `contacts`, escribe en `consent_audit_log`
+    para audit trail inmutable (Art. 9). El log persiste aunque
+    posteriormente se haga hard-delete del contact.
+    """
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Capturar phone ANTES del UPDATE (para hash en audit log).
+    phone_for_hash: Optional[str] = None
+    try:
+        existing = supabase.table("contacts").select("phone").eq(
+            "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+        if existing.data:
+            phone_for_hash = existing.data[0].get("phone")
+    except Exception:
+        pass  # Best-effort; el audit log puede ir sin hash.
+
     try:
         if given:
             update = {
@@ -466,19 +588,43 @@ def _record_consent(
                     "timestamp": now_iso,
                 },
             }
+            event_for_log = "granted"
             logger.info("[CONSENT] Registrado via chat | contact=%s tenant=%s", contact_id, tenant_id)
         else:
+            # Ley 1581/2012 Colombia (Habeas Data) — Art. 9 audit + Art. 15
+            # supresión total de PII en revocación. Anonimizamos los 6
+            # campos PII de `contacts`. `phone` se conserva como canal de
+            # comunicación (cliente puede bloquear el número si requiere
+            # supresión total del canal — out of scope del orchestrator).
             update = {
                 "consent_given": False,
                 "consent_revoked_at": now_iso,
                 "consent_revoked_reason": "Revocación solicitada por el titular vía WhatsApp",
                 "name": None,
-                "email": None,      # Ley 1581 Art. 15 — anonimización total en revocación
+                "email": None,
+                "document_type": None,    # Rev. 92.e — Art. 15 (gap fix)
+                "document_number": None,  # Rev. 92.e — Art. 15 (gap fix)
                 "address": None,
                 "notes": None,
             }
+            event_for_log = "revoked"
             logger.info("[CONSENT] Revocado + anonimizado | contact=%s tenant=%s", contact_id, tenant_id)
         supabase.table("contacts").update(update).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
+
+        # Rev. 93 — Append-only audit log (Art. 9).
+        _log_consent_event(
+            supabase,
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            phone=phone_for_hash,
+            event=event_for_log,
+            source="whatsapp",
+            conversation_id=conversation_id,
+            evidence={
+                "consent_text_version": CONSENT_TEXT_VERSION,
+                "timestamp": now_iso,
+            },
+        )
     except Exception as e:
         logger.error("[CONSENT] Error registrando consentimiento contact=%s: %s", contact_id, e)
 
