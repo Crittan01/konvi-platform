@@ -139,9 +139,13 @@ def _build_export_payload(sb: Client, tenant_id: str, contact_id: str) -> dict:
     contact = contact_res.data[0]
 
     # Orders relacionadas — un timeout aquí no debe devolver export incompleto.
+    # Rev. 102 — schema real de orders (verificado contra DB):
+    # id, tenant_id, contact_id, conversation_id, status, total_amount, notes,
+    # created_at, updated_at, shipping_cost. NO existe `currency` ni `paid_at`
+    # (la moneda es global del tenant, en COP; paid_at se deriva de wompi_events).
     try:
         orders_res = sb.table("orders").select(
-            "id, status, total_amount, currency, created_at, paid_at"
+            "id, status, total_amount, shipping_cost, created_at, updated_at"
         ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
             "created_at", desc=True).execute()
         consent_history_res = sb.table("consent_audit_log").select(
@@ -376,10 +380,12 @@ def _render_export_html(payload: dict) -> str:
 
     orders_rows = "".join([
         f"<tr><td>{esc(o.get('id'))}</td><td>{esc(o.get('status'))}</td>"
-        f"<td>{esc(o.get('total_amount'))} {esc(o.get('currency'))}</td>"
-        f"<td>{esc(o.get('created_at'))}</td><td>{esc(o.get('paid_at'))}</td></tr>"
+        f"<td>{esc(o.get('total_amount'))} COP</td>"
+        f"<td>{esc(o.get('shipping_cost'))}</td>"
+        f"<td>{esc(o.get('created_at'))}</td>"
+        f"<td>{esc(o.get('updated_at'))}</td></tr>"
         for o in orders
-    ]) or "<tr><td colspan='5' class='empty'>Sin órdenes asociadas.</td></tr>"
+    ]) or "<tr><td colspan='6' class='empty'>Sin órdenes asociadas.</td></tr>"
 
     consent_rows = "".join([
         f"<tr><td>{esc(e.get('occurred_at'))}</td><td>{esc(e.get('event'))}</td>"
@@ -442,7 +448,7 @@ def _render_export_html(payload: dict) -> str:
 
 <h2>2. Órdenes asociadas ({len(orders)})</h2>
 <table>
-  <thead><tr><th>ID</th><th>Estado</th><th>Total</th><th>Creada</th><th>Pagada</th></tr></thead>
+  <thead><tr><th>ID</th><th>Estado</th><th>Total</th><th>Envío</th><th>Creada</th><th>Actualizada</th></tr></thead>
   <tbody>{orders_rows}</tbody>
 </table>
 

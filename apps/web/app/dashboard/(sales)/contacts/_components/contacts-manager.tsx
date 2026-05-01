@@ -651,10 +651,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           </Button>
                         </div>
 
-                        {/* ── Habeas Data acciones (separadas + agrupadas) ───── */}
+                        {/* ── Habeas Data acciones (paleta verde uniforme) ─── */}
                         {sarAction && (
                           <div className="pt-3 mt-3 border-t border-border space-y-2">
-                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-500 uppercase tracking-wide">
                               <ShieldCheck className="h-3 w-3" />
                               Habeas Data — Derechos del titular
                             </div>
@@ -665,7 +665,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 size="sm"
                                 variant="outline"
                                 title="Art. 14 — Exportar todos los datos del titular en JSON"
-                                className="h-8 text-xs gap-1.5 px-3 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+                                className="h-8 text-xs gap-1.5 px-3 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/60"
                                 onClick={() => triggerSar(c.id, 'export')}
                               >
                                 {sarRunning === `${c.id}:export`
@@ -680,7 +680,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                   size="sm"
                                   variant="outline"
                                   title="Reporte HTML imprimible (Cmd+P → Save as PDF)"
-                                  className="h-8 text-xs gap-1.5 px-3 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10"
+                                  className="h-8 text-xs gap-1.5 px-3 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/60"
                                   onClick={() => triggerPrintable(c.id)}
                                 >
                                   {sarRunning === `${c.id}:printable`
@@ -695,7 +695,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 size="sm"
                                 variant="outline"
                                 title="Art. 19 — Portabilidad (JSON estándar)"
-                                className="h-8 text-xs gap-1.5 px-3 border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
+                                className="h-8 text-xs gap-1.5 px-3 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/60"
                                 onClick={() => triggerSar(c.id, 'portability')}
                               >
                                 {sarRunning === `${c.id}:portability`
@@ -709,7 +709,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 size="sm"
                                 variant="outline"
                                 title="Art. 15 — Supresión: anonimiza PII (irreversible)"
-                                className="h-8 text-xs gap-1.5 px-3 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                                className="h-8 text-xs gap-1.5 px-3 border-emerald-500/40 text-emerald-500 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/60"
                                 onClick={() => triggerSar(c.id, 'erase')}
                               >
                                 {sarRunning === `${c.id}:erase`
@@ -719,8 +719,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                               </Button>
                             </div>
                             <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                              Cada acción registra evento inmutable en <code className="text-[10px]">consent_audit_log</code> (Art. 9).
-                              Anonimizar es irreversible (Art. 15).
+                              Reporte JSON / PDF (Art. 14) y Portabilidad (Art. 19) son lectura.
+                              <strong className="text-amber-400"> Anonimizar (Art. 15) es irreversible</strong> — borra
+                              nombre/email/documento/dirección/notas; conserva phone (canal) y audit log inmutable.
                             </p>
                           </div>
                         )}
