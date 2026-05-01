@@ -132,16 +132,16 @@ $ ls supabase/migrations/2026050[2-7]* | wc -l
 
 ---
 
-## INTERVENCION HUMANA REQUERIDA
+## INTERVENCION HUMANA — Estado actualizado 2026-05-01
 
-| ID | Acción | Responsable | Insumos | Criterio de éxito |
-|---|---|---|---|---|
-| H1 | Revisión legal de `dpa.md`, `privacy-policy.md`, `subprocessors.md` | Abogado certificado en data privacy Colombia | docs/legal/* | Documentos firmables |
-| H2 | Configurar `RESEND_API_KEY` en Render | DevOps | Cuenta Resend | Email de prueba llega al ops |
-| H3 | Aplicar 5 migraciones nuevas en Supabase prod | DBA | scripts/db_migrations.sh | `MIGRATION:` log limpio |
-| H4 | Configurar `notification_settings` con email del tenant para test | Tenant | Tenant Console | Test event llega al inbox |
-| H5 | UI: agregar página de aceptación legal click-wrap | Frontend | Migration 20260507010000 | `tenant_legal_acceptance` row creada |
-| H6 | Ejecutar drill simulacro de incidente P1 | Equipo | `incident-response.md` | Notificación SIC en ≤ 72h |
+| ID | Acción | Estado |
+|---|---|---|
+| H1 | Revisión legal de `dpa.md`, `privacy-policy.md`, `subprocessors.md` | ✅ **APROBADO** as-is por usuario 2026-05-01. Templates vigentes hasta primer enterprise tenant que requiera revisión jurídica formal |
+| H2 | Configurar `RESEND_API_KEY` en Render | ⏸️ **STANDBY** hasta paso a producción. El sistema usa fallback graceful (log en lugar de email), no falla flujo |
+| H3 | Aplicar 5 migraciones en Supabase prod | ✅ **DONE** 2026-05-01: las 5 migraciones aplicadas + ledger sincronizado vía `migration repair` |
+| H4 | Configurar `notification_settings` con email del tenant | ⏸️ Pendiente activación con H2 |
+| H5 | UI Tenant Console: página click-wrap de aceptación legal | ⏸️ Pendiente (no bloqueante para producción técnica) |
+| H6 | Drill simulacro de incidente P1 | ⏸️ Pendiente, documentado en `docs/legal/incident-response.md` |
 
 ---
 
