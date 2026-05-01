@@ -44,7 +44,12 @@ export function TemplatesSection({ loadSelectedTemplates, defaultExpanded = true
 
   const allSelected = selected.size === STARTER_TEMPLATES.length
   const toggle = (id: string) =>
-    setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+    setSelected(prev => {
+      const s = new Set(prev)
+      if (s.has(id)) s.delete(id)
+      else s.add(id)
+      return s
+    })
   const toggleAll = () =>
     setSelected(allSelected ? new Set() : new Set(STARTER_TEMPLATES.map(t => t.id)))
 
