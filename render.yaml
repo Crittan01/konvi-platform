@@ -278,4 +278,8 @@ services:
       - key: CART_RECOVERY_LOOKBACK_DAYS
         value: "7"
     healthCheckPath: /health
-    autoDeploy: true
+    # Rev. 92.b: auto-deploy desactivado para iterar el orchestrator
+    # localmente sin que cada push a develop lance redeploy en Render.
+    # Para promover una versión a Render: "Manual Deploy" desde
+    # dashboard. Re-activar a `true` cuando termine la iteración.
+    autoDeploy: false
