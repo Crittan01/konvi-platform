@@ -84,11 +84,14 @@ fi
 # ─── 5. Next.js Lint ─────────────────────────────────────────────────────────
 _hdr "Next.js ESLint (apps/web)"
 
+# Rev. 102 — el regex anterior `^Error:|: error` no matcheaba el formato
+# de Next lint que es `<col>  Error: <message>` (no empieza con "Error:").
+# Reforzamos para detectar ese formato + cualquier Error: en columna.
 if command -v pnpm &>/dev/null; then
   lint_out=$(pnpm --filter web lint 2>&1 || true)
-  if echo "$lint_out" | grep -qE "^Error:|: error"; then
-    _err "Errores de lint bloqueantes"
-    echo "$lint_out" | grep -E "^Error:|: error" | head -5
+  if echo "$lint_out" | grep -qE "^([0-9]+:[0-9]+ +)?Error:|: error"; then
+    _err "Errores de lint bloqueantes (rompen el build):"
+    echo "$lint_out" | grep -E "Error:|: error" | head -5
   elif echo "$lint_out" | grep -q "warning"; then
     _ok "Lint OK (con warnings no bloqueantes)"
   else
@@ -96,6 +99,29 @@ if command -v pnpm &>/dev/null; then
   fi
 else
   _warn "pnpm no disponible — omitiendo lint"
+fi
+
+# ─── 5.5 Next.js Build (apps/web) — Rev. 102 ────────────────────────────────
+# El lint solo reporta. Necesitamos confirmar que el build SSR pasa, ya que
+# `next build` aplica reglas estrictas adicionales que `next lint` omite.
+# Sin esto, errores como prefer-const o no-unused-expressions pasaban
+# desapercibidos y bloqueaban el deploy en Render.
+_hdr "Next.js build (apps/web) — opt-in con --build"
+
+if [ "${VALIDATE_BUILD:-}" = "1" ] || [ "${1:-}" = "--build" ] || [ "${1:-}" = "--full" ]; then
+  if command -v pnpm &>/dev/null; then
+    build_out=$(pnpm --filter web build 2>&1 || true)
+    if echo "$build_out" | grep -q "Failed to compile"; then
+      _err "next build FALLÓ (Render no podrá desplegar):"
+      echo "$build_out" | grep -E "Error:" | head -5
+    else
+      _ok "next build OK"
+    fi
+  else
+    _warn "pnpm no disponible — omitiendo build"
+  fi
+else
+  _warn "Build omitido (correr con --build o VALIDATE_BUILD=1 para ejecutarlo)"
 fi
 
 # ─── 6. Render.yaml coherencia ───────────────────────────────────────────────

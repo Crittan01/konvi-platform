@@ -317,7 +317,7 @@ export default function CatalogTable({
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
-    let result = q
+    const result = q
       ? products.filter(p =>
           p.title.toLowerCase().includes(q) ||
           p.description?.toLowerCase().includes(q) ||
