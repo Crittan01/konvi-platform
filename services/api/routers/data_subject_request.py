@@ -25,12 +25,27 @@ from pydantic import BaseModel, Field
 from supabase import Client
 
 from dependencies.auth import (
+    _extract_jwt_payload,  # type: ignore
     get_current_tenant,
     get_service_client,
     require_write_role,
 )
 from dependencies.pii_audit import log_pii_access
 from dependencies.security import RL_WRITE_DEFAULT
+
+
+def _actor_from_request(request: Request) -> tuple[Optional[str], Optional[str]]:
+    """Devuelve (user_id, user_email) del JWT. None si falla.
+
+    Rev. 102 — get_current_tenant retorna el tenant_id (str), no un objeto;
+    para acceder al actor (operador que hace la request) hay que extraer
+    del JWT directamente.
+    """
+    try:
+        payload = _extract_jwt_payload(request)
+        return payload.get("sub"), payload.get("email")
+    except Exception:
+        return None, None
 
 logger = logging.getLogger("api.data_subject_request")
 
@@ -204,7 +219,7 @@ async def data_subject_request(
     contact_id: str,
     body: DataSubjectRequest,
     request: Request,
-    tenant=Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),
     sb: Client = Depends(get_service_client),
     _role=Depends(require_write_role),
     _rl: None = Depends(RL_WRITE_DEFAULT),
@@ -213,10 +228,11 @@ async def data_subject_request(
 
     Body: { type: 'export'|'rectify'|'erase'|'portability', reason?, rectification? }
 
-    Hardening rev. 100:
+    Hardening rev. 100/102:
       - Rate limit por write bucket (DoS protection).
       - Cada lectura de PII registra en pii_access_log (Art. 9 audit).
       - DB errors → 503 explícito (no retorna payload incompleto).
+      - tenant_id viene como str (no objeto); actor del JWT.
     """
     if body.type not in VALID_TYPES:
         raise HTTPException(
@@ -226,23 +242,20 @@ async def data_subject_request(
 
     # Verificar que el contacto pertenece al tenant.
     check = sb.table("contacts").select("id, phone, tenant_id").eq(
-        "id", contact_id).eq("tenant_id", tenant.tenant_id).limit(1).execute()
+        "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
     if not check.data:
         raise HTTPException(status_code=404, detail="Contacto no encontrado")
     contact_phone = check.data[0].get("phone")
 
-    actor_email = getattr(tenant, "email", None) or getattr(tenant, "user_email", None)
-    actor_user_id = getattr(tenant, "user_id", None)
+    actor_user_id, actor_email = _actor_from_request(request)
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
     if body.type == "export" or body.type == "portability":
-        payload = _build_export_payload(sb, tenant.tenant_id, contact_id)
-        # Rev. 100 — registrar acceso PII (Art. 9). Operador export = lectura masiva
-        # de campos sensibles (name, email, document, address, etc.).
+        payload = _build_export_payload(sb, tenant_id, contact_id)
         log_pii_access(
             sb,
-            tenant_id=tenant.tenant_id,
+            tenant_id=tenant_id,
             contact_id=contact_id,
             accessed_by=f"user:{actor_email}" if actor_email else "user:unknown",
             purpose="sar_export" if body.type == "export" else "sar_portability",
@@ -252,7 +265,7 @@ async def data_subject_request(
         )
         _audit(
             sb,
-            tenant_id=tenant.tenant_id,
+            tenant_id=tenant_id,
             contact_id=contact_id,
             phone=contact_phone,
             event="export_request" if body.type == "export" else "portability",
@@ -264,7 +277,7 @@ async def data_subject_request(
                 "fields_exported": list(payload["subject"].keys()),
             },
         )
-        await _notify_sar_safe(sb, tenant.tenant_id, contact_id, body.type, body.reason)
+        await _notify_sar_safe(sb, tenant_id, contact_id, body.type, body.reason)
         return payload
 
     if body.type == "rectify":
@@ -273,10 +286,9 @@ async def data_subject_request(
                 status_code=400,
                 detail="rectify requiere `rectification` con campos a corregir",
             )
-        # Mark contact for review (no auto-update — operador valida).
         _audit(
             sb,
-            tenant_id=tenant.tenant_id,
+            tenant_id=tenant_id,
             contact_id=contact_id,
             phone=contact_phone,
             event="rectified",
@@ -288,7 +300,7 @@ async def data_subject_request(
                 "status": "pending_review",
             },
         )
-        await _notify_sar_safe(sb, tenant.tenant_id, contact_id, "rectify", body.reason)
+        await _notify_sar_safe(sb, tenant_id, contact_id, "rectify", body.reason)
         return {
             "status": "received",
             "message": "Solicitud de rectificación registrada para revisión",
@@ -296,10 +308,10 @@ async def data_subject_request(
         }
 
     # type == "erase"
-    _execute_erase(sb, tenant.tenant_id, contact_id)
+    _execute_erase(sb, tenant_id, contact_id)
     _audit(
         sb,
-        tenant_id=tenant.tenant_id,
+        tenant_id=tenant_id,
         contact_id=contact_id,
         phone=contact_phone,
         event="revoked",
@@ -311,7 +323,7 @@ async def data_subject_request(
             "via": "tenant_console",
         },
     )
-    await _notify_sar_safe(sb, tenant.tenant_id, contact_id, "erase", body.reason)
+    await _notify_sar_safe(sb, tenant_id, contact_id, "erase", body.reason)
     return {
         "status": "erased",
         "message": "PII anonimizada conforme Art. 15 Ley 1581/2012",
@@ -474,7 +486,7 @@ def _render_export_html(payload: dict) -> str:
 async def data_subject_request_printable(
     contact_id: str,
     request: Request,
-    tenant=Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),
     sb: Client = Depends(get_service_client),
     _role=Depends(require_write_role),
     _rl: None = Depends(RL_WRITE_DEFAULT),
@@ -484,23 +496,21 @@ async def data_subject_request_printable(
     Rev. 101 (F1). El operador abre la URL → Cmd/Ctrl+P → Save as PDF.
     Cero deps server-side; calidad visual >= WeasyPrint default.
     """
-    # Reutiliza la composición del export. Verifica que el contacto pertenezca.
     check = sb.table("contacts").select("id, phone").eq(
-        "id", contact_id).eq("tenant_id", tenant.tenant_id).limit(1).execute()
+        "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
     if not check.data:
         raise HTTPException(status_code=404, detail="Contacto no encontrado")
     contact_phone = check.data[0].get("phone")
 
-    payload = _build_export_payload(sb, tenant.tenant_id, contact_id)
+    payload = _build_export_payload(sb, tenant_id, contact_id)
 
-    actor_email = getattr(tenant, "email", None) or getattr(tenant, "user_email", None)
-    actor_user_id = getattr(tenant, "user_id", None)
+    actor_user_id, actor_email = _actor_from_request(request)
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
     log_pii_access(
         sb,
-        tenant_id=tenant.tenant_id,
+        tenant_id=tenant_id,
         contact_id=contact_id,
         accessed_by=f"user:{actor_email}" if actor_email else "user:unknown",
         purpose="sar_export_printable",
@@ -510,7 +520,7 @@ async def data_subject_request_printable(
     )
     _audit(
         sb,
-        tenant_id=tenant.tenant_id,
+        tenant_id=tenant_id,
         contact_id=contact_id,
         phone=contact_phone,
         event="export_request",
