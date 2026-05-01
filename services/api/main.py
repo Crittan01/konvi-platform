@@ -93,6 +93,9 @@ app.include_router(contacts.router, prefix="/api/v1/contacts")
 # Rev. 93 — Habeas Data: Subject Access Request (SAR / ARCO).
 from routers import data_subject_request as _dsr  # noqa: E402
 app.include_router(_dsr.router, prefix="/api/v1/contacts")
+# Rev. 101 (F5) — SIC pre-cocinado.
+from routers import sic_report as _sic  # noqa: E402
+app.include_router(_sic.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1/settings")
 app.include_router(integrations.router, prefix="/api/v1/integrations")
 app.include_router(shipping.router, prefix="/api/v1/shipping")

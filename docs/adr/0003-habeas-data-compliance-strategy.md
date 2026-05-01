@@ -136,12 +136,18 @@ respuesta a SIC depende de disciplina humana del tenant.
 
 ## 7. Open issues / follow-ups
 
-- **F1** — Generación de PDF para SAR export (WeasyPrint + Meta document upload).
-- **F2** — Tokenización completa de `document_number` con Vault.
-- **F3** — Migración de `audit_log` legacy a `consent_audit_log`.
-- **F4** — UI Tenant Console: configuración de retention policies per-tenant.
-- **F5** — Reporte SIC pre-cocinado (CSV + JSON formal).
-- **F6** — Detector self-service de **rectificación** vía WhatsApp.
+Estado actualizado al cierre rev. 101:
+
+- **F1** — ✅ DONE rev. 101: HTML imprimible server-side (`GET /api/v1/contacts/{id}/data-subject-request/printable`). Operador hace Cmd+P → Save as PDF. Cero deps nuevas. La opción WeasyPrint + Meta document upload queda parqueada para sprint dedicado cuando aparezca el caso de uso real (envío del reporte al titular vía WhatsApp document message — hoy se devuelve resumen text-only por chat).
+- **F2** — ⛔ DEFERRED CONSCIENTE rev. 101. Tokenización completa de `document_number` con Vault. Razones:
+  - Riesgo: el plaintext de `document_number` está consumido por el flujo de checkout Wompi. Migrar a Vault token requiere refactor del checkout + migración de datos productivos en una tabla viva. Históricamente las migraciones destructivas en path de pago han sido las que más downtime generan.
+  - Valor incremental bajo: rev. 96 ya entregó `document_number_hash` (sha256) + `document_number_last4` aditivos. Los logs (`pii_access_log`, `consent_audit_log`) usan `phone_hash` y nunca exponen `document_number` plaintext. La mitigación de minimización Art. 4 ya está cubierta para el path read-mostly (queries operacionales pueden usar last4).
+  - Trigger para reabrir F2: SIC exige cifrado-at-rest específico de identificadores nacionales, O hay un breach que demuestra que el plaintext es vector real, O un enterprise tenant lo pone como precondición de contrato.
+- **F3** — ✅ DONE rev. 101: vista SQL `vw_consent_events_unified` que UNION `consent_audit_log` (canónico) + `audit_log` (legacy filtrado entity_type=contact + action consent/revoke/rectify/delete). NO hay migración de data — cada tabla mantiene su rol; la vista es el punto único para reportes SIC.
+- **F4** — ✅ DONE rev. 101: UI Tenant Console en `/dashboard/settings/retention` permite override per-tenant de defaults globales con CRUD.
+- **F5** — ✅ DONE rev. 101: endpoint `GET /api/v1/sic-report?format=json|csv` con period filter + opcional contact_id. Cada generación se audita en `consent_audit_log`.
+- **F6** — ✅ DONE rev. 101: detector pre-LLM `_detect_rectification_intent` + handler que registra evento "rectified" pendiente de revisión + notifica al tenant.
+- **F7** — ✅ DONE rev. 101: UI click-wrap en `/dashboard/settings/legal` con aceptación inmutable + histórico (versionada por documento).
 
 ## 8. References
 

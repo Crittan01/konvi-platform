@@ -74,7 +74,7 @@ supabase/migrations/          # fuente canónica de esquema
 ## Validación pre-deploy
 
 ```bash
-bash scripts/validate.sh          # sintaxis + 1138 tests + TypeScript + lint
+bash scripts/validate.sh          # sintaxis + 1167 tests + TypeScript + lint
 bash scripts/validate.sh --full   # + pip-audit + coherencia vars
 ```
 

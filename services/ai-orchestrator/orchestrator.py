@@ -404,14 +404,65 @@ _DATA_EXPORT_TOKENS = {
 
 
 def _detect_data_export_intent(text: str) -> bool:
-    """Rev. 97 — True si el titular solicita ejercer derecho Art. 14 (acceso)."""
+    """Rev. 97 — True si el titular solicita ejercer derecho Art. 14 (acceso).
+
+    Rev. 101 — también excluye si hay tokens de rectificación (más específicos);
+    la frase "habeas data" sola es genérica y el detector rectify gana.
+    """
     if not text:
         return False
     normalized = _normalize_text_simple(text)
-    # Excluir si es una revocación (que ya tiene su flujo).
     if any(rev in normalized for rev in _REVOCATION_TOKENS):
         return False
+    if any(rec in normalized for rec in _RECTIFICATION_TOKENS):
+        return False
     return any(token in normalized for token in _DATA_EXPORT_TOKENS)
+
+
+# Rev. 101 (F6) — Detector pre-LLM rectificación Habeas Data Art. 16.
+# El titular puede solicitar corrección de un dato concreto vía WhatsApp:
+# email, dirección, nombre, documento. NO actualizamos auto — registramos
+# audit "rectified" pendiente de revisión + notificamos al tenant para
+# que valide y ejecute el cambio (puede requerir verificación de identidad).
+_RECTIFICATION_TOKENS = {
+    # "Corregir / actualizar mi X"
+    "corregir mis datos", "corrige mis datos",
+    "actualizar mis datos", "actualiza mis datos",
+    "modificar mis datos", "modifica mis datos",
+    "rectificar mis datos", "rectifica mis datos",
+    # Variantes con campos específicos
+    "actualizar mi email", "actualiza mi email",
+    "actualizar mi correo", "actualiza mi correo",
+    "actualizar mi direccion", "actualiza mi direccion",
+    "actualizar mi telefono", "actualiza mi telefono",
+    "cambiar mis datos", "cambia mis datos",
+    # Ley 1581 formal
+    "ejercer rectificacion", "derecho de rectificacion",
+    "solicito rectificacion", "rectificacion habeas data",
+    # Errores en datos
+    "tienen mal mis datos", "estan mal mis datos",
+    "mis datos estan incorrectos", "mis datos no son correctos",
+}
+
+
+def _detect_rectification_intent(text: str) -> bool:
+    """Rev. 101 — True si el titular solicita corrección de datos (Art. 16).
+
+    Orden de precedencia: revocación > rectificación > export. La
+    rectificación PRECEDE al export en la decisión: si el mensaje
+    contiene un token de rectify (más específico), gana sobre tokens
+    de export como "habeas data" (más genérico).
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+    # Revocación es siempre dominante (mayor riesgo si se ignora).
+    if any(rev in normalized for rev in _REVOCATION_TOKENS):
+        return False
+    # Si hay token de rectificación, gana incluso si también hay token export.
+    if any(token in normalized for token in _RECTIFICATION_TOKENS):
+        return True
+    return False
 
 
 def _mask_value(value: Optional[str]) -> str:
@@ -5207,6 +5258,71 @@ async def build_and_run_orchestration(
                 logger.error("[SAR] notify_sar_received excepción: %s", exc)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[SAR] Export self-service procesado | conversation=%s", conversation_id)
+            return
+
+        # ── 2.7 Rectificación Habeas Data Art. 16 (rev. 101 / F6) ───────────────
+        # Cliente pide corrección formal vía WhatsApp. NO actualizamos auto:
+        # registramos rectified en consent_audit_log (pendiente revisión) +
+        # notificamos al tenant. El titular puede entonces ser contactado por
+        # el operador para verificar identidad y recoger los datos correctos.
+        # Diferencia con sub-flow UPDATE (rev. 89): aquel cambia datos
+        # operacionales puntuales en flujo de compra. Este es ejercicio
+        # formal del derecho Art. 16 — exige paper trail.
+        if _detect_rectification_intent(content) and contact_id:
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Recibida tu solicitud de rectificación de datos personales "
+                    "(Art. 16 Ley 1581/2012 Habeas Data). Un operador la "
+                    "revisará y se contactará contigo para validar tu "
+                    "identidad y recoger los datos correctos.\n\n"
+                    "Mientras tanto, sigue tu compra normal si lo deseas."
+                ),
+            )
+            try:
+                phone_for_audit = None
+                p_res = supabase.table("contacts").select("phone").eq(
+                    "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+                if p_res.data:
+                    phone_for_audit = p_res.data[0].get("phone")
+                _log_consent_event(
+                    supabase,
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                    phone=phone_for_audit,
+                    event="rectified",
+                    source="whatsapp",
+                    conversation_id=conversation_id,
+                    evidence={
+                        "via": "self_service",
+                        "channel": "whatsapp",
+                        "status": "pending_review",
+                        "raw_message": content[:500],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("[SAR] rectify audit log falló: %s", exc)
+            try:
+                from notifications import notify_sar_received
+                ok = await notify_sar_received(
+                    supabase,
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                    sar_type="rectify",
+                    reason="Cliente solicitó rectificación vía WhatsApp",
+                )
+                if not ok:
+                    logger.error(
+                        "[SAR] notify_sar_received(rectify) returned False tenant=%s",
+                        tenant_id,
+                    )
+            except Exception as exc:
+                logger.error("[SAR] notify_sar_received(rectify) excepción: %s", exc)
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.info("[SAR] Rectify self-service registrado | conversation=%s", conversation_id)
             return
 
         # ── 2.55 Sub-flow UPDATE de datos (rev. 89) ───────────────────────────
