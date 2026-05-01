@@ -1973,23 +1973,62 @@ def _merge_address_data(existing: Optional[dict], incoming: Optional[dict]) -> d
 
 
 def _build_address_request_prompt(contact_record: dict, first_name: Optional[str]) -> str:
+    """Rev. 92.d — Prompt de address diferenciado por tipo de vivienda.
+
+    Reglas:
+      • Solo lista los OBLIGATORIOS faltantes (nunca pide lo ya dado).
+      • Marca explícitamente cada faltante como obligatorio.
+      • Sugiere OPCIONALES contextuales según tipo conocido (o
+        condicionales si tipo aún se desconoce).
+
+    Spec módulo Contactos:
+      • Casa: street + city + type [+ reference opcional].
+      • Edificio: + apartment [+ complex_name + reference opcionales].
+      • Conjunto: + tower + apartment [+ complex_name + reference
+                  opcionales].
+    """
     name_prefix = f", {first_name}" if first_name else ""
     address = contact_record.get("address") if isinstance(contact_record, dict) else None
     missing = _missing_address_fields(address)
-    if missing:
-        lines = [f"Gracias{name_prefix}. Para completar la dirección de entrega me falta:"]
-        lines.extend([f"• {field}" for field in missing])
-        lines.append("• Dato adicional opcional: barrio, referencia o portería")
-        return "\n".join(lines)
-    return (
-        f"Gracias{name_prefix}. Para la entrega compárteme por favor:\n"
-        "• Calle y número\n"
-        "• Ciudad\n"
-        "• Tipo de vivienda: *casa*, *edificio* o *conjunto*\n"
-        "• Si es *edificio*: apartamento\n"
-        "• Si es *conjunto*: torre y apartamento\n"
-        "• Dato adicional opcional: barrio, referencia o portería"
+    building_type = _normalize_building_type(
+        (address or {}).get("building_type") if isinstance(address, dict) else None
     )
+
+    # Address completa — defensivo.
+    if not missing:
+        return f"Listo{name_prefix}, ya tengo tu dirección de entrega."
+
+    # Construir el bloque de obligatorios faltantes.
+    lines = [f"Gracias{name_prefix}. Para completar la dirección de entrega me falta:"]
+    for field in missing:
+        lines.append(f"* *{field}* (obligatorio)")
+
+    # Opcionales contextuales — depende del tipo conocido.
+    optional_msg = ""
+    if building_type == "casa":
+        optional_msg = (
+            "_Opcional_: punto de referencia "
+            "(ej. portería, esquina cercana)."
+        )
+    elif building_type == "edificio":
+        optional_msg = (
+            "_Opcional_: nombre del edificio, punto de referencia."
+        )
+    elif building_type == "conjunto":
+        optional_msg = (
+            "_Opcional_: nombre del conjunto, punto de referencia."
+        )
+    else:
+        # Tipo aún se desconoce — sugerir condicionales sin pedir
+        # lo que ya tenemos.
+        optional_msg = (
+            "_Opcional_ (según el tipo): nombre del edificio/conjunto, "
+            "o punto de referencia."
+        )
+
+    lines.append("")
+    lines.append(optional_msg)
+    return "\n".join(lines)
 
 
 def _determine_transactional_state(contact: dict) -> str:
@@ -2594,7 +2633,7 @@ _TONO_INSTRUCCIONES: dict[str, str] = {
     "amigable": (
         "TONO: Amigable y cercano. Tutea al cliente desde el inicio.\n"
         "Saluda así: \"¡Hola! ¿En qué te puedo ayudar?\". Confirma así: \"Listo, eso lo manejamos.\".\n"
-        "Usa contracciones naturales (\"está\", \"vamos\", \"aquí\"). Un emoji puntual está bien (👋 😊).\n"
+        "Usa contracciones naturales (\"está\", \"vamos\", \"aquí\"). Un emoji puntual está bien (👋 ).\n"
         "Ejemplo natural: \"¡Sí! Lo tenemos disponible. Cuéntame para qué ciudad y te cotizo el envío.\""
     ),
     "cercano": (
@@ -2648,7 +2687,7 @@ _SAFETY_GREETING_BANK: dict[str, list[str]] = {
         "Hola, {agent} de {tenant} por aquí. ¿En qué te apoyo?",
     ],
     "amigable": [
-        "¡Hola! Soy {agent} de {tenant} 😊 ¿En qué te ayudo?",
+        "¡Hola! Soy {agent} de {tenant}  ¿En qué te ayudo?",
         "¡Hola! Soy {agent} de {tenant}. Cuéntame, ¿qué necesitas?",
         "¡Hola! Acá {agent} de {tenant}. ¿En qué te puedo ayudar?",
         "¡Hola! Soy {agent} de {tenant}. ¿Qué se te ofrece hoy?",
@@ -2802,7 +2841,7 @@ def _response_promises_handover(text: str) -> bool:
 # Razón: evitar que el cliente reciba siempre la misma string robótica.
 # Selección por seed = conversation_id + day_of_year (consistente en el día).
 _CANCEL_SUCCESS_VARIANTS = [
-    "Listo, cancelé tu pedido. 😊\n\nCuando quieras volver a cotizar, aquí estoy.",
+    "Listo, cancelé tu pedido. \n\nCuando quieras volver a cotizar, aquí estoy.",
     "Hecho, ya cancelé el pedido.\n\nSi cambias de idea o quieres ver otra cosa, me avisas.",
     "Perfecto, lo cancelo. 👍\n\nPuedes volver a consultar el catálogo cuando gustes.",
 ]
@@ -2812,7 +2851,7 @@ _CANCEL_NONE_VARIANTS = [
     "Por aquí no aparece pedido activo. ¿Qué necesitas?",
 ]
 _REACTIVATION_VARIANTS = [
-    "¡Hola de nuevo! 😊 Hace un rato que no hablábamos. ¿En qué te puedo ayudar hoy?",
+    "¡Hola de nuevo!  Hace un rato que no hablábamos. ¿En qué te puedo ayudar hoy?",
     "¡Hola! Ha pasado un tiempo desde tu última consulta. Cuéntame, ¿qué necesitas?",
     "¡Hey! Por aquí estoy de nuevo. ¿En qué te ayudo?",
 ]
@@ -4153,7 +4192,7 @@ _BULLET_LINE_RE = re.compile(r"^\* (?!_Entre otros)\S")
 _TRUNCATED_MARKER = "* _Entre otros..._"
 _MARKETING_CITE = (
     "> _Tenemos muchas más referencias para ti — pregúntame por la "
-    "que te interese._ 😊"
+    "que te interese._ "
 )
 
 
@@ -4399,7 +4438,7 @@ async def build_and_run_orchestration(
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
                     text=(
-                        "Por ahora solo puedo atender mensajes de texto. 😊\n\n"
+                        "Por ahora solo puedo atender mensajes de texto. \n\n"
                         f"Si necesitas que un {tenant_escalation_role} revise lo que enviaste, "
                         f"dímelo y te conecto con él."
                     ),

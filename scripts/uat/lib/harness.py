@@ -273,7 +273,13 @@ def default_response_rules(profile: dict) -> list[Rule]:
               "sérum de vitamina", "serum de vitamina", "vit. c", "vit c"),
             lambda _: profile.get("serum_presentation", "30 ml por favor")),
         (20, ("presentación", "presentacion", "gramaje", "tamaño",
-              "60g", "100g", "150g"),
+              "60g", "100g", "150g",
+              # Bot a veces pregunta "¿Cuál te gustaría llevar?" sin
+              # mencionar "presentación". La frase "cuál te gustaría"
+              # post-listado de variantes es la pregunta de selección.
+              "cuál te gustaría", "cual te gustaria",
+              "qué te gustaría llevar", "que te gustaria llevar",
+              "te gustaría llevar", "te gustaria llevar"),
             lambda _: f"La de {profile.get('presentation', '60 gramos')} por favor"),
 
         # Cantidad.
