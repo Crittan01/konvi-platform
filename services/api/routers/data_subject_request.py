@@ -19,7 +19,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from supabase import Client
 
@@ -28,6 +28,8 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
+from dependencies.pii_audit import log_pii_access
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger("api.data_subject_request")
 
@@ -104,31 +106,42 @@ def _build_export_payload(sb: Client, tenant_id: str, contact_id: str) -> dict:
 
     Incluye: contact, orders, conversations, consent history.
     Formato JSON estándar para portabilidad (Art. 19).
+
+    Raises 404 si el contacto no existe o no pertenece al tenant.
+    Raises 503 si la DB falla / timeout durante la composición —
+    preferible a devolver export incompleto silencioso (rev. 100).
     """
     # Contact
-    contact_res = sb.table("contacts").select("*").eq(
-        "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+    try:
+        contact_res = sb.table("contacts").select("*").eq(
+            "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+    except Exception as exc:
+        logger.error("[SAR] DB error reading contact: %s", exc)
+        raise HTTPException(status_code=503, detail="DB temporarily unavailable")
     if not contact_res.data:
         raise HTTPException(status_code=404, detail="Contacto no encontrado")
     contact = contact_res.data[0]
 
-    # Orders relacionadas
-    orders_res = sb.table("orders").select(
-        "id, status, total_amount, currency, created_at, paid_at"
-    ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
-        "created_at", desc=True).execute()
-
-    # Consent history
-    consent_history_res = sb.table("consent_audit_log").select(
-        "event, source, occurred_at, evidence, actor_email"
-    ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
-        "occurred_at", desc=True).execute()
-
-    # PII access history
-    pii_history_res = sb.table("pii_access_log").select(
-        "accessed_by, purpose, fields_accessed, accessed_at"
-    ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
-        "accessed_at", desc=True).limit(100).execute()
+    # Orders relacionadas — un timeout aquí no debe devolver export incompleto.
+    try:
+        orders_res = sb.table("orders").select(
+            "id, status, total_amount, currency, created_at, paid_at"
+        ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
+            "created_at", desc=True).execute()
+        consent_history_res = sb.table("consent_audit_log").select(
+            "event, source, occurred_at, evidence, actor_email"
+        ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
+            "occurred_at", desc=True).execute()
+        pii_history_res = sb.table("pii_access_log").select(
+            "accessed_by, purpose, fields_accessed, accessed_at"
+        ).eq("contact_id", contact_id).eq("tenant_id", tenant_id).order(
+            "accessed_at", desc=True).limit(100).execute()
+    except Exception as exc:
+        logger.error("[SAR] DB error reading SAR sub-tables: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo componer el export completo. Reintenta en unos segundos.",
+        )
 
     return {
         "format_version": "1.0",
@@ -189,13 +202,20 @@ def _execute_erase(
 async def data_subject_request(
     contact_id: str,
     body: DataSubjectRequest,
+    request: Request,
     tenant=Depends(get_current_tenant),
     sb: Client = Depends(get_service_client),
     _role=Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """POST /api/v1/contacts/{id}/data-subject-request.
 
     Body: { type: 'export'|'rectify'|'erase'|'portability', reason?, rectification? }
+
+    Hardening rev. 100:
+      - Rate limit por write bucket (DoS protection).
+      - Cada lectura de PII registra en pii_access_log (Art. 9 audit).
+      - DB errors → 503 explícito (no retorna payload incompleto).
     """
     if body.type not in VALID_TYPES:
         raise HTTPException(
@@ -212,9 +232,23 @@ async def data_subject_request(
 
     actor_email = getattr(tenant, "email", None) or getattr(tenant, "user_email", None)
     actor_user_id = getattr(tenant, "user_id", None)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
 
     if body.type == "export" or body.type == "portability":
         payload = _build_export_payload(sb, tenant.tenant_id, contact_id)
+        # Rev. 100 — registrar acceso PII (Art. 9). Operador export = lectura masiva
+        # de campos sensibles (name, email, document, address, etc.).
+        log_pii_access(
+            sb,
+            tenant_id=tenant.tenant_id,
+            contact_id=contact_id,
+            accessed_by=f"user:{actor_email}" if actor_email else "user:unknown",
+            purpose="sar_export" if body.type == "export" else "sar_portability",
+            fields_accessed=list(payload["subject"].keys()),
+            ip_address=client_ip,
+            user_agent=user_agent,
+        )
         _audit(
             sb,
             tenant_id=tenant.tenant_id,

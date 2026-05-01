@@ -1,9 +1,110 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-04-29 (rev. 77 · formato visual canónico WhatsApp con citas)
+**Última actualización**: 2026-05-01 (rev. 100 · cierre real de certificación end-to-end)
 **Fuente de verdad**: DB live (Supabase `***SUPABASE_PROJECT_REF_REDACTED***`) + contratos en código.
 **Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
+
+---
+
+## Cierre rev. 100 (2026-05-01) — CERTIFICATION CLOSURE
+
+Cierre repo-wide post-Habeas-Data: 4 auditorías paralelas (security,
+doc-drift, runtime, cross-layer) detectaron 4 P0 + 5 P1 reales. Todos
+cerrados sin fixes aislados, en 5 bloques coherentes.
+
+### Bloque 1 — Compliance/seguridad código (27 tests rev. 100)
+
+- **`fn_apply_retention` per-tenant** (rev. 100): la versión rev. 95 leía
+  solo el default global e ignoraba overrides per-tenant. Migration
+  20260508010000 itera todos los tenants y aplica `WHERE tenant_id =
+  r_tenant.tenant_id` en cada DELETE/UPDATE — multi-tenant safe.
+- **`_log_pii_access` wired** (services/api/dependencies/pii_audit.py):
+  el helper era código muerto en orchestrator (0 callsites). Ahora se
+  invoca en SAR endpoint (purpose='sar_export'/'sar_portability') con
+  IP + user-agent del operador. Tabla `pii_access_log` ya recibe rows.
+- **`notifications._notify_tenant_event` semantics**: antes retornaba
+  True silencioso si todos los recipients fallaban. Ahora distingue
+  no-recipients-configurados (True) vs todos-fallaron (False + log
+  ERROR). Caller en orchestrator distingue excepción de False boolean.
+- **SAR endpoint hardening** (`data_subject_request.py`): rate-limit
+  `RL_WRITE_DEFAULT`, `try/except` en `_build_export_payload` que
+  propaga 503 ante DB error (en lugar de payload incompleto silencioso),
+  PII access log con IP + user-agent, parámetro `Request` para captura.
+- **CSP + HSTS headers** en `services/api/main.py`:
+  `Content-Security-Policy: default-src 'none'; connect-src 'self';
+  frame-ancestors 'none'` + `Strict-Transport-Security: max-age=31536000`.
+
+### Bloque 2 — Infra coherence (4 tests)
+
+- `RESEND_API_KEY` (sync: false) + `RESEND_FROM_EMAIL` agregados al
+  servicio `commerce-ops-orchestrator` en render.yaml.
+- `.env.example`: sección obsoleta SMTP/BREVO reemplazada por Resend.
+
+### Bloque 3 — UI Tenant Console
+
+- `apps/web/.../contacts/page.tsx`: nueva server action `sarAction` que
+  proxea POST `/api/v1/contacts/{id}/data-subject-request` con JWT del
+  operador. Devuelve payload JSON.
+- `contacts-manager.tsx`: 3 botones nuevos por contacto (owner/manager):
+  - **Reporte Habeas Data** (Art. 14) — descarga JSON completo.
+  - **Portabilidad** (Art. 19) — descarga JSON estándar.
+  - **Anonimizar** (Art. 15) — confirma + ejecuta erase + revalidate.
+
+### Bloque 4 — Documentación coherente
+
+- `.context/01-state.md` (este archivo) — sección rev. 100 actualizada.
+- `.context/04-next-steps.md` — F1-F7 follow-ups del ADR-0003.
+- `CLAUDE.md` — counts actualizados (1100 → 1165 tests).
+- `docs/HANDOFF.md` — 5+1 nuevas migraciones documentadas.
+
+### Bloque 5 — Validación
+
+- Migration 20260508010000 aplicada a Supabase prod + ledger sync.
+- Suite total: 1138 tests OK · validate.sh 13/13 · TypeScript OK · ESLint OK.
+- Reporte cierre: `docs/reports/rev100_certification_closure.md`.
+
+### INTERVENCION HUMANA REQUERIDA
+
+| ID | Acción | Razón |
+|---|---|---|
+| H7 | Rotar Supabase service_role + anon_key + DB password + Meta secret + Wompi sandbox keys | Commit `be739a4` (2026-04-06) tenía `.env` con credenciales reales del proyecto productivo `***SUPABASE_PROJECT_REF_REDACTED***`; ya removido en commit 488c6c6 pero la historia git pushed a GitHub conserva el plaintext. |
+| H8 | (Opcional) git history rewrite con `git filter-repo --path .env --invert-paths` | Destructivo (cambia hashes de TODOS los commits); requiere coordinación con cualquier dev con clones locales. Alternativa segura: solo rotar (H7). |
+
+---
+
+## Cierre rev. 93–99 (2026-04-30 a 2026-05-01) — Habeas Data Compliance
+
+End-to-end Ley 1581/2012 Colombia en 4 sprints commiteados+pusheados
+(`1eea615`, `3252db3`, `16a208e`, `e5787b6`). Cobertura completa Arts.
+4, 9, 12, 14, 15, 16, 17, 18, 19. Reporte en
+`docs/reports/rev93_99_habeas_data_completion.md`. Detalle por sprint:
+
+- **Sprint 1 rev. 93**: `consent_audit_log` + `pii_access_log` (append-only,
+  triggers UPDATE/DELETE bloqueados, RLS por tenant) + endpoint
+  `POST /api/v1/contacts/{id}/data-subject-request` (export/rectify/
+  erase/portability) + helpers `_log_consent_event`, `_hash_phone`.
+  `_record_consent(False)` ahora anonimiza los 6 campos PII (Art. 15)
+  + escribe audit (Art. 9).
+- **Sprint 2 rev. 94+95**: integración Resend (con fallback graceful
+  sin API key) + helpers `notify_consent_revoked` / `notify_sar_received`
+  + `retention_policies` table con defaults globales (messages 180d
+  hard, conversations 365d soft, contacts inactive 730d, pii_access_log
+  365d) + `fn_apply_retention(entity, dry_run)` + 4 pg_cron domingos
+  03:xx UTC.
+- **Sprint 3 rev. 96+97**: tokenización aditiva `document_number_hash`
+  (sha256) + `document_number_last4` con trigger sync — phone NO se
+  cifra (R4 risk lookup WhatsApp). Detector pre-LLM
+  `_detect_data_export_intent` con 30+ tokens; handler en orchestrator
+  responde "envíame mis datos" con resumen masked + audit + notif tenant.
+- **Sprint 4 rev. 98+99**: 5 docs en `docs/legal/` (dpa, privacy-policy,
+  subprocessors, incident-response, roles) + ADR-0003 con decisiones
+  D1–D7 / alternativas A1–A4 / follow-ups F1–F7 + migration
+  `tenant_legal_acceptance` (append-only, RLS, unique per version).
+
+H1 templates legales: APROBADO as-is por usuario hasta primer enterprise
+tenant. H2 RESEND_API_KEY: STANDBY hasta paso a producción (sistema usa
+fallback graceful — no falla flujo).
 
 ---
 

@@ -1,4 +1,4 @@
-# Handoff — Estado Operativo Real (2026-04-24, rev. 31)
+# Handoff — Estado Operativo Real (2026-05-01, rev. 100)
 
 Este documento describe el estado operativo real de `develop`.
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
@@ -14,8 +14,22 @@ tienen prioridad.
 - Tenant Console: ✅ live (fases 1–11.5 completas)
 - Platform Console: ❌ fuera de alcance (bloqueante OQ-P01)
 - Servicios live en Render: `web`, `connector-whatsapp`, `api`, `ai-orchestrator`
-- DB canónica: `supabase/migrations/` (72 migraciones — rev. 69)
+- DB canónica: `supabase/migrations/` (87 migraciones — rev. 100)
+- **Habeas Data Ley 1581 end-to-end**: ✅ rev. 93–100 — audit logs append-only,
+  SAR endpoint, retention policies per-tenant, PII tokenization aditiva,
+  click-wrap acceptance, Resend notifications con fallback graceful.
 - **Fase C Inbox (pagos Wompi)**: ✅ implementada y validada en sandbox (2026-04-24)
+
+## Migraciones recientes (rev. 93–100)
+
+| Timestamp | Archivo | Propósito |
+|---|---|---|
+| 20260502010000 | `consent_audit_log.sql` | Append-only audit Art. 9 |
+| 20260502010001 | `pii_access_log.sql` | Trazabilidad de accesos PII |
+| 20260505010000 | `retention_policies.sql` | TTL declarativos + pg_cron |
+| 20260506010000 | `pii_tokenization.sql` | Hash + last4 de document_number |
+| 20260507010000 | `tenant_legal_acceptance.sql` | Click-wrap DPA / privacy |
+| 20260508010000 | `retention_per_tenant_fix.sql` | Fix rev. 100: itera per-tenant |
 
 ## Cierre de auditoría (2026-04-21)
 

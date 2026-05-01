@@ -18,6 +18,10 @@ MIGRATION_PATH = os.path.join(
     os.path.dirname(__file__), "..",
     "supabase/migrations/20260505010000_retention_policies.sql"
 )
+MIGRATION_PER_TENANT_FIX_PATH = os.path.join(
+    os.path.dirname(__file__), "..",
+    "supabase/migrations/20260508010000_retention_per_tenant_fix.sql"
+)
 
 
 class RetentionMigrationStructureTests(unittest.TestCase):
@@ -205,6 +209,64 @@ class RlsPoliciesTests(unittest.TestCase):
     def test_modify_policy_requires_owner_or_manager(self):
         self.assertIn("'owner'", self.sql)
         self.assertIn("'manager'", self.sql)
+
+
+class PerTenantFixMigrationTests(unittest.TestCase):
+    """Rev. 100 — fn_apply_retention itera per-tenant policies."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(MIGRATION_PER_TENANT_FIX_PATH, encoding="utf-8") as f:
+            cls.sql = f.read()
+
+    def test_migration_exists(self):
+        self.assertTrue(os.path.exists(MIGRATION_PER_TENANT_FIX_PATH))
+
+    def test_iterates_tenants(self):
+        # Bug original: solo leía default global. Fix: FOR r_tenant IN SELECT id FROM tenants.
+        self.assertRegex(
+            self.sql,
+            r"FOR\s+r_tenant\s+IN\s+SELECT\s+id\s+AS\s+tenant_id\s+FROM\s+public\.tenants",
+        )
+
+    def test_resolves_per_tenant_override(self):
+        # Por cada tenant, busca override antes de caer al default.
+        self.assertRegex(
+            self.sql,
+            r"WHERE\s+tenant_id\s*=\s*r_tenant\.tenant_id",
+        )
+
+    def test_falls_back_to_global_default(self):
+        # Si no hay override, v_eff_ttl := v_default_ttl.
+        self.assertIn("v_eff_ttl := v_default_ttl", self.sql)
+        self.assertIn("v_eff_act := v_default_act", self.sql)
+
+    def test_delete_filters_by_tenant_id(self):
+        # CADA DELETE/UPDATE incluye tenant_id = r_tenant.tenant_id.
+        # Sin esto, multi-tenant safety se rompe.
+        delete_blocks = re.findall(
+            r"(DELETE\s+FROM\s+public\.\w+[^;]+?)(?=\s*RETURNING|\s*;)",
+            self.sql, flags=re.DOTALL | re.IGNORECASE,
+        )
+        for block in delete_blocks:
+            self.assertIn(
+                "tenant_id = r_tenant.tenant_id", block,
+                f"DELETE block missing tenant filter:\n{block[:200]}",
+            )
+
+    def test_update_filters_by_tenant_id(self):
+        update_blocks = re.findall(
+            r"(UPDATE\s+public\.\w+[^;]+?)(?=\s*RETURNING|\s*;)",
+            self.sql, flags=re.DOTALL | re.IGNORECASE,
+        )
+        for block in update_blocks:
+            self.assertIn(
+                "tenant_id = r_tenant.tenant_id", block,
+                f"UPDATE block missing tenant filter:\n{block[:200]}",
+            )
+
+    def test_returns_total_count_summed_across_tenants(self):
+        self.assertIn("v_total_count := v_total_count + v_count", self.sql)
 
 
 if __name__ == "__main__":

@@ -56,19 +56,25 @@ supabase/migrations/          # fuente canónica de esquema
 
 ## NO leer (reduce tokens ~50%)
 
-- `supabase/migrations/` — 49+ SQLs. Leer solo si hay tarea explícita de migración.
+- `supabase/migrations/` — 87 SQLs. Leer solo si hay tarea explícita de migración.
 - `.context/01-state-archive.md` — historial de sesiones archivado.
 - `packages/db/migrations/` — snapshot legacy divergido, no canónico.
 - `scratch/`, `scripts/debug/` — temporales locales.
-- `docs/reports/` — vacío.
 - `infra/render/`, `infra/local/`, `infra/supabase/` — vacíos.
 - `services/connector-mercadolibre/`, `services/connector-shopify/`,
   `services/cron/`, `services/worker/` — solo README (Fase 13 futura).
 
+## Leer si hay tarea de cumplimiento / cierre
+
+- `docs/reports/rev93_99_habeas_data_completion.md` — cierre Habeas Data Ley 1581.
+- `docs/reports/rev100_certification_closure.md` — cierre real certificación rev. 100.
+- `docs/legal/*.md` — DPA, privacy, subprocessors, incident-response, roles.
+- `docs/adr/0003-habeas-data-compliance-strategy.md` — decisiones + follow-ups F1-F7.
+
 ## Validación pre-deploy
 
 ```bash
-bash scripts/validate.sh          # sintaxis + 184 tests + TypeScript + lint
+bash scripts/validate.sh          # sintaxis + 1138 tests + TypeScript + lint
 bash scripts/validate.sh --full   # + pip-audit + coherencia vars
 ```
 

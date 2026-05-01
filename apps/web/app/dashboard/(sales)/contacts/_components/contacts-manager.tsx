@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Download, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,12 +41,21 @@ type Contact = {
   address: ContactAddress | null
 }
 
+type SarResult = {
+  ok: boolean
+  status: number
+  type: string
+  payload?: unknown
+  error?: string
+}
+
 type Props = {
   initialContacts: Contact[]
   canWrite: boolean
   addAction:    (fd: FormData) => Promise<void>
   editAction:   (fd: FormData) => Promise<void>
   deleteAction: (fd: FormData) => Promise<void>
+  sarAction?:   (fd: FormData) => Promise<SarResult>
 }
 
 const ITEMS_PER_PAGE = 30
@@ -59,7 +68,7 @@ const formatPhone = (raw: string): string => {
   return digits ? `+${digits}` : (raw || '')
 }
 
-export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -161,6 +170,54 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     const fd = new FormData()
     fd.set('contact_id', contactId)
     handleDelete(fd)
+  }
+
+  // Rev. 100 — SAR (Habeas Data Art. 14, 15, 19) handler.
+  // Triggers para owner/manager: export → descarga JSON; erase → anonimiza.
+  const [sarRunning, setSarRunning] = useState<string | null>(null)
+  const triggerSar = (contactId: string, sarType: 'export' | 'erase' | 'portability') => {
+    if (!sarAction) {
+      window.alert('Acción SAR no disponible (sarAction prop ausente).')
+      return
+    }
+    if (sarType === 'erase') {
+      if (!confirm(
+        '¿Confirmas SUPRESIÓN de PII de este contacto?\n\n' +
+        'Esta acción es IRREVERSIBLE: anonimiza nombre, email, documento, dirección y notas.\n' +
+        'Solo se conserva el teléfono (canal WhatsApp) y el audit log inmutable.\n\n' +
+        'Habeas Data Ley 1581/2012 Art. 15 — Derecho de supresión.'
+      )) return
+    }
+    setSarRunning(`${contactId}:${sarType}`)
+    startTransition(async () => {
+      try {
+        const fd = new FormData()
+        fd.set('contact_id', contactId)
+        fd.set('sar_type', sarType)
+        const res = await sarAction(fd)
+        if (!res.ok) {
+          window.alert(`SAR ${sarType} falló (${res.status}): ${res.error || JSON.stringify(res.payload).slice(0, 200)}`)
+          return
+        }
+        if (sarType === 'export' || sarType === 'portability') {
+          // Descarga el JSON (Art. 14 / 19).
+          const json = JSON.stringify(res.payload, null, 2)
+          const blob = new Blob([json], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `habeas-data-${sarType}-${contactId.slice(0, 8)}-${Date.now()}.json`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(url)
+        } else if (sarType === 'erase') {
+          window.alert('Supresión Art. 15 procesada. Los datos PII fueron anonimizados.\nEl audit log conserva trazabilidad inmutable.')
+        }
+      } finally {
+        setSarRunning(null)
+      }
+    })
   }
 
   const extractEvidenceNote = (evidence: Contact['consent_evidence']): string | null => {
@@ -513,10 +570,56 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           <input type="checkbox" name="consent_given" defaultChecked={c.consent_given} className="h-3.5 w-3.5 rounded" />
                           <span className="text-xs text-muted-foreground">Consentimiento Habeas Data</span>
                         </label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Button type="submit" disabled={isPending} size="sm" variant="outline" className="h-7 text-xs gap-1.5">
                             {isPending ? <><Loader2 className="h-3 w-3 animate-spin" />Guardando...</> : 'Guardar cambios'}
                           </Button>
+                          {sarAction && (
+                            <>
+                              <Button
+                                type="button"
+                                disabled={isPending}
+                                size="sm"
+                                variant="ghost"
+                                title="Habeas Data Art. 14 — Exportar todos los datos del titular en JSON"
+                                className="h-7 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                                onClick={() => triggerSar(c.id, 'export')}
+                              >
+                                {sarRunning === `${c.id}:export`
+                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  : <Download className="h-3 w-3 mr-1" />}
+                                Reporte Habeas Data
+                              </Button>
+                              <Button
+                                type="button"
+                                disabled={isPending}
+                                size="sm"
+                                variant="ghost"
+                                title="Habeas Data Art. 19 — Portabilidad (JSON estándar)"
+                                className="h-7 text-xs text-violet-400 hover:text-violet-300 hover:bg-violet-500/10"
+                                onClick={() => triggerSar(c.id, 'portability')}
+                              >
+                                {sarRunning === `${c.id}:portability`
+                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  : <FileText className="h-3 w-3 mr-1" />}
+                                Portabilidad
+                              </Button>
+                              <Button
+                                type="button"
+                                disabled={isPending}
+                                size="sm"
+                                variant="ghost"
+                                title="Habeas Data Art. 15 — Supresión: anonimiza PII (irreversible)"
+                                className="h-7 text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                                onClick={() => triggerSar(c.id, 'erase')}
+                              >
+                                {sarRunning === `${c.id}:erase`
+                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  : <ShieldOff className="h-3 w-3 mr-1" />}
+                                Anonimizar
+                              </Button>
+                            </>
+                          )}
                           <Button
                             type="button"
                             disabled={isPending}
