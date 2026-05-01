@@ -79,6 +79,26 @@ def _audit(
         logger.warning("[SAR] consent_audit_log insert falló: %s", exc)
 
 
+async def _notify_sar_safe(
+    sb: Client,
+    tenant_id: str,
+    contact_id: str,
+    sar_type: str,
+    reason: Optional[str],
+) -> None:
+    """Rev. 94 — Wrapper seguro: notifica al tenant del SAR sin bloquear flujo."""
+    try:
+        import sys, os as _os
+        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "ai-orchestrator"))
+        from notifications import notify_sar_received  # type: ignore
+        await notify_sar_received(
+            sb, tenant_id=tenant_id, contact_id=contact_id,
+            sar_type=sar_type, reason=reason,
+        )
+    except Exception as exc:
+        logger.warning("[SAR] notify_sar_received falló: %s", exc)
+
+
 def _build_export_payload(sb: Client, tenant_id: str, contact_id: str) -> dict:
     """Genera el payload completo de export del contacto.
 
@@ -209,6 +229,7 @@ async def data_subject_request(
                 "fields_exported": list(payload["subject"].keys()),
             },
         )
+        await _notify_sar_safe(sb, tenant.tenant_id, contact_id, body.type, body.reason)
         return payload
 
     if body.type == "rectify":
@@ -232,6 +253,7 @@ async def data_subject_request(
                 "status": "pending_review",
             },
         )
+        await _notify_sar_safe(sb, tenant.tenant_id, contact_id, "rectify", body.reason)
         return {
             "status": "received",
             "message": "Solicitud de rectificación registrada para revisión",
@@ -254,6 +276,7 @@ async def data_subject_request(
             "via": "tenant_console",
         },
     )
+    await _notify_sar_safe(sb, tenant.tenant_id, contact_id, "erase", body.reason)
     return {
         "status": "erased",
         "message": "PII anonimizada conforme Art. 15 Ley 1581/2012",

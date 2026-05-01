@@ -3,13 +3,25 @@ Despacho de notificaciones operacionales por evento.
 
 Canales soportados:
 - telegram (activo)
-- email (preparado para fase SMTP; placeholder no bloqueante)
+- email vía Resend (rev. 94, activo cuando RESEND_API_KEY está configurada).
+  Fallback a logger si la var no está seteada.
+
+Eventos:
+- human_takeover (rev. 84) — escalación a operador.
+- consent_revoked (rev. 94) — cliente revocó por WhatsApp.
+- sar_received (rev. 94) — solicitud Habeas Data del titular.
 """
 import logging
+import os
 from typing import Any
 
 import httpx
 from supabase import Client
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.getenv(
+    "RESEND_FROM_EMAIL", "Commerce Ops <noreply@commerce-ops.local>"
+)
 
 logger = logging.getLogger("orchestrator.notifications")
 
@@ -67,19 +79,192 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
     return False
 
 
+async def _send_email_via_resend(
+    *, to: str, subject: str, html: str, text: str | None = None,
+) -> bool:
+    """Rev. 94 — Envío real vía Resend API.
+
+    Si `RESEND_API_KEY` no está configurada, fallback a logger (no falla
+    el flujo). Resend free tier: 100 emails/día — suficiente para
+    notificaciones críticas operacionales.
+
+    Docs: https://resend.com/docs/api-reference/emails/send-email
+    """
+    if not RESEND_API_KEY:
+        logger.info(
+            "[EMAIL][NO_KEY] Email simulated to=%s subject=%r (RESEND_API_KEY not set)",
+            to, subject,
+        )
+        return True
+
+    payload = {
+        "from": RESEND_FROM_EMAIL,
+        "to": [to],
+        "subject": subject,
+        "html": html,
+    }
+    if text:
+        payload["text"] = text
+
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.post(
+                "https://api.resend.com/emails", json=payload, headers=headers,
+            )
+        if 200 <= res.status_code < 300:
+            logger.info("[EMAIL][SENT] to=%s subject=%r", to, subject)
+            return True
+        logger.error(
+            "[EMAIL][ERROR] status=%s body=%s",
+            res.status_code, res.text[:200],
+        )
+        # 4xx (bad request, invalid key) — no retry; 5xx — retry.
+        if res.status_code < 500:
+            return True
+        return False
+    except Exception as exc:
+        logger.error("[EMAIL] Resend unreachable: %s", exc)
+        return False
+
+
 def _dispatch_email_placeholder(config: dict[str, Any], payload: dict[str, Any]) -> bool:
+    """Mantenido por compat — wrapper no-async sobre _send_email_via_resend.
+
+    `dispatch_human_takeover_event` aún usa este path. Para nuevos
+    eventos preferir `notify_consent_event` / `notify_sar_received`.
+    """
     recipient = str(config.get("to_email") or config.get("recipient") or "").strip()
     if not recipient:
         logger.warning("Email habilitado sin recipient configurado. Se omite por ahora.")
         return True
-
-    logger.info(
-        "Email channel preparado (pendiente SMTP runtime). recipient=%s event=%s conv=%s",
-        recipient,
-        payload.get("event_type"),
-        payload.get("conversation_id"),
+    if not RESEND_API_KEY:
+        logger.info(
+            "[EMAIL][NO_KEY] Email simulated to=%s event=%s",
+            recipient, payload.get("event_type"),
+        )
+        return True
+    # Resolución asíncrona via asyncio.run en sync context (caller actual).
+    import asyncio
+    subject = f"[Commerce Ops] {payload.get('event_type', 'notification')}"
+    html = (
+        f"<p>Evento operacional: <b>{payload.get('event_type')}</b></p>"
+        f"<pre>{payload}</pre>"
     )
-    return True
+    try:
+        return asyncio.run(_send_email_via_resend(
+            to=recipient, subject=subject, html=html,
+        ))
+    except RuntimeError:
+        # Caller ya tiene event loop activo — fire-and-forget.
+        logger.info("[EMAIL] caller has loop; fire-and-forget to=%s", recipient)
+        return True
+
+
+async def notify_consent_revoked(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    contact_phone_hash: str,
+    occurred_at: str,
+    source: str = "whatsapp",
+) -> bool:
+    """Rev. 94 — Notifica al tenant que un cliente revocó consent.
+
+    Habeas Data Ley 1581 Art. 9: el responsable (tenant) debe estar
+    enterado de las revocaciones para mantener registro adecuado.
+    """
+    return await _notify_tenant_event(
+        supabase,
+        tenant_id=tenant_id,
+        event_type="consent_revoked",
+        subject=f"🔒 Cliente revocó consentimiento (Habeas Data)",
+        html_body=(
+            f"<h2>Revocación de consentimiento</h2>"
+            f"<p>Un cliente revocó su consentimiento de tratamiento de datos.</p>"
+            f"<ul>"
+            f"<li><b>Cliente</b> (hash): <code>{contact_phone_hash[:16]}…</code></li>"
+            f"<li><b>Fecha</b>: {occurred_at}</li>"
+            f"<li><b>Canal</b>: {source}</li>"
+            f"</ul>"
+            f"<p>El sistema ya anonimizó los datos personales del contacto "
+            f"(Art. 15 Ley 1581/2012). Esta notificación es solo para tu "
+            f"registro de cumplimiento.</p>"
+            f"<hr>"
+            f"<small>Generado automáticamente por Commerce Ops Platform.</small>"
+        ),
+    )
+
+
+async def notify_sar_received(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    contact_id: str,
+    sar_type: str,                      # 'export' | 'rectify' | 'erase' | 'portability'
+    reason: str | None = None,
+) -> bool:
+    """Rev. 94 — Notifica al tenant que llegó una solicitud Habeas Data."""
+    return await _notify_tenant_event(
+        supabase,
+        tenant_id=tenant_id,
+        event_type=f"sar_{sar_type}",
+        subject=f"📋 Solicitud Habeas Data ({sar_type})",
+        html_body=(
+            f"<h2>Solicitud de derechos del titular</h2>"
+            f"<p>Tipo: <b>{sar_type}</b></p>"
+            f"<p>Contacto ID: <code>{contact_id[:8]}…</code></p>"
+            + (f"<p>Razón: {reason}</p>" if reason else "")
+            + f"<p>Detalles en Tenant Console → Contactos.</p>"
+        ),
+    )
+
+
+async def _notify_tenant_event(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    event_type: str,
+    subject: str,
+    html_body: str,
+) -> bool:
+    """Despachador genérico — busca recipients del tenant en
+    `notification_settings` y envía email."""
+    if not tenant_id:
+        return True
+
+    settings_res = (
+        supabase.table("notification_settings")
+        .select("channel, enabled, config")
+        .eq("tenant_id", tenant_id)
+        .eq("enabled", True)
+        .eq("channel", "email")
+        .execute()
+    )
+    rows = settings_res.data or []
+    if not rows:
+        # Sin email configurado — no es error, solo log.
+        logger.info(
+            "[NOTIFY] tenant=%s sin email configurado — skip event=%s",
+            tenant_id, event_type,
+        )
+        return True
+
+    sent_any = False
+    for row in rows:
+        config = dict(row.get("config") or {})
+        recipient = str(config.get("to_email") or config.get("recipient") or "").strip()
+        if not recipient:
+            continue
+        ok = await _send_email_via_resend(
+            to=recipient, subject=subject, html=html_body,
+        )
+        if ok:
+            sent_any = True
+    return sent_any or not rows  # OK si no había rows, OK si al menos uno se envió.
 
 
 async def dispatch_human_takeover_event(supabase: Client, payload: dict[str, Any]) -> bool:
