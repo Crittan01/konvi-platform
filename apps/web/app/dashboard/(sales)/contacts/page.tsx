@@ -250,6 +250,40 @@ export default async function ContactsPage({
     revalidatePath('/dashboard/contacts')
   }
 
+  // Rev. 101 (F1) — HTML imprimible del SAR. Endpoint GET (no POST).
+  async function sarPrintableAction(formData: FormData): Promise<{
+    ok: boolean
+    status: number
+    html?: string
+    error?: string
+  }> {
+    'use server'
+    const sb = createClient()
+    const { data: { session } } = await sb.auth.getSession()
+    const m = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, status: 403, error: 'No tienes permisos.' }
+    }
+    const contactId = String(formData.get('contact_id') || '')
+    if (!contactId) return { ok: false, status: 400, error: 'contact_id requerido.' }
+    const token = session?.access_token
+    if (!token) return { ok: false, status: 401, error: 'Sesión expirada.' }
+    try {
+      const res = await fetch(
+        `${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(contactId)}/data-subject-request/printable`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        },
+      )
+      const text = await res.text()
+      return { ok: res.ok, status: res.status, html: res.ok ? text : undefined, error: res.ok ? undefined : text.slice(0, 200) }
+    } catch (e) {
+      return { ok: false, status: 502, error: e instanceof Error ? e.message : 'Network error' }
+    }
+  }
+
   // Rev. 100 — SAR (Subject Access Request) Habeas Data Art. 14.
   // Server action proxy al endpoint /api/v1/contacts/{id}/data-subject-request.
   // Devuelve { ok, payload } para que el cliente serialice y descargue.
@@ -341,6 +375,7 @@ export default async function ContactsPage({
         editAction={editContact}
         deleteAction={deleteContact}
         sarAction={sarAction}
+        sarPrintableAction={sarPrintableAction}
       />
     </div>
   )

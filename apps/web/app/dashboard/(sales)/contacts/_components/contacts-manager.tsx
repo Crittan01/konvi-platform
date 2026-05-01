@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Download, FileText } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Download, FileText, Printer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -56,6 +56,7 @@ type Props = {
   editAction:   (fd: FormData) => Promise<void>
   deleteAction: (fd: FormData) => Promise<void>
   sarAction?:   (fd: FormData) => Promise<SarResult>
+  sarPrintableAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; html?: string; error?: string }>
 }
 
 const ITEMS_PER_PAGE = 30
@@ -68,7 +69,7 @@ const formatPhone = (raw: string): string => {
   return digits ? `+${digits}` : (raw || '')
 }
 
-export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -170,6 +171,37 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     const fd = new FormData()
     fd.set('contact_id', contactId)
     handleDelete(fd)
+  }
+
+  // Rev. 101 (F1) — Abre HTML imprimible en nueva pestaña; el operador
+  // hace Cmd+P → Save as PDF.
+  const triggerPrintable = (contactId: string) => {
+    if (!sarPrintableAction) {
+      window.alert('Acción imprimible no disponible.')
+      return
+    }
+    setSarRunning(`${contactId}:printable`)
+    startTransition(async () => {
+      try {
+        const fd = new FormData()
+        fd.set('contact_id', contactId)
+        const res = await sarPrintableAction(fd)
+        if (!res.ok || !res.html) {
+          window.alert(`Falló reporte imprimible (${res.status}): ${res.error || 'unknown'}`)
+          return
+        }
+        const blob = new Blob([res.html], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        const w = window.open(url, '_blank', 'noopener,noreferrer')
+        if (!w) {
+          window.alert('El browser bloqueó la nueva pestaña. Habilita popups y reintenta.')
+        }
+        // No revocamos URL inmediatamente — la nueva pestaña aún la usa.
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      } finally {
+        setSarRunning(null)
+      }
+    })
   }
 
   // Rev. 100 — SAR (Habeas Data Art. 14, 15, 19) handler.
@@ -604,6 +636,22 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                   : <FileText className="h-3 w-3 mr-1" />}
                                 Portabilidad
                               </Button>
+                              {sarPrintableAction && (
+                                <Button
+                                  type="button"
+                                  disabled={isPending}
+                                  size="sm"
+                                  variant="ghost"
+                                  title="Reporte HTML imprimible (Cmd+P → Save as PDF)"
+                                  className="h-7 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                                  onClick={() => triggerPrintable(c.id)}
+                                >
+                                  {sarRunning === `${c.id}:printable`
+                                    ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    : <Printer className="h-3 w-3 mr-1" />}
+                                  PDF
+                                </Button>
+                              )}
                               <Button
                                 type="button"
                                 disabled={isPending}

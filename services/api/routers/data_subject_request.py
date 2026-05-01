@@ -20,6 +20,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 
@@ -316,3 +317,211 @@ async def data_subject_request(
         "message": "PII anonimizada conforme Art. 15 Ley 1581/2012",
         "consent_revoked_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ── Rev. 101 (F1) — HTML imprimible para reporte SAR ────────────────────────
+# Decisión: NO usamos WeasyPrint / reportlab server-side (zero new deps,
+# zero deploy risk). El endpoint sirve HTML con CSS print-friendly; el
+# operador hace Cmd+P → "Save as PDF" en el browser y obtiene PDF de
+# calidad. Si en el futuro se requiere PDF server-side (envío vía email
+# o Meta document), se agrega lib en sprint dedicado.
+
+def _render_export_html(payload: dict) -> str:
+    """Compone HTML print-friendly del payload de export Art. 14 / 19."""
+    subject = payload.get("subject") or {}
+    orders = payload.get("orders") or []
+    consent_history = payload.get("consent_history") or []
+    pii_history = payload.get("pii_access_history") or []
+    subprocessors = payload.get("subprocessors") or []
+    legal = payload.get("legal_basis") or {}
+    generated = payload.get("generated_at", "")
+
+    def esc(v) -> str:
+        if v is None:
+            return "(no registrado)"
+        return (
+            str(v)
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+
+    def field_row(label: str, value) -> str:
+        return f"<tr><th>{esc(label)}</th><td>{esc(value)}</td></tr>"
+
+    subject_rows = "\n".join([
+        field_row("ID", subject.get("id")),
+        field_row("Teléfono", subject.get("phone")),
+        field_row("Nombre", subject.get("name")),
+        field_row("Email", subject.get("email")),
+        field_row("Tipo de documento", subject.get("document_type")),
+        field_row("Número de documento", subject.get("document_number")),
+        field_row("Dirección", subject.get("address")),
+        field_row("Consentimiento activo", subject.get("consent_given")),
+        field_row("Otorgado en", subject.get("consent_given_at")),
+        field_row("Revocado en", subject.get("consent_revoked_at")),
+        field_row("Razón de revocación", subject.get("consent_revoked_reason")),
+        field_row("Versión del consent", subject.get("consent_text_version")),
+    ])
+
+    orders_rows = "".join([
+        f"<tr><td>{esc(o.get('id'))}</td><td>{esc(o.get('status'))}</td>"
+        f"<td>{esc(o.get('total_amount'))} {esc(o.get('currency'))}</td>"
+        f"<td>{esc(o.get('created_at'))}</td><td>{esc(o.get('paid_at'))}</td></tr>"
+        for o in orders
+    ]) or "<tr><td colspan='5' class='empty'>Sin órdenes asociadas.</td></tr>"
+
+    consent_rows = "".join([
+        f"<tr><td>{esc(e.get('occurred_at'))}</td><td>{esc(e.get('event'))}</td>"
+        f"<td>{esc(e.get('source'))}</td><td>{esc(e.get('actor_email'))}</td></tr>"
+        for e in consent_history
+    ]) or "<tr><td colspan='4' class='empty'>Sin eventos de consent registrados.</td></tr>"
+
+    pii_rows = "".join([
+        f"<tr><td>{esc(p.get('accessed_at'))}</td><td>{esc(p.get('accessed_by'))}</td>"
+        f"<td>{esc(p.get('purpose'))}</td><td>{esc(p.get('fields_accessed'))}</td></tr>"
+        for p in pii_history
+    ]) or "<tr><td colspan='4' class='empty'>Sin accesos PII registrados.</td></tr>"
+
+    sub_rows = "".join([
+        f"<tr><td>{esc(s.get('name'))}</td><td>{esc(s.get('role'))}</td>"
+        f"<td>{esc(s.get('jurisdiction'))}</td></tr>"
+        for s in subprocessors
+    ])
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Reporte Habeas Data — Art. 14 Ley 1581/2012</title>
+<style>
+  @page {{ size: letter; margin: 1.8cm 2cm; }}
+  body {{ font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+          font-size: 11pt; color: #111; line-height: 1.4; max-width: 780px; margin: 0 auto; padding: 1em; }}
+  h1 {{ font-size: 18pt; border-bottom: 2px solid #111; padding-bottom: 0.3em; margin-bottom: 0.2em; }}
+  h2 {{ font-size: 13pt; margin-top: 1.4em; border-bottom: 1px solid #ccc; padding-bottom: 0.2em; }}
+  .meta {{ color: #555; font-size: 9pt; margin-bottom: 1.2em; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 0.5em; }}
+  th, td {{ text-align: left; padding: 0.4em 0.6em; border-bottom: 1px solid #eee;
+           font-size: 10pt; vertical-align: top; }}
+  th {{ background: #f5f5f5; font-weight: 600; width: 30%; }}
+  td.empty {{ color: #999; font-style: italic; text-align: center; }}
+  .footer {{ margin-top: 2em; font-size: 9pt; color: #555; border-top: 1px solid #ccc;
+            padding-top: 0.6em; }}
+  .print-hint {{ background: #fffae6; border: 1px solid #f1d97a; padding: 0.5em 0.8em;
+                border-radius: 4px; margin-bottom: 1em; font-size: 9pt; }}
+  @media print {{ .print-hint {{ display: none; }} body {{ padding: 0; }} }}
+</style>
+</head>
+<body>
+
+<div class="print-hint">
+  <strong>Imprimir como PDF:</strong> Cmd/Ctrl + P → Destino: "Guardar como PDF".
+  Este HTML está optimizado para letter print + márgenes ANSI.
+</div>
+
+<h1>Reporte Habeas Data</h1>
+<div class="meta">
+  Ley 1581/2012 Colombia · Art. 14 (acceso) / Art. 19 (portabilidad) ·
+  Generado: <strong>{esc(generated)}</strong> ·
+  Versión formato: <strong>{esc(payload.get('format_version', '1.0'))}</strong>
+</div>
+
+<h2>1. Datos del titular</h2>
+<table>{subject_rows}</table>
+
+<h2>2. Órdenes asociadas ({len(orders)})</h2>
+<table>
+  <thead><tr><th>ID</th><th>Estado</th><th>Total</th><th>Creada</th><th>Pagada</th></tr></thead>
+  <tbody>{orders_rows}</tbody>
+</table>
+
+<h2>3. Histórico de consent ({len(consent_history)})</h2>
+<table>
+  <thead><tr><th>Fecha</th><th>Evento</th><th>Fuente</th><th>Actor</th></tr></thead>
+  <tbody>{consent_rows}</tbody>
+</table>
+
+<h2>4. Accesos a PII ({len(pii_history)})</h2>
+<table>
+  <thead><tr><th>Fecha</th><th>Actor</th><th>Propósito</th><th>Campos</th></tr></thead>
+  <tbody>{pii_rows}</tbody>
+</table>
+
+<h2>5. Subprocesadores</h2>
+<table>
+  <thead><tr><th>Nombre</th><th>Rol</th><th>Jurisdicción</th></tr></thead>
+  <tbody>{sub_rows}</tbody>
+</table>
+
+<h2>6. Marco legal</h2>
+<table>
+  {field_row("Ley", legal.get("law"))}
+  {field_row("Responsable", legal.get("responsible"))}
+  {field_row("Encargado (procesador)", legal.get("processor"))}
+</table>
+
+<div class="footer">
+  Documento generado automáticamente por Commerce Ops Platform.
+  El responsable del tratamiento es el tenant. Para preguntas sobre
+  este reporte, contactar al responsable directamente.
+  Este documento contiene PII; manejar conforme a Habeas Data Ley 1581/2012.
+</div>
+
+</body>
+</html>"""
+
+
+@router.get("/{contact_id}/data-subject-request/printable", response_class=HTMLResponse)
+async def data_subject_request_printable(
+    contact_id: str,
+    request: Request,
+    tenant=Depends(get_current_tenant),
+    sb: Client = Depends(get_service_client),
+    _role=Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
+):
+    """GET /api/v1/contacts/{id}/data-subject-request/printable — HTML print-friendly.
+
+    Rev. 101 (F1). El operador abre la URL → Cmd/Ctrl+P → Save as PDF.
+    Cero deps server-side; calidad visual >= WeasyPrint default.
+    """
+    # Reutiliza la composición del export. Verifica que el contacto pertenezca.
+    check = sb.table("contacts").select("id, phone").eq(
+        "id", contact_id).eq("tenant_id", tenant.tenant_id).limit(1).execute()
+    if not check.data:
+        raise HTTPException(status_code=404, detail="Contacto no encontrado")
+    contact_phone = check.data[0].get("phone")
+
+    payload = _build_export_payload(sb, tenant.tenant_id, contact_id)
+
+    actor_email = getattr(tenant, "email", None) or getattr(tenant, "user_email", None)
+    actor_user_id = getattr(tenant, "user_id", None)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
+    log_pii_access(
+        sb,
+        tenant_id=tenant.tenant_id,
+        contact_id=contact_id,
+        accessed_by=f"user:{actor_email}" if actor_email else "user:unknown",
+        purpose="sar_export_printable",
+        fields_accessed=list(payload["subject"].keys()),
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+    _audit(
+        sb,
+        tenant_id=tenant.tenant_id,
+        contact_id=contact_id,
+        phone=contact_phone,
+        event="export_request",
+        actor_email=actor_email,
+        actor_user_id=actor_user_id,
+        evidence={
+            "type": "export",
+            "format": "printable_html",
+            "fields_exported": list(payload["subject"].keys()),
+        },
+    )
+
+    html = _render_export_html(payload)
+    return HTMLResponse(content=html, status_code=200)
