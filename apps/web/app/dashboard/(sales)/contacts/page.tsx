@@ -1,6 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { ShieldCheck, ShieldOff, Users } from 'lucide-react'
+import { ShieldCheck, Users } from 'lucide-react'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
@@ -381,24 +381,9 @@ export default async function ContactsPage({
         </span>
       </div>
 
-      {/* Rev. 102 — Banner de rol/permisos para que el usuario sepa qué puede hacer */}
-      {!canWrite && (
-        <div className="rounded-xl border border-amber-700/40 bg-amber-700/5 px-4 py-3 text-sm text-amber-700 flex items-start gap-2">
-          <ShieldOff className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            <span className="font-semibold">Modo solo lectura.</span>{' '}
-            Tu rol actual es <code className="font-mono text-xs">{role}</code>. Puedes ver
-            la lista de contactos pero no crear, editar, eliminar ni ejecutar acciones
-            Habeas Data. Pide a un administrador (owner o manager) que ajuste tu rol si
-            necesitas acceso adicional.
-          </span>
-        </div>
-      )}
-
       <ContactsManager
         initialContacts={contacts}
         canWrite={canWrite}
-        currentRole={role}
         addAction={addContact}
         editAction={editContact}
         deleteAction={deleteContact}

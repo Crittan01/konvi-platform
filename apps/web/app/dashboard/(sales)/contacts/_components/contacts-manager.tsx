@@ -58,7 +58,6 @@ type SarResult = {
 type Props = {
   initialContacts: Contact[]
   canWrite: boolean
-  currentRole?: string
   addAction:    (fd: FormData) => Promise<void>
   editAction:   (fd: FormData) => Promise<void>
   deleteAction: (fd: FormData) => Promise<void>
@@ -76,7 +75,7 @@ const formatPhone = (raw: string): string => {
   return digits ? `+${digits}` : (raw || '')
 }
 
-export default function ContactsManager({ initialContacts, canWrite, currentRole: _currentRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
