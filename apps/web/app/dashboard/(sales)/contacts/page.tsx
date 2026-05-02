@@ -73,6 +73,7 @@ const normalizeDaneCode = (raw?: string | null) => {
 type Contact = {
   id: string
   phone: string
+  shipping_phone: string | null
   name: string | null
   email: string | null
   notes: string | null
@@ -108,7 +109,7 @@ export default async function ContactsPage({
     let query = supabase
       .from('contacts')
       .select(
-        'id, phone, name, email, notes, document_type, document_number, ' +
+        'id, phone, shipping_phone, name, email, notes, document_type, document_number, ' +
         'consent_given, consent_date, consent_source, consent_notice_version, ' +
         'consent_evidence, consent_actor_email, consent_revoked_at, consent_revoked_reason, created_at, address'
       )
@@ -203,6 +204,12 @@ export default async function ContactsPage({
       )
     }
     const phoneE164 = `+${phoneCountry}${digits}`
+    // Rev. 103 — phone alternativo de envío (opcional). Solo persiste si
+    // tiene 10 dígitos válidos Colombia (no empieza por 0).
+    const shippingPhoneRaw = ((formData.get('shipping_phone') as string) || '').replace(/\D/g, '')
+    const shippingPhoneE164 = (shippingPhoneRaw.length >= 10 && shippingPhoneRaw[shippingPhoneRaw.length - 10] !== '0')
+      ? `+57${shippingPhoneRaw.slice(-10)}`
+      : null
     const initialEvidence: Record<string, unknown> = {
       created_via: 'dashboard_contacts',
       note: consentEvidenceNote || null,
@@ -212,6 +219,7 @@ export default async function ContactsPage({
     const { data: inserted } = await sb.from('contacts').insert({
       tenant_id:     m.tenant_id,
       phone:         phoneE164,
+      shipping_phone: shippingPhoneE164,
       name:          (formData.get('name') as string) || null,
       email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
@@ -476,10 +484,17 @@ export default async function ContactsPage({
     const effectiveConsentDate = effectiveConsentGiven
       ? (wasAnonymized ? nowIso : (prev?.consent_date ?? nowIso))
       : (prev?.consent_date ?? null)
+    // Rev. 103 — shipping_phone (opcional). Si vacío, queda null (Envía
+    // hace fallback a contacts.phone). Si presente, normaliza a +E.164 CO.
+    const editShippingRaw = ((formData.get('shipping_phone') as string) || '').replace(/\D/g, '')
+    const editShippingE164 = (editShippingRaw.length >= 10 && editShippingRaw[editShippingRaw.length - 10] !== '0')
+      ? `+57${editShippingRaw.slice(-10)}`
+      : null
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
       email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
+      shipping_phone: editShippingE164,
       // Rev. 69 — documento (ambos juntos o ambos null).
       document_type:   editDocType && editDocNumber ? editDocType : null,
       document_number: editDocType && editDocNumber ? editDocNumber : null,

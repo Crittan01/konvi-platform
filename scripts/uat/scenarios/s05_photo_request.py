@@ -34,20 +34,17 @@ SUPPORTED_MODES = ("new", "known")
 
 def _run_subtest(
     phone: str, tenant_id: str, label: str, opening: str, expect_image: bool,
+    mode: str = "new",
 ) -> tuple[str, str, str, dict]:
     """Ejecuta un sub-test fotográfico aislado.
 
     Retorna (label, status, reason, evidence).
     """
     hard_reset(phone, tenant_id)
-
     if mode == "known":
-
         sb_seed = e2e_chat._supabase()
-
         if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
-
-            return ScenarioResult(0, scenario.__name__, FAIL, "Seed known contact falló")
+            return label, FAIL, "Seed known contact falló", {}
     time.sleep(2)
     photo_rules: list[Rule] = [
         (40, ("cuál producto", "cual producto", "cuéntame su nombre",
@@ -105,7 +102,7 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     ]
     results: list[tuple[str, str, str, dict]] = []
     for label, msg, expect_image in sub_tests:
-        results.append(_run_subtest(phone, tenant_id, label, msg, expect_image))
+        results.append(_run_subtest(phone, tenant_id, label, msg, expect_image, mode=mode))
 
     passes = sum(1 for _, st, _, _ in results if st == PASS)
     total = len(results)

@@ -1431,6 +1431,35 @@ def _get_contact_address(
     return address if isinstance(address, dict) else None
 
 
+def _get_contact_shipping_phone(
+    supabase: Client,
+    tenant_id: str,
+    customer_phone: Optional[str],
+) -> Optional[str]:
+    """Rev. 103 — devuelve `contacts.shipping_phone` si existe, sino
+    fallback al `customer_phone` (WhatsApp). Útil para construir el
+    `destination.phone` del shipment con el phone del receptor real.
+    """
+    if not customer_phone:
+        return None
+    phone_norm = _normalize_phone(customer_phone)
+    phone_plus = f"+{phone_norm}"
+    res = (
+        supabase.table("contacts")
+        .select("phone, shipping_phone")
+        .eq("tenant_id", tenant_id)
+        .or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus}")
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        return phone_plus  # fallback
+    ship = (rows[0].get("shipping_phone") or "").strip()
+    base = (rows[0].get("phone") or "").strip()
+    return ship or base or phone_plus
+
+
 async def _request_shipping_quote(tenant_id: str, payload: dict) -> tuple[int, dict]:
     token = _build_api_auth_token(tenant_id)
     if not token:
@@ -1504,6 +1533,13 @@ async def handle_shipping_quote_if_applicable(
         phone = _get_conversation_customer_phone(supabase, conversation_id)
         contact_address = _get_contact_address(supabase, tenant_id, phone)
         destination = _coerce_destination(contact_address)
+        # Rev. 103 — destination.phone = shipping_phone (alternativo) si
+        # existe, sino contact.phone (WhatsApp). Asegura que la guía Envía
+        # tenga el phone correcto del RECEPTOR (no siempre el pagador).
+        if destination is not None:
+            recipient_phone = _get_contact_shipping_phone(supabase, tenant_id, phone)
+            if recipient_phone:
+                destination["phone"] = recipient_phone
         if not destination:
             destination, ambiguous_city = _resolve_destination_from_conversation(
                 query_text=query_text,

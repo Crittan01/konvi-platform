@@ -260,6 +260,15 @@ class CheckoutFormConductor:
         if isinstance(addr, dict) and any(v for v in addr.values() if v):
             sim["address"] = self._merge_address(sim.get("address"), addr)
 
+        # Rev. 103 — phone alternativo de envío (separado de contacts.phone).
+        # NO sobrescribe sim["phone"] (que es el WhatsApp invariante);
+        # persiste como sim["shipping_phone"] formato +E.164 Colombia.
+        ship_phone = getattr(parsed, "extracted_shipping_phone", None)
+        if ship_phone:
+            digits = re.sub(r"\D", "", str(ship_phone))
+            if len(digits) >= 10 and digits[-10] != "0":
+                sim["shipping_phone"] = f"+57{digits[-10:]}"
+
         # Consent: si el inbound es claro "sí" tras una pregunta de consent,
         # el flujo orchestrator superior ya marca consent_given=True ANTES
         # de llegar al conductor. No tocamos consent aquí (separation of

@@ -49,15 +49,15 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     if not outs:
         return ScenarioResult(3, "KB cita de fuentes", FAIL,
             "Sin outbound tras 2 intentos")
-    text = " ".join(o.get("content") or "" for o in outs)
-    has_citation = "_Fuente:" in text or "*Fuente*" in text or "Fuente:" in text
+    full_text = " ".join(o.get("content") or "" for o in outs)
+    has_citation = "_Fuente:" in full_text or "*Fuente*" in full_text or "Fuente:" in full_text
     if not has_citation:
-        return ScenarioResult(3, "KB cita de fuentes", FAIL,
+        return ScenarioResult(3, f"KB cita de fuentes [{mode}]", FAIL,
             "Bot respondió sobre KB pero no incluyó cita de fuente (rev. 78 F3)",
-            evidence={"sample": text[:300]})
-    return ScenarioResult(3, "KB cita de fuentes", PASS,
-        "Respuesta KB incluye cita explícita",
-        evidence={"preview": text[:200]})
+            evidence={"mode": mode, "full_text": full_text})
+    return ScenarioResult(3, f"KB cita de fuentes [{mode}]", PASS,
+        f"Respuesta KB incluye cita explícita ({len(full_text)} chars)",
+        evidence={"mode": mode, "full_text": full_text})
 
 
 if __name__ == "__main__":

@@ -98,17 +98,14 @@ def _validate_no_sports(text: str) -> tuple[bool, str]:
 
 def _run_subtest(
     phone: str, tenant_id: str, label: str, message: str, validator,
+    mode: str = "new",
 ) -> tuple[str, str, str]:
     """Ejecuta UN sub-escenario aislado. Retorna (label, status, reason)."""
     hard_reset(phone, tenant_id)
-
     if mode == "known":
-
         sb_seed = e2e_chat._supabase()
-
         if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
-
-            return ScenarioResult(0, scenario.__name__, FAIL, "Seed known contact falló")
+            return label, FAIL, "Seed known contact falló"
     time.sleep(2)  # Cool-down post-reset.
     t0 = now_iso()
     if not send_inbound(phone, tenant_id, message):
@@ -130,7 +127,7 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     ]
     results: list[tuple[str, str, str]] = []
     for label, msg, validator in sub_tests:
-        results.append(_run_subtest(phone, tenant_id, label, msg, validator))
+        results.append(_run_subtest(phone, tenant_id, label, msg, validator, mode=mode))
 
     passes = sum(1 for _, st, _ in results if st == PASS)
     total = len(results)
