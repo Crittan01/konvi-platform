@@ -70,6 +70,20 @@ class UploadHelperTests(unittest.TestCase):
         for mime in ("'application/pdf'", "'image/jpeg'", "'image/png'", "'image/webp'"):
             self.assertIn(mime, self.ts)
 
+    def test_extension_fallback_present(self):
+        # Rev. 103 hotfix: si browser envía MIME no estándar (vacío,
+        # x-pdf), inferimos por extensión antes de rechazar.
+        self.assertIn('EXTENSION_TO_MIME', self.ts)
+        for ext_key in ('pdf:', 'jpg:', 'jpeg:', 'png:', 'webp:'):
+            self.assertIn(ext_key, self.ts)
+
+    def test_rejection_includes_filename_and_received_mime(self):
+        # Logging diagnóstico: cuando rechazamos por MIME, devolvemos
+        # filename + receivedMime para que server log + UI puedan
+        # explicar el rechazo al operador.
+        self.assertIn('receivedMime', self.ts)
+        self.assertIn('filename: file.name', self.ts)
+
     def test_returns_skipped_for_no_file(self):
         self.assertIn("status: 'skipped'", self.ts)
 
@@ -126,8 +140,13 @@ class ServerActionWireTests(unittest.TestCase):
         self.assertIn('attachment_path', self.page_src)
         self.assertIn('attachment_uploaded_at', self.page_src)
 
-    def test_too_large_throws_human_error(self):
-        self.assertIn('supera 5 MB', self.page_src)
+    def test_upload_failure_does_not_abort(self):
+        # Rev. 103 hotfix: si upload falla (rejected o error), persistimos
+        # marker en consent_evidence en lugar de throw. Romper con throw
+        # rompe el render Next y oculta el problema real.
+        self.assertIn('attachment_skip_reason', self.page_src)
+        self.assertIn('attachment_skip_at', self.page_src)
+        self.assertIn("[F10] Contact creado pero adjunto no se subi", self.page_src)
 
 
 class UIRev103UploadTests(unittest.TestCase):
