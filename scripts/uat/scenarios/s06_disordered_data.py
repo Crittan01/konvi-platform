@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lib.harness import (  # noqa: E402
     PASS, FAIL, SKIP, ScenarioResult, ConversationDriver, default_response_rules,
-    hard_reset, run_one,
+    fetch_audit_events, hard_reset, run_one,
 )
 import e2e_chat  # noqa: E402
 
@@ -56,7 +56,8 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select(
-        "name, email, document_number, address, consent_given"
+        "id, name, email, document_number, address, consent_given, "
+        "consent_source, consent_channel, consent_notice_version"
     ).eq("tenant_id", tenant_id).or_(
         f"phone.eq.{digits},phone.eq.+{digits}"
     ).limit(1).execute()
@@ -90,9 +91,34 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
             f"FSM extrajo solo {4-len(missing)}/4 campos del volcado",
             evidence={**evidence, "extracted": extracted})
 
+    # Rev. 103 — verificación Habeas Data: bot debe haber persistido
+    # consent_source='whatsapp' + audit log event='granted' source='whatsapp'.
+    audit_granted = fetch_audit_events(sb, tenant_id, contact_id=c["id"],
+                                       event="granted", limit=3)
+    habeas_fails: list[str] = []
+    if c.get("consent_source") != "whatsapp":
+        habeas_fails.append(
+            f"consent_source={c.get('consent_source')!r} (esperado 'whatsapp')"
+        )
+    if not audit_granted:
+        habeas_fails.append("audit_log 'granted' NO escrito")
+    elif audit_granted[0].get("source") != "whatsapp":
+        habeas_fails.append(
+            f"audit.source={audit_granted[0].get('source')!r}"
+        )
+
+    if habeas_fails:
+        return ScenarioResult(6, "Datos desordenados (turn-by-turn)", FAIL,
+            f"PII extraído OK pero Habeas Data incompleto: {'; '.join(habeas_fails)}",
+            evidence={**evidence, "extracted": extracted,
+                      "consent_source": c.get("consent_source"),
+                      "audit_granted_count": len(audit_granted)})
+
     return ScenarioResult(6, "Datos desordenados (turn-by-turn)", PASS,
-        f"Adaptativo: {4-len(missing)}/4 campos extraídos de un volcado en {res.turns} turnos",
-        evidence={**evidence, "extracted": extracted})
+        f"Adaptativo: {4-len(missing)}/4 campos + Habeas Data OK en {res.turns} turnos",
+        evidence={**evidence, "extracted": extracted,
+                  "consent_source": c.get("consent_source"),
+                  "audit_granted_count": len(audit_granted)})
 
 
 if __name__ == "__main__":
