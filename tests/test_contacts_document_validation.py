@@ -27,7 +27,8 @@ from dependencies.contact_validators import (  # noqa: E402
 
 class DocumentTypeTests(unittest.TestCase):
     def test_co_types_set(self):
-        self.assertEqual(DOCUMENT_TYPES_CO, frozenset({"CC", "CE", "NIT", "PP", "TI", "OTHER"}))
+        # Rev. 102 — TI removido (Decreto 1377/2013 Art. 7 menores).
+        self.assertEqual(DOCUMENT_TYPES_CO, frozenset({"CC", "CE", "NIT", "PP", "OTHER"}))
 
     def test_normalize_strips_dots_and_spaces(self):
         self.assertEqual(normalize_document_number("1.234.567"), "1234567")
@@ -56,9 +57,10 @@ class DocumentTypeTests(unittest.TestCase):
         self.assertIn("dígitos", err)
 
     def test_validate_cc_rejects_too_short(self):
+        # Rev. 102 — rango estricto: CC 6-10 dígitos (era 6-12).
         err = validate_document("CC", "12345")  # 5 dígitos < 6
         self.assertIsNotNone(err)
-        self.assertIn("entre 6 y 12", err)
+        self.assertIn("entre 6 y 10", err)
 
     def test_validate_nit_accepts_without_dv(self):
         # Sin DV → lenient (Wompi lo acepta).
@@ -96,8 +98,12 @@ class DocumentTypeTests(unittest.TestCase):
             self.assertGreaterEqual(dv, 0)
             self.assertLessEqual(dv, 9)
 
-    def test_validate_ti_accepts(self):
-        self.assertIsNone(validate_document("TI", "10234567890"))
+    def test_validate_ti_rejected_post_rev102(self):
+        # Rev. 102 — TI removido del set válido. Decreto 1377/2013 Art. 7
+        # prohíbe tratamiento de datos de menores sin representante legal.
+        err = validate_document("TI", "10234567890")
+        self.assertIsNotNone(err)
+        self.assertIn("inválido", err.lower())
 
 
 class AddressCompleteTests(unittest.TestCase):

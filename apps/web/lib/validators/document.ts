@@ -1,14 +1,26 @@
 /**
- * Validators de documento de identidad colombiano (rev. 69).
+ * Validators de documento de identidad colombiano (rev. 69, ajustado rev. 102).
  *
  * Espejo del helper Python en
  * services/api/dependencies/contact_validators.py — mismas reglas para
  * que el frontend pueda validar antes de enviar al backend.
  *
  * Tipos aceptados: alineados con Wompi customer_data.legal_id_type para CO.
+ *
+ * **Rev. 102** — TI (Tarjeta de Identidad) removido: corresponde a menores
+ * de edad (7-17 años). Decreto 1377/2013 Art. 7 prohíbe el tratamiento de
+ * datos de menores sin autorización del representante legal — flujo no
+ * soportado por el sistema. Si se requiere, implementar flujo de
+ * representante legal (Sprint dedicado, F8 backlog).
+ *
+ * **Rev. 102** — Rangos ajustados a realidad colombiana (eran laxos):
+ *   CC  6-12 → 6-10 (cédula CO máx. 10 dígitos)
+ *   CE  4-8  → 6-7  (Migración Colombia)
+ *   NIT 9-13 → 9-11 (9 dígitos + DV opcional con guion)
+ *   PP  6-15 → 6-15 (sin cambio: cubre pasaportes extranjeros)
  */
 
-export const DOCUMENT_TYPES_CO = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'] as const
+export const DOCUMENT_TYPES_CO = ['CC', 'CE', 'NIT', 'PP', 'OTHER'] as const
 export type DocumentTypeCO = (typeof DOCUMENT_TYPES_CO)[number]
 
 export const DOCUMENT_TYPE_LABELS: Record<DocumentTypeCO, string> = {
@@ -16,7 +28,6 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentTypeCO, string> = {
   CE: 'Cédula de Extranjería',
   NIT: 'NIT (empresa)',
   PP: 'Pasaporte',
-  TI: 'Tarjeta de Identidad',
   OTHER: 'Otro',
 }
 
@@ -27,11 +38,10 @@ interface LengthRule {
 }
 
 const DOC_LEN_RULES: Record<DocumentTypeCO, LengthRule> = {
-  CC:    { min: 6, max: 12, digitsOnly: true },
-  CE:    { min: 4, max: 8,  digitsOnly: true },
-  NIT:   { min: 9, max: 13, digitsOnly: false }, // admite '-1' del DV
+  CC:    { min: 6, max: 10, digitsOnly: true },
+  CE:    { min: 6, max: 7,  digitsOnly: true },
+  NIT:   { min: 9, max: 11, digitsOnly: false }, // admite '-DV' (1 dígito)
   PP:    { min: 6, max: 15, digitsOnly: false },
-  TI:    { min: 8, max: 11, digitsOnly: true },
   OTHER: { min: 3, max: 30, digitsOnly: false },
 }
 

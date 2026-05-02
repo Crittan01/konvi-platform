@@ -17,7 +17,7 @@ sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api"
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
 
 # Imports module-level (evita issues de class-attribute method-binding).
-from orchestrator import _detect_rectification_intent  # noqa: E402
+from orchestrator import _detect_rectification_intent, _detect_minor_intent  # noqa: E402
 from routers.data_subject_request import _render_export_html  # noqa: E402
 from routers.sic_report import _build_sic_payload, _payload_to_csv  # noqa: E402
 
@@ -315,6 +315,91 @@ class F2DeferDocumentedTests(unittest.TestCase):
         self.assertIn("Wompi", adr)  # checkout dependency
         self.assertIn("aditivos", adr)  # rev. 96 mitigation existente
         self.assertIn("Trigger para reabrir F2", adr)
+
+
+class DetectMinorIntentTests(unittest.TestCase):
+    """Rev. 102 — Detector minoría de edad pre-LLM (Decreto 1377/2013 Art. 7)."""
+
+    def test_explicit_phrases(self):
+        self.assertTrue(_detect_minor_intent("Hola, soy menor de edad"))
+        self.assertTrue(_detect_minor_intent("yo soy menor"))
+        self.assertTrue(_detect_minor_intent("no tengo mayoría de edad"))
+        self.assertTrue(_detect_minor_intent("Soy un niño"))
+        self.assertTrue(_detect_minor_intent("estoy en bachillerato"))
+        self.assertTrue(_detect_minor_intent("Tengo permiso de mi mamá"))
+
+    def test_age_under_18(self):
+        self.assertTrue(_detect_minor_intent("Tengo 14 años"))
+        self.assertTrue(_detect_minor_intent("tengo 17 años"))
+        self.assertTrue(_detect_minor_intent("ya tengo 16 años"))
+        self.assertTrue(_detect_minor_intent("Tengo 5 añitos"))
+        self.assertTrue(_detect_minor_intent("Cumplí 13 años"))
+
+    def test_age_18_or_more_does_not_trigger(self):
+        # 18+ es mayor de edad, NO debe disparar.
+        self.assertFalse(_detect_minor_intent("Tengo 18 años"))
+        self.assertFalse(_detect_minor_intent("Ya cumplí 25 años"))
+        self.assertFalse(_detect_minor_intent("tengo 30 años"))
+
+    def test_negative_no_age_no_phrase(self):
+        self.assertFalse(_detect_minor_intent("Hola, quiero comprar el aceite"))
+        self.assertFalse(_detect_minor_intent("¿Cuánto cuesta?"))
+        self.assertFalse(_detect_minor_intent(""))
+
+    def test_age_not_about_self_does_not_trigger(self):
+        # "16 productos" NO debe disparar el regex (no hay "años").
+        self.assertFalse(_detect_minor_intent("Quiero 16 productos"))
+        self.assertFalse(_detect_minor_intent("La promo dura 7 días"))
+
+    def test_handles_accents(self):
+        self.assertTrue(_detect_minor_intent("SOY MENOR DE EDAD"))
+        self.assertTrue(_detect_minor_intent("Tengo 16 años"))
+
+
+class StricterDocumentRulesTests(unittest.TestCase):
+    """Rev. 102 — rangos estrictos en validators (CC 6-10, CE 6-7, NIT 9-11),
+    TI removido del set."""
+
+    def test_ti_removed_from_accepted_types(self):
+        sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+        from dependencies.contact_validators import DOCUMENT_TYPES_CO  # noqa: E402
+        self.assertNotIn("TI", DOCUMENT_TYPES_CO)
+        self.assertIn("CC", DOCUMENT_TYPES_CO)
+        self.assertIn("CE", DOCUMENT_TYPES_CO)
+        self.assertIn("NIT", DOCUMENT_TYPES_CO)
+        self.assertIn("PP", DOCUMENT_TYPES_CO)
+
+    def test_cc_max_10_digits(self):
+        from dependencies.contact_validators import validate_document  # noqa: E402
+        # 10 dígitos OK, 11 falla.
+        self.assertIsNone(validate_document("CC", "1234567890"))
+        self.assertIsNotNone(validate_document("CC", "12345678901"))
+        # 6 dígitos mínimo OK, 5 falla.
+        self.assertIsNone(validate_document("CC", "123456"))
+        self.assertIsNotNone(validate_document("CC", "12345"))
+
+    def test_ce_6_to_7_digits(self):
+        from dependencies.contact_validators import validate_document  # noqa: E402
+        self.assertIsNone(validate_document("CE", "123456"))
+        self.assertIsNone(validate_document("CE", "1234567"))
+        # 5 falla, 8 falla.
+        self.assertIsNotNone(validate_document("CE", "12345"))
+        self.assertIsNotNone(validate_document("CE", "12345678"))
+
+    def test_nit_max_11_with_dv(self):
+        from dependencies.contact_validators import validate_document  # noqa: E402
+        # 9 dígitos OK (sin DV).
+        self.assertIsNone(validate_document("NIT", "900123456"))
+        # 9 dígitos + -DV = 11 chars OK (asume DV correcto módulo-11).
+        # 12 chars falla.
+        self.assertIsNotNone(validate_document("NIT", "1234567890123"))
+
+    def test_ti_validation_now_rejects(self):
+        from dependencies.contact_validators import validate_document  # noqa: E402
+        # TI ya no es tipo válido — rechaza.
+        result = validate_document("TI", "12345678901")
+        self.assertIsNotNone(result)
+        self.assertIn("inválido", result.lower())
 
 
 if __name__ == "__main__":
