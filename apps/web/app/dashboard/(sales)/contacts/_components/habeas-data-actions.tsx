@@ -20,7 +20,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   ShieldCheck, Download, FileText, Printer, ShieldOff,
-  HelpCircle, Loader2, AlertTriangle,
+  HelpCircle, Loader2, AlertTriangle, CheckCircle2, XCircle,
 } from 'lucide-react'
 
 type SarType = 'export' | 'portability' | 'erase'
@@ -143,6 +143,20 @@ export default function HabeasDataActions({
   const [pendingAction, setPendingAction] = useState<ActionKind | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
 
+  // Rev. 102 — Dialog de resultado (sustituye window.alert).
+  // Solo para Anonimizar (success — confirmación visual irreversible) y
+  // para errores en cualquier acción. Los reads exitosos no requieren
+  // dialog: la descarga del archivo o nueva pestaña ya es feedback.
+  const [resultDialog, setResultDialog] = useState<{
+    kind: 'success' | 'error'
+    title: string
+    message: string
+    detail?: string
+  } | null>(null)
+
+  const showError = (title: string, message: string, detail?: string) =>
+    setResultDialog({ kind: 'error', title, message, detail })
+
   const executeAction = async (kind: ActionKind) => {
     setRunning(kind)
     try {
@@ -152,14 +166,21 @@ export default function HabeasDataActions({
         fd.set('contact_id', contactId)
         const res = await sarPrintableAction(fd)
         if (!res.ok || !res.html) {
-          window.alert(`Falló reporte PDF (${res.status}): ${res.error || 'unknown'}`)
+          showError(
+            'No se pudo generar el reporte PDF',
+            'El servidor reportó un error al componer el reporte.',
+            `Código ${res.status}${res.error ? ' · ' + res.error : ''}`,
+          )
           return
         }
         const blob = new Blob([res.html], { type: 'text/html' })
         const url = URL.createObjectURL(blob)
         const w = window.open(url, '_blank', 'noopener,noreferrer')
         if (!w) {
-          window.alert('El browser bloqueó la nueva pestaña. Habilita popups.')
+          showError(
+            'El navegador bloqueó la nueva pestaña',
+            'Habilita los popups de este sitio y vuelve a intentarlo.',
+          )
         }
         setTimeout(() => URL.revokeObjectURL(url), 60_000)
         return
@@ -174,7 +195,11 @@ export default function HabeasDataActions({
           typeof res.payload === 'object' && res.payload && 'detail' in res.payload
             ? (res.payload as { detail?: string }).detail
             : res.error
-        window.alert(`Acción falló (${res.status}): ${detail || 'unknown'}`)
+        showError(
+          'La acción no se pudo completar',
+          'El servidor rechazó la solicitud. Reintenta en unos segundos; si persiste, contacta soporte.',
+          `Código ${res.status}${detail ? ' · ' + detail : ''}`,
+        )
         return
       }
       if (sarType === 'export' || sarType === 'portability') {
@@ -188,11 +213,16 @@ export default function HabeasDataActions({
         a.click()
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
+        // Reads exitosos no requieren Dialog — la descarga es feedback.
       } else if (sarType === 'erase') {
-        window.alert(
-          'Supresión Art. 15 procesada.\n\n' +
-          'PII anonimizada en DB. El audit log conserva trazabilidad inmutable.'
-        )
+        setResultDialog({
+          kind: 'success',
+          title: 'Datos personales anonimizados',
+          message:
+            'Se borraron los datos personales del titular (nombre, email, documento, dirección y notas). ' +
+            'Quedó registro permanente de la operación para auditoría legal.',
+          detail: contactDisplayName,
+        })
       }
     } finally {
       setRunning(null)
@@ -387,6 +417,48 @@ export default function HabeasDataActions({
         (no se puede borrar — es la prueba de que cumpliste con la solicitud).
         Click en (?) para ver el detalle de cada derecho.
       </p>
+
+      {/* Rev. 102 — Dialog de resultado (sustituye window.alert). */}
+      <Dialog
+        open={resultDialog !== null}
+        onOpenChange={(o) => !o && setResultDialog(null)}
+      >
+        <DialogContent className="max-w-md">
+          {resultDialog && (
+            <>
+              <DialogHeader>
+                <DialogTitle className={`flex items-center gap-2 ${
+                  resultDialog.kind === 'success' ? 'text-emerald-700' : 'text-red-700'
+                }`}>
+                  {resultDialog.kind === 'success'
+                    ? <CheckCircle2 className="h-5 w-5" />
+                    : <XCircle className="h-5 w-5" />}
+                  {resultDialog.title}
+                </DialogTitle>
+                {resultDialog.detail && (
+                  <DialogDescription>{resultDialog.detail}</DialogDescription>
+                )}
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">{resultDialog.message}</p>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setResultDialog(null)}
+                  className={
+                    resultDialog.kind === 'success'
+                      ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                      : ''
+                  }
+                  variant={resultDialog.kind === 'error' ? 'outline' : 'default'}
+                >
+                  Entendido
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
