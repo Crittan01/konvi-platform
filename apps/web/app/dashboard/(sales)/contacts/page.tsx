@@ -175,6 +175,10 @@ export default async function ContactsPage({
     const consentNoticeVersion = ((formData.get('consent_notice_version') as string) || '').trim()
     const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
+    // Rev. 102 — Opción B Habeas Data: campos exclusivos del flujo de
+    // re-edición post-anonimización.
+    const renewedConsentChecked = formData.get('renewed_consent') === 'on'
+    const renewedConsentEvidence = ((formData.get('renewed_consent_evidence') as string) || '').trim()
     const { data: existing } = await sb.from('contacts')
       .select('consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
       .eq('id', formData.get('contact_id') as string)
@@ -188,6 +192,27 @@ export default async function ContactsPage({
       consent_evidence?: Record<string, unknown> | null
       consent_revoked_at?: string | null
     } | null)
+
+    // Rev. 102 — Guard de re-edición post-anonimización (Opción B).
+    // Si el contact estaba anonimizado (revoked_at no null) Y el operador
+    // intenta enviar PII (cualquier campo no vacío) Y no marcó el checkbox
+    // de consent renovado o no proporcionó evidencia → rechazar.
+    const wasAnonymized = !!prev?.consent_revoked_at && prev?.consent_given === false
+    const incomingPii = [
+      'name', 'email', 'document_number', 'addr_street', 'notes',
+    ].some(k => ((formData.get(k) as string) || '').trim().length > 0)
+    if (wasAnonymized && incomingPii) {
+      if (!renewedConsentChecked) {
+        throw new Error(
+          'Este contacto fue anonimizado. Marca "Confirmo consentimiento renovado" antes de editar PII.'
+        )
+      }
+      if (renewedConsentEvidence.length < 10) {
+        throw new Error(
+          'La evidencia del consentimiento renovado debe tener al menos 10 caracteres.'
+        )
+      }
+    }
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
@@ -208,11 +233,11 @@ export default async function ContactsPage({
       complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
       reference:     (formData.get('addr_reference')     as string) || undefined,
     } : null
-    // Rev. 69 — documento de identidad en edit.
+    // Rev. 69 — documento de identidad en edit. Rev. 102: TI removido.
     const editDocTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
-    const editDocType = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'].includes(editDocTypeRaw) ? editDocTypeRaw : null
+    const editDocType = ['CC', 'CE', 'NIT', 'PP', 'OTHER'].includes(editDocTypeRaw) ? editDocTypeRaw : null
     const editDocNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
-    const mergedEvidence = {
+    const mergedEvidence: Record<string, unknown> = {
       ...((prev?.consent_evidence ?? {}) as Record<string, unknown>),
       last_update: {
         source: consentSource || prev?.consent_source || null,
@@ -222,9 +247,33 @@ export default async function ContactsPage({
         at: nowIso,
       },
     }
-    const shouldMarkRevoked = !consentGiven && !!prev?.consent_given
-    const effectiveConsentDate = consentGiven
-      ? (prev?.consent_date ?? nowIso)
+    // Rev. 102 — Opción B Habeas Data: registrar inmutablemente el
+    // consent renovado tras anonimización (append a array para que
+    // si el ciclo se repite, queden todos los renewals históricos).
+    if (wasAnonymized && renewedConsentChecked && renewedConsentEvidence) {
+      const prevRenewals = Array.isArray(mergedEvidence.renewals_after_revocation)
+        ? mergedEvidence.renewals_after_revocation as unknown[]
+        : []
+      mergedEvidence.renewals_after_revocation = [
+        ...prevRenewals,
+        {
+          at: nowIso,
+          actor_email: u?.email ?? null,
+          previous_revoked_at: prev?.consent_revoked_at ?? null,
+          evidence_text: renewedConsentEvidence,
+        },
+      ]
+    }
+    // Rev. 102 — si el operador confirmó renewed_consent + evidencia,
+    // implícitamente el contact está siendo re-activado: forzar
+    // consent_given=true para evitar estado contradictorio (PII registrada
+    // sin consent activo).
+    const effectiveConsentGiven = (wasAnonymized && renewedConsentChecked && renewedConsentEvidence)
+      ? true
+      : consentGiven
+    const shouldMarkRevoked = !effectiveConsentGiven && !!prev?.consent_given
+    const effectiveConsentDate = effectiveConsentGiven
+      ? (wasAnonymized ? nowIso : (prev?.consent_date ?? nowIso))
       : (prev?.consent_date ?? null)
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
@@ -234,16 +283,16 @@ export default async function ContactsPage({
       document_type:   editDocType && editDocNumber ? editDocType : null,
       document_number: editDocType && editDocNumber ? editDocNumber : null,
       address,
-      consent_given: consentGiven,
+      consent_given: effectiveConsentGiven,
       consent_date: effectiveConsentDate,
       consent_source: consentSource || prev?.consent_source || null,
       // Igual que en addContact: persistimos consent_channel para Ley 1581.
-      consent_channel: consentGiven ? 'dashboard_console' : null,
+      consent_channel: effectiveConsentGiven ? 'dashboard_console' : null,
       consent_notice_version: consentNoticeVersion || prev?.consent_notice_version || null,
       consent_evidence: mergedEvidence,
       consent_actor_email: u?.email ?? null,
-      consent_revoked_at: consentGiven ? null : (shouldMarkRevoked ? nowIso : (prev?.consent_revoked_at ?? null)),
-      consent_revoked_reason: consentGiven ? null : (revocationReason || null),
+      consent_revoked_at: effectiveConsentGiven ? null : (shouldMarkRevoked ? nowIso : (prev?.consent_revoked_at ?? null)),
+      consent_revoked_reason: effectiveConsentGiven ? null : (revocationReason || null),
     })
       .eq('id', formData.get('contact_id') as string)
       .eq('tenant_id', m.tenant_id)
