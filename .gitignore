@@ -47,6 +47,14 @@ packages/auth/node_modules/
 scratch/
 scripts/debug/
 
+# ─── Claude Code runtime artifacts ────────────────────────────────────────────
+# Lock file regenerado automáticamente — no debe ir al repo.
+.claude/scheduled_tasks.lock
+
+# ─── UAT logs (transcripts de conversaciones de prueba) ──────────────────────
+# Generados por scripts/uat/scenarios/*.py — útiles localmente, no compartir.
+scripts/uat/logs/
+
 # ─── packages/db/migrations — snapshot legacy (no canónico) ──────────────────
 # Fuente de verdad: supabase/migrations/
 # packages/db/migrations/ es un snapshot histórico divergido
