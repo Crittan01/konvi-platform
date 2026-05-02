@@ -235,6 +235,11 @@ export default async function ContactsPage({
 
     // Rev. 103 (F10) — si canal in_person + file adjunto, sube a Storage
     // y persiste URL en consent_evidence.attachment_url (segundo update).
+    // Importante: si upload falla (MIME no válido, > 5MB, error storage),
+    // NO abortamos. El contact ya está creado; persistimos un marker en
+    // evidence para que el operador sepa que el adjunto falló y pueda
+    // reintentar editando. Romper con throw aquí causa "Error al cargar
+    // el módulo" en Next y oculta el problema real.
     const newId = (inserted as { id?: string } | null)?.id
     if (newId && consentGiven && consentSource === 'in_person') {
       const result = await uploadConsentEvidence(formData, newId, m.tenant_id)
@@ -249,15 +254,23 @@ export default async function ContactsPage({
             attachment_uploaded_at: new Date().toISOString(),
           },
         }).eq('id', newId).eq('tenant_id', m.tenant_id)
-      } else if (result.status === 'rejected') {
-        // No abortamos el contact creado, pero sí informamos: thrown error
-        // se renderiza en la UI sin perder el contact (operador puede
-        // volver a editar y resubir). El contact queda con consent_evidence
-        // sin attachment.
-        throw new Error(
-          result.reason === 'too_large'
-            ? 'El archivo de evidencia supera 5 MB. Contact creado sin adjunto — edítalo y vuelve a subirlo.'
-            : 'El tipo de archivo no es válido (PDF/JPG/PNG/WEBP). Contact creado sin adjunto.'
+      } else if (result.status === 'rejected' || result.status === 'error') {
+        const skipReason = result.status === 'rejected' ? result.reason : 'storage_error'
+        await sb.from('contacts').update({
+          consent_evidence: {
+            ...initialEvidence,
+            attachment_skip_reason: skipReason,
+            attachment_skip_filename: 'filename' in result ? result.filename : null,
+            attachment_skip_received_mime: 'receivedMime' in result ? result.receivedMime : null,
+            attachment_skip_storage_message: result.status === 'error' ? result.message : null,
+            attachment_skip_at: new Date().toISOString(),
+          },
+        }).eq('id', newId).eq('tenant_id', m.tenant_id)
+        console.warn(
+          '[F10] Contact creado pero adjunto no se subió',
+          { contactId: newId, skipReason, filename: 'filename' in result ? result.filename : null,
+            receivedMime: 'receivedMime' in result ? result.receivedMime : null,
+            storageMessage: result.status === 'error' ? result.message : null },
         )
       }
     }
@@ -419,6 +432,9 @@ export default async function ContactsPage({
     // Rev. 103 (F10) — Si canal in_person + archivo adjunto, sube
     // evidencia física al bucket consent-evidence y persiste URL en
     // mergedEvidence.attachment_url. La SAR export incluye el URL.
+    // Si upload falla (MIME no válido, > 5MB, error storage), NO abortamos
+    // el edit: persistimos marker en evidence + log; los demás campos del
+    // form se aplican normalmente.
     const editContactId = (formData.get('contact_id') as string) || ''
     if (editContactId && consentSource === 'in_person') {
       const upload = await uploadConsentEvidence(formData, editContactId, m.tenant_id)
@@ -428,11 +444,19 @@ export default async function ContactsPage({
         mergedEvidence.attachment_mime = upload.mime
         mergedEvidence.attachment_size = upload.size
         mergedEvidence.attachment_uploaded_at = nowIso
-      } else if (upload.status === 'rejected') {
-        throw new Error(
-          upload.reason === 'too_large'
-            ? 'El archivo de evidencia supera 5 MB. No se aplicaron cambios.'
-            : 'El tipo de archivo no es válido (solo PDF/JPG/PNG/WEBP). No se aplicaron cambios.'
+      } else if (upload.status === 'rejected' || upload.status === 'error') {
+        const skipReason = upload.status === 'rejected' ? upload.reason : 'storage_error'
+        mergedEvidence.attachment_skip_reason = skipReason
+        mergedEvidence.attachment_skip_filename = 'filename' in upload ? upload.filename : null
+        mergedEvidence.attachment_skip_received_mime = 'receivedMime' in upload ? upload.receivedMime : null
+        mergedEvidence.attachment_skip_storage_message = upload.status === 'error' ? upload.message : null
+        mergedEvidence.attachment_skip_at = nowIso
+        console.warn(
+          '[F10] Edit contact: adjunto no se subió',
+          { contactId: editContactId, skipReason,
+            filename: 'filename' in upload ? upload.filename : null,
+            receivedMime: 'receivedMime' in upload ? upload.receivedMime : null,
+            storageMessage: upload.status === 'error' ? upload.message : null },
         )
       }
     }
