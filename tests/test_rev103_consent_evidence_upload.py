@@ -177,9 +177,13 @@ class UIRev103UploadTests(unittest.TestCase):
         # accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"
         self.assertIn('accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"', self.manager_src)
 
-    def test_edit_shows_existing_attachment_link(self):
-        self.assertIn('existingAttachmentUrl', self.manager_src)
-        self.assertIn('Ver archivo actual', self.manager_src)
+    def test_edit_shows_existing_attachment_card(self):
+        # Rev. 103 hotfix: el bucket es privado, getPublicUrl() devuelve
+        # 404. Reemplazado el <a href> roto por <ExistingAttachmentCard>
+        # con botón "Ver archivo" que llama getConsentEvidenceSignedUrl.
+        self.assertIn('ExistingAttachmentCard', self.manager_src)
+        self.assertIn('hasAttachment', self.manager_src)
+        self.assertIn('getConsentEvidenceSignedUrl', self.manager_src)
 
 
 if __name__ == '__main__':

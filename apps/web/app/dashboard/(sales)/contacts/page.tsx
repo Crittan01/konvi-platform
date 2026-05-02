@@ -244,10 +244,11 @@ export default async function ContactsPage({
     if (newId && consentGiven && consentSource === 'in_person') {
       const result = await uploadConsentEvidence(formData, newId, m.tenant_id)
       if (result.status === 'uploaded') {
+        // Persistimos `attachment_path` (no `attachment_url`): el bucket
+        // es privado, la UI genera signed URL on-demand.
         await sb.from('contacts').update({
           consent_evidence: {
             ...initialEvidence,
-            attachment_url: result.url,
             attachment_path: result.path,
             attachment_mime: result.mime,
             attachment_size: result.size,
@@ -439,7 +440,10 @@ export default async function ContactsPage({
     if (editContactId && consentSource === 'in_person') {
       const upload = await uploadConsentEvidence(formData, editContactId, m.tenant_id)
       if (upload.status === 'uploaded') {
-        mergedEvidence.attachment_url = upload.url
+        // Persistimos `attachment_path` (no `attachment_url`): el bucket
+        // es privado, la UI genera signed URL on-demand.
+        // Si hay un attachment_url legacy, lo limpiamos.
+        delete mergedEvidence.attachment_url
         mergedEvidence.attachment_path = upload.path
         mergedEvidence.attachment_mime = upload.mime
         mergedEvidence.attachment_size = upload.size
