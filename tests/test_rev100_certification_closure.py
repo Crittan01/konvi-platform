@@ -293,12 +293,14 @@ class OrchestratorCallerErrorLoggingTests(unittest.TestCase):
 
     def test_consent_revoked_caller_distinguishes_false_from_exception(self):
         # Debe haber: ok = await notify_consent_revoked(...) + if not ok: error.
+        # Test robusto a refactors de indent (rev. 103 añadió nivel anidado
+        # para path "no había datos que eliminar").
         self.assertRegex(
             self.code, r"ok\s*=\s*await\s+notify_consent_revoked",
         )
-        self.assertIn(
-            'logger.error(\n                        "[CONSENT] notify_consent_revoked returned False',
+        self.assertRegex(
             self.code,
+            r'logger\.error\(\s*\n\s+"\[CONSENT\]\s+notify_consent_revoked\s+returned\s+False',
         )
 
     def test_sar_received_caller_distinguishes_false_from_exception(self):
