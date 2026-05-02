@@ -38,41 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lib.harness import (  # noqa: E402
     PASS, FAIL, ScenarioResult,
-    fetch_audit_events,
+    fetch_audit_events, seed_known_contact,
     hard_reset, send_inbound, wait_outbound, now_iso, run_one,
 )
 import e2e_chat  # noqa: E402
-
-
-_DUMMY_CONTACT = {
-    "name": "Cristian Garzón Tamayo",
-    "email": "crittan01@gmail.com",
-    "document_type": "CC",
-    "document_number": "1032414179",
-    "address": {
-        "street": "Calle 3 sur 70-84",
-        "city": "Bogotá",
-        "state": "Bogotá D.C.",
-        "country": "CO",
-        "neighborhood": "Olaya",
-        "building_type": "casa",
-    },
-    "consent_given": True,
-    "consent_text_version": "v2026-04",
-    "consent_given_at": now_iso(),
-}
-
-
-def _seed_contact(sb, tenant_id: str, phone: str) -> str | None:
-    """FASE 1 — Insert determinístico de contacto dummy con consent."""
-    digits = phone.lstrip("+")
-    payload = {**_DUMMY_CONTACT, "tenant_id": tenant_id, "phone": phone}
-    res = sb.table("contacts").upsert(
-        payload, on_conflict="tenant_id,phone"
-    ).execute()
-    if not res.data:
-        return None
-    return res.data[0].get("id")
 
 
 def scenario(phone: str, tenant_id: str) -> ScenarioResult:
@@ -82,8 +51,15 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
 
     sb = e2e_chat._supabase()
 
-    # FASE 1 — SETUP DETERMINÍSTICO.
-    contact_id = _seed_contact(sb, tenant_id, phone)
+    # FASE 1 — SETUP DETERMINÍSTICO via helper centralizado de harness.
+    # Rev. 103 — antes había `_seed_contact` privado; ahora reusamos el
+    # helper común para consistencia entre escenarios (s01, s08, s17, etc.).
+    contact_id = seed_known_contact(
+        sb, tenant_id, phone,
+        consent_given=True,
+        name="Cristian Garzón Tamayo",
+        email="crittan01@gmail.com",
+    )
     if not contact_id:
         return ScenarioResult(8, "Revocación Habeas Data", FAIL,
             "No se pudo seedear contact dummy en DB")

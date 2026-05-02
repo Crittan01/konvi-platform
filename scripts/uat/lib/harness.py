@@ -159,6 +159,53 @@ def hash_phone(phone: str) -> str:
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
+def seed_known_contact(
+    sb,
+    tenant_id: str,
+    phone: str,
+    *,
+    consent_given: bool = True,
+    name: str = "Cristian Garzón",
+    email: str = "crittan01@gmail.com",
+    document_type: str = "CC",
+    document_number: str = "1032414179",
+    address: dict | None = None,
+) -> str | None:
+    """Rev. 103 — Seed determinístico de contact "conocido" (con consent + PII).
+
+    Permite que un escenario corra dos sub-tests en serie:
+      sub_test_new_user()     ← hard_reset, sin seed
+      sub_test_known_user()   ← este helper, contact con consent activo
+
+    El bot se comporta distinto en cada caso:
+      - Nuevo: saludo genérico "Hola, soy Sara Camila..."
+      - Conocido: saludo personalizado "Hola, Cristian! Bienvenido de nuevo..."
+
+    Doble verificación es estrategia UAT obligatoria a partir de rev. 103.
+    """
+    digits = phone.lstrip("+")
+    payload = {
+        "tenant_id": tenant_id, "phone": phone,
+        "name": name, "email": email,
+        "document_type": document_type,
+        "document_number": document_number,
+        "address": address or {
+            "street": "Calle 3 sur 70-84", "city": "Bogotá",
+            "state": "Bogotá D.C.", "country": "CO", "neighborhood": "Olaya",
+            "building_type": "casa",
+        },
+        "consent_given": consent_given,
+        "consent_source": "whatsapp" if consent_given else None,
+        "consent_channel": "whatsapp" if consent_given else None,
+        "consent_date": now_iso() if consent_given else None,
+        "consent_evidence": {"created_via": "uat_seed", "captured_at": now_iso()},
+    }
+    res = sb.table("contacts").upsert(payload, on_conflict="tenant_id,phone").execute()
+    if not res.data:
+        return None
+    return res.data[0].get("id")
+
+
 def fetch_audit_events(
     sb,
     tenant_id: str,
@@ -177,7 +224,7 @@ def fetch_audit_events(
     matchear post-anonimización donde contact_id puede ser huérfano.
     """
     q = sb.table("consent_audit_log").select(
-        "event, source, phone_hash, contact_id, actor_email, evidence, occurred_at"
+        "id, event, source, phone_hash, contact_id, actor_email, evidence, occurred_at"
     ).eq("tenant_id", tenant_id)
     if contact_id:
         q = q.eq("contact_id", contact_id)
