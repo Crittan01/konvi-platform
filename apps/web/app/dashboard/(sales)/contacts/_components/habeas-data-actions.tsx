@@ -47,6 +47,9 @@ type Props = {
 
 type ActionKind = 'json' | 'pdf' | 'portability' | 'erase'
 
+// Rev. 102 — copy en lenguaje plano para el operador del tenant.
+// Nada de nombres de tabla, columnas o flags técnicos. Si el operador
+// quiere detalle técnico, lo encontrará en docs/legal/* o ADR-0003.
 const ACTION_META: Record<ActionKind, {
   label: string
   article: string
@@ -60,70 +63,74 @@ const ACTION_META: Record<ActionKind, {
     label: 'Reporte (JSON)',
     article: 'Art. 14 — Derecho de acceso',
     description:
-      'Descarga un archivo JSON con todos los datos del titular: información personal, ' +
-      'órdenes asociadas, histórico de consent, accesos a PII, subprocesadores y marco legal.',
+      'Descarga un archivo con todos los datos del titular: información personal, ' +
+      'pedidos, historial de consentimiento y subprocesadores. Útil para responder ' +
+      'a una solicitud del cliente o de la SIC.',
     icon: Download,
     isDestructive: false,
     consequences: [
-      'NO modifica ningún dato del contacto.',
-      'Se descarga un archivo .json en tu navegador.',
+      'No modifica ningún dato del contacto.',
+      'Se descarga un archivo en tu navegador.',
     ],
     audits: [
-      'consent_audit_log → event=export_request',
-      'pii_access_log → purpose=sar_export (con tu IP + user-agent)',
+      'Queda registro permanente de que pediste este reporte (con la fecha y tu usuario).',
+      'Se anota qué campos se incluyeron y desde qué computador se solicitó.',
     ],
   },
   pdf: {
     label: 'Reporte (PDF)',
     article: 'Art. 14 — Derecho de acceso (formato imprimible)',
     description:
-      'Abre el mismo reporte en una nueva pestaña con formato HTML imprimible. ' +
-      'Tú haces Cmd/Ctrl+P → "Guardar como PDF" para obtener un PDF legible.',
+      'Abre el mismo reporte en una nueva pestaña, listo para imprimir. ' +
+      'Útil cuando necesitas un PDF firmable o presentable a la SIC.',
     icon: Printer,
     isDestructive: false,
     consequences: [
-      'NO modifica ningún dato del contacto.',
-      'Abre nueva pestaña con el reporte; tú haces Cmd+P.',
+      'No modifica ningún dato del contacto.',
+      'Abre nueva pestaña; tú haces Cmd/Ctrl + P → "Guardar como PDF".',
     ],
     audits: [
-      'consent_audit_log → event=export_request (format=printable_html)',
-      'pii_access_log → purpose=sar_export_printable',
+      'Queda registro permanente de que generaste este PDF (con la fecha y tu usuario).',
+      'Se anota desde qué computador se solicitó.',
     ],
   },
   portability: {
     label: 'Portabilidad',
     article: 'Art. 19 — Derecho de portabilidad',
     description:
-      'Descarga un JSON con formato estándar para que el titular pueda llevar sus datos a otra ' +
-      'plataforma. El contenido es idéntico al Reporte JSON; el motivo legal registrado en audit es distinto.',
+      'Genera el mismo reporte que el JSON, pero rotulado legalmente como ' +
+      '"portabilidad" — para cuando el cliente quiere migrar sus datos a otra ' +
+      'plataforma. Para la SIC el motivo legal registrado es distinto al acceso.',
     icon: FileText,
     isDestructive: false,
     consequences: [
-      'NO modifica ningún dato del contacto.',
-      'Se descarga un archivo .json en tu navegador.',
+      'No modifica ningún dato del contacto.',
+      'Se descarga un archivo en tu navegador.',
     ],
     audits: [
-      'consent_audit_log → event=portability',
-      'pii_access_log → purpose=sar_portability',
+      'Queda registro permanente de que el cliente solicitó portabilidad.',
+      'Sirve como prueba ante la SIC si el cliente luego reclama.',
     ],
   },
   erase: {
     label: 'Anonimizar',
     article: 'Art. 15 — Derecho de supresión',
     description:
-      'Anonimiza la PII del titular: nullifica nombre, email, documento, dirección y notas. ' +
-      'Conserva el teléfono (canal WhatsApp) y deja registro inmutable en audit log.',
+      'Borra los datos personales del titular (nombre, email, documento, dirección y notas). ' +
+      'Conserva solo el teléfono porque es el canal de WhatsApp. Esta acción NO se puede deshacer.',
     icon: ShieldOff,
     isDestructive: true,
     consequences: [
-      'IRREVERSIBLE: nullifica name, email, document_type, document_number, address, notes.',
-      'Conserva phone (canal WhatsApp).',
-      'Marca consent_given=false, consent_revoked_at=NOW().',
-      'Si el cliente vuelve, hay que recapturar consentimiento + datos.',
+      'Esta acción es IRREVERSIBLE — los datos personales se borran del sistema.',
+      'Se borran: nombre, email, documento de identidad, dirección y notas.',
+      'Se conserva el teléfono (necesario para identificar la conversación de WhatsApp).',
+      'El consentimiento queda marcado como revocado con fecha de hoy.',
+      'Si el cliente vuelve a comprar, deberás pedirle de nuevo sus datos y consentimiento.',
     ],
     audits: [
-      'consent_audit_log → event=revoked (append-only, NO se puede borrar)',
-      'Notificación email al tenant (si RESEND_API_KEY configurado)',
+      'Queda registro permanente de la supresión (con la fecha y tu usuario).',
+      'Este registro NO se puede borrar — es la prueba de que cumpliste la solicitud.',
+      'Si el tenant tiene email configurado, se le notifica automáticamente.',
     ],
   },
 }
@@ -221,15 +228,17 @@ export default function HabeasDataActions({
               <HelpCircle className="h-4 w-4" />
             </button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>Acciones Habeas Data — guía rápida</DialogTitle>
               <DialogDescription>
-                Ley 1581/2012 Colombia. El tenant es Responsable del tratamiento ante la SIC.
-                Cada acción queda registrada inmutablemente.
+                Ley 1581 de 2012 Colombia. El tenant (tu negocio) es responsable
+                ante la Superintendencia de Industria y Comercio (SIC). Cada
+                acción queda registrada de forma permanente para que puedas
+                demostrar cumplimiento.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 text-sm overflow-y-auto pr-1 flex-1">
               {(Object.keys(ACTION_META) as ActionKind[]).map(kind => {
                 const m = ACTION_META[kind]
                 const Icon = m.icon
@@ -258,8 +267,8 @@ export default function HabeasDataActions({
                         </ul>
                       </div>
                       <div>
-                        <p className="font-semibold text-foreground mb-1">Audit registrado:</p>
-                        <ul className="list-disc list-inside space-y-0.5 text-muted-foreground font-mono text-[10px]">
+                        <p className="font-semibold text-foreground mb-1">Lo que queda guardado:</p>
+                        <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
                           {m.audits.map(a => <li key={a}>{a}</li>)}
                         </ul>
                       </div>
@@ -268,7 +277,7 @@ export default function HabeasDataActions({
                 )
               })}
             </div>
-            <DialogFooter>
+            <DialogFooter className="mt-2 pt-2 border-t border-border">
               <Button onClick={() => setInfoOpen(false)} size="sm">Cerrar</Button>
             </DialogFooter>
           </DialogContent>
@@ -332,8 +341,8 @@ export default function HabeasDataActions({
                     </ul>
                   </div>
                   <div className="rounded-md border border-border bg-muted/30 p-2.5 text-xs">
-                    <p className="font-semibold mb-1">Quedará registrado en audit:</p>
-                    <ul className="list-disc list-inside space-y-0.5 text-muted-foreground font-mono text-[10px]">
+                    <p className="font-semibold mb-1">Lo que queda guardado:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
                       {m.audits.map(a => <li key={a}>{a}</li>)}
                     </ul>
                   </div>
@@ -372,10 +381,11 @@ export default function HabeasDataActions({
         </DialogContent>
       </Dialog>
 
-      {/* Disclaimer en una sola línea (lo grueso ahora vive en Dialogs) */}
+      {/* Disclaimer en lenguaje plano */}
       <p className="text-[10px] text-muted-foreground/70">
-        Cada acción queda registrada en <code className="text-[10px]">consent_audit_log</code> (Art. 9 — append-only).
-        Click en (?) para ver detalle de cada derecho.
+        Cada acción queda registrada de forma permanente para auditoría
+        (no se puede borrar — es la prueba de que cumpliste con la solicitud).
+        Click en (?) para ver el detalle de cada derecho.
       </p>
     </div>
   )
