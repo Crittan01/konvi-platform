@@ -37,38 +37,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lib.harness import (  # noqa: E402
     PASS, FAIL, SKIP, ScenarioResult, ConversationDriver, default_response_rules,
-    fetch_audit_events, hard_reset, run_one,
+    fetch_audit_events, seed_known_contact, hard_reset, run_one,
 )
 import e2e_chat  # noqa: E402
-
-
-_UNCONSENTED_PII = {
-    "name": "Cristian Garzón",
-    "email": "crittan01@gmail.com",
-    "document_type": "CC",
-    "document_number": "1032414179",
-    "address": {
-        "street": "Calle 3 sur 70-84",
-        "city": "Bogotá",
-        "state": "Bogotá D.C.",
-        "country": "CO",
-    },
-    "consent_given": False,  # ← clave: rev. 103 permite esto
-    "consent_source": None,
-    "consent_date": None,
-}
-
-
-def _seed_unconsented_contact(sb, tenant_id: str, phone: str) -> str | None:
-    """Operador creó contact con PII pero sin marcar consent (rev. 103)."""
-    digits = phone.lstrip("+")
-    payload = {**_UNCONSENTED_PII, "tenant_id": tenant_id, "phone": phone}
-    res = sb.table("contacts").upsert(
-        payload, on_conflict="tenant_id,phone"
-    ).execute()
-    if not res.data:
-        return None
-    return res.data[0].get("id")
 
 
 def scenario(phone: str, tenant_id: str) -> ScenarioResult:
@@ -77,8 +48,14 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
 
     sb = e2e_chat._supabase()
 
-    # FASE 1 — SEED: contact pre-existente sin consent.
-    contact_id = _seed_unconsented_contact(sb, tenant_id, phone)
+    # FASE 1 — SEED via helper centralizado: contact pre-existente con
+    # PII pero `consent_given=false` (caso normal SaaS B2B post-rev. 103
+    # cuando el operador llena el form Add sin marcar el check).
+    contact_id = seed_known_contact(
+        sb, tenant_id, phone,
+        consent_given=False,
+        name="Cristian Garzón",
+    )
     if not contact_id:
         return ScenarioResult(17, "Consent gating unconsented contact", FAIL,
             "No se pudo seedear contact unconsented")
