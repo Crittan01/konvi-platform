@@ -261,7 +261,13 @@ export default async function ContactsPage({
     const consentSource = sourceRaw
     // Rev. 102 — versión auto-estampada con la constante vigente.
     const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
-    const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
+    // Rev. 102 — `consent_evidence_note` puede venir del bloque normal de
+    // consent O del bloque renewed_consent (post-anonim). Tomamos el que
+    // venga primero no vacío. Esto evita duplicar el mismo campo en el
+    // form cuando awaitingRenewal=true.
+    const renewedConsentEvidenceRaw = ((formData.get('renewed_consent_evidence') as string) || '').trim()
+    const consentEvidenceNoteRaw = ((formData.get('consent_evidence_note') as string) || '').trim()
+    const consentEvidenceNote = consentEvidenceNoteRaw || renewedConsentEvidenceRaw
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     // Rev. 102 — canal "other" exige Evidencia ≥ 20 chars.
     if (consentGiven && consentSource === 'other' && consentEvidenceNote.length < 20) {
