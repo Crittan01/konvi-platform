@@ -1,10 +1,14 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import AddressSelector from '@/components/address-selector'
 import { validateColombianDocument } from '@/lib/validators/document'
 import { validateAddress, type StructuredAddress, type BuildingType } from '@/lib/validators/address'
@@ -151,6 +155,15 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id)
 
+  // Rev. 102 — feedback visual de éxito tras Guardar (no usamos modal
+  // para no agregar fricción a la acción explícita del operador).
+  // Banner verde efímero (3s) que confirma que la operación se ejecutó.
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const showSuccess = (msg: string) => {
+    setSuccessMessage(msg)
+    setTimeout(() => setSuccessMessage(null), 3500)
+  }
+
   const handleAdd = (fd: FormData) => {
     const error = validateFormData(fd)
     if (error) {
@@ -159,11 +172,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     }
     startTransition(async () => {
       await addAction(fd)
-      // Reset form post-save. addAction lanza si la validación servidor falla
-      // (StartTransition propaga); si llegamos aquí fue ok.
       addFormRef.current?.reset()
-      // Forzar remount del AddressSelector para limpiar su state interno.
       setAddressResetKey(k => k + 1)
+      showSuccess('Contacto guardado correctamente.')
     })
   }
 
@@ -175,20 +186,29 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     }
     startTransition(async () => {
       await editAction(fd)
+      showSuccess('Cambios guardados correctamente.')
     })
   }
 
-  const handleDelete = (fd: FormData) => {
-    if (!confirm('¿Eliminar este contacto? Esta acción no se puede deshacer.')) return
+  // Rev. 102 — Eliminar ahora usa Dialog shadcn/ui (no `confirm()` nativo).
+  // Coherente con el patrón de Anonimizar; warning visual destructivo.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const pendingDeleteContact = useMemo(
+    () => initialContacts.find(c => c.id === pendingDeleteId) ?? null,
+    [initialContacts, pendingDeleteId],
+  )
+  const handleDeleteById = (contactId: string) => {
+    setPendingDeleteId(contactId)
+  }
+  const confirmDelete = () => {
+    if (!pendingDeleteId) return
+    const fd = new FormData()
+    fd.set('contact_id', pendingDeleteId)
+    setPendingDeleteId(null)
     startTransition(async () => {
       await deleteAction(fd)
+      showSuccess('Contacto eliminado.')
     })
-  }
-
-  const handleDeleteById = (contactId: string) => {
-    const fd = new FormData()
-    fd.set('contact_id', contactId)
-    handleDelete(fd)
   }
 
   // Rev. 102 — handlers SAR/printable movidos a <HabeasDataActions />
@@ -208,6 +228,71 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
 
   return (
     <div className="space-y-4">
+      {/* Rev. 102 — Banner efímero de éxito */}
+      {successMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 right-4 z-50 rounded-lg border border-emerald-700/50 bg-emerald-700/10 px-4 py-2.5 text-sm text-emerald-700 flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-top-2"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {successMessage}
+        </div>
+      )}
+
+      {/* Rev. 102 — Dialog confirmación Eliminar (sustituye confirm() nativo) */}
+      <Dialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(o) => !o && setPendingDeleteId(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
+              Eliminar contacto
+            </DialogTitle>
+            <DialogDescription>Esta acción es destructiva y no se puede deshacer.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Vas a eliminar el contacto{' '}
+              <strong className="text-foreground">
+                {pendingDeleteContact?.name || 'sin nombre'}{' '}
+                ({pendingDeleteContact ? formatPhone(pendingDeleteContact.phone) : ''})
+              </strong>.
+            </p>
+            <div className="rounded-md border border-red-700/40 bg-red-700/5 p-2.5 text-xs text-red-700">
+              <p className="font-semibold mb-1">Diferencia con &quot;Anonimizar&quot;:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li><strong>Eliminar</strong>: borra el contacto completo de la base. No queda registro Habeas Data.</li>
+                <li><strong>Anonimizar</strong>: borra solo PII pero conserva el registro inmutable para auditoría legal.</li>
+              </ul>
+              <p className="mt-2">
+                Si el motivo es una solicitud Habeas Data del titular, usa <strong>Anonimizar</strong> en lugar de Eliminar.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPendingDeleteId(null)}
+              size="sm"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={confirmDelete}
+              size="sm"
+              className="bg-red-700 hover:bg-red-800 text-white"
+            >
+              Sí, eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Búsqueda y Filtros */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
