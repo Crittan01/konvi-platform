@@ -634,10 +634,13 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                               <ShieldCheck className="h-3 w-3" /> Consent.{' '}
                               {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-CO')}</span>}
                             </span>
+                          ) : c.consent_revoked_at ? (
+                            <span className="flex items-center gap-1 text-[11px] text-amber-700">
+                              <ShieldOff className="h-3 w-3" /> Revocado
+                            </span>
                           ) : (
                             <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                              <ShieldOff className="h-3 w-3" />
-                              {c.consent_revoked_at ? 'Revocado' : 'Sin consent.'}
+                              <ShieldOff className="h-3 w-3" /> Sin consent.
                             </span>
                           )}
                         </div>
