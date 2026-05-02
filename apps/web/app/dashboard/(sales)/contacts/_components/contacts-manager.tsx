@@ -68,12 +68,24 @@ type Props = {
 
 const ITEMS_PER_PAGE = 30
 
-// Mismo formato que Inbox: +57 312 583 5649
+// Mismo formato que Inbox: +57 312 583 5649. Rev. 102: detección
+// de country code. Para CO formato bonito; otros países muestra +N+digits.
 const formatPhone = (raw: string): string => {
   const digits = (raw || '').replace(/\D/g, '')
+  if (!digits) return raw || ''
+  // Colombia: 12 dígitos totales (57 + 10).
   if (digits.startsWith('57') && digits.length === 12)
     return `+57 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`
-  return digits ? `+${digits}` : (raw || '')
+  // Otros países comunes: separar prefijo conocido del resto.
+  // Detectar prefijo iterando sobre la lista (de más largo a más corto
+  // para evitar match prematuro de +1 cuando es +1 vs +193).
+  const prefixes = ['593', '52', '54', '55', '56', '51', '57', '58', '34', '1']
+  for (const p of prefixes) {
+    if (digits.startsWith(p) && digits.length >= p.length + 7) {
+      return `+${p} ${digits.slice(p.length)}`
+    }
+  }
+  return `+${digits}`
 }
 
 export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
@@ -172,6 +184,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   //     (mutuamente excluyente, antes ambos siempre visibles confundía)
   const [addConsentChecked, setAddConsentChecked] = useState(false)
   const [addConsentSource, setAddConsentSource] = useState('')
+  // Rev. 102 — country code para Add. Default Colombia, lista corta
+  // priorizando América Latina + USA + España.
+  const [addPhoneCountry, setAddPhoneCountry] = useState('57')
   const [editConsentChecked, setEditConsentChecked] = useState<Record<string, boolean>>({})
   const [editConsentSource, setEditConsentSource] = useState<Record<string, string>>({})
   const toggleEditConsent = (id: string, defaultValue: boolean) =>
@@ -185,6 +200,23 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     editConsentSource[id] === undefined ? defaultValue : editConsentSource[id]
   const setEditConsentSourceFor = (id: string, value: string) =>
     setEditConsentSource(prev => ({ ...prev, [id]: value }))
+
+  // Rev. 102 — Lista de países soportados para el phone (E.164).
+  // Default Colombia. Otros países disponibles si llega extranjero.
+  // Sincronizado con SUPPORTED_COUNTRY_CODES en page.tsx server action.
+  const PHONE_COUNTRIES: Array<{ code: string; flag: string; label: string; placeholderDigits: string }> = [
+    { code: '57',  flag: '🇨🇴', label: 'Colombia',  placeholderDigits: '3001234567' },
+    { code: '58',  flag: '🇻🇪', label: 'Venezuela', placeholderDigits: '4141234567' },
+    { code: '593', flag: '🇪🇨', label: 'Ecuador',   placeholderDigits: '991234567' },
+    { code: '51',  flag: '🇵🇪', label: 'Perú',      placeholderDigits: '912345678' },
+    { code: '52',  flag: '🇲🇽', label: 'México',    placeholderDigits: '5512345678' },
+    { code: '1',   flag: '🇺🇸', label: 'USA/CA',    placeholderDigits: '5551234567' },
+    { code: '34',  flag: '🇪🇸', label: 'España',    placeholderDigits: '612345678' },
+    { code: '54',  flag: '🇦🇷', label: 'Argentina', placeholderDigits: '91123456789' },
+    { code: '56',  flag: '🇨🇱', label: 'Chile',     placeholderDigits: '912345678' },
+    { code: '55',  flag: '🇧🇷', label: 'Brasil',    placeholderDigits: '11912345678' },
+  ]
+  const phoneCountryMeta = PHONE_COUNTRIES.find(c => c.code === addPhoneCountry) ?? PHONE_COUNTRIES[0]
 
   // Rev. 102 — Help text contextual por canal. Guía al operador sobre
   // qué evidencia debe registrar/archivar para audit ante SIC.
@@ -246,6 +278,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
       setAddressResetKey(k => k + 1)
       setAddConsentChecked(false)
       setAddConsentSource('')
+      setAddPhoneCountry('57')
       router.refresh()
       showSuccess('Contacto guardado correctamente.')
     })
@@ -413,18 +446,34 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                 <div className="space-y-1">
                   <Label className="text-xs">Teléfono <span className="text-destructive">*</span></Label>
                   <div className="flex">
-                    <span className="inline-flex items-center px-2.5 h-9 border border-r-0 border-input rounded-l-md text-xs text-muted-foreground bg-muted select-none shrink-0">+57</span>
+                    <select
+                      name="phone_country"
+                      value={addPhoneCountry}
+                      onChange={e => setAddPhoneCountry(e.target.value)}
+                      title="Código de país"
+                      className="inline-flex items-center px-2 h-9 border border-r-0 border-input rounded-l-md text-xs bg-muted shrink-0 focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {PHONE_COUNTRIES.map(c => (
+                        <option key={c.code} value={c.code}>
+                          {c.flag} +{c.code} {c.label}
+                        </option>
+                      ))}
+                    </select>
                     <Input
                       name="phone"
                       type="tel"
                       inputMode="numeric"
-                      maxLength={10}
-                      placeholder="3001234567"
+                      maxLength={14}
+                      placeholder={phoneCountryMeta.placeholderDigits}
                       className="rounded-l-none"
                       required
-                      onInput={e => { const el = e.currentTarget; el.value = el.value.replace(/\D/g, '').slice(0, 10) }}
+                      onInput={e => { const el = e.currentTarget; el.value = el.value.replace(/\D/g, '').slice(0, 14) }}
                     />
                   </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Default Colombia. Cambia el código si el cliente es extranjero.
+                    Mín. 7 / máx. 14 dígitos.
+                  </p>
                 </div>
                 {/* Rev. 102 — Banner Habeas Data si check OFF: explica
                     por qué los campos PII están bloqueados (Ley 1581 Art. 9). */}
@@ -779,25 +828,68 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           )}
                         </div>
                         {/* Rev. 102 — Bloque Habeas Data reorganizado:
-                            check primero + condicionales evidencia/razón */}
+                            check con semántica clara según estado del contact */}
                         <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
-                          <label className="flex items-start gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              name="consent_given"
-                              checked={consentChecked}
-                              onChange={() => toggleEditConsent(c.id, c.consent_given)}
-                              className="h-3.5 w-3.5 mt-0.5 rounded"
-                            />
-                            <span className="text-xs text-foreground leading-snug">
-                              <strong>El titular autoriza el tratamiento de sus datos</strong> (Ley 1581/2012).
-                              {!consentChecked && (
-                                <span className="block text-amber-700 mt-0.5 text-[11px]">
-                                  Sin este check los campos personales quedan bloqueados.
+                          {(() => {
+                            // Estado actual del consent del contact:
+                            //   "active"   → consent_given=true (read-only; revocar via Anonimizar)
+                            //   "revoked"  → consent_given=false + consent_revoked_at (flujo renewed_consent)
+                            //   "no_consent" → contact sin consent y sin revocación (legacy/raro,
+                            //                  permite activar)
+                            const consentState =
+                              c.consent_given ? 'active'
+                              : c.consent_revoked_at ? 'revoked'
+                              : 'no_consent'
+
+                            if (consentState === 'active') {
+                              // Read-only: para revocar usar el botón Anonimizar.
+                              return (
+                                <>
+                                  <input type="hidden" name="consent_given" value="on" />
+                                  <div className="flex items-start gap-2">
+                                    <ShieldCheck className="h-4 w-4 text-emerald-700 shrink-0 mt-0.5" />
+                                    <div className="text-xs text-foreground leading-snug">
+                                      <strong>Consentimiento activo</strong> (Ley 1581/2012)
+                                      {c.consent_date && (
+                                        <span className="text-muted-foreground">
+                                          {' '}desde {new Date(c.consent_date).toLocaleDateString('es-CO')}
+                                        </span>
+                                      )}.
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        Para revocar el consentimiento usa el botón
+                                        <strong className="text-amber-700"> Anonimizar </strong>
+                                        en la sección Habeas Data abajo. Esa acción borra la PII
+                                        + deja audit inmutable + notifica al tenant. Desmarcar
+                                        este check NO es la vía correcta de revocación legal.
+                                      </p>
+                                    </div>
+                                  </div>
+                                </>
+                              )
+                            }
+
+                            // consentState === 'revoked' o 'no_consent':
+                            // permite el checkbox interactivo
+                            return (
+                              <label className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  name="consent_given"
+                                  checked={consentChecked}
+                                  onChange={() => toggleEditConsent(c.id, c.consent_given)}
+                                  className="h-3.5 w-3.5 mt-0.5 rounded"
+                                />
+                                <span className="text-xs text-foreground leading-snug">
+                                  <strong>El titular autoriza el tratamiento de sus datos</strong> (Ley 1581/2012).
+                                  {!consentChecked && (
+                                    <span className="block text-amber-700 mt-0.5 text-[11px]">
+                                      Sin este check los campos personales quedan bloqueados.
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </span>
-                          </label>
+                              </label>
+                            )
+                          })()}
 
                           {consentChecked && (() => {
                             const currentSource = getEditConsentSource(c.id, c.consent_source ?? '')

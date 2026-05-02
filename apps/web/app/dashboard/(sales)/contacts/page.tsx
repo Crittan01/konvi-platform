@@ -36,6 +36,28 @@ const CONSENT_SOURCES = new Set([
 // política cambia, bumpear esta constante + el archivo legal.
 const CURRENT_PRIVACY_NOTICE_VERSION = 'v2026-05-01'
 
+// Rev. 102 — Country codes soportados para el phone del titular.
+// Default Colombia (+57). Otros países disponibles por si llega un
+// extranjero (CE/PP). El bot WhatsApp está optimizado para CO; en
+// otros países el contact se registra correctamente pero el flujo
+// del bot puede ser limitado hasta que se internacionalice.
+//
+// E.164 spec: total digits including country code is 8-15. Prefijo
+// va sin el +. Validamos en server: digits totales (sin prefijo) entre
+// 7 y 14 dependiendo del país.
+const SUPPORTED_COUNTRY_CODES = new Set([
+  '57',  // Colombia (default)
+  '58',  // Venezuela
+  '593', // Ecuador
+  '51',  // Perú
+  '52',  // México
+  '1',   // USA / Canadá
+  '34',  // España
+  '54',  // Argentina
+  '56',  // Chile
+  '55',  // Brasil
+])
+
 const normalizeDaneCode = (raw?: string | null) => {
   const digits = String(raw ?? '').replace(/\D/g, '')
   if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
@@ -176,16 +198,21 @@ export default async function ContactsPage({
     const docTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
     const docType = ['CC', 'CE', 'NIT', 'PP', 'TI', 'OTHER'].includes(docTypeRaw) ? docTypeRaw : null
     const docNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
-    const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 10)
-    if (digits.length !== 10) {
-      // Antes: `return` silencioso. Ahora levantamos error visible para que
-      // el operador entienda por qué no se persistió. El cliente del form
-      // ya valida con HTML5 + zod-mirror; este es el último guardrail.
-      throw new Error('Teléfono inválido. Debe tener 10 dígitos en Colombia.')
+    // Rev. 102 — phone con country code seleccionable.
+    const phoneCountryRaw = ((formData.get('phone_country') as string) || '57').replace(/\D/g, '')
+    const phoneCountry = SUPPORTED_COUNTRY_CODES.has(phoneCountryRaw) ? phoneCountryRaw : '57'
+    const digits = ((formData.get('phone') as string) ?? '').replace(/\D/g, '').slice(0, 14)
+    // E.164: phone total (country + número) entre 8 y 15 dígitos.
+    // Validación laxa por país: número (sin country) entre 7 y 14.
+    if (digits.length < 7 || digits.length > 14) {
+      throw new Error(
+        `Teléfono inválido. Debe tener entre 7 y 14 dígitos (sin contar el código de país +${phoneCountry}).`
+      )
     }
+    const phoneE164 = `+${phoneCountry}${digits}`
     await sb.from('contacts').insert({
       tenant_id:     m.tenant_id,
-      phone:         `+57${digits}`,
+      phone:         phoneE164,
       name:          (formData.get('name') as string) || null,
       email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
       notes:         (formData.get('notes') as string) || null,
@@ -261,6 +288,7 @@ export default async function ContactsPage({
         '(Ley 1581/2012 Art. 9). Marca el check de consentimiento o vacía los campos personales.'
       )
     }
+
     const { data: existing } = await sb.from('contacts')
       .select('consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
       .eq('id', formData.get('contact_id') as string)
@@ -274,6 +302,21 @@ export default async function ContactsPage({
       consent_evidence?: Record<string, unknown> | null
       consent_revoked_at?: string | null
     } | null)
+
+    // Rev. 102 — Guardrail server-side: bloquear desmarcar el check de
+    // consent en Edit cuando el contact tenía consent_given=true.
+    // La revocación debe ir por el flujo formal (botón Anonimizar) que
+    // garantiza nullificación de PII + audit inmutable + notif tenant.
+    // Si el operador (o un cliente API) intenta hacer "soft revoke"
+    // desmarcando el check + guardar con PII llena → rechazar.
+    if (prev?.consent_given === true && !consentGiven && !renewedConsentChecked) {
+      throw new Error(
+        'No puedes revocar el consentimiento desmarcando este check. ' +
+        'Para revocar usa el botón "Anonimizar" en la sección Habeas Data — ' +
+        'esa acción borra la PII, deja audit inmutable y notifica al tenant ' +
+        'conforme Ley 1581/2012 Art. 15.'
+      )
+    }
 
     // Rev. 102 — Guard de re-edición post-anonimización (Opción B).
     // Si el contact estaba anonimizado (revoked_at no null) Y el operador
