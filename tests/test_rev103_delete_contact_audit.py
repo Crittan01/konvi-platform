@@ -77,6 +77,22 @@ class DeleteContactServerActionTests(unittest.TestCase):
             self.page_src,
         )
 
+    def test_uses_admin_client_for_audit_insert(self):
+        # consent_audit_log RLS solo permite INSERT a service_role.
+        # El cliente user-auth (cookies) silenciosamente falla.
+        # deleteContact debe usar createAdminClient() para el audit.
+        self.assertIn(
+            "import { createAdminClient } from '@/utils/supabase/admin'",
+            self.page_src,
+        )
+        self.assertIn('createAdminClient()', self.page_src)
+        self.assertIn("admin.from('consent_audit_log')", self.page_src)
+
+    def test_aborts_delete_if_audit_fails(self):
+        # Audit log es legal-required; si falla, NO procedemos al delete.
+        self.assertIn('auditResult.error', self.page_src)
+        self.assertIn('NO fue eliminado', self.page_src)
+
     def test_reads_phone_snapshot_before_delete(self):
         # Antes del DELETE, lee el phone para hashearlo.
         # Patrón: select('phone') → eq('id', contactId) → eq('tenant_id') → single()

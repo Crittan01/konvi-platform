@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { ShieldCheck, Users } from 'lucide-react'
 import AiInsightPanel from '@/components/ai-insight-panel'
@@ -512,6 +513,12 @@ export default async function ContactsPage({
     // Rev. 103 (SaaS B2B) — audit ANTES del DELETE físico. El audit log
     // es append-only e inmutable; la fila persiste con phone hasheado
     // aunque el contact_id quede huérfano. Trazabilidad ante SIC.
+    //
+    // RLS de consent_audit_log: GRANT INSERT TO service_role solamente.
+    // El cliente user-auth NO puede escribir; el insert silenciosamente
+    // devuelve { error } sin throw. Por eso usamos createAdminClient()
+    // SOLO para el audit insert. El delete del contact sigue usando el
+    // cliente user-auth (RLS contacts permite owner/manager del tenant).
     const { data: snapshot } = await sb.from('contacts')
       .select('phone')
       .eq('id', contactId)
@@ -519,7 +526,8 @@ export default async function ContactsPage({
       .single()
     if (!snapshot) return
 
-    await sb.from('consent_audit_log').insert({
+    const admin = createAdminClient()
+    const auditResult = await admin.from('consent_audit_log').insert({
       tenant_id: m.tenant_id,
       contact_id: contactId,
       phone_hash: hashPhone((snapshot as { phone?: string | null }).phone),
@@ -532,6 +540,14 @@ export default async function ContactsPage({
         deleted_by: u?.email ?? null,
       },
     })
+    if (auditResult.error) {
+      // Audit log es legal-required; no procedemos al delete si falla.
+      console.error('[deleteContact] audit log insert falló', auditResult.error)
+      throw new Error(
+        'No se pudo registrar el audit log del eliminado. El contacto NO fue eliminado. ' +
+        `(detalle: ${auditResult.error.message})`
+      )
+    }
 
     await sb.from('contacts')
       .delete()
