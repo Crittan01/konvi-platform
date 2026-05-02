@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -57,6 +58,7 @@ type SarResult = {
 type Props = {
   initialContacts: Contact[]
   canWrite: boolean
+  currentRole?: string
   addAction:    (fd: FormData) => Promise<void>
   editAction:   (fd: FormData) => Promise<void>
   deleteAction: (fd: FormData) => Promise<void>
@@ -74,7 +76,7 @@ const formatPhone = (raw: string): string => {
   return digits ? `+${digits}` : (raw || '')
 }
 
-export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, currentRole: _currentRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -155,6 +157,8 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id)
 
+  const router = useRouter()
+
   // Rev. 102 — feedback visual de éxito tras Guardar (no usamos modal
   // para no agregar fricción a la acción explícita del operador).
   // Banner verde efímero (3s) que confirma que la operación se ejecutó.
@@ -174,6 +178,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
       await addAction(fd)
       addFormRef.current?.reset()
       setAddressResetKey(k => k + 1)
+      router.refresh()
       showSuccess('Contacto guardado correctamente.')
     })
   }
@@ -186,6 +191,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     }
     startTransition(async () => {
       await editAction(fd)
+      router.refresh()
       showSuccess('Cambios guardados correctamente.')
     })
   }
@@ -207,6 +213,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     setPendingDeleteId(null)
     startTransition(async () => {
       await deleteAction(fd)
+      router.refresh()
       showSuccess('Contacto eliminado.')
     })
   }

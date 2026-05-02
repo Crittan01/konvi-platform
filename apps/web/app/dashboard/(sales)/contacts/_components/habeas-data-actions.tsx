@@ -13,6 +13,7 @@
 // plano se pierde visualmente.
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -138,6 +139,7 @@ const ACTION_META: Record<ActionKind, {
 export default function HabeasDataActions({
   contactId, contactDisplayName, sarAction, sarPrintableAction,
 }: Props) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [running, setRunning] = useState<ActionKind | null>(null)
   const [pendingAction, setPendingAction] = useState<ActionKind | null>(null)
@@ -215,6 +217,12 @@ export default function HabeasDataActions({
         URL.revokeObjectURL(url)
         // Reads exitosos no requieren Dialog — la descarga es feedback.
       } else if (sarType === 'erase') {
+        // Rev. 102 — fuerza refresh del Server Component padre para
+        // que la lista de contactos refleje la anonimización sin que
+        // el operador tenga que recargar manualmente. El revalidatePath
+        // del server action invalida cache, pero router.refresh() es
+        // lo que le dice al cliente "trae el RSC nuevo ya".
+        router.refresh()
         setResultDialog({
           kind: 'success',
           title: 'Datos personales anonimizados',
