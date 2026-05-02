@@ -52,9 +52,21 @@ criterio PASS/FAIL/SKIP visibles al abrir el archivo.
 | 14 | `s14_change_shipping.py` | **Cambio ciudad** | Cotiza Bogotá → "mejor a Medellín" → re-cotiza |
 | 15 | `s15_payment_link_delivery.py` | **Anti-alucinación TX** | Bot promete link → debe entregar URL Wompi real |
 | 16 | `s16_wompi_approved_simulation.py` | Webhook sandbox | Sim APPROVED firmado → orden=confirmed + stock decrement |
+| 17 | `s17_consent_gating_for_unconsented_contact.py` | **SaaS B2B + consent** | Operador crea contact `consent_given=false` → cliente escribe → bot pide consent → audit log granted |
+| 18 | `s18_meli_contact_inbound_match.py` | **MeLi ↔ WhatsApp** | Webhook MeLi crea contact → mismo phone escribe a WhatsApp → match único + consent_source preservado |
+| 19 | `s19_renewed_consent_after_anonymization.py` | **Art. 15 + Opción B** | Anonim → renewed_consent → `renewals_after_revocation[]` con `previous_revoked_at` |
+| 20 | `s20_operator_delete_audit_immutable.py` | **Audit append-only** | Delete contact → audit `event='deleted'` + UPDATE/DELETE bloqueados por trigger anti-tamper |
+| 21 | `s21_form_add_unconsented_operator.py` | **Form Add SaaS B2B** | Insert con PII + `consent_given=false` aceptado por DB (rev. 103 quitó guard PII-sin-consent) |
+| 22 | `s22_consent_evidence_storage_in_person.py` | **F10 Storage** | Bucket privado consent-evidence + upload PDF + signed URL con TTL |
+| 23 | `s23_renewals_cap_50.py` | **Cap evidence** | 60 entries → cap a 50 últimas + markers truncated_at + truncated_count |
 
 **Críticos (rev. 91)**: S6, S9, S12, S15. Estos validan la captura de datos
 y el cierre transaccional. Si fallan, hay regresión arquitectónica.
+
+**Críticos (rev. 103 SaaS B2B + Habeas Data)**: S17, S18, S19, S20.
+S17 valida que el bot detecta contact sin consent y lo pide. S18 valida
+match cross-canal MeLi↔WhatsApp. S19 valida flow renewed_consent. S20
+valida inmutabilidad del audit log (defensa real ante manipulación).
 
 ---
 
