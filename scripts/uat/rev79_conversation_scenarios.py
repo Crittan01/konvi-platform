@@ -54,6 +54,14 @@ from scenarios.s13_multi_product import scenario as scenario_13
 from scenarios.s14_change_shipping import scenario as scenario_14
 from scenarios.s15_payment_link_delivery import scenario as scenario_15
 from scenarios.s16_wompi_approved_simulation import scenario as scenario_16
+# Rev. 103 — escenarios SaaS B2B + Habeas Data extendido.
+from scenarios.s17_consent_gating_for_unconsented_contact import scenario as scenario_17
+from scenarios.s18_meli_contact_inbound_match import scenario as scenario_18
+from scenarios.s19_renewed_consent_after_anonymization import scenario as scenario_19
+from scenarios.s20_operator_delete_audit_immutable import scenario as scenario_20
+from scenarios.s21_form_add_unconsented_operator import scenario as scenario_21
+from scenarios.s22_consent_evidence_storage_in_person import scenario as scenario_22
+from scenarios.s23_renewals_cap_50 import scenario as scenario_23
 
 
 SCENARIOS: list[tuple[int, str, Callable]] = [
@@ -73,6 +81,13 @@ SCENARIOS: list[tuple[int, str, Callable]] = [
     (14, "scenario_14_change_shipping", scenario_14),
     (15, "scenario_15_payment_link_delivery", scenario_15),
     (16, "scenario_16_wompi_approved_simulation", scenario_16),
+    (17, "scenario_17_consent_gating_unconsented", scenario_17),
+    (18, "scenario_18_meli_inbound_match", scenario_18),
+    (19, "scenario_19_renewed_consent_after_anonim", scenario_19),
+    (20, "scenario_20_operator_delete_audit_immutable", scenario_20),
+    (21, "scenario_21_form_add_unconsented", scenario_21),
+    (22, "scenario_22_storage_in_person", scenario_22),
+    (23, "scenario_23_renewals_cap_50", scenario_23),
 ]
 
 
