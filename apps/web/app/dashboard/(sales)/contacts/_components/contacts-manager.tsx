@@ -204,17 +204,19 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   // Rev. 102 — Lista de países soportados para el phone (E.164).
   // Default Colombia. Otros países disponibles si llega extranjero.
   // Sincronizado con SUPPORTED_COUNTRY_CODES en page.tsx server action.
-  const PHONE_COUNTRIES: Array<{ code: string; flag: string; label: string; placeholderDigits: string }> = [
-    { code: '57',  flag: '🇨🇴', label: 'Colombia',  placeholderDigits: '3001234567' },
-    { code: '58',  flag: '🇻🇪', label: 'Venezuela', placeholderDigits: '4141234567' },
-    { code: '593', flag: '🇪🇨', label: 'Ecuador',   placeholderDigits: '991234567' },
-    { code: '51',  flag: '🇵🇪', label: 'Perú',      placeholderDigits: '912345678' },
-    { code: '52',  flag: '🇲🇽', label: 'México',    placeholderDigits: '5512345678' },
-    { code: '1',   flag: '🇺🇸', label: 'USA/CA',    placeholderDigits: '5551234567' },
-    { code: '34',  flag: '🇪🇸', label: 'España',    placeholderDigits: '612345678' },
-    { code: '54',  flag: '🇦🇷', label: 'Argentina', placeholderDigits: '91123456789' },
-    { code: '56',  flag: '🇨🇱', label: 'Chile',     placeholderDigits: '912345678' },
-    { code: '55',  flag: '🇧🇷', label: 'Brasil',    placeholderDigits: '11912345678' },
+  // Sin emoji de bandera: muchos OS (Windows en particular) no las
+  // renderizan y se ven como caracteres rotos.
+  const PHONE_COUNTRIES: Array<{ code: string; label: string; placeholderDigits: string }> = [
+    { code: '57',  label: 'Colombia',  placeholderDigits: '3001234567' },
+    { code: '58',  label: 'Venezuela', placeholderDigits: '4141234567' },
+    { code: '593', label: 'Ecuador',   placeholderDigits: '991234567' },
+    { code: '51',  label: 'Perú',      placeholderDigits: '912345678' },
+    { code: '52',  label: 'México',    placeholderDigits: '5512345678' },
+    { code: '1',   label: 'USA/CA',    placeholderDigits: '5551234567' },
+    { code: '34',  label: 'España',    placeholderDigits: '612345678' },
+    { code: '54',  label: 'Argentina', placeholderDigits: '91123456789' },
+    { code: '56',  label: 'Chile',     placeholderDigits: '912345678' },
+    { code: '55',  label: 'Brasil',    placeholderDigits: '11912345678' },
   ]
   const phoneCountryMeta = PHONE_COUNTRIES.find(c => c.code === addPhoneCountry) ?? PHONE_COUNTRIES[0]
 
@@ -455,7 +457,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                     >
                       {PHONE_COUNTRIES.map(c => (
                         <option key={c.code} value={c.code}>
-                          {c.flag} +{c.code} {c.label}
+                          +{c.code} {c.label}
                         </option>
                       ))}
                     </select>
@@ -742,7 +744,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                       <form action={handleEdit} className="mt-3 space-y-3 pt-3 border-t border-border">
                         <input type="hidden" name="contact_id" value={c.id} />
 
-                        {/* Rev. 102 — Opción B Habeas Data: contact post-anonimización */}
+                        {/* Rev. 102 — Opción B Habeas Data: contact post-anonimización.
+                            Bloque ÚNICO: checkbox renewed + canal + evidencia.
+                            Cuando este flow está activo, el bloque consent normal de
+                            abajo NO se renderiza (era redundancia). */}
                         {awaitingRenewal && (
                           <div className="rounded-lg border border-amber-700/40 bg-amber-700/5 p-3 space-y-2">
                             <div className="flex items-start gap-2 text-xs text-amber-700">
@@ -750,9 +755,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                               <div className="flex-1">
                                 <p className="font-semibold">Contacto anonimizado el {c.consent_revoked_at && new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}.</p>
                                 <p className="mt-0.5 text-muted-foreground">
-                                  Para volver a registrar PII (nombre, email, documento, dirección, notas)
-                                  el sistema requiere que el titular haya otorgado consentimiento renovado.
-                                  Confirma que cuentas con esa autorización y describe la evidencia.
+                                  Para volver a registrar PII el sistema requiere consentimiento
+                                  renovado del titular. Confirma que cuentas con esa autorización,
+                                  indica el canal por el que la diste, y describe la evidencia.
                                 </p>
                               </div>
                             </div>
@@ -765,27 +770,63 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 className="h-3.5 w-3.5 mt-0.5 rounded"
                               />
                               <span className="text-foreground">
-                                <strong>Confirmo</strong> que el titular ha otorgado consentimiento renovado para tratar nuevamente sus datos personales.
+                                <strong>Confirmo</strong> que el titular ha otorgado consentimiento renovado.
                               </span>
                             </label>
-                            {!!renewedConsent[c.id] && (
-                              <div className="space-y-1">
-                                <Label className="text-xs text-amber-700">
-                                  Evidencia del consentimiento renovado <span className="text-destructive">*</span>
-                                </Label>
-                                <Input
-                                  name="renewed_consent_evidence"
-                                  required
-                                  minLength={10}
-                                  maxLength={500}
-                                  placeholder="Ej: WhatsApp 2026-05-01 14:30 — el titular respondió 'Sí, autorizo nuevamente'."
-                                  className="h-8 text-xs"
-                                />
-                                <p className="text-[10px] text-muted-foreground">
-                                  Mínimo 10 caracteres. Se guarda inmutablemente en el audit log.
-                                </p>
+                            {!!renewedConsent[c.id] && (() => {
+                              const renewedSource = getEditConsentSource(c.id, '')
+                              const isOther = renewedSource === 'other'
+                              return (
+                              <div className="space-y-2 pt-1">
+                                {/* Hidden: re-activar consent_given y persistir versión política. */}
+                                <input type="hidden" name="consent_given" value="on" />
+
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-amber-700">
+                                    Canal del consentimiento renovado <span className="text-destructive">*</span>
+                                  </Label>
+                                  <select
+                                    name="consent_source"
+                                    required
+                                    value={renewedSource}
+                                    onChange={e => setEditConsentSourceFor(c.id, e.target.value)}
+                                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                                  >
+                                    <option value="" disabled>— Selecciona —</option>
+                                    <option value="whatsapp">WhatsApp</option>
+                                    <option value="web_form">Formulario web</option>
+                                    <option value="in_person">Presencial</option>
+                                    <option value="import">Importación</option>
+                                    <option value="other">Otro</option>
+                                  </select>
+                                  <p className="text-[10px] text-muted-foreground leading-snug">
+                                    {renewedSource && CONSENT_SOURCE_HELP[renewedSource]
+                                      ? CONSENT_SOURCE_HELP[renewedSource]
+                                      : 'Cómo capturaste la nueva autorización.'}
+                                  </p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-amber-700">
+                                    Evidencia del consentimiento renovado <span className="text-destructive">*</span>
+                                  </Label>
+                                  <Input
+                                    name="renewed_consent_evidence"
+                                    required
+                                    minLength={isOther ? 20 : 10}
+                                    maxLength={500}
+                                    placeholder="Ej: WhatsApp 2026-05-01 14:30 — el titular respondió 'Sí, autorizo nuevamente'."
+                                    className="h-8 text-xs"
+                                  />
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {isOther
+                                      ? 'OBLIGATORIO mínimo 20 caracteres (canal "Otro" exige descripción detallada).'
+                                      : 'Mínimo 10 caracteres. Se guarda inmutablemente en audit log.'}
+                                  </p>
+                                </div>
                               </div>
-                            )}
+                              )
+                            })()}
                           </div>
                         )}
 
@@ -827,8 +868,11 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             </div>
                           )}
                         </div>
-                        {/* Rev. 102 — Bloque Habeas Data reorganizado:
-                            check con semántica clara según estado del contact */}
+                        {/* Rev. 102 — Bloque Habeas Data reorganizado.
+                            Si awaitingRenewal=true, NO renderizar (toda la lógica
+                            ya vive en el bloque renewed_consent arriba para evitar
+                            redundancia con el operador). */}
+                        {!awaitingRenewal && (
                         <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
                           {(() => {
                             // Estado actual del consent del contact:
@@ -962,6 +1006,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             </div>
                           )}
                         </div>
+                        )}
                         {/* ── Acciones principales (guardar) ─────────────────── */}
                         <div className="flex items-center gap-2 pt-1">
                           <Button
