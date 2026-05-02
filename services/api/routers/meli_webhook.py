@@ -48,6 +48,34 @@ def _hash_phone(phone: Optional[str]) -> Optional[str]:
     normalized = re.sub(r"[\s+\-]", "", str(phone))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
+
+def _normalize_phone_e164(raw: Optional[str]) -> Optional[str]:
+    """Rev. 103 (D2) — normaliza un phone arbitrario a formato E.164 (+digits).
+
+    El form Add Contacto persiste E.164 (`+57...`). El webhook MeLi
+    históricamente persistía sin `+` (`5755555550901`), creando
+    inconsistencia que rompía el match cross-canal cuando el comprador
+    MeLi escribía al WhatsApp del tenant.
+
+    Reglas:
+      - Si el raw ya empieza con `+`, preservamos eso y stripeamos
+        cualquier separador interno.
+      - Si es solo dígitos y >= 8 chars, prefijamos `+`.
+      - En cualquier otro caso, retornamos None (data quality issue).
+    """
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.startswith("+"):
+        digits = re.sub(r"\D", "", s)
+        return f"+{digits}" if digits else None
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 8:
+        return f"+{digits}"
+    return None
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["MeLi Webhook"])
 
@@ -376,15 +404,15 @@ def _upsert_meli_contact(
     Retorna contact_id si hay teléfono disponible; None si no hay datos suficientes.
     MeLi expone phone en billing_info para vendedores verificados.
     """
-    phone = (
+    raw_phone = (
         (buyer.get("billing_info") or {}).get("phone")
         or buyer.get("phone")
         or None
     )
-    if not phone:
+    phone_e164 = _normalize_phone_e164(raw_phone)
+    if not phone_e164:
         return None
 
-    phone_str = str(phone).strip()
     buyer_name = (
         f"{buyer.get('first_name', '')} {buyer.get('last_name', '')}".strip()
         or buyer.get("nickname")
@@ -394,7 +422,7 @@ def _upsert_meli_contact(
 
     contact_payload = {
         "tenant_id": tenant_id,
-        "phone": phone_str,
+        "phone": phone_e164,
         "name": buyer_name,
         "consent_given": True,
         "consent_source": "marketplace_meli",
@@ -409,24 +437,46 @@ def _upsert_meli_contact(
         "consent_actor_email": "system:meli_webhook",
     }
 
+    # Rev. 103 (D2) — backwards compat: si existe un contact con el
+    # mismo phone en formato LEGACY (sin `+`), lo migramos in-place
+    # actualizando phone → E.164 + el resto del payload. Esto evita
+    # duplicados (`+57...` y `57...` para el mismo titular).
+    legacy_phone = phone_e164.lstrip("+")
+    contact_id: Optional[str] = None
     try:
-        result = supabase.table("contacts").upsert(
-            contact_payload,
-            on_conflict="tenant_id,phone",
-        ).execute()
-        contact_id = result.data[0]["id"] if result.data else None
+        legacy = (
+            supabase.table("contacts")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("phone", legacy_phone)
+            .limit(1)
+            .execute()
+        )
+        if legacy.data:
+            contact_id = legacy.data[0]["id"]
+            supabase.table("contacts").update(contact_payload).eq("id", contact_id).execute()
+        else:
+            result = supabase.table("contacts").upsert(
+                contact_payload,
+                on_conflict="tenant_id,phone",
+            ).execute()
+            contact_id = result.data[0]["id"] if result.data else None
     except Exception as e:
-        logger.warning("No se pudo crear/actualizar contacto MeLi (phone=%s): %s", phone, e)
+        logger.warning(
+            "No se pudo crear/actualizar contacto MeLi (phone=%s): %s",
+            phone_e164, e,
+        )
         return None
 
     # Audit log append-only — el tenant tiene trazabilidad del origen
     # MeLi y SIC puede consultar event='granted' con source='system'.
+    # phone_hash invariante a presencia de `+` (la regex strip lo ignora).
     if contact_id:
         try:
             supabase.table("consent_audit_log").insert({
                 "tenant_id": tenant_id,
                 "contact_id": contact_id,
-                "phone_hash": _hash_phone(phone_str),
+                "phone_hash": _hash_phone(phone_e164),
                 "event": "granted",
                 "source": "system",
                 "actor_email": "system:meli_webhook",

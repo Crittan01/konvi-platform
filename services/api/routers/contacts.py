@@ -42,6 +42,7 @@ CONSENT_SOURCES = {
     "in_person",
     "import",
     "other",
+    "marketplace_meli",  # rev. 103: webhook MeLi (no se ofrece en UI dropdown)
 }
 
 

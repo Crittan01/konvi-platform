@@ -1310,8 +1310,12 @@ export default function InboxPage() {
                   )}
                   <div className="flex items-center gap-1 mt-1">
                     {convContext.contact.consent_given ? (
-                      <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                      <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 bg-emerald-700/10 px-1.5 py-0.5 rounded-full border border-emerald-700/30">
                         <BadgeCheck className="h-3 w-3" /> Habeas data
+                      </span>
+                    ) : convContext.contact.consent_revoked_at ? (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-700 bg-amber-700/10 px-1.5 py-0.5 rounded-full border border-amber-700/30">
+                        <BadgeX className="h-3 w-3" /> Revocado
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground bg-border/30 px-1.5 py-0.5 rounded-full border border-border">
