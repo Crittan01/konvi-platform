@@ -34,15 +34,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Permitir import desde services/api.
-REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO / "services/api"))
-
 from lib.harness import (  # noqa: E402
     PASS, FAIL, SKIP, ScenarioResult, ConversationDriver, default_response_rules,
     fetch_audit_events, hard_reset, send_inbound, wait_outbound, now_iso, run_one,
 )
 import e2e_chat  # noqa: E402
+
+# Locked-mode: escenario server-side / seed propio. mode=known no aplica.
+SUPPORTED_MODES = ("new",)
+
+# Permitir import desde services/api (después de harness para que lib/ tenga prio).
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO / "services/api"))
 
 
 def _import_meli_contact(sb, tenant_id: str, phone_e164: str) -> str | None:
@@ -59,7 +62,7 @@ def _import_meli_contact(sb, tenant_id: str, phone_e164: str) -> str | None:
                                 meli_order_id=f"S18-{int(time.time())}")
 
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")

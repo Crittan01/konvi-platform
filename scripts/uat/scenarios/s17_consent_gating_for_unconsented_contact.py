@@ -41,8 +41,12 @@ from lib.harness import (  # noqa: E402
 )
 import e2e_chat  # noqa: E402
 
+# Locked-mode: el escenario seedea un contact con consent_given=false.
+# `mode=known` no aplica (sería contradictorio).
+SUPPORTED_MODES = ("new",)
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
     time.sleep(2)
 

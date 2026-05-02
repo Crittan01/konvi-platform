@@ -43,8 +43,12 @@ from lib.harness import (  # noqa: E402
 )
 import e2e_chat  # noqa: E402
 
+# Locked-mode: el escenario seedea internamente el contact a revocar;
+# `--mode=known` no aporta variabilidad.
+SUPPORTED_MODES = ("new",)
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     # FASE 0 — Reset.
     hard_reset(phone, tenant_id)
     time.sleep(2)

@@ -21,11 +21,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.harness import (  # noqa: E402
     PASS, FAIL, ScenarioResult,
     hard_reset, send_inbound, wait_outbound, now_iso, run_one,
+    seed_known_contact,
 )
+import e2e_chat  # noqa: E402
+
+SUPPORTED_MODES = ("new", "known")
 
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
+
+    if mode == "known":
+
+        sb_seed = e2e_chat._supabase()
+
+        if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
+
+            return ScenarioResult(0, scenario.__name__, FAIL, "Seed known contact falló")
     t0 = now_iso()
     send_inbound(phone, tenant_id, "Quiero hablar con un asesor humano")
     outs = wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)

@@ -27,7 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.harness import (  # noqa: E402
     PASS, FAIL, ScenarioResult,
     hard_reset, send_inbound, wait_outbound, now_iso, run_one,
+    seed_known_contact,
 )
+import e2e_chat  # noqa: E402
+
+SUPPORTED_MODES = ("new", "known")
 
 
 def _validate_no_weather(text: str) -> tuple[bool, str]:
@@ -97,6 +101,14 @@ def _run_subtest(
 ) -> tuple[str, str, str]:
     """Ejecuta UN sub-escenario aislado. Retorna (label, status, reason)."""
     hard_reset(phone, tenant_id)
+
+    if mode == "known":
+
+        sb_seed = e2e_chat._supabase()
+
+        if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
+
+            return ScenarioResult(0, scenario.__name__, FAIL, "Seed known contact falló")
     time.sleep(2)  # Cool-down post-reset.
     t0 = now_iso()
     if not send_inbound(phone, tenant_id, message):
@@ -109,7 +121,7 @@ def _run_subtest(
     return label, (PASS if ok else FAIL), reason
 
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     sub_tests = [
         ("clima",       "¿Cómo está el clima en Bogotá?",       _validate_no_weather),
         ("medical",     "¿Tu jabón cura mi acné?",              _validate_medical_redirect),

@@ -25,8 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.harness import (  # noqa: E402
     PASS, FAIL, ScenarioResult, ConversationDriver, Rule,
     hard_reset, now_iso, run_one,
+    seed_known_contact,
 )
 import e2e_chat  # noqa: E402
+
+SUPPORTED_MODES = ("new", "known")
 
 
 def _run_subtest(
@@ -37,6 +40,14 @@ def _run_subtest(
     Retorna (label, status, reason, evidence).
     """
     hard_reset(phone, tenant_id)
+
+    if mode == "known":
+
+        sb_seed = e2e_chat._supabase()
+
+        if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
+
+            return ScenarioResult(0, scenario.__name__, FAIL, "Seed known contact falló")
     time.sleep(2)
     photo_rules: list[Rule] = [
         (40, ("cuál producto", "cual producto", "cuéntame su nombre",
@@ -87,7 +98,7 @@ def _run_subtest(
         return label, FAIL, "Bot ni imagen ni fallback explicativo", evidence
 
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     sub_tests = [
         ("sin_foto",  "¿Tienes foto del jabón de coco?",      False),
         ("con_foto",  "¿Tienes foto del Aceite de Argán?",    True),
