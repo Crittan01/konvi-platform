@@ -8,6 +8,15 @@
 
 ---
 
+## Backlog rev. 102 — Follow-ups Habeas Data (post-iteración UX)
+
+| ID | Tarea | Esfuerzo | Trigger para retomar |
+|---|---|---|---|
+| **F8** | Flujo de representante legal para venta a menores. Tablas extra: `representative_*`. Sprint dedicado | ~3-5 días | Llega tenant que vende a menores (e.g., uniformes escolares) |
+| **F9** | i18n del bot WhatsApp para países no-CO. Adapt prompts + detectores por idioma/país. Hoy el contact se registra OK pero el flujo del bot puede ser limitado para extranjeros | ~1-2 semanas | Llegan tenants con base internacional; contacts con phone non-CO crece >5% |
+| **F10** | Upload de evidencia física (PDF/imagen) para canal `in_person`. Hoy se referencia como texto en Evidencia | ~3 días | Tenant lo pide explícitamente (e.g., requisito de auditoría externa) |
+| **F11** | Reporte SIC pre-cocinado más rico — incluir `consent_evidence.renewals_after_revocation[]` + cadena completa de eventos | ~1 día | Llegue queja SIC formal o auditoría programada |
+
 ## Backlog rev. 100 — ADR-0003 follow-ups (Habeas Data)
 
 | ID | Tarea | Prioridad | Estado |

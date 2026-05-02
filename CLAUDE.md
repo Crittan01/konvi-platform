@@ -68,13 +68,15 @@ supabase/migrations/          # fuente canónica de esquema
 
 - `docs/reports/rev93_99_habeas_data_completion.md` — cierre Habeas Data Ley 1581.
 - `docs/reports/rev100_certification_closure.md` — cierre real certificación rev. 100.
+- `docs/reports/rev102_habeas_data_ux_hardening.md` — UX/legal hardening + 5 bugs runtime.
 - `docs/legal/*.md` — DPA, privacy, subprocessors, incident-response, roles.
-- `docs/adr/0003-habeas-data-compliance-strategy.md` — decisiones + follow-ups F1-F7.
+- `docs/adr/0003-habeas-data-compliance-strategy.md` — decisiones + follow-ups F1-F11.
 
 ## Validación pre-deploy
 
 ```bash
-bash scripts/validate.sh          # sintaxis + 1167 tests + TypeScript + lint
+bash scripts/validate.sh          # sintaxis + 1178 tests + TypeScript + lint
+bash scripts/validate.sh --build  # + Next.js build (detecta errores que bloquean Render)
 bash scripts/validate.sh --full   # + pip-audit + coherencia vars
 ```
 

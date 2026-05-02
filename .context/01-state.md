@@ -1,9 +1,95 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-05-01 (rev. 100 · cierre real de certificación end-to-end)
+**Última actualización**: 2026-05-01 (rev. 102 · Habeas Data UX hardening + 5 bugs runtime resueltos)
 **Fuente de verdad**: DB live (Supabase `xmelwnhhphksbpdjmbbp`) + contratos en código.
 **Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
+
+---
+
+## Cierre rev. 102 (2026-05-01) — Habeas Data UX hardening
+
+Iteración intensiva con usuario sobre módulo Contactos (testing en VM
+local). 18 commits desde `0f82242` hasta `f496dad`. 5 bugs runtime
+detectados+resueltos vía lectura de logs (no especulación) + cambios
+UX/legal significativos.
+
+**Bugs runtime resueltos** (con stack traces de logs locales):
+
+- `0f82242` — digest `3617361344` "Functions cannot be passed to Client
+  Components": `CONSENT_SOURCES = new Set([...])` capturado por closure
+  de server actions inline. Movido a module scope.
+- `78fcc01` — Render no desplegaba apps/web por errores ESLint
+  pre-existentes (no míos): `let result` en catalog-table.tsx + ternary
+  como statement en templates-section.tsx. Reforcé `validate.sh` con
+  `next build` opt-in via `--build` o `VALIDATE_BUILD=1`.
+- `41ffe1f` — SAR endpoints 500 con `'str' object has no attribute
+  'tenant_id'`: get_current_tenant retorna str. Fix signature
+  `tenant_id: str = Depends(...)` + helper `_actor_from_request(request)`.
+- `d7b4e63` — SAR 503 `column orders.currency does not exist`. Schema
+  real: `id, tenant_id, contact_id, status, total_amount, shipping_cost,
+  created_at, updated_at, notes`. Fix select + HTML render.
+- `409b079` — Optimistic update post-Anonimizar. router.refresh() solo
+  no provocaba re-render visible. Combinar con Set local de IDs
+  optimistically erased + override en render.
+
+**Iteración UX/legal**:
+
+- TI removido del sistema (Decreto 1377/2013 Art. 7 menores).
+- Detector pre-LLM `_detect_minor_intent` con prioridad máxima en
+  orchestrator: 10+ frases + regex `tengo N años` (N<18). Escala a
+  human_takeover.
+- Canales consent reducidos a 5 defensibles (eliminados manual_console
+  y phone_call).
+- Form Add/Edit: 3 capas de defensa Art. 9 (UI preventiva inputs
+  disabled sin consent + server guard + DB constraint).
+- Form Edit: check consent read-only cuando `consent_given=true`
+  (revocación SOLO via botón Anonimizar). Server bloquea soft-revoke.
+- Opción B post-anonimización: `renewed_consent` flow con evidencia
+  inmutable persistida en `consent_evidence.renewals_after_revocation[]`.
+- Phone country code: 10 países (CO default + LATAM + USA + ES).
+  Validación 7-14 dígitos. E.164 construction.
+- Document number: validación dinámica por tipo. Rangos estrictos
+  (CC 6-10, CE 6-7, NIT 9-11, PP 6-15).
+- Anonimizar dialog: motivo obligatorio minLength=10. Server rechaza
+  con HTTP 400 si entre 1-9 chars.
+- `primary_identifier` en JSON SAR: jerarquía document > phone > UUID.
+- Paleta UI: shades fluorescentes (300-500) → shade 700.
+- `window.alert` → Dialog shadcn/ui consistente.
+- Versión política auto-completada (constante module-level
+  `CURRENT_PRIVACY_NOTICE_VERSION`).
+- Banner verde flotante post-save (no modal cada vez para acción
+  explícita del operador).
+- Eliminar contacto upgrade a Dialog rojo con educación (Eliminar vs
+  Anonimizar).
+
+**Memorias persistidas**:
+
+- `memory/feedback_local_logs.md` — Logs en
+  `/home/ansible/commerce-ops-local/logs/` son fuente de verdad runtime;
+  leer antes de especular.
+- `memory/feedback_ui_colors.md` — Tailwind shades 300-500 son
+  fluorescentes; usar 700 en componentes Tenant Console.
+- `memory/feedback_scope_discipline.md` — Pregunta = respuesta de texto;
+  cambios solo cuando se piden literalmente.
+
+**Suite**: 1178 tests OK · validate.sh 14/14 (incluye `next build`
+opt-in via `--build`).
+
+**Reporte**: [docs/reports/rev102_habeas_data_ux_hardening.md](../docs/reports/rev102_habeas_data_ux_hardening.md).
+
+---
+
+## Cierre rev. 101 (2026-05-01) — Backlog ADR-0003 F1-F7 cerrado
+
+F1 HTML imprimible SAR (zero deps, browser print-to-PDF) ·
+F3 vista SQL `vw_consent_events_unified` ·
+F4 UI retention policies per-tenant ·
+F5 endpoint `GET /api/v1/sic-report` ·
+F6 detector pre-LLM rectificación ·
+F7 UI click-wrap legal acceptance.
+F2 DEFERRED consciente.
+Reporte: backlog en ADR-0003.
 
 ---
 
