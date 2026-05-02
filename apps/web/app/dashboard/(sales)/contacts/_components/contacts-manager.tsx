@@ -171,7 +171,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   //   - mostrar "Evidencia" si ON / "Razón de revocatoria" si OFF
   //     (mutuamente excluyente, antes ambos siempre visibles confundía)
   const [addConsentChecked, setAddConsentChecked] = useState(false)
+  const [addConsentSource, setAddConsentSource] = useState('')
   const [editConsentChecked, setEditConsentChecked] = useState<Record<string, boolean>>({})
+  const [editConsentSource, setEditConsentSource] = useState<Record<string, string>>({})
   const toggleEditConsent = (id: string, defaultValue: boolean) =>
     setEditConsentChecked(prev => ({
       ...prev,
@@ -179,6 +181,20 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     }))
   const isEditConsentChecked = (id: string, defaultValue: boolean): boolean =>
     editConsentChecked[id] === undefined ? defaultValue : editConsentChecked[id]
+  const getEditConsentSource = (id: string, defaultValue: string): string =>
+    editConsentSource[id] === undefined ? defaultValue : editConsentSource[id]
+  const setEditConsentSourceFor = (id: string, value: string) =>
+    setEditConsentSource(prev => ({ ...prev, [id]: value }))
+
+  // Rev. 102 — Help text contextual por canal. Guía al operador sobre
+  // qué evidencia debe registrar/archivar para audit ante SIC.
+  const CONSENT_SOURCE_HELP: Record<string, string> = {
+    whatsapp: 'Evidencia: el hilo de WhatsApp donde el titular dijo "Sí acepto". El sistema lo enlaza al consent_audit_log automáticamente.',
+    web_form: 'Evidencia: captura del formulario web (timestamp + IP + checkbox). Asegúrate que tu sitio persiste estos datos.',
+    in_person: 'Evidencia: documento físico firmado por el titular. Archiva el papel y referencia su ubicación en Evidencia abajo.',
+    import: 'Importación: el consent fue capturado en otro sistema. Eres responsable de demostrarlo ante SIC.',
+    other: 'Catch-all. La Evidencia es OBLIGATORIA (mínimo 20 caracteres). Si no puedes describir de dónde vino, este canal NO aplica.',
+  }
 
   /** Contact que fue anonimizado y aún no tiene consent renovado. */
   const isAwaitingRenewal = (c: Contact): boolean =>
@@ -229,6 +245,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
       addFormRef.current?.reset()
       setAddressResetKey(k => k + 1)
       setAddConsentChecked(false)
+      setAddConsentSource('')
       router.refresh()
       showSuccess('Contacto guardado correctamente.')
     })
@@ -424,18 +441,18 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Nombre completo <span className="text-destructive">*</span>
-                    <span className="ml-1 text-[10px] text-muted-foreground">(Wompi y Envia lo requieren)</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(Pasarela de pagos y Transportadora lo requieren)</span>
                   </Label>
                   <Input name="name" placeholder="Juan García López" required disabled={!addConsentChecked} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Correo electrónico <span className="text-destructive">*</span>
-                    <span className="ml-1 text-[10px] text-muted-foreground">(Wompi customer_data)</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(Pasarela de pagos)</span>
                   </Label>
                   <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required disabled={!addConsentChecked} />
                 </div>
-                {/* Documento de identidad — Wompi PSE/Bancolombia lo exigen en checkout */}
+                {/* Documento de identidad — Pasarela de pagos PSE/Bancolombia lo exigen en checkout */}
                 {addConsentChecked ? (
                   <DocumentFields
                     required
@@ -491,35 +508,44 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                       <select
                         name="consent_source"
                         required
-                        defaultValue=""
+                        value={addConsentSource}
+                        onChange={e => setAddConsentSource(e.target.value)}
                         className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                       >
                         <option value="" disabled>— Selecciona —</option>
-                        <option value="manual_console">Consola</option>
                         <option value="whatsapp">WhatsApp</option>
                         <option value="web_form">Formulario web</option>
-                        <option value="phone_call">Llamada</option>
                         <option value="in_person">Presencial</option>
                         <option value="import">Importación</option>
                         <option value="other">Otro</option>
                       </select>
-                      <p className="text-[10px] text-muted-foreground">
-                        De dónde vino el consentimiento (clasificación para reportes).
+                      <p className="text-[10px] text-muted-foreground leading-snug">
+                        {addConsentSource && CONSENT_SOURCE_HELP[addConsentSource]
+                          ? CONSENT_SOURCE_HELP[addConsentSource]
+                          : 'De dónde vino el consentimiento (selecciona uno).'}
                       </p>
                     </div>
                   )}
 
                   {addConsentChecked && (
                     <div className="space-y-1">
-                      <Label className="text-xs">Evidencia (nota interna)</Label>
+                      <Label className="text-xs">
+                        Evidencia (nota interna)
+                        {addConsentSource === 'other' && (
+                          <span className="text-destructive ml-1">*</span>
+                        )}
+                      </Label>
                       <Input
                         name="consent_evidence_note"
+                        required={addConsentSource === 'other'}
+                        minLength={addConsentSource === 'other' ? 20 : undefined}
                         placeholder="Ej: WhatsApp 2026-05-01 14:30, dijo 'Sí acepto' en hilo conv-abc"
                         className="h-8 text-xs"
                       />
                       <p className="text-[10px] text-muted-foreground">
-                        Detalle textual de cómo se capturó: hilo, fecha/hora, documento físico, etc.
-                        Crítico para responder a SIC con prueba concreta.
+                        {addConsentSource === 'other'
+                          ? 'OBLIGATORIO (mínimo 20 caracteres) — describe de dónde vino el consent.'
+                          : 'Detalle textual de cómo se capturó. Crítico para responder a SIC.'}
                       </p>
                     </div>
                   )}
@@ -773,7 +799,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             </span>
                           </label>
 
-                          {consentChecked && (
+                          {consentChecked && (() => {
+                            const currentSource = getEditConsentSource(c.id, c.consent_source ?? '')
+                            return (
                             <div className="space-y-1 pt-1">
                               <Label className="text-xs">
                                 Canal de consentimiento <span className="text-destructive">*</span>
@@ -781,38 +809,51 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                               <select
                                 name="consent_source"
                                 required
-                                defaultValue={c.consent_source ?? ''}
+                                value={currentSource}
+                                onChange={e => setEditConsentSourceFor(c.id, e.target.value)}
                                 className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                               >
                                 <option value="" disabled>— Selecciona —</option>
-                                <option value="manual_console">Consola</option>
                                 <option value="whatsapp">WhatsApp</option>
                                 <option value="web_form">Formulario web</option>
-                                <option value="phone_call">Llamada</option>
                                 <option value="in_person">Presencial</option>
                                 <option value="import">Importación</option>
                                 <option value="other">Otro</option>
                               </select>
-                              <p className="text-[10px] text-muted-foreground">
-                                De dónde vino el consentimiento (clasificación para reportes).
+                              <p className="text-[10px] text-muted-foreground leading-snug">
+                                {currentSource && CONSENT_SOURCE_HELP[currentSource]
+                                  ? CONSENT_SOURCE_HELP[currentSource]
+                                  : 'De dónde vino el consentimiento (selecciona uno).'}
                               </p>
                             </div>
-                          )}
+                            )
+                          })()}
 
-                          {consentChecked && (
+                          {consentChecked && (() => {
+                            const currentSource = getEditConsentSource(c.id, c.consent_source ?? '')
+                            const isOther = currentSource === 'other'
+                            return (
                             <div className="space-y-1">
-                              <Label className="text-xs">Evidencia (nota interna)</Label>
+                              <Label className="text-xs">
+                                Evidencia (nota interna)
+                                {isOther && <span className="text-destructive ml-1">*</span>}
+                              </Label>
                               <Input
                                 name="consent_evidence_note"
                                 defaultValue={extractEvidenceNote(c.consent_evidence) ?? ''}
+                                required={isOther}
+                                minLength={isOther ? 20 : undefined}
                                 placeholder="Ej: WhatsApp 2026-05-01 14:30, dijo 'Sí acepto'"
                                 className="h-8 text-xs"
                               />
                               <p className="text-[10px] text-muted-foreground">
-                                Detalle textual de cómo se capturó. Crítico para SIC.
+                                {isOther
+                                  ? 'OBLIGATORIO (mínimo 20 caracteres) — describe de dónde vino el consent.'
+                                  : 'Detalle textual de cómo se capturó. Crítico para SIC.'}
                               </p>
                             </div>
-                          )}
+                            )
+                          })()}
 
                           {!consentChecked && (
                             <div className="space-y-1 pt-1">

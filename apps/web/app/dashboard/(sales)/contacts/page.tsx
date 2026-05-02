@@ -14,9 +14,18 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 // Components" digest 3617361344. Mover a module scope resuelve: las
 // server actions referencian el binding del módulo (resoluble en runtime),
 // no un closure capturado en el render.
+// Rev. 102 — refinada a 5 canales con evidencia defensible.
+// REMOVIDOS:
+//   - manual_console: el operador marcando un check no es evidencia del titular
+//   - phone_call: requiere grabación cara, no factible para pequeño e-commerce
+// MANTENIDOS con criterios:
+//   - whatsapp: hilo de conversación es la evidencia (mejor caso, nativo)
+//   - web_form: requiere captura del form en sistema del tenant
+//   - in_person: documento físico firmado, ubicación referenciada en Evidencia
+//   - import: sistema origen con due diligence; tenant es responsable
+//   - other: catch-all, exige Evidencia minLength=20 (validado server)
 const CONSENT_SOURCES = new Set([
-  'manual_console', 'whatsapp', 'web_form', 'phone_call',
-  'in_person', 'import', 'other',
+  'whatsapp', 'web_form', 'in_person', 'import', 'other',
 ])
 
 // Rev. 102 — Versión vigente del aviso/política de privacidad de la
@@ -134,6 +143,14 @@ export default async function ContactsPage({
     // Rev. 102 — versión auto-estampada con la constante vigente.
     const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
     const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
+    // Rev. 102 — canal "other" exige Evidencia ≥ 20 chars (catch-all
+    // legítimo solo si el operador puede describir de dónde vino).
+    if (consentGiven && consentSource === 'other' && consentEvidenceNote.length < 20) {
+      throw new Error(
+        'Cuando el canal es "Otro" la Evidencia debe describir de dónde vino el ' +
+        'consentimiento (mínimo 20 caracteres). Si no puedes describirlo, el canal no aplica.'
+      )
+    }
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
@@ -219,6 +236,13 @@ export default async function ContactsPage({
     const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
     const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
+    // Rev. 102 — canal "other" exige Evidencia ≥ 20 chars.
+    if (consentGiven && consentSource === 'other' && consentEvidenceNote.length < 20) {
+      throw new Error(
+        'Cuando el canal es "Otro" la Evidencia debe describir de dónde vino el ' +
+        'consentimiento (mínimo 20 caracteres).'
+      )
+    }
     // Rev. 102 — Opción B Habeas Data: campos exclusivos del flujo de
     // re-edición post-anonimización.
     const renewedConsentChecked = formData.get('renewed_consent') === 'on'
