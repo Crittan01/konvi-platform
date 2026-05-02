@@ -163,9 +163,14 @@ def main() -> int:
 
     if args.cleanup:
         print("\n━━━ Cleanup ━━━")
-        sb.table("consent_audit_log").delete().eq("contact_id", contact_id).execute()
+        # IMPORTANTE: consent_audit_log es append-only (trigger anti-tamper
+        # rev. 93). NO intentar DELETE — bloquea con P0001. Las filas de
+        # audit creadas por este smoke quedan como artefacto inmutable
+        # (apuntando a un contact_id huérfano post-DELETE de contacts).
+        # Ese es el comportamiento legal-required: SIC puede consultar
+        # eventos históricos aunque el contact ya no exista.
         sb.table("contacts").delete().eq("id", contact_id).execute()
-        print(f"  contact y audit borrados.")
+        print(f"  contact eliminado. (audit log queda inmutable — by design)")
     else:
         print(f"\n  (sin cleanup; revisa /dashboard/contacts → +{BUYER['phone']})")
         print(f"  (rerun con --cleanup para limpiar)")

@@ -50,6 +50,10 @@ class UpsertMeliContactTests(unittest.TestCase):
 
     def setUp(self):
         self.supabase = MagicMock()
+        # Rev. 103 (D2) — El nuevo path hace SELECT legacy primero. Mock el
+        # select chain para devolver `data=[]` (no hay legacy → usar upsert).
+        select_chain = self.supabase.table.return_value.select.return_value
+        select_chain.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
         self.upsert_chain = self.supabase.table.return_value.upsert
         self.upsert_chain.return_value.execute.return_value = MagicMock(
             data=[{'id': 'contact-uuid-123'}]
@@ -87,7 +91,8 @@ class UpsertMeliContactTests(unittest.TestCase):
         )
         upsert_payload = self.upsert_chain.call_args[0][0]
         self.assertEqual(upsert_payload['tenant_id'], 't1')
-        self.assertEqual(upsert_payload['phone'], '3125835649')
+        # Rev. 103 (D2): phone normalizado a E.164 con `+` prefijo.
+        self.assertEqual(upsert_payload['phone'], '+3125835649')
         self.assertEqual(upsert_payload['name'], 'Juan García')
         self.assertTrue(upsert_payload['consent_given'])
         self.assertEqual(upsert_payload['consent_source'], 'marketplace_meli')
@@ -104,12 +109,21 @@ class UpsertMeliContactTests(unittest.TestCase):
 
     def test_upsert_uses_on_conflict_tenant_phone(self):
         _upsert_meli_contact(
-            buyer={'first_name': 'X', 'phone': '999'},
+            buyer={'first_name': 'X', 'phone': '3001234567'},
             tenant_id='t1',
             supabase=self.supabase,
         )
         on_conflict = self.upsert_chain.call_args.kwargs.get('on_conflict')
         self.assertEqual(on_conflict, 'tenant_id,phone')
+
+    def test_short_phone_returns_none(self):
+        # Rev. 103 (D2): phone < 8 dígitos no normaliza → None.
+        result = _upsert_meli_contact(
+            buyer={'first_name': 'X', 'phone': '999'},
+            tenant_id='t1',
+            supabase=self.supabase,
+        )
+        self.assertIsNone(result)
 
     def test_inserts_audit_log_with_granted_event(self):
         _upsert_meli_contact(
@@ -143,12 +157,14 @@ class UpsertMeliContactTests(unittest.TestCase):
         )
 
     def test_audit_failure_does_not_abort_upsert(self):
-        # Configurar audit log para fallar.
+        # Configurar audit log para fallar; el SELECT legacy retorna vacío.
         def selective_table(name):
             tbl = MagicMock()
             if name == 'consent_audit_log':
                 tbl.insert.return_value.execute.side_effect = Exception('boom')
             else:
+                # Legacy SELECT empty → upsert path.
+                tbl.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
                 tbl.upsert.return_value.execute.return_value = MagicMock(
                     data=[{'id': 'cid-1'}],
                 )
@@ -164,6 +180,33 @@ class UpsertMeliContactTests(unittest.TestCase):
         )
         self.assertEqual(result, 'cid-1')
 
+    def test_legacy_phone_migrates_to_e164(self):
+        # Rev. 103 (D2): si existe un contact con phone legacy (sin `+`),
+        # el webhook UPDATEa esa fila con phone E.164 + payload, evitando
+        # duplicados (`+57X` y `57X` para el mismo titular).
+        contacts_tbl = MagicMock()
+        contacts_tbl.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{'id': 'legacy-cid-7'}],
+        )
+        audit_tbl = MagicMock()
+        audit_tbl.insert.return_value.execute.return_value = MagicMock()
+        def selective_table(name):
+            return audit_tbl if name == 'consent_audit_log' else contacts_tbl
+        self.supabase.table.side_effect = selective_table
+
+        result = _upsert_meli_contact(
+            buyer={'first_name': 'X', 'phone': '3009999999'},
+            tenant_id='t1',
+            supabase=self.supabase,
+            meli_order_id='ord-legacy',
+        )
+        self.assertEqual(result, 'legacy-cid-7')
+        # update fue llamado con phone E.164 (no legacy).
+        update_payload = contacts_tbl.update.call_args[0][0]
+        self.assertEqual(update_payload['phone'], '+3009999999')
+        # NO se invocó upsert (path de migración, no de inserción nueva).
+        contacts_tbl.upsert.assert_not_called()
+
     def test_billing_info_phone_is_preferred(self):
         _upsert_meli_contact(
             buyer={
@@ -174,7 +217,8 @@ class UpsertMeliContactTests(unittest.TestCase):
             supabase=self.supabase,
         )
         upsert_payload = self.upsert_chain.call_args[0][0]
-        self.assertEqual(upsert_payload['phone'], '3009999999')
+        # Rev. 103 (D2): phone normalizado a E.164.
+        self.assertEqual(upsert_payload['phone'], '+3009999999')
 
 
 class MigrationMarketplaceMeliTests(unittest.TestCase):
