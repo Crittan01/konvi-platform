@@ -21,13 +21,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lib.harness import (  # noqa: E402
     PASS, FAIL, SKIP, ScenarioResult, ConversationDriver, default_response_rules,
-    fetch_audit_events, hard_reset, run_one,
+    fetch_audit_events, hard_reset, run_one, seed_known_contact,
 )
 import e2e_chat  # noqa: E402
 
+SUPPORTED_MODES = ("new", "known")
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
+    if mode == "known":
+        sb_seed = e2e_chat._supabase()
+        if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
+            return ScenarioResult(9, "Happy path completo", FAIL,
+                "Seed known contact falló")
     profile = {
         "product_query": "1 jabón artesanal de coco",
         "presentation": "60 gramos",

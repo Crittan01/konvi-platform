@@ -462,18 +462,32 @@ def default_response_rules(profile: dict) -> list[Rule]:
 
 # ── Runner aislado por escenario ─────────────────────────────────────────────
 
-def run_one(scenario_fn: Callable[[str, str], ScenarioResult],
+SCENARIO_MODES = ("new", "known")
+
+
+def run_one(scenario_fn: Callable[..., ScenarioResult],
             phone: str | None = None,
             tenant_id: str | None = None) -> int:
-    """Ejecuta un solo escenario standalone. Retorna exit_code (0 si PASS).
+    """Ejecuta un escenario standalone. Retorna exit_code (0 si PASS o SKIP).
 
-    Uso típico al final de cada scripts/uat/scenarios/sNN_*.py:
-        if __name__ == "__main__":
-            sys.exit(run_one(scenario_X))
+    Rev. 103 — soporta `--mode {new,known,both}`:
+      • new   (default): hard_reset, sin seed. Cliente desconocido por bot.
+      • known          : seed_known_contact con consent+name+PII. Bot saluda
+                         personalizado y puede saltar pasos del FSM.
+      • both           : ejecuta primero new luego known en serie.
+
+    El escenario_fn debe aceptar un parámetro opcional `mode='new'`.
+    Si declara `SUPPORTED_MODES` (atributo a nivel módulo), se respeta:
+      • SUPPORTED_MODES=('new',)        → 'known' resulta SKIP claro.
+      • SUPPORTED_MODES=('new','known') → ambos modos válidos.
+    Si no declara, asume soporta solo 'new' (compat retro).
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--phone", default=phone or DEFAULT_PHONE)
     parser.add_argument("--tenant-id", default=tenant_id or DEFAULT_TENANT_ID)
+    parser.add_argument("--mode", choices=("new", "known", "both"),
+                        default="new",
+                        help="new (sin seed), known (seed contact con consent), both")
     parser.add_argument("--json", action="store_true",
                         help="Imprime resultado como JSON (útil para CI).")
     args = parser.parse_args()
@@ -482,22 +496,50 @@ def run_one(scenario_fn: Callable[[str, str], ScenarioResult],
         print("[SKIP] Stack down (connector :8000 no responde)", file=sys.stderr)
         return 0
 
-    print(f"[RUN] {scenario_fn.__name__}", file=sys.stderr)
-    try:
-        res = scenario_fn(args.phone, args.tenant_id)
-    except Exception as exc:
-        res = ScenarioResult(0, scenario_fn.__name__, FAIL,
-                             f"Excepción: {exc}",
-                             error=traceback.format_exc())
+    # Detectar SUPPORTED_MODES del módulo del escenario.
+    scenario_module = sys.modules.get(scenario_fn.__module__)
+    supported = getattr(scenario_module, "SUPPORTED_MODES", ("new",))
 
-    icon = {PASS: "✅", FAIL: "❌", SKIP: "⏭️"}.get(res.status, "?")
-    print(f"  → {icon} {res.status}: {res.message}", file=sys.stderr)
+    modes_to_run = [args.mode] if args.mode != "both" else list(SCENARIO_MODES)
+    results: list[ScenarioResult] = []
+
+    for mode in modes_to_run:
+        if mode not in supported:
+            res = ScenarioResult(0, scenario_fn.__name__, SKIP,
+                f"Modo '{mode}' no aplica para este escenario "
+                f"(SUPPORTED_MODES={supported}).")
+            results.append(res)
+            icon = "⏭️"
+            print(f"[{mode}] {icon} SKIP: {res.message}", file=sys.stderr)
+            continue
+
+        print(f"[{mode}] [RUN] {scenario_fn.__name__}", file=sys.stderr)
+        try:
+            # Llamada compatible: si la función acepta `mode`, lo pasamos;
+            # si no (compat retro), invocamos la signature 2-arg.
+            try:
+                res = scenario_fn(args.phone, args.tenant_id, mode=mode)
+            except TypeError:
+                res = scenario_fn(args.phone, args.tenant_id)
+        except Exception as exc:
+            res = ScenarioResult(0, scenario_fn.__name__, FAIL,
+                                 f"Excepción: {exc}",
+                                 error=traceback.format_exc())
+        results.append(res)
+        icon = {PASS: "✅", FAIL: "❌", SKIP: "⏭️"}.get(res.status, "?")
+        print(f"[{mode}]  → {icon} {res.status}: {res.message}", file=sys.stderr)
 
     if args.json:
         print(json.dumps({
-            "number": res.number, "name": res.name,
-            "status": res.status, "message": res.message,
-            "evidence": res.evidence, "error": res.error,
+            "scenario": scenario_fn.__name__,
+            "modes": modes_to_run,
+            "results": [{
+                "mode": modes_to_run[i] if i < len(modes_to_run) else None,
+                "number": r.number, "name": r.name,
+                "status": r.status, "message": r.message,
+                "evidence": r.evidence, "error": r.error,
+            } for i, r in enumerate(results)],
         }, ensure_ascii=False, default=str))
 
-    return 0 if res.status in (PASS, SKIP) else 1
+    # Exit code: 0 si TODOS PASS o SKIP; 1 si alguno FAIL.
+    return 0 if all(r.status in (PASS, SKIP) for r in results) else 1

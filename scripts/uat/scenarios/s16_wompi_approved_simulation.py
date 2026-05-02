@@ -34,8 +34,12 @@ import e2e_chat  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
+# Locked-mode: depende de orden pending_payment existente (creada por S15).
+# `mode=known` no aplica — el contact existe por la cadena S15.
+SUPPORTED_MODES = ("new",)
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")
     contact = sb.table("contacts").select("id").eq(

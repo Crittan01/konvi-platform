@@ -36,8 +36,11 @@ from lib.harness import (  # noqa: E402
 )
 import e2e_chat  # noqa: E402
 
+# Locked-mode: escenario server-side / seed propio. mode=known no aplica.
+SUPPORTED_MODES = ("new",)
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")

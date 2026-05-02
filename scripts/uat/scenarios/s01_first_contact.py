@@ -1,24 +1,24 @@
 #!/usr/bin/env python3.11
-"""S1 — Primer contacto + saludo (doble verificación rev. 103).
+"""S1 — Primer contacto + saludo.
 
-OBJETIVO: smoke test que valida el saludo en DOS modalidades:
-  (A) Usuario NUEVO   — phone no existe en contacts. Bot saluda
-                          genérico ("Hola, soy Sara Camila...").
-  (B) Usuario CONOCIDO — phone existe con consent_given=true + name.
-                          Bot saluda personalizado ("Hola, Cristian!
-                          Bienvenido de nuevo...").
+OBJETIVO: smoke test que valida saludo del bot.
 
-PASS SOLO si AMBOS sub-tests pasan.
-FAIL si alguno falla (sin outbound, outbound corto, o known user no
-  recibe saludo personalizado).
+MODOS soportados (rev. 103 — flag --mode al runner):
+  • new   (default): phone no existe en contacts. Bot saluda genérico
+                     ("¡Hola! 👋 Soy Sara Camila de KAIU... ¿En qué te
+                     puedo ayudar?").
+  • known          : phone existe con consent+name. Bot saluda
+                     personalizado ("¡Hola, Cristian! 👋 Bienvenido de
+                     nuevo a KAIU...").
 
-Validación común:
-  • Outbound NO vacío (>5 chars).
-  • Bot menciona "KAIU" o "Sara Camila" (firma del negocio).
+PASS: outbound NO vacío + menciona KAIU/Sara Camila.
+  Para mode=known además: incluye nombre del cliente o "de nuevo".
+FAIL: sin outbound, outbound corto, o known no personaliza.
 
-Validación específica known user:
-  • Outbound incluye el nombre del cliente (señal de personalización).
-  • O la palabra "de nuevo" / "vuelves" / "bienvenido(a)".
+Uso:
+  python3.11 scripts/uat/scenarios/s01_first_contact.py --mode=new
+  python3.11 scripts/uat/scenarios/s01_first_contact.py --mode=known
+  python3.11 scripts/uat/scenarios/s01_first_contact.py --mode=both
 """
 from __future__ import annotations
 import sys
@@ -34,14 +34,25 @@ from lib.harness import (  # noqa: E402
 )
 import e2e_chat  # noqa: E402
 
+SUPPORTED_MODES = ("new", "known")
 GREETING = "Hola, buenas tardes"
 
 
-def _send_and_capture(phone: str, tenant_id: str) -> tuple[bool, str]:
-    """Envia un saludo y captura el primer outbound. Retry x1 si vacío."""
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
+    hard_reset(phone, tenant_id)
+    time.sleep(1)
+
+    sb = e2e_chat._supabase()
+    if mode == "known":
+        seed_id = seed_known_contact(sb, tenant_id, phone, name="Cristian")
+        if not seed_id:
+            return ScenarioResult(1, "Primer contacto", FAIL,
+                "Seed contact (mode=known) falló")
+
     t0 = now_iso()
     if not send_inbound(phone, tenant_id, GREETING):
-        return False, "Webhook rechazó inbound"
+        return ScenarioResult(1, "Primer contacto", FAIL,
+            "Webhook rechazó inbound")
     outs = wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)
     if not outs:
         time.sleep(8)
@@ -49,88 +60,38 @@ def _send_and_capture(phone: str, tenant_id: str) -> tuple[bool, str]:
         send_inbound(phone, tenant_id, GREETING)
         outs = wait_outbound(phone, tenant_id, since_ts=t0, timeout_s=45)
     if not outs:
-        return False, "Sin outbound tras 2 intentos"
+        return ScenarioResult(1, "Primer contacto", FAIL,
+            "Sin outbound tras 2 intentos")
+
     text = (outs[-1].get("content") or "").strip()
-    return True, text
-
-
-def _common_validations(text: str) -> list[str]:
-    """Asserts compartidos entre ambos sub-tests."""
+    low = text.lower()
     fails: list[str] = []
+
     if len(text) < 5:
         fails.append(f"outbound corto ({len(text)} chars)")
-    low = text.lower()
     if not any(k in low for k in ("kaiu", "sara camila")):
-        fails.append("no menciona KAIU/Sara Camila (firma del negocio)")
-    return fails
+        fails.append("no menciona KAIU/Sara Camila")
 
-
-def _sub_test_new_user(phone: str, tenant_id: str) -> dict:
-    """Sub-test A: hard_reset, sin seed → bot saluda genérico."""
-    hard_reset(phone, tenant_id)
-    time.sleep(1)
-    ok, text = _send_and_capture(phone, tenant_id)
-    if not ok:
-        return {"status": FAIL, "message": text, "preview": ""}
-    fails = _common_validations(text)
-    low = text.lower()
-    # Para usuario nuevo, NO debe usar "de nuevo" ni nombre específico.
-    if "de nuevo" in low or "bienvenido(a)" in low and "cristian" in low:
-        fails.append("bot saludó como 'de nuevo' a usuario sin seed (asume contexto inexistente)")
-    if fails:
-        return {"status": FAIL, "message": "; ".join(fails), "preview": text[:140]}
-    return {"status": PASS, "message": f"saludo genérico OK ({len(text)} chars)",
-            "preview": text[:140]}
-
-
-def _sub_test_known_user(phone: str, tenant_id: str) -> dict:
-    """Sub-test B: seed contact con consent + name → bot saluda personalizado."""
-    hard_reset(phone, tenant_id)
-    time.sleep(1)
-    sb = e2e_chat._supabase()
-    seed_id = seed_known_contact(sb, tenant_id, phone, name="Cristian")
-    if not seed_id:
-        return {"status": FAIL, "message": "seed contact falló", "preview": ""}
-    ok, text = _send_and_capture(phone, tenant_id)
-    if not ok:
-        return {"status": FAIL, "message": text, "preview": ""}
-    fails = _common_validations(text)
-    low = text.lower()
-    # Conocido: debe usar nombre o "de nuevo" / "bienvenido".
-    personalized = (
-        "cristian" in low or "de nuevo" in low or "vuelves" in low
-        or "bienvenido(a) de nuevo" in low
-    )
-    if not personalized:
-        fails.append(
-            "saludo no personalizado para known user "
-            "(esperado nombre, 'de nuevo' o 'vuelves')"
+    if mode == "new":
+        # Para new: NO debe haber personalización (no nombre, no "de nuevo").
+        if "de nuevo" in low or "vuelves" in low:
+            fails.append("bot saludó como 'de nuevo' a usuario sin seed")
+    elif mode == "known":
+        # Para known: debe haber personalización.
+        personalized = (
+            "cristian" in low or "de nuevo" in low or "vuelves" in low
+            or "bienvenido" in low
         )
+        if not personalized:
+            fails.append("saludo NO personalizado para known user "
+                         "(esperado nombre, 'de nuevo' o 'bienvenido')")
+
+    evidence = {"mode": mode, "preview": text[:160]}
     if fails:
-        return {"status": FAIL, "message": "; ".join(fails), "preview": text[:140]}
-    return {"status": PASS, "message": f"saludo personalizado OK ({len(text)} chars)",
-            "preview": text[:140]}
-
-
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
-    new_result = _sub_test_new_user(phone, tenant_id)
-    known_result = _sub_test_known_user(phone, tenant_id)
-
-    evidence = {
-        "new_user": new_result,
-        "known_user": known_result,
-    }
-
-    if new_result["status"] == FAIL:
-        return ScenarioResult(1, "Primer contacto (doble verif)", FAIL,
-            f"Sub-test NEW USER FAIL: {new_result['message']}", evidence=evidence)
-    if known_result["status"] == FAIL:
-        return ScenarioResult(1, "Primer contacto (doble verif)", FAIL,
-            f"Sub-test KNOWN USER FAIL: {known_result['message']}", evidence=evidence)
-
-    return ScenarioResult(1, "Primer contacto (doble verif)", PASS,
-        "Saludos OK: nuevo (genérico) + conocido (personalizado)",
-        evidence=evidence)
+        return ScenarioResult(1, f"Primer contacto [{mode}]", FAIL,
+            "; ".join(fails), evidence=evidence)
+    return ScenarioResult(1, f"Primer contacto [{mode}]", PASS,
+        f"Saludo {mode} OK ({len(text)} chars)", evidence=evidence)
 
 
 if __name__ == "__main__":

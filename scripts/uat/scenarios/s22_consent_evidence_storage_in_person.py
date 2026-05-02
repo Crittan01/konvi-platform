@@ -32,11 +32,14 @@ from lib.harness import (  # noqa: E402
 )
 import e2e_chat  # noqa: E402
 
+# Locked-mode: escenario server-side / seed propio. mode=known no aplica.
+SUPPORTED_MODES = ("new",)
+
 BUCKET = "consent-evidence"
 DUMMY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
 
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     sb = e2e_chat._supabase()  # service_role client (bypasea RLS).
 
     # 1. Verificar bucket existe + shape correcto.

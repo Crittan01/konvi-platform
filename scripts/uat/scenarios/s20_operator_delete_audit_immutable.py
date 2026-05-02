@@ -34,8 +34,11 @@ from lib.harness import (  # noqa: E402
 )
 import e2e_chat  # noqa: E402
 
+# Locked-mode: escenario server-side / seed propio. mode=known no aplica.
+SUPPORTED_MODES = ("new",)
 
-def scenario(phone: str, tenant_id: str) -> ScenarioResult:
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
     sb = e2e_chat._supabase()
     digits = phone.lstrip("+")
@@ -99,21 +102,26 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
         return ScenarioResult(20, "Delete audit immutable", FAIL,
             f"source={target_row.get('source')!r} (esperado 'tenant_console')")
 
-    # FASE 4 — Probar inmutabilidad: UPDATE debe fallar.
+    # FASE 4 — Probar inmutabilidad: UPDATE y DELETE deben fallar
+    # con P0001 ('consent_audit_log es append-only').
+    audit_row_id = target_row.get("id")
+    if not audit_row_id:
+        return ScenarioResult(20, "Delete audit immutable", FAIL,
+            "fetch_audit_events no devolvió `id` (helper roto)")
+
     update_blocked = False
     try:
         sb.table("consent_audit_log").update({"event": "granted"}).eq(
-            "id", target_row.get("contact_id")
+            "id", audit_row_id
         ).execute()
     except Exception as e:
         msg = str(e).lower()
         update_blocked = "append-only" in msg or "p0001" in msg
 
-    # DELETE debe fallar.
     delete_blocked = False
     try:
         sb.table("consent_audit_log").delete().eq(
-            "id", target_row.get("contact_id")
+            "id", audit_row_id
         ).execute()
     except Exception as e:
         msg = str(e).lower()

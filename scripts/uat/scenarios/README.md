@@ -59,6 +59,7 @@ criterio PASS/FAIL/SKIP visibles al abrir el archivo.
 | 21 | `s21_form_add_unconsented_operator.py` | **Form Add SaaS B2B** | Insert con PII + `consent_given=false` aceptado por DB (rev. 103 quitó guard PII-sin-consent) |
 | 22 | `s22_consent_evidence_storage_in_person.py` | **F10 Storage** | Bucket privado consent-evidence + upload PDF + signed URL con TTL |
 | 23 | `s23_renewals_cap_50.py` | **Cap evidence** | 60 entries → cap a 50 últimas + markers truncated_at + truncated_count |
+| 24 | `s24_casual_real_world_chat.py` | **Robustez lingüística** | Cliente colombiano REAL: muletillas ("parce", "dale"), saludo "buenas qué más", consent casual ("claro que sí, acepto"), PII compuesta. Certifica que el bot NO depende de respuestas canónicas |
 
 **Críticos (rev. 91)**: S6, S9, S12, S15. Estos validan la captura de datos
 y el cierre transaccional. Si fallan, hay regresión arquitectónica.
