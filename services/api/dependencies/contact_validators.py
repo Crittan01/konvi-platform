@@ -12,22 +12,27 @@ from typing import Optional
 
 
 # Tipos de documento aceptados por Wompi para Colombia.
-# DNI no aplica (es Argentina/España); RG es Brasil. Para CO usamos solo:
-DOCUMENT_TYPES_CO = frozenset({"CC", "CE", "NIT", "PP", "TI", "OTHER"})
+# DNI no aplica (es Argentina/España); RG es Brasil.
+#
+# Rev. 102 — TI (Tarjeta de Identidad) removido: corresponde a menores
+# de edad. Decreto 1377/2013 Art. 7 prohíbe el tratamiento de datos de
+# menores sin autorización del representante legal — flujo no soportado
+# por el sistema (F8 backlog si se requiere).
+DOCUMENT_TYPES_CO = frozenset({"CC", "CE", "NIT", "PP", "OTHER"})
 
 
-# Reglas de longitud por tipo (Colombia, conservadoras).
-# CC: 6-12 dígitos. CE: 4-7 dígitos.
-# NIT: 9-11 (sin DV) o con DV "9.999.999.999-1".
-# PP: alfanumérico 6-15.
-# TI: 8-11 dígitos.
-# OTHER: 3-30 caracteres alfanuméricos.
+# Reglas de longitud por tipo — rangos estrictos a realidad colombiana
+# (rev. 102 — antes eran laxos):
+#   CC  6-10 dígitos (cédula CO máx. 10)
+#   CE  6-7 dígitos (Migración Colombia)
+#   NIT 9-11 chars (9 dígitos + DV opcional con guion)
+#   PP  6-15 alfanumérico (cubre extranjeros)
+#   OTHER 3-30 alfanumérico
 DOC_LEN_RULES = {
-    "CC":    {"min": 6,  "max": 12, "digits_only": True},
-    "CE":    {"min": 4,  "max": 8,  "digits_only": True},
-    "NIT":   {"min": 9,  "max": 13, "digits_only": False},  # admite "-1" del DV
+    "CC":    {"min": 6,  "max": 10, "digits_only": True},
+    "CE":    {"min": 6,  "max": 7,  "digits_only": True},
+    "NIT":   {"min": 9,  "max": 11, "digits_only": False},  # admite "-DV"
     "PP":    {"min": 6,  "max": 15, "digits_only": False},
-    "TI":    {"min": 8,  "max": 11, "digits_only": True},
     "OTHER": {"min": 3,  "max": 30, "digits_only": False},
 }
 

@@ -68,7 +68,33 @@ Aplicamos:
 - Audit inmutable de accesos a tu PII.
 - Tokenización de número de documento (hash + last4 visible).
 
-## 8. Cambios a esta política
+## 8. Menores de edad
+
+**No procesamos datos de menores de edad sin autorización del representante legal.**
+
+Marco normativo: Ley 1581/2012 + **Decreto 1377/2013 Art. 7** + Sentencia
+C-748/2011 de la Corte Constitucional.
+
+Nuestro sistema:
+
+- No acepta el tipo de documento "Tarjeta de Identidad" (TI) en el
+  registro de contactos. Los pedidos de menores deben registrarse con
+  los datos del representante legal (padre, madre o tutor) como
+  contacto principal.
+- El bot de WhatsApp detecta cuando el cliente declara ser menor de
+  edad ("tengo 14 años", "soy menor", etc.) o lo sugiere por contexto
+  ("mi mamá me dijo", "tengo permiso de mis padres") y NO continúa
+  el flujo comercial. Pide al representante legal que escriba al
+  chat y escala la conversación a un operador humano.
+- Si por error se registra a un menor sin autorización, el operador
+  humano debe ejecutar Anonimizar (Art. 15) sobre el contacto y
+  registrar la decisión en `consent_audit_log` con razón explícita.
+
+Si eres menor de edad: por favor, pide a tu padre, madre o tutor que
+nos escriba para gestionar tu compra. No podemos procesar tu solicitud
+directamente.
+
+## 9. Cambios a esta política
 
 Te notificaremos por WhatsApp con 30 días de antelación si la política
 cambia materialmente.

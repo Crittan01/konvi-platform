@@ -5,13 +5,19 @@
 // (apps/web/lib/validators/document.ts + services/api/dependencies/
 // contact_validators.py).
 //
-// Reglas por tipo:
-//   CC    6-12 dígitos · solo números
-//   CE    4-8  dígitos · solo números
-//   NIT   9-13 chars   · números + guion (DV)
-//   PP    6-15 chars   · alfanumérico
-//   TI    8-11 dígitos · solo números
+// Reglas estrictas por tipo (ajustadas a realidad colombiana):
+//   CC    6-10 dígitos · solo números
+//   CE    6-7  dígitos · solo números (Migración Colombia)
+//   NIT   9-11 chars   · 9 dígitos + opcionalmente -DV
+//   PP    6-15 chars   · alfanumérico (cubre pasaportes extranjeros)
 //   OTHER 3-30 chars   · alfanumérico
+//
+// **TI removido (rev. 102)**: la Tarjeta de Identidad corresponde a
+// menores de edad (7-17 años). Decreto 1377/2013 Art. 7 prohíbe el
+// tratamiento de datos de menores sin autorización del representante
+// legal — flujo no soportado por este sistema. Si llega solicitud
+// formal de un tenant que vende a menores, se implementa flujo
+// completo de representante legal (Sprint dedicado, F8 backlog).
 //
 // Cuando el operador cambia el select, el input ajusta:
 //   - inputMode (numeric|text)
@@ -25,7 +31,7 @@ import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-export type DocType = 'CC' | 'CE' | 'NIT' | 'PP' | 'TI' | 'OTHER' | ''
+export type DocType = 'CC' | 'CE' | 'NIT' | 'PP' | 'OTHER' | ''
 
 type RuleSpec = {
   min: number
@@ -41,44 +47,36 @@ type RuleSpec = {
 
 const RULES: Record<Exclude<DocType, ''>, RuleSpec> = {
   CC: {
-    min: 6, max: 12, digitsOnly: true, allowDash: false,
+    min: 6, max: 10, digitsOnly: true, allowDash: false,
     inputMode: 'numeric',
-    pattern: '\\d{6,12}',
+    pattern: '\\d{6,10}',
     placeholder: '1234567890',
-    title: 'Cédula: solo dígitos, entre 6 y 12 caracteres',
-    example: '6 a 12 dígitos',
+    title: 'Cédula: solo dígitos, entre 6 y 10 caracteres',
+    example: '6 a 10 dígitos',
   },
   CE: {
-    min: 4, max: 8, digitsOnly: true, allowDash: false,
+    min: 6, max: 7, digitsOnly: true, allowDash: false,
     inputMode: 'numeric',
-    pattern: '\\d{4,8}',
-    placeholder: '12345678',
-    title: 'Cédula de extranjería: solo dígitos, entre 4 y 8 caracteres',
-    example: '4 a 8 dígitos',
+    pattern: '\\d{6,7}',
+    placeholder: '1234567',
+    title: 'Cédula de extranjería: solo dígitos, 6 o 7 caracteres',
+    example: '6 o 7 dígitos',
   },
   NIT: {
-    min: 9, max: 13, digitsOnly: false, allowDash: true,
+    min: 9, max: 11, digitsOnly: false, allowDash: true,
     inputMode: 'text',
-    pattern: '\\d{8,12}-?\\d?',
+    pattern: '\\d{9}(-\\d)?',
     placeholder: '900123456-7',
-    title: 'NIT: 8-12 dígitos, opcionalmente guion + dígito de verificación',
-    example: '8-12 dígitos + DV opcional',
+    title: 'NIT: 9 dígitos, opcionalmente guion + dígito de verificación (1 dígito)',
+    example: '9 dígitos + DV opcional',
   },
   PP: {
     min: 6, max: 15, digitsOnly: false, allowDash: false,
     inputMode: 'text',
     pattern: '[A-Za-z0-9]{6,15}',
     placeholder: 'AB123456',
-    title: 'Pasaporte: alfanumérico, entre 6 y 15 caracteres',
+    title: 'Pasaporte: alfanumérico, entre 6 y 15 caracteres (varía por país)',
     example: '6 a 15 alfanuméricos',
-  },
-  TI: {
-    min: 8, max: 11, digitsOnly: true, allowDash: false,
-    inputMode: 'numeric',
-    pattern: '\\d{8,11}',
-    placeholder: '12345678901',
-    title: 'Tarjeta de identidad: solo dígitos, entre 8 y 11 caracteres',
-    example: '8 a 11 dígitos',
   },
   OTHER: {
     min: 3, max: 30, digitsOnly: false, allowDash: true,
@@ -156,7 +154,6 @@ export default function DocumentFields({
           <option value="CE">CE{layout === 'compact' ? '' : ' (Extranjería)'}</option>
           <option value="NIT">NIT{layout === 'compact' ? '' : ' (Empresa)'}</option>
           <option value="PP">PP{layout === 'compact' ? '' : ' (Pasaporte)'}</option>
-          <option value="TI">TI{layout === 'compact' ? '' : ' (T. Identidad)'}</option>
           <option value="OTHER">Otro</option>
         </select>
       </div>

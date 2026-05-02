@@ -465,6 +465,61 @@ def _detect_rectification_intent(text: str) -> bool:
     return False
 
 
+# Rev. 102 — Detector pre-LLM de minoría de edad.
+# Decreto 1377/2013 Art. 7 prohíbe el tratamiento de datos de menores
+# sin autorización del representante legal. Si el cliente declara ser
+# menor (texto explícito o número de edad < 18), el bot NO continúa el
+# flujo comercial: pide formalmente datos del representante legal y
+# escala a operador humano.
+#
+# Conservador: falsos positivos (e.g., "tengo 16 productos") son
+# aceptables porque escalan a humano que decide. Falsos negativos NO
+# son aceptables porque generan tratamiento ilegal de datos de menor.
+_MINOR_EXPLICIT_PHRASES = (
+    "soy menor de edad", "soy menor", "soy menor de 18",
+    "no tengo mayoria de edad", "no soy mayor de edad",
+    "soy un nino", "soy una nina", "soy un menor",
+    "estoy en colegio", "estoy en bachillerato",
+    "mi mama me dijo", "mi papa me dijo",  # señales contextuales
+    "tengo permiso de mis padres", "tengo permiso de mi mama",
+    "tengo permiso de mi papa",
+)
+
+# Regex: "tengo N años" / "ya tengo N" / "N años de edad" donde N es número
+# Captura: \b(\d{1,2})\s*(?:años|anos|year|años de edad|anos de edad)
+_AGE_REGEX = re.compile(
+    r"\b(?:tengo|tengo casi|tengo apenas|cumpli|ya tengo)?\s*(\d{1,2})\s*(?:años|anos|añitos|anitos|year|years)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_minor_intent(text: str) -> bool:
+    """Rev. 102 — True si el cliente declara/sugiere ser menor de edad.
+
+    Habeas Data Decreto 1377/2013 Art. 7. Conservador: prefiere falso
+    positivo (escalar a humano) sobre falso negativo (tratar datos de
+    menor sin autorización).
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text)
+
+    # Frases explícitas
+    if any(p in normalized for p in _MINOR_EXPLICIT_PHRASES):
+        return True
+
+    # Edad numérica: si menciona "tengo N años" con N entre 1 y 17, trigger
+    for match in _AGE_REGEX.finditer(normalized):
+        try:
+            age = int(match.group(1))
+        except (ValueError, IndexError):
+            continue
+        if 1 <= age < 18:
+            return True
+
+    return False
+
+
 def _mask_value(value: Optional[str]) -> str:
     """Mask sensible value, mostrando solo primeros 2 + últimos 4 chars."""
     if not value:
@@ -5152,6 +5207,71 @@ async def build_and_run_orchestration(
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.warning(
                 "[META_COMMERCE] Solicitud medicamento detectada conv=%s — bot rechazó cordialmente",
+                conversation_id,
+            )
+            return
+
+        # ── 2.45 Detección determinística de minoría de edad (rev. 102) ────────
+        # Prioridad máxima absoluta: Decreto 1377/2013 Art. 7 prohíbe tratamiento
+        # de datos de menores sin autorización del representante legal. Si el
+        # cliente declara ser menor, NO continuamos NINGÚN flujo comercial —
+        # respondemos cordialmente pidiendo el representante + escalamos a humano.
+        if _detect_minor_intent(content):
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=(
+                    "Por nuestra política de protección de datos no podemos "
+                    "continuar con la compra directamente contigo (Habeas Data "
+                    "Ley 1581/2012, Decreto 1377 Art. 7). Necesitamos que tu "
+                    "padre, madre o tutor legal nos escriba a este chat para "
+                    "autorizar la operación. Mientras tanto, un asesor del "
+                    "equipo te contactará si lo necesitas."
+                ),
+            )
+            # Audit: queda registro de que el cliente declaró minoría de edad y
+            # que NO se procesó la solicitud comercial.
+            try:
+                phone_for_audit = None
+                if contact_id:
+                    p_res = supabase.table("contacts").select("phone").eq(
+                        "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+                    if p_res.data:
+                        phone_for_audit = p_res.data[0].get("phone")
+                # Reuse del helper de consent audit (event=rectified pendiente
+                # review parece el más cercano semánticamente; alternativa:
+                # extender el CHECK del enum si se requiere event específico).
+                _log_consent_event(
+                    supabase,
+                    tenant_id=tenant_id,
+                    contact_id=contact_id or "00000000-0000-0000-0000-000000000000",
+                    phone=phone_for_audit,
+                    event="rectified",
+                    source="whatsapp",
+                    conversation_id=conversation_id,
+                    evidence={
+                        "reason": "minor_age_declared",
+                        "law": "Decreto 1377/2013 Art. 7",
+                        "action": "escalated_to_human_pending_legal_representative",
+                        "raw_message_excerpt": content[:200],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("[MINOR] audit log falló: %s", exc)
+            # Escala a humano: marca conversación como takeover para que un
+            # operador adulto retome (validación de identidad del representante
+            # requiere criterio humano).
+            try:
+                supabase.table("conversations").update({
+                    "status": CONVERSATION_STATUS_HUMAN_TAKEOVER,
+                }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            except Exception as exc:
+                logger.warning("[MINOR] escalation status update falló: %s", exc)
+            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            logger.warning(
+                "[MINOR] Detectada minoría de edad conv=%s — flujo comercial bloqueado, escalado a humano",
                 conversation_id,
             )
             return
