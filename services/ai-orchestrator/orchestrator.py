@@ -317,6 +317,54 @@ def _detect_data_update_intent(text: str) -> Optional[str]:
     return "general"
 
 
+# Rev. 103 — Pre-LLM extractor de phone alternativo de envío.
+# Estrategia: requiere keyword DISCRIMINANTE (alterno, recibe, otra persona,
+# actualiza, etc.) ANTES de extraer 10 dígitos. Sin keyword → asume el
+# cliente solo dio su WhatsApp normal y NO extrae (evita falsos positivos).
+_SHIPPING_KEYWORDS = (
+    "alternativo", "alterno", "de envio", "de envío", "de entrega",
+    "de contacto", "otra persona", "lo recibe", "la recibe",
+    "lo va a recibir", "la va a recibir", "lo recibira", "la recibira",
+    "actualiza el celular", "actualizar el celular",
+    "actualiza mi celular", "actualizar mi celular",
+    "actualiza el numero", "actualiza el número",
+    "adicional", "nuevo numero", "nuevo número",
+    "diferente", "secundario",
+    "su celular es", "su numero es", "su número es",
+)
+
+_SHIPPING_PHONE_DIGITS_RE = re.compile(r"(?:\+?57\s*)?(\d{10})\b")
+
+
+def _detect_shipping_phone_update(text: str) -> Optional[str]:
+    """Rev. 103 — Pre-LLM: extrae phone alternativo de envío SOLO si el
+    cliente lo menciona con keyword discriminante.
+
+    Patrones cubiertos (requieren keyword + dígitos):
+      - "celular alternativo: 3001234567"
+      - "actualiza mi celular: 3001234567"
+      - "el pedido lo recibe mi mamá, su celular es 3001234567"
+      - "número adicional 3009998877"
+
+    Defensivo: si el cliente solo da su WhatsApp normal sin keyword
+    contextual, NO extrae (evita sobrescribir contacts.phone).
+
+    Retorna 10 dígitos sin prefijo (+57 implícito) o None.
+    """
+    if not text:
+        return None
+    normalized = _normalize_text_simple(text).lower()
+    if not any(kw in normalized for kw in _SHIPPING_KEYWORDS):
+        return None
+    m = _SHIPPING_PHONE_DIGITS_RE.search(text)
+    if not m:
+        return None
+    digits = m.group(1)
+    if len(digits) != 10 or digits[0] == "0":
+        return None
+    return digits
+
+
 # Rev. 83: detección de cancelación de pedido. UX: el cliente que cancela
 # NO debe ser escalado a humano (sería molesto). Bot acusa recibo cordial,
 # cierra el cart, deja la puerta abierta para volver.
@@ -612,6 +660,70 @@ def _tokenize_for_consent(normalized: str) -> set[str]:
     token queda como "sí," (con coma) y el set no lo reconoce.
     """
     return {re.sub(r"[,.!?;:]+", "", tok) for tok in normalized.split() if tok}
+
+
+# Rev. 103 — Pre-LLM gate de confirmación de pedido. Defensivo contra
+# Gemini marcando intent=order_acknowledgment cuando el cliente envía
+# texto largo (dump PII, pregunta, etc.) que NO es confirmación real.
+_ORDER_CONFIRM_PHRASES: tuple[str, ...] = (
+    "si confirmo", "sí confirmo", "confirmo el pedido", "confirmo la compra",
+    "confirmo", "confirma", "confirmado", "confirmar",
+    "si esta bien", "sí está bien", "esta bien", "está bien",
+    "si listo", "sí listo", "listo confirmo", "ok confirmo",
+    "perfecto confirmo", "vale confirmo", "dale confirmo",
+    "si por favor", "sí por favor", "afirmativo",
+    "claro confirmo", "claro que sí confirmo", "claro que si confirmo",
+)
+_ORDER_CONFIRM_TOKENS: set[str] = {
+    "si", "sí", "confirmo", "confirmar", "ok", "vale", "dale", "listo",
+    "perfecto", "afirmativo", "claro",
+}
+# Pistas de PII / texto no-confirmatorio (si están, NO es confirmación pura).
+_NON_CONFIRM_HINTS: tuple[str, ...] = (
+    "@", "soy ", "mi nombre", "mi correo", "mi email", "mi cédula", "mi cedula",
+    "mi documento", "mi direccion", "mi dirección", "calle", "carrera",
+    "diagonal", "transversal", "barrio", "cc ", "ti ", "ce ",
+)
+
+
+def _detect_order_confirmation(text: str) -> bool:
+    """Rev. 103 — Pre-LLM: True si el cliente confirma EXPLÍCITAMENTE.
+
+    Cuando el cliente ya recibió `📋 Resumen + ¿Confirmas?`, el siguiente
+    inbound debe ser una afirmación corta ("sí", "confirmo", "ok") sin
+    PII. Si trae datos personales (email, dirección, "mi cédula", etc.)
+    es probablemente un dump duplicado u otra cosa — NO confirmación.
+
+    Bug ref: T9-T10 en log conv 573125835649_20260502 — el cliente
+    "envió" el dump dos veces (replay UAT runner) y Gemini interpretó el
+    segundo como order_acknowledgment, generando link de pago sin
+    confirmación real.
+
+    Defensas:
+      • PII detectada → False (no es confirmación pura).
+      • Texto > 80 chars → False (probablemente otro contenido).
+      • Negaciones explícitas → False.
+      • Phrase canónica ("sí confirmo", "confirmo", "ok") → True.
+      • Token único ("si", "ok", "vale") en mensaje corto → True.
+    """
+    if not text:
+        return False
+    normalized = _normalize_text_simple(text).lower()
+    # Defensa 1: PII presente → no es confirmación pura.
+    if any(hint in normalized for hint in _NON_CONFIRM_HINTS):
+        return False
+    # Defensa 2: texto largo → probablemente no es solo confirmación.
+    if len(normalized) > 80:
+        return False
+    # Defensa 3: negación explícita.
+    if any(phrase in normalized for phrase in _CONSENT_NO_PHRASES):
+        return False
+    # Frases canónicas de confirmación.
+    if any(phrase in normalized for phrase in _ORDER_CONFIRM_PHRASES):
+        return True
+    # Tokens cortos.
+    tokens = _tokenize_for_consent(normalized)
+    return bool(tokens & _ORDER_CONFIRM_TOKENS) and not bool(tokens & _CONSENT_NO_TOKENS)
 
 
 def _detect_consent_yes(text: str) -> bool:
@@ -1157,7 +1269,7 @@ def _fetch_contact_for_phone(
     phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
     query = (
         supabase.table("contacts")
-        .select("id, consent_given, name, email, address, document_type, document_number, phone")
+        .select("id, consent_given, name, email, address, document_type, document_number, phone, shipping_phone")
         .eq("tenant_id", tenant_id)
     )
     if hasattr(query, "or_"):
@@ -1331,6 +1443,16 @@ class OrchestratorOutput(BaseModel):
     extracted_document_number: Optional[str] = Field(
         default=None,
         description="Número de documento sin puntos ni espacios. Para NIT puede incluir '-DV' al final."
+    )
+    # Rev. 103 — phone alternativo para envío (separado del WhatsApp).
+    extracted_shipping_phone: Optional[str] = Field(
+        default=None,
+        description=(
+            "Celular ALTERNATIVO para envío SOLO cuando el cliente menciona "
+            "explícitamente que el pedido lo recibe OTRA persona o pide ACTUALIZAR "
+            "el celular del envío. Solo dígitos (10 dígitos Colombia, sin +57). "
+            "Ej: '3001234567'. Vacío si el cliente solo da su WhatsApp normal."
+        )
     )
     total_in_cents: Optional[int] = Field(
         default=None,
@@ -1560,6 +1682,12 @@ async def _send_outbound_text(
     if not customer_phone:
         logger.error("[OUTBOUND] No customer_phone for conversation_id=%s", conversation_id)
         return False
+
+    # Rev. 103 — defensa final: si el outbound es resumen del pedido y
+    # contiene "Celular: null/None", reemplazar con customer_phone real.
+    # Cubre el caso donde el LLM compone el resumen viendo phone:null en
+    # el contexto JSON (no pasa por el override determinístico).
+    text = _fix_null_phone_in_summary(text, customer_phone)
 
     meta_message_id = await send_whatsapp_message(
         tenant_id=tenant_id,
@@ -2457,6 +2585,36 @@ def _resolve_display_state(
     return "CATALOG_MODE"
 
 
+def _fix_null_phone_in_summary(text: str, customer_phone: Optional[str]) -> str:
+    """Rev. 103 — defensa final: reemplaza 'Celular: null' / 'None' por
+    el phone real del WhatsApp del cliente cuando aparece en un resumen
+    de pedido.
+
+    Este post-process se ejecuta en el outbound antes de enviar a Meta.
+    Cubre el caso donde el LLM compone el resumen y copia 'null' que vio
+    en el contexto JSON (`contact_record.phone: null`), saltándose el
+    override determinístico de `_build_order_summary_text`.
+
+    Idempotente: si el outbound ya tiene un phone válido en la línea
+    Celular, no toca.
+    """
+    if not text or "Resumen de tu pedido" not in text:
+        return text
+    if not customer_phone:
+        return text
+    formatted = _format_phone_for_summary(customer_phone)
+    if not formatted:
+        return text
+    # Reemplazar "* Celular: null|None|undefined" (case insensitive) +
+    # variantes con espacios extra. NO toca si ya hay un phone real.
+    return re.sub(
+        r"(\*\s*Celular:\s*)(?:null|none|undefined)\b",
+        rf"\1{formatted}",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
 def _format_phone_for_summary(phone: Optional[str]) -> str:
     """Formatea el celular para mostrar en el resumen.
 
@@ -2465,6 +2623,11 @@ def _format_phone_for_summary(phone: Optional[str]) -> str:
     de generar el link de pago. Envía y Wompi requieren este dato.
     """
     if not phone:
+        return ""
+    # Defensivo: rechazar cadenas como "null" / "none" / "undefined" que
+    # pueden colarse desde JSON parseado o coerción str(None) en algún path.
+    phone_str = str(phone).strip().lower()
+    if phone_str in ("null", "none", "undefined", ""):
         return ""
     digits = re.sub(r"\D", "", str(phone))
     if not digits:
@@ -2621,6 +2784,11 @@ def _build_order_summary_text(
     name = str(contact.get("name") or "").strip()
     email = str(contact.get("email") or "").strip()
     phone = _format_phone_for_summary(contact.get("phone"))
+    # Rev. 103 — phone alternativo de envío. Solo se muestra si difiere
+    # del WhatsApp (caso "compro para otra persona").
+    shipping_phone_raw = contact.get("shipping_phone")
+    shipping_phone = _format_phone_for_summary(shipping_phone_raw)
+    has_alternate_phone = bool(shipping_phone) and shipping_phone != phone
     doc_t = str(contact.get("document_type") or "").strip().upper()
     doc_n = str(contact.get("document_number") or "").strip()
     address_line = _format_address_for_summary(contact.get("address"))
@@ -2633,7 +2801,12 @@ def _build_order_summary_text(
         if email:
             lines.append(f"• Correo: {email}")
         if phone:
-            lines.append(f"• Celular: {phone}")
+            if has_alternate_phone:
+                # Cliente dio shipping alternativo — diferenciar ambos.
+                lines.append(f"• Celular (WhatsApp): {phone}")
+                lines.append(f"• Celular (envío): *{shipping_phone}*")
+            else:
+                lines.append(f"• Celular: {phone}")
         if doc_t and doc_n:
             lines.append(f"• Documento: {doc_t} {doc_n}")
         if address_line:
@@ -3018,7 +3191,7 @@ _TONO_INSTRUCCIONES: dict[str, str] = {
 _HUMAN_STYLE_GUIDE = """
 GUÍA DE ESTILO HUMANO (aplica siempre, encima del tono):
 - Nunca uses fórmulas robóticas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida".
-- NO RE-SALUDES dentro de la misma conversación. "¡Hola!" SOLO en el primer mensaje saliente. Si ya hubo intercambio previo, abre con conector ("Claro", "Listo", "Perfecto", "Entendido", "Genial") o entra directo al contenido — nunca con "¡Hola!".
+- NO RE-SALUDES dentro de la misma conversación. "¡Hola!" SOLO en el primer mensaje saliente cuando el cliente saluda ("hola", "buenas"). Si el primer mensaje del cliente es una PREGUNTA DIRECTA (sin saludo, ej: "¿Qué productos tienes?", "¿Cuál es la política de devoluciones?"), abre con un conector cordial ("Claro", "Por supuesto", "Te cuento", "Con gusto", "Listo") + va al grano — NO uses "¡Hola!" si el cliente no saludó. Si ya hubo intercambio previo, abre con conector ("Claro", "Listo", "Perfecto", "Entendido", "Genial") o entra directo al contenido — nunca con "¡Hola!".
 - No repitas la misma estructura sintáctica en mensajes consecutivos: varía inicios, transiciones y cierres.
 - Adáptate al registro del cliente: si escribe corto e informal, responde corto e informal; si escribe formal, mantén formalidad.
 - Confirma comprensión rotando expresiones: "Listo", "Perfecto", "Entendido", "Ya veo", "Claro" — no repitas la misma dos veces seguidas.
@@ -3889,8 +4062,9 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
     if not role_desc:
         role_desc = f"Asistente comercial cordial de {tenant_name}."
 
-    # Personalización por cliente conocido — el bot debe saludar por nombre
-    # cuando hay contact con consent y el cliente solo está saludando.
+    # Personalización por cliente conocido — el bot debe usar el primer
+    # nombre cuando hay contact con consent. Aplica al PRIMER mensaje de
+    # la conversación, sea saludo o pregunta directa (rev. 103: consistencia).
     _kc_first_name = _extract_first_name(
         contact_record.get("name") if isinstance(contact_record, dict) else None
     )
@@ -3898,10 +4072,12 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
     if _kc_first_name and isinstance(contact_record, dict) and contact_record.get("consent_given"):
         known_customer_block = (
             f"\nCLIENTE CONOCIDO: {_kc_first_name}.\n"
-            f"- Si el cliente solo saluda ('hola', 'buenas'), salúdalo por su primer nombre "
-            f"(ej. \"¡Hola, {_kc_first_name}!\") — es cliente recurrente y aprecia ese reconocimiento.\n"
-            f"- En el resto de la conversación, usa el primer nombre con moderación (1-2 veces máximo "
-            f"para no sonar artificial).\n"
+            f"- En el PRIMER mensaje de respuesta de la conversación, SIEMPRE incluye "
+            f"el primer nombre del cliente — sea saludo ('¡Hola, {_kc_first_name}! 👋 ...') "
+            f"o pregunta directa ('Claro, {_kc_first_name}, te muestro...'). "
+            f"Es cliente recurrente y aprecia ese reconocimiento.\n"
+            f"- En el resto de la conversación (mensajes posteriores), usa el primer nombre "
+            f"con moderación (1-2 veces máximo) para no sonar artificial.\n"
         )
 
     _greet_phrase, _greet_label = _co_time_of_day_greeting()
@@ -3958,7 +4134,7 @@ PARA CLIENTE CONOCIDO:
 - Saludo SIEMPRE por primer nombre. Ej: "¡Hola, *Cristian*! 👋 Bienvenido(a) de nuevo a *{tenant_name}*. ¿Qué buscas hoy?"
 - NO repreguntes consent (ya está dado).
 - NO repreguntes nombre, correo, documento, dirección — los datos están en DB.
-- En el RESUMEN PRE-CONFIRMACIÓN incluye sus datos guardados como BULLETS `*` (todos en la misma sección, formato uniforme — NO uses cita `>` para datos del resumen). Pregunta SIEMPRE: "¿Confirmas estos datos o quieres actualizar alguno (dirección, correo, documento)?". Esto cubre que el cliente pueda querer envío a otra dirección esta vez.
+- En el RESUMEN PRE-CONFIRMACIÓN incluye sus datos guardados como BULLETS `*` (todos en la misma sección, formato uniforme — NO uses cita `>` para datos del resumen). Pregunta SIEMPRE: "¿Confirmas estos datos o quieres actualizar alguno? (dirección, correo, celular si el envío va a otra persona, documento)". Esto cubre que el cliente pueda querer envío a otra dirección esta vez.
 - Si el cliente tiene `last_cart` abandonado (<7 días en `customer_context`) → en el primer turno de intent transaccional, OFRECE retomar: "Veo que tenías *X items* en tu carrito reciente. ¿Lo retomamos o nuevo pedido?".
 - Si el cliente tiene `last_orders` con frecuencia ≥ 3 compras del mismo kit → ofrece reorder rápido: "¿Repetir tu kit habitual (*X*)?".
 - Si tiene `pending_payment_orders` → "Tienes un pedido pendiente de pago (*$X COP* desde fecha). ¿Lo retomas o creas uno nuevo?".
@@ -4132,7 +4308,7 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 - Cuando hay UN solo item, igual envuelve en sección con título en negrita.
 - LISTAS DE 3+ ÍTEMS → SIEMPRE estructura con bullets `* ` y agrupa por categoría con título en negrita. NO uses prosa plana ("Tenemos X, Y, Z y también A, B, C") cuando hay categorías o múltiples items — eso es plano y poco legible.
 - Respuestas CORTAS (1-2 oraciones, saludo, agradecimiento) → prosa natural OK.
-- LISTADO DE CATÁLOGO AMPLIO (rev. 103 — minimalismo agresivo, ahorro tokens):
+- LISTADO DE CATÁLOGO AMPLIO (rev. 103 — minimalismo + marketing indirecto):
   Cuando el cliente pregunta abiertamente por el catálogo ("qué venden",
   "qué productos tienen", "qué hay") debe mostrar SOLO LOS NOMBRES DE
   CATEGORÍAS, MÁXIMO 5, sin productos ejemplo, sin precios. El objetivo
@@ -4147,8 +4323,25 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
   • Si hay >5 categorías totales, agregar al final:
     `> _y N categorías más — pregúntame por la que te interese._`
   • Cierre con pregunta de discovery: "¿Sobre cuál te cuento más?" o similar.
+  • SALUDO + blockquote tienen ROLES DISTINTOS — NO REDUNDANCIA:
+      - Saludo: identifica QUIÉN (ej: "Soy Sara Camila de KAIU Living
+        Natural"). NO repitas propuesta de valor aquí ("100% natural",
+        "artesanal", etc.).
+      - Blockquote: comunica VALOR DIFERENCIADOR (marketing indirecto).
+    Si el saludo ya menciona "100% natural", el blockquote NO debe
+    repetirlo — buscar otro ángulo (ingredientes específicos, recomendación
+    personalizada, beneficio concreto).
+  • OBLIGATORIO — añadir un blockquote final en cursiva con un mensaje de
+    MARKETING INDIRECTO breve (≤80 chars). Variantes válidas (rota, no
+    repitas la misma):
+      > _Cuéntame qué tipo de piel o necesidad tienes y te recomiendo lo ideal._
+      > _Pregúntame por la categoría que te llame la atención y te muestro detalles._
+      > _Hechos artesanalmente — si quieres conocer ingredientes, dime cuál te interesa._
+      > _Tenemos opción para cada tipo de piel — cuéntame qué buscas._
 
-  Patrón canónico amplio (≤5 categorías visibles):
+  Patrón canónico amplio (≤5 categorías visibles + nota marketing):
+
+    ¡Hola! 👋 Soy Sara Camila de KAIU Living Natural.
 
     Tenemos:
     * Aceites vegetales
@@ -4157,6 +4350,8 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
     * Sérums faciales
 
     ¿Sobre cuál te cuento más?
+
+    > _Cuéntame qué tipo de piel o necesidad tienes y te recomiendo lo ideal._
 
   Si listas UNA SOLA categoría (cliente preguntó específico "¿qué jabones
   tienen?"), entonces SÍ profundiza: muestra hasta 4 productos concretos +
@@ -4186,6 +4381,12 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 - USA CURSIVA `_texto_` para aclaraciones suaves o aclaratorias. Ej: `_(envío estimado, sujeto a confirmación de la transportadora)_`.
 - NOMBRES de productos del catálogo en NEGRITA siempre. Ej: *Jabón Artesanal de Coco*, *Sérum de Vitamina C*.
 - PRECIOS y TOTALES en negrita. Ej: *$18.000 COP*, *TOTAL: $24.740 COP*.
+- KB REGULATORIA — al responder con info de KB (devoluciones, garantías,
+  privacidad, envíos), destaca en NEGRITA los términos y cifras críticos
+  para el cliente. Ej: "*15 días calendario*", "*producto defectuoso*",
+  "*sin usar*", "*empaque original*". Esto mejora la comprensión rápida
+  en pantalla de WhatsApp y reduce malentendidos. Aplica a 3-5 términos
+  clave por respuesta — no abuses (todo en negrita = nada en negrita).
 - CITA AL FINAL CON CURSIVA cuando uses información de la KB. Ej: `_Fuente: Política de devoluciones, Sobre KAIU_`.
 
 Patrón canónico — catálogo AMPLIO por categorías (rev. 103 minimalismo):
@@ -4247,7 +4448,7 @@ Envío: *$6.740 COP*
 * Documento: CC 1032414179
 * Dirección: Calle 3 sur # 70-84 — Olaya, Bogotá
 
-¿Confirmas estos datos o quieres actualizar alguno (dirección, correo, documento)?
+¿Confirmas estos datos o quieres actualizar alguno? (dirección, correo, celular si el envío va a otra persona, documento)
 
 CATÁLOGO ACTUAL ({tenant_name}):
 {catalog_text}{variant_section}{kb_section}
@@ -4259,6 +4460,14 @@ REGLAS DE EXTRACCIÓN Y CIERRE DE COMPRA (CRÍTICO — aplica siempre):
 - Si mencionas el nombre del cliente en conversación, usa solo primer nombre.
 - En línea de resumen "Nombre:" usa nombre completo.
 - Cuando confirmas creación de pedido y haya montos claros, entrega total_in_cents y shipping_cost_cents.
+- PHONE ALTERNATIVO DE ENVÍO (rev. 103): si el cliente menciona EXPLÍCITAMENTE que el pedido lo recibe OTRA persona, o pide ACTUALIZAR el celular del envío, extrae solo los 10 dígitos en extracted_shipping_phone. Ejemplos válidos:
+    Cliente: "el pedido lo recibe mi mamá, su celular es 3001234567"
+      → extracted_shipping_phone = "3001234567"
+    Cliente: "actualiza mi celular de envío: 3225551234"
+      → extracted_shipping_phone = "3225551234"
+    Cliente: "número alternativo 3009998877"
+      → extracted_shipping_phone = "3009998877"
+  NO extraigas si el cliente solo da su WhatsApp normal — eso es su contacts.phone (canal de chat) y NO se cambia. extracted_shipping_phone NUNCA debe sobrescribir el WhatsApp del cliente.
 
 Responde SIEMPRE en JSON puro con este esquema exacto:
 {{
@@ -4283,6 +4492,7 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
   }},
   "extracted_document_type": "CC|CE|NIT|PP|TI|OTHER o null si no se mencionó documento",
   "extracted_document_number": "solo dígitos sin puntos/espacios, ej '1234567890' o null",
+  "extracted_shipping_phone": "10 dígitos del celular alternativo de envío, ej '3001234567', o null si solo dio su WhatsApp",
   "total_in_cents": null,
   "shipping_cost_cents": null
 }}"""
@@ -4481,6 +4691,10 @@ def _format_whatsapp_response_text(text: str) -> str:
     #    invitacional. Mejora UX cuando no hay URL pública del doc.
     formatted = _enhance_kb_citation(formatted)
 
+    # 10. Rev. 103 — Negrita en términos KB regulatoria (plazos, condiciones,
+    #     términos legales). Aplica solo si hay cita Fuente:.
+    formatted = _bold_kb_terms(formatted)
+
     return formatted
 
 
@@ -4491,6 +4705,145 @@ _KB_CITE_CTA = (
     "Si quieres que te amplíe algún punto o que te envíe el documento "
     "completo, házmelo saber."
 )
+
+
+def _enrich_image_caption(
+    caption: str,
+    *,
+    contact_record: Optional[dict],
+    history: Optional[list[dict]],
+) -> str:
+    """Rev. 103 — añade conector cordial al inicio del caption de imagen.
+
+    El image_send_tool produce un caption "frío" que arranca con el título
+    del producto en negrita. Para humanizar el envío de imagen,
+    prefijamos con un conector cordial ("Claro, mira:" / "Listo, mira:")
+    + opcionalmente el nombre del cliente si es conocido + es primer
+    outbound de la conversación (no satura con nombre repetido).
+
+    Variantes rotativas (basadas en hash de conversation timestamp) para
+    no sonar robotizado en runs consecutivos.
+
+    Sigue el patrón de `_inject_known_customer_name` (post-process
+    determinístico que asegura UX consistente cuando el LLM no decide).
+    """
+    if not caption or not isinstance(caption, str):
+        return caption
+    is_known = (
+        isinstance(contact_record, dict)
+        and contact_record.get("consent_given")
+        and (contact_record.get("name") or "").strip()
+    )
+    has_prior_outbound = any(
+        str(m.get("direction") or "").lower() == "outbound"
+        for m in (history or [])
+    )
+    if is_known and not has_prior_outbound:
+        first_name = contact_record["name"].strip().split()[0]
+        connector = f"Claro, mira *{first_name}*:"
+    else:
+        connector = "Claro, mira:"
+    return f"{connector}\n\n{caption}"
+
+
+def _inject_known_customer_name(
+    text: str,
+    *,
+    contact_record: Optional[dict],
+    history: Optional[list[dict]],
+) -> str:
+    """Rev. 103 — post-process determinístico: si el contact es conocido
+    (consent_given=True + name) Y este es el PRIMER outbound de la
+    conversación, inyecta el primer nombre al saludo del bot.
+
+    El LLM a veces sigue la instrucción de personalización del prompt
+    (S1 saludo) y a veces no (S2 pregunta directa). Este post-process
+    garantiza consistencia — sigue el patrón establecido por
+    `_truncate_category_listings`, `_enhance_kb_citation`,
+    `_safety_greeting_response`.
+
+    Idempotente: no toca si el nombre ya aparece en el texto.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    if not isinstance(contact_record, dict):
+        return text
+    if not contact_record.get("consent_given"):
+        return text
+    raw_name = (contact_record.get("name") or "").strip()
+    if not raw_name:
+        return text
+    first_name = raw_name.split()[0]
+    if first_name.lower() in text.lower():
+        return text  # ya presente — idempotente
+
+    # Verificar que sea el primer outbound. `history` debe contener solo
+    # mensajes previos (no el outbound que estamos por enviar).
+    has_prior_outbound = any(
+        str(m.get("direction") or "").lower() == "outbound"
+        for m in (history or [])
+    )
+    if has_prior_outbound:
+        return text
+
+    # Patrones a reemplazar (en orden de preferencia).
+    patterns = [
+        (re.compile(r"^¡Hola!"), f"¡Hola, {first_name}!"),
+        (re.compile(r"^¡Hola\s"), f"¡Hola, {first_name} "),
+        (re.compile(r"^Hola!"), f"Hola, {first_name}!"),
+        (re.compile(r"^Hola\b"), f"Hola, {first_name}"),
+    ]
+    for pat, repl in patterns:
+        if pat.match(text):
+            return pat.sub(repl, text, count=1)
+
+    # No empieza con Hola — prefijar saludo personalizado.
+    return f"Hola, {first_name}. {text}"
+
+
+# Términos típicos de KB regulatoria que mejoran la lectura WhatsApp
+# si quedan en *negrita*. Aplica solo si el outbound tiene cita Fuente:.
+_BOLD_KB_PATTERNS: list[str] = [
+    # Plazos específicos primero (más largos = más específicos).
+    # IMPORTANTE: NO incluir un patrón genérico "\d+\s*días" porque
+    # solaparía con "X días calendario / hábiles" causando doble-bold.
+    r"\d+\s*d[ií]as\s+calendario",
+    r"\d+\s*d[ií]as\s+h[áa]biles",
+    r"\d+\s*horas?\s+(?:h[áa]biles|calendario)",
+    # Términos contractuales/legales recurrentes.
+    r"sin\s+usar",
+    r"empaque\s+original",
+    r"perfectas?\s+condiciones?",
+    r"producto\s+defectuoso",
+    r"ofertas?\s+especiales?",
+    r"contacto\s+con\s+la\s+piel",
+    r"n[úu]mero\s+de\s+pedido",
+]
+
+
+def _bold_kb_terms(text: str) -> str:
+    """Rev. 103 — post-process determinístico: envuelve en *negrita* los
+    términos recurrentes de KB regulatoria (devoluciones, garantías) que
+    mejoran la legibilidad del cliente en pantalla WhatsApp.
+
+    Solo aplica si la respuesta tiene cita `Fuente:` (señal de KB).
+    Idempotente: si ya está en negrita, no duplica.
+
+    Sigue el patrón de `_truncate_category_listings`,
+    `_enhance_kb_citation` e `_inject_known_customer_name`.
+    """
+    if not text or "Fuente:" not in text:
+        return text
+    if not isinstance(text, str):
+        return text
+    out = text
+    for pattern in _BOLD_KB_PATTERNS:
+        # Lookbehind/lookahead negativo para `*`: evita re-envolver
+        # si el LLM ya puso el término en negrita.
+        regex = re.compile(rf"(?<!\*)({pattern})(?!\*)", re.IGNORECASE)
+        # `count=1` por patrón — destacar 1ra aparición; evita saturar.
+        out = regex.sub(r"*\1*", out, count=1)
+    return out
 
 
 def _enhance_kb_citation(text: str) -> str:
@@ -4951,13 +5304,22 @@ async def build_and_run_orchestration(
         )
         if image_result.handled:
             if image_result.image_link:
+                # Rev. 103 — enriquecer caption con conector cordial +
+                # nombre del cliente si conocido (humaniza el envío).
+                _enriched_caption = _enrich_image_caption(
+                    image_result.image_caption or "",
+                    contact_record=contact_record,
+                    history=history,
+                )
                 _meta_id = await send_whatsapp_message(
                     tenant_id=tenant_id,
                     supabase=supabase,
                     to_phone=customer_phone_raw or "",
                     image_link=image_result.image_link,
-                    image_caption=image_result.image_caption,
+                    image_caption=_enriched_caption,
                 )
+                # Reflejar el caption enriquecido para persistencia/log.
+                image_result.image_caption = _enriched_caption
                 # Persistir outbound como content_type=image (Inbox lo renderiza).
                 try:
                     supabase.table("messages").insert({
@@ -5906,17 +6268,40 @@ async def build_and_run_orchestration(
                         parsed.total_in_cents = expected
                         parsed.shipping_cost_cents = verified_ctx["shipping_cost_cents"] or parsed.shipping_cost_cents
 
-                payment_link_result = await handle_payment_link_if_applicable(
-                    tenant_id=tenant_id,
-                    contact_id=contact_id,
-                    conversation_id=conversation_id,
-                    contact_name=contact_record.get("name") if contact_record else None,
-                    total_in_cents=parsed.total_in_cents,
-                    shipping_cost_cents=parsed.shipping_cost_cents,
-                    notes=None,
-                    supabase=supabase,
-                    verified_ctx=verified_ctx,  # IDs reales para stock correcto
-                )
+                # Rev. 103 — Pre-LLM gate: validar que el inbound del
+                # cliente sea confirmación EXPLÍCITA antes de generar
+                # link de pago. Defensa contra Gemini marcando
+                # order_acknowledgment ante un dump duplicado o texto
+                # largo que NO es confirmación real (bug detectado en
+                # log conv 573125835649_20260502).
+                if not _detect_order_confirmation(content):
+                    logger.warning(
+                        "[PAYMENT_LINK_GATE] LLM marcó order_acknowledgment "
+                        "pero inbound NO es confirmación explícita: %r — "
+                        "preservando pregunta de confirmación",
+                        content[:100],
+                    )
+                    parsed.intent_detected = "product_inquiry"
+                    parsed.requires_human = False
+                    parsed.should_respond = True
+                    parsed.response_text = (
+                        "Para confirmar tu pedido y generar el link de pago, "
+                        "respóndeme con un *Sí, confirmo* (o dime qué dato "
+                        "quieres actualizar primero)."
+                    )
+                    payment_link_result = None
+                else:
+                    payment_link_result = await handle_payment_link_if_applicable(
+                        tenant_id=tenant_id,
+                        contact_id=contact_id,
+                        conversation_id=conversation_id,
+                        contact_name=contact_record.get("name") if contact_record else None,
+                        total_in_cents=parsed.total_in_cents,
+                        shipping_cost_cents=parsed.shipping_cost_cents,
+                        notes=None,
+                        supabase=supabase,
+                        verified_ctx=verified_ctx,  # IDs reales para stock correcto
+                    )
                 if payment_link_result:
                     parsed.requires_human = False
                     parsed.should_respond = True
@@ -5962,6 +6347,25 @@ async def build_and_run_orchestration(
                     parsed.response_text.count("?"),
                 )
                 parsed.response_text = _truncated
+
+        # ── 6.999b Post-process rev. 103: personalización cliente conocido ────
+        # Si contact_record tiene consent + name Y es el primer outbound de
+        # la conversación, garantizar que el saludo incluya el primer nombre.
+        # El LLM a veces ignora la instrucción del prompt; este post-process
+        # determinístico asegura consistencia (igual patrón que
+        # _truncate_category_listings / _enhance_kb_citation).
+        if parsed.response_text:
+            _personalized = _inject_known_customer_name(
+                parsed.response_text,
+                contact_record=contact_record,
+                history=history,
+            )
+            if _personalized != parsed.response_text:
+                logger.info(
+                    "[KNOWN_CUSTOMER] inyectado primer_nombre en outbound conv=%s",
+                    conversation_id,
+                )
+                parsed.response_text = _personalized
 
         # ── 7. Enviar respuesta si corresponde ────────────────────────────────
         if parsed.should_respond and parsed.response_text:
@@ -6127,6 +6531,16 @@ async def build_and_run_orchestration(
                             "[CART] populate/get falló (rev. 80, fallback): %s",
                             _cart_err,
                         )
+                    # Rev. 103 — fallback de phone: si _sim_contact no
+                    # tiene phone válido (None/"null"/vacío), usar el
+                    # customer_phone_raw del WhatsApp para que el resumen
+                    # muestre celular real (no "Celular: null").
+                    if isinstance(_sim_contact, dict):
+                        _sim_phone = _sim_contact.get("phone")
+                        _sim_phone_str = str(_sim_phone or "").strip().lower()
+                        if _sim_phone_str in ("", "null", "none", "undefined"):
+                            if customer_phone_raw:
+                                _sim_contact["phone"] = customer_phone_raw
                     _summary = _build_order_summary_text(
                         contact_record=_sim_contact,
                         verified_ctx=None,
@@ -6250,8 +6664,25 @@ async def build_and_run_orchestration(
         # de la conversación sin escribirlos en DB hasta que autorice.
         _consent_ok = bool(contact_record and contact_record.get("consent_given"))
         _has_doc_extract = bool(parsed.extracted_document_type or parsed.extracted_document_number)
-        if contact_id and _consent_ok and (parsed.extracted_name or parsed.extracted_direction or parsed.extracted_email or _has_doc_extract):
+        # Rev. 103 — pre-LLM dual cobertura: regex defensivo si LLM no extrajo.
+        _shipping_phone_extracted = (
+            getattr(parsed, "extracted_shipping_phone", None)
+            or _detect_shipping_phone_update(content or "")
+        )
+        if contact_id and _consent_ok and (
+            parsed.extracted_name
+            or parsed.extracted_direction
+            or parsed.extracted_email
+            or _has_doc_extract
+            or _shipping_phone_extracted
+        ):
             update_data = {}
+            # Rev. 103 — shipping_phone alternativo (separado de contacts.phone).
+            # NO toca el phone WhatsApp; solo añade shipping_phone con fallback +57.
+            if _shipping_phone_extracted:
+                _ship_digits = re.sub(r"\D", "", str(_shipping_phone_extracted))
+                if len(_ship_digits) >= 10 and _ship_digits[-10] != "0":
+                    update_data["shipping_phone"] = f"+57{_ship_digits[-10:]}"
             if parsed.extracted_email and _EMAIL_REGEX.match(str(parsed.extracted_email).strip()):
                 update_data["email"] = str(parsed.extracted_email).strip().lower()
             if parsed.extracted_name and str(parsed.extracted_name).strip():

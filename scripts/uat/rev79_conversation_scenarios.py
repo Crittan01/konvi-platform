@@ -62,6 +62,7 @@ from scenarios.s20_operator_delete_audit_immutable import scenario as scenario_2
 from scenarios.s21_form_add_unconsented_operator import scenario as scenario_21
 from scenarios.s22_consent_evidence_storage_in_person import scenario as scenario_22
 from scenarios.s23_renewals_cap_50 import scenario as scenario_23
+from scenarios.s24_casual_real_world_chat import scenario as scenario_24
 
 
 SCENARIOS: list[tuple[int, str, Callable]] = [
@@ -88,6 +89,7 @@ SCENARIOS: list[tuple[int, str, Callable]] = [
     (21, "scenario_21_form_add_unconsented", scenario_21),
     (22, "scenario_22_storage_in_person", scenario_22),
     (23, "scenario_23_renewals_cap_50", scenario_23),
+    (24, "scenario_24_casual_real_world_chat", scenario_24),
 ]
 
 

@@ -34,6 +34,7 @@ type ContactAddress = {
 type Contact = {
   id: string
   phone: string
+  shipping_phone?: string | null   // rev. 103 — phone alternativo de envío
   name: string | null
   email: string | null
   notes: string | null
@@ -537,6 +538,24 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   </Label>
                   <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required />
                 </div>
+                {/* Rev. 103 — phone alternativo para envío (opcional). */}
+                <div className="space-y-1">
+                  <Label className="text-xs">
+                    Celular para envío
+                    <span className="ml-1 text-[10px] text-muted-foreground">(opcional — solo si el envío va a otra persona)</span>
+                  </Label>
+                  <Input
+                    name="shipping_phone"
+                    type="tel"
+                    placeholder="3001234567"
+                    pattern="[3]\d{9}"
+                    maxLength={10}
+                    autoComplete="off"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Si lo dejas vacío, la transportadora usa el celular WhatsApp principal.
+                  </p>
+                </div>
                 {/* Documento de identidad — Pasarela de pagos PSE/Bancolombia lo exigen en checkout */}
                 <DocumentFields required showRequiredAsterisk layout="default" />
                 <div className="space-y-1">
@@ -716,6 +735,12 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                         <p className="text-xs font-mono text-muted-foreground">
                           {formatPhone(c.phone)}
                         </p>
+                        {c.shipping_phone && c.shipping_phone !== c.phone && (
+                          <p className="text-xs font-mono text-amber-700 mt-0.5 flex items-center gap-1" title="Phone alternativo para envío (transportadora contacta a este número)">
+                            <Phone className="h-3 w-3 shrink-0" />
+                            Envío: {formatPhone(c.shipping_phone)}
+                          </p>
+                        )}
                         {c.email && (
                           <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                             <Mail className="h-3 w-3 shrink-0" />
@@ -881,6 +906,24 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             <Label className="text-xs">Email</Label>
                             <Input name="email" type="email" defaultValue={c.email ?? ''} disabled={!piiUnlocked} className="h-8 text-xs" autoComplete="email" />
                           </div>
+                        </div>
+                        {/* Rev. 103 — phone alternativo de envío (edit). */}
+                        <div className="space-y-1">
+                          <Label className="text-xs">
+                            Celular envío
+                            <span className="ml-1 text-[10px] text-muted-foreground">(opcional — alterno al WhatsApp)</span>
+                          </Label>
+                          <Input
+                            name="shipping_phone"
+                            type="tel"
+                            placeholder="3001234567"
+                            defaultValue={(c.shipping_phone || '').replace(/^\+57/, '')}
+                            pattern="[3]\d{9}"
+                            maxLength={10}
+                            autoComplete="off"
+                            disabled={!piiUnlocked}
+                            className="h-8 text-xs"
+                          />
                         </div>
                         {/* Rev. 69 — Documento de identidad (edición) */}
                         {piiUnlocked ? (

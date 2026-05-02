@@ -1,16 +1,14 @@
-"""Rev. 90 + 92 — Test del rule LISTADO TRUNCADO en el system prompt.
+"""Rev. 90 + 92 + 103 — Test del rule de listado de catálogo en system prompt.
 
-UX observado: cuando el bot lista catálogo ("¿qué tienen?"), si lista
-TODOS los productos por categoría puede:
-  • Abrumar al cliente (paredes de texto).
-  • Crear sensación falsa de "esos son TODOS los productos" cuando
-    en realidad hay más en el catálogo del tenant.
+Evolución:
+  Rev. 90 — listado truncado a máx 3 ítems por categoría.
+  Rev. 92 — endurecido a máx 2 ítems + cursiva "Entre otros".
+  Rev. 103 — minimalismo agresivo (UAT S2 feedback): catálogo AMPLIO
+    muestra SOLO nombres de categorías (≤5), sin productos. Cuando
+    cliente pregunta UNA categoría, profundiza hasta 4 productos.
 
-Patrón canónico (rev. 92): MÁXIMO 2 ítems concretos por categoría +
-3er bullet en cursiva `* _Entre otros..._` cuando hay ≥3 ítems.
-
-Como el system prompt está hardcoded, este test verifica que el string
-de la regla esté presente y no se haya removido por accidente.
+Como el system prompt está hardcoded, este test verifica que las reglas
+clave estén presentes y no se hayan removido por accidente.
 """
 import sys
 import unittest
@@ -27,36 +25,46 @@ class ListadoTruncadoPromptRuleTests(unittest.TestCase):
         ) as fh:
             self.src = fh.read()
 
-    def test_listado_truncado_rule_present(self):
-        self.assertIn("LISTADO TRUNCADO", self.src)
+    def test_catalogo_amplio_rule_present(self):
+        # Rev. 103 — sustituye "LISTADO TRUNCADO" por "LISTADO DE CATÁLOGO AMPLIO".
+        self.assertIn("LISTADO DE CATÁLOGO AMPLIO", self.src)
 
-    def test_rule_specifies_max_2_items_per_category(self):
-        # Rev. 92: pasamos de "máximo 3" a "máximo 2".
-        self.assertIn("MÁXIMO 2 ítems", self.src)
+    def test_rule_specifies_max_5_categories(self):
+        # Rev. 103: catálogo amplio muestra máx 5 categorías.
+        self.assertIn("MÁXIMO 5 categorías", self.src)
+
+    def test_rule_specifies_no_products_in_amplio(self):
+        # Rev. 103: catálogo amplio NO muestra productos ejemplo.
+        self.assertIn("sin productos ejemplo", self.src)
+
+    def test_rule_specifies_no_prices_in_amplio(self):
+        # Rev. 103: catálogo amplio NO muestra precios.
+        self.assertIn("SIN precios en respuesta amplia", self.src)
 
     def test_rule_specifies_entre_otros_marker(self):
-        # Patrón canónico rev. 92: cursiva genérica "Entre otros".
+        # Patrón canónico cuando se profundiza: cursiva "_Entre otros..._".
         self.assertIn("_Entre otros..._", self.src)
 
     def test_rule_explains_motivation(self):
-        # Justificación: evitar abrumar + sensación falsa de "todos".
+        # Justificación: ahorro tokens + minimalismo.
         self.assertTrue(
-            "abrumar" in self.src.lower()
-            or "sensación falsa" in self.src.lower()
+            "minimalismo" in self.src.lower()
+            or "ahorro" in self.src.lower()
+            or "abrumar" in self.src.lower()
         )
 
-    def test_rule_handles_n_equals_1_case(self):
-        # Si solo hay 1 ítem en la categoría, mostrar solo ese 1
-        # (sin "Entre otros").
-        self.assertIn("Si la categoría tiene N=1", self.src)
+    def test_rule_allows_4_items_for_specific_category_query(self):
+        # Cuando el cliente pregunta específico (UNA categoría), bot
+        # profundiza hasta 4 productos + "Entre otros".
+        self.assertIn("hasta 4 productos", self.src)
 
-    def test_rule_handles_n_equals_2_case(self):
-        # Si hay 2 ítems exactos, mostrar los 2 sin "Entre otros".
-        self.assertIn("Si la categoría tiene N=2", self.src)
+    def test_rule_specifies_marketing_blockquote(self):
+        # Rev. 103: blockquote con marketing indirecto al final.
+        self.assertIn("MARKETING INDIRECTO", self.src)
 
-    def test_rule_allows_4_items_for_single_category_query(self):
-        # Cuando el cliente pregunta específico, hasta 4 + "Entre otros".
-        self.assertIn("hasta 4 ítems", self.src)
+    def test_rule_specifies_discovery_question(self):
+        # Cierre con pregunta de discovery activo.
+        self.assertIn("Sobre cuál te cuento más", self.src)
 
 
 if __name__ == "__main__":
