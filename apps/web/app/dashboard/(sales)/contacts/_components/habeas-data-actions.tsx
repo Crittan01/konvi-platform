@@ -44,6 +44,15 @@ type Props = {
     html?: string
     error?: string
   }>
+  /**
+   * Rev. 102 — Optimistic UX. Cuando un erase tiene éxito en el server,
+   * el parent puede actualizar su estado local de inmediato (e.g.,
+   * remover/anonimizar la card visualmente) sin esperar a que el RSC
+   * payload de router.refresh() llegue. Necesario porque router.refresh()
+   * puede tardar y/o no provocar re-render visible del Server Component
+   * padre cuando se llama desde un Client Component nested.
+   */
+  onEraseSuccess?: (contactId: string) => void
 }
 
 type ActionKind = 'json' | 'pdf' | 'portability' | 'erase'
@@ -137,7 +146,7 @@ const ACTION_META: Record<ActionKind, {
 }
 
 export default function HabeasDataActions({
-  contactId, contactDisplayName, sarAction, sarPrintableAction,
+  contactId, contactDisplayName, sarAction, sarPrintableAction, onEraseSuccess,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -217,11 +226,14 @@ export default function HabeasDataActions({
         URL.revokeObjectURL(url)
         // Reads exitosos no requieren Dialog — la descarga es feedback.
       } else if (sarType === 'erase') {
-        // Rev. 102 — fuerza refresh del Server Component padre para
-        // que la lista de contactos refleje la anonimización sin que
-        // el operador tenga que recargar manualmente. El revalidatePath
-        // del server action invalida cache, pero router.refresh() es
-        // lo que le dice al cliente "trae el RSC nuevo ya".
+        // Rev. 102 — combo:
+        //   1) onEraseSuccess(contactId): optimistic update del parent
+        //      (oculta/anonimiza la card LOCALMENTE de inmediato).
+        //   2) router.refresh(): pide RSC payload nuevo al server para
+        //      sincronizar el estado real en background.
+        // Sin (1), el user veía datos viejos hasta refrescar manualmente
+        // porque router.refresh() solo no provocaba re-render visible.
+        if (onEraseSuccess) onEraseSuccess(contactId)
         router.refresh()
         setResultDialog({
           kind: 'success',

@@ -157,6 +157,29 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id)
 
+  // Rev. 102 — Optimistic update post-Anonimizar.
+  // Cuando una acción erase tiene éxito en el server, el contact_id se
+  // añade a este Set y la card se renderiza con PII ya anonimizada
+  // localmente, sin esperar a que router.refresh() complete el round-trip
+  // del RSC payload. Cuando initialContacts se actualiza vía RSC fresh,
+  // useEffect limpia el Set para no acumular IDs.
+  const [optimisticErasedIds, setOptimisticErasedIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    // Cuando cambian los initialContacts (RSC fresh tras router.refresh),
+    // los IDs en el Set ya tienen su PII anonimizada en el server, así
+    // que el override local ya no es necesario.
+    setOptimisticErasedIds(new Set())
+  }, [initialContacts])
+  const markErasedOptimistically = (contactId: string) => {
+    setOptimisticErasedIds(prev => {
+      const next = new Set(prev)
+      next.add(contactId)
+      return next
+    })
+    // Cierra el panel de edición si estaba abierto sobre ese contacto.
+    if (expandedId === contactId) setExpandedId(null)
+  }
+
   const router = useRouter()
 
   // Rev. 102 — feedback visual de éxito tras Guardar (no usamos modal
@@ -444,7 +467,23 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
             </div>
           ) : (
             <div className="space-y-2">
-              {paginatedContacts.map((c) => (
+              {paginatedContacts.map((rawContact) => {
+                // Rev. 102 — Optimistic erase override: si el contact está
+                // en optimisticErasedIds, mostrar PII como nullificada
+                // localmente (la DB ya está anonimizada por el server
+                // action, solo esperamos a router.refresh()).
+                const c = optimisticErasedIds.has(rawContact.id)
+                  ? {
+                      ...rawContact,
+                      name: null, email: null,
+                      document_type: null, document_number: null,
+                      address: null, notes: null,
+                      consent_given: false,
+                      consent_revoked_at: rawContact.consent_revoked_at ?? new Date().toISOString(),
+                      consent_revoked_reason: rawContact.consent_revoked_reason ?? 'Solicitud de supresión vía SAR',
+                    }
+                  : rawContact
+                return (
                 <div key={c.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 transition-all focus-within:border-primary/50">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -636,6 +675,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             }
                             sarAction={sarAction}
                             sarPrintableAction={sarPrintableAction}
+                            onEraseSuccess={markErasedOptimistically}
                           />
                         )}
                       </form>
@@ -643,8 +683,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                     </div>
                   )}
                 </div>
-              ))}
-              
+                )
+              })}
+
               {/* Paginación */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between py-2 px-1 text-sm text-muted-foreground">
