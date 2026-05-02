@@ -15,6 +15,8 @@ import { validateColombianDocument } from '@/lib/validators/document'
 import { validateAddress, type StructuredAddress, type BuildingType } from '@/lib/validators/address'
 import HabeasDataActions from './habeas-data-actions'
 import DocumentFields, { type DocType } from './document-fields'
+import { PHONE_COUNTRIES, formatPhone } from './helpers/phone-countries'
+import { CONSENT_SOURCE_HELP } from './helpers/consent-source-help'
 
 type ContactAddress = {
   street?: string; number?: string; city?: string
@@ -70,24 +72,6 @@ const ITEMS_PER_PAGE = 30
 
 // Mismo formato que Inbox: +57 312 583 5649. Rev. 102: detección
 // de country code. Para CO formato bonito; otros países muestra +N+digits.
-const formatPhone = (raw: string): string => {
-  const digits = (raw || '').replace(/\D/g, '')
-  if (!digits) return raw || ''
-  // Colombia: 12 dígitos totales (57 + 10).
-  if (digits.startsWith('57') && digits.length === 12)
-    return `+57 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`
-  // Otros países comunes: separar prefijo conocido del resto.
-  // Detectar prefijo iterando sobre la lista (de más largo a más corto
-  // para evitar match prematuro de +1 cuando es +1 vs +193).
-  const prefixes = ['593', '52', '54', '55', '56', '51', '57', '58', '34', '1']
-  for (const p of prefixes) {
-    if (digits.startsWith(p) && digits.length >= p.length + 7) {
-      return `+${p} ${digits.slice(p.length)}`
-    }
-  }
-  return `+${digits}`
-}
-
 export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
@@ -202,33 +186,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     setEditConsentSource(prev => ({ ...prev, [id]: value }))
 
   // Rev. 102 — Lista de países soportados para el phone (E.164).
-  // Default Colombia. Otros países disponibles si llega extranjero.
-  // Sincronizado con SUPPORTED_COUNTRY_CODES en page.tsx server action.
-  // Sin emoji de bandera: muchos OS (Windows en particular) no las
-  // renderizan y se ven como caracteres rotos.
-  const PHONE_COUNTRIES: Array<{ code: string; label: string; placeholderDigits: string }> = [
-    { code: '57',  label: 'Colombia',  placeholderDigits: '3001234567' },
-    { code: '58',  label: 'Venezuela', placeholderDigits: '4141234567' },
-    { code: '593', label: 'Ecuador',   placeholderDigits: '991234567' },
-    { code: '51',  label: 'Perú',      placeholderDigits: '912345678' },
-    { code: '52',  label: 'México',    placeholderDigits: '5512345678' },
-    { code: '1',   label: 'USA/CA',    placeholderDigits: '5551234567' },
-    { code: '34',  label: 'España',    placeholderDigits: '612345678' },
-    { code: '54',  label: 'Argentina', placeholderDigits: '91123456789' },
-    { code: '56',  label: 'Chile',     placeholderDigits: '912345678' },
-    { code: '55',  label: 'Brasil',    placeholderDigits: '11912345678' },
-  ]
   const phoneCountryMeta = PHONE_COUNTRIES.find(c => c.code === addPhoneCountry) ?? PHONE_COUNTRIES[0]
-
-  // Rev. 102 — Help text contextual por canal. Guía al operador sobre
-  // qué evidencia debe registrar/archivar para audit ante SIC.
-  const CONSENT_SOURCE_HELP: Record<string, string> = {
-    whatsapp: 'Evidencia: el hilo de WhatsApp donde el titular dijo "Sí acepto". El sistema lo enlaza al consent_audit_log automáticamente.',
-    web_form: 'Evidencia: captura del formulario web (timestamp + IP + checkbox). Asegúrate que tu sitio persiste estos datos.',
-    in_person: 'Evidencia: documento físico firmado por el titular. Archiva el papel y referencia su ubicación en Evidencia abajo.',
-    import: 'Importación: el consent fue capturado en otro sistema. Eres responsable de demostrarlo ante SIC.',
-    other: 'Catch-all. La Evidencia es OBLIGATORIA (mínimo 20 caracteres). Si no puedes describir de dónde vino, este canal NO aplica.',
-  }
 
   /** Contact que fue anonimizado y aún no tiene consent renovado. */
   const isAwaitingRenewal = (c: Contact): boolean =>
@@ -300,20 +258,26 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   }
 
   // Rev. 102 — Eliminar ahora usa Dialog shadcn/ui (no `confirm()` nativo).
-  // Coherente con el patrón de Anonimizar; warning visual destructivo.
+  // Rev. 103 — motivo opcional + audit log antes del DELETE.
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [pendingDeleteReason, setPendingDeleteReason] = useState<string>('')
   const pendingDeleteContact = useMemo(
     () => initialContacts.find(c => c.id === pendingDeleteId) ?? null,
     [initialContacts, pendingDeleteId],
   )
   const handleDeleteById = (contactId: string) => {
     setPendingDeleteId(contactId)
+    setPendingDeleteReason('')
   }
   const confirmDelete = () => {
     if (!pendingDeleteId) return
     const fd = new FormData()
     fd.set('contact_id', pendingDeleteId)
+    if (pendingDeleteReason.trim()) {
+      fd.set('delete_reason', pendingDeleteReason.trim())
+    }
     setPendingDeleteId(null)
+    setPendingDeleteReason('')
     startTransition(async () => {
       await deleteAction(fd)
       router.refresh()
@@ -374,11 +338,24 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
             <div className="rounded-md border border-red-700/40 bg-red-700/5 p-2.5 text-xs text-red-700">
               <p className="font-semibold mb-1">Diferencia con &quot;Anonimizar&quot;:</p>
               <ul className="list-disc list-inside space-y-0.5">
-                <li><strong>Eliminar</strong>: borra el contacto completo de la base. No queda registro Habeas Data.</li>
-                <li><strong>Anonimizar</strong>: borra solo PII pero conserva el registro inmutable para auditoría legal.</li>
+                <li><strong>Eliminar</strong>: borra el contacto completo de la base. Queda audit log inmutable (event=&quot;deleted&quot;) con phone hasheado para trazabilidad ante SIC.</li>
+                <li><strong>Anonimizar</strong>: nullifica solo PII pero conserva el contact_id y todos los registros relacionados (orders, claims) intactos.</li>
               </ul>
               <p className="mt-2">
-                Si el motivo es una solicitud Habeas Data del titular, usa <strong>Anonimizar</strong> en lugar de Eliminar.
+                Si el titular pidió ejercer su derecho Habeas Data, normalmente <strong>Anonimizar</strong> es la vía correcta.
+              </p>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Motivo (opcional)</Label>
+              <Input
+                value={pendingDeleteReason}
+                onChange={e => setPendingDeleteReason(e.target.value)}
+                placeholder="Ej: contacto duplicado, registro de prueba, etc."
+                className="h-8 text-xs"
+                maxLength={300}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Se guarda en audit log junto con tu email. Útil si el tenant necesita justificar la eliminación después.
               </p>
             </div>
           </div>
@@ -477,60 +454,32 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                     Mín. 7 / máx. 14 dígitos.
                   </p>
                 </div>
-                {/* Rev. 102 — Banner Habeas Data si check OFF: explica
-                    por qué los campos PII están bloqueados (Ley 1581 Art. 9). */}
-                {!addConsentChecked && (
-                  <div className="rounded-md border border-amber-700/40 bg-amber-700/5 px-3 py-2 text-[11px] text-amber-700 flex items-start gap-2">
-                    <ShieldOff className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>
-                      Marca el check de consentimiento más abajo para habilitar los
-                      campos personales. Sin autorización del titular el sistema
-                      solo registra el teléfono (canal de comunicación).
-                    </span>
-                  </div>
-                )}
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Nombre completo <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Pasarela de pagos y Transportadora lo requieren)</span>
                   </Label>
-                  <Input name="name" placeholder="Juan García López" required disabled={!addConsentChecked} />
+                  <Input name="name" placeholder="Juan García López" required />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Correo electrónico <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Pasarela de pagos)</span>
                   </Label>
-                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required disabled={!addConsentChecked} />
+                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required />
                 </div>
                 {/* Documento de identidad — Pasarela de pagos PSE/Bancolombia lo exigen en checkout */}
-                {addConsentChecked ? (
-                  <DocumentFields
-                    required
-                    showRequiredAsterisk
-                    layout="default"
-                  />
-                ) : (
-                  <div className="text-[10px] text-muted-foreground italic">
-                    Documento de identidad bloqueado — marca el consentimiento.
-                  </div>
-                )}
+                <DocumentFields required showRequiredAsterisk layout="default" />
                 <div className="space-y-1">
                   <Label className="text-xs flex items-center gap-1">
                     <MapPin className="h-3 w-3" /> Dirección de entrega <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Envia exige street + city + state + postal)</span>
                   </Label>
-                  {addConsentChecked ? (
-                    <AddressSelector key={addressResetKey} fieldPrefix="addr" showBuildingDetails />
-                  ) : (
-                    <div className="text-[10px] text-muted-foreground italic">
-                      Dirección bloqueada — marca el consentimiento.
-                    </div>
-                  )}
+                  <AddressSelector key={addressResetKey} fieldPrefix="addr" showBuildingDetails />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Notas internas (opcional)</Label>
-                  <Input name="notes" placeholder="Cliente frecuente..." disabled={!addConsentChecked} />
+                  <Input name="notes" placeholder="Cliente frecuente..." />
                 </div>
                 {/* Bloque Habeas Data — check primero para que UX cuadre */}
                 <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
@@ -564,8 +513,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                         className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                       >
                         <option value="" disabled>— Selecciona —</option>
+                        <option value="manual_console">Consola (operador)</option>
                         <option value="whatsapp">WhatsApp</option>
                         <option value="web_form">Formulario web</option>
+                        <option value="phone_call">Llamada telefónica</option>
                         <option value="in_person">Presencial</option>
                         <option value="import">Importación</option>
                         <option value="other">Otro</option>
@@ -597,6 +548,24 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                         {addConsentSource === 'other'
                           ? 'OBLIGATORIO (mínimo 20 caracteres) — describe de dónde vino el consent.'
                           : 'Detalle textual de cómo se capturó. Crítico para responder a SIC.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Rev. 103 (F10) — Adjuntar evidencia física cuando canal=in_person. */}
+                  {addConsentChecked && addConsentSource === 'in_person' && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">
+                        Adjuntar evidencia física <span className="text-[10px] text-muted-foreground">(PDF o imagen, opcional, máx. 5 MB)</span>
+                      </Label>
+                      <input
+                        type="file"
+                        name="consent_evidence_file"
+                        accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"
+                        className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Sube el escaneo del documento firmado. Queda guardado en el bucket privado del tenant. La SAR export incluye el link automáticamente.
                       </p>
                     </div>
                   )}
@@ -735,11 +704,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                       {expandedId === c.id && (() => {
                         const awaitingRenewal = isAwaitingRenewal(c)
                         const consentChecked = isEditConsentChecked(c.id, c.consent_given)
-                        // Rev. 102 (Opción A+B Ley 1581):
-                        // PII solo editable si HAY consent + (no anonimizado o renovado)
-                        const piiUnlocked =
-                          consentChecked &&
-                          (!awaitingRenewal || !!renewedConsent[c.id])
+                        // Rev. 103 (SaaS B2B) — PII libre para editar EXCEPTO en
+                        // post-anonimización (Art. 15 sigue siendo ritual legal serio:
+                        // re-introducir PII requiere consentimiento renovado del titular).
+                        const piiUnlocked = !awaitingRenewal || !!renewedConsent[c.id]
                         return (
                       <form action={handleEdit} className="mt-3 space-y-3 pt-3 border-t border-border">
                         <input type="hidden" name="contact_id" value={c.id} />
@@ -925,11 +893,9 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 />
                                 <span className="text-xs text-foreground leading-snug">
                                   <strong>El titular autoriza el tratamiento de sus datos</strong> (Ley 1581/2012).
-                                  {!consentChecked && (
-                                    <span className="block text-amber-700 mt-0.5 text-[11px]">
-                                      Sin este check los campos personales quedan bloqueados.
-                                    </span>
-                                  )}
+                                  <span className="block text-muted-foreground mt-0.5 text-[11px]">
+                                    Marca el check + canal para registrar el consent. Si lo dejas sin marcar, el contacto queda con consent_given=false (el bot pedirá consent al titular en su próxima interacción).
+                                  </span>
                                 </span>
                               </label>
                             )
@@ -968,7 +934,13 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           {consentChecked && (() => {
                             const currentSource = getEditConsentSource(c.id, c.consent_source ?? '')
                             const isOther = currentSource === 'other'
+                            const isInPerson = currentSource === 'in_person'
+                            const evidenceObj = (c.consent_evidence ?? {}) as Record<string, unknown>
+                            const existingAttachmentUrl = typeof evidenceObj.attachment_url === 'string'
+                              ? evidenceObj.attachment_url
+                              : null
                             return (
+                            <>
                             <div className="space-y-1">
                               <Label className="text-xs">
                                 Evidencia (nota interna)
@@ -988,6 +960,26 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                   : 'Detalle textual de cómo se capturó. Crítico para SIC.'}
                               </p>
                             </div>
+                            {/* Rev. 103 (F10) — Adjuntar/reemplazar evidencia física en Edit. */}
+                            {isInPerson && (
+                              <div className="space-y-1">
+                                <Label className="text-xs">
+                                  Adjuntar evidencia física <span className="text-[10px] text-muted-foreground">(PDF o imagen, opcional, máx. 5 MB)</span>
+                                </Label>
+                                <input
+                                  type="file"
+                                  name="consent_evidence_file"
+                                  accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"
+                                  className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground"
+                                />
+                                {existingAttachmentUrl && (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Ya hay evidencia adjunta. <a href={existingAttachmentUrl} target="_blank" rel="noreferrer" className="underline text-blue-700">Ver archivo actual</a>. Si subes otro, se reemplaza.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            </>
                             )
                           })()}
 

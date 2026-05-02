@@ -23,15 +23,30 @@ Referencia oficial:
 import logging
 import os
 import asyncio
+import hashlib
 import httpx
+import re
 import time
 import threading
 from datetime import datetime, timezone
+from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from dependencies.auth import _get_service_client, get_service_client
 from dependencies.security import webhook_rate_limit_check
 from integrations import meli_client
+
+# Rev. 103 — Versión vigente del aviso de privacidad (sincronizar con
+# apps/web/.../contacts/page.tsx CURRENT_PRIVACY_NOTICE_VERSION + docs/legal/privacy-policy.md).
+CURRENT_PRIVACY_NOTICE_VERSION = "v2026-05-01"
+
+
+def _hash_phone(phone: Optional[str]) -> Optional[str]:
+    """Espejo de orchestrator._hash_phone — sha256 con strip de spaces/+/-."""
+    if not phone:
+        return None
+    normalized = re.sub(r"[\s+\-]", "", str(phone))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["MeLi Webhook"])
@@ -343,9 +358,21 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
         logger.error("Error decrementando stock para orden MeLi %s: %s", order_id, e)
 
 
-def _upsert_meli_contact(buyer: dict, tenant_id: str, supabase) -> str | None:
+def _upsert_meli_contact(
+    buyer: dict,
+    tenant_id: str,
+    supabase,
+    meli_order_id: Optional[str] = None,
+) -> str | None:
     """
-    Crea o actualiza un contacto desde los datos del comprador MeLi.
+    Rev. 103 (SaaS B2B pivot) — crea o actualiza contact desde MeLi con
+    consent_source='marketplace_meli' + audit log inmutable.
+
+    Filosofía: el tenant operador es Responsable bajo DPA + Mercado Libre
+    tiene su propia política de privacidad que cubre la captura del comprador.
+    La plataforma marca el origen del dato (trazable ante SIC) y registra
+    audit; no añade restricciones especiales sobre el flujo posterior.
+
     Retorna contact_id si hay teléfono disponible; None si no hay datos suficientes.
     MeLi expone phone en billing_info para vendedores verificados.
     """
@@ -357,20 +384,65 @@ def _upsert_meli_contact(buyer: dict, tenant_id: str, supabase) -> str | None:
     if not phone:
         return None
 
+    phone_str = str(phone).strip()
     buyer_name = (
         f"{buyer.get('first_name', '')} {buyer.get('last_name', '')}".strip()
         or buyer.get("nickname")
         or None
     )
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    contact_payload = {
+        "tenant_id": tenant_id,
+        "phone": phone_str,
+        "name": buyer_name,
+        "consent_given": True,
+        "consent_source": "marketplace_meli",
+        "consent_date": now_iso,
+        "consent_channel": "marketplace_meli",
+        "consent_notice_version": CURRENT_PRIVACY_NOTICE_VERSION,
+        "consent_evidence": {
+            "imported_from": "mercadolibre",
+            "meli_order_id": meli_order_id,
+            "captured_at": now_iso,
+        },
+        "consent_actor_email": "system:meli_webhook",
+    }
+
     try:
         result = supabase.table("contacts").upsert(
-            {"tenant_id": tenant_id, "phone": str(phone).strip(), "name": buyer_name},
+            contact_payload,
             on_conflict="tenant_id,phone",
         ).execute()
-        return result.data[0]["id"] if result.data else None
+        contact_id = result.data[0]["id"] if result.data else None
     except Exception as e:
         logger.warning("No se pudo crear/actualizar contacto MeLi (phone=%s): %s", phone, e)
         return None
+
+    # Audit log append-only — el tenant tiene trazabilidad del origen
+    # MeLi y SIC puede consultar event='granted' con source='system'.
+    if contact_id:
+        try:
+            supabase.table("consent_audit_log").insert({
+                "tenant_id": tenant_id,
+                "contact_id": contact_id,
+                "phone_hash": _hash_phone(phone_str),
+                "event": "granted",
+                "source": "system",
+                "actor_email": "system:meli_webhook",
+                "evidence": {
+                    "imported_from": "mercadolibre",
+                    "meli_order_id": meli_order_id,
+                    "consent_source": "marketplace_meli",
+                },
+            }).execute()
+        except Exception as e:
+            logger.warning(
+                "[MeLi] consent_audit_log insert falló contact=%s: %s",
+                contact_id, e,
+            )
+
+    return contact_id
 
 
 async def _process_order(resource: str, tenant_id: str, access_token: str, supabase):
@@ -410,7 +482,7 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
             logger.info("Orden MeLi %s → status %s (tenant %s)", meli_order_id, internal_status, tenant_id)
     else:
         # Crear contacto si hay teléfono disponible
-        contact_id = _upsert_meli_contact(buyer, tenant_id, supabase)
+        contact_id = _upsert_meli_contact(buyer, tenant_id, supabase, meli_order_id=meli_order_id)
 
         # Resolver variation_id para cada item del pedido
         meli_order_items = order_data.get("order_items", [])
