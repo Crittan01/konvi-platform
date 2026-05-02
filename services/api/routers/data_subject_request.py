@@ -163,9 +163,37 @@ def _build_export_payload(sb: Client, tenant_id: str, contact_id: str) -> dict:
             detail="No se pudo componer el export completo. Reintenta en unos segundos.",
         )
 
+    # Rev. 102 — primary_identifier explícito.
+    # Para SIC y reportes legales, el documento de identidad es el ID
+    # primario del titular (cuando existe). Phone es el canal. UUID es
+    # ref interna del sistema. Exponer los 3 con jerarquía clara evita
+    # que el destinatario tenga que adivinar cuál usar para correlacionar.
+    doc_type = contact.get("document_type")
+    doc_number = contact.get("document_number")
+    primary_id_kind: str
+    primary_id_value: Optional[str]
+    if doc_type and doc_number:
+        primary_id_kind = "document"
+        primary_id_value = f"{doc_type} {doc_number}"
+    elif contact.get("phone"):
+        primary_id_kind = "phone"
+        primary_id_value = contact.get("phone")
+    else:
+        primary_id_kind = "internal_uuid"
+        primary_id_value = contact.get("id")
+
     return {
         "format_version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "primary_identifier": {
+            "kind": primary_id_kind,
+            "value": primary_id_value,
+            "note": (
+                "Identificador legal primario del titular. "
+                "Use este valor al correlacionar el reporte con quejas SIC. "
+                "El UUID interno (subject.id) es solo referencia técnica."
+            ),
+        },
         "subject": {
             "id": contact.get("id"),
             "phone": contact.get("phone"),
@@ -345,6 +373,7 @@ async def data_subject_request(
 def _render_export_html(payload: dict) -> str:
     """Compone HTML print-friendly del payload de export Art. 14 / 19."""
     subject = payload.get("subject") or {}
+    primary_id = payload.get("primary_identifier") or {}
     orders = payload.get("orders") or []
     consent_history = payload.get("consent_history") or []
     pii_history = payload.get("pii_access_history") or []
@@ -441,6 +470,14 @@ def _render_export_html(payload: dict) -> str:
   Ley 1581/2012 Colombia · Art. 14 (acceso) / Art. 19 (portabilidad) ·
   Generado: <strong>{esc(generated)}</strong> ·
   Versión formato: <strong>{esc(payload.get('format_version', '1.0'))}</strong>
+</div>
+
+<div style="background:#f0f7f4;border-left:4px solid #166534;padding:0.7em 1em;margin-bottom:1em;border-radius:4px;">
+  <strong style="color:#166534;">Identificador primario del titular</strong> ({esc(primary_id.get('kind'))}):
+  <span style="font-family:monospace;font-size:11pt;font-weight:600;">{esc(primary_id.get('value'))}</span>
+  <p style="margin:0.3em 0 0 0;font-size:9pt;color:#555;">
+    Use este valor al responder a SIC. El UUID interno (subject.id) es solo referencia técnica de la plataforma.
+  </p>
 </div>
 
 <h2>1. Datos del titular</h2>

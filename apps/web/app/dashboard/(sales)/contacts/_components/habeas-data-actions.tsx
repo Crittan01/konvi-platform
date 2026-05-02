@@ -1,0 +1,382 @@
+'use client'
+
+// Rev. 102 — Componente unificado de acciones Habeas Data por contacto.
+// Incluye:
+//   1. Header con icono (?) que abre dialog explicativo de los 4 derechos.
+//   2. 4 botones (Reporte JSON / PDF / Portabilidad / Anonimizar).
+//   3. Dialog de confirmación específico por acción antes de ejecutar.
+//   4. Disclaimer con estructura visual organizada (no párrafo plano).
+//
+// Razón del refactor: el usuario notó que (a) las acciones registran en
+// audit_log y eso amerita confirmación explícita; (b) el operador no
+// siempre entiende qué hace cada botón; (c) la nota al pie como párrafo
+// plano se pierde visualmente.
+
+import { useState, useTransition } from 'react'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, DialogTrigger,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import {
+  ShieldCheck, Download, FileText, Printer, ShieldOff,
+  HelpCircle, Loader2, AlertTriangle,
+} from 'lucide-react'
+
+type SarType = 'export' | 'portability' | 'erase'
+
+type SarResult = {
+  ok: boolean
+  status: number
+  type: string
+  payload?: unknown
+  error?: string
+}
+
+type Props = {
+  contactId: string
+  contactDisplayName: string
+  sarAction: (fd: FormData) => Promise<SarResult>
+  sarPrintableAction?: (fd: FormData) => Promise<{
+    ok: boolean
+    status: number
+    html?: string
+    error?: string
+  }>
+}
+
+type ActionKind = 'json' | 'pdf' | 'portability' | 'erase'
+
+const ACTION_META: Record<ActionKind, {
+  label: string
+  article: string
+  description: string
+  icon: typeof Download
+  isDestructive: boolean
+  consequences: string[]
+  audits: string[]
+}> = {
+  json: {
+    label: 'Reporte (JSON)',
+    article: 'Art. 14 — Derecho de acceso',
+    description:
+      'Descarga un archivo JSON con todos los datos del titular: información personal, ' +
+      'órdenes asociadas, histórico de consent, accesos a PII, subprocesadores y marco legal.',
+    icon: Download,
+    isDestructive: false,
+    consequences: [
+      'NO modifica ningún dato del contacto.',
+      'Se descarga un archivo .json en tu navegador.',
+    ],
+    audits: [
+      'consent_audit_log → event=export_request',
+      'pii_access_log → purpose=sar_export (con tu IP + user-agent)',
+    ],
+  },
+  pdf: {
+    label: 'Reporte (PDF)',
+    article: 'Art. 14 — Derecho de acceso (formato imprimible)',
+    description:
+      'Abre el mismo reporte en una nueva pestaña con formato HTML imprimible. ' +
+      'Tú haces Cmd/Ctrl+P → "Guardar como PDF" para obtener un PDF legible.',
+    icon: Printer,
+    isDestructive: false,
+    consequences: [
+      'NO modifica ningún dato del contacto.',
+      'Abre nueva pestaña con el reporte; tú haces Cmd+P.',
+    ],
+    audits: [
+      'consent_audit_log → event=export_request (format=printable_html)',
+      'pii_access_log → purpose=sar_export_printable',
+    ],
+  },
+  portability: {
+    label: 'Portabilidad',
+    article: 'Art. 19 — Derecho de portabilidad',
+    description:
+      'Descarga un JSON con formato estándar para que el titular pueda llevar sus datos a otra ' +
+      'plataforma. El contenido es idéntico al Reporte JSON; el motivo legal registrado en audit es distinto.',
+    icon: FileText,
+    isDestructive: false,
+    consequences: [
+      'NO modifica ningún dato del contacto.',
+      'Se descarga un archivo .json en tu navegador.',
+    ],
+    audits: [
+      'consent_audit_log → event=portability',
+      'pii_access_log → purpose=sar_portability',
+    ],
+  },
+  erase: {
+    label: 'Anonimizar',
+    article: 'Art. 15 — Derecho de supresión',
+    description:
+      'Anonimiza la PII del titular: nullifica nombre, email, documento, dirección y notas. ' +
+      'Conserva el teléfono (canal WhatsApp) y deja registro inmutable en audit log.',
+    icon: ShieldOff,
+    isDestructive: true,
+    consequences: [
+      'IRREVERSIBLE: nullifica name, email, document_type, document_number, address, notes.',
+      'Conserva phone (canal WhatsApp).',
+      'Marca consent_given=false, consent_revoked_at=NOW().',
+      'Si el cliente vuelve, hay que recapturar consentimiento + datos.',
+    ],
+    audits: [
+      'consent_audit_log → event=revoked (append-only, NO se puede borrar)',
+      'Notificación email al tenant (si RESEND_API_KEY configurado)',
+    ],
+  },
+}
+
+export default function HabeasDataActions({
+  contactId, contactDisplayName, sarAction, sarPrintableAction,
+}: Props) {
+  const [isPending, startTransition] = useTransition()
+  const [running, setRunning] = useState<ActionKind | null>(null)
+  const [pendingAction, setPendingAction] = useState<ActionKind | null>(null)
+  const [infoOpen, setInfoOpen] = useState(false)
+
+  const executeAction = async (kind: ActionKind) => {
+    setRunning(kind)
+    try {
+      if (kind === 'pdf') {
+        if (!sarPrintableAction) return
+        const fd = new FormData()
+        fd.set('contact_id', contactId)
+        const res = await sarPrintableAction(fd)
+        if (!res.ok || !res.html) {
+          window.alert(`Falló reporte PDF (${res.status}): ${res.error || 'unknown'}`)
+          return
+        }
+        const blob = new Blob([res.html], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        const w = window.open(url, '_blank', 'noopener,noreferrer')
+        if (!w) {
+          window.alert('El browser bloqueó la nueva pestaña. Habilita popups.')
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+        return
+      }
+      const sarType: SarType = kind === 'json' ? 'export' : kind === 'portability' ? 'portability' : 'erase'
+      const fd = new FormData()
+      fd.set('contact_id', contactId)
+      fd.set('sar_type', sarType)
+      const res = await sarAction(fd)
+      if (!res.ok) {
+        const detail =
+          typeof res.payload === 'object' && res.payload && 'detail' in res.payload
+            ? (res.payload as { detail?: string }).detail
+            : res.error
+        window.alert(`Acción falló (${res.status}): ${detail || 'unknown'}`)
+        return
+      }
+      if (sarType === 'export' || sarType === 'portability') {
+        const json = JSON.stringify(res.payload, null, 2)
+        const blob = new Blob([json], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `habeas-data-${sarType}-${contactId.slice(0, 8)}-${Date.now()}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } else if (sarType === 'erase') {
+        window.alert(
+          'Supresión Art. 15 procesada.\n\n' +
+          'PII anonimizada en DB. El audit log conserva trazabilidad inmutable.'
+        )
+      }
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  const handleClick = (kind: ActionKind) => () => {
+    setPendingAction(kind)
+  }
+
+  const handleConfirm = () => {
+    if (!pendingAction) return
+    const kind = pendingAction
+    setPendingAction(null)
+    startTransition(async () => { await executeAction(kind) })
+  }
+
+  return (
+    <div className="pt-3 mt-3 border-t border-border space-y-3">
+      {/* Header con (?) info */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">
+          <ShieldCheck className="h-3 w-3" />
+          Habeas Data — Derechos del titular
+        </div>
+        <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-emerald-700 transition-colors"
+              title="¿Para qué sirve cada acción?"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Acciones Habeas Data — guía rápida</DialogTitle>
+              <DialogDescription>
+                Ley 1581/2012 Colombia. El tenant es Responsable del tratamiento ante la SIC.
+                Cada acción queda registrada inmutablemente.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              {(Object.keys(ACTION_META) as ActionKind[]).map(kind => {
+                const m = ACTION_META[kind]
+                const Icon = m.icon
+                return (
+                  <div
+                    key={kind}
+                    className={`rounded-lg border p-3 ${
+                      m.isDestructive
+                        ? 'border-amber-700/40 bg-amber-700/5'
+                        : 'border-emerald-700/40 bg-emerald-700/5'
+                    }`}
+                  >
+                    <div className={`flex items-center gap-2 font-semibold ${
+                      m.isDestructive ? 'text-amber-700' : 'text-emerald-700'
+                    }`}>
+                      <Icon className="h-4 w-4" />
+                      {m.label}
+                      <span className="text-xs font-normal text-muted-foreground">{m.article}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1.5">{m.description}</p>
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <p className="font-semibold text-foreground mb-1">Qué pasa:</p>
+                        <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
+                          {m.consequences.map(c => <li key={c}>{c}</li>)}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-foreground mb-1">Audit registrado:</p>
+                        <ul className="list-disc list-inside space-y-0.5 text-muted-foreground font-mono text-[10px]">
+                          {m.audits.map(a => <li key={a}>{a}</li>)}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setInfoOpen(false)} size="sm">Cerrar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Botones */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {(Object.keys(ACTION_META) as ActionKind[]).map(kind => {
+          const m = ACTION_META[kind]
+          if (kind === 'pdf' && !sarPrintableAction) return null
+          const Icon = m.icon
+          const isRunning = running === kind
+          const hoverClasses = m.isDestructive
+            ? 'hover:bg-amber-700/10 hover:text-amber-800 hover:border-amber-700'
+            : 'hover:bg-emerald-700/10 hover:text-emerald-800 hover:border-emerald-700'
+          return (
+            <Button
+              key={kind}
+              type="button"
+              disabled={isPending || running !== null}
+              size="sm"
+              variant="outline"
+              title={m.description}
+              className={`h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 ${hoverClasses}`}
+              onClick={handleClick(kind)}
+            >
+              {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
+              {m.label}
+            </Button>
+          )
+        })}
+      </div>
+
+      {/* Dialog de confirmación específico por acción */}
+      <Dialog open={pendingAction !== null} onOpenChange={(o) => !o && setPendingAction(null)}>
+        <DialogContent className="max-w-md">
+          {pendingAction && (() => {
+            const m = ACTION_META[pendingAction]
+            const Icon = m.icon
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className={`flex items-center gap-2 ${
+                    m.isDestructive ? 'text-amber-700' : 'text-emerald-700'
+                  }`}>
+                    {m.isDestructive ? <AlertTriangle className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+                    Confirmar: {m.label}
+                  </DialogTitle>
+                  <DialogDescription>{m.article}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  <p className="text-muted-foreground">
+                    Acción sobre <strong className="text-foreground">{contactDisplayName}</strong>.
+                  </p>
+                  <p>{m.description}</p>
+                  <div className="rounded-md border border-border bg-muted/30 p-2.5 text-xs">
+                    <p className="font-semibold mb-1">Qué pasará:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
+                      {m.consequences.map(c => <li key={c}>{c}</li>)}
+                    </ul>
+                  </div>
+                  <div className="rounded-md border border-border bg-muted/30 p-2.5 text-xs">
+                    <p className="font-semibold mb-1">Quedará registrado en audit:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-muted-foreground font-mono text-[10px]">
+                      {m.audits.map(a => <li key={a}>{a}</li>)}
+                    </ul>
+                  </div>
+                  {m.isDestructive && (
+                    <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2.5 text-xs text-amber-700">
+                      <strong>Esta acción es IRREVERSIBLE.</strong> Una vez ejecutada, los datos
+                      personales NO se pueden recuperar. El audit log conservará prueba de lo ocurrido.
+                    </div>
+                  )}
+                </div>
+                <DialogFooter className="gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setPendingAction(null)}
+                    size="sm"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleConfirm}
+                    size="sm"
+                    className={
+                      m.isDestructive
+                        ? 'bg-amber-700 hover:bg-amber-800 text-white'
+                        : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                    }
+                  >
+                    {m.isDestructive ? 'Sí, anonimizar' : `Sí, ${m.label.toLowerCase()}`}
+                  </Button>
+                </DialogFooter>
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Disclaimer en una sola línea (lo grueso ahora vive en Dialogs) */}
+      <p className="text-[10px] text-muted-foreground/70">
+        Cada acción queda registrada en <code className="text-[10px]">consent_audit_log</code> (Art. 9 — append-only).
+        Click en (?) para ver detalle de cada derecho.
+      </p>
+    </div>
+  )
+}

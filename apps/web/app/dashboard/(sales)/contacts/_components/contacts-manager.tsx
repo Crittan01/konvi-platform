@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Download, FileText, Printer, Pencil } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import AddressSelector from '@/components/address-selector'
 import { validateColombianDocument } from '@/lib/validators/document'
 import { validateAddress, type StructuredAddress, type BuildingType } from '@/lib/validators/address'
+import HabeasDataActions from './habeas-data-actions'
 
 type ContactAddress = {
   street?: string; number?: string; city?: string
@@ -190,84 +191,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     handleDelete(fd)
   }
 
-  // Rev. 101 (F1) — Abre HTML imprimible en nueva pestaña; el operador
-  // hace Cmd+P → Save as PDF.
-  const triggerPrintable = (contactId: string) => {
-    if (!sarPrintableAction) {
-      window.alert('Acción imprimible no disponible.')
-      return
-    }
-    setSarRunning(`${contactId}:printable`)
-    startTransition(async () => {
-      try {
-        const fd = new FormData()
-        fd.set('contact_id', contactId)
-        const res = await sarPrintableAction(fd)
-        if (!res.ok || !res.html) {
-          window.alert(`Falló reporte imprimible (${res.status}): ${res.error || 'unknown'}`)
-          return
-        }
-        const blob = new Blob([res.html], { type: 'text/html' })
-        const url = URL.createObjectURL(blob)
-        const w = window.open(url, '_blank', 'noopener,noreferrer')
-        if (!w) {
-          window.alert('El browser bloqueó la nueva pestaña. Habilita popups y reintenta.')
-        }
-        // No revocamos URL inmediatamente — la nueva pestaña aún la usa.
-        setTimeout(() => URL.revokeObjectURL(url), 60_000)
-      } finally {
-        setSarRunning(null)
-      }
-    })
-  }
-
-  // Rev. 100 — SAR (Habeas Data Art. 14, 15, 19) handler.
-  // Triggers para owner/manager: export → descarga JSON; erase → anonimiza.
-  const [sarRunning, setSarRunning] = useState<string | null>(null)
-  const triggerSar = (contactId: string, sarType: 'export' | 'erase' | 'portability') => {
-    if (!sarAction) {
-      window.alert('Acción SAR no disponible (sarAction prop ausente).')
-      return
-    }
-    if (sarType === 'erase') {
-      if (!confirm(
-        '¿Confirmas SUPRESIÓN de PII de este contacto?\n\n' +
-        'Esta acción es IRREVERSIBLE: anonimiza nombre, email, documento, dirección y notas.\n' +
-        'Solo se conserva el teléfono (canal WhatsApp) y el audit log inmutable.\n\n' +
-        'Habeas Data Ley 1581/2012 Art. 15 — Derecho de supresión.'
-      )) return
-    }
-    setSarRunning(`${contactId}:${sarType}`)
-    startTransition(async () => {
-      try {
-        const fd = new FormData()
-        fd.set('contact_id', contactId)
-        fd.set('sar_type', sarType)
-        const res = await sarAction(fd)
-        if (!res.ok) {
-          window.alert(`SAR ${sarType} falló (${res.status}): ${res.error || JSON.stringify(res.payload).slice(0, 200)}`)
-          return
-        }
-        if (sarType === 'export' || sarType === 'portability') {
-          // Descarga el JSON (Art. 14 / 19).
-          const json = JSON.stringify(res.payload, null, 2)
-          const blob = new Blob([json], { type: 'application/json' })
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = `habeas-data-${sarType}-${contactId.slice(0, 8)}-${Date.now()}.json`
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          URL.revokeObjectURL(url)
-        } else if (sarType === 'erase') {
-          window.alert('Supresión Art. 15 procesada. Los datos PII fueron anonimizados.\nEl audit log conserva trazabilidad inmutable.')
-        }
-      } finally {
-        setSarRunning(null)
-      }
-    })
-  }
+  // Rev. 102 — handlers SAR/printable movidos a <HabeasDataActions />
+  // (apps/web/.../contacts/_components/habeas-data-actions.tsx). Allí está
+  // la lógica de descargas + dialogs de confirmación + dialog (?) de info.
+  // Aquí solo pasamos las server actions como props.
 
   const extractEvidenceNote = (evidence: Contact['consent_evidence']): string | null => {
     if (!evidence || typeof evidence !== 'object') return null
@@ -651,79 +578,18 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           </Button>
                         </div>
 
-                        {/* ── Habeas Data acciones (paleta verde oscuro uniforme) ─── */}
+                        {/* Rev. 102 — Acciones Habeas Data unificadas con (?) info + confirm dialogs */}
                         {sarAction && (
-                          <div className="pt-3 mt-3 border-t border-border space-y-2">
-                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">
-                              <ShieldCheck className="h-3 w-3" />
-                              Habeas Data — Derechos del titular
-                            </div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Button
-                                type="button"
-                                disabled={isPending}
-                                size="sm"
-                                variant="outline"
-                                title="Art. 14 — Exportar todos los datos del titular en JSON"
-                                className="h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 hover:bg-emerald-700/10 hover:text-emerald-800 hover:border-emerald-700"
-                                onClick={() => triggerSar(c.id, 'export')}
-                              >
-                                {sarRunning === `${c.id}:export`
-                                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                                  : <Download className="h-3 w-3" />}
-                                Reporte (JSON)
-                              </Button>
-                              {sarPrintableAction && (
-                                <Button
-                                  type="button"
-                                  disabled={isPending}
-                                  size="sm"
-                                  variant="outline"
-                                  title="Reporte HTML imprimible (Cmd+P → Save as PDF)"
-                                  className="h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 hover:bg-emerald-700/10 hover:text-emerald-800 hover:border-emerald-700"
-                                  onClick={() => triggerPrintable(c.id)}
-                                >
-                                  {sarRunning === `${c.id}:printable`
-                                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                                    : <Printer className="h-3 w-3" />}
-                                  Reporte (PDF)
-                                </Button>
-                              )}
-                              <Button
-                                type="button"
-                                disabled={isPending}
-                                size="sm"
-                                variant="outline"
-                                title="Art. 19 — Portabilidad (JSON estándar)"
-                                className="h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 hover:bg-emerald-700/10 hover:text-emerald-800 hover:border-emerald-700"
-                                onClick={() => triggerSar(c.id, 'portability')}
-                              >
-                                {sarRunning === `${c.id}:portability`
-                                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                                  : <FileText className="h-3 w-3" />}
-                                Portabilidad
-                              </Button>
-                              <Button
-                                type="button"
-                                disabled={isPending}
-                                size="sm"
-                                variant="outline"
-                                title="Art. 15 — Supresión: anonimiza PII (irreversible)"
-                                className="h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 hover:bg-amber-700/10 hover:text-amber-800 hover:border-amber-700"
-                                onClick={() => triggerSar(c.id, 'erase')}
-                              >
-                                {sarRunning === `${c.id}:erase`
-                                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                                  : <ShieldOff className="h-3 w-3" />}
-                                Anonimizar
-                              </Button>
-                            </div>
-                            <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                              Reporte JSON / PDF (Art. 14) y Portabilidad (Art. 19) son lectura.
-                              <strong className="text-amber-700"> Anonimizar (Art. 15) es irreversible</strong> — borra
-                              nombre/email/documento/dirección/notas; conserva phone (canal) y audit log inmutable.
-                            </p>
-                          </div>
+                          <HabeasDataActions
+                            contactId={c.id}
+                            contactDisplayName={
+                              c.name
+                                ? `${c.name} (${formatPhone(c.phone)})`
+                                : formatPhone(c.phone)
+                            }
+                            sarAction={sarAction}
+                            sarPrintableAction={sarPrintableAction}
+                          />
                         )}
                       </form>
                       )}

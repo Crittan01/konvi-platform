@@ -73,6 +73,11 @@ class RenderExportHtmlTests(unittest.TestCase):
         base = {
             "format_version": "1.0",
             "generated_at": "2026-05-01T00:00:00Z",
+            "primary_identifier": {
+                "kind": "document",
+                "value": "CC 1234567890",
+                "note": "Identificador legal primario.",
+            },
             "subject": {
                 "id": "c-1", "phone": "+57x", "name": "Cristian",
                 "email": "test@x.com", "document_type": "CC",
