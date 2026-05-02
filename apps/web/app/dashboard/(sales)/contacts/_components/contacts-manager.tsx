@@ -1043,6 +1043,8 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             sarAction={sarAction}
                             sarPrintableAction={sarPrintableAction}
                             onEraseSuccess={markErasedOptimistically}
+                            isAnonymized={!c.consent_given && !!c.consent_revoked_at}
+                            anonymizedAt={c.consent_revoked_at}
                           />
                         )}
                       </form>

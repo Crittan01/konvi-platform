@@ -340,6 +340,30 @@ async def data_subject_request(
         }
 
     # type == "erase"
+    # Rev. 102 — guard: rechazar erase si el contact ya está anonimizado.
+    # Re-anonimizar es no-op funcional (PII ya null) PERO sobrescribe la
+    # fecha original de anonimización (información legal valiosa) y
+    # ensucia consent_audit_log con eventos 'revoked' duplicados que
+    # confunden análisis ante SIC.
+    try:
+        already_check = sb.table("contacts").select(
+            "consent_given, consent_revoked_at"
+        ).eq("id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+    except Exception as exc:
+        logger.error("[SAR] DB error pre-erase check: %s", exc)
+        raise HTTPException(status_code=503, detail="DB temporarily unavailable")
+    already_row = (already_check.data or [{}])[0]
+    if (already_row.get("consent_given") is False
+            and already_row.get("consent_revoked_at")):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Este contacto ya está anonimizado "
+                f"(desde {already_row.get('consent_revoked_at')}). "
+                "Re-anonimizar borraría la fecha original de la operación. "
+                "Si necesitas registrar un evento adicional, usa Reporte/Portabilidad."
+            ),
+        )
     # Rev. 102 — motivo obligatorio (minLength=10) cuando viene desde
     # Tenant Console. Sigue siendo opcional para llamadas programáticas
     # del bot (que no pasan reason): defaultea a "Solicitud de supresión
