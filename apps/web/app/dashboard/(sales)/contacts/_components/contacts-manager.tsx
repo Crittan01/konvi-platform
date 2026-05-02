@@ -398,10 +398,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                     </Label>
                     <Input
                       name="document_number"
-                      placeholder="1.234.567.890"
+                      placeholder="1234567890"
                       required
-                      pattern="[\d.\-]+"
-                      title="Solo dígitos, puntos o guion (DV NIT)"
+                      pattern="[\d\-]+"
+                      title="Solo dígitos. NIT acepta guion para dígito de verificación."
                     />
                   </div>
                 </div>
