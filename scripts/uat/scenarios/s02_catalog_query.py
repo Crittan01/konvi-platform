@@ -47,15 +47,17 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     if not outs:
         return ScenarioResult(2, f"Consulta catálogo [{mode}]", FAIL,
             "Sin outbound tras 60s")
-    text = " ".join(o.get("content") or "" for o in outs).lower()
-    has_listing = any(k in text for k in ("$", "cop", "precio", "producto", "jabón", "sérum"))
+    full_text = " ".join(o.get("content") or "" for o in outs)
+    text_lower = full_text.lower()
+    has_listing = any(k in text_lower for k in ("$", "cop", "precio", "producto", "jabón", "sérum"))
     if not has_listing:
         return ScenarioResult(2, f"Consulta catálogo [{mode}]", FAIL,
             "Outbound no contiene marcadores de catálogo (precio/producto)",
-            evidence={"mode": mode, "sample": text[:200]})
+            evidence={"mode": mode, "sample": full_text[:300]})
     return ScenarioResult(2, f"Consulta catálogo [{mode}]", PASS,
-        f"Bot listó productos en {len(outs)} mensaje(s)",
-        evidence={"mode": mode, "outbound_count": len(outs), "preview": text[:200]})
+        f"Bot listó productos en {len(outs)} mensaje(s) ({len(full_text)} chars)",
+        evidence={"mode": mode, "outbound_count": len(outs),
+                  "full_text": full_text})
 
 
 if __name__ == "__main__":
