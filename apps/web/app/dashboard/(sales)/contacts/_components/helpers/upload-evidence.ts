@@ -87,12 +87,56 @@ export async function uploadConsentEvidence(
     return { status: 'error', message: error.message }
   }
 
-  const { data } = sb.storage.from(CONSENT_EVIDENCE_BUCKET).getPublicUrl(path)
   return {
     status: 'uploaded',
-    url: data.publicUrl,
+    // Rev. 103 hotfix: el bucket es PRIVADO; getPublicUrl() devuelve un
+    // path /object/public/ que retorna 404. La UI debe usar
+    // getConsentEvidenceSignedUrl(contactId) para acceder al archivo.
+    // url se persiste vacío (compat con código que aún la lee).
+    url: '',
     path,
     mime: effectiveMime,
     size: file.size,
   }
+}
+
+/**
+ * Rev. 103 — Genera signed URL temporal (5 min) para acceder a un
+ * adjunto de evidencia. Bucket privado: solo el tenant owner del
+ * archivo puede leerlo (RLS lo refuerza). Llamado on-click desde la UI
+ * cuando el operador quiere ver/descargar la evidencia.
+ *
+ * Retorna null si: contact no existe, contact pertenece a otro tenant,
+ * no hay attachment_path en evidence, o storage falla.
+ */
+export async function getConsentEvidenceSignedUrl(
+  contactId: string,
+): Promise<{ url: string } | { error: string }> {
+  if (!contactId) return { error: 'contact_id requerido' }
+  const sb = createClient()
+  const { data: { user: u } } = await sb.auth.getUser()
+  const m = (u?.app_metadata ?? {}) as { tenant_id?: string }
+  if (!m.tenant_id) return { error: 'No autenticado' }
+
+  const { data: contact } = await sb.from('contacts')
+    .select('consent_evidence')
+    .eq('id', contactId)
+    .eq('tenant_id', m.tenant_id)
+    .single()
+  if (!contact) return { error: 'Contacto no encontrado' }
+
+  const evidence = (contact.consent_evidence ?? {}) as Record<string, unknown>
+  const path = typeof evidence.attachment_path === 'string'
+    ? evidence.attachment_path
+    : null
+  if (!path) return { error: 'No hay archivo adjunto para este contacto' }
+
+  const { data, error } = await sb.storage
+    .from(CONSENT_EVIDENCE_BUCKET)
+    .createSignedUrl(path, 60 * 5) // 5 min TTL
+
+  if (error || !data?.signedUrl) {
+    return { error: error?.message || 'No se pudo generar URL temporal' }
+  }
+  return { url: data.signedUrl }
 }

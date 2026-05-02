@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2, Paperclip, ExternalLink } from 'lucide-react'
+import { getConsentEvidenceSignedUrl } from './helpers/upload-evidence'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -69,6 +70,74 @@ type Props = {
 }
 
 const ITEMS_PER_PAGE = 30
+
+// Rev. 103 (F10) — Card visible que muestra que el contact tiene evidencia
+// física adjunta + botón "Ver archivo" que genera signed URL on-demand
+// (5 min TTL). Bucket privado obliga a este patrón: getPublicUrl() devuelve
+// 404 contra buckets privados.
+function ExistingAttachmentCard({
+  contactId,
+  mime,
+  size,
+  uploadedAt,
+}: {
+  contactId: string
+  mime: string | null
+  size: number | null
+  uploadedAt: string | null
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const handleView = async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const result = await getConsentEvidenceSignedUrl(contactId)
+      if ('url' in result) {
+        window.open(result.url, '_blank', 'noopener,noreferrer')
+      } else {
+        setError(result.error)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al generar URL')
+    } finally {
+      setLoading(false)
+    }
+  }
+  const sizeKb = size != null ? Math.max(1, Math.round(size / 1024)) : null
+  const mimeShort = mime?.replace('application/', '').replace('image/', '').toUpperCase() ?? '—'
+  return (
+    <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-2.5 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <Paperclip className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-emerald-700">Evidencia física adjunta</p>
+          <p className="text-[10px] text-muted-foreground">
+            {mimeShort}{sizeKb != null && ` · ${sizeKb} KB`}
+            {uploadedAt && ` · subida ${new Date(uploadedAt).toLocaleDateString('es-CO')}`}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 text-xs"
+          onClick={handleView}
+          disabled={loading}
+        >
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ExternalLink className="h-3 w-3" />}
+          Ver archivo
+        </Button>
+      </div>
+      {error && (
+        <p className="text-[10px] text-destructive">No se pudo abrir: {error}</p>
+      )}
+      <p className="text-[10px] text-muted-foreground">
+        Si subes otro archivo abajo, se reemplaza.
+      </p>
+    </div>
+  )
+}
 
 // Mismo formato que Inbox: +57 312 583 5649. Rev. 102: detección
 // de country code. Para CO formato bonito; otros países muestra +N+digits.
@@ -939,8 +1008,16 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             const isOther = currentSource === 'other'
                             const isInPerson = currentSource === 'in_person'
                             const evidenceObj = (c.consent_evidence ?? {}) as Record<string, unknown>
-                            const existingAttachmentUrl = typeof evidenceObj.attachment_url === 'string'
-                              ? evidenceObj.attachment_url
+                            const hasAttachment = typeof evidenceObj.attachment_path === 'string'
+                              && (evidenceObj.attachment_path as string).length > 0
+                            const attachmentMime = typeof evidenceObj.attachment_mime === 'string'
+                              ? evidenceObj.attachment_mime
+                              : null
+                            const attachmentSize = typeof evidenceObj.attachment_size === 'number'
+                              ? evidenceObj.attachment_size
+                              : null
+                            const attachmentUploadedAt = typeof evidenceObj.attachment_uploaded_at === 'string'
+                              ? evidenceObj.attachment_uploaded_at
                               : null
                             return (
                             <>
@@ -965,21 +1042,27 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             </div>
                             {/* Rev. 103 (F10) — Adjuntar/reemplazar evidencia física en Edit. */}
                             {isInPerson && (
-                              <div className="space-y-1">
-                                <Label className="text-xs">
-                                  Adjuntar evidencia física <span className="text-[10px] text-muted-foreground">(PDF o imagen, opcional, máx. 5 MB)</span>
-                                </Label>
-                                <input
-                                  type="file"
-                                  name="consent_evidence_file"
-                                  accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"
-                                  className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground"
-                                />
-                                {existingAttachmentUrl && (
-                                  <p className="text-[10px] text-muted-foreground">
-                                    Ya hay evidencia adjunta. <a href={existingAttachmentUrl} target="_blank" rel="noreferrer" className="underline text-blue-700">Ver archivo actual</a>. Si subes otro, se reemplaza.
-                                  </p>
+                              <div className="space-y-2">
+                                {hasAttachment && (
+                                  <ExistingAttachmentCard
+                                    contactId={c.id}
+                                    mime={attachmentMime}
+                                    size={attachmentSize}
+                                    uploadedAt={attachmentUploadedAt}
+                                  />
                                 )}
+                                <div className="space-y-1">
+                                  <Label className="text-xs">
+                                    {hasAttachment ? 'Reemplazar evidencia física' : 'Adjuntar evidencia física'}
+                                    <span className="text-[10px] text-muted-foreground ml-1">(PDF o imagen, opcional, máx. 5 MB)</span>
+                                  </Label>
+                                  <input
+                                    type="file"
+                                    name="consent_evidence_file"
+                                    accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"
+                                    className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground"
+                                  />
+                                </div>
                               </div>
                             )}
                             </>
