@@ -53,6 +53,15 @@ type Props = {
    * padre cuando se llama desde un Client Component nested.
    */
   onEraseSuccess?: (contactId: string) => void
+  /**
+   * Rev. 102 — Si el contact ya fue anonimizado (consent_given=false +
+   * consent_revoked_at no null), el botón "Anonimizar" se renderiza
+   * disabled. Re-anonimizar es no-op funcional pero ensucia el audit
+   * log con eventos duplicados Y sobrescribe la fecha original de la
+   * anonimización (información legal valiosa).
+   */
+  isAnonymized?: boolean
+  anonymizedAt?: string | null
 }
 
 type ActionKind = 'json' | 'pdf' | 'portability' | 'erase'
@@ -147,6 +156,7 @@ const ACTION_META: Record<ActionKind, {
 
 export default function HabeasDataActions({
   contactId, contactDisplayName, sarAction, sarPrintableAction, onEraseSuccess,
+  isAnonymized = false, anonymizedAt = null,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -352,6 +362,17 @@ export default function HabeasDataActions({
           if (kind === 'pdf' && !sarPrintableAction) return null
           const Icon = m.icon
           const isRunning = running === kind
+          // Rev. 102 — botón Anonimizar deshabilitado si el contact ya
+          // está anonimizado. Re-anonimizar es no-op funcional pero
+          // sobrescribiría la fecha original (info legal valiosa) y
+          // ensuciaría audit log con eventos duplicados.
+          const isEraseOnAnonymized = kind === 'erase' && isAnonymized
+          const buttonDisabled = isPending || running !== null || isEraseOnAnonymized
+          const buttonTitle = isEraseOnAnonymized
+            ? `Este contacto ya fue anonimizado${
+                anonymizedAt ? ` el ${new Date(anonymizedAt).toLocaleDateString('es-CO')}` : ''
+              }. Acción no disponible.`
+            : m.description
           const hoverClasses = m.isDestructive
             ? 'hover:bg-amber-700/10 hover:text-amber-800 hover:border-amber-700'
             : 'hover:bg-emerald-700/10 hover:text-emerald-800 hover:border-emerald-700'
@@ -359,11 +380,11 @@ export default function HabeasDataActions({
             <Button
               key={kind}
               type="button"
-              disabled={isPending || running !== null}
+              disabled={buttonDisabled}
               size="sm"
               variant="outline"
-              title={m.description}
-              className={`h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 ${hoverClasses}`}
+              title={buttonTitle}
+              className={`h-8 text-xs gap-1.5 px-3 border-emerald-700/50 text-emerald-700 ${hoverClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
               onClick={handleClick(kind)}
             >
               {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
