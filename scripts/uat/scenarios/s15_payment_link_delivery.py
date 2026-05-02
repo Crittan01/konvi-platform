@@ -76,10 +76,14 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
     ))
 
     digits = phone.lstrip("+")
-    contact = sb.table("contacts").select("consent_given, email, name").eq(
-        "tenant_id", tenant_id
-    ).or_(f"phone.eq.{digits},phone.eq.+{digits}").limit(1).execute()
-    consent_given = contact.data[0].get("consent_given") if contact.data else False
+    contact = sb.table("contacts").select(
+        "consent_given, consent_source, email, name"
+    ).eq("tenant_id", tenant_id).or_(
+        f"phone.eq.{digits},phone.eq.+{digits}"
+    ).limit(1).execute()
+    c = contact.data[0] if contact.data else {}
+    consent_given = c.get("consent_given") or False
+    consent_source = c.get("consent_source")
 
     evidence = {
         "turns": res.turns,
@@ -87,10 +91,19 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
         "link_delivered": bool(link),
         "fsm_enforced_data": fsm_enforced,
         "consent_given": consent_given,
+        # Rev. 103 — registramos canal por el que se otorgó el consent
+        # para verificar que el bot persiste 'whatsapp' (no 'manual_console').
+        "consent_source": consent_source,
         "transcript_tail": res.transcript[-3:],
     }
 
     if link:
+        # Rev. 103 — si llegamos al link, el consent fue otorgado.
+        # Verificar que consent_source='whatsapp' (no otro valor).
+        if consent_given and consent_source and consent_source != "whatsapp":
+            return ScenarioResult(15, "Promesa de link cumplida", FAIL,
+                f"Link entregado pero consent_source={consent_source!r} (esperado 'whatsapp')",
+                evidence={**evidence, "link": link})
         return ScenarioResult(15, "Promesa de link cumplida", PASS,
             f"Link Wompi entregado: {link[:50]}...",
             evidence={**evidence, "link": link})

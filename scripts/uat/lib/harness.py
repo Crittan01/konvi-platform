@@ -150,6 +150,45 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ── Habeas Data verification helpers (rev. 103) ──────────────────────────────
+
+def hash_phone(phone: str) -> str:
+    """Espejo de orchestrator._hash_phone — sha256 sin spaces/+/-."""
+    import hashlib
+    norm = re.sub(r"[\s+\-]", "", str(phone or ""))
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def fetch_audit_events(
+    sb,
+    tenant_id: str,
+    *,
+    contact_id: str | None = None,
+    phone: str | None = None,
+    event: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Lee filas de consent_audit_log para un contact_id o phone.
+
+    Útil para validar runtime de eventos de consent escritos por el bot:
+    granted (post-consent), revoked (post-revocación), etc.
+
+    Si phone se pasa, computamos el sha256 hash (invariante a +/-) para
+    matchear post-anonimización donde contact_id puede ser huérfano.
+    """
+    q = sb.table("consent_audit_log").select(
+        "event, source, phone_hash, contact_id, actor_email, evidence, occurred_at"
+    ).eq("tenant_id", tenant_id)
+    if contact_id:
+        q = q.eq("contact_id", contact_id)
+    elif phone:
+        q = q.eq("phone_hash", hash_phone(phone))
+    if event:
+        q = q.eq("event", event)
+    q = q.order("occurred_at", desc=True).limit(limit)
+    return q.execute().data or []
+
+
 def bot_asks(text: str, *keywords: str) -> bool:
     low = text.lower()
     return any(k.lower() in low for k in keywords)

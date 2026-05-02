@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lib.harness import (  # noqa: E402
     PASS, FAIL, ScenarioResult,
+    fetch_audit_events,
     hard_reset, send_inbound, wait_outbound, now_iso, run_one,
 )
 import e2e_chat  # noqa: E402
@@ -131,11 +132,18 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
     else:
         final_state = (db_res.data[0] if db_res.data else None)
 
+    # Rev. 103 — verificación adicional: audit log inmutable.
+    audit_revoked = fetch_audit_events(sb, tenant_id, contact_id=contact_id,
+                                       event="revoked", limit=3)
+
     evidence = {
         "phase_1_seed_id": contact_id[:8],
         "phase_2_bot_acknowledged": bot_acknowledged,
         "phase_2_outbound_count": len(outs),
         "phase_3_final_state": final_state,
+        "phase_4_audit_revoked_count": len(audit_revoked),
+        "phase_4_audit_source": (audit_revoked[0].get("source")
+                                  if audit_revoked else None),
         "bot_preview": bot_text[:240],
     }
 
@@ -164,6 +172,13 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
             fails.append(f"{field} NO anonimizado (Art. 15)")
     if not bot_acknowledged:
         fails.append("Bot no acusó recibo en el chat")
+    # Rev. 103 — el bot debe escribir audit log event='revoked' source='whatsapp'.
+    if not audit_revoked:
+        fails.append("audit_log 'revoked' NO escrito (Art. 9 trazabilidad)")
+    elif audit_revoked[0].get("source") != "whatsapp":
+        fails.append(
+            f"audit.source={audit_revoked[0].get('source')!r} (esperado 'whatsapp')"
+        )
 
     if fails:
         return ScenarioResult(8, "Revocación Habeas Data", FAIL,
@@ -171,7 +186,7 @@ def scenario(phone: str, tenant_id: str) -> ScenarioResult:
             evidence=evidence)
 
     return ScenarioResult(8, "Revocación Habeas Data", PASS,
-        "Audit trail (revoked_at + reason) + PII anonimizada + bot OK",
+        "Audit trail (revoked_at + reason + audit_log) + PII anonimizada + bot OK",
         evidence=evidence)
 
 
