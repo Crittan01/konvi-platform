@@ -484,27 +484,28 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   </label>
 
                   {addConsentChecked && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Canal de consentimiento</Label>
-                        <select
-                          name="consent_source"
-                          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                          defaultValue="manual_console"
-                        >
-                          <option value="manual_console">Consola</option>
-                          <option value="whatsapp">WhatsApp</option>
-                          <option value="web_form">Formulario web</option>
-                          <option value="phone_call">Llamada</option>
-                          <option value="in_person">Presencial</option>
-                          <option value="import">Importación</option>
-                          <option value="other">Otro</option>
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Versión aviso/política</Label>
-                        <Input name="consent_notice_version" placeholder="v2026-04" className="h-8 text-xs" />
-                      </div>
+                    <div className="space-y-1 pt-1">
+                      <Label className="text-xs">
+                        Canal de consentimiento <span className="text-destructive">*</span>
+                      </Label>
+                      <select
+                        name="consent_source"
+                        required
+                        defaultValue=""
+                        className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                      >
+                        <option value="" disabled>— Selecciona —</option>
+                        <option value="manual_console">Consola</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="web_form">Formulario web</option>
+                        <option value="phone_call">Llamada</option>
+                        <option value="in_person">Presencial</option>
+                        <option value="import">Importación</option>
+                        <option value="other">Otro</option>
+                      </select>
+                      <p className="text-[10px] text-muted-foreground">
+                        De dónde vino el consentimiento (clasificación para reportes).
+                      </p>
                     </div>
                   )}
 
@@ -513,11 +514,12 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                       <Label className="text-xs">Evidencia (nota interna)</Label>
                       <Input
                         name="consent_evidence_note"
-                        placeholder="Ej: autorizó por chat y aceptó política"
+                        placeholder="Ej: WhatsApp 2026-05-01 14:30, dijo 'Sí acepto' en hilo conv-abc"
                         className="h-8 text-xs"
                       />
                       <p className="text-[10px] text-muted-foreground">
-                        Cómo obtuviste el consentimiento. Útil para responder a SIC.
+                        Detalle textual de cómo se capturó: hilo, fecha/hora, documento físico, etc.
+                        Crítico para responder a SIC con prueba concreta.
                       </p>
                     </div>
                   )}
@@ -772,31 +774,28 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           </label>
 
                           {consentChecked && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                              <div className="space-y-1">
-                                <Label className="text-xs">Canal de consentimiento</Label>
-                                <select
-                                  name="consent_source"
-                                  defaultValue={c.consent_source ?? 'manual_console'}
-                                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                                >
-                                  <option value="manual_console">Consola</option>
-                                  <option value="whatsapp">WhatsApp</option>
-                                  <option value="web_form">Formulario web</option>
-                                  <option value="phone_call">Llamada</option>
-                                  <option value="in_person">Presencial</option>
-                                  <option value="import">Importación</option>
-                                  <option value="other">Otro</option>
-                                </select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Versión aviso/política</Label>
-                                <Input
-                                  name="consent_notice_version"
-                                  defaultValue={c.consent_notice_version ?? ''}
-                                  className="h-8 text-xs"
-                                />
-                              </div>
+                            <div className="space-y-1 pt-1">
+                              <Label className="text-xs">
+                                Canal de consentimiento <span className="text-destructive">*</span>
+                              </Label>
+                              <select
+                                name="consent_source"
+                                required
+                                defaultValue={c.consent_source ?? ''}
+                                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                              >
+                                <option value="" disabled>— Selecciona —</option>
+                                <option value="manual_console">Consola</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="web_form">Formulario web</option>
+                                <option value="phone_call">Llamada</option>
+                                <option value="in_person">Presencial</option>
+                                <option value="import">Importación</option>
+                                <option value="other">Otro</option>
+                              </select>
+                              <p className="text-[10px] text-muted-foreground">
+                                De dónde vino el consentimiento (clasificación para reportes).
+                              </p>
                             </div>
                           )}
 
@@ -806,9 +805,12 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                               <Input
                                 name="consent_evidence_note"
                                 defaultValue={extractEvidenceNote(c.consent_evidence) ?? ''}
-                                placeholder="Cómo obtuviste/renovaste el consentimiento"
+                                placeholder="Ej: WhatsApp 2026-05-01 14:30, dijo 'Sí acepto'"
                                 className="h-8 text-xs"
                               />
+                              <p className="text-[10px] text-muted-foreground">
+                                Detalle textual de cómo se capturó. Crítico para SIC.
+                              </p>
                             </div>
                           )}
 

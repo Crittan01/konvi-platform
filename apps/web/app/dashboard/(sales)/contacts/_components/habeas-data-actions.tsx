@@ -413,22 +413,25 @@ export default function HabeasDataActions({
                       personales NO se pueden recuperar. El audit log conservará prueba de lo ocurrido.
                     </div>
                   )}
-                  {/* Rev. 102 (D) — input motivo opcional para Anonimizar */}
+                  {/* Rev. 102 (D) — motivo OBLIGATORIO para Anonimizar.
+                      Acción irreversible amerita audit con contexto concreto. */}
                   {pendingAction === 'erase' && (
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-foreground">
-                        Motivo de la supresión <span className="text-muted-foreground font-normal">(opcional)</span>
+                        Motivo de la supresión <span className="text-destructive">*</span>
                       </label>
                       <input
                         type="text"
                         value={eraseReason}
                         onChange={e => setEraseReason(e.target.value.slice(0, 200))}
+                        minLength={10}
                         maxLength={200}
+                        required
                         placeholder="Ej: titular pidió por WhatsApp 2026-05-01"
                         className="w-full h-8 px-2 text-xs rounded-md border border-input bg-background"
                       />
                       <p className="text-[10px] text-muted-foreground">
-                        Se guarda en el audit log. Si lo dejas vacío usa &quot;Solicitud de supresión vía SAR&quot;.
+                        Mínimo 10 caracteres. Queda en el audit log inmutable como prueba ante SIC.
                       </p>
                     </div>
                   )}
@@ -446,9 +449,13 @@ export default function HabeasDataActions({
                     type="button"
                     onClick={handleConfirm}
                     size="sm"
+                    disabled={
+                      // Rev. 102 (D) — bloquear si motivo no cumple minLength.
+                      pendingAction === 'erase' && eraseReason.trim().length < 10
+                    }
                     className={
                       m.isDestructive
-                        ? 'bg-amber-700 hover:bg-amber-800 text-white'
+                        ? 'bg-amber-700 hover:bg-amber-800 text-white disabled:bg-amber-700/40'
                         : 'bg-emerald-700 hover:bg-emerald-800 text-white'
                     }
                   >
