@@ -5640,50 +5640,77 @@ async def build_and_run_orchestration(
 
         # ── 2.5 Detección determinística de revocación (ANTES del LLM) ─────────
         # Prioridad máxima: el titular siempre puede revocar el consentimiento.
+        # Rev. 103 — bifurcamos según si REALMENTE hay datos personales que
+        # eliminar. Si el cliente nunca dio consent ni PII, el bot da
+        # tranquilidad sin afirmar falsamente "tus datos fueron eliminados".
         if _detect_revocation_intent(content):
             phone_for_notify: Optional[str] = None
-            if contact_id:
+            had_data_to_revoke = False
+            if contact_id and isinstance(contact_record, dict):
                 # Capturar phone ANTES del UPDATE para hashearlo en notificación.
-                try:
-                    p_res = supabase.table("contacts").select("phone").eq(
-                        "id", contact_id).eq("tenant_id", tenant_id).limit(1).execute()
-                    if p_res.data:
-                        phone_for_notify = p_res.data[0].get("phone")
-                except Exception:
-                    pass
-                _record_consent(supabase, contact_id, tenant_id, given=False, conversation_id=conversation_id)
+                phone_for_notify = contact_record.get("phone")
+                # Determinar si hay datos reales que eliminar:
+                #   - consent_given=True (consentimiento activo), o
+                #   - cualquier PII registrada (name/email/doc/address).
+                had_consent = contact_record.get("consent_given") is True
+                had_pii = any(
+                    contact_record.get(k)
+                    for k in ("name", "email", "document_number", "address")
+                )
+                had_data_to_revoke = had_consent or had_pii
+
+            if had_data_to_revoke and contact_id:
+                # Path A — revocación legal real (Art. 9 + 15).
+                _record_consent(
+                    supabase, contact_id, tenant_id,
+                    given=False, conversation_id=conversation_id,
+                )
+                outbound_text = (
+                    "Tus datos personales han sido eliminados de nuestros registros. "
+                    "Si en un futuro deseas volver a registrarte, puedes hacerlo cuando quieras. "
+                    "Seguiré ayudándote con tu consulta sin guardar información personal."
+                )
+            else:
+                # Path B — tranquilidad: no hay datos que eliminar.
+                outbound_text = (
+                    "No tengo datos personales tuyos registrados, así que no hay nada que eliminar. "
+                    "Puedes seguir conversando con tranquilidad — solo guardo el chat de WhatsApp "
+                    "necesario para responderte. Si más adelante autorizas el tratamiento de datos "
+                    "para una compra, te lo pediré explícitamente."
+                )
+
             await _send_outbound_text(
                 supabase=supabase,
                 conversation_id=conversation_id,
                 tenant_id=tenant_id,
-                text=(
-                    "Tus datos personales han sido eliminados de nuestros registros. "
-                    "Si en un futuro deseas volver a registrarte, puedes hacerlo cuando quieras. "
-                    "Seguiré ayudándote con tu consulta sin guardar información personal."
-                ),
+                text=outbound_text,
             )
-            # Rev. 94 — Notificar al tenant (Habeas Data Art. 9 — registro de revocación).
-            # Rev. 100 — distinguir excepciones de retornos False (todos fallaron).
-            try:
-                from notifications import notify_consent_revoked
-                ok = await notify_consent_revoked(
-                    supabase,
-                    tenant_id=tenant_id,
-                    contact_phone_hash=_hash_phone(phone_for_notify) or "",
-                    occurred_at=datetime.now(timezone.utc).isoformat(),
-                    source="whatsapp",
-                )
-                if not ok:
-                    # Audit gap — el evento queda en consent_audit_log pero el
-                    # tenant no fue alertado. Visible en Render logs.
-                    logger.error(
-                        "[CONSENT] notify_consent_revoked returned False tenant=%s — todos los recipients fallaron",
-                        tenant_id,
+
+            if had_data_to_revoke and contact_id:
+                # Rev. 94 — Notificar al tenant SOLO si hubo revocación real.
+                # No alertar al tenant cuando el cliente nunca dio datos.
+                try:
+                    from notifications import notify_consent_revoked
+                    ok = await notify_consent_revoked(
+                        supabase,
+                        tenant_id=tenant_id,
+                        contact_phone_hash=_hash_phone(phone_for_notify) or "",
+                        occurred_at=datetime.now(timezone.utc).isoformat(),
+                        source="whatsapp",
                     )
-            except Exception as exc:
-                logger.error("[CONSENT] notify_consent_revoked excepción: %s", exc)
+                    if not ok:
+                        logger.error(
+                            "[CONSENT] notify_consent_revoked returned False tenant=%s — todos los recipients fallaron",
+                            tenant_id,
+                        )
+                except Exception as exc:
+                    logger.error("[CONSENT] notify_consent_revoked excepción: %s", exc)
+
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-            logger.info("[CONSENT] Revocación procesada | conversation=%s", conversation_id)
+            logger.info(
+                "[CONSENT] Revocación procesada | conversation=%s | had_data=%s",
+                conversation_id, had_data_to_revoke,
+            )
             return
 
         # ── 2.6 Detección Habeas Data Art. 14 (cliente pide SUS datos) ──────────
