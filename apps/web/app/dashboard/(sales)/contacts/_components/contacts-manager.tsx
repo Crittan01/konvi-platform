@@ -14,6 +14,7 @@ import AddressSelector from '@/components/address-selector'
 import { validateColombianDocument } from '@/lib/validators/document'
 import { validateAddress, type StructuredAddress, type BuildingType } from '@/lib/validators/address'
 import HabeasDataActions from './habeas-data-actions'
+import DocumentFields, { type DocType } from './document-fields'
 
 type ContactAddress = {
   street?: string; number?: string; city?: string
@@ -372,39 +373,11 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required />
                 </div>
                 {/* Documento de identidad — Wompi PSE/Bancolombia lo exigen en checkout */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">
-                      Tipo doc. <span className="text-destructive">*</span>
-                    </Label>
-                    <select
-                      name="document_type"
-                      defaultValue=""
-                      required
-                      className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-xs"
-                    >
-                      <option value="">— Selecciona —</option>
-                      <option value="CC">CC (Cédula)</option>
-                      <option value="CE">CE (Extranjería)</option>
-                      <option value="NIT">NIT (Empresa)</option>
-                      <option value="PP">PP (Pasaporte)</option>
-                      <option value="TI">TI (Tarjeta Identidad)</option>
-                      <option value="OTHER">Otro</option>
-                    </select>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">
-                      Número doc. <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      name="document_number"
-                      placeholder="1234567890"
-                      required
-                      pattern="[\d\-]+"
-                      title="Solo dígitos. NIT acepta guion para dígito de verificación."
-                    />
-                  </div>
-                </div>
+                <DocumentFields
+                  required
+                  showRequiredAsterisk
+                  layout="default"
+                />
                 <div className="space-y-1">
                   <Label className="text-xs flex items-center gap-1">
                     <MapPin className="h-3 w-3" /> Dirección de entrega <span className="text-destructive">*</span>
@@ -567,28 +540,11 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           </div>
                         </div>
                         {/* Rev. 69 — Documento de identidad (edición) */}
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Tipo doc.</Label>
-                            <select
-                              name="document_type"
-                              defaultValue={c.document_type ?? ''}
-                              className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs"
-                            >
-                              <option value="">—</option>
-                              <option value="CC">CC</option>
-                              <option value="CE">CE</option>
-                              <option value="NIT">NIT</option>
-                              <option value="PP">PP</option>
-                              <option value="TI">TI</option>
-                              <option value="OTHER">Otro</option>
-                            </select>
-                          </div>
-                          <div className="col-span-2 space-y-1">
-                            <Label className="text-xs">Número doc.</Label>
-                            <Input name="document_number" defaultValue={c.document_number ?? ''} className="h-8 text-xs" />
-                          </div>
-                        </div>
+                        <DocumentFields
+                          layout="compact"
+                          defaultDocType={(c.document_type ?? '') as DocType}
+                          defaultDocNumber={c.document_number ?? ''}
+                        />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-xs">Notas</Label>
