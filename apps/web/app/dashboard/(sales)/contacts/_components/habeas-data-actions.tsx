@@ -153,6 +153,9 @@ export default function HabeasDataActions({
   const [running, setRunning] = useState<ActionKind | null>(null)
   const [pendingAction, setPendingAction] = useState<ActionKind | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
+  // Rev. 102 (D) — motivo opcional para Anonimizar. Reemplaza el texto
+  // hardcodeado "Solicitud de supresión vía SAR" si el operador llena.
+  const [eraseReason, setEraseReason] = useState('')
 
   // Rev. 102 — Dialog de resultado (sustituye window.alert).
   // Solo para Anonimizar (success — confirmación visual irreversible) y
@@ -200,6 +203,10 @@ export default function HabeasDataActions({
       const fd = new FormData()
       fd.set('contact_id', contactId)
       fd.set('sar_type', sarType)
+      // Rev. 102 (D) — pasar motivo personalizado de erase al server.
+      if (sarType === 'erase' && eraseReason.trim()) {
+        fd.set('reason', eraseReason.trim())
+      }
       const res = await sarAction(fd)
       if (!res.ok) {
         const detail =
@@ -257,7 +264,11 @@ export default function HabeasDataActions({
     if (!pendingAction) return
     const kind = pendingAction
     setPendingAction(null)
-    startTransition(async () => { await executeAction(kind) })
+    startTransition(async () => {
+      await executeAction(kind)
+      // Reset motivo tras submit (success o error).
+      if (kind === 'erase') setEraseReason('')
+    })
   }
 
   return (
@@ -400,6 +411,25 @@ export default function HabeasDataActions({
                     <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2.5 text-xs text-amber-700">
                       <strong>Esta acción es IRREVERSIBLE.</strong> Una vez ejecutada, los datos
                       personales NO se pueden recuperar. El audit log conservará prueba de lo ocurrido.
+                    </div>
+                  )}
+                  {/* Rev. 102 (D) — input motivo opcional para Anonimizar */}
+                  {pendingAction === 'erase' && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-foreground">
+                        Motivo de la supresión <span className="text-muted-foreground font-normal">(opcional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={eraseReason}
+                        onChange={e => setEraseReason(e.target.value.slice(0, 200))}
+                        maxLength={200}
+                        placeholder="Ej: titular pidió por WhatsApp 2026-05-01"
+                        className="w-full h-8 px-2 text-xs rounded-md border border-input bg-background"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Se guarda en el audit log. Si lo dejas vacío usa &quot;Solicitud de supresión vía SAR&quot;.
+                      </p>
                     </div>
                   )}
                 </div>

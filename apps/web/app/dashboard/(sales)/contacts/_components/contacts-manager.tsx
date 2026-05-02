@@ -164,6 +164,22 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   const toggleRenewedConsent = (id: string) =>
     setRenewedConsent(prev => ({ ...prev, [id]: !prev[id] }))
 
+  // Rev. 102 — state controlled del check "consent_given" para form Add
+  // y para forms Edit (per-contact). Permite condicionar UX:
+  //   - inputs PII disabled si check OFF (Ley 1581 Art. 9 — sin consent
+  //     no se pueden tratar datos personales)
+  //   - mostrar "Evidencia" si ON / "Razón de revocatoria" si OFF
+  //     (mutuamente excluyente, antes ambos siempre visibles confundía)
+  const [addConsentChecked, setAddConsentChecked] = useState(false)
+  const [editConsentChecked, setEditConsentChecked] = useState<Record<string, boolean>>({})
+  const toggleEditConsent = (id: string, defaultValue: boolean) =>
+    setEditConsentChecked(prev => ({
+      ...prev,
+      [id]: prev[id] === undefined ? !defaultValue : !prev[id],
+    }))
+  const isEditConsentChecked = (id: string, defaultValue: boolean): boolean =>
+    editConsentChecked[id] === undefined ? defaultValue : editConsentChecked[id]
+
   /** Contact que fue anonimizado y aún no tiene consent renovado. */
   const isAwaitingRenewal = (c: Contact): boolean =>
     !c.consent_given && !!c.consent_revoked_at
@@ -212,6 +228,7 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
       await addAction(fd)
       addFormRef.current?.reset()
       setAddressResetKey(k => k + 1)
+      setAddConsentChecked(false)
       router.refresh()
       showSuccess('Contacto guardado correctamente.')
     })
@@ -392,73 +409,133 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                     />
                   </div>
                 </div>
+                {/* Rev. 102 — Banner Habeas Data si check OFF: explica
+                    por qué los campos PII están bloqueados (Ley 1581 Art. 9). */}
+                {!addConsentChecked && (
+                  <div className="rounded-md border border-amber-700/40 bg-amber-700/5 px-3 py-2 text-[11px] text-amber-700 flex items-start gap-2">
+                    <ShieldOff className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Marca el check de consentimiento más abajo para habilitar los
+                      campos personales. Sin autorización del titular el sistema
+                      solo registra el teléfono (canal de comunicación).
+                    </span>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Nombre completo <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Wompi y Envia lo requieren)</span>
                   </Label>
-                  <Input name="name" placeholder="Juan García López" required />
+                  <Input name="name" placeholder="Juan García López" required disabled={!addConsentChecked} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Correo electrónico <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Wompi customer_data)</span>
                   </Label>
-                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required />
+                  <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required disabled={!addConsentChecked} />
                 </div>
                 {/* Documento de identidad — Wompi PSE/Bancolombia lo exigen en checkout */}
-                <DocumentFields
-                  required
-                  showRequiredAsterisk
-                  layout="default"
-                />
+                {addConsentChecked ? (
+                  <DocumentFields
+                    required
+                    showRequiredAsterisk
+                    layout="default"
+                  />
+                ) : (
+                  <div className="text-[10px] text-muted-foreground italic">
+                    Documento de identidad bloqueado — marca el consentimiento.
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label className="text-xs flex items-center gap-1">
                     <MapPin className="h-3 w-3" /> Dirección de entrega <span className="text-destructive">*</span>
                     <span className="ml-1 text-[10px] text-muted-foreground">(Envia exige street + city + state + postal)</span>
                   </Label>
-                  <AddressSelector key={addressResetKey} fieldPrefix="addr" showBuildingDetails />
+                  {addConsentChecked ? (
+                    <AddressSelector key={addressResetKey} fieldPrefix="addr" showBuildingDetails />
+                  ) : (
+                    <div className="text-[10px] text-muted-foreground italic">
+                      Dirección bloqueada — marca el consentimiento.
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Notas internas (opcional)</Label>
-                  <Input name="notes" placeholder="Cliente frecuente..." />
+                  <Input name="notes" placeholder="Cliente frecuente..." disabled={!addConsentChecked} />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Canal de consentimiento</Label>
-                    <select
-                      name="consent_source"
-                      className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                      defaultValue="manual_console"
-                    >
-                      <option value="manual_console">Consola</option>
-                      <option value="whatsapp">WhatsApp</option>
-                      <option value="web_form">Formulario web</option>
-                      <option value="phone_call">Llamada</option>
-                      <option value="in_person">Presencial</option>
-                      <option value="import">Importación</option>
-                      <option value="other">Otro</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Versión aviso/política</Label>
-                    <Input name="consent_notice_version" placeholder="v2026-04" className="h-8 text-xs" />
-                  </div>
+                {/* Bloque Habeas Data — check primero para que UX cuadre */}
+                <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="consent_given"
+                      checked={addConsentChecked}
+                      onChange={e => setAddConsentChecked(e.target.checked)}
+                      className="h-4 w-4 mt-0.5 rounded"
+                    />
+                    <span className="text-xs text-foreground leading-snug">
+                      <strong>El titular autorizó el tratamiento de sus datos</strong> (Ley 1581/2012).
+                      <span className="block text-muted-foreground mt-0.5 text-[11px]">
+                        Sin esta autorización solo se guarda el teléfono. Los demás
+                        campos personales se rechazan en el servidor.
+                      </span>
+                    </span>
+                  </label>
+
+                  {addConsentChecked && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Canal de consentimiento</Label>
+                        <select
+                          name="consent_source"
+                          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                          defaultValue="manual_console"
+                        >
+                          <option value="manual_console">Consola</option>
+                          <option value="whatsapp">WhatsApp</option>
+                          <option value="web_form">Formulario web</option>
+                          <option value="phone_call">Llamada</option>
+                          <option value="in_person">Presencial</option>
+                          <option value="import">Importación</option>
+                          <option value="other">Otro</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Versión aviso/política</Label>
+                        <Input name="consent_notice_version" placeholder="v2026-04" className="h-8 text-xs" />
+                      </div>
+                    </div>
+                  )}
+
+                  {addConsentChecked && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Evidencia (nota interna)</Label>
+                      <Input
+                        name="consent_evidence_note"
+                        placeholder="Ej: autorizó por chat y aceptó política"
+                        className="h-8 text-xs"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Cómo obtuviste el consentimiento. Útil para responder a SIC.
+                      </p>
+                    </div>
+                  )}
+
+                  {!addConsentChecked && (
+                    <div className="space-y-1 pt-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Razón de revocatoria
+                        <span className="text-[10px] ml-1">(solo si creas un contacto que ya nace revocado)</span>
+                      </Label>
+                      <Input
+                        name="consent_revoked_reason"
+                        placeholder="Ej: importación de clientes que pidieron borrarse"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Evidencia (nota interna)</Label>
-                  <Input name="consent_evidence_note" placeholder="Ej: autorizó por chat y aceptó política" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Razón de revocatoria (si aplica)</Label>
-                  <Input name="consent_revoked_reason" placeholder="Ej: solicitó eliminación de datos" className="h-8 text-xs" />
-                </div>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input type="checkbox" name="consent_given" className="h-4 w-4 mt-0.5 rounded" />
-                  <span className="text-xs text-muted-foreground leading-snug">
-                    El contacto autorizó el tratamiento de sus datos (Ley 1581)
-                  </span>
-                </label>
                 <Button type="submit" disabled={isPending} className="w-full">
                   {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar contacto'}
                 </Button>
@@ -578,7 +655,12 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                       </Button>
                       {expandedId === c.id && (() => {
                         const awaitingRenewal = isAwaitingRenewal(c)
-                        const piiUnlocked = !awaitingRenewal || !!renewedConsent[c.id]
+                        const consentChecked = isEditConsentChecked(c.id, c.consent_given)
+                        // Rev. 102 (Opción A+B Ley 1581):
+                        // PII solo editable si HAY consent + (no anonimizado o renovado)
+                        const piiUnlocked =
+                          consentChecked &&
+                          (!awaitingRenewal || !!renewedConsent[c.id])
                         return (
                       <form action={handleEdit} className="mt-3 space-y-3 pt-3 border-t border-border">
                         <input type="hidden" name="contact_id" value={c.id} />
@@ -668,52 +750,83 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             </div>
                           )}
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Canal de consentimiento</Label>
-                            <select
-                              name="consent_source"
-                              defaultValue={c.consent_source ?? 'manual_console'}
-                              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                            >
-                              <option value="manual_console">Consola</option>
-                              <option value="whatsapp">WhatsApp</option>
-                              <option value="web_form">Formulario web</option>
-                              <option value="phone_call">Llamada</option>
-                              <option value="in_person">Presencial</option>
-                              <option value="import">Importación</option>
-                              <option value="other">Otro</option>
-                            </select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Versión aviso/política</Label>
-                            <Input
-                              name="consent_notice_version"
-                              defaultValue={c.consent_notice_version ?? ''}
-                              className="h-8 text-xs"
+                        {/* Rev. 102 — Bloque Habeas Data reorganizado:
+                            check primero + condicionales evidencia/razón */}
+                        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              name="consent_given"
+                              checked={consentChecked}
+                              onChange={() => toggleEditConsent(c.id, c.consent_given)}
+                              className="h-3.5 w-3.5 mt-0.5 rounded"
                             />
-                          </div>
+                            <span className="text-xs text-foreground leading-snug">
+                              <strong>El titular autoriza el tratamiento de sus datos</strong> (Ley 1581/2012).
+                              {!consentChecked && (
+                                <span className="block text-amber-700 mt-0.5 text-[11px]">
+                                  Sin este check los campos personales quedan bloqueados.
+                                </span>
+                              )}
+                            </span>
+                          </label>
+
+                          {consentChecked && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Canal de consentimiento</Label>
+                                <select
+                                  name="consent_source"
+                                  defaultValue={c.consent_source ?? 'manual_console'}
+                                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                                >
+                                  <option value="manual_console">Consola</option>
+                                  <option value="whatsapp">WhatsApp</option>
+                                  <option value="web_form">Formulario web</option>
+                                  <option value="phone_call">Llamada</option>
+                                  <option value="in_person">Presencial</option>
+                                  <option value="import">Importación</option>
+                                  <option value="other">Otro</option>
+                                </select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Versión aviso/política</Label>
+                                <Input
+                                  name="consent_notice_version"
+                                  defaultValue={c.consent_notice_version ?? ''}
+                                  className="h-8 text-xs"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {consentChecked && (
+                            <div className="space-y-1">
+                              <Label className="text-xs">Evidencia (nota interna)</Label>
+                              <Input
+                                name="consent_evidence_note"
+                                defaultValue={extractEvidenceNote(c.consent_evidence) ?? ''}
+                                placeholder="Cómo obtuviste/renovaste el consentimiento"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          )}
+
+                          {!consentChecked && (
+                            <div className="space-y-1 pt-1">
+                              <Label className="text-xs text-muted-foreground">
+                                Razón de revocatoria
+                                <span className="text-[10px] ml-1">(opcional, queda en audit)</span>
+                              </Label>
+                              <Input
+                                name="consent_revoked_reason"
+                                defaultValue={c.consent_revoked_reason ?? ''}
+                                placeholder="Ej: titular pidió por chat el día X"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          )}
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Evidencia (nota interna)</Label>
-                          <Input
-                            name="consent_evidence_note"
-                            defaultValue={extractEvidenceNote(c.consent_evidence) ?? ''}
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Razón de revocatoria (si aplica)</Label>
-                          <Input
-                            name="consent_revoked_reason"
-                            defaultValue={c.consent_revoked_reason ?? ''}
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" name="consent_given" defaultChecked={c.consent_given} className="h-3.5 w-3.5 rounded" />
-                          <span className="text-xs text-muted-foreground">Consentimiento Habeas Data</span>
-                        </label>
                         {/* ── Acciones principales (guardar) ─────────────────── */}
                         <div className="flex items-center gap-2 pt-1">
                           <Button
