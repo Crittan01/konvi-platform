@@ -19,6 +19,14 @@ const CONSENT_SOURCES = new Set([
   'in_person', 'import', 'other',
 ])
 
+// Rev. 102 — Versión vigente del aviso/política de privacidad de la
+// plataforma. Sincronizado con docs/legal/privacy-policy.md.
+// Cuando un titular otorga consent, el server estampa AUTOMÁTICAMENTE
+// esta versión en consent_notice_version. El operador NO escribe esto
+// (era confuso pedirle un número de versión que no conocía). Si la
+// política cambia, bumpear esta constante + el archivo legal.
+const CURRENT_PRIVACY_NOTICE_VERSION = 'v2026-05-01'
+
 const normalizeDaneCode = (raw?: string | null) => {
   const digits = String(raw ?? '').replace(/\D/g, '')
   if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
@@ -114,8 +122,17 @@ export default async function ContactsPage({
     const nowIso = new Date().toISOString()
     const consentGiven = formData.get('consent_given') === 'on'
     const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
-    const consentSource = sourceRaw && CONSENT_SOURCES.has(sourceRaw) ? sourceRaw : (consentGiven ? 'manual_console' : '')
-    const consentNoticeVersion = ((formData.get('consent_notice_version') as string) || '').trim()
+    // Rev. 102 — Canal ahora vacío + required en UI; backend rechaza si
+    // consent_given=true sin canal seleccionado.
+    if (consentGiven && (!sourceRaw || !CONSENT_SOURCES.has(sourceRaw))) {
+      throw new Error(
+        'Falta seleccionar el canal por el que el titular dio consent. ' +
+        'Es obligatorio para audit (Ley 1581 Art. 9).'
+      )
+    }
+    const consentSource = sourceRaw
+    // Rev. 102 — versión auto-estampada con la constante vigente.
+    const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
     const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     const street   = (formData.get('addr_street') as string) || null
@@ -190,8 +207,16 @@ export default async function ContactsPage({
     const nowIso = new Date().toISOString()
     const consentGiven = formData.get('consent_given') === 'on'
     const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
-    const consentSource = sourceRaw && CONSENT_SOURCES.has(sourceRaw) ? sourceRaw : ''
-    const consentNoticeVersion = ((formData.get('consent_notice_version') as string) || '').trim()
+    // Rev. 102 — Canal ahora required en UI cuando consent_given=true.
+    if (consentGiven && (!sourceRaw || !CONSENT_SOURCES.has(sourceRaw))) {
+      throw new Error(
+        'Falta seleccionar el canal por el que el titular dio consent. ' +
+        'Es obligatorio para audit (Ley 1581 Art. 9).'
+      )
+    }
+    const consentSource = sourceRaw
+    // Rev. 102 — versión auto-estampada con la constante vigente.
+    const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
     const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim()
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     // Rev. 102 — Opción B Habeas Data: campos exclusivos del flujo de

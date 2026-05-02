@@ -340,6 +340,16 @@ async def data_subject_request(
         }
 
     # type == "erase"
+    # Rev. 102 — motivo obligatorio (minLength=10) cuando viene desde
+    # Tenant Console. Sigue siendo opcional para llamadas programáticas
+    # del bot (que no pasan reason): defaultea a "Solicitud de supresión
+    # vía SAR" más abajo. La UI fuerza el length=10 antes de POST.
+    if body.reason is not None and 0 < len(body.reason.strip()) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="El motivo de la supresión debe tener al menos 10 caracteres "
+                   "(o estar vacío para usar el default).",
+        )
     _execute_erase(sb, tenant_id, contact_id)
     _audit(
         sb,
