@@ -92,6 +92,25 @@ export default async function ContactsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+
+    // Rev. 102 (Opción A Habeas Data) — Ley 1581 Art. 9: sin
+    // consentimiento previo, expreso e informado, NO se pueden tratar
+    // datos personales. El sistema permite registrar SOLO el teléfono
+    // (mínimo necesario del canal de comunicación). Cualquier otro
+    // campo PII rechazado en server.
+    const consentGivenCheck = formData.get('consent_given') === 'on'
+    if (!consentGivenCheck) {
+      const piiAttempted = [
+        'name', 'email', 'document_number', 'addr_street', 'notes',
+      ].some(k => ((formData.get(k) as string) || '').trim().length > 0)
+      if (piiAttempted) {
+        throw new Error(
+          'No se pueden registrar datos personales sin consentimiento del titular ' +
+          '(Ley 1581/2012 Art. 9). Marca el check "El titular autorizó el tratamiento" ' +
+          'o no llenes los campos personales.'
+        )
+      }
+    }
     const nowIso = new Date().toISOString()
     const consentGiven = formData.get('consent_given') === 'on'
     const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
@@ -179,6 +198,20 @@ export default async function ContactsPage({
     // re-edición post-anonimización.
     const renewedConsentChecked = formData.get('renewed_consent') === 'on'
     const renewedConsentEvidence = ((formData.get('renewed_consent_evidence') as string) || '').trim()
+
+    // Rev. 102 (Opción A Habeas Data) — guard general edit: si NO hay
+    // consent activo (ni renewed) y se intenta enviar PII → rechazar.
+    // Esto cubre el caso "operador editó un contacto, desmarcó el check
+    // y dejó los inputs llenos" — el sistema bloquea el guardado.
+    const editingPiiAttempted = [
+      'name', 'email', 'document_number', 'addr_street', 'notes',
+    ].some(k => ((formData.get(k) as string) || '').trim().length > 0)
+    if (!consentGiven && !renewedConsentChecked && editingPiiAttempted) {
+      throw new Error(
+        'No se pueden persistir datos personales sin consentimiento del titular ' +
+        '(Ley 1581/2012 Art. 9). Marca el check de consentimiento o vacía los campos personales.'
+      )
+    }
     const { data: existing } = await sb.from('contacts')
       .select('consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
       .eq('id', formData.get('contact_id') as string)
