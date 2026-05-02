@@ -157,6 +157,17 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id)
 
+  // Rev. 102 (Opción B Habeas Data) — checkbox per-contact que confirma
+  // consentimiento renovado del titular, requisito para volver a editar
+  // PII después de una anonimización.
+  const [renewedConsent, setRenewedConsent] = useState<Record<string, boolean>>({})
+  const toggleRenewedConsent = (id: string) =>
+    setRenewedConsent(prev => ({ ...prev, [id]: !prev[id] }))
+
+  /** Contact que fue anonimizado y aún no tiene consent renovado. */
+  const isAwaitingRenewal = (c: Contact): boolean =>
+    !c.consent_given && !!c.consent_revoked_at
+
   // Rev. 102 — Optimistic update post-Anonimizar.
   // Cuando una acción erase tiene éxito en el server, el contact_id se
   // añade a este Set y la card se renderiza con PII ya anonimizada
@@ -565,34 +576,97 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                         <Pencil className="h-3 w-3" />
                         {expandedId === c.id ? 'Cerrar edición' : 'Editar datos / Acciones Habeas Data'}
                       </Button>
-                      {expandedId === c.id && (
+                      {expandedId === c.id && (() => {
+                        const awaitingRenewal = isAwaitingRenewal(c)
+                        const piiUnlocked = !awaitingRenewal || !!renewedConsent[c.id]
+                        return (
                       <form action={handleEdit} className="mt-3 space-y-3 pt-3 border-t border-border">
                         <input type="hidden" name="contact_id" value={c.id} />
+
+                        {/* Rev. 102 — Opción B Habeas Data: contact post-anonimización */}
+                        {awaitingRenewal && (
+                          <div className="rounded-lg border border-amber-700/40 bg-amber-700/5 p-3 space-y-2">
+                            <div className="flex items-start gap-2 text-xs text-amber-700">
+                              <ShieldOff className="h-4 w-4 shrink-0 mt-0.5" />
+                              <div className="flex-1">
+                                <p className="font-semibold">Contacto anonimizado el {c.consent_revoked_at && new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}.</p>
+                                <p className="mt-0.5 text-muted-foreground">
+                                  Para volver a registrar PII (nombre, email, documento, dirección, notas)
+                                  el sistema requiere que el titular haya otorgado consentimiento renovado.
+                                  Confirma que cuentas con esa autorización y describe la evidencia.
+                                </p>
+                              </div>
+                            </div>
+                            <label className="flex items-start gap-2 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                name="renewed_consent"
+                                checked={!!renewedConsent[c.id]}
+                                onChange={() => toggleRenewedConsent(c.id)}
+                                className="h-3.5 w-3.5 mt-0.5 rounded"
+                              />
+                              <span className="text-foreground">
+                                <strong>Confirmo</strong> que el titular ha otorgado consentimiento renovado para tratar nuevamente sus datos personales.
+                              </span>
+                            </label>
+                            {!!renewedConsent[c.id] && (
+                              <div className="space-y-1">
+                                <Label className="text-xs text-amber-700">
+                                  Evidencia del consentimiento renovado <span className="text-destructive">*</span>
+                                </Label>
+                                <Input
+                                  name="renewed_consent_evidence"
+                                  required
+                                  minLength={10}
+                                  maxLength={500}
+                                  placeholder="Ej: WhatsApp 2026-05-01 14:30 — el titular respondió 'Sí, autorizo nuevamente'."
+                                  className="h-8 text-xs"
+                                />
+                                <p className="text-[10px] text-muted-foreground">
+                                  Mínimo 10 caracteres. Se guarda inmutablemente en el audit log.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-xs">Nombre</Label>
-                            <Input name="name" defaultValue={c.name ?? ''} className="h-8 text-xs" />
+                            <Input name="name" defaultValue={c.name ?? ''} disabled={!piiUnlocked} className="h-8 text-xs" />
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs">Email</Label>
-                            <Input name="email" type="email" defaultValue={c.email ?? ''} className="h-8 text-xs" autoComplete="email" />
+                            <Input name="email" type="email" defaultValue={c.email ?? ''} disabled={!piiUnlocked} className="h-8 text-xs" autoComplete="email" />
                           </div>
                         </div>
                         {/* Rev. 69 — Documento de identidad (edición) */}
-                        <DocumentFields
-                          layout="compact"
-                          defaultDocType={(c.document_type ?? '') as DocType}
-                          defaultDocNumber={c.document_number ?? ''}
-                        />
+                        {piiUnlocked ? (
+                          <DocumentFields
+                            layout="compact"
+                            defaultDocType={(c.document_type ?? '') as DocType}
+                            defaultDocNumber={c.document_number ?? ''}
+                          />
+                        ) : (
+                          <div className="text-[10px] text-muted-foreground italic">
+                            Documento de identidad bloqueado — confirma consentimiento renovado para editar.
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-xs">Notas</Label>
-                            <Input name="notes" defaultValue={c.notes ?? ''} className="h-8 text-xs" />
+                            <Input name="notes" defaultValue={c.notes ?? ''} disabled={!piiUnlocked} className="h-8 text-xs" />
                           </div>
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs flex items-center gap-1"><MapPin className="h-3 w-3" /> Dirección de entrega</Label>
-                          <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} showBuildingDetails />
+                          {piiUnlocked ? (
+                            <AddressSelector fieldPrefix="addr" defaultValue={c.address ?? {}} showBuildingDetails />
+                          ) : (
+                            <div className="text-[10px] text-muted-foreground italic">
+                              Dirección bloqueada — confirma consentimiento renovado para editar.
+                            </div>
+                          )}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
@@ -679,7 +753,8 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           />
                         )}
                       </form>
-                      )}
+                      )
+                      })()}
                     </div>
                   )}
                 </div>
