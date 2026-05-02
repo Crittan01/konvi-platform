@@ -833,8 +833,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                     className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                                   >
                                     <option value="" disabled>— Selecciona —</option>
+                                    <option value="manual_console">Consola (operador)</option>
                                     <option value="whatsapp">WhatsApp</option>
                                     <option value="web_form">Formulario web</option>
+                                    <option value="phone_call">Llamada telefónica</option>
                                     <option value="in_person">Presencial</option>
                                     <option value="import">Importación</option>
                                     <option value="other">Otro</option>
@@ -988,8 +990,10 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
                               >
                                 <option value="" disabled>— Selecciona —</option>
+                                <option value="manual_console">Consola (operador)</option>
                                 <option value="whatsapp">WhatsApp</option>
                                 <option value="web_form">Formulario web</option>
+                                <option value="phone_call">Llamada telefónica</option>
                                 <option value="in_person">Presencial</option>
                                 <option value="import">Importación</option>
                                 <option value="other">Otro</option>
