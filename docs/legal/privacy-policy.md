@@ -99,6 +99,21 @@ directamente.
 Te notificaremos por WhatsApp con 30 días de antelación si la política
 cambia materialmente.
 
+## 10. Datos importados desde marketplaces
+
+Cuando recibimos órdenes desde marketplaces (Mercado Libre y otros), los
+datos del comprador (nombre, teléfono) llegan automáticamente vía webhook
+del marketplace y los almacenamos para gestionar la entrega y la atención
+post-venta. Cada contacto importado queda marcado con
+`consent_source = marketplace_meli` y un audit log inmutable referencia el
+`meli_order_id` correspondiente.
+
+El marketplace de origen aplica su propia política de privacidad sobre la
+captura inicial del dato; el tenant es responsable del tratamiento posterior
+bajo el DPA firmado con la plataforma. Si el titular ejerce sus derechos
+Habeas Data, los flujos de SAR (export/portabilidad/anonimización) operan
+exactamente igual que para contactos creados por otros canales.
+
 ---
 
 **Versión:** [v2026-XX]

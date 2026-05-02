@@ -4,6 +4,8 @@ import { ShieldCheck, Users } from 'lucide-react'
 import AiInsightPanel from '@/components/ai-insight-panel'
 import ContactsManager from './_components/contacts-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { hashPhone } from '@/lib/crypto/phone-hash'
+import { uploadConsentEvidence } from './_components/helpers/upload-evidence'
 
 // Rev. 102 — module-level scope.
 // Bug previo: estaban definidas DENTRO de ContactsPage; los server actions
@@ -14,18 +16,21 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 // Components" digest 3617361344. Mover a module scope resuelve: las
 // server actions referencian el binding del módulo (resoluble en runtime),
 // no un closure capturado en el render.
-// Rev. 102 — refinada a 5 canales con evidencia defensible.
-// REMOVIDOS:
-//   - manual_console: el operador marcando un check no es evidencia del titular
-//   - phone_call: requiere grabación cara, no factible para pequeño e-commerce
-// MANTENIDOS con criterios:
+// Rev. 103 (SaaS B2B pivot) — canales operacionales completos.
+// El tenant es Responsable ante la SIC; la plataforma es Encargado puro
+// (modelo Wati/Mailchimp/Respond.io). El operador del tenant decide qué
+// canal aplica según su flujo. Help text en UI explica cada uno.
+//   - manual_console: operador registra consent dado fuera del sistema
 //   - whatsapp: hilo de conversación es la evidencia (mejor caso, nativo)
-//   - web_form: requiere captura del form en sistema del tenant
-//   - in_person: documento físico firmado, ubicación referenciada en Evidencia
-//   - import: sistema origen con due diligence; tenant es responsable
+//   - web_form: form en sistema del tenant
+//   - phone_call: llamada con el titular; evidencia = grabación o nota
+//   - in_person: documento físico firmado; opcional adjuntar escaneo (F10)
+//   - import: sistema origen con due diligence
 //   - other: catch-all, exige Evidencia minLength=20 (validado server)
+//   - marketplace_meli: solo via webhook MeLi (no en UI dropdown)
 const CONSENT_SOURCES = new Set([
-  'whatsapp', 'web_form', 'in_person', 'import', 'other',
+  'manual_console', 'whatsapp', 'web_form', 'phone_call',
+  'in_person', 'import', 'other', 'marketplace_meli',
 ])
 
 // Rev. 102 — Versión vigente del aviso/política de privacidad de la
@@ -132,24 +137,11 @@ export default async function ContactsPage({
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
 
-    // Rev. 102 (Opción A Habeas Data) — Ley 1581 Art. 9: sin
-    // consentimiento previo, expreso e informado, NO se pueden tratar
-    // datos personales. El sistema permite registrar SOLO el teléfono
-    // (mínimo necesario del canal de comunicación). Cualquier otro
-    // campo PII rechazado en server.
-    const consentGivenCheck = formData.get('consent_given') === 'on'
-    if (!consentGivenCheck) {
-      const piiAttempted = [
-        'name', 'email', 'document_number', 'addr_street', 'notes',
-      ].some(k => ((formData.get(k) as string) || '').trim().length > 0)
-      if (piiAttempted) {
-        throw new Error(
-          'No se pueden registrar datos personales sin consentimiento del titular ' +
-          '(Ley 1581/2012 Art. 9). Marca el check "El titular autorizó el tratamiento" ' +
-          'o no llenes los campos personales.'
-        )
-      }
-    }
+    // Rev. 103 (SaaS B2B) — la plataforma es Encargado puro. El tenant
+    // firma DPA y certifica tener base legal apropiada para los datos
+    // que registra. Si llena PII sin marcar consent → persistimos con
+    // consent_given=false; el bot WhatsApp pedirá consent activamente
+    // cuando el cliente conteste.
     const nowIso = new Date().toISOString()
     const consentGiven = formData.get('consent_given') === 'on'
     const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
@@ -210,7 +202,13 @@ export default async function ContactsPage({
       )
     }
     const phoneE164 = `+${phoneCountry}${digits}`
-    await sb.from('contacts').insert({
+    const initialEvidence: Record<string, unknown> = {
+      created_via: 'dashboard_contacts',
+      note: consentEvidenceNote || null,
+      actor_email: u?.email ?? null,
+      captured_at: nowIso,
+    }
+    const { data: inserted } = await sb.from('contacts').insert({
       tenant_id:     m.tenant_id,
       phone:         phoneE164,
       name:          (formData.get('name') as string) || null,
@@ -228,17 +226,41 @@ export default async function ContactsPage({
       // generando inconsistencia con `consent_source` (que sí se llenaba).
       consent_channel: consentGiven ? 'dashboard_console' : null,
       consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
-      consent_evidence: {
-        created_via: 'dashboard_contacts',
-        note: consentEvidenceNote || null,
-        actor_email: u?.email ?? null,
-        captured_at: nowIso,
-      },
+      consent_evidence: initialEvidence,
       consent_actor_email: u?.email ?? null,
       consent_revoked_at: !consentGiven && revocationReason ? nowIso : null,
       consent_revoked_reason: !consentGiven ? (revocationReason || null) : null,
       address,
-    })
+    }).select('id').single()
+
+    // Rev. 103 (F10) — si canal in_person + file adjunto, sube a Storage
+    // y persiste URL en consent_evidence.attachment_url (segundo update).
+    const newId = (inserted as { id?: string } | null)?.id
+    if (newId && consentGiven && consentSource === 'in_person') {
+      const result = await uploadConsentEvidence(formData, newId, m.tenant_id)
+      if (result.status === 'uploaded') {
+        await sb.from('contacts').update({
+          consent_evidence: {
+            ...initialEvidence,
+            attachment_url: result.url,
+            attachment_path: result.path,
+            attachment_mime: result.mime,
+            attachment_size: result.size,
+            attachment_uploaded_at: new Date().toISOString(),
+          },
+        }).eq('id', newId).eq('tenant_id', m.tenant_id)
+      } else if (result.status === 'rejected') {
+        // No abortamos el contact creado, pero sí informamos: thrown error
+        // se renderiza en la UI sin perder el contact (operador puede
+        // volver a editar y resubir). El contact queda con consent_evidence
+        // sin attachment.
+        throw new Error(
+          result.reason === 'too_large'
+            ? 'El archivo de evidencia supera 5 MB. Contact creado sin adjunto — edítalo y vuelve a subirlo.'
+            : 'El tipo de archivo no es válido (PDF/JPG/PNG/WEBP). Contact creado sin adjunto.'
+        )
+      }
+    }
     revalidatePath('/dashboard/contacts')
   }
 
@@ -277,23 +299,10 @@ export default async function ContactsPage({
       )
     }
     // Rev. 102 — Opción B Habeas Data: campos exclusivos del flujo de
-    // re-edición post-anonimización.
+    // re-edición post-anonimización (mantenido en rev. 103: la
+    // anonimización formal sí es ritual legal serio).
     const renewedConsentChecked = formData.get('renewed_consent') === 'on'
     const renewedConsentEvidence = ((formData.get('renewed_consent_evidence') as string) || '').trim()
-
-    // Rev. 102 (Opción A Habeas Data) — guard general edit: si NO hay
-    // consent activo (ni renewed) y se intenta enviar PII → rechazar.
-    // Esto cubre el caso "operador editó un contacto, desmarcó el check
-    // y dejó los inputs llenos" — el sistema bloquea el guardado.
-    const editingPiiAttempted = [
-      'name', 'email', 'document_number', 'addr_street', 'notes',
-    ].some(k => ((formData.get(k) as string) || '').trim().length > 0)
-    if (!consentGiven && !renewedConsentChecked && editingPiiAttempted) {
-      throw new Error(
-        'No se pueden persistir datos personales sin consentimiento del titular ' +
-        '(Ley 1581/2012 Art. 9). Marca el check de consentimiento o vacía los campos personales.'
-      )
-    }
 
     const { data: existing } = await sb.from('contacts')
       .select('consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
@@ -395,6 +404,38 @@ export default async function ContactsPage({
         },
       ]
     }
+    // Rev. 103 — Cap renewals_after_revocation a las últimas 50 entries
+    // para que JSONB no crezca sin control en contracts enterprise con
+    // muchos ciclos de revocación/renovación. Marker de truncamiento
+    // queda en evidence (transparencia ante SIC).
+    if (Array.isArray(mergedEvidence.renewals_after_revocation)) {
+      const arr = mergedEvidence.renewals_after_revocation as unknown[]
+      if (arr.length > 50) {
+        mergedEvidence.renewals_after_revocation = arr.slice(-50)
+        mergedEvidence.renewals_truncated_at = nowIso
+        mergedEvidence.renewals_truncated_count = arr.length - 50
+      }
+    }
+    // Rev. 103 (F10) — Si canal in_person + archivo adjunto, sube
+    // evidencia física al bucket consent-evidence y persiste URL en
+    // mergedEvidence.attachment_url. La SAR export incluye el URL.
+    const editContactId = (formData.get('contact_id') as string) || ''
+    if (editContactId && consentSource === 'in_person') {
+      const upload = await uploadConsentEvidence(formData, editContactId, m.tenant_id)
+      if (upload.status === 'uploaded') {
+        mergedEvidence.attachment_url = upload.url
+        mergedEvidence.attachment_path = upload.path
+        mergedEvidence.attachment_mime = upload.mime
+        mergedEvidence.attachment_size = upload.size
+        mergedEvidence.attachment_uploaded_at = nowIso
+      } else if (upload.status === 'rejected') {
+        throw new Error(
+          upload.reason === 'too_large'
+            ? 'El archivo de evidencia supera 5 MB. No se aplicaron cambios.'
+            : 'El tipo de archivo no es válido (solo PDF/JPG/PNG/WEBP). No se aplicaron cambios.'
+        )
+      }
+    }
     // Rev. 102 — si el operador confirmó renewed_consent + evidencia,
     // implícitamente el contact está siendo re-activado: forzar
     // consent_given=true para evitar estado contradictorio (PII registrada
@@ -436,9 +477,37 @@ export default async function ContactsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const contactId = (formData.get('contact_id') as string) || ''
+    if (!contactId) return
+    const reason = ((formData.get('delete_reason') as string) || '').trim()
+
+    // Rev. 103 (SaaS B2B) — audit ANTES del DELETE físico. El audit log
+    // es append-only e inmutable; la fila persiste con phone hasheado
+    // aunque el contact_id quede huérfano. Trazabilidad ante SIC.
+    const { data: snapshot } = await sb.from('contacts')
+      .select('phone')
+      .eq('id', contactId)
+      .eq('tenant_id', m.tenant_id)
+      .single()
+    if (!snapshot) return
+
+    await sb.from('consent_audit_log').insert({
+      tenant_id: m.tenant_id,
+      contact_id: contactId,
+      phone_hash: hashPhone((snapshot as { phone?: string | null }).phone),
+      event: 'deleted',
+      source: 'tenant_console',
+      actor_email: u?.email ?? null,
+      actor_user_id: u?.id ?? null,
+      evidence: {
+        reason: reason || null,
+        deleted_by: u?.email ?? null,
+      },
+    })
+
     await sb.from('contacts')
       .delete()
-      .eq('id', formData.get('contact_id') as string)
+      .eq('id', contactId)
       .eq('tenant_id', m.tenant_id)
     revalidatePath('/dashboard/contacts')
   }
