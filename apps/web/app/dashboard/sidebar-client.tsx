@@ -53,7 +53,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'leaf', href: '/dashboard',       label: 'Dashboard', icon: LayoutDashboard, roles: [] },
   { kind: 'leaf', href: '/dashboard/inbox', label: 'Inbox',     icon: MessageSquare,   roles: [], integration: 'whatsapp' },
 
-  // ── Ventas ✅ ─────────────────────────────────────────────────────────────
+  // ── Ventas ─────────────────────────────────────────────────────────────
   {
     kind: 'group', id: 'ventas', label: 'Ventas', icon: ShoppingCart, roles: [],
     children: [
@@ -64,10 +64,10 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── Productos ✅ ──────────────────────────────────────────────────────────
+  // ── Productos ──────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard/catalog', label: 'Productos', icon: Boxes, roles: ['owner', 'manager'] },
 
-  // ── Canales ✅ ────────────────────────────────────────────────────────────
+  // ── Canales ────────────────────────────────────────────────────────────
   // Restaurado como grupo — Shopify, tienda custom entrarán aquí en fases futuras
   {
     kind: 'group', id: 'canales', label: 'Canales', icon: Store, roles: ['owner', 'manager'],
@@ -76,13 +76,13 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── Compras ✅ ────────────────────────────────────────────────────────────
+  // ── Compras ────────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard/purchases', label: 'Compras', icon: Wallet, roles: ['owner'] },
 
-  // ── Finanzas ✅ ───────────────────────────────────────────────────────────
+  // ── Finanzas ───────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard/finance', label: 'Finanzas', icon: DollarSign, roles: ['owner'] },
 
-  // ── IA y Conocimiento ✅ ──────────────────────────────────────────────────
+  // ── IA y Conocimiento ──────────────────────────────────────────────────
   // Renombrado: no existe Automatizaciones live — el nombre refleja lo que realmente hay
   {
     kind: 'group', id: 'ia', label: 'IA y Conocimiento', icon: BrainCircuit, roles: ['owner', 'manager'],
@@ -92,7 +92,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── Analítica ✅ ──────────────────────────────────────────────────────────
+  // ── Analítica ──────────────────────────────────────────────────────────
   {
     kind: 'group', id: 'analitica', label: 'Analítica', icon: BarChart2, roles: ['owner', 'manager'],
     children: [
@@ -101,7 +101,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // ── Configuración ✅ ──────────────────────────────────────────────────────
+  // ── Configuración ──────────────────────────────────────────────────────
   //  Rev. 5 — 2026-04-14 (Vuelta 5 — Cierre dominio Configuración)
   //
   //  General         → /settings   — datos del negocio, logo, WABA, dirección de envío, Telegram

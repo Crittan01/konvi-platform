@@ -40,7 +40,7 @@ def _validate_startup_config() -> None:
             logger.error("[STARTUP] ❌ %s", err)
         sys.exit(1)
 
-    logger.info("[STARTUP] ✅ Validación de configuración OK")
+    logger.info("[STARTUP] Validación de configuración OK")
 
 
 @asynccontextmanager

@@ -331,7 +331,7 @@ export default async function SettingsPage() {
                     </Label>
                     <textarea id="after-hours" name="after_hours_message"
                       defaultValue={tenant?.after_hours_message ?? ''}
-                      placeholder={'Ej: ¡Hola! 👋 En este momento nuestro equipo descansa.\nTe respondemos mañana entre las 8:00 AM y 6:00 PM.\n¡Gracias por escribirnos!'}
+                      placeholder={'Ej: ¡Hola! En este momento nuestro equipo descansa.\nTe respondemos mañana entre las 8:00 AM y 6:00 PM.\n¡Gracias por escribirnos!'}
                       rows={3}
                       className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                     <p className="text-[10px] text-muted-foreground">Tip: escríbelo como tú le hablarías al cliente — natural y cálido. El bot lo envía automáticamente antes de escalar.</p>

@@ -538,22 +538,33 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                   </Label>
                   <Input name="email" type="email" placeholder="cliente@email.com" autoComplete="email" required />
                 </div>
-                {/* Rev. 103 — phone alternativo para envío (opcional). */}
+                {/* Rev. 103 — phone para envío. Si vacío defaultea al WhatsApp. */}
                 <div className="space-y-1">
                   <Label className="text-xs">
                     Celular para envío
-                    <span className="ml-1 text-[10px] text-muted-foreground">(opcional — solo si el envío va a otra persona)</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">(default = WhatsApp; usar otro solo si el envío va a otra persona)</span>
                   </Label>
-                  <Input
-                    name="shipping_phone"
-                    type="tel"
-                    placeholder="3001234567"
-                    pattern="[3]\d{9}"
-                    maxLength={10}
-                    autoComplete="off"
-                  />
+                  <div className="flex">
+                    <span
+                      title="Código país (Colombia)"
+                      className="inline-flex items-center px-2 h-9 border border-r-0 border-input rounded-l-md text-xs bg-muted shrink-0 text-muted-foreground"
+                    >
+                      +57
+                    </span>
+                    <Input
+                      name="shipping_phone"
+                      type="tel"
+                      inputMode="numeric"
+                      placeholder="3001234567"
+                      pattern="[3]\d{9}"
+                      maxLength={10}
+                      autoComplete="off"
+                      className="rounded-l-none"
+                      onInput={e => { const el = e.currentTarget; el.value = el.value.replace(/\D/g, '').slice(0, 10) }}
+                    />
+                  </div>
                   <p className="text-[10px] text-muted-foreground">
-                    Si lo dejas vacío, la transportadora usa el celular WhatsApp principal.
+                    Vacío = la transportadora contacta al celular WhatsApp principal.
                   </p>
                 </div>
                 {/* Documento de identidad — Pasarela de pagos PSE/Bancolombia lo exigen en checkout */}
@@ -907,23 +918,39 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                             <Input name="email" type="email" defaultValue={c.email ?? ''} disabled={!piiUnlocked} className="h-8 text-xs" autoComplete="email" />
                           </div>
                         </div>
-                        {/* Rev. 103 — phone alternativo de envío (edit). */}
+                        {/* Rev. 103 — phone para envío (edit). Defaultea al
+                            WhatsApp cuando no se da uno alternativo. */}
                         <div className="space-y-1">
                           <Label className="text-xs">
                             Celular envío
-                            <span className="ml-1 text-[10px] text-muted-foreground">(opcional — alterno al WhatsApp)</span>
+                            <span className="ml-1 text-[10px] text-muted-foreground">(default = WhatsApp; cambiar solo si recibe otra persona)</span>
                           </Label>
-                          <Input
-                            name="shipping_phone"
-                            type="tel"
-                            placeholder="3001234567"
-                            defaultValue={(c.shipping_phone || '').replace(/^\+57/, '')}
-                            pattern="[3]\d{9}"
-                            maxLength={10}
-                            autoComplete="off"
-                            disabled={!piiUnlocked}
-                            className="h-8 text-xs"
-                          />
+                          <div className="flex">
+                            <span
+                              title="Código país (Colombia)"
+                              className="inline-flex items-center px-2 h-8 border border-r-0 border-input rounded-l-md text-[11px] bg-muted shrink-0 text-muted-foreground"
+                            >
+                              +57
+                            </span>
+                            <Input
+                              name="shipping_phone"
+                              type="tel"
+                              inputMode="numeric"
+                              placeholder={(c.phone || '3001234567').replace(/^\+?57\s*/, '')}
+                              defaultValue={(c.shipping_phone || '').replace(/^\+?57\s*/, '')}
+                              pattern="[3]\d{9}"
+                              maxLength={10}
+                              autoComplete="off"
+                              disabled={!piiUnlocked}
+                              className="h-8 text-xs rounded-l-none"
+                              onInput={e => { const el = e.currentTarget; el.value = el.value.replace(/\D/g, '').slice(0, 10) }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            {c.shipping_phone && c.shipping_phone !== c.phone
+                              ? 'Distinto al WhatsApp — la transportadora contactará a este número.'
+                              : 'Igual al WhatsApp — la transportadora usa este mismo número.'}
+                          </p>
                         </div>
                         {/* Rev. 69 — Documento de identidad (edición) */}
                         {piiUnlocked ? (

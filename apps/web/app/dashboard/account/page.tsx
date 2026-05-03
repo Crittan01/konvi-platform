@@ -58,7 +58,7 @@ export default async function AccountPage({
         </CardHeader>
         <CardContent>
           {searchParams.success && (
-            <p className="text-sm text-emerald-400 mb-4">✅ Contraseña actualizada correctamente.</p>
+            <p className="text-sm text-emerald-400 mb-4">Contraseña actualizada correctamente.</p>
           )}
           {searchParams.error && (
             <p className="text-sm text-destructive mb-4">{decodeURIComponent(searchParams.error)}</p>

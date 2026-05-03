@@ -208,7 +208,7 @@ export default async function IntegrationsPage({
         const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '✅ Commerce Ops — Conexión Telegram verificada.' }),
+          body: JSON.stringify({ chat_id: chatId, text: 'Commerce Ops — Conexión Telegram verificada.' }),
           signal: controller.signal,
         })
         clearTimeout(timeout)

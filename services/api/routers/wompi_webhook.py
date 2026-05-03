@@ -526,9 +526,9 @@ def _notify_client_payment_approved(
 ) -> None:
     short_id = order_id[:8].upper()
     text = (
-        f"✅ *¡Pago confirmado!*\n\n"
+        f"*¡Pago confirmado!*\n\n"
         f"Tu pedido *#{short_id}* está registrado y en preparación. "
-        f"Pronto te enviamos información de tu envío. ¡Gracias por tu compra! 🎉"
+        f"Pronto te enviamos información de tu envío. ¡Gracias por tu compra!"
     )
 
     # Persistir mensaje outbound

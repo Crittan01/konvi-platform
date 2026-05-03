@@ -93,7 +93,8 @@ def _fetch_messages(supabase, conversation_id: str, limit: int) -> list[dict]:
 def _fetch_contact(supabase, tenant_id: str, phone: str) -> Optional[dict]:
     variants = _phone_variants(phone)
     q = supabase.table("contacts").select(
-        "id, name, email, document_type, document_number, address, consent_given"
+        "id, name, email, phone, shipping_phone, document_type, document_number, "
+        "address, consent_given, consent_revoked_at"
     ).eq("tenant_id", tenant_id)
     or_clause = ",".join(f"phone.eq.{v}" for v in variants)
     if hasattr(q, "or_"):
@@ -142,6 +143,10 @@ def _render_dump(phone: str, conv: dict, contact: Optional[dict], messages: list
         lines.append(f"  contact_id       : {contact.get('id')}")
         lines.append(f"  name             : {contact.get('name')}")
         lines.append(f"  email            : {contact.get('email')}")
+        lines.append(f"  phone (WhatsApp) : {contact.get('phone')}")
+        ship = contact.get("shipping_phone")
+        if ship:
+            lines.append(f"  shipping_phone   : {ship}")
         doc_type = contact.get("document_type")
         doc_num = contact.get("document_number")
         if doc_type or doc_num:
@@ -150,6 +155,9 @@ def _render_dump(phone: str, conv: dict, contact: Optional[dict], messages: list
         if addr:
             lines.append(f"  address          : {addr}")
         lines.append(f"  consent_given    : {contact.get('consent_given')}")
+        revoked = contact.get("consent_revoked_at")
+        if revoked:
+            lines.append(f"  consent_revoked  : {revoked}")
     lines.append("")
     lines.append(f"MENSAJES ({len(messages)})")
     lines.append("-" * 78)

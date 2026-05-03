@@ -91,4 +91,4 @@ def startup_event():
     """Arrancar el worker en un daemon thread al iniciar el servidor."""
     t = threading.Thread(target=_run_worker_thread, daemon=True, name="orchestrator-worker")
     t.start()
-    logger.info("✅ Worker thread iniciado. Servidor HTTP escuchando en $PORT.")
+    logger.info("Worker thread iniciado. Servidor HTTP escuchando en $PORT.")
