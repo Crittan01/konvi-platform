@@ -477,15 +477,24 @@ def _consume_cart_reservations_if_any(
                 logger.warning(
                     "[STOCK] consume reservation=%s failed: %s", rid, exc,
                 )
-        # 4) Marcar cart como converted
-        if consumed > 0:
-            try:
-                supabase.table("conversation_carts").update({
-                    "status": "converted",
-                    "converted_order_id": order_id,
-                }).eq("id", cart_id).execute()
-            except Exception:
-                pass
+        # 4) Marcar cart como converted SIEMPRE que el order quede confirmed
+        # (reservas son optimization opcional; ausencia no debe impedir el
+        # cierre del cart). Rev. 103 — bug observado en pago real
+        # (#A12E4D47): cart quedó status='open' tras Wompi webhook OK
+        # porque el flow conversacional no crea stock_reservations
+        # explícitamente (cart se llena vía cart_tool.add_item directo).
+        # Resultado: panel del Inbox seguía mostrando "Carrito en
+        # construcción" tras pago confirmado.
+        try:
+            supabase.table("conversation_carts").update({
+                "status": "converted",
+                "converted_order_id": order_id,
+            }).eq("id", cart_id).execute()
+        except Exception as exc:
+            logger.warning(
+                "[CART] no pude marcar cart=%s converted tras order=%s: %s",
+                cart_id, order_id, exc,
+            )
         return consumed
     except Exception as exc:
         logger.warning("[STOCK] reservations consume probe failed: %s", exc)
