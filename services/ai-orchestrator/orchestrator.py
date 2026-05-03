@@ -3575,6 +3575,54 @@ def _extract_shipping_cost_from_history(history: list[dict]) -> Optional[int]:
     return None
 
 
+def _extract_shipping_cost_from_db(
+    supabase: Client, conversation_id: str,
+) -> Optional[int]:
+    """Rev. 103 — DB fallback de `_extract_shipping_cost_from_history`.
+
+    Razón: el `history` en memoria está limitado a CONVERSATION_HISTORY_LIMIT=25.
+    En convs largas (caso real conv c765ea4d con 45 msgs), la cotización
+    quedó en msg #8 → fuera del window → resumen mostraba "Envío: $0 COP"
+    aunque el panel del Inbox correctamente mostraba $7.310.
+
+    Estrategia: query directo a `messages` de toda la conversación,
+    buscando el outbound más reciente con marker "Económica". Sin límite.
+    """
+    if not conversation_id:
+        return None
+    _price_pattern = re.compile(r"\$\s*([\d.,]+)\s*(?:COP)?", re.IGNORECASE)
+    try:
+        res = (
+            supabase.table("messages")
+            .select("content")
+            .eq("conversation_id", conversation_id)
+            .eq("direction", "outbound")
+            .ilike("content", "%conómica%")
+            .order("created_at", desc=True)
+            .limit(3)
+            .execute()
+        )
+        for row in (res.data or []):
+            content = str(row.get("content") or "")
+            for line in content.splitlines():
+                if "Económica" in line or "Economica" in line:
+                    matches = _price_pattern.findall(line)
+                    for raw in matches:
+                        cleaned = raw.replace(".", "").replace(",", "")
+                        try:
+                            value = int(cleaned)
+                            if value >= 1000:
+                                return value * 100
+                        except ValueError:
+                            continue
+    except Exception as exc:
+        logger.warning(
+            "[SHIP_HIST_DB] error extrayendo shipping conv=%s: %s",
+            conversation_id, exc,
+        )
+    return None
+
+
 def _extract_shipping_carrier_from_history(history: list[dict]) -> Optional[str]:
     """Rev. 103 — extrae el carrier de la opción Económica del último
     outbound de cotización. Caso real: el cliente que dice "sigamos" tras
@@ -7499,6 +7547,26 @@ async def build_and_run_orchestration(
                     # — NO llamar a `_build_order_summary_text` que caería
                     # al fallback de inferencia desde history (alucinación).
                     if _cart_for_summary and (_cart_for_summary.get("items") or []):
+                        # DB fallback de shipping para convs largas. En
+                        # history truncado a 25 msgs, la cotización (msg
+                        # #8) queda fuera → resumen mostraba "$0 COP" aunque
+                        # el panel sí lo veía. Inyectamos el shipping de
+                        # DB directamente al cart_from_db para que
+                        # `_verified_ctx_from_cart` lo pase al resumen.
+                        if not (_cart_for_summary.get("shipping_cents") or 0):
+                            _ship_db = _extract_shipping_cost_from_db(
+                                supabase, conversation_id,
+                            ) or 0
+                            if _ship_db > 0:
+                                _cart_for_summary["shipping_cents"] = _ship_db
+                                # Reset requires_requote — el shipping recién
+                                # leído de DB ES la cotización vigente.
+                                _cart_for_summary["requires_requote"] = False
+                                logger.info(
+                                    "[CART_SUMMARY] shipping inyectado desde DB "
+                                    "(history truncado): %s cents conv=%s",
+                                    _ship_db, conversation_id[:8],
+                                )
                         _summary = _build_order_summary_text(
                             contact_record=_sim_contact,
                             verified_ctx=None,
