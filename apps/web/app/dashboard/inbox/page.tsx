@@ -280,6 +280,32 @@ function prefixLine(
   }, 0)
 }
 
+// Rev. 103 — Lista numerada: cada línea recibe un número auto-incrementado
+// arrancando en 1. Si solo hay una línea, simple `1. `.
+function prefixLineNumbered(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  setText: (v: string) => void,
+): void {
+  const ta = ref.current
+  if (!ta) return
+  const start = ta.selectionStart ?? 0
+  const end = ta.selectionEnd ?? start
+  const value = ta.value
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1
+  const lineEndRaw = value.indexOf('\n', end)
+  const lineEnd = lineEndRaw === -1 ? value.length : lineEndRaw
+  const block = value.slice(lineStart, lineEnd)
+  const numbered = block.split('\n')
+    .map((l, i) => `${i + 1}. ${l}`)
+    .join('\n')
+  const newVal = `${value.slice(0, lineStart)}${numbered}${value.slice(lineEnd)}`
+  setText(newVal)
+  setTimeout(() => {
+    ta.focus()
+    ta.setSelectionRange(lineStart + 3, lineStart + numbered.length)
+  }, 0)
+}
+
 function variationLabel(v: ProductVariation): string {
   if (v.attributes && Object.keys(v.attributes).length > 0) {
     return Object.entries(v.attributes).map(([k, val]) => `${k}: ${val}`).join(', ')
@@ -1365,59 +1391,89 @@ export default function InboxPage() {
             {selectedConv.status === 'human_takeover' ? (
               <div className="p-3 border-t border-border bg-card space-y-2">
                 {sendError && <p className="text-xs text-red-400 text-center">{sendError}</p>}
-                {/* Rev. 103 — Toolbar de formato WhatsApp (estilo Teams/Slack).
-                    Inserta los markers alrededor de la selección o donde
-                    está el cursor. Atajos Ctrl+B / Ctrl+I dentro del textarea. */}
-                <div className="flex items-center gap-1 px-1">
+                {/* Rev. 103 — Toolbar completa de formato WhatsApp (estilo
+                    Teams/Slack). Cubre TODAS las opciones de la doc oficial
+                    de Meta:
+                      Inline: *negrita* _cursiva_ ~tachado~ `código` ```mono```
+                      Bloque: > cita · viñetas · numerada
+                    Atajos: Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código.
+                */}
+                <div className="flex items-center gap-0.5 px-1 flex-wrap">
+                  {/* — Inline format — */}
                   <button
                     type="button"
                     onClick={() => wrapSelection(replyInputRef, setReplyText, '*')}
-                    title="Negrita (Ctrl+B)"
-                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm font-bold"
+                    title="Negrita — *texto*  (Ctrl+B)"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm font-bold"
                   >B</button>
                   <button
                     type="button"
                     onClick={() => wrapSelection(replyInputRef, setReplyText, '_')}
-                    title="Cursiva (Ctrl+I)"
-                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm italic"
+                    title="Cursiva — _texto_  (Ctrl+I)"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm italic"
                   >I</button>
                   <button
                     type="button"
                     onClick={() => wrapSelection(replyInputRef, setReplyText, '~')}
-                    title="Tachado"
-                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm line-through"
+                    title="Tachado — ~texto~"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm line-through"
                   >S</button>
                   <button
                     type="button"
+                    onClick={() => wrapSelection(replyInputRef, setReplyText, '`')}
+                    title="Código alineado — `texto`  (Ctrl+E)"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-mono"
+                  >{'<>'}</button>
+                  <button
+                    type="button"
                     onClick={() => wrapSelection(replyInputRef, setReplyText, '```')}
-                    title="Monoespaciado"
-                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-mono"
+                    title="Bloque monoespaciado — ```texto```"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-mono"
                   >{'</>'}</button>
+
+                  {/* Separador visual */}
+                  <span className="h-5 w-px bg-border mx-1" aria-hidden="true" />
+
+                  {/* — Block format — */}
                   <button
                     type="button"
                     onClick={() => prefixLine(replyInputRef, setReplyText, '> ')}
-                    title="Cita"
-                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm"
+                    title="Cita — > texto"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm"
                   >&ldquo;&rdquo;</button>
-                  <span className="text-[10px] text-muted-foreground ml-2">
-                    *negrita* _cursiva_ ~tachado~ ```mono```
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => prefixLine(replyInputRef, setReplyText, '* ')}
+                    title="Lista con viñetas — * texto"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-base"
+                  >•</button>
+                  <button
+                    type="button"
+                    onClick={() => prefixLineNumbered(replyInputRef, setReplyText)}
+                    title="Lista numerada — 1. texto"
+                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-medium"
+                  >1.</button>
                 </div>
+                <p className="text-[10px] text-muted-foreground px-1 leading-tight">
+                  Formato WhatsApp: <code className="font-mono">*negrita*</code> · <code className="font-mono">_cursiva_</code> · <code className="font-mono">~tachado~</code> · <code className="font-mono">`código`</code> · <code className="font-mono">{'```mono```'}</code> · <code className="font-mono">{'> cita'}</code> · <code className="font-mono">* lista</code> · <code className="font-mono">1. numerada</code>
+                </p>
                 <div className="flex gap-2 items-end">
                   <textarea
                     ref={replyInputRef}
                     value={replyText}
                     onChange={e => { setReplyText(e.target.value); setSendError(null) }}
                     onKeyDown={e => {
-                      // Atajos de formato (Ctrl+B / Ctrl+I) — antes de Enter handler
+                      // Rev. 103 — atajos de formato (antes del handler de Enter)
+                      // Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código inline
                       if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
                         const k = e.key.toLowerCase()
                         if (k === 'b') { e.preventDefault(); wrapSelection(replyInputRef, setReplyText, '*'); return }
                         if (k === 'i') { e.preventDefault(); wrapSelection(replyInputRef, setReplyText, '_'); return }
+                        if (k === 'e') { e.preventDefault(); wrapSelection(replyInputRef, setReplyText, '`'); return }
                       }
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage() }
                     }}
-                    placeholder="Escribe tu respuesta... (Enter para enviar · Shift+Enter nueva línea · Ctrl+B negrita)"
+                    placeholder="Escribe tu respuesta...  (Enter envía · Shift+Enter salto de línea · Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código)"
                     disabled={sending}
                     rows={2}
                     className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
