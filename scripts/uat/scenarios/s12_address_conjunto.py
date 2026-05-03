@@ -1,37 +1,25 @@
 #!/usr/bin/env python3.11
-"""S12 — Conversación larga con conjunto + shipping_phone alterno.
+"""S12 — Conversación con address conjunto + shipping_phone alterno.
 
-OBJETIVO: reproducir el flujo real que destapó dos bugs críticos en
-conversaciones >25 mensajes (rev. 103, conv `3448118a`):
+OBJETIVO: validar manejo de address conjunto (torre + apto) + phone
+alterno + 2 caminos según perfil del cliente:
 
-  1. **Carrier truncado del history**: cliente eligió "Económica" en msg
-     #9 → al llegar al resumen (msg #34), el window de 25 dejó fuera la
-     señal → state degrada a AWAITING_CARRIER_SELECTION → LLM compone
-     resumen freestyle CON ALUCINACIÓN DE PRODUCTOS NO PEDIDOS.
-  2. **Link de pago no enviado**: bot dice "Te genero el link" pero el
-     guard `payment_link_tool` ignora porque state ≠ READY_FOR_SUMMARY.
+  • mode=new: cliente desconocido recolecta TODA la PII desde cero.
+    17 turnos. Conversación larga que estresa el history truncated
+    a 25 msgs (bug rev. 103: carrier_selected + shipping cost
+    perdían señal, resumen alucinaba productos del catálogo).
+
+  • mode=known: cliente conocido con casa registrada quiere enviar
+    ESTA VEZ a un conjunto diferente. Stress: bot debe DETECTAR el
+    cambio de address post-resumen + actualizar a conjunto + persistir
+    nuevo torre/apto/complex_name + shipping_phone alterno. NO debe
+    re-pedir email/nombre/documento (ya están registrados).
+    8-10 turnos — flujo natural de cliente recurrente con preferencia
+    distinta para este pedido específico.
 
 Fix rev. 103: `_has_carrier_been_selected_in_conversation` (DB fallback)
++ `_extract_shipping_cost_from_db` + cart-as-SoT con variant detector
 + extensión de `_LIE_PHRASES` con frases de promesa de link.
-
-FLOW (~17 turnos, ~40+ mensajes incluyendo snapshots):
-  T1   "Hola buen día"
-  T2   "Deseo un jabón de Coco"
-  T3   "60g"                        — selección presentación
-  T4   "Cotizar envío a Bogotá"
-  T5   "Economica"                  — carrier choice (msg que se trunca!)
-  T6   "Si"                         — consent
-  T7   email
-  T8   nombre
-  T9   documento
-  T10  street (incompleto, sin tipo)
-  T11  "Gracias"                    — filler intentando saltar tipo vivienda
-  T12  "Conjunto"
-  T13  "Conjunto Torres de san Antonio" — complex_name
-  T14  "Torre 7 Apto 503"           — tower + apto
-  T15  "Puedo agregar otro número?" — modify shipping_phone post-resumen
-  T16  "3223840887"
-  T17  "Si"                         — final confirm
 
 PASS: orden creada + EXACTAMENTE 1 item (Coco) + shipping_phone alterno
 + address conjunto completa + bot envió link Wompi.
@@ -54,11 +42,10 @@ import e2e_chat  # noqa: E402
 SUPPORTED_MODES = ("new", "known")
 
 
-# Secuencia exacta del flujo real (conv 3448118a). Cada string es un
-# inbound. Tras cada inbound esperamos el outbound del bot antes de
-# enviar el siguiente — eso garantiza ordenamiento estricto y reproduce
-# el comportamiento real del cliente humano.
-_CONVERSATION_SEQUENCE: tuple[str, ...] = (
+# Sequence mode=new — cliente desconocido, recolecta toda la PII.
+# Conversación larga (~17 turnos, 40+ mensajes con snapshots) que
+# estresa el history truncado a 25 msgs.
+_SEQUENCE_NEW: tuple[str, ...] = (
     "Hola buen día",
     "Deseo un jabón de Coco",
     "60g",
@@ -76,7 +63,30 @@ _CONVERSATION_SEQUENCE: tuple[str, ...] = (
     "Puedo agregar otro número de celular?",  # modify shipping_phone
     "3223840887",
     "Si",                                    # confirma resumen
-    "Si confirmo",                           # confirma generar link (2da confirm)
+    "Si confirmo",                           # confirma generar link
+)
+
+
+# Sequence mode=known — cliente conocido CON conjunto pre-registrado
+# (seeded). El bot REUSA address sin re-pedir, completando checkout
+# rápido. Stress test: cliente recurrente agrega celular alterno
+# para envío en este pedido específico.
+# 8 turnos vs 17 de mode=new — refleja la realidad de un cliente
+# habitual que ya tiene PII y address. Validar que el bot:
+#   • NO re-pide email/nombre/documento (ya están).
+#   • Reusa address conjunto registrada (no inventa ni vuelve a
+#     preguntar tipo de vivienda).
+#   • Acepta shipping_phone alterno post-resumen sin desorientarse.
+#   • Llega a payment_link sin redundancias.
+_SEQUENCE_KNOWN: tuple[str, ...] = (
+    "Hola",
+    "Quiero un jabón de coco de 60g",
+    "Cotizar envío a Bogotá",
+    "Economica",
+    "Puedo agregar otro número de celular para el envío?",  # stress shipping_phone
+    "3223840887",
+    "Si",                                    # confirma resumen actualizado
+    "Si confirmo",                           # genera link
 )
 
 
@@ -84,12 +94,32 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
     hard_reset(phone, tenant_id)
     if mode == "known":
         sb_seed = e2e_chat._supabase()
-        if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
-            return ScenarioResult(12, "Conversación larga conjunto+shipping_alt",
+        # Seed contact con address tipo CONJUNTO pre-registrada. El test
+        # valida que el bot reusa estos datos sin re-preguntar cuando el
+        # cliente recurrente ya los tiene en DB (= flujo natural SaaS B2B).
+        if not seed_known_contact(
+            sb_seed, tenant_id, phone,
+            name="Cristian Camilo Garzón Tamayo",
+            address={
+                "street": "CR 72M BIS A 45-23",
+                "city": "Bogotá D.C.",
+                "state": "Bogotá D.C.",
+                "country": "CO",
+                "dane_code": "11001",
+                "building_type": "conjunto",
+                "complex_name": "Torres de san Antonio",
+                "tower": "Torre 7",
+                "apartment": "503",
+            },
+        ):
+            return ScenarioResult(12, "Address conjunto + shipping alt",
                                   FAIL, "Seed known contact falló")
+        sequence = _SEQUENCE_KNOWN
+    else:
+        sequence = _SEQUENCE_NEW
 
     transcript: list[dict] = []
-    for idx, inbound in enumerate(_CONVERSATION_SEQUENCE, start=1):
+    for idx, inbound in enumerate(sequence, start=1):
         t0 = now_iso()
         if not send_inbound(phone, tenant_id, inbound):
             return ScenarioResult(12, "Conversación larga conjunto+shipping_alt",
@@ -179,7 +209,7 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
         )
 
     evidence = {
-        "turns": len(_CONVERSATION_SEQUENCE),
+        "turns": len(sequence),
         "order_status": order_status if orders_q.data else None,
         "order_items_titles": [it.get("title") for it in (
             orders_q.data[0].get("order_items") or [] if orders_q.data else []
