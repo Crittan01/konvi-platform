@@ -120,7 +120,7 @@ interface OpenClaim {
   id: string
   ticket_number: string
   status: string
-  type?: string | null
+  reason?: string | null
   created_at: string
 }
 
@@ -1665,10 +1665,12 @@ export default function InboxPage() {
                   {convContext.open_claims.map(claim => (
                     <div key={claim.id} className="p-2 rounded-lg bg-red-50/40 border border-red-200/50">
                       <p className="text-xs font-medium">#{claim.ticket_number}</p>
-                      {claim.type && (
-                        <p className="text-[10px] text-muted-foreground">{claim.type}</p>
+                      {claim.reason && (
+                        <p className="text-[11px] text-muted-foreground line-clamp-2 italic">
+                          {claim.reason}
+                        </p>
                       )}
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
                         Abierto · {timeAgo(claim.created_at)}
                       </p>
                     </div>

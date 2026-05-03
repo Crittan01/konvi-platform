@@ -424,12 +424,13 @@ async def get_conversation_context(
         # Rev. 103 — Reclamos abiertos del cliente (mismo bloque que el bot
         # ve en su system prompt). El operador humano debe poder verlos en
         # el panel para no duplicar trabajo y dar continuidad.
+        # Schema real: claims tiene `reason` (texto libre), no `type`.
         open_claims: List[dict] = []
         if contact_id:
             try:
                 claims_res = (
                     supabase.table("claims")
-                    .select("id, ticket_number, status, created_at, type")
+                    .select("id, ticket_number, status, reason, created_at")
                     .eq("tenant_id", tenant_id)
                     .eq("customer_id", contact_id)
                     .eq("status", "open")
@@ -509,19 +510,22 @@ async def update_conversation_status(
         )
         if not result.data:
             if idem_session is not None:
-                abort_idempotency(idem_session)
+                abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         body_payload = {"id": conversation_id, "status": body.status}
         if idem_session is not None:
-            finalize_idempotency(idem_session, status_code=200, body=body_payload)
+            finalize_idempotency(
+                supabase=supabase, tenant_id=tenant_id, session=idem_session,
+                status_code=200, body=body_payload,
+            )
         return body_payload
     except HTTPException:
         if idem_session is not None:
-            abort_idempotency(idem_session)
+            abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         raise
     except Exception as e:
         if idem_session is not None:
-            abort_idempotency(idem_session)
+            abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error actualizando status de conversación %s: %s", conversation_id, e)
         raise HTTPException(status_code=500, detail="Error al actualizar conversación")
 
