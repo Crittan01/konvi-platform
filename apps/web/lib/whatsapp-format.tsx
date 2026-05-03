@@ -1,25 +1,35 @@
 /**
- * Rev. 103 — Renderizado de formato WhatsApp en React.
+ * Rev. 103 — Renderizado completo de formato WhatsApp en React.
  *
- * WhatsApp soporta:
- *   • *texto*  → bold
- *   • _texto_  → italic
- *   • ~texto~  → strikethrough
- *   • ```texto``` → monospace (un bloque o inline)
- *   • > texto  → blockquote (línea entera)
- *   • URLs → autolink
- *   • \n\n → párrafos
+ * Soporta TODAS las opciones oficiales de WhatsApp
+ * (https://faq.whatsapp.com/539178204879377):
+ *
+ *   Inline (dentro de una línea):
+ *     • *texto*       → bold
+ *     • _texto_       → italic
+ *     • ~texto~       → strikethrough
+ *     • `texto`       → código alineado (inline)
+ *     • ```texto```   → monospace (bloque)
+ *
+ *   Block (línea entera):
+ *     • > texto       → blockquote
+ *     • * texto       → lista con viñetas
+ *     • - texto       → lista con viñetas
+ *     • 1. texto      → lista numerada
+ *
+ *   Adicional:
+ *     • URLs → autolink
+ *     • \n\n → párrafos
  *
  * Diseño:
  *   • Sin `dangerouslySetInnerHTML` — escape automático por React.
- *   • Procesa por líneas para detectar blockquote.
+ *   • Procesa por líneas para detectar blockquote/listas.
  *   • Dentro de cada línea, parsing recursivo de inline markers.
- *   • Reusable en chat messages + previews.
+ *   • Reusable en chat messages + previews + editor preview.
  */
 import React from 'react'
 
-// Reglas de formato inline (orden importa: monospace primero para no
-// romper su contenido con otros markers).
+// ── Inline rules ──────────────────────────────────────────────────────────
 type InlineRule = {
   pattern: RegExp                // captura: 1 = contenido
   render: (content: string, key: string) => React.ReactNode
@@ -27,38 +37,52 @@ type InlineRule = {
 
 const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+)\b/g
 
+// Orden importa: monospace (triple y single) primero porque su contenido
+// es literal y NO debe parsearse para otros markers.
 const INLINE_RULES: InlineRule[] = [
-  // Monospace ```...``` o ``...`` — primero porque su contenido es literal
+  // 1. Monospace BLOQUE ```...``` (triple backtick)
   {
     pattern: /```([^`\n]{1,500})```/g,
     render: (c, k) => (
       <code
         key={k}
-        className="px-1 py-0.5 rounded bg-border/40 text-[0.95em] font-mono"
+        className="px-1.5 py-0.5 rounded bg-border/40 text-[0.92em] font-mono"
       >
         {c}
       </code>
     ),
   },
-  // Bold *texto*
+  // 2. Código INLINE `...` (single backtick — distinto del bloque mono)
+  {
+    pattern: /(?<!`)`([^`\n]{1,500}?)`(?!`)/g,
+    render: (c, k) => (
+      <code
+        key={k}
+        className="px-1 py-0.5 rounded bg-border/30 text-[0.92em] font-mono"
+      >
+        {c}
+      </code>
+    ),
+  },
+  // 3. Bold *...*
   {
     pattern: /(?<!\w)\*([^*\n]{1,500}?)\*(?!\w)/g,
     render: (c, k) => (
       <strong key={k} className="font-semibold">
-        {parseInlineRecursive(c, INLINE_RULES.slice(2), `${k}.b`)}
+        {parseInlineRecursive(c, INLINE_RULES.slice(3), `${k}.b`)}
       </strong>
     ),
   },
-  // Italic _texto_
+  // 4. Italic _..._
   {
     pattern: /(?<!\w)_([^_\n]{1,500}?)_(?!\w)/g,
     render: (c, k) => (
       <em key={k} className="italic">
-        {parseInlineRecursive(c, INLINE_RULES.slice(3), `${k}.i`)}
+        {parseInlineRecursive(c, INLINE_RULES.slice(4), `${k}.i`)}
       </em>
     ),
   },
-  // Strikethrough ~texto~
+  // 5. Strikethrough ~...~
   {
     pattern: /(?<!\w)~([^~\n]{1,500}?)~(?!\w)/g,
     render: (c, k) => (
@@ -70,7 +94,7 @@ const INLINE_RULES: InlineRule[] = [
 ]
 
 /** Parsing recursivo de inline markers. `rules` permite saltar reglas
- *  ya aplicadas (evita re-bolding bold). */
+ *  ya aplicadas (evita re-bolding de bold). */
 function parseInlineRecursive(
   text: string,
   rules: InlineRule[],
@@ -78,7 +102,6 @@ function parseInlineRecursive(
 ): React.ReactNode[] {
   if (!text) return []
   if (rules.length === 0) {
-    // Sin más reglas → autolink + plain text
     return autoLinkText(text, keyPrefix)
   }
 
@@ -86,12 +109,10 @@ function parseInlineRecursive(
   const out: React.ReactNode[] = []
   let lastIdx = 0
   let m: RegExpExecArray | null
-  // Reset regex state (lastIndex) — global flags conservan estado entre calls
   first.pattern.lastIndex = 0
   let count = 0
   while ((m = first.pattern.exec(text)) !== null) {
     if (m.index > lastIdx) {
-      // Texto antes del match: parsear con las reglas RESTANTES
       out.push(
         ...parseInlineRecursive(
           text.slice(lastIdx, m.index),
@@ -103,7 +124,7 @@ function parseInlineRecursive(
     out.push(first.render(m[1] ?? '', `${keyPrefix}.${count}.m`))
     lastIdx = m.index + m[0].length
     count += 1
-    if (count > 200) break // safety
+    if (count > 200) break
   }
   if (lastIdx < text.length) {
     out.push(
@@ -148,26 +169,33 @@ function autoLinkText(text: string, keyPrefix: string): React.ReactNode[] {
   return out
 }
 
+// ── Block-level patterns (línea entera) ───────────────────────────────────
+
+const BULLET_RE = /^[*-]\s+(.*)$/         // "* texto" o "- texto"
+const NUMBERED_RE = /^(\d+)\.\s+(.*)$/    // "1. texto"
+const QUOTE_RE = /^>\s+(.*)$/             // "> texto"
+
 /**
  * Renderiza un texto WhatsApp-formatted como JSX seguro.
- * Maneja blockquotes (líneas que empiezan con `> `) y formato inline.
+ * Maneja blockquotes + listas (viñetas y numeradas) + formato inline.
  */
 export function renderWhatsAppFormat(text: string): React.ReactNode {
   if (!text) return null
 
   const lines = text.split('\n')
   const blocks: React.ReactNode[] = []
-
-  // Agrupar líneas consecutivas de blockquote en un solo bloque.
   let i = 0
   let blockKey = 0
+
   while (i < lines.length) {
     const line = lines[i] ?? ''
-    if (line.startsWith('> ')) {
-      // Recolectar todas las líneas blockquote consecutivas
+
+    // 1. Blockquote (líneas consecutivas con `> `)
+    if (QUOTE_RE.test(line)) {
       const quoteLines: string[] = []
-      while (i < lines.length && (lines[i] ?? '').startsWith('> ')) {
-        quoteLines.push((lines[i] ?? '').slice(2))
+      while (i < lines.length && QUOTE_RE.test(lines[i] ?? '')) {
+        const m = (lines[i] ?? '').match(QUOTE_RE)
+        quoteLines.push(m ? m[1] : '')
         i += 1
       }
       blocks.push(
@@ -182,15 +210,65 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
           ))}
         </blockquote>,
       )
-    } else {
-      blocks.push(
-        <span key={`ln.${blockKey++}`}>
-          {parseInlineRecursive(line, INLINE_RULES, `ln.${blockKey}`)}
-          {i < lines.length - 1 && <br />}
-        </span>,
-      )
-      i += 1
+      continue
     }
+
+    // 2. Lista numerada (líneas consecutivas con "N. texto")
+    if (NUMBERED_RE.test(line)) {
+      const items: { num: number; text: string }[] = []
+      while (i < lines.length && NUMBERED_RE.test(lines[i] ?? '')) {
+        const m = (lines[i] ?? '').match(NUMBERED_RE)
+        if (m) items.push({ num: parseInt(m[1], 10), text: m[2] })
+        i += 1
+      }
+      const startNum = items[0]?.num ?? 1
+      blocks.push(
+        <ol
+          key={`ol.${blockKey++}`}
+          className="list-decimal pl-5 my-1 space-y-0.5"
+          start={startNum}
+        >
+          {items.map((it, ii) => (
+            <li key={`ol.${blockKey}.${ii}`}>
+              {parseInlineRecursive(it.text, INLINE_RULES, `ol.${blockKey}.${ii}`)}
+            </li>
+          ))}
+        </ol>,
+      )
+      continue
+    }
+
+    // 3. Lista con viñetas (líneas consecutivas con "* " o "- ")
+    if (BULLET_RE.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && BULLET_RE.test(lines[i] ?? '')) {
+        const m = (lines[i] ?? '').match(BULLET_RE)
+        items.push(m ? m[1] : '')
+        i += 1
+      }
+      blocks.push(
+        <ul
+          key={`ul.${blockKey++}`}
+          className="list-disc pl-5 my-1 space-y-0.5"
+        >
+          {items.map((it, ii) => (
+            <li key={`ul.${blockKey}.${ii}`}>
+              {parseInlineRecursive(it, INLINE_RULES, `ul.${blockKey}.${ii}`)}
+            </li>
+          ))}
+        </ul>,
+      )
+      continue
+    }
+
+    // 4. Línea normal
+    blocks.push(
+      <span key={`ln.${blockKey++}`}>
+        {parseInlineRecursive(line, INLINE_RULES, `ln.${blockKey}`)}
+        {i < lines.length - 1 && <br />}
+      </span>,
+    )
+    i += 1
   }
 
   return <>{blocks}</>
@@ -205,8 +283,11 @@ export function stripWhatsAppFormat(text: string): string {
   if (!text) return ''
   return text
     .replace(/```([^`\n]+)```/g, '$1')
+    .replace(/(?<!`)`([^`\n]+?)`(?!`)/g, '$1')
     .replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '$1')
     .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '$1')
     .replace(/(?<!\w)~([^~\n]+)~(?!\w)/g, '$1')
     .replace(/^>\s+/gm, '')
+    .replace(/^[*-]\s+/gm, '• ')
+    .replace(/^(\d+)\.\s+/gm, '$1. ')
 }
