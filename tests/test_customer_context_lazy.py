@@ -103,14 +103,19 @@ class LoadCustomerContextBlockTests(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def test_lazy_skips_supabase_when_no_token(self):
+    def test_block_loads_real_time_when_contact_id_present(self):
+        """Rev. 103 — lazy-loading removido. El bloque de contexto del
+        cliente es ESPEJO real-time del Inbox y siempre carga (no
+        bloqueado por gate léxico). Razón: el LLM debe ver verdad cada
+        turno para no alucinar."""
         os.environ["CUSTOMER_CONTEXT_ENABLED"] = "true"
         os.environ["CUSTOMER_CONTEXT_MODE"] = "lazy"
         sb = MagicMock()
-        result = _load_customer_context_block(sb, "tenant-1", "contact-1", "Andrés", query_text="hola")
-        self.assertEqual(result, "")
-        # Nunca consulta a Supabase porque el gate cortó antes.
-        sb.table.assert_not_called()
+        _load_customer_context_block(
+            sb, "tenant-1", "contact-1", "Andrés", query_text="hola",
+        )
+        # El gate lazy ya NO debe cortar antes de consultar DB.
+        sb.table.assert_called()
 
 
 if __name__ == "__main__":

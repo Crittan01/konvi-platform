@@ -8,6 +8,7 @@ import {
   Search, X, ChevronLeft, ChevronRight, Filter, CheckCheck, Check,
   Circle, Wifi, WifiOff, Package, ShoppingBag, MapPin, Plus,
   BadgeCheck, BadgeX, Loader2, Info, ChevronsRight,
+  ShoppingCart, Mail, FileText, Truck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { createIdempotencyKey } from '@/lib/idempotency'
@@ -81,14 +82,42 @@ interface ContactRow {
   id: string
   name?: string
   phone: string
+  // Rev. 103 — campos PII completos (espejo del system prompt del bot).
+  shipping_phone?: string | null
+  email?: string | null
+  document_type?: string | null
+  document_number?: string | null
   address?: Record<string, unknown>
   consent_given?: boolean
   consent_revoked_at?: string | null
 }
 
+// Rev. 103 — Cart-as-SoT en vivo. El operador humano ve el mismo carrito
+// que el bot está construyendo turn-by-turn.
+interface CartItem {
+  product_id: string
+  variation_id: string
+  quantity: number
+  unit_price_cents: number
+  title: string
+  variant_label: string
+  sku: string
+}
+
+interface ActiveCart {
+  id: string
+  items: CartItem[]
+  subtotal_cents: number
+  shipping_cents: number
+  total_cents: number
+  carrier_name: string
+  requires_requote: boolean
+}
+
 interface ConvContext {
   contact: ContactRow | null
   recent_orders: OrderRow[]
+  active_cart: ActiveCart | null
   products: Product[]
   product_count: number
   low_stock_count: number
@@ -373,7 +402,11 @@ export default function InboxPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showArchived])
 
-  // ── Cargar contexto del panel al cambiar conversación ─────────────────────
+  // ── Cargar contexto del panel al cambiar conversación + auto-refresh ───────
+  // Rev. 103 — Real-time mirror del Inbox: refresh cada 5s mientras la
+  // conversación está seleccionada para reflejar cambios en cart, address,
+  // contact (caso real: bot agrega item al cart en el siguiente turno → el
+  // operador humano lo ve sin recargar la página).
   useEffect(() => {
     if (!selectedId) {
       setConvContext(null)
@@ -387,21 +420,43 @@ export default function InboxPage() {
     setOrderError(null)
 
     const controller = new AbortController()
-    supabase.auth.getSession().then(({ data }) => {
-      const token = data.session?.access_token
-      if (!token) { setContextLoading(false); return }
-      fetch(`/api/conversations/${selectedId}/context`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        signal: controller.signal,
-      })
-        .then(r => r.json())
-        .then(json => {
-          if (!controller.signal.aborted) setConvContext(json)
+    let refreshTimer: ReturnType<typeof setInterval> | null = null
+    let cancelled = false
+
+    const fetchContext = async (opts?: { silent?: boolean }) => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const token = data.session?.access_token
+        if (!token) {
+          if (!opts?.silent) setContextLoading(false)
+          return
+        }
+        const res = await fetch(`/api/conversations/${selectedId}/context`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: controller.signal,
         })
-        .catch(e => { if (!controller.signal.aborted) console.warn('context error', e) })
-        .finally(() => { if (!controller.signal.aborted) setContextLoading(false) })
+        if (!res.ok) return
+        const json = await res.json()
+        if (!cancelled && !controller.signal.aborted) setConvContext(json)
+      } catch (e) {
+        if (!controller.signal.aborted && !opts?.silent) console.warn('context error', e)
+      } finally {
+        if (!opts?.silent && !cancelled && !controller.signal.aborted) {
+          setContextLoading(false)
+        }
+      }
+    }
+
+    fetchContext().then(() => {
+      // Real-time refresh cada 5s (silent — sin loading flicker).
+      refreshTimer = setInterval(() => fetchContext({ silent: true }), 5000)
     })
-    return () => controller.abort()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      if (refreshTimer) clearInterval(refreshTimer)
+    }
   }, [selectedId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Cargar mensajes ────────────────────────────────────────────────────────
@@ -1296,15 +1351,43 @@ export default function InboxPage() {
                       <p className="text-xs text-muted-foreground">{formatPhone(convContext.contact.phone)}</p>
                     </div>
                   </div>
+                  {/* Rev. 103 — PII completa para que el operador humano
+                      vea todo lo que el bot ya tiene (espejo system prompt). */}
+                  {convContext.contact.email && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <Mail className="h-3 w-3" />
+                      {convContext.contact.email}
+                    </p>
+                  )}
+                  {convContext.contact.document_type && convContext.contact.document_number && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <FileText className="h-3 w-3" />
+                      {convContext.contact.document_type} {convContext.contact.document_number}
+                    </p>
+                  )}
+                  {convContext.contact.shipping_phone &&
+                   convContext.contact.shipping_phone !== convContext.contact.phone &&
+                   convContext.contact.shipping_phone.replace(/\+/g, '') !==
+                   convContext.contact.phone.replace(/\+/g, '') && (
+                    <p className="text-[11px] text-amber-700 flex items-center gap-1">
+                      <Truck className="h-3 w-3" />
+                      Envío: {formatPhone(convContext.contact.shipping_phone)}
+                    </p>
+                  )}
                   {convContext.contact.address && (
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3" />
                       {typeof convContext.contact.address === 'object'
-                        ? [
-                            (convContext.contact.address as Record<string, string>)['street'],
-                            (convContext.contact.address as Record<string, string>)['number'],
-                            (convContext.contact.address as Record<string, string>)['city']
-                          ].filter(Boolean).join(', ') || 'Dirección registrada'
+                        ? (() => {
+                            const addr = convContext.contact.address as Record<string, string>
+                            const parts: string[] = []
+                            if (addr.street) parts.push(addr.street)
+                            if (addr.complex_name) parts.push(addr.complex_name)
+                            if (addr.tower) parts.push(`Torre ${addr.tower}`)
+                            if (addr.apartment) parts.push(`Apto ${addr.apartment}`)
+                            if (addr.city) parts.push(addr.city)
+                            return parts.join(' — ') || 'Dirección registrada'
+                          })()
                         : (convContext.contact.address as string)}
                     </p>
                   )}
@@ -1330,6 +1413,61 @@ export default function InboxPage() {
                 </p>
               )}
             </section>
+
+            {/* Rev. 103 — Carrito ACTIVO (cart-as-SoT) — espejo de lo que
+                el bot está construyendo turn-by-turn. Solo visible si hay
+                items. Real-time refresh cada 5s. */}
+            {convContext?.active_cart && convContext.active_cart.items.length > 0 && (
+              <section className="p-4 border-b border-border">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <ShoppingCart className="h-3 w-3" /> Carrito en construcción
+                </p>
+                <div className="space-y-1.5">
+                  {convContext.active_cart.items.map((it, idx) => (
+                    <div key={idx} className="flex justify-between items-start gap-2 p-2 rounded-lg bg-background border border-border">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">
+                          {it.quantity}× {it.title}
+                        </p>
+                        {it.variant_label && (
+                          <p className="text-[10px] text-muted-foreground">
+                            {it.variant_label}
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-[11px] font-medium whitespace-nowrap">
+                        {formatMoney(((it.unit_price_cents || 0) * (it.quantity || 1)) / 100)}
+                      </p>
+                    </div>
+                  ))}
+                  <div className="pt-1.5 border-t border-border space-y-0.5">
+                    <div className="flex justify-between text-[11px] text-muted-foreground">
+                      <span>Subtotal</span>
+                      <span>{formatMoney((convContext.active_cart.subtotal_cents || 0) / 100)}</span>
+                    </div>
+                    {convContext.active_cart.shipping_cents > 0 && (
+                      <div className="flex justify-between text-[11px] text-muted-foreground">
+                        <span>
+                          Envío{convContext.active_cart.carrier_name && ` · ${convContext.active_cart.carrier_name}`}
+                        </span>
+                        <span>{formatMoney(convContext.active_cart.shipping_cents / 100)}</span>
+                      </div>
+                    )}
+                    {convContext.active_cart.requires_requote && (
+                      <p className="text-[10px] text-amber-700 italic">
+                        ⚠ Cart cambió — envío necesita re-cotización
+                      </p>
+                    )}
+                    {convContext.active_cart.total_cents > 0 && (
+                      <div className="flex justify-between text-xs font-semibold pt-0.5">
+                        <span>Total</span>
+                        <span>{formatMoney(convContext.active_cart.total_cents / 100)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* Pedidos recientes */}
             <section className="p-4 border-b border-border">

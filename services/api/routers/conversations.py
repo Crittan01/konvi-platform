@@ -252,7 +252,13 @@ async def get_conversation_context(
             phone_space = f"+57 {phone_norm[2:]}" if phone_norm.startswith("57") else phone_plus
             contact_res = (
                 supabase.table("contacts")
-                .select("id, name, phone, address, consent_given, consent_revoked_at")
+                .select(
+                    # Rev. 103 — campos PII completos para el panel Inbox
+                    # (espejo del contexto que el bot LLM ya recibe).
+                    "id, name, phone, shipping_phone, email, "
+                    "document_type, document_number, address, "
+                    "consent_given, consent_revoked_at"
+                )
                 .eq("tenant_id", tenant_id)
                 .or_(f"phone.eq.{phone_norm},phone.eq.{phone_plus},phone.eq.{phone_space}")
                 .order("name", nullsfirst=False)   # Contacto con nombre real primero; anónimos al final
@@ -320,9 +326,105 @@ async def get_conversation_context(
         except Exception as pe:
             logger.warning("Error cargando catálogo para context tenant=%s: %s", tenant_id, pe)
 
+        # Rev. 103 — Cart-as-SoT en vivo: el panel "Contexto del cliente"
+        # del Inbox debe ver el mismo carrito que tiene el bot. Misma data
+        # que el LLM recibe en su system prompt — visibilidad total al
+        # operador humano para que pueda ayudar/correr el pedido manual.
+        active_cart: Optional[dict] = None
+        try:
+            cart_res = (
+                supabase.table("conversation_carts")
+                .select("id, status, subtotal_cents, shipping_cents, "
+                        "total_cents, shipping_meta, requires_requote")
+                .eq("tenant_id", tenant_id)
+                .eq("conversation_id", conversation_id)
+                .eq("status", "open")
+                .limit(1)
+                .execute()
+            )
+            cart_rows = cart_res.data or []
+            if cart_rows:
+                cart = cart_rows[0]
+                # Items + producto/variante (mismo schema que cart_tool).
+                items_res = (
+                    supabase.table("conversation_cart_items")
+                    .select("id, product_id, variation_id, quantity, "
+                            "unit_price_cents, created_at")
+                    .eq("cart_id", cart["id"])
+                    .order("created_at", desc=False)
+                    .execute()
+                )
+                cart_items: List[dict] = []
+                if items_res.data:
+                    var_ids = list({i["variation_id"] for i in items_res.data
+                                    if i.get("variation_id")})
+                    prod_ids = list({i["product_id"] for i in items_res.data
+                                     if i.get("product_id")})
+                    var_lookup: dict = {}
+                    prod_lookup: dict = {}
+                    if var_ids:
+                        vres = (
+                            supabase.table("product_variations")
+                            .select("id, attributes, sku")
+                            .in_("id", var_ids)
+                            .execute()
+                        )
+                        for r in (vres.data or []):
+                            attrs = r.get("attributes") or {}
+                            label = ""
+                            if isinstance(attrs, dict) and attrs:
+                                label = " ".join(
+                                    str(v).strip() for v in attrs.values() if v
+                                ).strip()
+                            r["label"] = label or r.get("sku") or ""
+                            var_lookup[r["id"]] = r
+                    if prod_ids:
+                        pres = (
+                            supabase.table("products")
+                            .select("id, title")
+                            .in_("id", prod_ids)
+                            .execute()
+                        )
+                        for r in (pres.data or []):
+                            prod_lookup[r["id"]] = r
+                    for it in items_res.data:
+                        v = var_lookup.get(it.get("variation_id")) or {}
+                        p = prod_lookup.get(it.get("product_id")) or {}
+                        cart_items.append({
+                            "product_id": it.get("product_id"),
+                            "variation_id": it.get("variation_id"),
+                            "quantity": it.get("quantity"),
+                            "unit_price_cents": it.get("unit_price_cents"),
+                            "title": p.get("title") or "Producto",
+                            "variant_label": v.get("label") or "",
+                            "sku": v.get("sku") or "",
+                        })
+                # Carrier desde shipping_meta o fallback "—"
+                shipping_meta = cart.get("shipping_meta") or {}
+                carrier_name = ""
+                if isinstance(shipping_meta, dict):
+                    carrier_name = (
+                        shipping_meta.get("carrier_label")
+                        or shipping_meta.get("carrier")
+                        or shipping_meta.get("service_name")
+                        or ""
+                    )
+                active_cart = {
+                    "id": cart["id"],
+                    "items": cart_items,
+                    "subtotal_cents": cart.get("subtotal_cents") or 0,
+                    "shipping_cents": cart.get("shipping_cents") or 0,
+                    "total_cents": cart.get("total_cents") or 0,
+                    "carrier_name": carrier_name,
+                    "requires_requote": bool(cart.get("requires_requote")),
+                }
+        except Exception as ce:
+            logger.warning("Error cargando active_cart conv=%s: %s", conversation_id, ce)
+
         return {
             "contact": contact,
             "recent_orders": recent_orders,
+            "active_cart": active_cart,
             "products": products,
             "product_count": product_count,
             "low_stock_count": low_stock_count,

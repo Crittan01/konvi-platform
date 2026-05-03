@@ -344,8 +344,9 @@ class LoadCustomerContextBlockIntegrationTests(unittest.TestCase):
             sb, "tenant-1", "contact-1", "Andrés", query_text="oye, mi carrito"
         )
         self.assertIn("CARRITO PREVIO", result)
-        # No hay header del bloque CONTEXTO DEL CLIENTE porque no hay activos ni claims.
-        self.assertNotIn("CONTEXTO DEL CLIENTE", result)
+        # Rev. 103 — el header "CONTEXTO DEL CLIENTE" siempre se inyecta
+        # cuando hay AL MENOS algo (cart-recovery cuenta).
+        self.assertIn("CONTEXTO DEL CLIENTE", result)
 
     def test_cart_y_pedidos_activos_coexisten(self):
         sb = FakeSupabase(

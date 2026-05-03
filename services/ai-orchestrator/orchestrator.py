@@ -1400,26 +1400,27 @@ def _load_cart_recovery_block(
 
 def _load_customer_context_block(
     supabase: Client, tenant_id: str, contact_id: Optional[str], first_name: Optional[str],
-    *, query_text: Optional[str] = None,
+    *, query_text: Optional[str] = None, conversation_id: Optional[str] = None,
+    contact_record: Optional[dict] = None, history: Optional[list[dict]] = None,
 ) -> str:
     """Construye un bloque "CONTEXTO DEL CLIENTE" para el system prompt
-    cuando el contacto es conocido y tiene operaciones activas o un
-    carrito previo cancelado recientemente (F7-lite).
+    espejo del panel del Inbox del Tenant Console — para que el LLM tenga
+    la VERDAD en tiempo real y no aluciñe.
 
-    Rev. 68: siempre cargaba si había contact_id.
-    Rev. 69: respeta CUSTOMER_CONTEXT_MODE (always/lazy/disabled) y
-    CUSTOMER_CONTEXT_ENABLED (kill switch). Default 'lazy' — carga solo si la
-    query del cliente menciona pedido/reclamo/envío/etc.
-    Rev. 70 (F7-lite): además inyecta carrito previo cancelled reciente para
-    permitir que el bot ofrezca retomar.
+    Rev. 103 — refactor a real-time mirror del Inbox panel:
+      • Contacto: nombre, teléfono, email, doc, dirección, shipping_phone,
+        consent (con bandera Habeas Data como en Inbox).
+      • Carrito ACTIVO de la conversación actual (cart-as-SoT, items reales).
+      • Pedidos recientes (mismo limit + status que Inbox).
+      • Reclamos abiertos.
+      • Carrito cancelado reciente (cart-recovery, opcional).
 
-    Razón: a escala el contexto suma ~150-300 tokens por mensaje. La mayoría
-    de mensajes son saludos o consultas de catálogo donde el contexto no se
-    usa. Cargar solo cuando aporta reduce 70-80% del overhead sin perder UX.
+    Removed lazy loading (rev. 69): siempre se carga cuando hay contact_id
+    + conversación viva. Razón directiva rev. 103: el LLM debe ver la
+    realidad turn-by-turn — alucinaciones de productos/precios pasaban
+    cuando el contexto no se cargaba en convs largas.
     """
     if not contact_id:
-        return ""
-    if not _customer_context_should_load(query_text):
         return ""
     try:
         # Pedidos activos (no cancelados ni delivered).
@@ -1458,33 +1459,135 @@ def _load_customer_context_block(
 
     cart_block = _load_cart_recovery_block(supabase, tenant_id, contact_id)
 
-    if not active_orders and not open_claims and not cart_block:
+    # Rev. 103 — Carrito activo de la conversación actual (cart-as-SoT).
+    # Espejo del panel "Contexto del cliente" del Inbox.
+    active_cart_summary: Optional[dict] = None
+    if conversation_id:
+        try:
+            from tools.cart_tool import get_cart_with_items as _get_cart_ctx
+            _cart = _get_cart_ctx(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            )
+            if _cart and (_cart.get("items") or []):
+                active_cart_summary = _cart
+        except Exception as _ac_exc:
+            logger.warning("[CTX] Error cargando carrito activo: %s", _ac_exc)
+
+    # Construir contacto resumido (mirror Inbox)
+    contact_lines: list[str] = []
+    if isinstance(contact_record, dict):
+        _name = (contact_record.get("name") or "").strip()
+        _phone = (contact_record.get("phone") or "").strip()
+        _email = (contact_record.get("email") or "").strip()
+        _doc_t = (contact_record.get("document_type") or "").strip().upper()
+        _doc_n = (contact_record.get("document_number") or "").strip()
+        _ship = (contact_record.get("shipping_phone") or "").strip()
+        _consent = bool(contact_record.get("consent_given"))
+        _addr = contact_record.get("address") or {}
+        if _name:
+            contact_lines.append(f"- Nombre: {_name}")
+        if _phone:
+            contact_lines.append(f"- Celular WhatsApp: {_phone}")
+        if _ship and _ship != _phone and _ship.replace("+", "") != _phone.replace("+", ""):
+            contact_lines.append(f"- Celular envío (alterno): {_ship}")
+        if _email:
+            contact_lines.append(f"- Email: {_email}")
+        if _doc_t and _doc_n:
+            contact_lines.append(f"- Documento: {_doc_t} {_doc_n}")
+        if isinstance(_addr, dict) and _addr:
+            _addr_parts = [
+                _addr.get("street"), _addr.get("complex_name"),
+            ]
+            if _addr.get("tower"):
+                _addr_parts.append(f"Torre {_addr['tower']}")
+            if _addr.get("apartment"):
+                _addr_parts.append(f"Apto {_addr['apartment']}")
+            if _addr.get("city"):
+                _addr_parts.append(_addr["city"])
+            _addr_str = " — ".join(p for p in _addr_parts if p)
+            if _addr_str:
+                contact_lines.append(f"- Dirección: {_addr_str}")
+        # Bandera Habeas Data (mirror Inbox badges)
+        if _consent:
+            contact_lines.append("- Habeas Data: ✓ activo")
+        elif contact_record.get("consent_revoked_at"):
+            contact_lines.append("- Habeas Data: ✗ revocado")
+        else:
+            contact_lines.append("- Habeas Data: ✗ pendiente (cliente sin consent)")
+
+    # Si nada para mostrar, no inyectar bloque vacío
+    has_anything = bool(
+        contact_lines or active_cart_summary or active_orders
+        or open_claims or cart_block
+    )
+    if not has_anything:
         return ""
 
-    lines: list[str] = []
-    if active_orders or open_claims:
-        header = "CONTEXTO DEL CLIENTE (cliente conocido):"
-        if first_name:
-            header = f"CONTEXTO DEL CLIENTE — {first_name} (cliente conocido):"
-        lines.extend(["", header])
-        if active_orders:
-            for o in active_orders:
-                short = (o.get("id") or "")[:8].upper()
-                status = o.get("status", "?")
-                total = o.get("total_amount") or 0
-                lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)} COP")
-        if open_claims:
-            for c in open_claims:
-                tn = c.get("ticket_number", "?")
-                lines.append(f"- Reclamo abierto #{tn} (sin resolver)")
-        lines.append(
-            "INSTRUCCIÓN: si el cliente pregunta por estos pedidos o reclamos, "
-            "ya tienes contexto y puedes mencionar el número y estado. "
-            "Si NO pregunta por ellos, NO los menciones — atiende lo que el cliente quiere ahora."
-        )
+    lines: list[str] = ["", "CONTEXTO DEL CLIENTE (real-time desde DB — esta es la VERDAD; NO inventes ni cambies):"]
+
+    if contact_lines:
+        lines.append("")
+        lines.append("👤 *Contacto*:")
+        lines.extend(contact_lines)
+
+    # Carrito ACTIVO de la conversación actual (cart-as-SoT)
+    if active_cart_summary:
+        lines.append("")
+        lines.append("🛒 *Carrito actual* (en construcción):")
+        _items = active_cart_summary.get("items") or []
+        _subtotal_cents = int(active_cart_summary.get("subtotal_cents") or 0)
+        for it in _items:
+            qty = int(it.get("quantity") or 1)
+            p = it.get("product") or {}
+            v = it.get("variation") or {}
+            ptitle = (p.get("title") or p.get("name") or "Producto").strip()
+            vlabel = (v.get("label") or v.get("presentation") or "").strip()
+            unit = int(it.get("unit_price_cents") or 0)
+            line_total = unit * qty
+            label = f"- {qty}x {ptitle}"
+            if vlabel and vlabel.lower() not in {"estandar", "estándar"}:
+                label += f" ({vlabel})"
+            label += f": {_format_cop(line_total)}"
+            lines.append(label)
+        lines.append(f"- Subtotal: {_format_cop(_subtotal_cents)}")
+        # Shipping en vivo desde history (último quote del bot)
+        if history:
+            _ship_cents = _extract_shipping_cost_from_history(history) or 0
+            _carrier_nm = _extract_shipping_carrier_from_history(history) or ""
+            if _ship_cents > 0:
+                _ship_label = f"Envío"
+                if _carrier_nm:
+                    _ship_label += f" (Económica · {_carrier_nm})"
+                lines.append(f"- {_ship_label}: {_format_cop(_ship_cents)}")
+                lines.append(f"- Total con envío: {_format_cop(_subtotal_cents + _ship_cents)}")
+
+    if active_orders:
+        lines.append("")
+        lines.append("📦 *Pedidos recientes*:")
+        for o in active_orders:
+            short = (o.get("id") or "")[:8].upper()
+            status = o.get("status", "?")
+            total = o.get("total_amount") or 0
+            lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)} COP")
+
+    if open_claims:
+        lines.append("")
+        lines.append("⚠️ *Reclamos abiertos*:")
+        for c in open_claims:
+            tn = c.get("ticket_number", "?")
+            lines.append(f"- Reclamo #{tn} (sin resolver)")
 
     if cart_block:
+        # Carrito previo cancelado (recovery) — separado del activo
         lines.append(cart_block)
+
+    lines.append("")
+    lines.append(
+        "INSTRUCCIÓN CRÍTICA: este contexto es REALIDAD desde DB. NO inventes "
+        "productos, precios, cantidades, ni datos del cliente. Si el cliente "
+        "pide cambiar/agregar/quitar algo, hazlo SOBRE este estado real. Si "
+        "el cliente NO pregunta por pedidos/reclamos, NO los menciones."
+    )
 
     return "\n".join(lines)
 
@@ -6848,7 +6951,10 @@ async def build_and_run_orchestration(
         )
         customer_context_block = _load_customer_context_block(
             supabase, tenant_id, contact_id, _customer_first_name,
-            query_text=content,  # rev. 69 — usado en modo 'lazy' para gate léxico
+            query_text=content,
+            conversation_id=conversation_id,        # rev. 103 — cart en vivo
+            contact_record=contact_record,          # rev. 103 — datos contacto
+            history=history_for_prompt,             # rev. 103 — shipping/carrier
         )
 
         system_prompt = _build_system_prompt(
