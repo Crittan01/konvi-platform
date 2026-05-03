@@ -7562,10 +7562,15 @@ async def build_and_run_orchestration(
                                 # Reset requires_requote — el shipping recién
                                 # leído de DB ES la cotización vigente.
                                 _cart_for_summary["requires_requote"] = False
+                                # Recalcular total — el cart_db tenía
+                                # total = subtotal (sin envío) porque el
+                                # shipping no estaba persistido al cart.
+                                _sub_cents = int(_cart_for_summary.get("subtotal_cents") or 0)
+                                _cart_for_summary["total_cents"] = _sub_cents + _ship_db
                                 logger.info(
                                     "[CART_SUMMARY] shipping inyectado desde DB "
-                                    "(history truncado): %s cents conv=%s",
-                                    _ship_db, conversation_id[:8],
+                                    "(history truncado): %s cents → total=%s conv=%s",
+                                    _ship_db, _sub_cents + _ship_db, conversation_id[:8],
                                 )
                         _summary = _build_order_summary_text(
                             contact_record=_sim_contact,
