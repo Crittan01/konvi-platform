@@ -138,22 +138,46 @@ def get_cart_with_items(
         var_lookup: dict = {}
         prod_lookup: dict = {}
         if var_ids:
+            # Rev. 103 — schema real de `product_variations` NO tiene columnas
+            # `label` ni `presentation`. La etiqueta de la variante se deriva
+            # del JSONB `attributes` (ej. {"size": "60g"} → label "60g").
             vres = (
                 supabase.table("product_variations")
-                .select("id, label, weight_kg, length_cm, width_cm, height_cm, "
-                        "presentation, sku")
+                .select("id, attributes, weight_kg, length_cm, "
+                        "width_cm, height_cm, sku")
                 .in_("id", var_ids)
                 .execute()
             )
-            var_lookup = {r["id"]: r for r in (vres.data or [])}
+            var_lookup = {}
+            for r in (vres.data or []):
+                attrs = r.get("attributes") or {}
+                if isinstance(attrs, dict) and attrs:
+                    # Concatena los valores de attributes en orden
+                    # (típicamente solo "size": "60g" → "60g").
+                    derived_label = " ".join(
+                        str(v).strip() for v in attrs.values() if v
+                    ).strip()
+                    r["label"] = derived_label or r.get("sku") or ""
+                    r["presentation"] = derived_label
+                else:
+                    r["label"] = r.get("sku") or ""
+                    r["presentation"] = ""
+                var_lookup[r["id"]] = r
         if prod_ids:
+            # Rev. 103 — schema real `products` solo tiene `title` (no `name`
+            # ni `brand`). El downstream usa `name` como alias — sintetizar
+            # desde title para compat.
             pres = (
                 supabase.table("products")
-                .select("id, title, name, brand")
+                .select("id, title")
                 .in_("id", prod_ids)
                 .execute()
             )
-            prod_lookup = {r["id"]: r for r in (pres.data or [])}
+            prod_lookup = {}
+            for r in (pres.data or []):
+                r["name"] = r.get("title")  # alias para downstream
+                r["brand"] = ""
+                prod_lookup[r["id"]] = r
         for it in items:
             it["variation"] = var_lookup.get(it.get("variation_id")) or {}
             it["product"] = prod_lookup.get(it.get("product_id")) or {}
