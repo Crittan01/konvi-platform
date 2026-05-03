@@ -2408,18 +2408,89 @@ def _resolve_variant_from_inbound(
     return None, qty
 
 
+def _detect_explicit_product_in_inbound(
+    content: str, catalog: list,
+) -> Optional[dict]:
+    """Rev. 103 — Cliente especifica producto + variante en un solo mensaje
+    sin esperar a que el bot presente opciones. Caso real (mode=known):
+    "Quiero un jabón de coco de 60g". El detector existente
+    `_last_outbound_presented_variants` falla aquí porque el último
+    outbound del bot fue solo un saludo, NO una presentación.
+
+    Estrategia: matchear en el inbound:
+      1. Una palabra discriminativa del título (no genérica). Para
+         "Jabón Artesanal de Coco" → {coco}. Si el inbound contiene
+         "coco", candidate match.
+      2. Un atributo de variante (60g, 100ml, etc) que matchee una de
+         las variantes del producto candidate.
+
+    Devuelve dict listo para `cart_tool.add_item` o None.
+    """
+    if not content or not catalog:
+        return None
+    if "?" in content:
+        return None  # pregunta no es intent de compra
+    norm = _normalize_text(content)
+    norm_tokens = set(re.findall(r"[a-z0-9ñ]+", norm))
+    if not norm_tokens:
+        return None
+
+    # Términos genéricos del catálogo (palabras compartidas por ≥40%
+    # de productos). Reusa helper existente.
+    generic_terms = _generic_catalog_terms(catalog)
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+
+    best_match: Optional[dict] = None
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        title_norm = _normalize_text(title)
+        title_words = set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _stop
+        # Palabras discriminativas (no genéricas)
+        discriminative = title_words - generic_terms
+        if not discriminative:
+            continue  # Producto sin discriminantes — saltar
+        # Necesita ALGUNA discriminativa en el inbound
+        if not (discriminative & norm_tokens):
+            continue
+        # Match — ahora resolver variante
+        variant, qty = _resolve_variant_from_inbound(content, prod)
+        if not variant:
+            continue
+        unit_price = float(variant.get("price") or 0)
+        if unit_price <= 0:
+            continue
+        # Si encontramos múltiples productos match, preferir el de
+        # MÁS palabras discriminativas matcheadas (más específico).
+        match_score = len(discriminative & norm_tokens)
+        if best_match is None or match_score > best_match["_score"]:
+            best_match = {
+                "product_id": str(prod.get("id") or ""),
+                "variation_id": str(variant.get("id") or ""),
+                "quantity": qty,
+                "unit_price_cents": int(round(unit_price * 100)),
+                "title": str(prod.get("title") or "Producto"),
+                "variant_label": str(variant.get("label") or ""),
+                "_score": match_score,
+            }
+
+    if best_match:
+        best_match.pop("_score", None)
+    return best_match
+
+
 def _detect_variant_confirmation(
     content: str, history: list[dict], catalog: list,
 ) -> Optional[dict]:
-    """Rev. 103 — Detector pre-LLM determinístico para "client confirms
-    variant after bot presented variants". Establece el cart-as-SoT en el
-    momento exacto de la confirmación, no al final del flujo.
+    """Rev. 103 — Detector pre-LLM determinístico cart-as-SoT.
 
-    Disparo:
-      • Bot acaba de presentar variantes de un producto del catálogo.
-      • Cliente responde con un mensaje corto que matchea una variante
-        (por valor de attribute, por número+unidad, o por label).
-      • No es pregunta (no contiene '?').
+    Dos caminos:
+      A. Bot acaba de presentar variantes → cliente elige una con
+         mensaje corto ("60g"). Match por variant attribute.
+      B. Cliente especifica producto+variante en un mensaje
+         ("quiero jabón de coco 60g") sin esperar presentación.
+         Match por discriminative word del título + variant attribute.
 
     Devuelve dict listo para `cart_tool.add_item` o None.
     """
@@ -2429,29 +2500,28 @@ def _detect_variant_confirmation(
         return None
     norm = _normalize_text(content)
     tokens = norm.split()
-    if not tokens or len(tokens) > 10:
-        return None  # Mensajes largos no son selecciones de variante
+    if not tokens or len(tokens) > 14:
+        return None  # Mensajes muy largos descartados (probablemente
+                     # consulta o address dump, no intent de compra)
 
+    # Camino A: ¿bot presentó variantes en el último outbound?
     product = _last_outbound_presented_variants(catalog, history)
-    if not product:
-        return None
+    if product:
+        variant, qty = _resolve_variant_from_inbound(content, product)
+        if variant:
+            unit_price = float(variant.get("price") or 0)
+            if unit_price > 0:
+                return {
+                    "product_id": str(product.get("id") or ""),
+                    "variation_id": str(variant.get("id") or ""),
+                    "quantity": qty,
+                    "unit_price_cents": int(round(unit_price * 100)),
+                    "title": str(product.get("title") or "Producto"),
+                    "variant_label": str(variant.get("label") or ""),
+                }
 
-    variant, qty = _resolve_variant_from_inbound(content, product)
-    if not variant:
-        return None
-
-    unit_price = float(variant.get("price") or 0)
-    if unit_price <= 0:
-        return None
-
-    return {
-        "product_id": str(product.get("id") or ""),
-        "variation_id": str(variant.get("id") or ""),
-        "quantity": qty,
-        "unit_price_cents": int(round(unit_price * 100)),
-        "title": str(product.get("title") or "Producto"),
-        "variant_label": str(variant.get("label") or ""),
-    }
+    # Camino B: producto+variante explícitos en el inbound
+    return _detect_explicit_product_in_inbound(content, catalog)
 
 
 def _save_product_snapshot(

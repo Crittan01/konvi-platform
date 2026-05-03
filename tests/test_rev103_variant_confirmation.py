@@ -167,3 +167,63 @@ def test_skip_empty_inputs():
     assert _detect_variant_confirmation("", [], _CATALOG) is None
     assert _detect_variant_confirmation("60g", [], _CATALOG) is None
     assert _detect_variant_confirmation("60g", [_outbound_with_variants("Coco")], []) is None
+
+
+# ── Camino B: producto+variante explícitos en un mensaje (rev. 103) ───────
+
+def test_explicit_product_variant_in_one_message():
+    """Cliente dice 'quiero un jabón de coco de 60g' sin que el bot
+    haya presentado variantes — debe matchear Coco 60g."""
+    history = [{"direction": "outbound", "content": "¡Hola! ¿En qué te puedo ayudar?"}]
+    out = _detect_variant_confirmation(
+        "Quiero un jabón de coco de 60g", history, _CATALOG,
+    )
+    assert out is not None
+    assert out["product_id"] == "prod-coco-001"
+    assert out["variation_id"] == "var-coco-60"
+    assert out["quantity"] == 1
+
+
+def test_explicit_with_quantity():
+    """'2 jabones de coco 100g' → qty=2, variation 100g."""
+    history = [{"direction": "outbound", "content": "Hola"}]
+    out = _detect_variant_confirmation("2 jabones de coco 100g", history, _CATALOG)
+    assert out is not None
+    assert out["variation_id"] == "var-coco-100"
+    assert out["quantity"] == 2
+
+
+def test_explicit_lavanda_specific_variant():
+    """Match correcto al producto cuando hay múltiples con variante igual.
+    'lavanda 150g' debe matchear Lavanda 150g, no Coco 150g."""
+    history = [{"direction": "outbound", "content": "Hola"}]
+    out = _detect_variant_confirmation("dame lavanda 150g", history, _CATALOG)
+    assert out is not None
+    assert out["product_id"] == "prod-lavanda-001"
+    assert out["variation_id"] == "var-lav-150"
+
+
+def test_explicit_no_match_when_only_generic_words():
+    """'quiero un jabón artesanal' (sin discriminativa) no matchea —
+    el catálogo tiene varios jabones artesanales, ambiguo."""
+    history = [{"direction": "outbound", "content": "Hola"}]
+    out = _detect_variant_confirmation("quiero un jabón artesanal", history, _CATALOG)
+    assert out is None
+
+
+def test_explicit_no_match_when_no_variant_specified():
+    """'jabón de coco' sin variante explícita → None (necesita 60g/100g/150g)."""
+    history = [{"direction": "outbound", "content": "Hola"}]
+    out = _detect_variant_confirmation("jabón de coco", history, _CATALOG)
+    assert out is None
+
+
+def test_path_a_priority_over_path_b():
+    """Si el bot presentó variantes Y el cliente dice algo que matchea
+    AMBOS caminos, debe preferir camino A (más específico al contexto)."""
+    history = [_outbound_with_variants("Jabón Artesanal de Coco")]
+    # El cliente dice "60g" — match A (variantes presentadas) gana
+    out = _detect_variant_confirmation("60g", history, _CATALOG)
+    assert out is not None
+    assert out["product_id"] == "prod-coco-001"
+    assert out["variation_id"] == "var-coco-60"
