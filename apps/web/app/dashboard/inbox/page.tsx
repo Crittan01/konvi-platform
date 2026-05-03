@@ -109,10 +109,16 @@ interface ActiveCart {
   id: string
   items: CartItem[]
   subtotal_cents: number
-  shipping_cents: number
+  shipping_cents: number              // effective: cart o último quote del history
   total_cents: number
   carrier_name: string
   requires_requote: boolean
+  // Rev. 103 — estado del shipping para que el operador vea siempre la línea
+  // Envío con contexto claro:
+  //   "active"  → cotización fresca + cart sin cambios
+  //   "stale"   → cotización existe pero cart cambió (bot re-cotizará)
+  //   "pending" → aún no se ha cotizado
+  shipping_status?: 'active' | 'stale' | 'pending'
 }
 
 // Rev. 103 — Reclamos abiertos espejo del system prompt.
@@ -1682,22 +1688,46 @@ export default function InboxPage() {
                       <span>Subtotal</span>
                       <span>{formatMoney((convContext.active_cart.subtotal_cents || 0) / 100)}</span>
                     </div>
-                    {convContext.active_cart.shipping_cents > 0 && (
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>
-                          Envío{convContext.active_cart.carrier_name && ` · ${convContext.active_cart.carrier_name}`}
-                        </span>
-                        <span>{formatMoney(convContext.active_cart.shipping_cents / 100)}</span>
-                      </div>
-                    )}
-                    {convContext.active_cart.requires_requote && (
-                      <p
-                        className="text-[10px] text-amber-700 italic"
-                        title="El carrito cambió después de la última cotización. El bot va a re-cotizar automáticamente la próxima vez que el cliente pregunte por envío."
-                      >
-                        ⚠ Cart cambió — envío necesita re-cotización
-                      </p>
-                    )}
+                    {/* Rev. 103 — Línea Envío SIEMPRE visible con estado.
+                        active=verde · stale=ámbar (recotizar) · pending=gris. */}
+                    {(() => {
+                      const status = convContext.active_cart.shipping_status || (
+                        convContext.active_cart.shipping_cents > 0
+                          ? (convContext.active_cart.requires_requote ? 'stale' : 'active')
+                          : 'pending'
+                      )
+                      const cents = convContext.active_cart.shipping_cents || 0
+                      const carrier = convContext.active_cart.carrier_name || ''
+                      const cls =
+                        status === 'stale'
+                          ? 'text-amber-700'
+                          : status === 'pending'
+                            ? 'text-muted-foreground italic'
+                            : 'text-muted-foreground'
+                      return (
+                        <div className={`flex justify-between text-xs ${cls}`}>
+                          <span className="flex items-center gap-1">
+                            Envío{carrier && ` · ${carrier}`}
+                            {status === 'stale' && (
+                              <span
+                                title="El carrito cambió post-cotización. El bot re-cotizará al confirmar."
+                                className="text-[9px] uppercase tracking-wider px-1 py-px rounded bg-amber-100 text-amber-800 border border-amber-200"
+                              >
+                                recotizar
+                              </span>
+                            )}
+                            {status === 'pending' && (
+                              <span className="text-[9px] uppercase tracking-wider px-1 py-px rounded bg-border/40 text-muted-foreground">
+                                pendiente
+                              </span>
+                            )}
+                          </span>
+                          <span>
+                            {cents > 0 ? formatMoney(cents / 100) : '—'}
+                          </span>
+                        </div>
+                      )
+                    })()}
                     {convContext.active_cart.total_cents > 0 && (
                       <div className="flex justify-between text-sm font-semibold pt-0.5">
                         <span>Total</span>

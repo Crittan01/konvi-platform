@@ -39,6 +39,13 @@ const URL_RE = /\b(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+)\b/g
 
 // Orden importa: monospace (triple y single) primero porque su contenido
 // es literal y NO debe parsearse para otros markers.
+//
+// Rev. 103 — colores adaptan al contexto del bubble:
+//   • `bg-foreground/10` y `text-current` → mono code legible en cualquier
+//     bubble (gris inbound + verde outbound).
+//   • `decoration-current` para URLs → preserva color del texto del bubble.
+//   • `border-current/30 + opacity-80` para blockquote → respeta tono
+//     del bubble pero diferenciado.
 const INLINE_RULES: InlineRule[] = [
   // 1. Monospace BLOQUE ```...``` (triple backtick)
   {
@@ -46,7 +53,7 @@ const INLINE_RULES: InlineRule[] = [
     render: (c, k) => (
       <code
         key={k}
-        className="px-1.5 py-0.5 rounded bg-border/40 text-[0.92em] font-mono"
+        className="px-1.5 py-0.5 rounded bg-foreground/10 text-[0.92em] font-mono"
       >
         {c}
       </code>
@@ -58,7 +65,7 @@ const INLINE_RULES: InlineRule[] = [
     render: (c, k) => (
       <code
         key={k}
-        className="px-1 py-0.5 rounded bg-border/30 text-[0.92em] font-mono"
+        className="px-1 py-0.5 rounded bg-foreground/10 text-[0.92em] font-mono"
       >
         {c}
       </code>
@@ -154,7 +161,10 @@ function autoLinkText(text: string, keyPrefix: string): React.ReactNode[] {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-primary underline decoration-primary/40 hover:decoration-primary break-all"
+        // Rev. 103 — text-current + decoration-current respeta el color
+        // del bubble (gris inbound, verde outbound). Antes con
+        // `text-primary` el link era invisible sobre bubble verde.
+        className="underline decoration-current/60 hover:decoration-current font-medium break-all"
       >
         {url}
       </a>,
@@ -201,7 +211,10 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
       blocks.push(
         <blockquote
           key={`bq.${blockKey++}`}
-          className="border-l-2 border-border pl-2 my-1 text-muted-foreground italic"
+          // Rev. 103 — border-current/40 hereda color del bubble + opacity-90
+          // mejor contraste que muted-foreground en bubble verde. pl-3 da
+          // separación clara borde-texto sin alejarse demasiado.
+          className="border-l-[3px] border-current/40 pl-3 my-1.5 italic opacity-90"
         >
           {quoteLines.map((ql, qi) => (
             <div key={`bq.${blockKey}.${qi}`}>
@@ -225,11 +238,14 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
       blocks.push(
         <ol
           key={`ol.${blockKey++}`}
-          className="list-decimal pl-5 my-1 space-y-0.5"
+          // Rev. 103 — pl-7 da espacio para que el número quepa cómodamente
+          // (antes pl-5 cortaba). marker:opacity-80 atenúa los números para
+          // que no compitan visualmente con el texto.
+          className="list-decimal pl-7 my-1.5 space-y-0.5 marker:opacity-80"
           start={startNum}
         >
           {items.map((it, ii) => (
-            <li key={`ol.${blockKey}.${ii}`}>
+            <li key={`ol.${blockKey}.${ii}`} className="pl-1">
               {parseInlineRecursive(it.text, INLINE_RULES, `ol.${blockKey}.${ii}`)}
             </li>
           ))}
@@ -249,10 +265,12 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
       blocks.push(
         <ul
           key={`ul.${blockKey++}`}
-          className="list-disc pl-5 my-1 space-y-0.5"
+          // Rev. 103 — pl-6 da espacio cómodo para la viñeta separada del
+          // borde del bubble. marker:opacity-80 baja intensidad de los dots.
+          className="list-disc pl-6 my-1.5 space-y-0.5 marker:opacity-80"
         >
           {items.map((it, ii) => (
-            <li key={`ul.${blockKey}.${ii}`}>
+            <li key={`ul.${blockKey}.${ii}`} className="pl-1">
               {parseInlineRecursive(it, INLINE_RULES, `ul.${blockKey}.${ii}`)}
             </li>
           ))}
