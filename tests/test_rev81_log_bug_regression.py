@@ -166,20 +166,27 @@ class LogBugRegressionTests(unittest.TestCase):
 
 
 class CartRequoteFlowTests(unittest.TestCase):
-    """Si cliente cambia carrito post-cotización, requires_requote=true
-    debe bloquear el resumen estancado."""
+    """Rev. 103 — cart-as-SoT: requires_requote ya no bloquea el resumen
+    de items. Solo señala que el shipping_cents está stale — el caller
+    extrae el shipping actual del history. Items siguen siendo verdad."""
 
-    def test_summary_blocked_when_requires_requote(self):
+    def test_summary_with_requires_requote_uses_history_shipping(self):
         cart = dict(CART_BUG_LOG)
         cart["requires_requote"] = True
+        history = [
+            {"direction": "outbound",
+             "content": "* *Económica*: Coordinadora | $11.000 | entrega ..."},
+        ]
         out = _build_order_summary_text(
             contact_record=CONTACT_CRISTIAN,
             verified_ctx=None,
             cart_from_db=cart,
+            history=history,
         )
-        # Cart marcado para re-cotizar → función NO genera resumen
-        # (cae a fallback que sin catalog/history también es None).
-        self.assertIsNone(out)
+        # Items del cart se preservan + shipping se extrae del history.
+        self.assertIsNotNone(out)
+        self.assertIn("Jabón Artesanal de Coco", out)
+        self.assertIn("Jabón Artesanal de Lavanda", out)
 
 
 class VerifiedCtxIntegrityTests(unittest.TestCase):

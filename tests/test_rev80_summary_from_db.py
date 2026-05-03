@@ -16,17 +16,25 @@ class VerifiedCtxFromCartTests(unittest.TestCase):
         self.assertIsNone(_verified_ctx_from_cart({}))
         self.assertIsNone(_verified_ctx_from_cart({"items": []}))
 
-    def test_cart_requires_requote_returns_none(self):
+    def test_cart_requires_requote_keeps_items_zeros_shipping(self):
+        """Rev. 103 — cart-as-SoT: requires_requote NO invalida ITEMS,
+        solo señala que shipping_cents está stale. Items siguen siendo
+        verdad. Shipping queda en 0 (caller lo extrae de history)."""
         cart = {
             "items": [{"variation_id": "v", "product_id": "p", "quantity": 1,
                        "unit_price_cents": 1800000,
                        "variation": {}, "product": {"title": "X"}}],
             "subtotal_cents": 1800000,
-            "shipping_cents": 0,
+            "shipping_cents": 7310,  # stale value (será ignorado)
             "total_cents": 1800000,
             "requires_requote": True,
         }
-        self.assertIsNone(_verified_ctx_from_cart(cart))
+        ctx = _verified_ctx_from_cart(cart)
+        self.assertIsNotNone(ctx)
+        self.assertEqual(len(ctx["items"]), 1)
+        self.assertEqual(ctx["items"][0]["title"], "X")
+        # Shipping stale ignorado al estar requires_requote=True
+        self.assertEqual(ctx["shipping_cost_cents"], 0)
 
     def test_cart_with_2_items_returns_full_ctx(self):
         """Bug del log: carrito con 2 items debe producir verified_ctx con
@@ -122,7 +130,10 @@ class BuildOrderSummaryFromDbTests(unittest.TestCase):
         self.assertIn("$93.000 COP", out)   # total
         self.assertNotIn("$26.000", out)    # bug del log NO debe aparecer
 
-    def test_summary_returns_none_if_cart_requires_requote(self):
+    def test_summary_with_requires_requote_extracts_shipping_from_history(self):
+        """Rev. 103 — cart-as-SoT: requires_requote ya no invalida el
+        resumen. Items siguen verdad; shipping se extrae del history
+        (donde la cotización vive como outbound del bot)."""
         cart = {
             "items": [{"variation_id": "v", "product_id": "p", "quantity": 1,
                        "unit_price_cents": 1800000,
@@ -130,14 +141,19 @@ class BuildOrderSummaryFromDbTests(unittest.TestCase):
             "subtotal_cents": 1800000, "shipping_cents": 0, "total_cents": 1800000,
             "requires_requote": True,
         }
+        history = [
+            {"direction": "outbound",
+             "content": "* *Económica*: Coordinadora | $7.310 | entrega ..."},
+        ]
         out = _build_order_summary_text(
             contact_record=self._contact(),
             verified_ctx=None,
             cart_from_db=cart,
+            history=history,
         )
-        # Cart requiere recotización → función no genera resumen.
-        # Cae en fallback que también devuelve None (sin catalog/history).
-        self.assertIsNone(out)
+        self.assertIsNotNone(out)
+        self.assertIn("X", out)            # item del cart
+        self.assertIn("$7.310", out)       # shipping extraído del history
 
 
 if __name__ == "__main__":

@@ -2162,6 +2162,195 @@ _CORRECTION_PROMPT: dict[str, str] = {
 }
 
 
+# ── Cart-as-SoT — variant confirmation detector (rev. 103) ────────────────
+# Razón arquitectónica: el carrito (`conversation_cart_items`) DEBE ser la
+# fuente de verdad del pedido. Antes de rev. 103, el cart se inferia tarde
+# (en READY_FOR_SUMMARY, vía `populate-on-demand`) leyendo del history. En
+# conversaciones largas el history truncado a 25 mensajes perdía la mención
+# del producto/variante elegido → el LLM componía resumen con producto
+# alucinado del catálogo (caso real conv 32e0397e: cliente pidió Coco 60g,
+# orden quedó con "Aceite Esencial de Árbol de Té $32.000").
+#
+# Solución: detector pre-LLM determinístico que persiste al cart EN EL
+# MOMENTO en que el cliente confirma la variante, no al final del flujo.
+# Después, todo el resto del sistema (cotización, resumen, payment_link,
+# Inbox del Tenant Console) lee del cart real — alucinación imposible.
+
+_PRESENTATION_MARKERS = (
+    "lo tenemos en", "tenemos las siguientes", "presentaciones",
+    "presentacion", "tamanos disponibles", "tamaños disponibles",
+    "estos tamanos", "estos tamaños", "viene en", "disponible en",
+    "estas presentaciones", "te puedo ofrecer",
+)
+
+_VARIANT_QTY_RE = re.compile(
+    r"^\s*(?:quiero\s+|dame\s+|el\s+|la\s+|los\s+|las\s+|me\s+das\s+|"
+    r"agreg(?:a|ame)\s+|añad(?:e|eme)\s+|sumame\s+|llevo\s+)?"
+    r"(\d{1,3})\s*(?:unidades?|uds?\.?|cantidad)?",
+    re.IGNORECASE,
+)
+
+
+def _last_outbound_presented_variants(
+    catalog: list, history: list[dict],
+) -> Optional[dict]:
+    """Si el outbound más reciente del bot listó las variantes de un
+    producto del catálogo, retorna el producto. Else None.
+
+    Discrimina por:
+      • Mención del título del producto (con o sin formato bold).
+      • Marker de presentación de variantes ("lo tenemos en", etc.) Y/O
+        listado con bullet + atributo numérico (60g/100g/30ml/etc).
+    """
+    if not catalog or not history:
+        return None
+    # Mirar SOLO el último outbound — si no presentó variantes ahí, el
+    # contexto cambió y el inbound siguiente NO es confirmación.
+    for msg in reversed(history):
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content = str(msg.get("content") or "")
+        if not content:
+            return None
+        content_norm = _normalize_text(content)
+        # Heurística: el outbound debe mencionar el título Y un marker de
+        # presentación O contener al menos 2 bullets con atributos numéricos.
+        has_marker = any(m in content_norm for m in _PRESENTATION_MARKERS)
+        bullet_attrs = re.findall(
+            r"[\*•\-]\s*(\d+)\s*(?:g|gr|gramos|ml|cc|mililitros|kg|oz)\b",
+            content_norm,
+            re.IGNORECASE,
+        )
+        if not (has_marker or len(bullet_attrs) >= 2):
+            return None
+        # Buscar el producto del catálogo cuyo título completo aparezca
+        # en el outbound. Match estricto (norm título in norm content).
+        for prod in catalog:
+            title = str(prod.get("title") or "").strip()
+            if not title:
+                continue
+            norm_title = _normalize_text(title)
+            if norm_title and norm_title in content_norm:
+                return prod
+        return None
+    return None
+
+
+def _resolve_variant_from_inbound(
+    inbound_text: str, product: dict,
+) -> tuple[Optional[dict], int]:
+    """Match el inbound del cliente a una variante específica del producto.
+
+    Estrategia:
+      1. Match por value de attributes (ej. "60g" matches attribute valor "60g").
+      2. Match por sustring numérico + unidad (ej. "60 gramos" matches "60g").
+      3. Match por label completo de la variant.
+
+    Devuelve (variant_dict, quantity). Si no resuelve, (None, 1).
+    """
+    if not inbound_text or not product:
+        return None, 1
+    norm = _normalize_text(inbound_text)
+    variants = product.get("variants") or []
+    if not variants:
+        return None, 1
+
+    # Extraer cantidad explícita ("2", "quiero 3", "el de 60") — solo si
+    # el número aparece al inicio o como separador, no si es parte de
+    # un atributo (ej. "60g" donde 60 es atributo, no qty).
+    qty = 1
+    qty_match = re.match(r"^\s*(\d+)\s+(?!g|ml|cc|kg|oz|gr|mililitros|gramos)",
+                         norm, re.IGNORECASE)
+    if qty_match:
+        try:
+            v = int(qty_match.group(1))
+            if 1 <= v <= 99:
+                qty = v
+        except ValueError:
+            pass
+
+    # 1. Match por attribute value (más confiable).
+    for v in variants:
+        attrs = v.get("attributes") or {}
+        if not isinstance(attrs, dict):
+            continue
+        for av in attrs.values():
+            av_n = _normalize_text(str(av or "")).strip()
+            if av_n and av_n in norm and len(av_n) >= 2:
+                return v, qty
+
+    # 2. Match por número + unidad (ej. cliente dice "60 gramos" pero
+    #    attribute value es "60g").
+    num_unit = re.search(
+        r"(\d{1,4})\s*(g|gr|gramos|ml|mililitros|cc|kg|oz)\b",
+        norm, re.IGNORECASE,
+    )
+    if num_unit:
+        target_num = num_unit.group(1)
+        for v in variants:
+            attrs = v.get("attributes") or {}
+            if not isinstance(attrs, dict):
+                continue
+            for av in attrs.values():
+                av_n = _normalize_text(str(av or ""))
+                if target_num and target_num in av_n:
+                    return v, qty
+
+    # 3. Match por label de la variant.
+    for v in variants:
+        label_n = _normalize_text(str(v.get("label") or "")).strip()
+        if label_n and label_n in norm and len(label_n) >= 3:
+            return v, qty
+
+    return None, qty
+
+
+def _detect_variant_confirmation(
+    content: str, history: list[dict], catalog: list,
+) -> Optional[dict]:
+    """Rev. 103 — Detector pre-LLM determinístico para "client confirms
+    variant after bot presented variants". Establece el cart-as-SoT en el
+    momento exacto de la confirmación, no al final del flujo.
+
+    Disparo:
+      • Bot acaba de presentar variantes de un producto del catálogo.
+      • Cliente responde con un mensaje corto que matchea una variante
+        (por valor de attribute, por número+unidad, o por label).
+      • No es pregunta (no contiene '?').
+
+    Devuelve dict listo para `cart_tool.add_item` o None.
+    """
+    if not content or not catalog:
+        return None
+    if "?" in content:
+        return None
+    norm = _normalize_text(content)
+    tokens = norm.split()
+    if not tokens or len(tokens) > 10:
+        return None  # Mensajes largos no son selecciones de variante
+
+    product = _last_outbound_presented_variants(catalog, history)
+    if not product:
+        return None
+
+    variant, qty = _resolve_variant_from_inbound(content, product)
+    if not variant:
+        return None
+
+    unit_price = float(variant.get("price") or 0)
+    if unit_price <= 0:
+        return None
+
+    return {
+        "product_id": str(product.get("id") or ""),
+        "variation_id": str(variant.get("id") or ""),
+        "quantity": qty,
+        "unit_price_cents": int(round(unit_price * 100)),
+        "title": str(product.get("title") or "Producto"),
+        "variant_label": str(variant.get("label") or ""),
+    }
+
+
 def _save_product_snapshot(
     supabase: Client,
     *,
@@ -2511,6 +2700,92 @@ def _has_carrier_been_selected(history: list[dict]) -> bool:
     return False
 
 
+def _has_carrier_been_selected_in_conversation(
+    supabase: Client, conversation_id: str
+) -> bool:
+    """Rev. 103 — DB fallback para `_has_carrier_been_selected` (igual
+    patrón que `_has_shipping_been_quoted_in_conversation`).
+
+    Razón: el `history` en memoria está limitado a CONVERSATION_HISTORY_LIMIT=25.
+    En conversaciones largas (caso real conv 3448118a con 41 mensajes) el
+    inbound "Económica" + el outbound de cotización quedan FUERA del window
+    → `carrier_selected=False` → state degrada a AWAITING_CARRIER_SELECTION
+    → cadena de fallos: LLM compone resumen freestyle (con alucinaciones de
+    productos no pedidos) + payment_link_tool no dispara (guard de
+    display_state) → "Te genero el link" sin link real al cliente.
+
+    Estrategia: query directo a `messages` de TODA la conversación. Busca
+    el outbound de cotización con markers + cualquier inbound posterior con
+    token de carrier (economica/rapida/etc). Sin límite de history.
+    """
+    if not conversation_id:
+        return False
+    carrier_tokens = (
+        "economica", "rapida", "deprisa", "servientrega", "coordinadora",
+        "tcc", "dhl", "fedex", "interrapidisimo", "mensajeros", "urbanos",
+    )
+    try:
+        # 1. Encontrar el outbound de cotización más reciente (con marker
+        #    "continuamos" + signo de pregunta) — patrón shipping_quote_tool.
+        quote_res = (
+            supabase.table("messages")
+            .select("id, content, created_at")
+            .eq("conversation_id", conversation_id)
+            .eq("direction", "outbound")
+            .ilike("content", "%continuamos%")
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        quote_rows = quote_res.data or []
+        quote_at: Optional[str] = None
+        for row in quote_rows:
+            content_norm = _normalize_text(str(row.get("content") or ""))
+            if any(m in content_norm for m in (
+                "continuamos con", "cual continuamos", "continuamos?"
+            )):
+                quote_at = row.get("created_at")
+                break
+        if not quote_at:
+            return False
+
+        # 2. Buscar inbounds POSTERIORES al quote, escaneando por carrier
+        #    token. Limitamos a 30 mensajes posteriores (suficiente para
+        #    cualquier flujo de PII collection razonable).
+        in_res = (
+            supabase.table("messages")
+            .select("content")
+            .eq("conversation_id", conversation_id)
+            .eq("direction", "inbound")
+            .gt("created_at", quote_at)
+            .order("created_at", desc=False)
+            .limit(30)
+            .execute()
+        )
+        for row in (in_res.data or []):
+            raw = str(row.get("content") or "")
+            content_n = _normalize_text(raw)
+            tokens = content_n.split()
+            if "?" in raw:
+                continue  # pregunta NO es selección
+            if len(tokens) > 8:
+                continue  # mensaje largo NO es selección de carrier
+            if any(token in content_n for token in carrier_tokens):
+                return True
+            # Continue intent ("sigamos", "continuemos") como Económica default
+            if any(t in {
+                "sigamos", "continuemos", "continuar", "continua", "continúa",
+                "procedamos", "compra", "comprar", "avancemos", "sigue",
+            } for t in tokens):
+                return True
+    except Exception as exc:
+        logger.warning(
+            "[FSM] error verificando carrier_selected DB conv=%s: %s",
+            conversation_id, exc,
+        )
+    return False
+
+
 def _last_outbound_was_order_confirmation_question(history: list[dict]) -> bool:
     for msg in reversed(history or []):
         if str(msg.get("direction") or "").strip().lower() == "outbound":
@@ -2798,9 +3073,20 @@ def _resolve_display_state(
     history: Optional[list[dict]],
     buying_intent: bool,
     shipping_quoted: bool,
+    carrier_selected_db: Optional[bool] = None,
 ) -> str:
     transaction_state = _determine_transactional_state(contact_record)
-    carrier_selected = _has_carrier_been_selected(history or [])
+    # Rev. 103 — fallback DB para carrier_selected (igual patrón que
+    # shipping_quoted). El history-only se "olvida" del carrier elegido
+    # cuando la conversación supera CONVERSATION_HISTORY_LIMIT=25 mensajes.
+    # Caso real conv 3448118a (41 msgs): cliente eligió "Económica" en msg
+    # #9 → quedó fuera del window al llegar al resumen → state degradó a
+    # AWAITING_CARRIER_SELECTION → LLM compuso resumen freestyle con
+    # alucinación de productos + payment_link_tool no disparó.
+    carrier_selected = (
+        _has_carrier_been_selected(history or [])
+        or bool(carrier_selected_db)
+    )
     order_confirm_pending = _last_outbound_was_order_confirmation_question(history or [])
 
     # Rev. 73 — ELIMINADO el shortcut "consent_given → carrier_selected=True".
@@ -2930,18 +3216,28 @@ def _verified_ctx_from_cart(cart: dict) -> Optional[dict]:
     """Rev. 80: convierte el cart en DB (output de cart_tool.get_cart_with_items)
     al schema de verified_ctx que espera _build_order_summary_text.
 
-    Devuelve None si el cart está vacío o requiere re-cotización.
+    Rev. 103 — `requires_requote=True` (set por add_item/remove_item) NO
+    invalida el cart como fuente de verdad de ITEMS. Solo significa que
+    `cart.shipping_cents` está stale — el caller debe extraer el shipping
+    actual desde history. Antes (rev. 80) retornaba None y el caller
+    caía a inferencia desde history truncado → alucinación de productos.
+    Razón: cart-as-SoT debe mantenerse independiente del estado
+    shipping; los items son verdad incluso si el envío necesita re-quote.
+
+    Devuelve None solo si cart vacío.
     """
     if not cart:
         return None
     items = cart.get("items") or []
     if not items:
         return None
-    if cart.get("requires_requote"):
-        # Cart cambió post-cotización, NO debemos generar resumen estancado.
-        return None
     subtotal = int(cart.get("subtotal_cents") or 0)
-    shipping = int(cart.get("shipping_cents") or 0)
+    # Rev. 103 — si requires_requote, ignorar shipping del cart (se
+    # extrae de history en caller). Items y subtotal SIEMPRE válidos.
+    if cart.get("requires_requote"):
+        shipping = 0
+    else:
+        shipping = int(cart.get("shipping_cents") or 0)
     total = int(cart.get("total_cents") or (subtotal + shipping))
     out_items = []
     for it in items:
@@ -2987,12 +3283,23 @@ def _build_order_summary_text(
     """
     if not verified_ctx and cart_from_db:
         verified_ctx = _verified_ctx_from_cart(cart_from_db)
+        # Rev. 103 — si cart tiene items pero shipping=0 (requires_requote),
+        # extraer shipping del history para no mostrar "Envío: $0".
+        if verified_ctx and not verified_ctx.get("shipping_cost_cents"):
+            _ship_hist = _extract_shipping_cost_from_history(history or []) or 0
+            if _ship_hist > 0:
+                verified_ctx["shipping_cost_cents"] = _ship_hist
+                verified_ctx["total_cents"] = (
+                    int(verified_ctx.get("subtotal_cents") or 0) + _ship_hist
+                )
     if not verified_ctx:
-        verified_ctx = (
-            _build_verified_multi_product_context(catalog or [], history or [])
-            or _build_verified_order_context(catalog or [], history or [])
-        )
-    if not verified_ctx or not verified_ctx.get("total_cents"):
+        # Rev. 103 — fallback eliminado. Si no hay cart real, retornar None
+        # para que el LLM componga (con LIE_PHRASES guard) en vez de
+        # inventar productos del catálogo. El populate-on-demand fue
+        # source of hallucinations (caso real conv 32e0397e: cliente pidió
+        # Coco 60g → orden con "Aceite Esencial de Árbol de Té").
+        return None
+    if not verified_ctx.get("total_cents"):
         return None
 
     items = verified_ctx.get("items")
@@ -6287,6 +6594,46 @@ async def build_and_run_orchestration(
                     items=_recovered_items,
                 )
 
+        # Rev. 103 — Cart-as-SoT: detectar confirmación de variante
+        # determinísticamente y persistir AL CART en el momento exacto en
+        # que el cliente eligió. Antes el cart se inferia tarde (en
+        # READY_FOR_SUMMARY) leyendo del history truncado → producto
+        # alucinado. Ahora el cart es la fuente de verdad turn-by-turn.
+        # El Inbox del Tenant Console (F-Inbox-1) leerá del cart real.
+        try:
+            _variant_confirmed = _detect_variant_confirmation(
+                content, history_for_prompt, catalog or [],
+            )
+            if _variant_confirmed:
+                from tools.cart_tool import ensure_cart, add_item
+                _cart = ensure_cart(
+                    supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    contact_id=contact_id,
+                )
+                add_item(
+                    supabase,
+                    cart_id=_cart["id"],
+                    tenant_id=tenant_id,
+                    product_id=_variant_confirmed["product_id"],
+                    variation_id=_variant_confirmed["variation_id"],
+                    quantity=_variant_confirmed["quantity"],
+                    unit_price_cents=_variant_confirmed["unit_price_cents"],
+                )
+                logger.info(
+                    "[CART][VARIANT_CONFIRMED] %dx %s (%s) → cart=%s conv=%s",
+                    _variant_confirmed["quantity"],
+                    _variant_confirmed["title"],
+                    _variant_confirmed.get("variant_label") or "default",
+                    _cart["id"][:8], conversation_id[:8],
+                )
+        except Exception as _vc_exc:
+            logger.warning(
+                "[CART] Variant confirmation persistence falló conv=%s: %s",
+                conversation_id, _vc_exc,
+            )
+
         # F3A: si la ventana de 24h expiró, buying_intent del historial no aplica
         buying_intent = False if _window_expired else _has_buying_intent(content, history_for_prompt)
         shipping_quoted = _has_shipping_been_quoted(history_for_prompt)
@@ -6316,18 +6663,27 @@ async def build_and_run_orchestration(
         history_for_fsm = list(history_for_prompt) + [
             {"direction": "inbound", "content": content}
         ]
+        # Rev. 103 — DB fallback para carrier_selected (cubre casos donde
+        # el history truncado a 25 mensajes pierde la señal del inbound de
+        # selección, que en convs largas queda fuera del window).
+        _carrier_selected_db = _has_carrier_been_selected_in_conversation(
+            supabase, conversation_id,
+        )
         display_state = _resolve_display_state(
             contact_record=contact_record,
             history=history_for_fsm,
             buying_intent=buying_intent,
             shipping_quoted=shipping_quoted,
+            carrier_selected_db=_carrier_selected_db,
         )
 
         # R-13: Snapshot de producto al confirmar carrier
         # Se actualiza si ya existe uno (cliente puede cambiar de producto antes de confirmar).
+        # Rev. 103 — usa también el DB fallback de carrier_selected para
+        # que el snapshot dispare en convs largas con history truncado.
         if (
             buying_intent
-            and _has_carrier_been_selected(history_for_prompt)
+            and (_has_carrier_been_selected(history_for_prompt) or _carrier_selected_db)
         ):
             _save_product_snapshot(
                 supabase,
@@ -6750,8 +7106,42 @@ async def build_and_run_orchestration(
                 parsed.should_respond = True
                 parsed.response_text = ORDER_CREATION_CONFIRMATION_TEMPLATE
             else:
-                # Validación de bounds: el total debe estar alineado con el contexto verificado
-                verified_ctx = _build_verified_order_context(catalog, history_for_prompt)
+                # Rev. 103 — Cart-as-SoT: leer del cart real primero. El cart
+                # ya fue poblado turn-by-turn por `_detect_variant_confirmation`.
+                # Solo fallback a inferencia desde history si cart genuinamente
+                # vacío (caso edge — debería ser raro post-rev. 103).
+                verified_ctx = None
+                try:
+                    from tools.cart_tool import get_cart_with_items as _get_cart_pl
+                    _cart_for_payment = _get_cart_pl(
+                        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                    )
+                    if _cart_for_payment and (_cart_for_payment.get("items") or []):
+                        verified_ctx = _verified_ctx_from_cart(_cart_for_payment)
+                        # Cart no almacena shipping_cost autoritariamente —
+                        # leer del último outbound de cotización.
+                        if verified_ctx:
+                            _ship_from_hist = _extract_shipping_cost_from_history(
+                                history_for_prompt
+                            ) or 0
+                            if _ship_from_hist > 0 and not verified_ctx.get("shipping_cost_cents"):
+                                verified_ctx["shipping_cost_cents"] = _ship_from_hist
+                                verified_ctx["total_cents"] = (
+                                    int(verified_ctx.get("subtotal_cents") or 0)
+                                    + _ship_from_hist
+                                )
+                except Exception as _pl_cart_exc:
+                    logger.warning(
+                        "[PAYMENT_LINK] cart-as-SoT falló: %s", _pl_cart_exc,
+                    )
+                # Fallback defensivo (raro post-rev. 103 con variant detector activo)
+                if not verified_ctx:
+                    logger.warning(
+                        "[PAYMENT_LINK] cart vacío al confirmar — fallback "
+                        "a _build_verified_order_context (puede alucinar) conv=%s",
+                        conversation_id,
+                    )
+                    verified_ctx = _build_verified_order_context(catalog, history_for_prompt)
                 if verified_ctx and verified_ctx["total_cents"] > 0:
                     expected = verified_ctx["total_cents"]
                     tolerance = max(50000, int(expected * 0.05))  # 5% o $500 COP
@@ -6945,87 +7335,48 @@ async def build_and_run_orchestration(
                     and display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
                                           "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}
                 ):
+                    # Rev. 103 — Cart-as-SoT: el cart se persiste turn-by-turn
+                    # vía `_detect_variant_confirmation` cuando el cliente
+                    # elige variante. Aquí solo LEEMOS, no inferimos. El
+                    # populate-on-demand previo (rev. 80) se eliminó porque
+                    # llamaba a `_build_verified_*` con history truncado y
+                    # producía alucinaciones (caso real conv 32e0397e:
+                    # cliente pidió Coco 60g → orden con "Aceite Esencial
+                    # de Árbol de Té"). Si por excepción el cart queda
+                    # vacío al llegar aquí, mejor degradar a CTA explícito
+                    # que inventar.
                     _cart_for_summary = None
                     try:
-                        from tools.cart_tool import (
-                            get_cart_with_items, ensure_cart, add_item,
-                        )
+                        from tools.cart_tool import get_cart_with_items
                         _cart_for_summary = get_cart_with_items(
                             supabase,
                             conversation_id=conversation_id,
                             tenant_id=tenant_id,
                         )
-                        # Rev. 80 — Populate-on-demand: si el cart en DB
-                        # está vacío, intentar extraer items del history
-                        # resolver y persistirlos. Esto permite que turnos
-                        # subsiguientes (ej. cliente dice "Bogotá" tras
-                        # haber dado "1 Coco + 2 Lavanda" antes) tengan el
-                        # cart completo aunque el último mensaje no
-                        # mencione productos.
-                        if (not _cart_for_summary
-                                or not (_cart_for_summary.get("items") or [])):
-                            _ctx_from_history = (
-                                _build_verified_multi_product_context(
-                                    catalog or [], history_for_prompt or []
-                                )
-                                or _build_verified_order_context(
-                                    catalog or [], history_for_prompt or []
-                                )
-                            )
-                            _ctx_items = (_ctx_from_history or {}).get("items") or []
-                            if not _ctx_items and _ctx_from_history:
-                                # Single-product: convertirlo en lista de un item.
-                                _single = _ctx_from_history
-                                if _single.get("variation_id"):
-                                    _ctx_items = [{
-                                        "product_id": _single.get("product_id"),
-                                        "variation_id": _single.get("variation_id"),
-                                        "quantity": int(_single.get("quantity") or 1),
-                                        "unit_price_cents": int(_single.get("unit_price_cents") or 0),
-                                    }]
-                            if _ctx_items:
-                                _cart_obj = ensure_cart(
-                                    supabase,
-                                    conversation_id=conversation_id,
-                                    tenant_id=tenant_id,
-                                    contact_id=contact_id,
-                                )
-                                _cart_id_str = _cart_obj.get("id") if _cart_obj else None
-                                for _it in _ctx_items:
-                                    if (not _cart_id_str
-                                            or not _it.get("product_id")
-                                            or not _it.get("variation_id")):
-                                        continue
-                                    try:
-                                        add_item(
-                                            supabase,
-                                            cart_id=_cart_id_str,
-                                            tenant_id=tenant_id,
-                                            product_id=_it["product_id"],
-                                            variation_id=_it["variation_id"],
-                                            quantity=int(_it.get("quantity") or 1),
-                                            unit_price_cents=int(_it.get("unit_price_cents") or 0),
-                                        )
-                                    except Exception as _add_err:
-                                        logger.warning(
-                                            "[CART] add_item falló durante populate: %s",
-                                            _add_err,
-                                        )
-                                _cart_for_summary = get_cart_with_items(
-                                    supabase,
-                                    conversation_id=conversation_id,
-                                    tenant_id=tenant_id,
-                                )
-                                logger.info(
-                                    "[CART] populate-on-demand: cart=%s items=%s",
-                                    (_cart_for_summary or {}).get("id", "?")[:8] if _cart_for_summary else "none",
-                                    len((_cart_for_summary or {}).get("items") or []),
-                                )
                     except Exception as _cart_err:
                         logger.warning(
-                            "[CART] populate/get falló (rev. 80, fallback): %s",
-                            _cart_err,
+                            "[CART] get_cart_with_items falló: %s", _cart_err,
                         )
+                    if not _cart_for_summary or not (_cart_for_summary.get("items") or []):
+                        # Cart vacío en READY_FOR_SUMMARY → algo se perdió
+                        # (probablemente el cliente saltó el paso de variantes
+                        # o el detector no captó). Pedir confirmación explícita
+                        # en vez de inventar producto.
+                        logger.warning(
+                            "[CART] READY_FOR_SUMMARY con cart vacío conv=%s — "
+                            "pidiendo confirmación de producto",
+                            conversation_id,
+                        )
+                        parsed.response_text = (
+                            "Antes de generar el resumen, ayúdame a confirmar el "
+                            "producto que quieres llevar.\n\n¿Cuál te interesa?"
+                        )
+                        parsed.requires_human = False
+                        parsed.should_respond = True
+                        parsed.intent_detected = "product_inquiry"
+                        # Skip el bloque de _build_order_summary_text — no
+                        # tenemos cart real.
+                        _cart_for_summary = None
                     # Rev. 103 — fallback de phone: si _sim_contact no
                     # tiene phone válido (None/"null"/vacío), usar el
                     # customer_phone_raw del WhatsApp para que el resumen
@@ -7036,21 +7387,29 @@ async def build_and_run_orchestration(
                         if _sim_phone_str in ("", "null", "none", "undefined"):
                             if customer_phone_raw:
                                 _sim_contact["phone"] = customer_phone_raw
-                    _summary = _build_order_summary_text(
-                        contact_record=_sim_contact,
-                        verified_ctx=None,
-                        catalog=catalog,
-                        history=history_for_prompt,
-                        cart_from_db=_cart_for_summary,
-                    )
-                    if _summary:
-                        parsed.response_text = _summary
-                        parsed.requires_human = False
-                        parsed.should_respond = True
-                        parsed.intent_detected = "product_inquiry"
-                        logger.info(
-                            "[FSM][POST] override READY_FOR_SUMMARY con resumen determinístico"
+                    # Rev. 103 — Solo construir resumen determinístico si
+                    # tenemos cart real con items. Si cart vacío, ya
+                    # seteamos el response_text de "confirma producto" arriba
+                    # — NO llamar a `_build_order_summary_text` que caería
+                    # al fallback de inferencia desde history (alucinación).
+                    if _cart_for_summary and (_cart_for_summary.get("items") or []):
+                        _summary = _build_order_summary_text(
+                            contact_record=_sim_contact,
+                            verified_ctx=None,
+                            catalog=catalog,
+                            history=history_for_prompt,
+                            cart_from_db=_cart_for_summary,
                         )
+                        if _summary:
+                            parsed.response_text = _summary
+                            parsed.requires_human = False
+                            parsed.should_respond = True
+                            parsed.intent_detected = "product_inquiry"
+                            logger.info(
+                                "[FSM][POST] override READY_FOR_SUMMARY con resumen determinístico (cart=%s items=%d)",
+                                _cart_for_summary.get("id", "?")[:8],
+                                len(_cart_for_summary.get("items") or []),
+                            )
                 # Avance intermedio NEEDS_X → NEEDS_Y: solicitar el siguiente dato.
                 elif (
                     _new_state in _state_order
@@ -7086,6 +7445,18 @@ async def build_and_run_orchestration(
                 "tu pedido va en camino",
                 "tu pedido esta confirmado",
                 "ya procese tu pedido",
+                # Rev. 103 — promesas de link de pago sin que el tool haya
+                # corrido. Caso real conv 3448118a: bot dijo "Te genero el
+                # link de pago" pero `payment_link_tool` no disparó (state
+                # estaba degradado a AWAITING_CARRIER_SELECTION). Cliente
+                # quedó sin link prometido. Estas frases ahora se reemplazan
+                # por CTA si no hay payment_link_result.
+                "te genero el link de pago",
+                "te genero el link",
+                "voy a generarte el link",
+                "te envio el link de pago",
+                "tu pedido esta listo",
+                "pedido esta listo",
             )
             _resp_norm = _normalize_text(parsed.response_text or "")
             if not payment_link_result and any(p in _resp_norm for p in _LIE_PHRASES):
