@@ -92,22 +92,50 @@ def verify_event_signature(payload: dict, events_key: str) -> bool:
         logger.warning("[WOMPI] Payload sin signature.properties o checksum")
         return False
 
-    parts = []
+    # Wompi (CO docs sept-2024+) envía properties relativas a `data` —
+    # ej. "transaction.id" se extrae de payload["data"]["transaction"]["id"],
+    # NO de payload["transaction"]["id"]. Pero docs antiguos podían usar
+    # paths absolutos. Intentamos ambos: primero data-relative, después
+    # root. El que produzca valores no-vacíos es el correcto.
+    def _traverse(root: object, dotted_path: str) -> str:
+        cur: object = root
+        for key in dotted_path.split("."):
+            if isinstance(cur, dict):
+                cur = cur.get(key, "")
+            else:
+                return ""
+        if cur is None:
+            return ""
+        return str(cur)
+
+    data_root = payload.get("data") if isinstance(payload, dict) else None
+
+    parts: list[str] = []
     for prop in properties:
-        val: object = payload  # traversal desde ROOT — "data.transaction.id" → payload["data"]["transaction"]["id"]
-        for key in prop.split("."):
-            val = val.get(key, "") if isinstance(val, dict) else ""
-        parts.append(str(val))
+        v_data = _traverse(data_root, prop) if isinstance(data_root, dict) else ""
+        v_root = _traverse(payload, prop)
+        # Preferir el path data-relative si aporta valor; root como fallback
+        # (compat con eventos legacy o non-data-wrapped en pruebas).
+        chosen = v_data if v_data else v_root
+        parts.append(chosen)
 
     concat = "".join(parts) + str(timestamp) + events_key
     computed = hashlib.sha256(concat.encode()).hexdigest().upper()
     valid = computed == expected_checksum.upper()
 
     if not valid:
+        # Diagnóstico: log de las properties usadas (sin secrets) para
+        # facilitar debugging si falla en producción.
+        _props_preview = ", ".join(
+            f"{p}={v[:24]}…" if len(v) > 24 else f"{p}={v}"
+            for p, v in zip(properties, parts)
+        )
         logger.warning(
-            "[WOMPI] Firma inválida. computed=%s received=%s",
+            "[WOMPI] Firma inválida. computed=%s received=%s ts=%s props=[%s]",
             computed[:12] + "...",
             expected_checksum[:12] + "...",
+            timestamp,
+            _props_preview,
         )
     return valid
 
