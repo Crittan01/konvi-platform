@@ -38,6 +38,23 @@ PENDING_PAYMENT_RELEASE_ENABLED = os.getenv("PENDING_PAYMENT_RELEASE_ENABLED", "
 }
 PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS = int(os.getenv("PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS", "600"))
 PENDING_PAYMENT_TTL_MINUTES = int(os.getenv("PENDING_PAYMENT_TTL_MINUTES", "35"))
+# Rev. 103 F1 — Recordatorio de pago dentro de la CSW (24h Meta).
+# Solo dispara free-form si la ventana sigue abierta. Sin template messages,
+# fuera de CSW Meta rechaza el envío con #131047 — F2 (templates HSM)
+# resolverá ese caso. F1 cubre 80% de pedidos: el cliente acaba de pedir el
+# link, su último inbound es de hace minutos, CSW abierta.
+PAYMENT_REMINDER_ENABLED = os.getenv("PAYMENT_REMINDER_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+PAYMENT_REMINDER_INTERVAL_SECONDS = int(os.getenv("PAYMENT_REMINDER_INTERVAL_SECONDS", "60"))
+# Cuándo recordar (default 25 min después de generar el link, dejando 5 min
+# antes del expiry de 30 min de Wompi y antes de que el TTL interno cancele
+# la orden a los 35 min).
+PAYMENT_REMINDER_DELAY_MINUTES = int(os.getenv("PAYMENT_REMINDER_DELAY_MINUTES", "25"))
+PAYMENT_REMINDER_WINDOW_MINUTES = int(os.getenv("PAYMENT_REMINDER_WINDOW_MINUTES", "5"))
+# Ventana CSW de Meta — fuente: developers.facebook.com (24h tras último
+# mensaje del cliente). Si cambia el SLA de Meta, ajustar aquí.
+META_CSW_HOURS = int(os.getenv("META_CSW_HOURS", "24"))
 # Anti-hibernación Render Free: ping al propio endpoint /health para prevenir que
 # el servicio web se hiberne. Solo necesario en plan Free (sin keep-alive nativo).
 ANTI_HIBERNATION_ENABLED = os.getenv("ANTI_HIBERNATION_ENABLED", "false").lower() in {
@@ -69,6 +86,8 @@ class OrchestratorWorker:
         self._last_cleanup_at = 0.0
         self._release_enabled = PENDING_PAYMENT_RELEASE_ENABLED
         self._last_release_at = 0.0
+        self._reminder_enabled = PAYMENT_REMINDER_ENABLED
+        self._last_reminder_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
         self._metrics = {
@@ -82,6 +101,8 @@ class OrchestratorWorker:
             "idempotency_cleanup_deleted": 0,
             "last_cleanup_deleted": 0,
             "expired_orders_cancelled": 0,
+            "payment_reminders_sent": 0,
+            "payment_reminders_skipped_csw_closed": 0,
         }
 
     def stop(self):
@@ -106,6 +127,7 @@ class OrchestratorWorker:
         await self._poll_human_takeover_notifications()
         await self._poll_whatsapp_outbound_messages()
         await self._run_idempotency_cleanup_if_due()
+        await self._send_payment_reminders_if_due()
         await self._release_expired_pending_payment_orders()
         await self._anti_hibernation_ping_if_due()
 
@@ -594,6 +616,163 @@ class OrchestratorWorker:
             )
         except Exception as exc:
             logger.error("[STARTUP] Error en sweep de startup: %s", exc)
+
+    async def _send_payment_reminders_if_due(self) -> None:
+        """Rev. 103 F1 — Recordatorio de pago dentro de la CSW (Meta 24h).
+
+        Para cada orden en `pending_payment` con created_at en el rango
+        [delay, delay+window) y sin recordatorio previo, verifica que la
+        ventana de servicio al cliente (CSW) de Meta siga abierta — i.e.
+        el último mensaje INBOUND del cliente fue hace menos de
+        META_CSW_HOURS. Si está abierta, envía free-form (gratis); si está
+        cerrada, marca el reminder como salteado y deja la orden seguir su
+        flujo normal de expiry. F2 (templates HSM) cubrirá el out-of-CSW.
+
+        Idempotente: usa orders.payment_reminder_sent_at como flag.
+        """
+        if not self._reminder_enabled:
+            return
+
+        now = time.time()
+        if now - self._last_reminder_at < max(30, PAYMENT_REMINDER_INTERVAL_SECONDS):
+            return
+        self._last_reminder_at = now
+
+        now_dt = datetime.now(timezone.utc)
+        # Rango: orders creadas entre (now - delay - window) y (now - delay).
+        # Ej. delay=25, window=5 → orders creadas hace 25-30 min.
+        upper_cutoff = (now_dt - timedelta(minutes=PAYMENT_REMINDER_DELAY_MINUTES)).isoformat()
+        lower_cutoff = (
+            now_dt - timedelta(minutes=PAYMENT_REMINDER_DELAY_MINUTES + PAYMENT_REMINDER_WINDOW_MINUTES)
+        ).isoformat()
+
+        try:
+            stale_res = (
+                self.supabase.table("orders")
+                .select("id, tenant_id, conversation_id, created_at, "
+                        "conversations(customer_phone)")
+                .eq("status", "pending_payment")
+                .is_("payment_reminder_sent_at", "null")
+                .lt("created_at", upper_cutoff)
+                .gte("created_at", lower_cutoff)
+                .limit(50)
+                .execute()
+            )
+            stale = stale_res.data or []
+        except Exception as exc:
+            logger.error("[REMINDER] Error consultando orders pendientes: %s", exc)
+            return
+        if not stale:
+            return
+
+        csw_cutoff = (now_dt - timedelta(hours=META_CSW_HOURS)).isoformat()
+
+        for order in stale:
+            order_id = order.get("id")
+            tenant_id = order.get("tenant_id")
+            conversation_id = order.get("conversation_id")
+            conv = order.get("conversations") or {}
+            customer_phone = conv.get("customer_phone") if isinstance(conv, dict) else None
+
+            if not (order_id and tenant_id and conversation_id and customer_phone):
+                logger.warning("[REMINDER] order=%s con datos incompletos — skip",
+                               (order_id or "?")[:8])
+                continue
+
+            try:
+                last_in_res = (
+                    self.supabase.table("messages")
+                    .select("created_at")
+                    .eq("conversation_id", conversation_id)
+                    .eq("direction", "inbound")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                last_inbound_rows = last_in_res.data or []
+            except Exception as exc:
+                logger.warning("[REMINDER] No pude verificar CSW conv=%s: %s",
+                               conversation_id[:8], exc)
+                continue
+
+            csw_open = bool(
+                last_inbound_rows
+                and (last_inbound_rows[0].get("created_at") or "") >= csw_cutoff
+            )
+            if not csw_open:
+                # Fuera de CSW: free-form bloqueado por Meta. Mark como
+                # salteado para no reintentar; F2 (templates) lo manejará.
+                self._metrics["payment_reminders_skipped_csw_closed"] += 1
+                try:
+                    self.supabase.table("orders").update({
+                        "payment_reminder_sent_at": now_dt.isoformat(),
+                    }).eq("id", order_id).is_("payment_reminder_sent_at", "null").execute()
+                except Exception:
+                    pass
+                logger.info(
+                    "[REMINDER] CSW cerrada — order=%s skip (F2 pendiente: HSM template)",
+                    order_id[:8],
+                )
+                continue
+
+            short_id = str(order_id)[:8].upper()
+            text = (
+                f"Te queda *5 min* para usar el link de pago de tu pedido "
+                f"*#{short_id}*.\n\n"
+                f"Si necesitas más tiempo o ayuda, escríbeme y lo resolvemos."
+            )
+            try:
+                meta_message_id = await send_whatsapp_message(
+                    tenant_id=tenant_id,
+                    supabase=self.supabase,
+                    to_phone=customer_phone,
+                    text=text,
+                )
+            except Exception as exc:
+                logger.error("[REMINDER] Error enviando WA order=%s: %s",
+                             order_id[:8], exc)
+                continue
+
+            if not meta_message_id:
+                logger.warning("[REMINDER] send_whatsapp_message no devolvió id — order=%s",
+                               order_id[:8])
+                continue
+
+            # Persistir outbound en messages para que aparezca en Inbox.
+            try:
+                self.supabase.table("messages").insert({
+                    "tenant_id": tenant_id,
+                    "conversation_id": conversation_id,
+                    "direction": "outbound",
+                    "content_type": "text",
+                    "content": text,
+                    "meta_message_id": meta_message_id,
+                    "processing_status": "processed",
+                    "processed": True,
+                    "processed_at": now_dt.isoformat(),
+                }).execute()
+            except Exception as exc:
+                logger.warning("[REMINDER] No pude persistir outbound order=%s: %s",
+                               order_id[:8], exc)
+
+            # Marcar idempotencia.
+            try:
+                upd = (
+                    self.supabase.table("orders")
+                    .update({"payment_reminder_sent_at": now_dt.isoformat()})
+                    .eq("id", order_id)
+                    .is_("payment_reminder_sent_at", "null")
+                    .execute()
+                )
+                if upd.data:
+                    self._metrics["payment_reminders_sent"] += 1
+                    logger.info(
+                        "[REMINDER] order=%s recordatorio enviado a %s (CSW abierta)",
+                        order_id[:8], customer_phone,
+                    )
+            except Exception as exc:
+                logger.warning("[REMINDER] No pude marcar idempotencia order=%s: %s",
+                               order_id[:8], exc)
 
     async def _release_expired_pending_payment_orders(self) -> None:
         """

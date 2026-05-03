@@ -105,7 +105,13 @@ def send_inbound(phone: str, tenant_id: str, text: str) -> bool:
 
 def wait_outbound(phone: str, tenant_id: str, *, since_ts: str,
                   timeout_s: int = 25, min_count: int = 1) -> list[dict]:
-    """Polling outbound desde `since_ts`."""
+    """Polling outbound desde `since_ts`.
+
+    Rev. 103 — filtra `content_type='context_snapshot'` (R-13 guarda
+    snapshots de producto con direction=outbound + content="" en messages
+    como artefacto interno). También ignora filas con content vacío, que
+    nunca son mensajes reales al cliente.
+    """
     sb = e2e_chat._supabase()
     deadline = time.time() + timeout_s
     outs: list[dict] = []
@@ -119,6 +125,8 @@ def wait_outbound(phone: str, tenant_id: str, *, since_ts: str,
             m for m in msgs
             if m.get("direction") == "outbound"
             and (m.get("created_at") or "") > since_ts
+            and m.get("content_type") != "context_snapshot"
+            and str(m.get("content") or "").strip()
         ]
         if len(outs) >= min_count:
             return outs
@@ -203,7 +211,28 @@ def seed_known_contact(
     res = sb.table("contacts").upsert(payload, on_conflict="tenant_id,phone").execute()
     if not res.data:
         return None
-    return res.data[0].get("id")
+    contact_id = res.data[0].get("id")
+
+    # Rev. 103 — un contact REAL conocido tiene una fila histórica en
+    # consent_audit_log de cuando dio consent originalmente. Sin esto, el
+    # test de happy path falla aunque el flow del bot sea correcto, porque
+    # no hay evento granted en el log para verificar Habeas Data.
+    if consent_given and contact_id:
+        try:
+            sb.table("consent_audit_log").insert({
+                "tenant_id": tenant_id,
+                "contact_id": contact_id,
+                "phone_hash": hash_phone(phone),
+                "event": "granted",
+                "source": "whatsapp",
+                "actor_email": "uat_seed@harness.local",
+                "evidence": {"seeded": True, "captured_at": now_iso()},
+            }).execute()
+        except Exception:
+            # consent_audit_log es append-only con triggers; si la fila
+            # exact ya existe (re-run del test), ignora silenciosamente.
+            pass
+    return contact_id
 
 
 def fetch_audit_events(
@@ -256,13 +285,19 @@ def extract_bot_question(bot_text: str) -> str:
 
 
 def extract_question_context(bot_text: str) -> str:
-    """Pregunta + 200 chars previos. Útil cuando la pregunta sola es ambigua."""
+    """Pregunta + 200 chars previos. Útil cuando la pregunta sola es ambigua.
+
+    Si no hay '?' en el texto (ej. el address prompt enumera obligatorios sin
+    cerrar pregunta), retorna el texto COMPLETO — los 200 chars finales
+    pueden cortar el verbo importante (caso real S9 turn 10 con
+    "Para completar la dirección..." en posición temprana del prompt).
+    """
     if not bot_text:
         return ""
     txt = bot_text.replace("\n", " ").strip()
     questions = re.findall(r"¿[^?]*\?|[^.!?]*\?", txt)
     if not questions:
-        return txt[-200:].strip()
+        return txt.strip()
     last_q = questions[-1].strip()
     idx = txt.rfind(last_q)
     if idx < 0:
@@ -344,8 +379,11 @@ def default_response_rules(profile: dict) -> list[Rule]:
     """
     product_query = profile.get('product_query', 'un jabón artesanal de coco')
     return [
-        # Saludo / preguntas abiertas iniciales.
-        (10, ("en qué te puedo ayudar", "como te puedo ayudar",
+        # Saludo / preguntas abiertas iniciales. Prio 17 para ganar contra
+        # rule-15 "cotizar el envío" cuando el bot saluda mencionando ambos
+        # ("para cotizar el envío y armar tu pedido, cuéntame qué productos"):
+        # naturalmente el cliente especifica producto antes de cotizar.
+        (17, ("en qué te puedo ayudar", "como te puedo ayudar",
               "qué te gustaría", "qué buscas",
               "qué productos", "qué producto",
               "cuéntame qué", "cuentame qué", "cuéntame que", "cuentame que",
@@ -386,6 +424,14 @@ def default_response_rules(profile: dict) -> list[Rule]:
               "cotizar el envío", "cotice el", "cotice tu",
               "valor exacto", "tarifa exacta", "te cotice el"),
             lambda _: "Sí, cotiza por favor"),
+
+        # Multi-opción carrier ("¿Con cuál continuamos? Económica o Rápida").
+        # Prio alta para que matchee ANTES que rule-15 que retorna "Sí, esa
+        # opción" (ambigua → bot pide clarificar → loop infinito en
+        # mode=known donde no hay NEEDS_CONSENT).
+        (20, ("con cuál continuamos", "cual continuamos",
+              "económica o rápida", "economica o rapida"),
+            lambda _: "Económica por favor"),
 
         # Bot ofrece avanzar genéricamente.
         (18, ("continuemos con tu pedido", "continuemos con la compra",

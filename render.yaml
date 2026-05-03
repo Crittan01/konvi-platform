@@ -242,6 +242,17 @@ services:
         value: "600"
       - key: PENDING_PAYMENT_TTL_MINUTES
         value: "35"
+      # ── Rev. 103 F1 — Recordatorio de pago dentro CSW (Meta 24h) ──────────
+      - key: PAYMENT_REMINDER_ENABLED
+        value: "true"
+      - key: PAYMENT_REMINDER_INTERVAL_SECONDS
+        value: "60"
+      - key: PAYMENT_REMINDER_DELAY_MINUTES
+        value: "25"
+      - key: PAYMENT_REMINDER_WINDOW_MINUTES
+        value: "5"
+      - key: META_CSW_HOURS
+        value: "24"
       # ── Anti-hibernación Render Free (R-10) ───────────────────────────────
       # ANTI_HIBERNATION_PING_URL: configurar en Render Dashboard (sync: false)
       # Formato: URLs separadas por coma, ej:

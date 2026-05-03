@@ -123,7 +123,7 @@ async def _cmd_resolver(conv_id: str) -> str:
 
         logger.info("[TG_WH] bot_active restaurado: conv=%s", conv_id)
         return (
-            f"✅ *Bot activado* en conversación `{conv_id[:8]}`.\n"
+            f"*Bot activado* en conversación `{conv_id[:8]}`.\n"
             f"El bot retomará la atención en el próximo mensaje del cliente."
         )
     except Exception as e:

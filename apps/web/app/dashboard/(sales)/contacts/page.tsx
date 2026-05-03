@@ -204,12 +204,13 @@ export default async function ContactsPage({
       )
     }
     const phoneE164 = `+${phoneCountry}${digits}`
-    // Rev. 103 — phone alternativo de envío (opcional). Solo persiste si
-    // tiene 10 dígitos válidos Colombia (no empieza por 0).
+    // Rev. 103 — phone alternativo de envío (opcional). Si el usuario lo
+    // deja vacío, defaulteamos al phone WhatsApp para que la transportadora
+    // siempre tenga un número de contacto.
     const shippingPhoneRaw = ((formData.get('shipping_phone') as string) || '').replace(/\D/g, '')
     const shippingPhoneE164 = (shippingPhoneRaw.length >= 10 && shippingPhoneRaw[shippingPhoneRaw.length - 10] !== '0')
       ? `+57${shippingPhoneRaw.slice(-10)}`
-      : null
+      : phoneE164
     const initialEvidence: Record<string, unknown> = {
       created_via: 'dashboard_contacts',
       note: consentEvidenceNote || null,
@@ -328,11 +329,12 @@ export default async function ContactsPage({
     const renewedConsentEvidence = ((formData.get('renewed_consent_evidence') as string) || '').trim()
 
     const { data: existing } = await sb.from('contacts')
-      .select('consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
+      .select('phone, consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
       .eq('id', formData.get('contact_id') as string)
       .eq('tenant_id', m.tenant_id)
       .single()
     const prev = (existing as {
+      phone?: string | null
       consent_given?: boolean
       consent_date?: string | null
       consent_source?: string | null
@@ -484,12 +486,13 @@ export default async function ContactsPage({
     const effectiveConsentDate = effectiveConsentGiven
       ? (wasAnonymized ? nowIso : (prev?.consent_date ?? nowIso))
       : (prev?.consent_date ?? null)
-    // Rev. 103 — shipping_phone (opcional). Si vacío, queda null (Envía
-    // hace fallback a contacts.phone). Si presente, normaliza a +E.164 CO.
+    // Rev. 103 — shipping_phone (opcional). Si el usuario lo deja vacío,
+    // defaulteamos al phone WhatsApp del contact (prev.phone) para que la
+    // transportadora siempre tenga un número de contacto.
     const editShippingRaw = ((formData.get('shipping_phone') as string) || '').replace(/\D/g, '')
     const editShippingE164 = (editShippingRaw.length >= 10 && editShippingRaw[editShippingRaw.length - 10] !== '0')
       ? `+57${editShippingRaw.slice(-10)}`
-      : null
+      : (prev?.phone ?? null)
     await sb.from('contacts').update({
       name:          (formData.get('name') as string) || null,
       email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,

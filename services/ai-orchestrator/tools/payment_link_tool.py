@@ -263,10 +263,10 @@ async def handle_payment_link_if_applicable(
     name_part = f" *{first_name}*" if first_name else ""
     short_id = order_id[:8].upper()
     response_text = (
-        f"✅ ¡Perfecto{name_part}! Tu pedido *#{short_id}* está listo.\n\n"
-        f"💳 *Paga aquí:*\n{checkout_url}\n\n"
-        f"⏰ El link es válido por 30 minutos. "
-        f"Una vez confirmado el pago recibirás la confirmación por este chat. 🎉"
+        f"¡Perfecto{name_part}! Tu pedido *#{short_id}* está listo.\n\n"
+        f"*Paga aquí:*\n{checkout_url}\n\n"
+        f"> El link es válido por 30 minutos. "
+        f"Una vez confirmado el pago recibirás la confirmación por este chat."
     )
 
     return PaymentLinkResult(

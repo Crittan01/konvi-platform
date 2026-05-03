@@ -423,6 +423,61 @@ def _detect_revocation_intent(text: str) -> bool:
     return any(token in normalized for token in _REVOCATION_TOKENS)
 
 
+# Rev. 103 — Detector pre-LLM determinístico de petición explícita de
+# atención humana. Razón: la salvaguarda anti-escalación-espuria
+# (orchestrator.py guard en CATALOG_MODE/NEEDS_SHIPPING_CITY/AWAITING_CARRIER_SELECTION)
+# pisaba `requires_human=True` cuando el LLM lo detectaba pero el cliente
+# estaba en modo consulta. Ese guard es necesario contra falsos positivos
+# del LLM, pero NO debe atrapar al cliente que pide explícitamente un
+# asesor. Este detector marca un flag `force_human_request` que sobrevive
+# a TODOS los guards y dispara `_set_conversation_status(human_takeover)`.
+_HUMAN_REQUEST_PATTERNS = (
+    # "Hablar con un asesor / humano / persona / agente"
+    re.compile(
+        r"\b(?:hablar|hable|comunicar(?:me)?|comunique(?:me)?|comuniqueme|"
+        r"pasar(?:me)?|paseme|pasame|pásame|atender(?:me)?|atiendame|atiéndame)\s+"
+        r"(?:con\s+)?(?:un|una|el|la|otro|otra)?\s*"
+        r"(?:asesor|asesora|humano|humana|persona|agente|alguien|"
+        r"vendedor|vendedora|representante|gestor|gestora|consultor|"
+        r"consultora|operador|operadora|servicio\s+al\s+cliente)\b",
+        re.IGNORECASE,
+    ),
+    # "Quiero / necesito un asesor / humano"
+    re.compile(
+        r"\b(?:quiero|necesito|requiero|deseo|preciso|busco|solicito)\s+"
+        r"(?:hablar\s+con\s+)?(?:un|una|el|la)?\s*"
+        r"(?:asesor|asesora|humano|humana|persona\s+real|agente|"
+        r"vendedor|vendedora|representante|operador|"
+        r"atenci[oó]n\s+humana|atenci[oó]n\s+personal|atenci[oó]n\s+personalizada|"
+        r"ayuda\s+(?:de\s+)?(?:un|una)?\s*(?:asesor|persona|humano|alguien))\b",
+        re.IGNORECASE,
+    ),
+    # Frases compuestas
+    re.compile(
+        r"\b(?:atenci[oó]n\s+humana|asesor\s+real|persona\s+real|"
+        r"humano\s+real|operador\s+humano|hablar\s+con\s+alguien|"
+        r"contactar(?:me)?\s+con\s+(?:un|una)?\s*(?:asesor|humano|persona|agente)|"
+        r"que\s+me\s+llame|llamame\s+un|ll[aá]meme\s+un)\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _detect_human_request_intent(text: str) -> bool:
+    """Rev. 103 — True si el cliente pide EXPLÍCITAMENTE atención humana.
+
+    Conservador: solo dispara con frases inequívocas. Casos como "tengo
+    una duda" o "ayúdame" NO matchean (son consultas normales que el bot
+    debe atender). El propósito de este detector es proteger la petición
+    legítima de escalación contra el guard anti-escalación-espuria del
+    orchestrator (que existe para bloquear `requires_human=True` espurio
+    en CATALOG_MODE).
+    """
+    if not text:
+        return False
+    return any(p.search(text) for p in _HUMAN_REQUEST_PATTERNS)
+
+
 # Rev. 97 — Cliente self-service Habeas Data Art. 14 (acceso a sus datos).
 # El titular puede pedir vía WhatsApp un resumen de los datos que el
 # tenant guarda sobre él. Detector pre-LLM determinístico (no se delega
@@ -610,10 +665,10 @@ def _build_customer_data_summary(
         except Exception:
             pass
 
-        consent_status = "Activo ✅" if c.get("consent_given") else "Revocado 🔒"
+        consent_status = "Activo" if c.get("consent_given") else "Revocado"
 
         lines = [
-            "📋 *Resumen de tus datos personales*",
+            "*Resumen de tus datos personales*",
             "",
             f"• Nombre: {c.get('name') or '(no registrado)'}",
             f"• Email: {c.get('email') or '(no registrado)'}",
@@ -1040,6 +1095,187 @@ def _cart_recovery_lookback_days() -> int:
     except (TypeError, ValueError):
         return 7
     return max(1, min(v, 60))
+
+
+def _fetch_recoverable_cart_items(
+    supabase: Client, tenant_id: str, contact_id: str,
+) -> list[dict]:
+    """Rev. 103 — devuelve items recuperables del último cancelled order
+    del cliente (filtrados por stock + precio actual válido). Used both
+    by cart-recovery system prompt block AND by deterministic retake
+    handler that persists items into conversation_cart_items.
+
+    Cada item retornado tiene shape compatible con cart_tool.add_item:
+      {variation_id, product_id, quantity, unit_price_cents, title}.
+
+    Vacío si no hay cancelled order reciente o ningún item es válido.
+    """
+    if not _cart_recovery_enabled() or not contact_id:
+        return []
+    lookback_days = _cart_recovery_lookback_days()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+    try:
+        cart_res = (
+            supabase.table("orders")
+            .select("id, status, created_at, "
+                    "order_items(title, unit_price, quantity, variation_id, product_id)")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .eq("status", "cancelled")
+            .gte("created_at", cutoff)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = cart_res.data or []
+    except Exception as exc:
+        logger.warning("[CART-REC] Error cargando cart cancelado: %s", exc)
+        return []
+    if not rows:
+        return []
+    items = (rows[0] or {}).get("order_items") or []
+    if not items:
+        return []
+    variation_ids = [it.get("variation_id") for it in items if it.get("variation_id")]
+    if not variation_ids:
+        return []
+    try:
+        v_res = (
+            supabase.table("product_variations")
+            .select("id, stock_quantity, price")
+            .eq("tenant_id", tenant_id)
+            .in_("id", variation_ids)
+            .execute()
+        )
+        variants_by_id = {row["id"]: row for row in (v_res.data or []) if row.get("id")}
+    except Exception as exc:
+        logger.warning("[CART-REC] Error re-validando variantes: %s", exc)
+        return []
+    out: list[dict] = []
+    for it in items:
+        vid = it.get("variation_id")
+        pid = it.get("product_id")
+        qty = int(it.get("quantity") or 0) or 1
+        if not vid or not pid:
+            continue
+        v = variants_by_id.get(vid)
+        if not v:
+            continue
+        if int(v.get("stock_quantity") or 0) < qty:
+            continue
+        cur_price = float(v.get("price") or 0)
+        if cur_price <= 0:
+            continue
+        out.append({
+            "variation_id": vid,
+            "product_id": pid,
+            "quantity": qty,
+            "unit_price_cents": int(round(cur_price * 100)),
+            "title": (it.get("title") or "").strip() or "Producto",
+        })
+    return out
+
+
+def _last_outbound_offered_cart_retake(history: list[dict]) -> bool:
+    """True si el último outbound del bot ofreció retomar el cart previo.
+    Markers conservadores que aparecen en el cart_recovery prompt cuando el
+    LLM hace la oferta ("Veo que tenías X items en tu carrito reciente",
+    "¿Lo retomamos o nuevo pedido?").
+    """
+    markers = (
+        "carrito reciente",
+        "tu carrito anterior",
+        "¿lo retomamos",
+        "lo retomamos o",
+        "carrito previo",
+        "tenias x items",
+        "tenias 1 items",
+        "tenias 2 items",
+        "tenias 3 items",
+        "ítems en tu carrito",
+        "items en tu carrito",
+    )
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").strip().lower() == "outbound":
+            content_norm = _normalize_text(str(msg.get("content") or ""))
+            return any(m in content_norm for m in markers)
+    return False
+
+
+def _detect_cart_retake_acceptance(content: str) -> bool:
+    """Rev. 103 — el cliente acepta retomar el cart previo. Solo dispara
+    cuando el último outbound del bot ofreció el retake (caller verifica)."""
+    if not content:
+        return False
+    norm = _normalize_text(content)
+    tokens = set(norm.split())
+    accept_phrases = (
+        "retomemos", "retomamos", "retomar",
+        "el anterior", "el mismo", "lo mismo",
+        "sigamos con la compra", "sigamos con el pedido",
+        "ese mismo", "esos mismos",
+    )
+    if any(p in norm for p in accept_phrases):
+        return True
+    # Frases cortas afirmativas tras la oferta también cuentan.
+    short_yes = {"si", "sí", "dale", "claro", "listo", "ok", "vale", "perfecto", "siga"}
+    if len(tokens) <= 4 and tokens & short_yes:
+        return True
+    return False
+
+
+def _persist_recovered_cart_items(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    contact_id: str,
+    items: list[dict],
+) -> bool:
+    """Rev. 103 — Copia items recuperables al cart_items de la conversación
+    actual. Idempotente: si el cart ya tiene items, no duplica.
+
+    Razón: sin esto el bot menciona "tienes X items previos" pero el cart
+    real está vacío → shipping_quote_tool cae a inventory disambiguation
+    aunque ya conozca los productos. Cart-as-SoT roto.
+    """
+    if not items:
+        return False
+    try:
+        from tools.cart_tool import ensure_cart, add_item, get_cart_with_items
+    except Exception as exc:
+        logger.warning("[CART-REC] cart_tool no disponible: %s", exc)
+        return False
+    try:
+        existing = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+    except Exception:
+        existing = None
+    if existing and (existing.get("items") or []):
+        # Cart ya tiene items en el flow actual — no sobreescribir.
+        return False
+    try:
+        cart = ensure_cart(
+            supabase, conversation_id=conversation_id,
+            tenant_id=tenant_id, contact_id=contact_id,
+        )
+        cart_id = cart["id"]
+        for it in items:
+            add_item(
+                supabase, cart_id=cart_id, tenant_id=tenant_id,
+                product_id=it["product_id"], variation_id=it["variation_id"],
+                quantity=int(it["quantity"]),
+                unit_price_cents=int(it["unit_price_cents"]),
+            )
+        logger.info(
+            "[CART-REC] Persistidos %d items recuperados a cart=%s conv=%s",
+            len(items), cart_id[:8], conversation_id[:8],
+        )
+        return True
+    except Exception as exc:
+        logger.warning("[CART-REC] Error persistiendo items recuperados: %s", exc)
+        return False
 
 
 def _load_cart_recovery_block(
@@ -2228,12 +2464,21 @@ def _has_carrier_been_selected(history: list[dict]) -> bool:
 
     # Detectar si la cotización mostró UNA sola opción.
     # "¿Continuamos con la opción Económica?" = opción única → afirmativo corto = selección válida.
-    # "¿Con cuál continuamos? Económica o Rápida" = múltiple → requiere mención de carrier.
+    # "¿Con cuál continuamos? Económica o Rápida" = múltiple → afirmativo "sigamos"/"continuemos"
+    # se interpreta como Económica (default cheaper).
     is_single_option = (
         "continuamos con la opcion" in quote_content_norm
         and "con cual continuamos" not in quote_content_norm
     )
     _affirmative_short = {"si", "sí", "ok", "dale", "listo", "claro", "si claro", "de una"}
+    # Rev. 103 — "sigamos"/"continuemos" tras multi-opción = aceptar default
+    # cheaper (Económica). Caso real: cliente que solo quiere terminar la
+    # compra rápido sin elegir explícitamente. Sin esto el LLM toma control
+    # del turno (display=AWAITING_CARRIER_SELECTION) y se salta NEEDS_CONSENT.
+    _continue_intent = {
+        "sigamos", "continuemos", "continuar", "continua", "continúa",
+        "procedamos", "compra", "comprar", "avancemos", "sigue",
+    }
 
     # Verificar inbounds DESPUÉS del outbound de cotización
     for msg in hist[quote_idx + 1:]:
@@ -2259,6 +2504,10 @@ def _has_carrier_been_selected(history: list[dict]) -> bool:
                 return True
             if any(t in _affirmative_short for t in cleaned_tokens) and len(cleaned_tokens) <= 3:
                 return True
+        # Rev. 103 — multi-opción: "sigamos con la compra" / "continuemos" /
+        # "procedamos" → aceptar como Económica (cheaper default).
+        if is_short and any(t in _continue_intent for t in tokens):
+            return True
     return False
 
 
@@ -2777,7 +3026,14 @@ def _build_order_summary_text(
     total = int(verified_ctx.get("total_cents") or 0)
     lines.append("")
     lines.append(f"Subtotal: {_format_cop(subtotal)}")
-    lines.append(f"Envío: {_format_cop(shipping)}")
+    # Rev. 103 — incluir carrier en línea de envío para que el cliente
+    # vea qué transportadora cotizó (Económica = default cuando dice
+    # "sigamos" sin elegir explícitamente).
+    carrier_name = _extract_shipping_carrier_from_history(history or [])
+    if carrier_name and shipping > 0:
+        lines.append(f"Envío (Económica - {carrier_name}): {_format_cop(shipping)}")
+    else:
+        lines.append(f"Envío: {_format_cop(shipping)}")
     lines.append(f"*TOTAL: {_format_cop(total)}*")
 
     contact = contact_record if isinstance(contact_record, dict) else {}
@@ -2909,6 +3165,70 @@ def _extract_shipping_cost_from_history(history: list[dict]) -> Optional[int]:
     return None
 
 
+def _extract_shipping_carrier_from_history(history: list[dict]) -> Optional[str]:
+    """Rev. 103 — extrae el carrier de la opción Económica del último
+    outbound de cotización. Caso real: el cliente que dice "sigamos" tras
+    una cotización multi-opción defaultea a Económica; el resumen y el
+    DB necesitan saber QUÉ carrier es para que la transportadora
+    reciba la guía correcta.
+
+    Formatos soportados (continúa buscando hacia atrás si el primer
+    outbound con "Económica" no matchea — ej. carrier ack post-quote):
+      • Cotización: "* *Económica*: Coordinadora Ground | $7.310 | ..."
+      • Carrier ack: "voy con la opción *Económica* (Coordinadora Ground) por ..."
+    Retorna ej. "Coordinadora Ground" o None.
+    """
+    _patterns = (
+        # Cotización con `|` separators
+        re.compile(r"(?:Económica|Economica)\*?:?\s*([^|]+?)\s*\|"),
+        # Ack con paréntesis
+        re.compile(r"(?:Económica|Economica)\*?\s*\(([^)]+)\)"),
+    )
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content = str(msg.get("content") or "")
+        if "Económica" not in content and "Economica" not in content:
+            continue
+        for line in content.splitlines():
+            if "Económica" not in line and "Economica" not in line:
+                continue
+            for pat in _patterns:
+                m = pat.search(line)
+                if m:
+                    name = m.group(1).strip().strip("*").strip()
+                    if name and 2 <= len(name) <= 60:
+                        return name
+        # No match en este outbound — sigue buscando hacia atrás (NO return None aquí).
+    return None
+
+
+def _generic_catalog_terms(catalog: list) -> set[str]:
+    """Rev. 103 — términos compartidos por ≥40% del catálogo, no
+    discriminativos. Caso real: catálogo de cosmética con 5 jabones todos
+    tienen "jabon" + "artesanal" en el título. El matcher por overlap >=2
+    atrapaba toda la categoría cuando el cliente solo nombraba 1 producto.
+    """
+    if not catalog:
+        return set()
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+    counts: dict[str, int] = {}
+    n = 0
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        n += 1
+        words = set(re.findall(r"[a-z0-9ñ]+", _normalize_text(title))) - _stop
+        for w in words:
+            counts[w] = counts.get(w, 0) + 1
+    if n < 3:
+        # Catálogo pequeño: nada se considera genérico.
+        return set()
+    threshold = max(2, int(n * 0.4))
+    return {w for w, c in counts.items() if c >= threshold}
+
+
 def _build_verified_multi_product_context(
     catalog: list,
     history: list[dict],
@@ -2927,6 +3247,13 @@ def _build_verified_multi_product_context(
     norm_tokens_set = set(re.findall(r"[a-z0-9ñ]+", norm))
     _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
 
+    # Rev. 103 — palabras genéricas compartidas por toda una categoría
+    # (ej. "jabon"/"artesanal" están en todos los jabones del catálogo).
+    # Si el cliente solo dijo "1 jabón artesanal de coco", el matcher por
+    # overlap >=2 también atrapaba Lavanda/Avena/Menta — bug grave en
+    # populate-on-demand del cart.
+    _generic_terms = _generic_catalog_terms(catalog)
+
     items_summary: list[dict] = []
     seen_titles: set[str] = set()
     has_explicit_qty = False
@@ -2938,9 +3265,16 @@ def _build_verified_multi_product_context(
         if norm_title in seen_titles:
             continue
         title_words = set(re.findall(r"[a-z0-9ñ]+", norm_title)) - _stop
+        # Discriminantes = palabras del título que NO son genéricas
+        # de la categoría. Para "Jabón Artesanal de Coco" → {coco};
+        # para "Aceite de Coco Virgen" → {aceite, coco, virgen}.
+        # Requerimos que TODAS las discriminativas estén en el texto
+        # del cliente — un solo "coco" en el inbound NO debe matchear
+        # tanto Jabón-Coco como Aceite-Coco.
+        discriminative = title_words - _generic_terms
         if norm_title in norm:
             pass
-        elif title_words and len(title_words & norm_tokens_set) >= 2:
+        elif discriminative and discriminative.issubset(norm_tokens_set):
             pass
         else:
             continue
@@ -3167,20 +3501,20 @@ _TONO_INSTRUCCIONES: dict[str, str] = {
     "amigable": (
         "TONO: Amigable y cercano. Tutea al cliente desde el inicio.\n"
         "Saluda así: \"¡Hola! ¿En qué te puedo ayudar?\". Confirma así: \"Listo, eso lo manejamos.\".\n"
-        "Usa contracciones naturales (\"está\", \"vamos\", \"aquí\"). Un emoji puntual está bien (👋 ).\n"
+        "Usa contracciones naturales (\"está\", \"vamos\", \"aquí\"). Sin emojis.\n"
         "Ejemplo natural: \"¡Sí! Lo tenemos disponible. Cuéntame para qué ciudad y te cotizo el envío.\""
     ),
     "cercano": (
         "TONO: Muy cercano, casi como un amigo. Tutea siempre y conversa con calidez.\n"
         "Saluda así: \"¡Hola! ¿Cómo estás? ¿En qué te ayudo?\". Confirma así: \"Listo, ya te ayudo con eso.\".\n"
-        "Permite expresiones colombianas naturales (\"vale\", \"con gusto\", \"de una\"). 1-2 emojis está bien.\n"
+        "Permite expresiones colombianas naturales (\"vale\", \"con gusto\", \"de una\"). Sin emojis.\n"
         "Ejemplo natural: \"¡Claro que sí! Eso lo tenemos. ¿Para dónde te lo enviaríamos?\""
     ),
     "juvenil": (
-        "TONO: Joven, dinámico y energético. Tutea siempre, usa frases cortas, emojis con moderación.\n"
-        "Saluda así: \"¡Hey! 👋 ¿Qué necesitas?\". Confirma así: \"¡Listo! Eso lo tengo.\".\n"
-        "Es válido un emoji por mensaje (no más de 2). Evita textitos infantilizados o sobreuso de signos.\n"
-        "Ejemplo natural: \"¡Sí lo tenemos! 🙌 ¿Para qué ciudad sería?\""
+        "TONO: Joven, dinámico y energético. Tutea siempre, usa frases cortas. Sin emojis.\n"
+        "Saluda así: \"¡Hey! ¿Qué necesitas?\". Confirma así: \"¡Listo! Eso lo tengo.\".\n"
+        "Evita textitos infantilizados o sobreuso de signos.\n"
+        "Ejemplo natural: \"¡Sí lo tenemos! ¿Para qué ciudad sería?\""
     ),
 }
 
@@ -3228,17 +3562,17 @@ _SAFETY_GREETING_BANK: dict[str, list[str]] = {
         "¡Hey, hola! Soy {agent} de {tenant}. ¿Cómo te ayudo?",
     ],
     "cercano": [
-        "¡Hola! ¿Cómo estás? Soy {agent} de {tenant} 👋 Cuéntame.",
+        "¡Hola! ¿Cómo estás? Soy {agent} de {tenant}. Cuéntame.",
         "¡Hola! Soy {agent} de {tenant}. ¿En qué te ayudo?",
         "¡Hey! Acá {agent} de {tenant}. Dime, ¿qué necesitas?",
         "¡Hola! Soy {agent} de {tenant}. ¿En qué te echo una mano?",
         "¡Qué tal! Soy {agent} de {tenant}. Cuéntame qué buscas.",
     ],
     "juvenil": [
-        "¡Hey! 👋 Soy {agent} de {tenant}. ¿Qué necesitas?",
-        "¡Holaaa! Soy {agent} de {tenant} 🙌 Cuéntame.",
+        "¡Hey! Soy {agent} de {tenant}. ¿Qué necesitas?",
+        "¡Holaaa! Soy {agent} de {tenant}. Cuéntame.",
         "¡Hey! Acá {agent} de {tenant}. ¿En qué te ayudo?",
-        "¡Hola! Soy {agent} de {tenant} ✨ ¿Qué buscas?",
+        "¡Hola! Soy {agent} de {tenant}. ¿Qué buscas?",
         "¡Qué más! Soy {agent} de {tenant}. Dime, ¿qué necesitas?",
     ],
 }
@@ -3740,7 +4074,7 @@ def _build_system_prompt(
     tenant_vision: str = "",
     tenant_valores: str = "",
     tenant_tono: str = "amigable",
-    tenant_escalation_role: str = "asesor",
+    tenant_escalation_role: str = "especialista",
     tenant_nit: str = "",
     tenant_email_contacto: str = "",
     tenant_telefono_contacto: str = "",
@@ -3863,11 +4197,12 @@ def _build_system_prompt(
             "\nCONTEXTO TEMPORAL — FUERA DE HORARIO HUMANO:",
             f"- Estamos fuera del horario de atención humana ({_format_support_schedule_text(tenant_support_schedule) or 'no configurado'}).",
             "- Sigue atendiendo (catálogo, cotización, captura de datos, link de pago) — el bot opera 24/7.",
-            f"- Si el cliente pide hablar con una persona, NO digas 'te conecto ahora'. Indica con cordialidad que un {tenant_escalation_role} responderá apenas inicie el próximo turno y deja registrada la solicitud.",
+            "- REGLA UX: NO menciones espontáneamente que estamos fuera de horario. NUNCA digas en saludos o respuestas iniciales que 'los asesores no están disponibles' — eso suena defensivo y rompe la experiencia. El bot atiende todo lo transaccional sin disclaim.",
+            f"- SOLO menciona el horario si el cliente pide EXPLÍCITAMENTE hablar con una persona (ej. 'quiero hablar con un asesor', 'pásame con humano'). En ese caso indica con cordialidad que un {tenant_escalation_role} responderá apenas inicie el próximo turno y deja registrada la solicitud.",
         ]
         if tenant_after_hours_message:
             after_hours_section_lines.append(
-                f"- Mensaje guía del tenant para fuera de horario (úsalo como referencia de tono, no lo copies literal): \"{tenant_after_hours_message}\""
+                f"- Mensaje guía del tenant (úsalo SOLO al escalar a humano, NO en saludos): \"{tenant_after_hours_message}\""
             )
         after_hours_section = "\n".join(after_hours_section_lines)
     tono_instruccion = _TONO_INSTRUCCIONES.get(tenant_tono, _TONO_INSTRUCCIONES["amigable"])
@@ -4073,7 +4408,7 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
         known_customer_block = (
             f"\nCLIENTE CONOCIDO: {_kc_first_name}.\n"
             f"- En el PRIMER mensaje de respuesta de la conversación, SIEMPRE incluye "
-            f"el primer nombre del cliente — sea saludo ('¡Hola, {_kc_first_name}! 👋 ...') "
+            f"el primer nombre del cliente — sea saludo ('¡Hola, {_kc_first_name}!...') "
             f"o pregunta directa ('Claro, {_kc_first_name}, te muestro...'). "
             f"Es cliente recurrente y aprecia ese reconocimiento.\n"
             f"- En el resto de la conversación (mensajes posteriores), usa el primer nombre "
@@ -4131,7 +4466,7 @@ CLIENTE CONOCIDO vs CLIENTE NUEVO (rev. 86):
 - "Cliente nuevo" = sin `customer_context` o `consent_given=false`.
 
 PARA CLIENTE CONOCIDO:
-- Saludo SIEMPRE por primer nombre. Ej: "¡Hola, *Cristian*! 👋 Bienvenido(a) de nuevo a *{tenant_name}*. ¿Qué buscas hoy?"
+- Saludo SIEMPRE por primer nombre. Ej: "¡Hola, *Cristian*! Bienvenido(a) de nuevo a *{tenant_name}*. ¿Qué buscas hoy?"
 - NO repreguntes consent (ya está dado).
 - NO repreguntes nombre, correo, documento, dirección — los datos están en DB.
 - En el RESUMEN PRE-CONFIRMACIÓN incluye sus datos guardados como BULLETS `*` (todos en la misma sección, formato uniforme — NO uses cita `>` para datos del resumen). Pregunta SIEMPRE: "¿Confirmas estos datos o quieres actualizar alguno? (dirección, correo, celular si el envío va a otra persona, documento)". Esto cubre que el cliente pueda querer envío a otra dirección esta vez.
@@ -4143,7 +4478,7 @@ PARA CLIENTE CONOCIDO:
 - Tono: conciso, asume contexto. Menos explicaciones que con cliente nuevo.
 
 PARA CLIENTE NUEVO:
-- Saludo: "¡Hola! 👋 Soy *{ai_agent.get('name', 'el asistente')}* de *{tenant_name}*. ¿En qué te ayudo?".
+- Saludo: "¡Hola! Soy *{ai_agent.get('name', 'el asistente')}* de *{tenant_name}*. ¿En qué te ayudo?".
 - Explica brevemente qué hace la tienda en el primer turno transaccional.
 - FSM completo de captura: consent → email → name → document → address.
 - Tono: explicativo, paso a paso, paciente.
@@ -4214,7 +4549,7 @@ Sintaxis oficial WhatsApp:
 
 Cuándo usar citas (`> texto`) — REGLA ESTRICTA (rev. 88):
 
-✅ USAR `> texto` SOLO en estos 3 escenarios específicos:
+USAR `> texto` SOLO en estos 3 escenarios específicos:
 
   1. ECO de un dato puntual que el cliente acaba de dar, ANTES de continuar.
      Una sola línea de cita + acuse + siguiente pregunta. Ej:
@@ -4341,7 +4676,7 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 
   Patrón canónico amplio (≤5 categorías visibles + nota marketing):
 
-    ¡Hola! 👋 Soy Sara Camila de KAIU Living Natural.
+    ¡Hola! Soy Sara Camila de KAIU Living Natural.
 
     Tenemos:
     * Aceites vegetales
@@ -4363,10 +4698,10 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 - ❌ INCORRECTO (bullet sin espacio, malformado):
     *Aceites vegetales: Almendras, Argán
     *Jabones artesanales: Coco, Lavanda
-- ✅ CORRECTO (bullet con espacio):
+- CORRECTO (bullet con espacio):
     * Aceites vegetales: Almendras, Argán
     * Jabones artesanales: Coco, Lavanda
-- ✅ TAMBIÉN CORRECTO (sección + items):
+- TAMBIÉN CORRECTO (sección + items):
     *Aceites vegetales:*
     * Almendras
     * Argán
@@ -4391,7 +4726,7 @@ Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universa
 
 Patrón canónico — catálogo AMPLIO por categorías (rev. 103 minimalismo):
 
-¡Hola! 👋 En *KAIU Living Natural* tenemos cosmética artesanal natural.
+¡Hola! En *KAIU Living Natural* tenemos cosmética artesanal natural.
 
 Tenemos:
 * Aceites vegetales
@@ -4419,13 +4754,13 @@ Confirmado, *Cristian*. ¿Algún piso o referencia adicional?
 
 Patrón canónico — saludo cliente conocido:
 
-¡Hola, *Cristian*! 👋 Bienvenido(a) de nuevo a *KAIU Living Natural*.
+¡Hola, *Cristian*! Bienvenido(a) de nuevo a *KAIU Living Natural*.
 
 ¿Qué buscas hoy?
 
 Patrón canónico — saludo cliente nuevo:
 
-¡Hola! 👋 Soy *Sara Camila* de *KAIU Living Natural*. Trabajamos cosmética artesanal 100% natural.
+¡Hola! Soy *Sara Camila* de *KAIU Living Natural*. Trabajamos cosmética artesanal 100% natural.
 
 ¿En qué te puedo ayudar?
 
@@ -4578,11 +4913,14 @@ def _humanize_name_in_text(text: str, contact_name: Optional[str], extracted_nam
     # acortarlo al primer nombre. Cubre casos donde el LLM emitió el nombre
     # completo y `contact_name`/`extracted_name` no están disponibles
     # (el LLM no los extrajo, o se persisten más tarde).
+    # Rev. 103 — sin re.IGNORECASE: el flag rompía la semántica "Title Case"
+    # del bloque del nombre (`[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+`) y atrapaba frases
+    # como "Listo, registré tu solicitud." reduciéndolas a "Listo, Registré.".
+    # Greeting words se aceptan ambas capitalizaciones explícitamente.
     _greeting_re = re.compile(
-        r"(¡?(?:gracias|hola|perfecto|listo|claro|entendido|bienvenido|bienvenida)[,\s]+)"
+        r"(¡?(?:[Gg]racias|[Hh]ola|[Pp]erfecto|[Ll]isto|[Cc]laro|[Ee]ntendido|[Bb]ienvenid[oa])[,\s]+)"
         r"((?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+){2,4}[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)"
         r"([!,\.])",
-        flags=re.IGNORECASE,
     )
     def _shorten_full_name(m: re.Match[str]) -> str:
         full = m.group(2)
@@ -5060,7 +5398,13 @@ async def build_and_run_orchestration(
         # Rev. 68 — escalation_role configurable por tenant (default 'asesor').
         # Se usa en mensajes de escalación al humano para alinear el término al
         # lenguaje de la marca (asesor / especialista / consultor / agente).
-        tenant_escalation_role  = tenant_row.get("escalation_role") or "asesor"
+        # Rev. 103 — fallback "especialista" (no "asesor"): el bot ya se
+        # posiciona como asesor/asesora virtual; usar "asesor" para el rol
+        # humano crea ambigüedad ("¿con cuál asesor?, ¿no eres tú asesora?").
+        # "Especialista" diferencia al humano del bot, suena profesional y
+        # cabe en cualquier vertical. Tenant puede sobrescribir por
+        # `escalation_role` en `tenants` si prefiere otro término.
+        tenant_escalation_role  = tenant_row.get("escalation_role") or "especialista"
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -5068,8 +5412,18 @@ async def build_and_run_orchestration(
         try:
             customer_phone_raw = _get_conversation_customer_phone(supabase, conversation_id)
             if customer_phone_raw:
+                # Rev. 103 — shipping_phone defaultea al WhatsApp para que la
+                # transportadora siempre tenga un número (caso real: cliente
+                # no menciona alternativo → Envía usa WhatsApp). Si después
+                # da otro celular ("el pedido lo recibe mi mamá"), el
+                # detector de intent lo sobrescribe en update_data.
                 supabase.table("contacts").upsert(
-                    {"tenant_id": tenant_id, "phone": customer_phone_raw, "consent_given": False},
+                    {
+                        "tenant_id": tenant_id,
+                        "phone": customer_phone_raw,
+                        "shipping_phone": customer_phone_raw,
+                        "consent_given": False,
+                    },
                     on_conflict="tenant_id,phone",
                     ignore_duplicates=True,
                 ).execute()
@@ -5910,6 +6264,29 @@ async def build_and_run_orchestration(
 
         # ── 3. Construir prompts ───────────────────────────────────────────────
         history_for_prompt = _history_without_current_inbound(history or [], content)
+
+        # Rev. 103 — Cart-recovery: si el bot ofreció retomar el cart
+        # cancelado en el outbound previo y el cliente aceptó ahora, copiar
+        # los items al conversation_cart_items (cart-as-SoT). Sin esto el
+        # bot menciona items pero shipping_quote_tool no los ve y pide
+        # disambiguación de productos al cotizar.
+        if (
+            contact_id
+            and _last_outbound_offered_cart_retake(history_for_prompt)
+            and _detect_cart_retake_acceptance(content)
+        ):
+            _recovered_items = _fetch_recoverable_cart_items(
+                supabase, tenant_id, contact_id,
+            )
+            if _recovered_items:
+                _persist_recovered_cart_items(
+                    supabase,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    contact_id=contact_id,
+                    items=_recovered_items,
+                )
+
         # F3A: si la ventana de 24h expiró, buying_intent del historial no aplica
         buying_intent = False if _window_expired else _has_buying_intent(content, history_for_prompt)
         shipping_quoted = _has_shipping_been_quoted(history_for_prompt)
@@ -5975,11 +6352,46 @@ async def build_and_run_orchestration(
                 logger.warning("[ORCH] R-15: error refetch contacto para READY_FOR_SUMMARY: %s", _r15_err)
 
         if display_state == "NEEDS_CONSENT":
+            # Rev. 103 — si el carrier acaba de defaultearse a Económica
+            # porque el cliente dijo "sigamos"/"continuemos" tras una
+            # cotización multi-opción (sin elegir explícitamente), prepender
+            # un ack de carrier para que el cliente vea qué se eligió. Sin
+            # esto, el bot saltaba a consent silenciosamente — feedback UAT
+            # s9: "el chat no confirmó cuál tipo de envío y supuso económico".
+            consent_text = CONSENT_QUESTION_TEMPLATE
+            _content_norm = _normalize_text(content or "")
+            _continue_intent = {
+                "sigamos", "continuemos", "continuar", "continua", "continúa",
+                "procedamos", "compra", "comprar", "avancemos", "sigue",
+            }
+            _user_picked_carrier_explicitly = any(
+                t in _content_norm for t in (
+                    "economica", "rapida", "deprisa", "servientrega",
+                    "coordinadora", "tcc", "dhl", "fedex", "interrapidisimo",
+                    "mensajeros", "urbanos",
+                )
+            )
+            if (
+                not _user_picked_carrier_explicitly
+                and any(t in _content_norm.split() for t in _continue_intent)
+            ):
+                _carrier_name = _extract_shipping_carrier_from_history(
+                    history_for_prompt or []
+                )
+                _shipping_cents = _extract_shipping_cost_from_history(
+                    history_for_prompt or []
+                ) or 0
+                if _carrier_name and _shipping_cents > 0:
+                    _carrier_ack = (
+                        f"Listo, voy con la opción *Económica* "
+                        f"({_carrier_name}) por *{_format_cop(_shipping_cents)}*.\n\n"
+                    )
+                    consent_text = _carrier_ack + consent_text
             await _send_outbound_text(
                 supabase=supabase,
                 conversation_id=conversation_id,
                 tenant_id=tenant_id,
-                text=CONSENT_QUESTION_TEMPLATE,
+                text=consent_text,
             )
             _mark_message_processing(
                 supabase,
@@ -6202,10 +6614,59 @@ async def build_and_run_orchestration(
         except Exception as _log_exc:
             logger.warning("[BOT_LOG] Falló persistencia bot_source_log: %s", _log_exc)
 
+        # Rev. 103 — Petición EXPLÍCITA de atención humana (pre-LLM
+        # determinístico). Marca un flag que sobrevive a TODOS los guards
+        # anti-escalación-espuria + reescribe el response_text con un
+        # mensaje de tranquilidad correcto sea horario o no. SIEMPRE
+        # escala (status=human_takeover) — el cliente que pide humano
+        # no debe quedar atrapado en bucle automático.
+        force_human_request = _detect_human_request_intent(content)
+        if force_human_request:
+            parsed.requires_human = True
+            parsed.should_respond = True
+            _outside_hours = _is_outside_support_hours(tenant_support_schedule)
+            # Rev. 103 — formato WhatsApp con jerarquía visual:
+            #   • *Negritas* en acción/rol/horario (info accionable).
+            #   • `> _cursiva_` en la nota secundaria (ofrecer adelantar tema)
+            #     — separa visualmente del CTA principal.
+            # Honesto al estado real: tras escalar, `status=human_takeover`
+            # y el orchestrator ignora futuros inbounds (los persiste pero
+            # no procesa). Decir "si necesitas ayuda con algo más, dímelo"
+            # sería una falsa puerta. Lo que SÍ es cierto: lo que el cliente
+            # escriba queda registrado y el {especialista} lo lee al tomar
+            # la conversación.
+            if _outside_hours:
+                _hours_text = _format_support_schedule_text(tenant_support_schedule) or "horario hábil"
+                parsed.response_text = (
+                    f"*Listo*, registré tu solicitud.\n\n"
+                    f"Un *{tenant_escalation_role}* te contactará apenas "
+                    f"inicie nuestro horario:\n"
+                    f"*{_hours_text}*.\n\n"
+                    f"> _Si quieres adelantar el tema, escríbelo aquí — "
+                    f"el {tenant_escalation_role} lo leerá cuando llegue._"
+                )
+            else:
+                parsed.response_text = (
+                    f"*Listo*, te conecto con un *{tenant_escalation_role}*.\n\n"
+                    f"En unos minutos alguien te atiende por aquí.\n\n"
+                    f"> _Si quieres adelantar el tema, escríbelo aquí — "
+                    f"el {tenant_escalation_role} lo verá apenas tome la conversación._"
+                )
+            logger.info(
+                "[HUMAN_REQ] Petición explícita de %s — escalando "
+                "conv=%s outside_hours=%s",
+                tenant_escalation_role, conversation_id, _outside_hours,
+            )
+
         # Salvaguarda: si LLM pide takeover para saludo/off_topic, no escalar.
         # Confiamos en la respuesta de Gemini (response_text); si vino vacía, generamos
         # un saludo seguro variado por tono + conversation_id (5 variaciones rotativas).
-        if parsed.requires_human and parsed.intent_detected in {"greeting", "off_topic"}:
+        # Rev. 103 — `force_human_request` la sobrescribe (cliente pidió humano explícito).
+        if (
+            parsed.requires_human
+            and parsed.intent_detected in {"greeting", "off_topic"}
+            and not force_human_request
+        ):
             parsed.requires_human = False
             parsed.should_respond = True
             if not parsed.response_text:
@@ -6227,7 +6688,14 @@ async def build_and_run_orchestration(
             )
 
         # Salvaguarda de escalación espuria en modo consulta.
-        if parsed.requires_human and display_state in {"CATALOG_MODE", "NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}:
+        # Rev. 103 — bypass cuando `force_human_request=True` (cliente pidió
+        # humano explícito). El guard sigue protegiendo contra falsos
+        # positivos del LLM en modo consulta normal.
+        if (
+            parsed.requires_human
+            and display_state in {"CATALOG_MODE", "NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}
+            and not force_human_request
+        ):
             if parsed.intent_detected in {"product_inquiry", "other", "unknown", "greeting"}:
                 parsed.requires_human = False
                 parsed.should_respond = True
