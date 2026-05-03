@@ -409,14 +409,85 @@ async def get_conversation_context(
                         or shipping_meta.get("service_name")
                         or ""
                     )
+
+                # Rev. 103 — Extraer el último shipping cotizado por el
+                # bot desde messages (mismo helper que el orchestrator
+                # usa en `_extract_shipping_cost_from_history`). Cuando
+                # el cart cambia post-cotización, `cart.shipping_cents`
+                # se invalida (requires_requote=true) pero el operador
+                # humano debe seguir viendo el último valor cotizado
+                # como referencia. Y cuando cart.shipping_cents = 0 pero
+                # ya hay quote → mostrar el del history.
+                last_quote_cents = 0
+                last_quote_carrier = ""
+                try:
+                    msgs_res = (
+                        supabase.table("messages")
+                        .select("content, created_at")
+                        .eq("conversation_id", conversation_id)
+                        .eq("direction", "outbound")
+                        .ilike("content", "%conómica%")
+                        .order("created_at", desc=True)
+                        .limit(3)
+                        .execute()
+                    )
+                    for row in (msgs_res.data or []):
+                        content = str(row.get("content") or "")
+                        for ln in content.splitlines():
+                            if "Económica" not in ln and "Economica" not in ln:
+                                continue
+                            mprice = re.search(r"\$\s*([\d.,]+)", ln)
+                            if mprice:
+                                cleaned = mprice.group(1).replace(".", "").replace(",", "")
+                                try:
+                                    val = int(cleaned)
+                                    if val >= 1000:
+                                        last_quote_cents = val * 100
+                                        # Carrier name antes del primer "|"
+                                        mcarrier = re.search(
+                                            r"(?:Económica|Economica)\*?:?\s*([^|]+?)\s*\|",
+                                            ln,
+                                        )
+                                        if mcarrier:
+                                            last_quote_carrier = mcarrier.group(1).strip().strip("*").strip()
+                                        break
+                                except ValueError:
+                                    continue
+                        if last_quote_cents:
+                            break
+                except Exception as qexc:
+                    logger.warning("Error extrayendo last quote conv=%s: %s",
+                                   conversation_id, qexc)
+
+                # `effective_shipping_cents` y `shipping_status` para que
+                # el frontend muestre línea Envío SIEMPRE con estado claro.
+                cart_shipping = int(cart.get("shipping_cents") or 0)
+                requires_rq = bool(cart.get("requires_requote"))
+                if cart_shipping > 0 and not requires_rq:
+                    effective_ship = cart_shipping
+                    ship_status = "active"  # cotización fresca + cart sin cambios
+                elif requires_rq and last_quote_cents > 0:
+                    effective_ship = last_quote_cents
+                    ship_status = "stale"   # bot recotizará al confirmar
+                elif last_quote_cents > 0:
+                    effective_ship = last_quote_cents
+                    ship_status = "active"
+                else:
+                    effective_ship = 0
+                    ship_status = "pending"  # nunca cotizado
+
+                effective_carrier = carrier_name or last_quote_carrier or ""
+                effective_total = int(cart.get("subtotal_cents") or 0) + effective_ship
+
                 active_cart = {
                     "id": cart["id"],
                     "items": cart_items,
                     "subtotal_cents": cart.get("subtotal_cents") or 0,
-                    "shipping_cents": cart.get("shipping_cents") or 0,
-                    "total_cents": cart.get("total_cents") or 0,
-                    "carrier_name": carrier_name,
-                    "requires_requote": bool(cart.get("requires_requote")),
+                    "shipping_cents": effective_ship,
+                    "total_cents": effective_total,
+                    "carrier_name": effective_carrier,
+                    "requires_requote": requires_rq,
+                    "shipping_status": ship_status,  # active | stale | pending
                 }
         except Exception as ce:
             logger.warning("Error cargando active_cart conv=%s: %s", conversation_id, ce)
