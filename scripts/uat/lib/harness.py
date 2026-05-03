@@ -191,9 +191,13 @@ def seed_known_contact(
 
     Doble verificación es estrategia UAT obligatoria a partir de rev. 103.
     """
+    # Canon runtime: connector normaliza a digits sin '+' (Meta envía wa_id
+    # sin '+'). Si seedeamos con '+', el orchestrator NO matchea por phone
+    # exact y crea un contact duplicado en su upsert posterior. Alineamos
+    # al canon para evitar duplicados.
     digits = phone.lstrip("+")
     payload = {
-        "tenant_id": tenant_id, "phone": phone,
+        "tenant_id": tenant_id, "phone": digits,
         "name": name, "email": email,
         "document_type": document_type,
         "document_number": document_number,
@@ -321,12 +325,23 @@ class ConversationDriver:
         self.matched: list[str] = []
         self._fired_rule_ids: set[int] = set()
 
+    # Reglas con keywords de confirmación pueden disparar varias veces:
+    # carrier-pick → "¿confirmas para generar?", post-resumen → "¿confirmas
+    # estos datos?". Ambas son "confirmas" pero contextos diferentes. Sin
+    # esto el driver agota la rule prio=20 en la primera y luego cae al
+    # fallback prio=1 ("sigamos") que el bot no interpreta como confirmación.
+    _REPEATABLE_KEYWORDS = ("confirmas", "confirmas que")
+
     def _resolve_reply(self, bot_text: str) -> tuple[str, str] | None:
         question = extract_bot_question(bot_text).lower()
         context = extract_question_context(bot_text).lower()
         for pass_target, pass_label in ((question, "Q"), (context, "Q+ctx")):
             for idx, (prio, kws, reply) in enumerate(self.rules):
-                if idx in self._fired_rule_ids:
+                is_repeatable = any(
+                    rep in (k.lower() for k in kws)
+                    for rep in self._REPEATABLE_KEYWORDS
+                )
+                if idx in self._fired_rule_ids and not is_repeatable:
                     continue
                 if any(k.lower() in pass_target for k in kws):
                     self._fired_rule_ids.add(idx)

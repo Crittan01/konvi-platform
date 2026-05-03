@@ -233,23 +233,42 @@ async def handle_payment_link_if_applicable(
     logger.info("[PAYMENT_LINK] Orden %s creada (pending_payment) tenant=%s", order_id, tenant_id)
 
     # ── 4. Generar link de pago Wompi ─────────────────────────────────────────
+    # Rev. 103+: reintento único ante transient (Wompi sandbox a veces tarda
+    # > 20s). El mismo patrón que shipping_quote_tool. La orden YA está
+    # creada en pending_payment, así que solo reintentamos la generación
+    # del link sin re-crear el pedido.
     checkout_url = None
     expires_at = None
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(
-                f"{API_URL}/api/v1/orders/{order_id}/payment-link",
-                headers=headers,
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    f"{API_URL}/api/v1/orders/{order_id}/payment-link",
+                    headers=headers,
+                )
+                if resp.status_code == 503:
+                    logger.warning("[PAYMENT_LINK] Wompi no configurado en Core API — fallback a human")
+                    return None
+                resp.raise_for_status()
+                link_data = resp.json()
+                checkout_url = link_data.get("checkout_url")
+                expires_at = link_data.get("expires_at", "")
+                break
+        except httpx.RequestError as e:
+            last_exc = e
+            logger.warning(
+                "[PAYMENT_LINK] transient error attempt=%d order=%s err=%s",
+                attempt + 1, order_id, e,
             )
-            if resp.status_code == 503:
-                logger.warning("[PAYMENT_LINK] Wompi no configurado en Core API — fallback a human")
-                return None
-            resp.raise_for_status()
-            link_data = resp.json()
-            checkout_url = link_data.get("checkout_url")
-            expires_at = link_data.get("expires_at", "")
-    except Exception as e:
-        logger.error("[PAYMENT_LINK] Error generando payment link order=%s: %s", order_id, e)
+        except Exception as e:
+            logger.error("[PAYMENT_LINK] Error generando payment link order=%s: %s", order_id, e)
+            return None
+    if not checkout_url and last_exc:
+        logger.error(
+            "[PAYMENT_LINK] tras reintentos sin link order=%s last_err=%s",
+            order_id, last_exc,
+        )
         return None
 
     if not checkout_url:

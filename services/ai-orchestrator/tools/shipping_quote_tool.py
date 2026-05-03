@@ -1461,6 +1461,12 @@ def _get_contact_shipping_phone(
 
 
 async def _request_shipping_quote(tenant_id: str, payload: dict) -> tuple[int, dict]:
+    """Llama a /api/v1/shipping/quote con resiliencia ante transients.
+
+    Rev. 103 — Envia upstream ocasionalmente tarda > 25s. Reintento único
+    antes de devolver 504 (mapea a respuesta soft, NO escala a humano).
+    Solo errores reales (4xx, falta config) escalan.
+    """
     token = _build_api_auth_token(tenant_id)
     if not token:
         return 500, {"detail": "SUPABASE_JWT_SECRET no configurado en orquestador."}
@@ -1472,12 +1478,25 @@ async def _request_shipping_quote(tenant_id: str, payload: dict) -> tuple[int, d
     }
 
     timeout = httpx.Timeout(SHIPPING_REQUEST_TIMEOUT_SECONDS)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(f"{API_URL}/api/v1/shipping/quote", json=payload, headers=headers)
-        body = resp.json() if resp.content else {}
-        if not isinstance(body, dict):
-            body = {"detail": "Respuesta inválida del servicio de shipping."}
-        return resp.status_code, body
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    f"{API_URL}/api/v1/shipping/quote",
+                    json=payload, headers=headers,
+                )
+                body = resp.json() if resp.content else {}
+                if not isinstance(body, dict):
+                    body = {"detail": "Respuesta inválida del servicio de shipping."}
+                return resp.status_code, body
+        except httpx.RequestError as exc:
+            last_exc = exc
+            logger.warning(
+                "[SHIPPING_QUOTE] transient error attempt=%d tenant=%s err=%s",
+                attempt + 1, tenant_id, exc,
+            )
+    return 504, {"detail": f"transient_timeout: {last_exc}"}
 
 
 def _build_quote_failure_response(detail: str, status_code: int) -> tuple[str, bool]:
@@ -1498,6 +1517,15 @@ def _build_quote_failure_response(detail: str, status_code: int) -> tuple[str, b
     if status_code in {400, 422}:
         return (
             "No pude validar la información para cotizar el envío. Confírmame ciudad y departamento.",
+            False,
+        )
+
+    # 504 = transient (timeout tras reintento). NO escalar a humano —
+    # cliente reintenta sin perder contexto. Diferenciar de 5xx persistente.
+    if status_code == 504:
+        return (
+            "El servicio de cotización está tardando más de lo esperado. "
+            "¿Probamos de nuevo en unos segundos?",
             False,
         )
 

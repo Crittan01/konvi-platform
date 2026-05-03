@@ -1,17 +1,21 @@
 #!/usr/bin/env python3.11
 """S9 — Happy path completo (compra fluida).
 
-OBJETIVO: validar flow end-to-end sin desorden hasta crear orden
-`pending_payment` en DB.
+OBJETIVO (rev. 103 — refactor mode=known):
 
-FLOW (≤ 18 turnos): saludo → producto → presentación → ciudad →
-cotización → carrier → consent → email → nombre → documento → dirección
-→ resumen → confirmación → orden creada.
+  • mode=new   : Flow end-to-end completo desde cero. ≤ 18 turnos:
+                 saludo → producto → presentación → ciudad → cotización
+                 → carrier → consent → email → nombre → documento →
+                 dirección → resumen → confirmación → orden creada.
+                 PASS: contact_row con consent_given=True + orden con
+                 status pending_payment + Habeas Data OK.
 
-PASS: contact_row con consent_given=True, orden con status
-pending_payment/confirmed.
-FAIL: contact no creado o status inesperado.
-SKIP: 18 turnos sin llegar a crear orden.
+  • mode=known : Cliente CONOCIDO con consent + PII completa pre-registrada.
+                 Flow corto (≤ 10 turnos): saludo personalizado → producto
+                 → presentación → carrier → resumen (sin re-pedir PII)
+                 → confirmación → link Wompi.
+                 PASS: bot NO disparó rules de PII (prio 30) ni de consent
+                 (prio 60); orden creada; PII intacta.
 """
 from __future__ import annotations
 import sys
@@ -28,13 +32,8 @@ import e2e_chat  # noqa: E402
 SUPPORTED_MODES = ("new", "known")
 
 
-def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
-    hard_reset(phone, tenant_id)
-    if mode == "known":
-        sb_seed = e2e_chat._supabase()
-        if not seed_known_contact(sb_seed, tenant_id, phone, name="Cristian"):
-            return ScenarioResult(9, "Happy path completo", FAIL,
-                "Seed known contact falló")
+def _scenario_new(phone: str, tenant_id: str) -> ScenarioResult:
+    """Cliente nuevo: flow completo con consent + recolección de PII."""
     profile = {
         "product_query": "1 jabón artesanal de coco",
         "presentation": "60 gramos",
@@ -55,7 +54,7 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
         f"phone.eq.{digits},phone.eq.+{digits}"
     ).limit(1).execute()
     if not contact.data:
-        return ScenarioResult(9, "Happy path completo", FAIL,
+        return ScenarioResult(9, "Happy path completo [new]", FAIL,
             f"Tras {res.turns} turnos, contact_row no creado",
             evidence={"transcript_tail": res.transcript[-3:]})
     c = contact.data[0]
@@ -64,9 +63,6 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
         "contact_id", contact_id
     ).order("created_at", desc=True).limit(1).execute()
 
-    # Rev. 103 — verificación Habeas Data: el bot debe persistir
-    # consent_source='whatsapp' (path post-consent) y dejar fila en
-    # consent_audit_log event='granted' source='whatsapp'.
     audit_granted = fetch_audit_events(sb, tenant_id, contact_id=contact_id,
                                        event="granted", limit=3)
     habeas_data_fails: list[str] = []
@@ -91,22 +87,104 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
         "transcript_tail": res.transcript[-3:],
     }
     if not orders.data:
-        return ScenarioResult(9, "Happy path completo", SKIP,
+        return ScenarioResult(9, "Happy path completo [new]", SKIP,
             f"Conversación cubrió {res.turns} turnos pero no llegó a crear "
             "orden — flujo posiblemente cortado en address/resumen",
             evidence=evidence)
     o = orders.data[0]
     if o.get("status") not in ("pending_payment", "confirmed"):
-        return ScenarioResult(9, "Happy path completo", FAIL,
+        return ScenarioResult(9, "Happy path completo [new]", FAIL,
             f"Orden creada pero status={o.get('status')} (esperado pending_payment)",
             evidence={**evidence, "order": o})
     if habeas_data_fails:
-        return ScenarioResult(9, "Happy path completo", FAIL,
+        return ScenarioResult(9, "Happy path completo [new]", FAIL,
             f"Orden creada pero Habeas Data incompleto: {'; '.join(habeas_data_fails)}",
             evidence={**evidence, "order_status": o.get("status")})
-    return ScenarioResult(9, "Happy path completo", PASS,
+    return ScenarioResult(9, "Happy path completo [new]", PASS,
         f"Orden {o['id'][:8]} status={o['status']} + Habeas Data OK en {res.turns} turnos",
         evidence={**evidence, "order_status": o.get("status")})
+
+
+def _scenario_known(phone: str, tenant_id: str) -> ScenarioResult:
+    """Cliente conocido: flow corto sin re-pedir PII existente."""
+    sb_seed = e2e_chat._supabase()
+    contact_id = seed_known_contact(sb_seed, tenant_id, phone, name="Cristian")
+    if not contact_id:
+        return ScenarioResult(9, "Happy path completo [known]", FAIL,
+            "Seed known contact falló")
+
+    seed_state = sb_seed.table("contacts").select(
+        "name, email, document_number, address"
+    ).eq("id", contact_id).limit(1).execute()
+    pre = seed_state.data[0] if seed_state.data else {}
+
+    profile = {
+        "product_query": "1 jabón artesanal de coco",
+        "presentation": "60 gramos",
+        "city": "Bogotá",
+    }
+    # Rules SIN PII (prio 30) ni consent (prio 60). Bot conoce al cliente
+    # → no debe preguntar nada de eso.
+    rules = [
+        r for r in default_response_rules(profile)
+        if r[0] not in (30, 60)
+    ]
+    drv = ConversationDriver(phone, tenant_id, rules, max_turns=10)
+    res = drv.run("Hola, quiero comprar un jabón artesanal de coco")
+
+    matched_history = " | ".join(res.matched_rule_history)
+    evidence = {
+        "turns": res.turns,
+        "matched_rules": res.matched_rule_history,
+        "transcript_tail": res.transcript[-3:],
+    }
+
+    sb = e2e_chat._supabase()
+    digits = phone.lstrip("+")
+    contact = sb.table("contacts").select(
+        "id, name, email, document_number, consent_given"
+    ).eq("tenant_id", tenant_id).or_(
+        f"phone.eq.{digits},phone.eq.+{digits}"
+    ).limit(1).execute()
+    if not contact.data:
+        return ScenarioResult(9, "Happy path completo [known]", FAIL,
+            "Contact desapareció", evidence=evidence)
+    c = contact.data[0]
+
+    fails: list[str] = []
+    asked_pii = any(s in matched_history for s in ("prio=30 ", "prio=60 "))
+    if asked_pii:
+        fails.append("Bot re-pidió PII al cliente conocido (rule prio 30/60 disparó)")
+    if c.get("name") != pre.get("name"):
+        fails.append(f"name overwriteado: pre={pre.get('name')!r} post={c.get('name')!r}")
+    if c.get("email") != pre.get("email"):
+        fails.append(f"email overwriteado: pre={pre.get('email')!r} post={c.get('email')!r}")
+
+    orders = sb.table("orders").select("id, status, total_amount").eq(
+        "contact_id", c["id"]
+    ).order("created_at", desc=True).limit(1).execute()
+    order_status = orders.data[0].get("status") if orders.data else None
+    if not orders.data:
+        return ScenarioResult(9, "Happy path completo [known]", SKIP,
+            f"Cliente conocido no llegó a orden en {res.turns} turnos",
+            evidence={**evidence, "matched_history": matched_history})
+    if order_status not in {"pending_payment", "confirmed"}:
+        fails.append(f"order.status={order_status!r} (esperado pending_payment)")
+
+    if fails:
+        return ScenarioResult(9, "Happy path completo [known]", FAIL,
+            "; ".join(fails),
+            evidence={**evidence, "order_status": order_status})
+    return ScenarioResult(9, "Happy path completo [known]", PASS,
+        f"Orden {orders.data[0]['id'][:8]} status={order_status} sin re-pedir PII en {res.turns} turnos",
+        evidence={**evidence, "order_status": order_status})
+
+
+def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
+    hard_reset(phone, tenant_id)
+    if mode == "known":
+        return _scenario_known(phone, tenant_id)
+    return _scenario_new(phone, tenant_id)
 
 
 if __name__ == "__main__":
