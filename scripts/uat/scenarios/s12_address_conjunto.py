@@ -75,7 +75,8 @@ _CONVERSATION_SEQUENCE: tuple[str, ...] = (
     "Torre 7 Apto 503",
     "Puedo agregar otro número de celular?",  # modify shipping_phone
     "3223840887",
-    "Si",                                    # final confirm
+    "Si",                                    # confirma resumen
+    "Si confirmo",                           # confirma generar link (2da confirm)
 )
 
 
