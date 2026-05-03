@@ -1,10 +1,256 @@
-# Próximos Pasos — Estado 2026-05-01 (rev. 100)
+# Próximos Pasos — Estado 2026-05-03 (rev. 103)
 
 ## ADRs activos
 
 - [docs/adr/0001-llm-tier-strategy.md](../docs/adr/0001-llm-tier-strategy.md) — Decisión rev. 81: AI Studio paid + cascada `flash → flash-lite → degraded` + model router. **NO** multi-API-key, **NO** Vertex AI por ahora. Contiene **triggers concretos** (§7) para revisitar la decisión cuando: tasa de cascada >10%, degraded >1%, tráfico >500 RPM/tenant, o 5+ tenants productivos. Validar estos umbrales antes de cualquier rev de scaling LLM.
 - [docs/adr/0002-meta-business-policy-compliance.md](../docs/adr/0002-meta-business-policy-compliance.md) — rev. 84/85: detectores pre-LLM healthcare + drugs + sensitive payment. Conservador con falsos positivos.
 - [docs/adr/0003-habeas-data-compliance-strategy.md](../docs/adr/0003-habeas-data-compliance-strategy.md) — rev. 93–99: cumplimiento Habeas Data Ley 1581/2012 end-to-end. Decisiones D1-D7, alternativas A1-A4, follow-ups F1-F7.
+
+---
+
+## Backlog rev. 103 — WhatsApp Templates HSM (F2-templates)
+
+**Trigger comercial**: 10 tenants en cola de integración al Platform Console.
+**6 de los 10** requieren capacidad de envío fuera de la CSW de 24h Meta vía
+templates HSM (recordatorios de pago, notificaciones de envío, alertas de
+abandono, etc.). Decisión rev. 103 (consensuada con stakeholder): implementar
+los **3 niveles de modularidad desde el inicio** — el costo de retrabajar
+schema y UI con tenants productivos es mayor que hacerlo bien ahora.
+
+### Specs verificadas (Meta docs oficial, 2026-05)
+
+Toda la implementación se basa en specs leídas directamente del Graph API
+de Meta — no asumir nada que no esté en estos refs:
+
+- **Endpoint creación**: `POST https://graph.facebook.com/v21.0/{WABA_ID}/message_templates`
+  - Body: `{name, language, category, components[]}`
+  - Categorías oficiales: `MARKETING`, `UTILITY`, `AUTHENTICATION` (no más).
+  - Componentes: `HEADER` (TEXT/IMAGE/DOCUMENT/VIDEO, max 60 chars text + 1 placeholder),
+    `BODY` (max 1024 chars), `FOOTER` (60 chars, sin placeholders),
+    `BUTTONS` (max 10 quick_reply, o URL/phone/copy_code/voice_call/flow).
+  - Placeholders: positional `{{1}} {{2}}` (default) o named `{{first_name}}`
+    (lowercase + underscores). Mutuamente excluyentes en el mismo template.
+  - Rate limit creación: **100 templates/hora por WABA**.
+- **Endpoint envío**: `POST https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages`
+  ```json
+  {
+    "messaging_product": "whatsapp",
+    "to": "573125835649",
+    "type": "template",
+    "template": {
+      "name": "payment_reminder_v1",
+      "language": {"code": "es_CO"},
+      "components": [
+        {"type": "body", "parameters": [
+          {"type": "text", "text": "AB12CD34"},
+          {"type": "text", "text": "5"}
+        ]}
+      ]
+    }
+  }
+  ```
+- **Aislamiento**: cada tenant tiene su propio **WABA** (WhatsApp Business
+  Account) con su propio set de templates. Max **250 templates por WABA**.
+  Max 2 phone numbers por WABA inicial (escala a 20). No hay riesgo de
+  cruce entre tenants — diseño Meta nativo multi-tenant.
+- **Webhook de aprobación**: campo `message_template_status_update` con
+  estados `PENDING | APPROVED | REJECTED | DISABLED | PAUSED |
+  LIMIT_EXCEEDED`. Suscribir es OBLIGATORIO para no enviar templates
+  inválidos. Tiempo de review Meta: hasta 24h (no garantizado más rápido).
+- **Pricing CO efectivo desde 2025-07-01**:
+  - Utility template **dentro de CSW**: gratis.
+  - Utility template **fuera de CSW**: ~$0.004 USD/msg.
+  - Marketing template: ~$0.025 USD/msg (siempre cobra).
+  - Authentication: ~$0.004 USD/msg.
+- **Rechazo de free-form fuera de CSW**: error `#131047 (Re-engagement
+  message)`. Sin templates aprobados, fuera de CSW = bot mudo.
+
+### Diseño F2 — 3 niveles de modularidad
+
+**Nivel 1 — Toggle global por tenant** (en `tenant_integrations.whatsapp.credentials`):
+
+```jsonc
+{
+  "phone_number_id": "...",
+  "waba_id": "...",                       // requerido para template management
+  "access_token": "<vault_ref>",
+  "templates_enabled": false,             // ← NIVEL 1: kill switch global
+  "template_namespace": "..."             // del WABA, retrieve via GET
+}
+```
+
+- `false` (default productivo conservador): bot NUNCA envía templates.
+  Out-of-CSW = skip silencioso (lo que F1 ya hace hoy).
+- `true`: bot puede enviar templates aprobados según niveles 2 y 3.
+
+**Nivel 2 — Per-template enable** (tabla nueva `whatsapp_templates`):
+
+```sql
+CREATE TABLE whatsapp_templates (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    waba_id         TEXT NOT NULL,
+    meta_template_id TEXT,                  -- id retornado por Meta tras crear
+    name            TEXT NOT NULL,          -- ej. "payment_reminder_v1"
+    language        TEXT NOT NULL,          -- ej. "es_CO"
+    category        TEXT NOT NULL,          -- MARKETING|UTILITY|AUTHENTICATION
+    body_text       TEXT NOT NULL,
+    components      JSONB NOT NULL,         -- estructura completa para resync
+    placeholders_format TEXT NOT NULL CHECK (placeholders_format IN ('positional','named')),
+    -- Estado Meta — sync vía webhook message_template_status_update
+    meta_status     TEXT NOT NULL DEFAULT 'PENDING'
+        CHECK (meta_status IN ('PENDING','APPROVED','REJECTED','DISABLED','PAUSED','LIMIT_EXCEEDED')),
+    meta_status_reason TEXT,                -- razón rechazo si meta_status=REJECTED
+    last_synced_at  TIMESTAMPTZ,
+    -- Control del tenant — independiente del meta_status
+    enabled         BOOLEAN NOT NULL DEFAULT true,
+    -- Audit
+    created_by_email TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, name, language)
+);
+```
+
+Regla de envío: solo dispara un template si `enabled=true AND
+meta_status='APPROVED' AND tenant.templates_enabled=true`. Permite que un
+tenant con 5 templates aprobados pause uno temporalmente sin perder el
+approved status de Meta.
+
+**Nivel 3 — Use-case mapping** (en `tenants` o tabla nueva
+`tenant_template_features`):
+
+```jsonc
+{
+  "tenant_id": "...",
+  "template_features": {
+    "payment_reminder":  "payment_reminder_v1",   // dispara este template
+    "shipping_eta":      null,                     // skip (no usar template)
+    "abandoned_cart":    "abandoned_cart_v2",
+    "order_confirmation": null
+  }
+}
+```
+
+Permite: "tenant usa template para recordar pago pero NO para envío
+(prefiere llamada del courier)". Si la feature está mapeada a `null`, el
+caso de uso **se salta** aunque haya templates aprobados disponibles.
+
+### Endpoints + jobs a implementar
+
+| Componente | Endpoint/Job | Descripción |
+|---|---|---|
+| `services/api/routers/whatsapp_templates.py` | `GET /api/v1/whatsapp_templates` | Lista templates del tenant + estado Meta |
+| ↑ | `POST /api/v1/whatsapp_templates` | Crea draft local + submit a Meta `POST /WABA_ID/message_templates` |
+| ↑ | `PUT /api/v1/whatsapp_templates/{id}` | Edit body/components (re-submit a Meta — pierde approval) |
+| ↑ | `DELETE /api/v1/whatsapp_templates/{id}` | Soft delete (DISABLED en Meta + enabled=false local) |
+| ↑ | `PATCH /api/v1/whatsapp_templates/{id}/toggle` | Solo enabled local (NO toca Meta) |
+| ↑ | `POST /api/v1/whatsapp_templates/sync` | Resync masivo desde `GET /WABA_ID/message_templates` |
+| `services/api/routers/whatsapp_webhook.py` | nuevo handler para `message_template_status_update` | Update meta_status local cuando Meta resuelve |
+| `services/ai-orchestrator/whatsapp_sender.py` | `send_template(name, language, components)` | Helper al lado de `send_whatsapp_message` |
+| `services/ai-orchestrator/worker.py:_send_payment_reminders_if_due` | branch CSW-cerrada | Si `tenant.templates_enabled` + `payment_reminder` mapeado + status=APPROVED → enviar template; else skip |
+
+### Tenant Console UI
+
+| Vista | Función |
+|---|---|
+| Settings → Integraciones → WhatsApp | Toggle nivel 1 + métrica de costo estimado mensual + botón "Resync templates" |
+| Settings → Templates | Lista con estado Meta + toggle enabled local + botón "Crear template" + botón "Re-someter" |
+| Settings → Templates → Crear/Editar | Form con: name (snake_case), language picker (es_CO default), category (MARKETING/UTILITY/AUTHENTICATION), body con preview de placeholders, footer opcional, buttons opcionales (URL/phone/quick_reply) |
+| Settings → Automatizaciones | Por feature (payment_reminder, abandoned_cart, shipping_update...): dropdown de templates aprobados + opción "Ninguno (skip)" |
+
+### Roadmap F2 (estimado)
+
+| Fase | Esfuerzo | Entregables |
+|---|---|---|
+| **F2.1 — Schema + sync básico** | 2 días | Migración `whatsapp_templates` + endpoint `sync` que importa templates aprobados existentes via Graph API |
+| **F2.2 — Webhook status update** | 1 día | Handler `message_template_status_update` + suscripción + tests |
+| **F2.3 — Endpoint envío template** | 1 día | `whatsapp_sender.send_template()` + integration con Vault para tokens |
+| **F2.4 — Reminder de pago via template** | 1 día | Branch CSW-cerrada en `_send_payment_reminders_if_due` usa template |
+| **F2.5 — UI Tenant Console (Settings → Templates)** | 3 días | Lista + crear + editar + toggle + sync manual |
+| **F2.6 — UI Settings → Automatizaciones (use-case mapping)** | 1 día | Mapping feature → template_name |
+| **F2.7 — UAT + 2 tenants piloto** | 2 días | Onboarding manual de 2 de los 6 tenants que requieren templates |
+| **Total estimado** | **~11 días** | F2 completo, listo para los otros 4 tenants |
+
+### Riesgos & mitigaciones (F2)
+
+| # | Riesgo | Mitigación |
+|---|---|---|
+| **R1** | Tenant sin permisos Business Manager para crear templates | Onboarding doc claro: el tenant debe tener acceso WABA + Business Manager admin + dar accesss al BSP. Validar al activar nivel 1. |
+| **R2** | Templates rechazados por Meta sin razón clara | Webhook captura `meta_status_reason`; UI lo muestra al tenant + banner con sugerencia (ej. "evita lenguaje promocional en Utility"). Permitir re-someter |
+| **R3** | Cambio de pricing Meta tras lanzamiento | Pricing solo se referencia para mostrar estimado al tenant — el cobro real lo hace Meta directo al WABA del tenant. Nuestro sistema NO factura. Documentar en onboarding. |
+| **R4** | Template aprobado se pausa por low quality (LIMIT_EXCEEDED) | Webhook detecta + UI pone alert rojo + se respeta el estado real (no se envía). Tenant debe corregir (ej. mejorar opt-in). |
+| **R5** | Categorización incorrecta (Utility marcado como Marketing → más caro) | Form UI obliga seleccionar categoría con tooltip de qué incluye cada una + ejemplos oficiales Meta. Validación adicional en backend (regex de palabras promocionales en body de Utility). |
+| **R6** | Tenant cambia el body del template y pierde approval | UI advierte explícitamente "Editar requiere nueva aprobación de Meta y puede tomar 24h". Versioning recomendado: `payment_reminder_v1` → `payment_reminder_v2`. |
+| **R7** | Token expirado al sincronizar templates | Reuso del flujo Vault existente para WhatsApp credentials + retry con backoff exponencial en el sync |
+
+### Out of scope F2 (para F3+)
+
+- **Template Builder visual drag-and-drop** (F3) — mientras se usa textarea + preview.
+- **A/B testing de templates** (F4).
+- **Analytics per-template**: open rate, click rate (Meta no provee opens en CSW; sí provee `delivered`/`read`/`failed` via webhook). Métricas via sub agregación nuestra (F4).
+- **Multi-language autotranslate** (F5).
+- **Marketing campaign scheduling** (F6) — F2 solo cubre Utility/Authentication para flujos transaccionales.
+
+### Dependencias antes de empezar F2
+
+- [ ] Confirmar que cada tenant tiene su WABA propio (no compartido). H7 podría afectar si rotamos tokens.
+- [ ] Identificar al "first tenant" piloto entre los 6. Preferencia: alguien técnico que entienda Meta Business Manager.
+- [ ] Confirmar dominio de webhook accesible públicamente para que Meta envíe `message_template_status_update` (ya tenemos `services/api` en Render).
+
+### Sources verificados
+
+- [WhatsApp Cloud API — Send Message Templates](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates/)
+- [WhatsApp Business Management API — Message Templates](https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/)
+- [Template Components — Meta for Developers](https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/components/)
+- [WhatsApp Business Accounts (WABA) Overview](https://developers.facebook.com/docs/whatsapp/overview/business-accounts/)
+- [Webhooks — message_template_status_update](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks/)
+- [Pricing Updates — WhatsApp Business Platform](https://developers.facebook.com/docs/whatsapp/pricing/updates-to-pricing/)
+- [Utility Messages — Official Use Cases](https://business.whatsapp.com/products/conversation-categories/utility)
+
+---
+
+## Backlog rev. 103 — UAT runtime (escenarios pendientes)
+
+UAT en `scripts/uat/scenarios/`. Patrón `--mode={new,known,both}` con
+`SUPPORTED_MODES = ("new","known")`. Validación dual obligatoria desde
+rev. 103 — el bot se comporta distinto en cada modo y el cierre debe
+cubrir ambos.
+
+| ID | Estado | Descripción | Notas |
+|---|---|---|---|
+| S1–S8 | ✅ PASS (sesiones previas) | Saludo, catálogo, cotización, captura PII, doc, dirección, confirmación, revocación Habeas Data | S8 con bifurcación Path A/B |
+| **S9** | ✅ PASS (rev. 103) | Happy path completo (12 turnos new / 7 known) | Orden + Wompi + Habeas Data |
+| **S10** | ⏳ Pendiente | Cliente cambia datos antes de pagar | "actualiza mi correo / dirección" — modo update |
+| **S11** | ⏳ Pendiente | Cliente cancela en pre-confirmación | Bot debe acusar + no crear orden |
+| **S12** | ⏳ Pendiente | Edificio/conjunto con apartment + tower | NEEDS_DIRECTION building_type variants |
+| **S13** | ⏳ Pendiente | Multi-product order (≥2 productos distintos) | Validar cart-as-SoT + sum dimensiones Envía |
+| **S14** | ⏳ Pendiente | Cliente menor de edad (CC <18) | Detector `_detect_minor_intent` debe escalar |
+| **S15** | ⏳ Pendiente | Out-of-domain (cliente pregunta política, etc) | KB lookup + bold regulatorio |
+| **S16** | ⏳ Pendiente | Off-topic / saludo sin intención de compra | Bot conversa breve sin forzar checkout |
+| **S17** | ⏳ Pendiente | Cliente pide hablar con humano | Escalation + after-hours mensaje SOLO aquí |
+| **S18** | ⏳ Pendiente | Cliente pregunta por pedido previo | `customer_context_block` + last_orders |
+| **S19** | ⏳ Pendiente | Reclamo (claim) abierto | Detector + handover |
+| **S20** | ⏳ Pendiente | Sensitive: medical / financial advice | Detectores ADR-0002 |
+| **S21** | ⏳ Pendiente | Cart abandonment + recovery | Cancelled order < 7 días → bot ofrece retake |
+| **S22** | ⏳ Pendiente | Phone alternativo de envío (rev. 103) | "el pedido lo recibe mi mamá, su celular es 322..." |
+| **S23** | ⏳ Pendiente | Pago confirmado vía Wompi webhook | `wompi_webhook` actualiza orden + bot acusa |
+| **S24** | ⏳ Pendiente | Pago fallido / link expirado | F1 reminder + status=cancelled |
+| **S25** | ⏳ Pendiente | Recuperación post-error LLM (cascade) | gemini-flash falla → flash-lite → degraded |
+
+---
+
+## Backlog rev. 103 — Follow-ups menores descubiertos
+
+| ID | Tarea | Esfuerzo | Trigger |
+|---|---|---|---|
+| **F-Inbox-1** | Visual de carrito + pedidos recientes en Inbox del Tenant Console (en `apps/web/dashboard/(sales)/inbox/`). Pieza ya existe en DB (`conversation_carts` + `orders`); falta render | ~3 días | Post-S24, todos los UAT cerrados |
+| **F-Order-1** | Persistir nombre del carrier (Coordinadora Ground / Mensajeros Urbanos) en `orders.shipping_carrier` o `shipping_meta`. Hoy solo aparece en el resumen del chat — al momento del pickup real Envía no sabe qué se prometió al cliente | ~1 día | Antes de primer pickup real con Envía |
+| **F-Cart-1** | Tightening de `_estimate_package_from_inventory` para evitar disambiguation cuando la cotización es solo de 1 carrier ítem visible | ~0.5 día | Si UAT S13 (multi-product) detecta el bug |
+| **F-S6-3** | Multi-shipping_phone por orden (un cliente envía a 2 personas en pedidos distintos). Hoy `shipping_phone` se sobrescribe a nivel de contact | ~1 día | Caso enterprise raro — esperar señal real |
+| **F-S3-3** | Upload de PDF/imagen al KB del tenant + send a customer. Hoy KB solo acepta texto | ~3 días | Tenant lo pide explícito |
+| **F-S3-4** | Bot envía PDF/link al customer (políticas de devolución, cuidado del producto, etc.) | ~1 día | Después de F-S3-3 |
+| **F-Catalog-1** | Catálogo amplio con paginación (cuando tenant tiene >50 productos). Hoy solo lista 5 categorías sin productos en saludo inicial | ~2 días | Tenant con catálogo grande detecta degradación UX |
 
 ---
 
