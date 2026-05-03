@@ -242,7 +242,7 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
           // el header de sección, comunicando jerarquía visual clara.
           // marker:opacity-80 atenúa los números para que no compitan
           // visualmente con el texto.
-          className="list-decimal pl-8 ml-2 my-1.5 space-y-0.5 marker:opacity-80"
+          className="list-decimal pl-7 ml-1 my-1.5 space-y-0.5 marker:opacity-80"
           start={startNum}
         >
           {items.map((it, ii) => (
@@ -270,7 +270,7 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
           // el header de sección. Antes con `pl-6` los bullets quedaban
           // pegados al borde izq del bubble — sin jerarquía visual.
           // marker:opacity-80 baja intensidad de los dots.
-          className="list-disc pl-8 ml-2 my-1.5 space-y-0.5 marker:opacity-80"
+          className="list-disc pl-7 ml-1 my-1.5 space-y-0.5 marker:opacity-80"
         >
           {items.map((it, ii) => (
             <li key={`ul.${blockKey}.${ii}`} className="pl-1">
