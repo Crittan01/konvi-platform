@@ -2967,6 +2967,26 @@ def _last_outbound_was_order_confirmation_question(history: list[dict]) -> bool:
     return False
 
 
+def _last_outbound_was_summary(history: list[dict]) -> bool:
+    """Rev. 103+ — True si el último outbound del bot ya fue un resumen.
+
+    Detecta cualquiera de: emoji 📋, label `*Resumen*`, ó la línea
+    `*TOTAL:` (presente solo en el resumen determinístico). Evita
+    re-emitir resumen si el cliente ya lo vio (idempotencia).
+    """
+    for msg in reversed(history or []):
+        if str(msg.get("direction") or "").strip().lower() != "outbound":
+            continue
+        content = str(msg.get("content") or "")
+        if "📋" in content:
+            return True
+        normalized = _normalize_text(content)
+        if "*resumen" in normalized or "resumen de tu pedido" in normalized:
+            return True
+        return False  # primer outbound más reciente no era resumen
+    return False
+
+
 def _detect_shipping_location_change(text: str, history: list[dict]) -> Optional[str]:
     """Rev. 87 — Detecta intent de cambiar ubicación de envío post-cotización.
 
@@ -3729,6 +3749,70 @@ def _extract_shipping_carrier_from_history(history: list[dict]) -> Optional[str]
                         return name
         # No match en este outbound — sigue buscando hacia atrás (NO return None aquí).
     return None
+
+
+def _persist_cart_shipping_if_needed(
+    *,
+    supabase: Client,
+    conversation_id: str,
+    tenant_id: str,
+    history: list[dict],
+) -> None:
+    """Rev. 103 — Cart-as-SoT: persiste shipping al cart cuando carrier
+    está seleccionado pero `cart.shipping_cents` aún es 0 o el cart está
+    en `requires_requote=True`.
+
+    Sin esta sincronización, el cart queda con `shipping_cents=0` y
+    `total_cents=subtotal_cents` aunque el carrier ya esté escogido. El
+    panel Inbox + el bot resumen + la UI de checkout necesitan workarounds
+    (`_extract_shipping_cost_from_history`, `_extract_shipping_cost_from_db`)
+    cada vez que leen el shipping. Al persistir aquí, el cart vuelve a ser
+    fuente única de verdad coherente: `subtotal + shipping = total`.
+
+    Idempotente: si el cart ya tiene shipping correcto y NO requires_requote,
+    no toca. Best-effort: si extracción falla, log warning y no bloquea.
+    """
+    try:
+        from tools.cart_tool import get_cart_with_items, set_shipping_meta
+    except Exception as exc:  # pragma: no cover
+        logger.warning("[CART_SYNC] import falló: %s", exc)
+        return
+    try:
+        cart = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning("[CART_SYNC] get_cart falló conv=%s: %s", conversation_id[:8], exc)
+        return
+    if not cart or not (cart.get("items") or []):
+        return
+    current_shipping = int(cart.get("shipping_cents") or 0)
+    requires_requote = bool(cart.get("requires_requote"))
+    if current_shipping > 0 and not requires_requote:
+        return  # ya sincronizado
+
+    ship_cents = _extract_shipping_cost_from_history(history) or 0
+    if ship_cents <= 0:
+        ship_cents = _extract_shipping_cost_from_db(supabase, conversation_id) or 0
+    if ship_cents <= 0:
+        return  # no hay cotización conocida — nada que persistir
+    carrier_name = _extract_shipping_carrier_from_history(history) or "Coordinadora"
+
+    try:
+        set_shipping_meta(
+            supabase,
+            cart_id=cart["id"],
+            tenant_id=tenant_id,
+            carrier=carrier_name,
+            service_level="Económica",
+            shipping_cents=ship_cents,
+        )
+        logger.info(
+            "[CART_SYNC] cart=%s shipping=%s carrier=%s persistido",
+            cart["id"][:8], ship_cents, carrier_name,
+        )
+    except Exception as exc:
+        logger.warning("[CART_SYNC] set_shipping_meta falló: %s", exc)
 
 
 def _generic_catalog_terms(catalog: list) -> set[str]:
@@ -5765,6 +5849,64 @@ def _enhance_kb_citation(text: str) -> str:
     return result
 
 
+def _ensure_kb_citation_present(text: str, kb_docs: list[dict]) -> str:
+    """Rev. 103 — Garantiza cita KB cuando el LLM la omitió.
+
+    El system prompt instruye al LLM a cerrar con `_Fuente: <título>_`
+    cuando usa la KB, pero en runs reales el modelo a veces lo olvida
+    (variabilidad ~5-15% según largo del contexto). Este post-process
+    determinístico cubre ese gap:
+
+      • Si el outbound tiene ≥ 30 chars verbatim de un kb_doc real →
+        anexa `_Fuente: <título>_` al final.
+      • Idempotente: si ya hay `_Fuente:` o `> Fuente:`, no toca.
+
+    Detección verbatim (no paraphrase): asegura que solo agrega cita
+    cuando el LLM realmente copió contenido de la KB. Evita falsos
+    positivos en respuestas que mencionan tópicos cubiertos por la KB
+    pero no la usan (ej. "tenemos política de devoluciones" sin citar
+    el plazo concreto).
+
+    El upgrade visual a `> Fuente: X` lo hace `_enhance_kb_citation`
+    durante el formato WhatsApp.
+    """
+    if not text or not kb_docs:
+        return text
+    if "_Fuente:" in text or "> Fuente:" in text:
+        return text
+
+    text_norm = re.sub(r"\s+", " ", text).strip()
+    if len(text_norm) < 30:
+        return text
+
+    best_overlap = 0
+    best_title = ""
+    for doc in kb_docs:
+        if doc.get("_synthetic_missing"):
+            continue
+        title = (doc.get("title") or "").strip()
+        content = (doc.get("content") or "").strip()
+        if not title or len(content) < 30:
+            continue
+        content_norm = re.sub(r"\s+", " ", content)
+        # Slide window 30 chars step 5 — busca overlap verbatim.
+        for i in range(0, max(0, len(text_norm) - 30) + 1, 5):
+            chunk = text_norm[i:i + 30]
+            if chunk in content_norm:
+                if len(chunk) > best_overlap:
+                    best_overlap = len(chunk)
+                    best_title = title
+                break
+
+    if not best_title:
+        return text
+    logger.info(
+        "[KB_CITE] LLM omitió cita — anexando _Fuente: %s (overlap=%d)",
+        best_title, best_overlap,
+    )
+    return text.rstrip() + f"\n\n_Fuente: {best_title}_"
+
+
 # ── Rev. 92 — Listado truncado determinístico ────────────────────────────────
 
 _CATEGORY_HEADER_RE = re.compile(r"^\*[^*\n]+:\*\s*$")
@@ -6890,6 +7032,24 @@ async def build_and_run_orchestration(
         _carrier_selected_db = _has_carrier_been_selected_in_conversation(
             supabase, conversation_id,
         )
+
+        # Rev. 103 — Cart-as-SoT: persistir shipping al cart en cuanto el
+        # carrier es detectado como seleccionado. Sin esto, el cart queda
+        # con shipping_cents=0 y total=subtotal — el panel Inbox y el
+        # resumen necesitan workarounds (extract_shipping_cost_from_history)
+        # para mostrar el shipping correcto. Con esto el cart es la única
+        # fuente de verdad coherente: subtotal + shipping = total.
+        if (
+            buying_intent
+            and (_has_carrier_been_selected(history_for_fsm) or _carrier_selected_db)
+        ):
+            _persist_cart_shipping_if_needed(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                history=history_for_fsm,
+            )
+
         display_state = _resolve_display_state(
             contact_record=contact_record,
             history=history_for_fsm,
@@ -7041,6 +7201,84 @@ async def build_and_run_orchestration(
                         conversation_id,
                     )
                     return
+
+        # Rev. 103+ — Bypass LLM: cuando display_state es READY_FOR_SUMMARY y
+        # el último outbound NO fue un resumen, emitir resumen determinístico
+        # cart-as-SoT antes de cualquier pregunta de confirmación. Garantiza
+        # contrato: cliente DEBE ver pedido + envío + total + datos de envío
+        # antes de aceptar. Aplica especialmente al cliente conocido que
+        # salta de carrier → READY_FOR_SUMMARY directo (sin pasar por
+        # NEEDS_CONSENT/NEEDS_EMAIL etc), donde el LLM tiende a emitir
+        # "Te genero el link" sin mostrar desglose. Idempotente: si el último
+        # outbound ya tiene `📋` o `*Resumen`, no re-emite.
+        #
+        # Guards adicionales para no interceptar updates de PII:
+        #   • inbound NO afirmativo (else dispara AWAITING_ORDER_CONFIRMATION).
+        #   • inbound NO contiene phone alternativo (else perdemos extracción
+        #     LLM de extracted_shipping_phone — caso S12 known T6 "3223840887"
+        #     respondiendo a "¿Cuál es tu número alterno?").
+        #   • inbound NO contiene email/document (PII update midflow).
+        _is_pii_update = bool(
+            _detect_shipping_phone_update(content or "")
+            or _detect_data_update_intent(content or "")
+        )
+        # Heurística adicional: si el inbound es 10+ dígitos consecutivos
+        # respondiendo a una pregunta del bot sobre número, es phone update.
+        _looks_like_phone = bool(
+            re.search(r"\b\+?5?7?\s?\d{10}\b", content or "")
+        )
+        if (
+            display_state == "READY_FOR_SUMMARY"
+            and not _last_outbound_was_summary(history or [])
+            and not _is_affirmative_confirmation(content or "")
+            and not _is_pii_update
+            and not _looks_like_phone
+        ):
+            try:
+                from tools.cart_tool import get_cart_with_items
+                _cart_resumen = get_cart_with_items(
+                    supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                )
+            except Exception as _ce:
+                logger.warning("[BYPASS_RESUMEN] cart fetch falló: %s", _ce)
+                _cart_resumen = None
+            if _cart_resumen and (_cart_resumen.get("items") or []):
+                _vctx = _verified_ctx_from_cart(_cart_resumen)
+                if _vctx and not _vctx.get("shipping_cost_cents"):
+                    _ship = (
+                        _extract_shipping_cost_from_history(history or []) or
+                        _extract_shipping_cost_from_db(supabase, conversation_id) or
+                        0
+                    )
+                    if _ship > 0:
+                        _vctx["shipping_cost_cents"] = _ship
+                        _vctx["total_cents"] = (
+                            int(_vctx.get("subtotal_cents") or 0) + _ship
+                        )
+                if _vctx and int(_vctx.get("total_cents") or 0) > 0:
+                    _resumen_text = _build_order_summary_text(
+                        contact_record=contact_record,
+                        verified_ctx=_vctx,
+                        catalog=catalog,
+                        history=history,
+                        cart_from_db=_cart_resumen,
+                    )
+                    if _resumen_text:
+                        await _send_outbound_text(
+                            supabase=supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            text=_resumen_text,
+                        )
+                        _mark_message_processing(
+                            supabase, message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        logger.info(
+                            "[BYPASS] READY_FOR_SUMMARY → resumen determinístico conv=%s",
+                            conversation_id[:8],
+                        )
+                        return
 
         # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
         if display_state == "READY_FOR_SUMMARY" and contact_id:
@@ -7457,6 +7695,15 @@ async def build_and_run_orchestration(
                 )
                 parsed.response_text = _truncated
 
+        # ── 6.999a Post-process rev. 103: cita KB obligatoria ────────────────
+        # Si el LLM omitió `_Fuente: X_` pero usó contenido verbatim ≥ 30 chars
+        # de un kb_doc real, anexamos la cita determinísticamente. El formato
+        # WhatsApp aplica el upgrade visual a `> Fuente:` después.
+        if parsed.response_text and kb_docs:
+            parsed.response_text = _ensure_kb_citation_present(
+                parsed.response_text, kb_docs,
+            )
+
         # ── 6.999b Post-process rev. 103: personalización cliente conocido ────
         # Si contact_record tiene consent + name Y es el primer outbound de
         # la conversación, garantizar que el saludo incluya el primer nombre.
@@ -7554,10 +7801,19 @@ async def build_and_run_orchestration(
                 # el cliente vea siempre el desglose antes de confirmar.
                 # Rev. 80: priorizar cart-en-DB como fuente de verdad para el
                 # resumen — evita que el resolver de history pierda items.
+                # Rev. 103+: incluir AWAITING_CARRIER_SELECTION como prior state
+                # (cliente conocido con PII completa salta directo de carrier
+                # → resumen sin pasar por NEEDS_*). Sin esto, el LLM componía
+                # "¿Confirmas?" sin mostrar el resumen primero, contradiciendo
+                # el contrato: cliente DEBE ver pedido + envío + total antes
+                # de aceptar para evitar sorpresas en el cobro.
                 if (
                     _new_state == "READY_FOR_SUMMARY"
-                    and display_state in {"NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
-                                          "NEEDS_DOCUMENT", "NEEDS_DIRECTION"}
+                    and display_state in {
+                        "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
+                        "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
+                        "AWAITING_CARRIER_SELECTION",
+                    }
                 ):
                     # Rev. 103 — Cart-as-SoT: el cart se persiste turn-by-turn
                     # vía `_detect_variant_confirmation` cuando el cliente
@@ -7702,10 +7958,23 @@ async def build_and_run_orchestration(
                 # por CTA si no hay payment_link_result.
                 "te genero el link de pago",
                 "te genero el link",
+                "te genero tu link de pago",
+                "te genero tu link",
                 "voy a generarte el link",
                 "te envio el link de pago",
                 "tu pedido esta listo",
                 "pedido esta listo",
+                # Rev. 103+: variantes en presente continuo sin entrega.
+                # Caso S9[known]: LLM dijo "Te estoy generando el link de
+                # pago para que finalices tu compra. Te lo envío en un
+                # momento." y nunca disparó payment_link_tool. Mensaje
+                # promesa-sin-entrega que confunde al cliente.
+                "te estoy generando el link",
+                "estoy generando el link",
+                "te lo envio en un momento",
+                "te lo envio en unos momentos",
+                "te lo envio en breve",
+                "te lo envio enseguida",
             )
             _resp_norm = _normalize_text(parsed.response_text or "")
             if not payment_link_result and any(p in _resp_norm for p in _LIE_PHRASES):
@@ -7714,10 +7983,50 @@ async def build_and_run_orchestration(
                     "Texto original: %r",
                     conversation_id, (parsed.response_text or "")[:200],
                 )
-                parsed.response_text = (
-                    "Antes de confirmarte el pedido necesito tu visto bueno. "
-                    "¿Confirmas para generar tu link de pago?"
-                )
+                # Rev. 103+: si tenemos cart con items + carrier seleccionado,
+                # emitir el RESUMEN determinístico en lugar del CTA genérico.
+                # Cumple contrato: cliente DEBE ver desglose antes de confirmar.
+                _replacement_text: str | None = None
+                if not _last_outbound_was_summary(history or []):
+                    try:
+                        from tools.cart_tool import get_cart_with_items
+                        _cart_lh = get_cart_with_items(
+                            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                        )
+                    except Exception:
+                        _cart_lh = None
+                    if _cart_lh and (_cart_lh.get("items") or []):
+                        _vctx_lh = _verified_ctx_from_cart(_cart_lh)
+                        if _vctx_lh and not _vctx_lh.get("shipping_cost_cents"):
+                            _ship_lh = (
+                                _extract_shipping_cost_from_history(history or []) or
+                                _extract_shipping_cost_from_db(supabase, conversation_id) or
+                                0
+                            )
+                            if _ship_lh > 0:
+                                _vctx_lh["shipping_cost_cents"] = _ship_lh
+                                _vctx_lh["total_cents"] = (
+                                    int(_vctx_lh.get("subtotal_cents") or 0) + _ship_lh
+                                )
+                        if _vctx_lh and int(_vctx_lh.get("total_cents") or 0) > 0:
+                            _replacement_text = _build_order_summary_text(
+                                contact_record=contact_record,
+                                verified_ctx=_vctx_lh,
+                                catalog=catalog,
+                                history=history,
+                                cart_from_db=_cart_lh,
+                            )
+                if _replacement_text:
+                    parsed.response_text = _replacement_text
+                    logger.info(
+                        "[ANTI_HALLU] reemplazo LIE→resumen determinístico conv=%s",
+                        conversation_id[:8],
+                    )
+                else:
+                    parsed.response_text = (
+                        "Antes de confirmarte el pedido necesito tu visto bueno. "
+                        "¿Confirmas para generar tu link de pago?"
+                    )
 
             # Bug 30 — sincronizar texto y status. Si el response_text promete
             # handover ("te paso con un asesor") pero requires_human=False, el

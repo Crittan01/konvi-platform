@@ -394,15 +394,21 @@ def set_shipping_meta(
     cart_id: str,
     tenant_id: str,
     carrier: str,
-    service_level: str,
-    rate_id: Optional[str],
-    city: str,
-    dane_code: Optional[str],
-    address_line: Optional[str],
-    weight_inputs: dict,
-    shipping_cents: int,
+    service_level: str = "",
+    rate_id: Optional[str] = None,
+    city: Optional[str] = None,
+    dane_code: Optional[str] = None,
+    address_line: Optional[str] = None,
+    weight_inputs: Optional[dict] = None,
+    shipping_cents: int = 0,
 ) -> dict:
-    """Persiste la rate Envia elegida + recalcula totals + clear requires_requote."""
+    """Persiste la rate Envia elegida + recalcula totals + clear requires_requote.
+
+    Rev. 103 — todos los campos meta son opcionales para que el orchestrator
+    pueda persistir cart shipping con info parcial (carrier + cents) cuando
+    detecta selección post-quote, y luego enriquecerla si shipping_quote_tool
+    corre con datos completos. El total siempre se recalcula coherente.
+    """
     # Leer subtotal actual para recomputar total.
     cur = (
         supabase.table("conversation_carts")
