@@ -238,10 +238,11 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
       blocks.push(
         <ol
           key={`ol.${blockKey++}`}
-          // Rev. 103 — pl-7 da espacio para que el número quepa cómodamente
-          // (antes pl-5 cortaba). marker:opacity-80 atenúa los números para
-          // que no compitan visualmente con el texto.
-          className="list-decimal pl-7 my-1.5 space-y-0.5 marker:opacity-80"
+          // Rev. 103 — pl-8 + ml-2 desplaza la lista hacia la derecha bajo
+          // el header de sección, comunicando jerarquía visual clara.
+          // marker:opacity-80 atenúa los números para que no compitan
+          // visualmente con el texto.
+          className="list-decimal pl-8 ml-2 my-1.5 space-y-0.5 marker:opacity-80"
           start={startNum}
         >
           {items.map((it, ii) => (
@@ -265,9 +266,11 @@ export function renderWhatsAppFormat(text: string): React.ReactNode {
       blocks.push(
         <ul
           key={`ul.${blockKey++}`}
-          // Rev. 103 — pl-6 da espacio cómodo para la viñeta separada del
-          // borde del bubble. marker:opacity-80 baja intensidad de los dots.
-          className="list-disc pl-6 my-1.5 space-y-0.5 marker:opacity-80"
+          // Rev. 103 — pl-8 + ml-2 desplaza la lista hacia la derecha bajo
+          // el header de sección. Antes con `pl-6` los bullets quedaban
+          // pegados al borde izq del bubble — sin jerarquía visual.
+          // marker:opacity-80 baja intensidad de los dots.
+          className="list-disc pl-8 ml-2 my-1.5 space-y-0.5 marker:opacity-80"
         >
           {items.map((it, ii) => (
             <li key={`ul.${blockKey}.${ii}`} className="pl-1">
