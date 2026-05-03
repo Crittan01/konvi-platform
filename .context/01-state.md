@@ -1,9 +1,159 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-05-01 (rev. 102 · Habeas Data UX hardening + 5 bugs runtime resueltos)
+**Última actualización**: 2026-05-03 (rev. 103 · SaaS B2B pivot Contactos + UAT S1–S9 PASS + F1 reminder dentro de CSW)
 **Fuente de verdad**: DB live (Supabase `xmelwnhhphksbpdjmbbp`) + contratos en código.
 **Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
+
+---
+
+## Cierre rev. 103 (2026-05-03) — SaaS B2B pivot + UAT runtime + F1 payment reminder
+
+Sesión larga (>40 commits) con foco en **producción** — el proyecto entra a fase
+de integración con 10 tenants reales (6 con WhatsApp Templates HSM aprobados).
+Pivote del módulo Contactos hacia modelo SaaS B2B (Wati / Mailchimp / Respond.io)
++ validación end-to-end del bot en escenarios reales + base para F2 (templates).
+
+**Migraciones aplicadas (remote + ledger sync)**:
+
+- `20260510030000_contacts_shipping_phone.sql` — `contacts.shipping_phone TEXT`
+  opcional. Caso real: hijo compra para mamá. WhatsApp = handle chat / titular
+  pago; shipping_phone = número del receptor del envío.
+- `20260510040000_contacts_shipping_phone_default.sql` — backfill de filas
+  existentes + trigger BEFORE INSERT/UPDATE que defaultea `shipping_phone =
+  phone` cuando viene NULL/empty. Defensa en profundidad: orchestrator INSERT
+  + addContact/editContact + DB trigger. Razón: la transportadora siempre
+  necesita un número de contacto; el shipping_phone solo se sobrescribe si
+  el cliente lo pide explícito.
+- `20260510050000_orders_payment_reminder_sent_at.sql` — `orders.payment_reminder_sent_at TIMESTAMPTZ`
+  para idempotencia del cron F1 (recordatorio de pago a +25 min dentro de la
+  CSW de 24h de Meta). Ver F1 abajo.
+
+**SaaS B2B pivot del módulo Contactos**:
+
+- Add/Edit form simplificado: 4 capas defensivas Habeas Data (UI disabled
+  sin consent + server guard + DB constraint + CONSENT_SOURCES module-scope).
+- Form Edit: input `Celular envío` con visual `+57 | 10dígitos` (mismo patrón
+  que phone WhatsApp). Hint contextual "Igual al WhatsApp" / "Distinto al
+  WhatsApp" según presencia de shipping_phone alterno.
+- Card de contact: badge ámbar "Envío:" SOLO cuando shipping_phone difiere
+  del WhatsApp (no clutter cuando son iguales).
+- MeLi import: `_normalize_phone_e164` helper + migración legacy de phone en
+  upsert (rev. 103 corrige formato divergente entre canales).
+- Delete contact: usa `createAdminClient()` para audit log INSERT (RLS solo
+  permite service_role) + user-auth client para DELETE — separación de
+  privilegios.
+
+**Bot UX improvements (validados en S1–S9)**:
+
+- **Revocación bifurcada Path A/B** (S8): cuando cliente nuevo (sin
+  consent + sin PII) pide eliminar datos, bot da tranquilidad sin afirmar
+  falsamente que eliminó datos inexistentes ("No tengo datos personales
+  tuyos registrados..."). Cliente conocido (Path A) recibe revocación legal
+  Art. 9 + 15 con audit_log inmutable.
+- **Catálogo amplio minimalista** (rev. 103 UX feedback): max 5 categorías
+  en respuesta inicial, sin productos, blockquote marketing al final.
+- **Carrier ack pre-consent**: cuando el cliente dice "sigamos" tras quote
+  multi-opción, bot prepende *"Listo, voy con la opción Económica
+  (Coordinadora Ground) por $7.310 COP"* antes de la pregunta de consent.
+  Antes saltaba silenciosamente al consent, dando sensación de que el bot
+  asumía sin avisar.
+- **Resumen pedido**: línea de envío ahora dice *"Envío (Económica -
+  Coordinadora Ground): $7.310 COP"* (antes solo "$7.310"). Carrier visible.
+- **Cart-recovery deterministic**: 3 helpers nuevos en orchestrator
+  (`_fetch_recoverable_cart_items`, `_last_outbound_offered_cart_retake`,
+  `_detect_cart_retake_acceptance`, `_persist_recovered_cart_items`).
+  Cuando bot ofrece retomar cart cancelado y cliente acepta, los items se
+  copian a `conversation_cart_items` (cart-as-SoT). Sin esto el bot
+  mencionaba items pero `shipping_quote_tool` veía cart vacío → caía a
+  inventory disambiguation y pedía clarificar producto que ya conocía.
+- **Multi-product matcher tightening**: `_generic_catalog_terms(catalog)`
+  detecta palabras compartidas por ≥40% del catálogo ("jabon", "artesanal"
+  en una tienda con 5 jabones). El matcher de productos en
+  `_build_verified_multi_product_context` ahora exige que TODAS las palabras
+  discriminativas estén en el inbound (no solo overlap genérico). Antes el
+  cliente que pedía "1 jabón artesanal de coco" generaba orden con 4
+  jabones distintos por overlap "jabon"+"artesanal". Issue grave de venta
+  cruzada involuntaria — fix crítico para producción.
+- **Phone null defense**: `_format_phone_for_summary` filtra "null"/"none"
+  string + `_fix_null_phone_in_summary` post-process reemplaza por
+  customer_phone real. Bot ya no muestra "Celular: null" en resumen.
+- **Personalización conditional**: `_inject_known_customer_name` fuerza el
+  primer nombre solo en el primer outbound y SOLO si `consent_given=true`
+  (privacy regla — no personalizar antes de tener consent registrado).
+- **KB regulatory bolding**: `_bold_kb_terms` post-process resalta términos
+  regulatorios ("15 días", "sin usar", "factura") en respuestas de política.
+- **Conector cordial**: `_enrich_image_caption` antepone "Claro, mira
+  *{name}*:" antes de imagen (UX feedback).
+- **Eliminados emojis customer-facing**: 🎉 ✅ 👋 removidos de templates +
+  system prompts (Sara persona, `_TONO_INSTRUCCIONES`, `_SAFETY_GREETING_BANK`,
+  payment_link_tool, wompi_webhook, dashboard placeholders, admin chat,
+  startup logs). El tono queda profesional sin coloquialismos visuales.
+- **After-hours disclaimer**: el system prompt ahora obliga al LLM a NO
+  mencionar espontáneamente "asesores fuera de horario" en saludos. SOLO
+  cuando el cliente pide explícitamente hablar con humano. Antes el bot
+  soltaba el disclaimer en T1 y rompía la experiencia transaccional 24/7.
+- **Disclaimer payment-link en blockquote**: el "El link es válido por 30
+  minutos..." ahora va con `> ` (cita) para separación visual del CTA.
+
+**F1 — Recordatorio de pago dentro de CSW Meta** (rev. 103, sesión actual):
+
+Cron en `services/ai-orchestrator/worker.py:_send_payment_reminders_if_due()`
+que corre cada 60s. Para cada orden en `pending_payment` con `created_at`
+en rango `[now-30min, now-25min)` y `payment_reminder_sent_at IS NULL`:
+1. Lee última INBOUND del cliente en `messages`.
+2. Si está dentro de CSW (`META_CSW_HOURS=24`): envía free-form **gratis**
+   *"Te queda 5 min para usar el link de pago de tu pedido #XXXXXXXX..."*
+   y persiste outbound en `messages` (visible en Inbox).
+3. Si CSW cerrada: skip + mark idempotent. F2 (templates HSM) cubrirá.
+4. Marca `payment_reminder_sent_at = now()`.
+
+Métricas: `payment_reminders_sent`, `payment_reminders_skipped_csw_closed`.
+
+**Validado dentro de docs oficiales Meta** (mayo 2026):
+[Service messages](https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/send-messages) ·
+[Pricing](https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing) ·
+[Utility messages](https://business.whatsapp.com/products/conversation-categories/utility) — desde
+2025-07-01 templates Utility dentro de CSW son **gratis**; fuera cuestan
+~$0.004 USD/msg (tarifa CO).
+
+**UAT runtime (S1–S9 PASS)**:
+
+Suite UAT en `scripts/uat/scenarios/` con `run_one()` runner aislado.
+Escenarios validados con `--mode={new,known}`:
+
+- S1 saludo, S2 catálogo, S3 cotización, S4 captura PII, S5 documento,
+  S6 dirección, S7 confirmación, S8 revocación Habeas Data
+  (Path A + B), S9 happy path completo (12 turnos new / 7 turnos known).
+- S9 PASS evidencia: orden creada en `pending_payment` + Wompi link generado
+  + Habeas Data OK (consent_source=whatsapp + audit_granted_count=1) +
+  resumen con carrier visible + resumen con celular formateado E.164.
+
+**Test harness fixes**:
+
+- `wait_outbound` filtra `content_type='context_snapshot'` (R-13 inserta
+  filas internas con direction=outbound + content="" que el harness
+  contaba como outbounds vacíos).
+- `extract_question_context` retorna texto completo cuando NO hay `?`
+  (antes truncaba a 200 chars y cortaba "Para completar la dirección").
+- Regla harness prio 20 nueva para multi-opción carrier ("¿Con cuál
+  continuamos? Económica o Rápida" → "Económica por favor"). Antes caía a
+  fallback "Sigamos con la compra" (ambiguo).
+- Regla productos prio 10→17 para ganar contra prio 15 "cotizar el envío"
+  cuando el bot saluda mencionando ambos.
+- `seed_known_contact` ahora escribe fila histórica en `consent_audit_log`
+  (event=granted, source=whatsapp, actor_email='uat_seed@harness.local')
+  para que el test mode=known no falle por ausencia de fila granted.
+
+**Suite**: 1267 tests Python · TS check · ESLint · 13/13 validate.sh OK.
+
+**Decisiones arquitectónicas (memorias persistidas)**:
+
+- 60% de los 10 tenants en cola requieren **WhatsApp Templates HSM** →
+  decisión rev. 103: implementar **F2 con 3 niveles desde el inicio**
+  (toggle global por tenant + per-template enable + use-case mapping).
+  Razón: con tenants productivos ya integrados, retrabajar schema y UI
+  más adelante es mucho más costoso. Ver F2 en `04-next-steps.md`.
 
 ---
 
