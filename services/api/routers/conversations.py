@@ -421,10 +421,31 @@ async def get_conversation_context(
         except Exception as ce:
             logger.warning("Error cargando active_cart conv=%s: %s", conversation_id, ce)
 
+        # Rev. 103 — Reclamos abiertos del cliente (mismo bloque que el bot
+        # ve en su system prompt). El operador humano debe poder verlos en
+        # el panel para no duplicar trabajo y dar continuidad.
+        open_claims: List[dict] = []
+        if contact_id:
+            try:
+                claims_res = (
+                    supabase.table("claims")
+                    .select("id, ticket_number, status, created_at, type")
+                    .eq("tenant_id", tenant_id)
+                    .eq("customer_id", contact_id)
+                    .eq("status", "open")
+                    .order("created_at", desc=True)
+                    .limit(5)
+                    .execute()
+                )
+                open_claims = claims_res.data or []
+            except Exception as cle:
+                logger.warning("Error cargando claims conv=%s: %s", conversation_id, cle)
+
         return {
             "contact": contact,
             "recent_orders": recent_orders,
             "active_cart": active_cart,
+            "open_claims": open_claims,
             "products": products,
             "product_count": product_count,
             "low_stock_count": low_stock_count,

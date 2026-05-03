@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { createIdempotencyKey } from '@/lib/idempotency'
+import { renderWhatsAppFormat, stripWhatsAppFormat } from '@/lib/whatsapp-format'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Conversation {
@@ -114,10 +115,20 @@ interface ActiveCart {
   requires_requote: boolean
 }
 
+// Rev. 103 — Reclamos abiertos espejo del system prompt.
+interface OpenClaim {
+  id: string
+  ticket_number: string
+  status: string
+  type?: string | null
+  created_at: string
+}
+
 interface ConvContext {
   contact: ContactRow | null
   recent_orders: OrderRow[]
   active_cart: ActiveCart | null
+  open_claims: OpenClaim[]
   products: Product[]
   product_count: number
   low_stock_count: number
@@ -216,6 +227,59 @@ const formatDateTime = (d: string) => {
 const formatMoney = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(v)
 
+// Rev. 103 — Toolbar helpers para editor con formato WhatsApp.
+// `wrapSelection` envuelve la selección actual con el marker (ej. *).
+// Si no hay selección, inserta `marker marker` y deja el cursor entre.
+function wrapSelection(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  setText: (v: string) => void,
+  marker: string,
+): void {
+  const ta = ref.current
+  if (!ta) return
+  const start = ta.selectionStart ?? 0
+  const end = ta.selectionEnd ?? start
+  const before = ta.value.slice(0, start)
+  const sel = ta.value.slice(start, end)
+  const after = ta.value.slice(end)
+  const wrapped = `${marker}${sel || 'texto'}${marker}`
+  const newVal = `${before}${wrapped}${after}`
+  setText(newVal)
+  // Re-focus + select el texto envuelto para edición fluida.
+  setTimeout(() => {
+    ta.focus()
+    const newStart = before.length + marker.length
+    const newEnd = newStart + (sel.length || 'texto'.length)
+    ta.setSelectionRange(newStart, newEnd)
+  }, 0)
+}
+
+// `prefixLine` agrega el prefix al inicio de cada línea seleccionada
+// (o de la línea donde está el cursor si no hay selección).
+function prefixLine(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  setText: (v: string) => void,
+  prefix: string,
+): void {
+  const ta = ref.current
+  if (!ta) return
+  const start = ta.selectionStart ?? 0
+  const end = ta.selectionEnd ?? start
+  const value = ta.value
+  // Localizar inicio y fin de las líneas tocadas
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1
+  const lineEndRaw = value.indexOf('\n', end)
+  const lineEnd = lineEndRaw === -1 ? value.length : lineEndRaw
+  const block = value.slice(lineStart, lineEnd)
+  const prefixed = block.split('\n').map(l => `${prefix}${l}`).join('\n')
+  const newVal = `${value.slice(0, lineStart)}${prefixed}${value.slice(lineEnd)}`
+  setText(newVal)
+  setTimeout(() => {
+    ta.focus()
+    ta.setSelectionRange(lineStart + prefix.length, lineStart + prefixed.length)
+  }, 0)
+}
+
 function variationLabel(v: ProductVariation): string {
   if (v.attributes && Object.keys(v.attributes).length > 0) {
     return Object.entries(v.attributes).map(([k, val]) => `${k}: ${val}`).join(', ')
@@ -261,6 +325,9 @@ export default function InboxPage() {
   const [contextPanelOpen, setContextPanelOpen] = useState(true)
   const [convContext, setConvContext] = useState<ConvContext | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
+  // Rev. 103 — indicador silencioso de auto-refresh (visible en header panel
+  // como pequeño spinner cuando el polling silent dispara).
+  const [contextRefreshing, setContextRefreshing] = useState(false)
   const [productSearchForm, setProductSearchForm]       = useState('')  // búsqueda en mini-form de pedido
   const [productSearchCatalog, setProductSearchCatalog] = useState('')  // búsqueda en catálogo informativo
   const [showAllOrders, setShowAllOrders] = useState(false)  // B2: paginación pedidos
@@ -424,6 +491,7 @@ export default function InboxPage() {
     let cancelled = false
 
     const fetchContext = async (opts?: { silent?: boolean }) => {
+      if (opts?.silent) setContextRefreshing(true)
       try {
         const { data } = await supabase.auth.getSession()
         const token = data.session?.access_token
@@ -441,8 +509,9 @@ export default function InboxPage() {
       } catch (e) {
         if (!controller.signal.aborted && !opts?.silent) console.warn('context error', e)
       } finally {
-        if (!opts?.silent && !cancelled && !controller.signal.aborted) {
-          setContextLoading(false)
+        if (!cancelled && !controller.signal.aborted) {
+          if (opts?.silent) setContextRefreshing(false)
+          else setContextLoading(false)
         }
       }
     }
@@ -1034,7 +1103,7 @@ export default function InboxPage() {
                   {conv.last_message && (
                     <p className="text-[11px] text-muted-foreground ml-4 truncate">
                       {conv.last_message.direction === 'outbound' ? '→ ' : ''}
-                      {conv.last_message.content}
+                      {stripWhatsAppFormat(conv.last_message.content)}
                     </p>
                   )}
                   <div className="ml-4 mt-1">
@@ -1079,14 +1148,35 @@ export default function InboxPage() {
                   <div className="h-8 w-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
                     <Phone className="h-3.5 w-3.5 text-primary" />
                   </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate">{formatPhone(selectedConv.customer_phone)}</p>
-                    <span
-                      className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${STATUS_CONFIG[selectedConv.status].color}`}
-                      title={STATUS_CONFIG[selectedConv.status].description}
-                    >
-                      {STATUS_CONFIG[selectedConv.status].label}
-                    </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm truncate">
+                      {convContext?.contact?.name || formatPhone(selectedConv.customer_phone)}
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${STATUS_CONFIG[selectedConv.status].color}`}
+                        title={STATUS_CONFIG[selectedConv.status].description}
+                      >
+                        {STATUS_CONFIG[selectedConv.status].label}
+                      </span>
+                      {/* Rev. 103 — SLA timer: muestra hace cuánto fue el último
+                          mensaje INBOUND del cliente. Naranja si >5min, rojo si >15min. */}
+                      {(() => {
+                        const lastInbound = [...messages].reverse().find(m => m.direction === 'inbound')
+                        if (!lastInbound) return null
+                        const ageMs = Date.now() - new Date(lastInbound.created_at).getTime()
+                        const ageMin = Math.floor(ageMs / 60000)
+                        let cls = 'text-muted-foreground'
+                        if (ageMin >= 15) cls = 'text-red-600 font-medium'
+                        else if (ageMin >= 5) cls = 'text-amber-600 font-medium'
+                        return (
+                          <span className={`inline-flex items-center gap-0.5 text-[10px] ${cls}`} title={`Último mensaje del cliente: ${formatDateTime(lastInbound.created_at)}`}>
+                            <Clock className="h-2.5 w-2.5" />
+                            {timeAgo(lastInbound.created_at)}
+                          </span>
+                        )
+                      })()}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1234,7 +1324,9 @@ export default function InboxPage() {
                         </a>
                       ) : null}
                       {msg.content && (
-                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                        <p className="whitespace-pre-wrap break-words">
+                          {renderWhatsAppFormat(msg.content)}
+                        </p>
                       )}
                       <p className={`text-[11px] mt-1 flex items-center gap-1.5 flex-wrap ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
                         {timeAgo(msg.created_at)}
@@ -1273,15 +1365,59 @@ export default function InboxPage() {
             {selectedConv.status === 'human_takeover' ? (
               <div className="p-3 border-t border-border bg-card space-y-2">
                 {sendError && <p className="text-xs text-red-400 text-center">{sendError}</p>}
+                {/* Rev. 103 — Toolbar de formato WhatsApp (estilo Teams/Slack).
+                    Inserta los markers alrededor de la selección o donde
+                    está el cursor. Atajos Ctrl+B / Ctrl+I dentro del textarea. */}
+                <div className="flex items-center gap-1 px-1">
+                  <button
+                    type="button"
+                    onClick={() => wrapSelection(replyInputRef, setReplyText, '*')}
+                    title="Negrita (Ctrl+B)"
+                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm font-bold"
+                  >B</button>
+                  <button
+                    type="button"
+                    onClick={() => wrapSelection(replyInputRef, setReplyText, '_')}
+                    title="Cursiva (Ctrl+I)"
+                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm italic"
+                  >I</button>
+                  <button
+                    type="button"
+                    onClick={() => wrapSelection(replyInputRef, setReplyText, '~')}
+                    title="Tachado"
+                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm line-through"
+                  >S</button>
+                  <button
+                    type="button"
+                    onClick={() => wrapSelection(replyInputRef, setReplyText, '```')}
+                    title="Monoespaciado"
+                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-mono"
+                  >{'</>'}</button>
+                  <button
+                    type="button"
+                    onClick={() => prefixLine(replyInputRef, setReplyText, '> ')}
+                    title="Cita"
+                    className="h-7 w-7 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm"
+                  >&ldquo;&rdquo;</button>
+                  <span className="text-[10px] text-muted-foreground ml-2">
+                    *negrita* _cursiva_ ~tachado~ ```mono```
+                  </span>
+                </div>
                 <div className="flex gap-2 items-end">
                   <textarea
                     ref={replyInputRef}
                     value={replyText}
                     onChange={e => { setReplyText(e.target.value); setSendError(null) }}
                     onKeyDown={e => {
+                      // Atajos de formato (Ctrl+B / Ctrl+I) — antes de Enter handler
+                      if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
+                        const k = e.key.toLowerCase()
+                        if (k === 'b') { e.preventDefault(); wrapSelection(replyInputRef, setReplyText, '*'); return }
+                        if (k === 'i') { e.preventDefault(); wrapSelection(replyInputRef, setReplyText, '_'); return }
+                      }
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage() }
                     }}
-                    placeholder="Escribe tu respuesta... (Enter para enviar)"
+                    placeholder="Escribe tu respuesta... (Enter para enviar · Shift+Enter nueva línea · Ctrl+B negrita)"
                     disabled={sending}
                     rows={2}
                     className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -1295,6 +1431,15 @@ export default function InboxPage() {
                     {sending ? <span className="text-xs animate-pulse">…</span> : <Send className="h-4 w-4" />}
                   </Button>
                 </div>
+                {/* Preview formateado del mensaje a enviar */}
+                {replyText.trim() && (
+                  <div className="rounded-lg bg-background/50 border border-border/40 px-3 py-2 text-xs">
+                    <p className="text-[10px] text-muted-foreground mb-1">Vista previa:</p>
+                    <div className="whitespace-pre-wrap break-words">
+                      {renderWhatsAppFormat(replyText)}
+                    </div>
+                  </div>
+                )}
                 <p className="text-[11px] text-amber-600 font-medium text-center flex items-center justify-center gap-1">
                   <User className="h-3 w-3" /> Modo agente humano (bot silenciado)
                 </p>
@@ -1320,10 +1465,13 @@ export default function InboxPage() {
           ${mobileView === 'context' ? 'flex' : 'hidden lg:flex'}
           ${contextPanelOpen ? 'lg:flex' : 'lg:hidden'}
         `}>
-          {/* Header panel */}
+          {/* Header panel — Rev. 103: indicador silencioso de auto-refresh */}
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <span className="text-sm font-semibold flex items-center gap-2">
               <User className="h-4 w-4 text-primary" /> Contexto del cliente
+              {contextRefreshing && (
+                <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" aria-label="Sincronizando" />
+              )}
             </span>
             <button
               onClick={() => setMobileView('chat')}
@@ -1337,31 +1485,45 @@ export default function InboxPage() {
 
             {/* Contacto */}
             <section className="p-4 border-b border-border">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Contacto</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contacto</p>
+                {convContext?.contact?.id && (
+                  <a
+                    href={`/dashboard/contacts?id=${convContext.contact.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Abrir perfil completo del cliente en nueva pestaña"
+                    className="text-[10px] text-primary hover:underline inline-flex items-center gap-0.5"
+                  >
+                    Ver perfil <ChevronsRight className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
               {contextLoading ? (
                 <div className="h-12 rounded-lg bg-border/30 animate-pulse" />
               ) : convContext?.contact ? (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                    <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
                       <User className="h-4 w-4 text-primary" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium">{convContext.contact.name || 'Sin nombre'}</p>
+                      <p className="text-sm font-semibold">{convContext.contact.name || 'Sin nombre'}</p>
                       <p className="text-xs text-muted-foreground">{formatPhone(convContext.contact.phone)}</p>
                     </div>
                   </div>
                   {/* Rev. 103 — PII completa para que el operador humano
-                      vea todo lo que el bot ya tiene (espejo system prompt). */}
+                      vea todo lo que el bot ya tiene (espejo system prompt).
+                      Tipografía text-xs (12px) para mejor legibilidad. */}
                   {convContext.contact.email && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <Mail className="h-3 w-3" />
-                      {convContext.contact.email}
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Mail className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{convContext.contact.email}</span>
                     </p>
                   )}
                   {convContext.contact.document_type && convContext.contact.document_number && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <FileText className="h-3 w-3" />
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <FileText className="h-3 w-3 shrink-0" />
                       {convContext.contact.document_type} {convContext.contact.document_number}
                     </p>
                   )}
@@ -1369,26 +1531,41 @@ export default function InboxPage() {
                    convContext.contact.shipping_phone !== convContext.contact.phone &&
                    convContext.contact.shipping_phone.replace(/\+/g, '') !==
                    convContext.contact.phone.replace(/\+/g, '') && (
-                    <p className="text-[11px] text-amber-700 flex items-center gap-1">
-                      <Truck className="h-3 w-3" />
+                    <p
+                      className="text-xs text-amber-700 flex items-center gap-1.5"
+                      title="Celular alternativo de envío. La transportadora contactará a este número (no el WhatsApp)."
+                    >
+                      <Truck className="h-3 w-3 shrink-0" />
                       Envío: {formatPhone(convContext.contact.shipping_phone)}
                     </p>
                   )}
-                  {convContext.contact.address && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <MapPin className="h-3 w-3" />
-                      {typeof convContext.contact.address === 'object'
-                        ? (() => {
-                            const addr = convContext.contact.address as Record<string, string>
-                            const parts: string[] = []
-                            if (addr.street) parts.push(addr.street)
-                            if (addr.complex_name) parts.push(addr.complex_name)
-                            if (addr.tower) parts.push(`Torre ${addr.tower}`)
-                            if (addr.apartment) parts.push(`Apto ${addr.apartment}`)
-                            if (addr.city) parts.push(addr.city)
-                            return parts.join(' — ') || 'Dirección registrada'
-                          })()
-                        : (convContext.contact.address as string)}
+                  {/* Rev. 103 — Address multilinea con jerarquía visual */}
+                  {convContext.contact.address && typeof convContext.contact.address === 'object' && (() => {
+                    const addr = convContext.contact.address as Record<string, string>
+                    const street = addr.street || ''
+                    const complex = addr.complex_name || ''
+                    const towerApto = [
+                      addr.tower ? `Torre ${addr.tower}` : '',
+                      addr.apartment ? `Apto ${addr.apartment}` : '',
+                    ].filter(Boolean).join(' · ')
+                    const city = addr.city || ''
+                    const hasAny = street || complex || towerApto || city
+                    return hasAny ? (
+                      <div className="text-xs text-muted-foreground flex items-start gap-1.5 mt-0.5">
+                        <MapPin className="h-3 w-3 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          {street && <p className="font-medium text-foreground">{street}</p>}
+                          {complex && <p className="italic">{complex}</p>}
+                          {towerApto && <p>{towerApto}</p>}
+                          {city && <p className="text-[11px]">{city}</p>}
+                        </div>
+                      </div>
+                    ) : null
+                  })()}
+                  {convContext.contact.address && typeof convContext.contact.address !== 'object' && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <MapPin className="h-3 w-3 shrink-0" />
+                      {convContext.contact.address as string}
                     </p>
                   )}
                   <div className="flex items-center gap-1 mt-1">
@@ -1418,9 +1595,13 @@ export default function InboxPage() {
                 el bot está construyendo turn-by-turn. Solo visible si hay
                 items. Real-time refresh cada 5s. */}
             {convContext?.active_cart && convContext.active_cart.items.length > 0 && (
-              <section className="p-4 border-b border-border">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-                  <ShoppingCart className="h-3 w-3" /> Carrito en construcción
+              <section className={`p-4 border-b border-border ${
+                convContext.active_cart.requires_requote
+                  ? 'bg-amber-50/30 dark:bg-amber-950/10'
+                  : 'bg-emerald-50/20 dark:bg-emerald-950/5'
+              }`}>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <ShoppingCart className="h-3.5 w-3.5" /> Carrito en construcción
                 </p>
                 <div className="space-y-1.5">
                   {convContext.active_cart.items.map((it, idx) => (
@@ -1430,23 +1611,23 @@ export default function InboxPage() {
                           {it.quantity}× {it.title}
                         </p>
                         {it.variant_label && (
-                          <p className="text-[10px] text-muted-foreground">
+                          <p className="text-[11px] text-muted-foreground">
                             {it.variant_label}
                           </p>
                         )}
                       </div>
-                      <p className="text-[11px] font-medium whitespace-nowrap">
+                      <p className="text-xs font-medium whitespace-nowrap">
                         {formatMoney(((it.unit_price_cents || 0) * (it.quantity || 1)) / 100)}
                       </p>
                     </div>
                   ))}
                   <div className="pt-1.5 border-t border-border space-y-0.5">
-                    <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Subtotal</span>
                       <span>{formatMoney((convContext.active_cart.subtotal_cents || 0) / 100)}</span>
                     </div>
                     {convContext.active_cart.shipping_cents > 0 && (
-                      <div className="flex justify-between text-[11px] text-muted-foreground">
+                      <div className="flex justify-between text-xs text-muted-foreground">
                         <span>
                           Envío{convContext.active_cart.carrier_name && ` · ${convContext.active_cart.carrier_name}`}
                         </span>
@@ -1454,12 +1635,15 @@ export default function InboxPage() {
                       </div>
                     )}
                     {convContext.active_cart.requires_requote && (
-                      <p className="text-[10px] text-amber-700 italic">
+                      <p
+                        className="text-[10px] text-amber-700 italic"
+                        title="El carrito cambió después de la última cotización. El bot va a re-cotizar automáticamente la próxima vez que el cliente pregunte por envío."
+                      >
                         ⚠ Cart cambió — envío necesita re-cotización
                       </p>
                     )}
                     {convContext.active_cart.total_cents > 0 && (
-                      <div className="flex justify-between text-xs font-semibold pt-0.5">
+                      <div className="flex justify-between text-sm font-semibold pt-0.5">
                         <span>Total</span>
                         <span>{formatMoney(convContext.active_cart.total_cents / 100)}</span>
                       </div>
@@ -1469,9 +1653,33 @@ export default function InboxPage() {
               </section>
             )}
 
+            {/* Rev. 103 — Reclamos abiertos. Visible al operador humano
+                (antes solo el bot los veía en system prompt). Si hay alguno
+                el operador puede continuar la atención sin duplicar trabajo. */}
+            {convContext?.open_claims && convContext.open_claims.length > 0 && (
+              <section className="p-4 border-b border-border">
+                <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" /> Reclamos abiertos ({convContext.open_claims.length})
+                </p>
+                <div className="space-y-1.5">
+                  {convContext.open_claims.map(claim => (
+                    <div key={claim.id} className="p-2 rounded-lg bg-red-50/40 border border-red-200/50">
+                      <p className="text-xs font-medium">#{claim.ticket_number}</p>
+                      {claim.type && (
+                        <p className="text-[10px] text-muted-foreground">{claim.type}</p>
+                      )}
+                      <p className="text-[10px] text-muted-foreground">
+                        Abierto · {timeAgo(claim.created_at)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Pedidos recientes */}
             <section className="p-4 border-b border-border">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Pedidos recientes</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Pedidos recientes</p>
               {contextLoading ? (
                 <div className="space-y-2">
                   {[1,2].map(i => <div key={i} className="h-10 rounded-lg bg-border/30 animate-pulse" />)}
