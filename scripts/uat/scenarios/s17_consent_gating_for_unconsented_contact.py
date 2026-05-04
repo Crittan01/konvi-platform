@@ -95,9 +95,15 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
                                        event="granted", limit=3)
 
     bot_text = " ".join((t.get("bot") or "").lower() for t in res.transcript)
+    # Cubre el template canónico ("¿Estás de acuerdo? *SÍ* o *NO*") + las
+    # variantes históricas — todas las cadenas que el bot usaría para pedir
+    # consent explícitamente, en cualquier wording del prompt rev. 103.
     bot_asked_consent = any(k in bot_text for k in (
         "tratamiento de datos", "habeas data", "ley 1581", "autorizas",
         "respondes sí", "responde sí",
+        "estás de acuerdo", "estas de acuerdo",
+        "guardar tus datos", "guardar sus datos", "consentimiento",
+        "autorización", "autorizacion", "podrías autorizarme",
     ))
 
     evidence = {
