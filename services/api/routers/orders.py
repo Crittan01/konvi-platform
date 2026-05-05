@@ -35,7 +35,17 @@ router = APIRouter(tags=["Orders"])
 
 VALID_STATUSES = {"pending", "pending_payment", "confirmed", "processing", "shipped", "delivered", "cancelled"}
 
-WOMPI_PAYMENT_LINK_TTL_MINUTES = 30  # Reserva de stock expira en 30 min
+WOMPI_PAYMENT_LINK_TTL_MINUTES = 30
+# TTL de validez del link Wompi (expires_at enviado al crear el link). Tiene
+# DOS espejos en el código que deben mantenerse alineados:
+#   • services/ai-orchestrator/tools/payment_link_tool.py:WOMPI_LINK_TTL_MINUTES
+#     (boundary entre bucket a/b del idempotency guard).
+#   • services/ai-orchestrator/worker.py:PAYMENT_REMINDER_DELAY_MINUTES
+#     (cron de recordatorio dispara 5 min antes de este TTL).
+# El cron de cancelación de orden (PENDING_PAYMENT_TTL_MINUTES) se diseña 5
+# min POR ENCIMA de este valor para permitir regeneración del link sobre la
+# misma orden (Plan A.0.1: una conv = una orden activa).
+# Detalles: docs/adr/0011-payment-link-lifecycle.md.
 
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -494,6 +504,24 @@ def _consume_cart_reservations_if_any(
             logger.warning(
                 "[CART] no pude marcar cart=%s converted tras order=%s: %s",
                 cart_id, order_id, exc,
+            )
+        # Rev. 104 (F1-6) — emit `cart_events.order_confirmed` (best-effort).
+        # Cross-service: duplicamos la inserción inline en lugar de importar
+        # `cart.events.emit` (vive en ai-orchestrator) para mantener el
+        # boundary de servicios. Schema canónico definido en migration
+        # 20260510090000_cart_events.sql.
+        try:
+            supabase.table("cart_events").insert({
+                "cart_id": cart_id,
+                "tenant_id": tenant_id,
+                "event_type": "order_confirmed",
+                "event_payload": {"order_id": order_id, "consumed": consumed},
+                "triggered_by": "webhook",
+            }).execute()
+        except Exception as exc:
+            logger.debug(
+                "[CART_EVENT] order_confirmed emit falló cart=%s: %s",
+                cart_id, exc,
             )
         return consumed
     except Exception as exc:

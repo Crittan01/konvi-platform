@@ -91,9 +91,11 @@ def scenario(phone: str, tenant_id: str, mode: str = "new") -> ScenarioResult:
         return ScenarioResult(18, "MeLi ↔ WhatsApp match", FAIL,
             f"consent_source={c0.get('consent_source')!r} (esperado 'marketplace_meli')",
             evidence={"contact": c0})
-    if c0.get("phone") != phone:  # phone E.164 con `+`
+    # Rev. 104 (F0-4): canon = digits-only (no '+'). Validamos contra `digits`,
+    # NO contra `phone` con '+'.
+    if c0.get("phone") != digits:
         return ScenarioResult(18, "MeLi ↔ WhatsApp match", FAIL,
-            f"phone={c0.get('phone')!r} (esperado E.164 '{phone}')",
+            f"phone={c0.get('phone')!r} (esperado canon '{digits}')",
             evidence={"contact": c0})
 
     # FASE 2 — MISMO BUYER ESCRIBE A WHATSAPP.

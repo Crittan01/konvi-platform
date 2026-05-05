@@ -191,11 +191,15 @@ def seed_known_contact(
 
     Doble verificación es estrategia UAT obligatoria a partir de rev. 103.
     """
-    # Canon runtime: connector normaliza a digits sin '+' (Meta envía wa_id
-    # sin '+'). Si seedeamos con '+', el orchestrator NO matchea por phone
-    # exact y crea un contact duplicado en su upsert posterior. Alineamos
-    # al canon para evitar duplicados.
-    digits = phone.lstrip("+")
+    # Rev. 104 (F0-4) — canon = digits-only via `lib/phone.py::to_db_format`.
+    # Si el helper falla (input inválido), fallback `lstrip('+')` para no
+    # bloquear seeds de tests.
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "services" / "api"))
+        from lib.phone import to_db_format  # type: ignore
+        digits = to_db_format(phone) or phone.lstrip("+")
+    except Exception:
+        digits = phone.lstrip("+")
     payload = {
         "tenant_id": tenant_id, "phone": digits,
         "name": name, "email": email,
@@ -333,8 +337,16 @@ class ConversationDriver:
     _REPEATABLE_KEYWORDS = ("confirmas", "confirmas que")
 
     def _resolve_reply(self, bot_text: str) -> tuple[str, str] | None:
-        question = extract_bot_question(bot_text).lower()
-        context = extract_question_context(bot_text).lower()
+        # Rev. 104 — strip de signos opening `¡` `¿` en pass_target Y en
+        # keywords del rule, para que el matcher sea agnóstico al estilo
+        # de puntuación del outbound. El bot ahora emite "Cuál es tu
+        # correo?" (sin `¿`) per el fix SMELL #4 del format pipeline;
+        # rules legacy con keyword "¿cuál es tu correo" siguen matcheando.
+        def _strip_open_punct(s: str) -> str:
+            return s.replace("¡", "").replace("¿", "")
+
+        question = _strip_open_punct(extract_bot_question(bot_text).lower())
+        context = _strip_open_punct(extract_question_context(bot_text).lower())
         for pass_target, pass_label in ((question, "Q"), (context, "Q+ctx")):
             for idx, (prio, kws, reply) in enumerate(self.rules):
                 is_repeatable = any(
@@ -343,7 +355,7 @@ class ConversationDriver:
                 )
                 if idx in self._fired_rule_ids and not is_repeatable:
                     continue
-                if any(k.lower() in pass_target for k in kws):
+                if any(_strip_open_punct(k.lower()) in pass_target for k in kws):
                     self._fired_rule_ids.add(idx)
                     label = (
                         f"[{pass_label}] prio={prio} kws={kws[:2]} "
