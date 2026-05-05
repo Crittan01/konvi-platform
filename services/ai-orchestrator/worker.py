@@ -37,6 +37,15 @@ PENDING_PAYMENT_RELEASE_ENABLED = os.getenv("PENDING_PAYMENT_RELEASE_ENABLED", "
     "1", "true", "yes", "on"
 }
 PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS = int(os.getenv("PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS", "600"))
+# TTL antes de que el cron cancele una orden `pending_payment` sin pago.
+# Diseñado intencionalmente 5 min POR ENCIMA de WOMPI_PAYMENT_LINK_TTL_MINUTES
+# (30 min) para dejar una ventana de regeneración:
+#   • 0–30 min: link Wompi vigente (bucket a en payment_link_tool reutiliza).
+#   • 30–35 min: link expirado pero orden viva (bucket b regenera).
+#   • > 35 min sin nuevo intent: cron cancela.
+# Si esta constante baja del TTL del link, el cron cerraría órdenes mientras
+# el link aún está vivo. Mantener relación: PENDING_PAYMENT_TTL_MINUTES >=
+# WOMPI_PAYMENT_LINK_TTL_MINUTES + 5. Detalles: docs/adr/0011-payment-link-lifecycle.md.
 PENDING_PAYMENT_TTL_MINUTES = int(os.getenv("PENDING_PAYMENT_TTL_MINUTES", "35"))
 # Rev. 103 F1 — Recordatorio de pago dentro de la CSW (24h Meta).
 # Solo dispara free-form si la ventana sigue abierta. Sin template messages,
@@ -782,6 +791,26 @@ class OrchestratorWorker:
         pending_payment = stock NO decrementado todavía → cancelar no requiere
         reversar stock; solo cambia el estado para liberar la "reserva conceptual"
         y limpiar el backlog de pedidos sin cobrar.
+
+        Lifecycle de payment links (Plan A.0.1, ADR-0011):
+
+          ─── 0 min ──── 30 min ───── 35 min ─────────────────────►
+              link #1   bucket(a)→   bucket(b)→     cron cancela
+              vivo      reusa link   regenera link  si NO hay payment
+                                     test_G77I9U    activo
+                                     test_8yaKgJ    último
+
+        El cron NO cancela una orden si tiene un `payments.pending` reciente.
+        Esa regla preserva el bucket (b) de payment_link_tool: si el cliente
+        regenera el link a t=33min, el último payment es fresco y la orden
+        sigue viva. Solo cuando el último payment supera el TTL (35min sin
+        nuevo intent) la orden se cancela.
+
+        Sin esta regla, había una race condition (caso runtime 2026-05-05
+        order #3E10CB92): bucket (b) regeneró link a 08:35:32; cron canceló
+        orden a 08:36:06 (34s después) → cliente recibió link válido pero
+        contra orden cancelled → si pagaba, webhook Wompi llegaba a estado
+        inconsistente.
         """
         if not self._release_enabled:
             return
@@ -791,8 +820,9 @@ class OrchestratorWorker:
             return
         self._last_release_at = now
 
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(minutes=PENDING_PAYMENT_TTL_MINUTES)
+        now_dt = datetime.now(timezone.utc)
+        cutoff_iso = (
+            now_dt - timedelta(minutes=PENDING_PAYMENT_TTL_MINUTES)
         ).isoformat()
 
         try:
@@ -800,7 +830,7 @@ class OrchestratorWorker:
                 self.supabase.table("orders")
                 .select("id, tenant_id")
                 .eq("status", "pending_payment")
-                .lt("created_at", cutoff)
+                .lt("created_at", cutoff_iso)
                 .limit(50)
                 .execute()
             )
@@ -810,6 +840,36 @@ class OrchestratorWorker:
 
             cancelled = 0
             for order in stale:
+                # Guard: no cancelar si hay payment pending fresco (cliente
+                # regeneró link recientemente vía bucket (b)).
+                try:
+                    fresh_pay_res = (
+                        self.supabase.table("payments")
+                        .select("id, created_at")
+                        .eq("order_id", order["id"])
+                        .eq("status", "pending")
+                        .gte("created_at", cutoff_iso)
+                        .limit(1)
+                        .execute()
+                    )
+                    if fresh_pay_res.data:
+                        # Hay intent de pago activo (≤ TTL min) — no cancelar.
+                        logger.debug(
+                            "[RELEASE] order=%s skip — payment fresco %s",
+                            order["id"][:8],
+                            fresh_pay_res.data[0].get("created_at"),
+                        )
+                        continue
+                except Exception as exc:
+                    # Si el lookup falla, conservador: no cancelar (mejor un
+                    # zombie que cancelar una orden válida con cliente
+                    # esperando pago).
+                    logger.warning(
+                        "[RELEASE] lookup payments falló order=%s: %s — skip",
+                        order["id"][:8], exc,
+                    )
+                    continue
+
                 res = (
                     self.supabase.table("orders")
                     .update({
