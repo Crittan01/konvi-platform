@@ -91,8 +91,9 @@ class UpsertMeliContactTests(unittest.TestCase):
         )
         upsert_payload = self.upsert_chain.call_args[0][0]
         self.assertEqual(upsert_payload['tenant_id'], 't1')
-        # Rev. 103 (D2): phone normalizado a E.164 con `+` prefijo.
-        self.assertEqual(upsert_payload['phone'], '+3125835649')
+        # Rev. 104 (F0-4): phone canónico = digits-only, con prefix CO inferido
+        # cuando es cel local de 10 dígitos. Ya NO usa formato E.164 con '+'.
+        self.assertEqual(upsert_payload['phone'], '573125835649')
         self.assertEqual(upsert_payload['name'], 'Juan García')
         self.assertTrue(upsert_payload['consent_given'])
         self.assertEqual(upsert_payload['consent_source'], 'marketplace_meli')
@@ -180,10 +181,13 @@ class UpsertMeliContactTests(unittest.TestCase):
         )
         self.assertEqual(result, 'cid-1')
 
-    def test_legacy_phone_migrates_to_e164(self):
-        # Rev. 103 (D2): si existe un contact con phone legacy (sin `+`),
-        # el webhook UPDATEa esa fila con phone E.164 + payload, evitando
-        # duplicados (`+57X` y `57X` para el mismo titular).
+    def test_legacy_phone_migrates_to_canonical(self):
+        # Rev. 104 (F0-4): si existe un contact con phone legacy en formato
+        # E.164 (con `+`), el webhook UPDATEa esa fila con phone canónico
+        # (digits-only) + payload, evitando duplicados.
+        # NOTA: el escenario invertido vs rev. 103 — antes el legacy era
+        # "sin +" y migraba a "con +". Ahora el legacy es "con +" y migra
+        # a "sin +" (canon).
         contacts_tbl = MagicMock()
         contacts_tbl.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
             data=[{'id': 'legacy-cid-7'}],
@@ -201,9 +205,9 @@ class UpsertMeliContactTests(unittest.TestCase):
             meli_order_id='ord-legacy',
         )
         self.assertEqual(result, 'legacy-cid-7')
-        # update fue llamado con phone E.164 (no legacy).
+        # update fue llamado con phone canónico (digits-only con prefix CO).
         update_payload = contacts_tbl.update.call_args[0][0]
-        self.assertEqual(update_payload['phone'], '+3009999999')
+        self.assertEqual(update_payload['phone'], '573009999999')
         # NO se invocó upsert (path de migración, no de inserción nueva).
         contacts_tbl.upsert.assert_not_called()
 
@@ -217,8 +221,8 @@ class UpsertMeliContactTests(unittest.TestCase):
             supabase=self.supabase,
         )
         upsert_payload = self.upsert_chain.call_args[0][0]
-        # Rev. 103 (D2): phone normalizado a E.164.
-        self.assertEqual(upsert_payload['phone'], '+3009999999')
+        # Rev. 104 (F0-4): phone canónico (digits-only con prefix CO).
+        self.assertEqual(upsert_payload['phone'], '573009999999')
 
 
 class MigrationMarketplaceMeliTests(unittest.TestCase):

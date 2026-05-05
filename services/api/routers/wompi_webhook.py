@@ -426,8 +426,17 @@ def _upsert_payment_record(
     wompi_status: str,
     raw_webhook: dict,
 ) -> bool:
-    """Persiste/actualiza el pago. Retorna True si era un registro existente (replay)."""
+    """Persiste/actualiza el pago. Retorna True si era un registro existente (replay).
+
+    Rev. 104 (F0-2 / BUG-3): el lookup busca por `wompi_txn_id` Y por
+    `wompi_link_id`. Antes solo buscaba por `wompi_txn_id`, ignorando que
+    `payment_link_tool` crea la fila inicial con `wompi_link_id` poblado y
+    `wompi_txn_id=NULL`. Cuando el webhook APPROVED llegaba, el SELECT
+    fallaba → INSERT chocaba con UNIQUE → orden quedaba en `confirmed`
+    pero `payments.status='PENDING'` (auditabilidad rota).
+    """
     existing = None
+    # 1) Lookup por wompi_txn_id (replay del mismo evento).
     if wompi_txn_id:
         res = (
             supabase.table("payments")
@@ -438,14 +447,31 @@ def _upsert_payment_record(
         )
         existing = (res.data or [None])[0]
 
+    # 2) Si no encontró por txn_id, buscar por wompi_link_id (fila pre-existente
+    #    creada por payment_link_tool con txn_id NULL — primer webhook APPROVED).
+    if not existing and wompi_link_id and order_id:
+        res = (
+            supabase.table("payments")
+            .select("id, tenant_id, wompi_txn_id")
+            .eq("order_id", order_id)
+            .eq("wompi_link_id", wompi_link_id)
+            .limit(1)
+            .execute()
+        )
+        existing = (res.data or [None])[0]
+
     if existing:
-        supabase.table("payments").update({
+        # Update: incluye wompi_txn_id si la fila lo tenía NULL (primer hit).
+        update_payload = {
             "wompi_status": wompi_status,
             "status": "approved" if wompi_status == WOMPI_TXN_APPROVED else wompi_status.lower(),
             "raw_webhook": raw_webhook,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", existing["id"]).execute()
-        return True  # replay: registro ya existía
+        }
+        if wompi_txn_id and not existing.get("wompi_txn_id"):
+            update_payload["wompi_txn_id"] = wompi_txn_id
+        supabase.table("payments").update(update_payload).eq("id", existing["id"]).execute()
+        return True  # replay o complete-pre-existing
 
     if not order_id:
         logger.warning("[WOMPI] sin_order_id_para_insert txn_id=%s — payment no registrado", wompi_txn_id)

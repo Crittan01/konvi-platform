@@ -20,6 +20,8 @@ from typing import Optional, Tuple
 
 import httpx
 
+from lib.phone import to_canonical as _phone_to_canonical, is_valid_co as _phone_is_valid_co  # rev. 104 F0-4
+
 logger = logging.getLogger(__name__)
 
 WOMPI_SANDBOX_URL = "https://sandbox.wompi.co/v1"
@@ -176,17 +178,21 @@ def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
     if full_name:
         cd["full_name"] = full_name
 
-    # Teléfono Wompi: split prefix + number. WhatsApp guarda con + (ej. +573001234567).
-    phone = (contact.get("phone") or "").strip()
-    if phone:
-        digits = phone.lstrip("+").lstrip("0")
-        if digits.startswith("57") and len(digits) >= 12:
+    # Teléfono Wompi: requiere split prefix + number según schema oficial
+    # (https://docs.wompi.co/docs/colombia/widget-checkout-web/).
+    # Rev. 104 (F0-4): leemos canon (digits-only, alineado con DB) y
+    # convertimos a la forma que Wompi espera. `to_canonical` tolera tanto
+    # legacy '+57...' como nuevo '57...'.
+    raw_phone = contact.get("phone") or ""
+    canonical = _phone_to_canonical(raw_phone)
+    if canonical:
+        if _phone_is_valid_co(canonical):
             cd["phone_number_prefix"] = "+57"
-            cd["phone_number"] = digits[2:]
+            cd["phone_number"] = canonical[2:]  # quita '57'
         else:
-            # Fallback: solo number sin prefix. Wompi puede aceptarlo o ignorarlo
-            # según el método. No agregar prefix=null porque Wompi rechaza nulls.
-            cd["phone_number"] = digits
+            # No-CO: Wompi puede aceptarlo sin prefix o rechazar; entregamos
+            # los dígitos tal cual y dejamos que Wompi valide.
+            cd["phone_number"] = canonical
 
     # Documento: ambos juntos o ninguno (regla Wompi).
     doc_type_raw = (contact.get("document_type") or "").strip().upper()

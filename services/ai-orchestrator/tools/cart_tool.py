@@ -33,6 +33,181 @@ from supabase import Client
 logger = logging.getLogger("orchestrator.tools.cart")
 
 
+def _emit_cart_event(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: Optional[str],
+    event_type: str,
+    payload: Optional[dict] = None,
+    correlation_id: Optional[str] = None,
+) -> None:
+    """Wrapper best-effort sobre `cart.events.emit`.
+
+    Se importa lazy para evitar circulares (cart/events.py no debe depender
+    de tools/cart_tool.py). Cualquier fallo es swalloweado: la auditoría
+    nunca debe bloquear la mutación funcional del cart.
+    """
+    if not tenant_id:
+        return
+    try:
+        from cart.events import emit as _emit
+        _emit(
+            supabase,
+            cart_id=cart_id,
+            tenant_id=tenant_id,
+            event_type=event_type,
+            payload=payload or {},
+            correlation_id=correlation_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[CART_EVENT] emit wrapper falló: %s", exc)
+
+
+def invalidate_pending_order_on_cart_change(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    reason: str,
+) -> Optional[dict]:
+    """Si la conversación del cart tiene una `orders.pending_payment` activa,
+    cancelarla + marcar `payments.pending` como `voided`.
+
+    Plan A.0.1 (cart-as-SoT, ADR-0011): toda mutación del cart con orden
+    activa rompe el contrato "una conv = una orden con un total acordado".
+    El link Wompi ya generado tiene un `amount_in_cents` congelado al momento
+    de crear la orden y NO se actualiza con el cart. Si el cliente paga el
+    link viejo después de modificar el cart, el monto pagado diverge del cart
+    real → pérdida o queja.
+
+    La invalidación es síncrona y precede al cambio del cart: si esto falla,
+    NO mutamos el cart (mejor rechazar la modificación que dejar inconsistencia).
+
+    Retorna:
+      None si no había orden activa (caso normal: cliente todavía construyendo
+      el cart antes de generar link).
+      dict {order_id, voided_payment_count, reason} si invalidó algo. El
+      caller (orchestrator) usa este dict para informar al cliente que el
+      link anterior ya no es válido.
+
+    Args:
+      cart_id: identifica la conversación (cart → conversation_id).
+      tenant_id: scope multi-tenant.
+      reason: motivo de la invalidación (ej. 'item_added', 'item_removed',
+              'qty_changed'). Se persiste en notes y en cart_events.
+    """
+    # Resolver conversation_id desde el cart.
+    try:
+        cart_res = (
+            supabase.table("conversation_carts")
+            .select("conversation_id")
+            .eq("id", cart_id)
+            .eq("tenant_id", tenant_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[CART_INVALIDATE] no pude leer cart=%s: %s — skip invalidation",
+            cart_id[:8], exc,
+        )
+        return None
+    cart_rows = cart_res.data if isinstance(cart_res.data, list) else []
+    if not cart_rows or not isinstance(cart_rows[0], dict):
+        return None
+    conversation_id = cart_rows[0].get("conversation_id")
+    if not conversation_id:
+        return None
+
+    # Buscar orden pending_payment activa para esta conversación.
+    try:
+        orders_res = (
+            supabase.table("orders")
+            .select("id, total_amount, notes")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .eq("status", "pending_payment")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[CART_INVALIDATE] lookup orders falló conv=%s: %s",
+            str(conversation_id)[:8], exc,
+        )
+        return None
+    orders_data = orders_res.data if isinstance(orders_res.data, list) else []
+    if not orders_data or not isinstance(orders_data[0], dict):
+        return None  # No hay orden activa — caso normal
+    order = orders_data[0]
+    order_id = order.get("id")
+    if not order_id:
+        return None
+
+    # Cancelar orden con motivo cart_modified.
+    try:
+        from datetime import datetime, timezone
+        prior_notes = str(order.get("notes") or "")
+        new_notes = (
+            f"{prior_notes} | cancelled_due_to_cart_change={reason}"
+            if prior_notes else f"cancelled_due_to_cart_change={reason}"
+        )
+        supabase.table("orders").update({
+            "status": "cancelled",
+            "notes": new_notes,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", order_id).eq("tenant_id", tenant_id).eq(
+            "status", "pending_payment"  # CAS: no pisar otros estados
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[CART_INVALIDATE] no pude cancelar order=%s: %s",
+            str(order_id)[:8], exc,
+        )
+        return None
+
+    # Voided todos los payments.pending de esta orden.
+    voided_count = 0
+    try:
+        upd = (
+            supabase.table("payments")
+            .update({"status": "voided"})
+            .eq("tenant_id", tenant_id)
+            .eq("order_id", order_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        voided_count = len(upd.data or []) if isinstance(upd.data, list) else 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[CART_INVALIDATE] no pude voided payments order=%s: %s — orden ya cancelada",
+            str(order_id)[:8], exc,
+        )
+
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="order_invalidated_due_to_cart_change",
+        payload={
+            "order_id": order_id,
+            "reason": reason,
+            "voided_payment_count": voided_count,
+            "previous_total_amount": float(order.get("total_amount") or 0),
+        },
+    )
+    logger.info(
+        "[CART_INVALIDATE] order=%s cancelada + %d payment(s) voided por reason=%s",
+        str(order_id)[:8], voided_count, reason,
+    )
+    return {
+        "order_id": order_id,
+        "voided_payment_count": voided_count,
+        "reason": reason,
+    }
+
+
 # ─── Cart lifecycle ──────────────────────────────────────────────────────────
 
 def ensure_cart(
@@ -201,9 +376,18 @@ def add_item(
     """Invoca RPC cart_add_item (UPSERT atómico) + invalida shipping.
 
     Si el cart ya tiene esta variation, suma la quantity (RPC lo maneja).
+
+    Plan A.0.1 / ADR-0011: si la conversación tiene una orden
+    `pending_payment` activa, antes del cambio se invalida (cancela orden
+    + voided payments). El campo `order_invalidated` en el payload retornado
+    señaliza al caller (orchestrator) para que informe al cliente que el
+    link anterior ya no es válido.
     """
     if quantity < 1:
         raise ValueError("add_item: quantity debe ser >= 1")
+    invalidated = invalidate_pending_order_on_cart_change(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_added",
+    )
     res = supabase.rpc(
         "cart_add_item",
         {
@@ -219,7 +403,22 @@ def add_item(
     payload = (res.data or [None])[0] if isinstance(res.data, list) else res.data
     if not payload:
         raise RuntimeError(f"add_item: RPC no devolvió payload (cart={cart_id})")
-    invalidate_shipping(supabase, cart_id=cart_id, reason="item_added")
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="item_added",
+        payload={
+            "product_id": product_id,
+            "variation_id": variation_id,
+            "quantity": int(quantity),
+            "unit_price_cents": int(unit_price_cents),
+        },
+    )
+    invalidate_shipping(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_added",
+    )
+    if isinstance(payload, dict) and invalidated:
+        payload["order_invalidated"] = invalidated
     return payload
 
 
@@ -270,7 +469,14 @@ def remove_item(
     tenant_id: str,
     variation_id: str,
 ) -> dict:
-    """Borra el item del carrito + recalcula totals + invalida shipping."""
+    """Borra el item del carrito + recalcula totals + invalida shipping.
+
+    Plan A.0.1 / ADR-0011: si la conversación tiene orden `pending_payment`
+    activa, se invalida antes del cambio (ver add_item).
+    """
+    invalidated = invalidate_pending_order_on_cart_change(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_removed",
+    )
     supabase.table("conversation_cart_items").delete().eq(
         "cart_id", cart_id
     ).eq("variation_id", variation_id).execute()
@@ -290,8 +496,22 @@ def remove_item(
         "subtotal_cents": new_subtotal,
         "total_cents": new_subtotal,  # shipping queda invalidado abajo
     }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
-    invalidate_shipping(supabase, cart_id=cart_id, reason="item_removed")
-    return {"cart_id": cart_id, "new_subtotal_cents": new_subtotal}
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="item_removed",
+        payload={
+            "variation_id": variation_id,
+            "new_subtotal_cents": new_subtotal,
+        },
+    )
+    invalidate_shipping(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_removed",
+    )
+    result = {"cart_id": cart_id, "new_subtotal_cents": new_subtotal}
+    if invalidated:
+        result["order_invalidated"] = invalidated
+    return result
 
 
 # ─── Shipping computation ────────────────────────────────────────────────────
@@ -449,6 +669,23 @@ def set_shipping_meta(
         "[CART] shipping_meta set cart=%s carrier=%s service=%s shipping=%s subtotal=%s total=%s",
         cart_id[:8], carrier, service_level, shipping_cents, subtotal, new_total,
     )
+    # Evento canónico: carrier_selected — el cliente eligió Económica/Rápida.
+    # Si shipping_cents=0 (quote inicial sin selección aún) emitimos shipping_quoted
+    # en su lugar; cuando llega selección real, el call siguiente reemite.
+    _evt = "carrier_selected" if int(shipping_cents) > 0 else "shipping_quoted"
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type=_evt,
+        payload={
+            "carrier": carrier,
+            "service_level": service_level,
+            "rate_id": rate_id,
+            "city": city,
+            "shipping_cents": int(shipping_cents),
+            "total_cents": new_total,
+        },
+    )
     # Devolvemos el snapshot computado, no la fila del UPDATE — el caller
     # solo necesita los nuevos totales y la meta para mostrar al cliente.
     return {
@@ -461,11 +698,80 @@ def set_shipping_meta(
     }
 
 
+def set_shipping_city(
+    supabase: Client,
+    *,
+    cart_id: str,
+    new_city: str,
+    new_dane_code: str | None = None,
+    tenant_id: str | None = None,
+) -> dict:
+    """Rev. 104 (F0-3 / BUG-1): registra cambio de ciudad post-cotización.
+
+    Cuando el cliente dice "cambia el envío a Medellín" tras haber cotizado
+    a Bogotá, el cart debe:
+      • Marcar `requires_requote=True` (cotización vieja inválida).
+      • Registrar la nueva `city` (y `dane_code` si se conoce) en
+        `shipping_meta` para que el next quote tenga el destino correcto.
+      • Limpiar `shipping_cents=0` y carrier (la próxima quote los re-llena).
+
+    El bot debe llamar esto ANTES de la nueva cotización; el `_persist_cart_shipping_if_needed`
+    posterior actualizará todos los campos cuando el cliente seleccione carrier.
+    """
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta, subtotal_cents")
+        .eq("id", cart_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        return {"cart_id": cart_id, "updated": False}
+    row = cur.data[0]
+    meta = row.get("shipping_meta") or {}
+    # Reset campos de quote vieja (carrier, service, rate_id) y override city.
+    new_meta = {
+        "city": new_city,
+        "dane_code": new_dane_code or meta.get("dane_code"),
+        "address_line": meta.get("address_line"),
+        "weight_inputs": meta.get("weight_inputs"),
+        "city_changed_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+    }
+    new_total = int(row.get("subtotal_cents") or 0)
+    supabase.table("conversation_carts").update({
+        "shipping_cents": 0,
+        "shipping_meta": new_meta,
+        "total_cents": new_total,
+        "requires_requote": True,
+    }).eq("id", cart_id).execute()
+    logger.info(
+        "[CART] shipping_city=%s cart=%s — requires_requote=True, prev city=%s",
+        new_city, cart_id[:8], meta.get("city"),
+    )
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="city_changed",
+        payload={
+            "prev_city": meta.get("city"),
+            "new_city": new_city,
+            "new_dane_code": new_dane_code,
+        },
+    )
+    return {
+        "cart_id": cart_id, "updated": True,
+        "new_city": new_city, "prev_city": meta.get("city"),
+    }
+
+
 def invalidate_shipping(
     supabase: Client,
     *,
     cart_id: str,
     reason: str = "item_changed",
+    tenant_id: str | None = None,
 ) -> dict:
     """Setea requires_requote=true + reset shipping_cents=0. Conserva
     address en shipping_meta para que el bot no tenga que repreguntar."""
@@ -495,4 +801,10 @@ def invalidate_shipping(
         "requires_requote": True,
     }).eq("id", cart_id).execute()
     logger.info("[CART] shipping invalidated cart=%s reason=%s", cart_id[:8], reason)
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="shipping_invalidated",
+        payload={"reason": reason, "preserved_city": preserved.get("city")},
+    )
     return {"cart_id": cart_id, "invalidated": True, "reason": reason}

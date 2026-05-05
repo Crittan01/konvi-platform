@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse
 from dependencies.auth import _get_service_client, get_service_client
 from dependencies.security import webhook_rate_limit_check
 from integrations import meli_client
+from lib.phone import to_db_format as _phone_to_db_format  # rev. 104 F0-4 canon único
 
 # Rev. 103 — Versión vigente del aviso de privacidad (sincronizar con
 # apps/web/.../contacts/page.tsx CURRENT_PRIVACY_NOTICE_VERSION + docs/legal/privacy-policy.md).
@@ -50,31 +51,20 @@ def _hash_phone(phone: Optional[str]) -> Optional[str]:
 
 
 def _normalize_phone_e164(raw: Optional[str]) -> Optional[str]:
-    """Rev. 103 (D2) — normaliza un phone arbitrario a formato E.164 (+digits).
+    """Rev. 104 (F0-4) — DEPRECATED. Mantenido por backwards-compat.
 
-    El form Add Contacto persiste E.164 (`+57...`). El webhook MeLi
-    históricamente persistía sin `+` (`5755555550901`), creando
-    inconsistencia que rompía el match cross-canal cuando el comprador
-    MeLi escribía al WhatsApp del tenant.
+    Antes (rev. 103 D2): normalizaba a E.164 (`+digits`) — diferente del
+    canon usado por orchestrator (`digits`), causando duplicación silenciosa
+    de contacts (BUG-2).
 
-    Reglas:
-      - Si el raw ya empieza con `+`, preservamos eso y stripeamos
-        cualquier separador interno.
-      - Si es solo dígitos y >= 8 chars, prefijamos `+`.
-      - En cualquier otro caso, retornamos None (data quality issue).
+    Ahora delega a `lib.phone.to_db_format` (canon = digits-only). El renombre
+    se mantiene como `_normalize_phone_e164` solo para no tocar 20+ callsites
+    en esta misma sesión; semánticamente ahora retorna canon, NO E.164.
+
+    TODO Fase 1: renombrar a `_normalize_phone_canonical` y hacer callsites
+    explícitos sobre el formato esperado.
     """
-    if not raw:
-        return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    if s.startswith("+"):
-        digits = re.sub(r"\D", "", s)
-        return f"+{digits}" if digits else None
-    digits = re.sub(r"\D", "", s)
-    if len(digits) >= 8:
-        return f"+{digits}"
-    return None
+    return _phone_to_db_format(raw)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["MeLi Webhook"])
@@ -409,8 +399,11 @@ def _upsert_meli_contact(
         or buyer.get("phone")
         or None
     )
-    phone_e164 = _normalize_phone_e164(raw_phone)
-    if not phone_e164:
+    # Rev. 104 (F0-4) — phone canon = digits-only (`to_db_format`). El
+    # nombre del local var queda como `phone_canonical` para reflejar la
+    # nueva semántica (antes `phone_e164` con `+` causaba BUG-2).
+    phone_canonical = _normalize_phone_e164(raw_phone)
+    if not phone_canonical:
         return None
 
     buyer_name = (
@@ -422,7 +415,7 @@ def _upsert_meli_contact(
 
     contact_payload = {
         "tenant_id": tenant_id,
-        "phone": phone_e164,
+        "phone": phone_canonical,
         "name": buyer_name,
         "consent_given": True,
         "consent_source": "marketplace_meli",
@@ -437,18 +430,18 @@ def _upsert_meli_contact(
         "consent_actor_email": "system:meli_webhook",
     }
 
-    # Rev. 103 (D2) — backwards compat: si existe un contact con el
-    # mismo phone en formato LEGACY (sin `+`), lo migramos in-place
-    # actualizando phone → E.164 + el resto del payload. Esto evita
-    # duplicados (`+57...` y `57...` para el mismo titular).
-    legacy_phone = phone_e164.lstrip("+")
+    # Rev. 104 (F0-4) — Migración data legacy (rev. 103 D2 dejó filas con
+    # `+57...` E.164). Si encontramos un contact con phone en formato legacy
+    # (con '+'), lo migramos a canonical. La lógica anterior buscaba SIN '+'
+    # asumiendo que el escrito era CON '+'; ahora se invierte.
+    legacy_phone_with_plus = f"+{phone_canonical}"
     contact_id: Optional[str] = None
     try:
         legacy = (
             supabase.table("contacts")
             .select("id")
             .eq("tenant_id", tenant_id)
-            .eq("phone", legacy_phone)
+            .eq("phone", legacy_phone_with_plus)
             .limit(1)
             .execute()
         )
@@ -464,7 +457,7 @@ def _upsert_meli_contact(
     except Exception as e:
         logger.warning(
             "No se pudo crear/actualizar contacto MeLi (phone=%s): %s",
-            phone_e164, e,
+            phone_canonical, e,
         )
         return None
 
@@ -476,7 +469,7 @@ def _upsert_meli_contact(
             supabase.table("consent_audit_log").insert({
                 "tenant_id": tenant_id,
                 "contact_id": contact_id,
-                "phone_hash": _hash_phone(phone_e164),
+                "phone_hash": _hash_phone(phone_canonical),
                 "event": "granted",
                 "source": "system",
                 "actor_email": "system:meli_webhook",

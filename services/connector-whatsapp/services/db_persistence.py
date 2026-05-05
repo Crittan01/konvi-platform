@@ -3,6 +3,8 @@ import logging
 from typing import Dict, Any, Optional
 from supabase import create_client, Client
 
+from lib.phone import to_canonical as _phone_to_canonical  # rev. 104 F0-4
+
 logger = logging.getLogger(__name__)
 
 # ─── Supabase con service_role (bypass RLS — se fija tenant_id explícitamente) ──
@@ -48,12 +50,17 @@ def _resolve_tenant_by_waba(supabase: Client, meta_waba_id: str) -> Optional[str
 
 
 def _normalize_phone(phone: str) -> str:
+    """Normaliza phone usando helper canónico shared (rev. 104, F0-4).
+
+    Delega a `lib/phone.py::to_canonical` (idéntico en api/orchestrator/connector,
+    validado por pact test). Forma canónica = digits-only, alineada con Meta wa_id.
+    Si el helper retorna None (input inválido), preserva comportamiento
+    legacy `lstrip('+').strip()` para no romper rows con phone basura.
     """
-    Normaliza el teléfono a formato sin prefijo '+'.
-    Meta envía el wa_id sin '+' (ej: '573125835649').
-    Guardar siempre sin '+' evita conversaciones duplicadas por formato.
-    """
-    return phone.lstrip("+").strip()
+    canonical = _phone_to_canonical(phone)
+    if canonical is not None:
+        return canonical
+    return (phone or "").lstrip("+").strip()
 
 
 def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) -> str:
