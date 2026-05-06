@@ -72,6 +72,49 @@ SKU si el catálogo los expone.
 
 ---
 
+## BUG-105-02 — Tenant Console Inbox no refresca conversaciones automáticamente
+
+**Reportado**: 2026-05-06 · UAT Sem 4 H.4.1 P2 · Founder · 🟡 media
+
+### Reproducción
+
+1. Abrir Tenant Console → Inbox con una conversación seleccionada
+2. Cliente envía mensaje desde WhatsApp
+3. Bot procesa + responde
+4. **Operador NO ve los nuevos mensajes en la UI hasta hacer F5 manual**
+
+### Comportamiento esperado
+
+Inbox debería refrescar la lista de conversaciones + mensajes de la conversación
+seleccionada en tiempo real (o al menos cada N segundos vía polling). Operador
+no debería tener que recargar la página para ver actividad nueva.
+
+### Causa probable (sin investigar a fondo)
+
+- Subscription Supabase Realtime puede no estar activa o estar mal configurada
+- Polling fallback puede no estar implementado
+- Service worker / cache HTTP puede estar interfiriendo
+
+### Componente afectado
+
+`apps/web/app/dashboard/inbox/page.tsx` — investigar:
+- ¿Hay subscription `supabase.channel(...).on('postgres_changes', ...)` para
+  conversations + messages?
+- ¿Hay setInterval polling como fallback?
+- ¿WebSocket Realtime conecta correctamente al cargar la página?
+
+### Plan de fix
+
+**NO fix ahora** (fuera de scope Sem 4 P0 integraciones). Candidato a:
+- Sem 11 P2 robustez/observability (Plan J.2.7) — junto con OpenTelemetry
+- O sesión dedicada UI hardening si se reporta más tenants afectados
+
+### Workaround actual
+
+Operador presiona F5 / Ctrl+R para refrescar manualmente.
+
+---
+
 <!--
 Plantilla para nuevos bugs:
 
