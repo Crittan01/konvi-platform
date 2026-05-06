@@ -440,6 +440,147 @@ async def record_consent(
         raise HTTPException(status_code=500, detail="Error al registrar consentimiento")
 
 
+# ─── Reactivar consent (Op-A.2 — opt-out vía STOP keyword) ───────────────────
+# Rev. 105 Sem 4 H.4.1.x — endpoint operador-only para reactivar consent
+# tras soft opt-out (STOP keyword vía WhatsApp).
+#
+# DIFERENTE de POST /consent:
+# - /consent body.given=true: registra consent inicial (con consent_evidence)
+# - /reactivate-consent: limpia consent_revoked_at + reason existentes
+#   (el contact YA tenía consent_given=true; solo refresca el revoke flag)
+#
+# Habeas Data Ley 1581 ART. 9: la reactivación manual desde Tenant Console
+# requiere actor explícito + razón. La buena práctica es double opt-in
+# (cliente confirma re-consent vía WhatsApp), pero por ahora aceptamos
+# acción manual del operador con audit trail completo (evidence incluye
+# actor_email + reason + trigger='manual_reactivate').
+
+class ReactivateConsentRequest(BaseModel):
+    reason: str = Field(
+        ...,
+        min_length=10,
+        max_length=500,
+        description="Razón explícita por la cual el operador reactiva consent. Habeas Data audit.",
+    )
+
+
+@router.post("/{contact_id}/reactivate-consent", response_model=dict)
+@audit_log(entity_type="contact", action="consent_reactivated")
+async def reactivate_consent(
+    contact_id: str,
+    body: ReactivateConsentRequest,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
+):
+    """Reactiva consent de un contacto que fue soft-opted-out vía STOP keyword.
+
+    Limpia `consent_revoked_at` + `consent_revoked_reason`. Inserta evento
+    `consent_audit_log` event='granted' source='tenant_console' con
+    `evidence.trigger='manual_reactivate'` + actor + reason.
+
+    Idempotente: si el contact ya tiene consent activo (revoked_at NULL),
+    retorna 200 con mensaje no-op (no inserta audit event duplicado).
+
+    Auth: requires write role (owner/manager). NO disponible para operadores
+    read-only por seguridad — reactivación de consent es decisión legal.
+    """
+    actor_email: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    try:
+        # Extract actor del JWT (igual patrón que data_subject_request).
+        from dependencies.auth import _decode_supabase_jwt  # noqa: PLC0415
+        token = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
+        if token:
+            claims = _decode_supabase_jwt(token) or {}
+            actor_email = claims.get("email")
+            actor_user_id = claims.get("sub")
+    except Exception:
+        pass  # Best-effort; audit puede correr sin actor en casos extremos.
+
+    # Verificar contact existe + pertenece al tenant.
+    existing_res = (
+        supabase.table("contacts")
+        .select("id, phone, consent_given, consent_revoked_at, consent_revoked_reason")
+        .eq("id", contact_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not existing_res.data:
+        raise HTTPException(status_code=404, detail="Contacto no encontrado")
+    contact = existing_res.data
+    contact_phone = contact.get("phone")
+
+    # Idempotencia: si ya está activo, no-op.
+    if not contact.get("consent_revoked_at"):
+        return {
+            "ok": True,
+            "no_op": True,
+            "message": "Consent ya está activo — sin cambios",
+            "consent_revoked_at": None,
+        }
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Limpiar revoke flags. NO tocamos PII (consent_given se mantiene true,
+    # name/email/etc intactos — soft opt-out NO anonimizó).
+    update_payload = {
+        "consent_revoked_at": None,
+        "consent_revoked_reason": None,
+    }
+    update_res = (
+        supabase.table("contacts")
+        .update(update_payload)
+        .eq("id", contact_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    if not update_res.data:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar contacto")
+
+    # Audit log Habeas Data Art. 9 — append-only.
+    import hashlib  # noqa: PLC0415
+    phone_hash = (
+        hashlib.sha256((contact_phone or "").encode("utf-8")).hexdigest()
+        if contact_phone else None
+    )
+    try:
+        supabase.table("consent_audit_log").insert({
+            "tenant_id": tenant_id,
+            "contact_id": contact_id,
+            "phone_hash": phone_hash,
+            "event": "granted",
+            "source": "tenant_console",
+            "actor_user_id": actor_user_id,
+            "actor_email": actor_email,
+            "evidence": {
+                "trigger": "manual_reactivate",
+                "reason": body.reason,
+                "reactivated_at": now_iso,
+                "previous_revoked_reason": contact.get("consent_revoked_reason"),
+            },
+        }).execute()
+    except Exception as e:
+        logger.warning(
+            "[CONSENT] reactivate-consent audit log falló (no crítico): %s", e,
+        )
+
+    logger.info(
+        "[CONSENT] Reactivado vía Tenant Console | contact=%s tenant=%s actor=%s",
+        contact_id, tenant_id, actor_email or "unknown",
+    )
+    return {
+        "ok": True,
+        "no_op": False,
+        "message": "Consent reactivado. Marketing puede reactivarse al cliente.",
+        "reactivated_at": now_iso,
+        "actor_email": actor_email,
+    }
+
+
 # ─── Soft-delete con anonimización (Q3: retención Ley 1581) ───────────────────────
 
 @router.delete("/{contact_id}", response_model=dict)

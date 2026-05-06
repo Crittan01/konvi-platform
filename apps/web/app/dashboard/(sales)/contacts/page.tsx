@@ -661,6 +661,76 @@ export default async function ContactsPage({
     }
   }
 
+  // Rev. 105 H.4.1.x — Server action: reactivar consent tras soft opt-out
+  // (STOP keyword via WhatsApp). Limpia consent_revoked_at + reason; PII
+  // intacta (no se anonimizó). Audit log Habeas Data Art. 9 con actor +
+  // reason. Idempotente: si ya está activo, no-op.
+  async function reactivateConsentAction(
+    formData: FormData,
+  ): Promise<{ ok: boolean; status: number; message: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, status: 403, message: 'Permisos insuficientes (requiere owner/manager)' }
+    }
+    const contactId = ((formData.get('contact_id') as string) || '').trim()
+    const reason = ((formData.get('reason') as string) || '').trim()
+    if (!contactId) return { ok: false, status: 400, message: 'contact_id requerido' }
+    if (reason.length < 10) {
+      return { ok: false, status: 400, message: 'Razón requerida (mínimo 10 caracteres)' }
+    }
+
+    // Verificar contact + capturar phone para hash audit.
+    const { data: contact } = await sb.from('contacts')
+      .select('phone, consent_revoked_at, consent_revoked_reason')
+      .eq('id', contactId)
+      .eq('tenant_id', m.tenant_id)
+      .single()
+    if (!contact) {
+      return { ok: false, status: 404, message: 'Contacto no encontrado' }
+    }
+    if (!contact.consent_revoked_at) {
+      return { ok: true, status: 200, message: 'Consent ya estaba activo (no-op)' }
+    }
+
+    // Audit log ANTES de UPDATE (Habeas Data Art. 9 — append-only inmutable).
+    const admin = createAdminClient()
+    const auditResult = await admin.from('consent_audit_log').insert({
+      tenant_id: m.tenant_id,
+      contact_id: contactId,
+      phone_hash: hashPhone((contact as { phone?: string | null }).phone),
+      event: 'granted',
+      source: 'tenant_console',
+      actor_email: u?.email ?? null,
+      actor_user_id: u?.id ?? null,
+      evidence: {
+        trigger: 'manual_reactivate',
+        reason,
+        previous_revoked_reason: (contact as { consent_revoked_reason?: string | null }).consent_revoked_reason,
+        reactivated_at: new Date().toISOString(),
+      },
+    })
+    if (auditResult.error) {
+      console.error('[reactivateConsent] audit log insert falló', auditResult.error)
+      return { ok: false, status: 500, message: 'No se pudo registrar audit log. Reactivación abortada.' }
+    }
+
+    // UPDATE contacts limpiando revoke flags (PII intacta, NO anonimiza).
+    const { error: updateErr } = await sb.from('contacts')
+      .update({ consent_revoked_at: null, consent_revoked_reason: null })
+      .eq('id', contactId)
+      .eq('tenant_id', m.tenant_id)
+    if (updateErr) {
+      console.error('[reactivateConsent] update contact falló', updateErr)
+      return { ok: false, status: 500, message: 'Audit log se registró pero update falló. Estado inconsistente — reportar.' }
+    }
+
+    revalidatePath('/dashboard/contacts')
+    return { ok: true, status: 200, message: 'Consent reactivado. Marketing puede reanudarse al cliente.' }
+  }
+
   // ── UI ─────────────────────────────────────────────────────────────────────
 
   return (
@@ -700,6 +770,7 @@ export default async function ContactsPage({
         deleteAction={deleteContact}
         sarAction={sarAction}
         sarPrintableAction={sarPrintableAction}
+        reactivateConsentAction={reactivateConsentAction}
       />
     </div>
   )
