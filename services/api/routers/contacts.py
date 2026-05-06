@@ -576,9 +576,32 @@ async def reactivate_consent(
             "[CONSENT] reactivate-consent audit log falló (no crítico): %s", e,
         )
 
+    # Rev. 105 H.4.1.x.gov.sync — Sincronía Inbox: también vuelve
+    # conversations.status='opted_out' → 'bot_active' simétricamente.
+    # Asimetría STOP→opted_out / Reactivar→bot_active es el design correcto.
+    conversations_reactivated = 0
+    if contact_phone:
+        try:
+            sync_res = (
+                supabase.table("conversations")
+                .update({"status": "bot_active"})
+                .eq("tenant_id", tenant_id)
+                .eq("customer_phone", contact_phone)
+                .eq("status", "opted_out")
+                .execute()
+            )
+            conversations_reactivated = len(sync_res.data or [])
+        except Exception as e:
+            # No abortamos — el consent ya se reactivó. Solo log.
+            logger.warning(
+                "[CONSENT] conversations sync falló (no crítico) contact=%s: %s",
+                contact_id, e,
+            )
+
     logger.info(
-        "[CONSENT] Reactivado vía Tenant Console | contact=%s tenant=%s actor=%s",
-        contact_id, tenant_id, actor_email or "unknown",
+        "[CONSENT] Reactivado vía Tenant Console | contact=%s tenant=%s actor=%s "
+        "conversations_synced=%d",
+        contact_id, tenant_id, actor_email or "unknown", conversations_reactivated,
     )
     return {
         "ok": True,
@@ -586,6 +609,7 @@ async def reactivate_consent(
         "message": "Consent reactivado. Marketing puede reactivarse al cliente.",
         "reactivated_at": now_iso,
         "actor_email": actor_email,
+        "conversations_reactivated": conversations_reactivated,
     }
 
 

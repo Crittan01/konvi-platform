@@ -733,8 +733,39 @@ export default async function ContactsPage({
       return { ok: false, status: 500, message: 'Audit log se registró pero update falló. Estado inconsistente — reportar.' }
     }
 
+    // Rev. 105 H.4.1.x.gov.sync — Sincronía Inbox: también vuelve
+    // conversations.status='opted_out' → 'bot_active' para que el operador
+    // vea estado consistente en ambas UIs (Contactos + Inbox). Asimetría
+    // STOP→opted_out / Reactivar→bot_active es el design simétrico correcto.
+    // El customer_phone del contact mapea a conversations.customer_phone (1:N).
+    const contactPhone = (contact as { phone?: string | null }).phone
+    let conversationsReactivated = 0
+    if (contactPhone) {
+      const { data: convData, error: convUpdateErr } = await sb.from('conversations')
+        .update({ status: 'bot_active' })
+        .eq('tenant_id', m.tenant_id)
+        .eq('customer_phone', contactPhone)
+        .eq('status', 'opted_out')
+        .select('id')
+      if (convUpdateErr) {
+        // No abortamos — el consent ya se reactivó. Solo loguear.
+        console.error('[reactivateConsent] conversations sync falló (no crítico)', convUpdateErr)
+      } else {
+        conversationsReactivated = (convData ?? []).length
+      }
+    }
+
     revalidatePath('/dashboard/contacts')
-    return { ok: true, status: 200, message: 'Consent reactivado. Marketing puede reanudarse al cliente.' }
+    revalidatePath('/dashboard/inbox')
+
+    const syncMsg = conversationsReactivated > 0
+      ? ` Conversaciones reactivadas: ${conversationsReactivated} (Inbox sincronizado).`
+      : ''
+    return {
+      ok: true,
+      status: 200,
+      message: `Consent reactivado. Marketing puede reanudarse al cliente.${syncMsg}`,
+    }
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
