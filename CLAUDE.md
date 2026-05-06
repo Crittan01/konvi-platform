@@ -75,8 +75,17 @@ supabase/migrations/          # fuente canónica de esquema
 ## Validación pre-deploy
 
 ```bash
-bash scripts/validate.sh          # sintaxis + 1178 tests + TypeScript + lint
-bash scripts/validate.sh --build  # + Next.js build (detecta errores que bloquean Render)
-bash scripts/validate.sh --full   # + pip-audit + coherencia vars
+bash scripts/validate.sh             # sintaxis + 1490 tests + TypeScript + lint
+bash scripts/validate.sh --build     # + Next.js build (detecta errores que bloquean Render)
+bash scripts/validate.sh --full      # + pip-audit + coherencia vars
+bash scripts/validate.sh --coverage  # + cobertura Python (baseline 58.9%, target 70% Sem 11)
+bash scripts/validate.sh --lint      # + ruff Python (baseline 202 errores, cleanup Sem 2-3)
+bash scripts/validate.sh --ci        # CI strict: --full + --coverage + --build + warns→fails
 ```
+
+CI/CD: `.github/workflows/ci.yml` ejecuta `validate.sh --ci` + Next.js build en cada PR.
+
+Baselines (rev. 105 Sem 1):
+- **Coverage Python**: 58.9% (target J.5 = 70% Sem 11) — env `COVERAGE_MIN=55` ajustable
+- **ruff lint errors**: 202 baseline (cleanup planificado Sem 2-3) — env `BASELINE_RUFF_ERRORS=202`
 

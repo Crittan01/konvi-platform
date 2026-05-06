@@ -8,6 +8,11 @@ dist/
 build/
 .pytest_cache/
 *.pyo
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.ruff_cache/
 
 # ─── Node / pnpm ──────────────────────────────────────────────────────────────
 node_modules/

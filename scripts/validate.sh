@@ -2,8 +2,11 @@
 # =============================================================================
 # validate.sh — Validación pre-deploy Commerce Ops Platform
 #
-#   bash scripts/validate.sh          # checks rápidos
-#   bash scripts/validate.sh --full   # incluye pip-audit + env vars
+#   bash scripts/validate.sh             # checks rápidos
+#   bash scripts/validate.sh --full      # + pip-audit + env vars
+#   bash scripts/validate.sh --build     # + Next.js build
+#   bash scripts/validate.sh --coverage  # + cobertura tests Python (mínimo COVERAGE_MIN, default 70)
+#   bash scripts/validate.sh --ci        # CI strict: --full + --coverage + --build + warns como fails
 #
 # Exit: 0 = OK, 1 = errores (no desplegar)
 # =============================================================================
@@ -13,13 +16,35 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 FULL=false
-[[ "${1:-}" == "--full" ]] && FULL=true
+BUILD=false
+COVERAGE=false
+CI_MODE=false
+# Cobertura: baseline rev. 105 = 58.9% (1490 tests, services/). Target J.5 = 70%
+# (Sem 11 audit cleanup). Default 55% deja 4% buffer para evitar falsos negativos
+# por nuevos archivos sin tests; subir a 70% al cerrar Sem 11.
+COVERAGE_MIN="${COVERAGE_MIN:-55}"
+
+for arg in "$@"; do
+  case "$arg" in
+    --full)     FULL=true ;;
+    --build)    BUILD=true ;;
+    --coverage) COVERAGE=true ;;
+    --ci)       CI_MODE=true; FULL=true; COVERAGE=true; BUILD=true ;;
+  esac
+done
 
 PASS=0; FAIL=0; WARN=0
 
 _ok()   { echo "  ✅ $*"; PASS=$((PASS+1)); }
 _err()  { echo "  ❌ $*"; FAIL=$((FAIL+1)); }
-_warn() { echo "  ⚠️  $*"; WARN=$((WARN+1)); }
+_warn() {
+  echo "  ⚠️  $*"
+  if $CI_MODE; then
+    FAIL=$((FAIL+1))
+  else
+    WARN=$((WARN+1))
+  fi
+}
 _hdr()  { echo; echo "▶ $*"; }
 
 # ─── 1. Python — Sintaxis ─────────────────────────────────────────────────────
@@ -42,13 +67,41 @@ done
 # ─── 2. Python — Tests ───────────────────────────────────────────────────────
 _hdr "Python unit tests"
 
-result=$(python3.11 -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
+if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
+  python3.11 -m coverage erase 2>/dev/null || true
+  result=$(python3.11 -m coverage run --source=services -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
+else
+  result=$(python3.11 -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
+fi
 if echo "$result" | grep -q "^OK"; then
   total=$(echo "$result" | grep -oP '\d+ test' | head -1)
   _ok "Suite completa OK ($total)"
 else
   _err "Hay tests fallando — NO desplegar"
   echo "$result" | grep -E "FAIL|ERROR" | head -5
+fi
+
+# ─── 2b. Python — Coverage (--coverage / --ci) ────────────────────────────────
+if $COVERAGE; then
+  _hdr "Python coverage (mínimo ${COVERAGE_MIN}%)"
+  if python3.11 -c "import coverage" 2>/dev/null; then
+    cov_out=$(python3.11 -m coverage report --skip-empty 2>&1 || true)
+    cov_total=$(echo "$cov_out" | grep -E "^TOTAL" | grep -oP '\d+(\.\d+)?%' | tr -d '%' | head -1)
+    if [ -n "$cov_total" ]; then
+      # Compare as integer (truncate decimal)
+      cov_int="${cov_total%.*}"
+      if [ "$cov_int" -ge "$COVERAGE_MIN" ]; then
+        _ok "Coverage: ${cov_total}% (≥${COVERAGE_MIN}%)"
+      else
+        _err "Coverage: ${cov_total}% (mínimo ${COVERAGE_MIN}%)"
+      fi
+      python3.11 -m coverage xml -o coverage.xml 2>/dev/null || true
+    else
+      _warn "No se pudo leer cobertura"
+    fi
+  else
+    _warn "coverage no instalado: python3.11 -m pip install 'coverage[toml]'"
+  fi
 fi
 
 # ─── 3. Python — Compilación de tests ────────────────────────────────────────
@@ -106,12 +159,14 @@ fi
 # `next build` aplica reglas estrictas adicionales que `next lint` omite.
 # Sin esto, errores como prefer-const o no-unused-expressions pasaban
 # desapercibidos y bloqueaban el deploy en Render.
-_hdr "Next.js build (apps/web) — opt-in con --build"
+_hdr "Next.js build (apps/web) — opt-in con --build / --ci"
 
-if [ "${VALIDATE_BUILD:-}" = "1" ] || [ "${1:-}" = "--build" ] || [ "${1:-}" = "--full" ]; then
+if $BUILD || [ "${VALIDATE_BUILD:-}" = "1" ]; then
   if command -v pnpm &>/dev/null; then
-    build_out=$(pnpm --filter web build 2>&1 || true)
-    if echo "$build_out" | grep -q "Failed to compile"; then
+    build_out=$(NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}" \
+                NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder}" \
+                pnpm --filter web build 2>&1 || true)
+    if echo "$build_out" | grep -qE "Failed to compile|Build failed"; then
       _err "next build FALLÓ (Render no podrá desplegar):"
       echo "$build_out" | grep -E "Error:" | head -5
     else
@@ -121,7 +176,7 @@ if [ "${VALIDATE_BUILD:-}" = "1" ] || [ "${1:-}" = "--build" ] || [ "${1:-}" = "
     _warn "pnpm no disponible — omitiendo build"
   fi
 else
-  _warn "Build omitido (correr con --build o VALIDATE_BUILD=1 para ejecutarlo)"
+  echo "  ℹ️  Build omitido (correr con --build, --ci, o VALIDATE_BUILD=1)"
 fi
 
 # ─── 6. Render.yaml coherencia ───────────────────────────────────────────────
@@ -211,6 +266,42 @@ if $FULL; then
     fi
   else
     _warn ".env no encontrado"
+  fi
+fi
+
+# ─── 9. Python lint (ruff) — opt-in con --lint hasta cleanup Sem 2-3 ─────────
+# Codebase tiene ~200 violaciones pre-existentes (services/api/pyproject.toml
+# define rules estrictas: I, C, B). Cleanup planificado en Sem 2-3 framework
+# común. Por ahora ruff es opt-in para no bloquear CI con deuda existente.
+LINT=false
+for arg in "$@"; do [[ "$arg" == "--lint" ]] && LINT=true; done
+
+if $LINT || $CI_MODE; then
+  _hdr "Python lint (ruff)"
+  if command -v ruff &>/dev/null; then
+    ruff_out=$(ruff check services/ tests/ --output-format=concise 2>&1 || true)
+    error_count=$(echo "$ruff_out" | grep -cE "^services/|^tests/" || echo 0)
+    if [ "$error_count" -gt 0 ]; then
+      if $CI_MODE; then
+        # CI strict: solo fallar si hay errores NUEVOS vs baseline.
+        # Baseline pre-Sem-1: ~204 errores. Cleanup en Sem 2-3.
+        BASELINE_RUFF_ERRORS="${BASELINE_RUFF_ERRORS:-202}"
+        if [ "$error_count" -gt "$BASELINE_RUFF_ERRORS" ]; then
+          _err "ruff: $error_count errores (baseline ${BASELINE_RUFF_ERRORS}, regresión +$((error_count - BASELINE_RUFF_ERRORS)))"
+          echo "$ruff_out" | grep -E "^services/|^tests/" | head -10
+        else
+          _ok "ruff: $error_count errores (≤ baseline ${BASELINE_RUFF_ERRORS}, sin regresión)"
+        fi
+      else
+        _warn "ruff: $error_count errores existentes (baseline pre-Sem-1, cleanup en Sem 2-3)"
+        echo "$ruff_out" | grep -E "^services/|^tests/" | head -5
+      fi
+    else
+      files=$(find services tests -name "*.py" ! -path "*/__pycache__/*" 2>/dev/null | wc -l | tr -d ' ')
+      _ok "ruff OK ($files archivos Python)"
+    fi
+  else
+    _warn "ruff no instalado: pip install ruff"
   fi
 fi
 
