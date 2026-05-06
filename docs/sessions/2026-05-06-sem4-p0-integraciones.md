@@ -327,7 +327,61 @@ si auditoría pide trail de opt-outs respetados.
 - LOC: +153 (lib) + +257 (tests) + +75 (orchestrator hook)
 - Commit: pendiente
 
-### UAT founder 2026-05-06 — Hallazgos
+### Cierre H.4.1 (2026-05-06 14:30 hora local)
+
+**Estado final: ✅ CERRADO con Opción A** (decisión founder post UAT-driven debug profundo).
+
+**Comportamiento final**:
+- Cliente envía `STOP`/`BAJA`/etc. → bot revoca consent (consent_revoked_at) + envía mensaje de baja + persiste outbound en messages
+- Cliente vuelve a escribir cualquier cosa → bot responde normalmente (saluda, atiende). Validado en UAT con "Hola buenas tardes" → bot respondió "Buenas tardes, Cristian! Bienvenido(a) de nuevo a KAIU Living Natural"
+- consent_revoked_at en contacts es **única fuente de verdad** de opt-out — filtra outbound proactivo (HSM templates marketing futuros)
+- Audit log Habeas Data ART. 9 preserva trail completo (revoked → granted manual → revoked → ...)
+
+**Razón Opción A vs B**:
+- Investigación profunda con debug log temporal reveló que connector-whatsapp resetea automáticamente status `opted_out` → `bot_active` cuando llega cualquier inbound del cliente. Esa lógica fue diseñada para reabrir conversaciones cerradas, pero también deshace cualquier intento del orchestrator de preservar `opted_out`.
+- Founder eligió respetar el design Q3 original ("NO bloquea conversación futura — cliente puede volver a escribir y bot responde") en lugar de pelearle al connector.
+- Resultado: detector STOP funciona idempotentemente (cada STOP confirma baja), pero conversación NO queda en silencio post-opt-out.
+
+**Reverts aplicados** (Opción A):
+- Revert fix #4: SKIP_OPTED_OUT branch en orchestrator.py removido (era unreachable code)
+- Revert fix #6: whitelist OPTED_OUT en `_get_conversation_status` removido (innecesario sin fix #4)
+- Removed: `mark_conversation_opted_out` call en STOP detector (status era transitorio, sin valor)
+- Removed: debug log temporal `[ORCH_DEBUG_H41]`
+
+**Mantenidos** (cumplen Q3 + Habeas Data):
+- Detector STOP regex 11 patrones canónicos (P1, P3 PASS)
+- Anti-falso-positivo (P2 PASS — "Stop, espera un momento" no revoca)
+- soft_revoke_consent → UPDATE consent_revoked_at + reason (NO anonimiza PII)
+- Audit log con event='revoked' + evidence={trigger:'stop_keyword', keyword_matched}
+- send_whatsapp_message confirmación
+- Persist outbound en messages (fix #5 — visible en Inbox tras refresh)
+- Migration CHECK constraint con opted_out (harmless, queda como status válido para futuro)
+- Frontend types con opted_out + STATUS_CONFIG + filtro (defensa para edge cases transitorios)
+- mark_conversation_opted_out function disponible en lib (no consumida — futura)
+
+**UAT P1-P4 + post-fix**:
+- P1 STOP exacto → ✅ PASS (consent revocado + mensaje de baja + audit log)
+- P2 "Stop, espera un momento" → ✅ PASS (no revoca, mensaje normal)
+- P3 BAJA → ✅ PASS (mismo flow que P1)
+- P4 STOP idempotente → ✅ PASS funcional (responde de nuevo, audit log refresca)
+- Post Op-A "Hola buenas tardes" → ✅ PASS (bot responde normal, status reset por connector)
+
+**Commits acumulados H.4.1** (8 total):
+- 9432d2d feat: STOP detector inicial
+- 957dc15 fix #1: CHECK constraint conversations.status
+- ced14ec fix #2: audit log events canónicos
+- 2356403 fix #3: frontend types + STATUS_CONFIG
+- d1fae6b fix #4: contract OPTED_OUT + skip + UI button (parcialmente revertido)
+- 3d194a6 fix #5: persistir outbound en messages
+- 38b8f50 fix #6: whitelist en _get_conversation_status (revertido)
+- (pendiente) revert + Op-A final close
+
+**Lección registrada**:
+1. Coordinación cuádruple es crítica: DB + backend domain + orchestrator + frontend. Pero también hay que verificar **layer extra**: connectors externos pueden tener lógica que afecta el flow.
+2. Q3 design ("no bloquea futuro") tiene implicaciones técnicas que deben respetarse — agregar `opted_out` como status persistente fue un over-engineering inadvertido.
+3. Tests con fake supabase NO detectan estos cross-layer bugs. Smoke E2E real con UAT humano sigue siendo crítico.
+
+### UAT founder 2026-05-06 — Hallazgos durante implementación
 
 **Prueba 1 (STOP exacto)**: ✅ Funcionalmente PASS — bot respondió correctamente
 con mensaje de baja. Pero log reveló:

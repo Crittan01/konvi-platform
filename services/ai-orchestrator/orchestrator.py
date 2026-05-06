@@ -18,7 +18,6 @@ from conversation_contract import (
     CONVERSATION_STATUS_BOT_ACTIVE,
     CONVERSATION_STATUS_CLOSED,
     CONVERSATION_STATUS_HUMAN_TAKEOVER,
-    CONVERSATION_STATUS_OPTED_OUT,
     PROCESSING_STATUS_FAILED,
     PROCESSING_STATUS_PENDING,
     PROCESSING_STATUS_PROCESSED,
@@ -27,7 +26,6 @@ from conversation_contract import (
     SKIP_REASON_GUARDRAIL,
     SKIP_REASON_HUMAN_TAKEOVER,
     SKIP_REASON_NON_TEXT,
-    SKIP_REASON_OPTED_OUT,
 )
 
 logger = logging.getLogger("orchestrator.core")
@@ -1534,12 +1532,7 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
 
 
 def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
-    """Lee el estado actual de la conversación para decidir si el bot puede responder.
-
-    Rev. 105 Sem 4 H.4.1 fix #6 — agrega CONVERSATION_STATUS_OPTED_OUT al
-    whitelist. Antes caía al fallback CLOSED para opted_out, ocultando la
-    semántica del opt-out — el orchestrator skipeaba con SKIP_REASON_CLOSED
-    en lugar de SKIP_REASON_OPTED_OUT, dificultando forensics."""
+    """Lee el estado actual de la conversación para decidir si el bot puede responder."""
     conv_res = (
         supabase.table("conversations")
         .select("status")
@@ -1554,7 +1547,6 @@ def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
         CONVERSATION_STATUS_BOT_ACTIVE,
         CONVERSATION_STATUS_HUMAN_TAKEOVER,
         CONVERSATION_STATUS_CLOSED,
-        CONVERSATION_STATUS_OPTED_OUT,
     }:
         return status
     return CONVERSATION_STATUS_CLOSED
@@ -5749,24 +5741,6 @@ async def build_and_run_orchestration(
             )
             return
 
-        # Rev. 105 Sem 4 H.4.1 — opt-out skip. Cliente revocó consent vía
-        # STOP keyword. Bot NO responde mientras la conversación esté en
-        # opted_out. Operador puede reactivar manual desde UI Inbox botón
-        # "Reactivar bot" (cambia status a bot_active). consent_revoked_at
-        # se mantiene independiente del status (filtra HSM templates outbound).
-        if conversation_status == CONVERSATION_STATUS_OPTED_OUT:
-            logger.info(
-                "[ORCH] Mensaje %s omitido: conversación opted_out (cliente revocó consent)",
-                message_id,
-            )
-            _mark_message_processing(
-                supabase,
-                message_id,
-                processing_status=PROCESSING_STATUS_SKIPPED,
-                skip_reason=SKIP_REASON_OPTED_OUT,
-            )
-            return
-
         # ── 0.5 Resolución temprana: tenant + contacto + historial ────────────────
         # Necesario antes de los gates para personalizar respuestas y verificar estado.
         # Rev. 71 — Saca columnas legacy (business_hours/cutoff_message/dispatch_lead_time)
@@ -5846,7 +5820,6 @@ async def build_and_run_orchestration(
                 from lib.whatsapp_optout import (  # noqa: PLC0415
                     OPTOUT_CONFIRMATION_TEXT,
                     is_optout_keyword,
-                    mark_conversation_opted_out,
                     soft_revoke_consent,
                 )
                 if is_optout_keyword(content):
@@ -5879,12 +5852,14 @@ async def build_and_run_orchestration(
                                 "rev": "105_h41",
                             },
                         )
-                        # Marca conversación opted_out (visibilidad UI).
-                        mark_conversation_opted_out(
-                            supabase,
-                            conversation_id=conversation_id,
-                            tenant_id=tenant_id,
-                        )
+                        # NOTA Op-A founder 2026-05-06: NO marcamos
+                        # conversation.status='opted_out' porque connector-whatsapp
+                        # lo resetea automáticamente a 'bot_active' al recibir
+                        # el siguiente inbound del cliente (lógica existente
+                        # diseñada para preservar Q3: "no bloquea futuro").
+                        # consent_revoked_at en contacts es la única fuente de
+                        # verdad de opt-out — filtra outbound proactivo (HSM
+                        # templates). Status conversación no se preserva.
                         # Envía confirmación de baja al cliente vía WhatsApp.
                         meta_msg_id_optout: Optional[str] = None
                         try:
