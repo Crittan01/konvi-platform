@@ -65,6 +65,8 @@ type Props = {
   canWrite: boolean
   addAction:    (fd: FormData) => Promise<void>
   editAction:   (fd: FormData) => Promise<void>
+  // Rev. 105 H.4.1.x — Reactivar consent tras soft opt-out (STOP keyword).
+  reactivateConsentAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; message: string }>
   deleteAction: (fd: FormData) => Promise<void>
   sarAction?:   (fd: FormData) => Promise<SarResult>
   sarPrintableAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; html?: string; error?: string }>
@@ -142,7 +144,7 @@ function ExistingAttachmentCard({
 
 // Mismo formato que Inbox: +57 312 583 5649. Rev. 102: detección
 // de country code. Para CO formato bonito; otros países muestra +N+digits.
-export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -355,6 +357,41 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
     })
   }
 
+  // Rev. 105 H.4.1.x — Reactivar consent tras soft opt-out (STOP keyword).
+  const [pendingReactivateId, setPendingReactivateId] = useState<string | null>(null)
+  const [pendingReactivateReason, setPendingReactivateReason] = useState<string>('')
+  const pendingReactivateContact = useMemo(
+    () => initialContacts.find(c => c.id === pendingReactivateId) ?? null,
+    [initialContacts, pendingReactivateId],
+  )
+  const handleReactivateById = (contactId: string) => {
+    setPendingReactivateId(contactId)
+    setPendingReactivateReason('')
+  }
+  const confirmReactivate = () => {
+    if (!pendingReactivateId || !reactivateConsentAction) return
+    const reason = pendingReactivateReason.trim()
+    if (reason.length < 10) {
+      window.alert('La razón debe tener al menos 10 caracteres (auditoría Habeas Data).')
+      return
+    }
+    const fd = new FormData()
+    fd.set('contact_id', pendingReactivateId)
+    fd.set('reason', reason)
+    const targetId = pendingReactivateId
+    setPendingReactivateId(null)
+    setPendingReactivateReason('')
+    startTransition(async () => {
+      const res = await reactivateConsentAction(fd)
+      if (res.ok) {
+        router.refresh()
+        showSuccess(res.message || 'Consent reactivado.')
+      } else {
+        window.alert(`Error reactivando consent (${targetId.slice(0, 8)}…): ${res.message}`)
+      }
+    })
+  }
+
   // Rev. 102 — handlers SAR/printable movidos a <HabeasDataActions />
   // (apps/web/.../contacts/_components/habeas-data-actions.tsx). Allí está
   // la lógica de descargas + dialogs de confirmación + dialog (?) de info.
@@ -445,6 +482,74 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
               className="bg-red-700 hover:bg-red-800 text-white"
             >
               Sí, eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rev. 105 H.4.1.x — Dialog confirmación Reactivar consent */}
+      <Dialog
+        open={pendingReactivateId !== null}
+        onOpenChange={(o) => !o && setPendingReactivateId(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-700">
+              <ShieldCheck className="h-5 w-5" />
+              Reactivar consent marketing
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción permite que el cliente vuelva a recibir HSM templates marketing.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Vas a reactivar consent del contacto{' '}
+              <strong className="text-foreground">
+                {pendingReactivateContact?.name || 'sin nombre'}{' '}
+                ({pendingReactivateContact ? formatPhone(pendingReactivateContact.phone) : ''})
+              </strong>.
+            </p>
+            <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-2.5 text-xs text-amber-700">
+              <p className="font-semibold mb-1">Habeas Data Ley 1581 ART. 9:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>El cliente debió haber dado consent renovado <strong>explícito</strong> (idealmente vía WhatsApp con confirmación).</li>
+                <li>Si solo te pidió por teléfono o presencial, la razón debe documentarlo claramente para audit ante SIC.</li>
+                <li>La razón quedará en <code>consent_audit_log</code> (append-only, 7 años retención).</li>
+              </ul>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Razón explícita (mínimo 10 caracteres) *</Label>
+              <Input
+                value={pendingReactivateReason}
+                onChange={e => setPendingReactivateReason(e.target.value)}
+                placeholder="Ej: Cliente llamó al 312-583-5649 a las 3pm pidiendo volver a recibir promociones..."
+                className="h-8 text-xs"
+                minLength={10}
+                maxLength={500}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Se guarda con tu email + timestamp. Esencial para defensa ante una queja regulatoria.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPendingReactivateId(null)}
+              size="sm"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={confirmReactivate}
+              size="sm"
+              className="bg-emerald-700 hover:bg-emerald-800 text-white"
+              disabled={pendingReactivateReason.trim().length < 10}
+            >
+              Sí, reactivar consent
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -728,7 +833,17 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium text-sm">{c.name ?? <span className="text-muted-foreground italic">Sin nombre</span>}</p>
-                          {c.consent_given ? (
+                          {c.consent_given && c.consent_revoked_at ? (
+                            // Rev. 105 H.4.1.x — Soft opt-out (STOP keyword).
+                            // PII intacta + consent_given=true + revoked_at populated.
+                            // Marketing bloqueado pero chat activo (Q3 + Op-A.2).
+                            <span
+                              className="flex items-center gap-1 text-[11px] text-rose-700"
+                              title="Cliente envió STOP/BAJA por WhatsApp. Templates HSM marketing bloqueados. Conversación puede continuar normalmente — bot responde a mensajes inbound. Para reactivar marketing, usar 'Reactivar consent' (requiere doble opt-in del cliente preferiblemente)."
+                            >
+                              <ShieldOff className="h-3 w-3" /> Marketing bloqueado · Chat activo
+                            </span>
+                          ) : c.consent_given ? (
                             <span className="flex items-center gap-1 text-[11px] text-emerald-700">
                               <ShieldCheck className="h-3 w-3" /> Consent.{' '}
                               {c.consent_date && <span className="opacity-60">{new Date(c.consent_date).toLocaleDateString('es-CO')}</span>}
@@ -767,10 +882,30 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                           </p>
                         )}
                         {c.consent_revoked_at && (
-                          <p className="text-xs text-amber-700 mt-0.5">
-                            Revocado: {new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}
-                            {c.consent_revoked_reason ? ` · ${c.consent_revoked_reason}` : ''}
-                          </p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                            <p className="text-xs text-amber-700">
+                              Revocado: {new Date(c.consent_revoked_at).toLocaleDateString('es-CO')}
+                              {c.consent_revoked_reason ? ` · ${c.consent_revoked_reason}` : ''}
+                            </p>
+                            {/* Rev. 105 H.4.1.x — Reactivar consent solo aplicable
+                                en soft opt-out (PII intacta, consent_given=true).
+                                NO mostrar para SAR-erase (consent_given=false +
+                                anonimización requiere consentimiento renovado vía
+                                edit form existente). */}
+                            {canWrite && c.consent_given && reactivateConsentAction && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-6 text-[11px] px-2 gap-1 border-emerald-700/40 text-emerald-700 hover:bg-emerald-700/10"
+                                onClick={() => handleReactivateById(c.id)}
+                                disabled={isPending}
+                                title="Reactivar consent marketing. Habeas Data: requiere razón explícita para audit."
+                              >
+                                <ShieldCheck className="h-3 w-3" /> Reactivar consent
+                              </Button>
+                            )}
+                          </div>
                         )}
                         {extractEvidenceNote(c.consent_evidence) && (
                           <p className="text-xs text-muted-foreground/80 mt-0.5">
