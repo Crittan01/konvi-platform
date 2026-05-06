@@ -67,6 +67,9 @@ type Props = {
   editAction:   (fd: FormData) => Promise<void>
   // Rev. 105 H.4.1.x — Reactivar consent tras soft opt-out (STOP keyword).
   reactivateConsentAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; message: string }>
+  // Rev. 105 H.4.1.x.gov — userRole para gobierno regulatorio: reactivar
+  // consent es owner-only (Habeas Data ART. 11).
+  userRole?: string
   deleteAction: (fd: FormData) => Promise<void>
   sarAction?:   (fd: FormData) => Promise<SarResult>
   sarPrintableAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; html?: string; error?: string }>
@@ -144,7 +147,8 @@ function ExistingAttachmentCard({
 
 // Mismo formato que Inbox: +57 312 583 5649. Rev. 102: detección
 // de country code. Para CO formato bonito; otros países muestra +N+digits.
-export default function ContactsManager({ initialContacts, canWrite, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
+export default function ContactsManager({ initialContacts, canWrite, userRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
+  const isOwner = userRole === 'owner'
   const [search, setSearch] = useState('')
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -891,18 +895,30 @@ export default function ContactsManager({ initialContacts, canWrite, addAction, 
                                 en soft opt-out (PII intacta, consent_given=true).
                                 NO mostrar para SAR-erase (consent_given=false +
                                 anonimización requiere consentimiento renovado vía
-                                edit form existente). */}
+                                edit form existente).
+                                Rev. 105 H.4.1.x.gov — Owner-only (Habeas Data
+                                ART. 11). Manager ve botón disabled con tooltip
+                                educativo. */}
                             {canWrite && c.consent_given && reactivateConsentAction && (
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-6 text-[11px] px-2 gap-1 border-emerald-700/40 text-emerald-700 hover:bg-emerald-700/10"
-                                onClick={() => handleReactivateById(c.id)}
-                                disabled={isPending}
-                                title="Reactivar consent marketing. Habeas Data: requiere razón explícita para audit."
+                                className={
+                                  isOwner
+                                    ? 'h-6 text-[11px] px-2 gap-1 border-emerald-700/40 text-emerald-700 hover:bg-emerald-700/10'
+                                    : 'h-6 text-[11px] px-2 gap-1 border-muted-foreground/30 text-muted-foreground cursor-not-allowed opacity-60'
+                                }
+                                onClick={isOwner ? () => handleReactivateById(c.id) : undefined}
+                                disabled={isPending || !isOwner}
+                                title={
+                                  isOwner
+                                    ? 'Reactivar consent marketing. Habeas Data: requiere razón explícita para audit.'
+                                    : 'Solo el owner puede reactivar consent (Habeas Data ART. 11 — responsable legal certifica re-consent del titular). Contacta al owner del tenant para que ejecute la acción.'
+                                }
                               >
-                                <ShieldCheck className="h-3 w-3" /> Reactivar consent
+                                <ShieldCheck className="h-3 w-3" />
+                                {isOwner ? 'Reactivar consent' : 'Reactivar (solo owner)'}
                               </Button>
                             )}
                           </div>

@@ -672,8 +672,14 @@ export default async function ContactsPage({
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
-      return { ok: false, status: 403, message: 'Permisos insuficientes (requiere owner/manager)' }
+    // Rev. 105 H.4.1.x — owner-only (Habeas Data ART. 11). Manager NO
+    // puede reactivar consent — debe escalar al owner para que firme.
+    if (!m.tenant_id || m.role !== 'owner') {
+      return {
+        ok: false,
+        status: 403,
+        message: 'Solo el owner puede reactivar consent (gobierno Habeas Data ART. 11). Contactar al owner del tenant para que ejecute la acción.',
+      }
     }
     const contactId = ((formData.get('contact_id') as string) || '').trim()
     const reason = ((formData.get('reason') as string) || '').trim()
@@ -765,6 +771,7 @@ export default async function ContactsPage({
       <ContactsManager
         initialContacts={contacts}
         canWrite={canWrite}
+        userRole={role}
         addAction={addContact}
         editAction={editContact}
         deleteAction={deleteContact}
