@@ -8,3 +8,5 @@ httpx==0.28.1
 PyJWT==2.10.1
 # Rev. 72 — embeddings KB en backend (cierra D3: GEMINI_API_KEY ya no expuesta al frontend).
 google-genai==1.47.0
+# Rev. 105 Sem 2 F.10 (MA-2) — bcrypt hashing para webhook secrets rotables per-tenant.
+bcrypt==5.0.0
