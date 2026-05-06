@@ -1232,6 +1232,13 @@ export default function InboxPage() {
                     <Bot className="h-3.5 w-3.5 mr-1" /> Volver al bot
                   </Button>
                 )}
+                {selectedConv.status === 'opted_out' && (
+                  <Button size="sm" variant="outline" onClick={() => updateStatus('bot_active')} disabled={takingOver}
+                    className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 text-xs h-8"
+                    title="Reactivar bot. consent_revoked_at sigue marcado — para reactivar marketing proactivo, el cliente debe re-otorgar consent explícitamente.">
+                    <Bot className="h-3.5 w-3.5 mr-1" /> Reactivar bot
+                  </Button>
+                )}
                 {/* Toggle panel contextual en desktop */}
                 <button
                   onClick={() => setContextPanelOpen(p => !p)}

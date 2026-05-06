@@ -18,6 +18,7 @@ from conversation_contract import (
     CONVERSATION_STATUS_BOT_ACTIVE,
     CONVERSATION_STATUS_CLOSED,
     CONVERSATION_STATUS_HUMAN_TAKEOVER,
+    CONVERSATION_STATUS_OPTED_OUT,
     PROCESSING_STATUS_FAILED,
     PROCESSING_STATUS_PENDING,
     PROCESSING_STATUS_PROCESSED,
@@ -26,6 +27,7 @@ from conversation_contract import (
     SKIP_REASON_GUARDRAIL,
     SKIP_REASON_HUMAN_TAKEOVER,
     SKIP_REASON_NON_TEXT,
+    SKIP_REASON_OPTED_OUT,
 )
 
 logger = logging.getLogger("orchestrator.core")
@@ -5738,6 +5740,24 @@ async def build_and_run_orchestration(
                 message_id,
                 processing_status=PROCESSING_STATUS_SKIPPED,
                 skip_reason=SKIP_REASON_CLOSED,
+            )
+            return
+
+        # Rev. 105 Sem 4 H.4.1 — opt-out skip. Cliente revocó consent vía
+        # STOP keyword. Bot NO responde mientras la conversación esté en
+        # opted_out. Operador puede reactivar manual desde UI Inbox botón
+        # "Reactivar bot" (cambia status a bot_active). consent_revoked_at
+        # se mantiene independiente del status (filtra HSM templates outbound).
+        if conversation_status == CONVERSATION_STATUS_OPTED_OUT:
+            logger.info(
+                "[ORCH] Mensaje %s omitido: conversación opted_out (cliente revocó consent)",
+                message_id,
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_OPTED_OUT,
             )
             return
 
