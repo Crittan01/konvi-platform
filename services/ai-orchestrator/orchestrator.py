@@ -5879,9 +5879,10 @@ async def build_and_run_orchestration(
                             conversation_id=conversation_id,
                             tenant_id=tenant_id,
                         )
-                        # Envía confirmación de baja al cliente.
+                        # Envía confirmación de baja al cliente vía WhatsApp.
+                        meta_msg_id_optout: Optional[str] = None
                         try:
-                            await send_whatsapp_message(
+                            meta_msg_id_optout = await send_whatsapp_message(
                                 tenant_id=tenant_id,
                                 supabase=supabase,
                                 to_phone=customer_phone_raw,
@@ -5890,6 +5891,28 @@ async def build_and_run_orchestration(
                         except Exception as send_err:
                             logger.error(
                                 "[OPTOUT] Falló envío confirmación: %s", send_err,
+                            )
+
+                        # Persistir el outbound en messages para que aparezca
+                        # en el Inbox del Tenant Console (rev. 105 H.4.1 fix #5).
+                        # Si el envío falló (meta_msg_id_optout=None), igual
+                        # registramos para trazabilidad — el cliente puede
+                        # reportar al operador que no recibió la confirmación.
+                        try:
+                            supabase.table("messages").insert({
+                                "conversation_id": conversation_id,
+                                "tenant_id": tenant_id,
+                                "direction": "outbound",
+                                "content_type": "text",
+                                "content": OPTOUT_CONFIRMATION_TEXT,
+                                "meta_message_id": meta_msg_id_optout,
+                                "processed": True,
+                                "processing_status": PROCESSING_STATUS_PROCESSED,
+                            }).execute()
+                        except Exception as persist_err:
+                            logger.error(
+                                "[OPTOUT] Falló persist messages outbound: %s",
+                                persist_err,
                             )
                         # Marca el mensaje inbound como procesado.
                         _mark_message_processing(
