@@ -16,7 +16,7 @@ almacenadas en Supabase Vault. No se usan env vars globales.
 """
 import hashlib
 import logging
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import httpx
 
@@ -438,3 +438,190 @@ async def get_transaction(
         if not isinstance(data, dict):
             return {}
         return data
+
+
+# ─── Rev. 105 Sem 4 H.3.2 — Retry + Circuit Breaker (resilience) ─────────────
+# Wrappers opt-in sobre create_payment_link / get_transaction / etc. que
+# agregan:
+#   - Retry exponential backoff + jitter (3 intentos default) ante 5xx /
+#     network / timeout
+#   - Circuit breaker per-tenant (opcional, evita gastar tiempo si Wompi
+#     está caído)
+#
+# NO modifica los wrappers originales — callers actuales siguen funcionando.
+# Para activar resilience en una callsite, cambiar:
+#   create_payment_link_sync(...)  →  create_payment_link_sync_with_resilience(...)
+#
+# Cierra riesgo P0 dossier Wompi 2026-05-05 sec. 6: outages temporales de
+# Wompi causaban falla inmediata en primer intento; con retry el flow se
+# recupera; con CB damos UX claro al cliente cuando Wompi está caído real.
+
+from typing import Callable as _Callable, TypeVar as _TypeVar  # noqa: E402
+
+_T = _TypeVar("_T")
+
+
+def _is_retriable_wompi(error: Exception) -> bool:
+    """5xx + network + timeout → retry. 4xx (validación) → no retry."""
+    # httpx.HTTPStatusError tiene .response.status_code
+    if hasattr(error, "response"):
+        try:
+            status = error.response.status_code  # type: ignore
+            if 500 <= status < 600:
+                return True
+            return False  # 4xx no retriable
+        except AttributeError:
+            pass
+    # Otros errores (timeout, connection, etc.) → retry.
+    return True
+
+
+def create_payment_link_sync_with_resilience(
+    *,
+    private_key: str,
+    environment: str,
+    order_id: str,
+    name: str,
+    description: str,
+    amount_in_cents: int,
+    expires_at: str,
+    redirect_url: Optional[str] = None,
+    contact: Optional[dict] = None,
+    max_attempts: int = 3,
+    circuit_breaker: Optional[Any] = None,
+) -> dict:
+    """Versión resiliente de create_payment_link_sync con retry + opcional
+    circuit breaker. Para callsites que toleran latencia adicional (BackgroundTasks).
+
+    circuit_breaker: instancia opcional de
+        services.api.lib.integration_client.CircuitBreaker. Si pasada, abre
+        tras N fallos consecutivos y levanta CircuitOpenError; caller debe
+        manejar (mostrar error UX-claro al cliente, encolar pgmq, etc.).
+    """
+    from lib.integration_client.retry import RetryPolicy, retry_sync  # noqa: PLC0415
+
+    if circuit_breaker is not None:
+        circuit_breaker.before_request("wompi")
+
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay_seconds=1.0,
+        max_delay_seconds=15.0,
+        jitter_seconds=0.5,
+    )
+
+    def _do() -> dict:
+        return create_payment_link_sync(
+            private_key=private_key,
+            environment=environment,
+            order_id=order_id,
+            name=name,
+            description=description,
+            amount_in_cents=amount_in_cents,
+            expires_at=expires_at,
+            redirect_url=redirect_url,
+            contact=contact,
+        )
+
+    try:
+        result = retry_sync(_do, policy=policy, is_retriable=_is_retriable_wompi)
+        if circuit_breaker is not None:
+            circuit_breaker.record_success("wompi")
+        return result
+    except Exception:
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure("wompi")
+        raise
+
+
+async def create_payment_link_with_resilience(
+    *,
+    private_key: str,
+    environment: str,
+    order_id: str,
+    name: str,
+    description: str,
+    amount_in_cents: int,
+    expires_at: str,
+    redirect_url: Optional[str] = None,
+    contact: Optional[dict] = None,
+    max_attempts: int = 3,
+    circuit_breaker: Optional[Any] = None,
+) -> dict:
+    """Versión async resiliente. Mismo contrato que create_payment_link
+    con retry + opcional circuit breaker."""
+    from lib.integration_client.retry import RetryPolicy, retry_async  # noqa: PLC0415
+
+    if circuit_breaker is not None:
+        circuit_breaker.before_request("wompi")
+
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay_seconds=1.0,
+        max_delay_seconds=15.0,
+        jitter_seconds=0.5,
+    )
+
+    async def _do() -> dict:
+        return await create_payment_link(
+            private_key=private_key,
+            environment=environment,
+            order_id=order_id,
+            name=name,
+            description=description,
+            amount_in_cents=amount_in_cents,
+            expires_at=expires_at,
+            redirect_url=redirect_url,
+            contact=contact,
+        )
+
+    try:
+        result = await retry_async(_do, policy=policy, is_retriable=_is_retriable_wompi)
+        if circuit_breaker is not None:
+            circuit_breaker.record_success("wompi")
+        return result
+    except Exception:
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure("wompi")
+        raise
+
+
+async def get_transaction_with_resilience(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+    max_attempts: int = 3,
+    circuit_breaker: Optional[Any] = None,
+) -> dict:
+    """Versión resiliente de get_transaction. Útil para reconciliation
+    background jobs donde puede tolerarse algo más de latencia ante
+    outages."""
+    from lib.integration_client.retry import RetryPolicy, retry_async  # noqa: PLC0415
+
+    if circuit_breaker is not None:
+        circuit_breaker.before_request("wompi")
+
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay_seconds=1.0,
+        max_delay_seconds=10.0,
+        jitter_seconds=0.5,
+    )
+
+    async def _do() -> dict:
+        return await get_transaction(
+            private_key=private_key,
+            environment=environment,
+            transaction_id=transaction_id,
+        )
+
+    try:
+        result = await retry_async(_do, policy=policy, is_retriable=_is_retriable_wompi)
+        if circuit_breaker is not None:
+            circuit_breaker.record_success("wompi")
+        return result
+    except Exception:
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure("wompi")
+        raise
