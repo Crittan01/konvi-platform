@@ -32,7 +32,9 @@ WHERE customer_phone IN ('573125835649', '+573125835649')
   AND status = 'opted_out'
 RETURNING id, customer_phone, status;
 
--- Audit log trail: insertar evento consent_re_granted (no borra el revoked)
+-- Audit log trail: insertar evento 'granted' con evidence={trigger:'manual_uat_restore'}
+-- (event canónico 'granted' por CHECK constraint; granularidad en evidence).
+-- NO borra el evento 'revoked' previo (append-only).
 INSERT INTO public.consent_audit_log (
     tenant_id, contact_id, phone_hash, event, source,
     actor_user_id, actor_email, evidence
@@ -41,11 +43,12 @@ SELECT
     c.tenant_id,
     c.id,
     encode(sha256(c.phone::bytea), 'hex'),
-    'consent_re_granted',
-    'manual_uat_restore',
+    'granted',
+    'tenant_console',  -- source canónico (CHECK constraint)
     NULL,
     'founder@uat',
     jsonb_build_object(
+        'trigger', 'manual_uat_restore',
         'reason', 'UAT cleanup post-STOP test rev105 H.4.1',
         'restored_at', NOW()::text
     )

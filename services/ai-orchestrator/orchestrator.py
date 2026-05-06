@@ -5842,10 +5842,13 @@ async def build_and_run_orchestration(
                             tenant_id=tenant_id,
                             contact_id=contact_id,
                             phone=customer_phone_raw,
-                            event="revoked_via_stop_keyword",
+                            event="revoked",  # canónico (constraint existente)
                             source="whatsapp",
                             conversation_id=conversation_id,
                             evidence={
+                                # Granularidad H.4.1 en evidence (constraint
+                                # solo conoce 'revoked'; trigger detalla origen).
+                                "trigger": "stop_keyword",
                                 "keyword_matched": content.strip().lower(),
                                 "rev": "105_h41",
                             },
