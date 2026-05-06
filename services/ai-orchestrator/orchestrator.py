@@ -5820,6 +5820,7 @@ async def build_and_run_orchestration(
                 from lib.whatsapp_optout import (  # noqa: PLC0415
                     OPTOUT_CONFIRMATION_TEXT,
                     is_optout_keyword,
+                    mark_conversation_opted_out,
                     soft_revoke_consent,
                 )
                 if is_optout_keyword(content):
@@ -5852,14 +5853,25 @@ async def build_and_run_orchestration(
                                 "rev": "105_h41",
                             },
                         )
-                        # NOTA Op-A founder 2026-05-06: NO marcamos
-                        # conversation.status='opted_out' porque connector-whatsapp
-                        # lo resetea automáticamente a 'bot_active' al recibir
-                        # el siguiente inbound del cliente (lógica existente
-                        # diseñada para preservar Q3: "no bloquea futuro").
-                        # consent_revoked_at en contacts es la única fuente de
-                        # verdad de opt-out — filtra outbound proactivo (HSM
-                        # templates). Status conversación no se preserva.
+                        # Marca conversación como opted_out (visibilidad UI
+                        # Inbox) — Op-A.2 founder 2026-05-06: status es
+                        # transitorio. El connector-whatsapp lo resetea
+                        # automáticamente a 'bot_active' al siguiente inbound
+                        # del cliente (lógica existente preserva Q3 "no
+                        # bloquea futuro"). Operador ve el badge "Opt-out"
+                        # en Inbox entre el STOP y la próxima respuesta del
+                        # cliente — audit visual transversal.
+                        #
+                        # IMPORTANTE: contacts.consent_revoked_at es la fuente
+                        # de verdad PERMANENTE del opt-out (nunca auto-reset).
+                        # Cuando se implemente outbound HSM marketing (H.4.2),
+                        # ese flow chequeará consent_revoked_at — bloqueará
+                        # envío proactivo aunque la conversación esté bot_active.
+                        mark_conversation_opted_out(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                        )
                         # Envía confirmación de baja al cliente vía WhatsApp.
                         meta_msg_id_optout: Optional[str] = None
                         try:

@@ -327,6 +327,36 @@ si auditoría pide trail de opt-outs respetados.
 - LOC: +153 (lib) + +257 (tests) + +75 (orchestrator hook)
 - Commit: pendiente
 
+### Op-A.2 refinement (2026-05-06 14:50 hora local)
+
+Tras Op-A inicial, founder articuló perspectiva refinada:
+- STOP/BAJA detectado → status='opted_out' SE PERSISTE inicialmente (audit visual transversal Inbox)
+- consent_revoked_at populated (fuente de verdad PERMANENTE)
+- Si cliente reescribe → connector resetea status a bot_active (Q3 preservado, bot responde)
+- consent_revoked_at PERMANECE (nunca auto-reset) → bloquea HSM templates marketing futuros (H.4.2)
+- Operador ve badge "Opt-out" en Inbox entre el STOP y próxima respuesta del cliente
+
+Diferencia con Op-A:
+- Op-A: NO marcaba conversation.status (transitorio sin valor)
+- Op-A.2: marca conversation.status='opted_out' (transitorio CON valor de audit visual)
+- Mismo resultado funcional Q3 (bot responde a cliente reescribe)
+- Mejor UX para el operador (visibilidad inmediata del opt-out)
+
+Cambio aplicado:
+- services/ai-orchestrator/orchestrator.py:
+  * Re-agrega import `mark_conversation_opted_out`
+  * Re-agrega call en STOP detector flow después de soft_revoke_consent
+    + audit log + ANTES de send_whatsapp_message
+  * Comentario explicativo Op-A.2 documentando semántica transitoria del status
+
+NO se re-agrega:
+- SKIP_OPTED_OUT branch en build_and_run_orchestration (innecesario — connector
+  resetea antes que orchestrator vea opted_out al procesar nuevos inbounds)
+- whitelist OPTED_OUT en _get_conversation_status (innecesario — fallback
+  CLOSED es defensa-en-profundidad para timing races raros)
+
+Suite: 1722 tests verde post-cambio.
+
 ### Cierre H.4.1 (2026-05-06 14:30 hora local)
 
 **Estado final: ✅ CERRADO con Opción A** (decisión founder post UAT-driven debug profundo).
