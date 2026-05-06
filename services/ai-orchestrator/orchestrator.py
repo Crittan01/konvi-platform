@@ -1534,7 +1534,12 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
 
 
 def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
-    """Lee el estado actual de la conversación para decidir si el bot puede responder."""
+    """Lee el estado actual de la conversación para decidir si el bot puede responder.
+
+    Rev. 105 Sem 4 H.4.1 fix #6 — agrega CONVERSATION_STATUS_OPTED_OUT al
+    whitelist. Antes caía al fallback CLOSED para opted_out, ocultando la
+    semántica del opt-out — el orchestrator skipeaba con SKIP_REASON_CLOSED
+    en lugar de SKIP_REASON_OPTED_OUT, dificultando forensics."""
     conv_res = (
         supabase.table("conversations")
         .select("status")
@@ -1549,6 +1554,7 @@ def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
         CONVERSATION_STATUS_BOT_ACTIVE,
         CONVERSATION_STATUS_HUMAN_TAKEOVER,
         CONVERSATION_STATUS_CLOSED,
+        CONVERSATION_STATUS_OPTED_OUT,
     }:
         return status
     return CONVERSATION_STATUS_CLOSED
