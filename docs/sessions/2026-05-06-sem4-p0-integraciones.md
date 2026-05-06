@@ -194,9 +194,76 @@ F.2 IntegrationClient, follow-up Sem 5).
 
 ---
 
-## H.2.3 — Polling tracking Envia backup (⏳)
+## H.2.3 — Polling tracking Envia backup (✅ CERRADO)
 
-(Pendiente)
+### Contexto
+
+Dossier Envia 2026-05-05 sec. 6 P0: webhooks Envia llegan at-least-once **sin
+garantía documentada**. Si un webhook se pierde (red caída, bug en handler,
+retry budget agotado), un shipment puede quedar en `picked_up`
+indefinidamente aunque ya fue entregado. Patrón **MA-9** del meta-análisis
+emerge como universal — polling backup para todos los webhooks que no
+garantizan delivery.
+
+### Solución
+
+Cron `poll_pending_shipments` que cada 6h:
+1. SELECT shipments con status no-terminal + creados <30d + no polled últimas 6h
+2. Por cada uno: `Envia.track_shipments([tracking_number])`
+3. Compara status retornado vs status actual en DB
+4. Si DIFERENTE → idempotency check F.4 (skip si webhook ya procesó) → update + cart_event
+5. Si igual → solo actualiza `last_polled_at`
+6. Métrica `diff_rate` = changed/polled (alarma si >5% en producción)
+
+### Cambios
+
+- Migration `20260514170000_shipments_last_polled_at.sql`:
+  - ALTER shipments ADD COLUMN last_polled_at TIMESTAMPTZ
+  - Index parcial polling_candidate_idx WHERE status non-terminal
+  - Aplicada al remote + ledger sync
+
+- `services/api/lib/envia_polling.py`:
+  - `NON_TERMINAL_STATUSES` / `TERMINAL_STATUSES` constantes
+  - `_extract_status_from_envia_response`: mapping Envia → status interno
+    (created→labeled, on_route→in_transit, canceled→cancelled, lost→failed)
+  - `_select_polling_candidates`: query con filtros + sort NULLs primero
+  - `_update_shipment_after_poll`: marca last_polled_at + status si cambió
+  - `poll_pending_shipments(supabase, envia_factory, ...)` async cron principal
+  - `PollingResult` dataclass con métricas + `diff_rate` property
+  - Cache de Envia clients per tenant (evita re-construir)
+  - Idempotency F.4 — skip si webhook ya procesó el cambio
+  - Errores Envia: marca last_polled_at igual (evita loop infinito en outage)
+
+- `tests/test_envia_polling.py` (13 tests):
+  - Status mapping (10 cases)
+  - Status no cambio → solo last_polled_at
+  - Status cambio → update + counter
+  - Envia falla → marca polled, no actualiza status
+  - Terminal status no es candidate
+  - Recientemente polled no es candidate
+  - Idempotency: webhook ya procesó → skip duplicate
+  - Factory falla → cuenta error
+  - PollingResult.diff_rate
+
+### Métricas post-commit
+
+- Suite tests: 1683 → **1696** (+13)
+- validate.sh: 13 OK / 0 ERR / 0 WARN
+- LOC: +260 (cliente) + +335 (tests)
+- Migration aplicada al remote + ledger sync
+- Commit: pendiente
+
+### UAT requerida
+
+❌ NO. Lib disponible, NO worker registrado todavía. Para activar en
+producción: registrar `poll_pending_shipments` en `worker.py` con frecuencia
+6h cuando se decida.
+
+### Riesgos residuales
+
+Ninguno. Decisión arquitectónica diferida: cuándo activar el cron en worker
+(recomendación: tras refactor webhook Envia H.2.2 para tener ambos canales
+trabajando en paralelo).
 
 ---
 
@@ -218,6 +285,7 @@ F.2 IntegrationClient, follow-up Sem 5).
 |---|---|---|---|---|
 | H.2.1 | `e4ed060` | +8 | +365 | (reusa F.2) |
 | H.3.1 | `0139b5e` | +12 | +274 | — |
-| H.3.2 | (pendiente) | +12 | +402 | — |
+| H.3.2 | `7f1afd6` | +12 | +402 | — |
+| H.2.3 | (pendiente) | +13 | +595 | `20260514170000` |
 
-**Total Sem 4 hasta ahora**: 3 items · +32 tests · +1041 LOC · 0 migrations nuevas.
+**Total Sem 4 hasta ahora**: 4 items · +45 tests · +1636 LOC · 1 migration nueva.
