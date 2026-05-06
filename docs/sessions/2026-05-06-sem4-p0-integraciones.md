@@ -134,9 +134,63 @@ Ninguno. Decisión arquitectónica diferida: cuándo crear endpoint admin que co
 
 ---
 
-## H.3.2 — Retry+CB Wompi (⏳)
+## H.3.2 — Retry+CB Wompi (✅ CERRADO)
 
-(Pendiente)
+### Contexto
+
+Si Wompi cae (mantenimiento o outage real), el cliente actual de
+`create_payment_link` falla en el primer intento. El bot dice al cliente
+"te genero el link" y luego no puede generarlo → cliente pierde la venta.
+
+Sin circuit breaker, además, cada request gasta ~15s timeout esperando un
+servicio caído, multiplicando latencia mientras Wompi está en outage.
+
+### Solución
+
+Wrappers `*_with_resilience` opt-in que combinan:
+- `retry_async` / `retry_sync` con exponential backoff + jitter (1s → 2s → 4s + jitter, max 15s)
+- 3 intentos default (configurable)
+- Discriminación 5xx (retry) vs 4xx (no retry — validación inválida no se arregla con retry)
+- Circuit breaker opcional inyectable (per-tenant, evita gastar requests si Wompi está caído real)
+
+Backward compatible: callers existentes siguen llamando
+`create_payment_link` / `create_payment_link_sync` sin cambio. Migración
+opt-in.
+
+### Cambios
+
+- `services/api/integrations/wompi_client.py`:
+  - `_is_retriable_wompi(error)`: 5xx + network/timeout retry, 4xx no retry
+  - `create_payment_link_sync_with_resilience(...)` síncrono
+  - `create_payment_link_with_resilience(...)` async
+  - `get_transaction_with_resilience(...)` async — para reconciliation jobs
+  - Todos aceptan `max_attempts` + `circuit_breaker` opcional
+  - Import `Any` agregado a `typing` import
+
+- `tests/test_wompi_resilience.py` (12 tests):
+  - `_is_retriable_wompi` 5xx vs 4xx vs otros
+  - Sync resilience: primer intento OK / retry 5xx / 4xx no retry
+  - Async resilience: primer intento OK / retry 5xx
+  - get_transaction resilience: retry 5xx / 404 no retry
+  - Circuit breaker abre tras N fallos
+  - Circuit breaker success resetea counter
+
+### Métricas post-commit
+
+- Suite tests: 1671 → **1683** (+12)
+- validate.sh: 13 OK / 0 ERR / 0 WARN (1 corrida tuvo flaky pre-existente del timing test, pasa en re-run)
+- LOC: +166 (cliente) + +236 (tests)
+- Commit: pendiente
+
+### UAT requerida
+
+❌ NO. Wrappers no consumidos en producción aún. Migración opt-in.
+
+### Riesgos residuales
+
+Ninguno. Decisión arquitectónica diferida: en qué callsite del orchestrator
+activar resilience primero (recomendación: al refactorizar Wompi client a
+F.2 IntegrationClient, follow-up Sem 5).
 
 ---
 
@@ -163,5 +217,7 @@ Ninguno. Decisión arquitectónica diferida: cuándo crear endpoint admin que co
 | Item cerrado | Commit | Tests +Δ | LOC +Δ | Migration |
 |---|---|---|---|---|
 | H.2.1 | `e4ed060` | +8 | +365 | (reusa F.2) |
+| H.3.1 | `0139b5e` | +12 | +274 | — |
+| H.3.2 | (pendiente) | +12 | +402 | — |
 
-**Total Sem 4 hasta ahora**: 1 item · +8 tests · +365 LOC · 0 migrations nuevas.
+**Total Sem 4 hasta ahora**: 3 items · +32 tests · +1041 LOC · 0 migrations nuevas.
