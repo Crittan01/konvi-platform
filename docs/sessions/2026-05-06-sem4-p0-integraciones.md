@@ -327,11 +327,45 @@ si auditoría pide trail de opt-outs respetados.
 - LOC: +153 (lib) + +257 (tests) + +75 (orchestrator hook)
 - Commit: pendiente
 
-### UAT requerida ⚠️
+### UAT founder 2026-05-06 — Hallazgos
 
-**Necesito que ejecutes 4 pruebas con `+573125835649`** antes de cerrar este item.
+**Prueba 1 (STOP exacto)**: ✅ Funcionalmente PASS — bot respondió correctamente
+con mensaje de baja. Pero log reveló:
 
-Te detallo en el siguiente turno.
+```
+[ERROR] lib.whatsapp_optout — [OPTOUT] Error marcando conversation opted_out
+conv=5af26baf-...: 'new row for relation "conversations" violates check
+constraint "conversations_status_check"'
+```
+
+**Bug identificado**: tabla `conversations` tenía CHECK constraint con solo
+3 valores `{'bot_active', 'human_takeover', 'closed'}`. El UPDATE a
+`'opted_out'` era rechazado silently (try-except envolvente lo capturó —
+flow funcional intacto, pero status no se persistía).
+
+**Fix aplicado** (Q5 = FIX IN PLACE):
+
+- Migration `20260514180000_conversations_status_opted_out.sql`:
+  - DROP CONSTRAINT conversations_status_check (definición vieja)
+  - RECREATE con `'opted_out'` agregado al ARRAY
+  - Aplicada al remote + ledger sync verificado
+  - Constraint nuevo: `CHECK (status = ANY (ARRAY['bot_active', 'human_takeover', 'closed', 'opted_out']))`
+
+- Backfill manual: la conversación `5af26baf-...` que quedó stuck con
+  status='bot_active' tras Prueba 1 fue actualizada manualmente a
+  'opted_out' para reflejar el estado real del cliente.
+
+### Métricas post-fix
+
+- Suite tests: 1722 verde (flaky timing test pre-existente, pasa en re-run)
+- 1 migration nueva aplicada al remote (20260514180000)
+- LOC: +35 (migration)
+
+### Re-UAT pendiente
+
+Pruebas 2, 3, 4 pendientes (P2 con frase, P3 BAJA, P4 idempotencia).
+Antes de P2 founder solicitará "restore" para reactivar consent y poder
+re-probar — restore SQL helper queda listo en `scripts/uat/`.
 
 ---
 
