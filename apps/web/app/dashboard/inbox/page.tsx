@@ -18,7 +18,7 @@ import { renderWhatsAppFormat, stripWhatsAppFormat } from '@/lib/whatsapp-format
 interface Conversation {
   id: string
   customer_phone: string
-  status: 'bot_active' | 'human_takeover' | 'closed'
+  status: 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
   created_at: string
   last_interaction_at?: string
   archived_at?: string | null
@@ -150,7 +150,7 @@ interface SelectedVariation {
   label: string
 }
 
-type FilterStatus = 'all' | 'bot_active' | 'human_takeover' | 'closed'
+type FilterStatus = 'all' | 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
   pending:    'Pendiente',
@@ -193,6 +193,12 @@ const STATUS_CONFIG = {
     dot: 'bg-slate-500',
     description: 'Cerrada: la conversación quedó archivada por inactividad o resolución manual. Si el cliente vuelve a escribir, se reabre automáticamente como Bot activo.',
   },
+  opted_out: {
+    label: 'Opt-out',
+    color: 'bg-rose-500/10 text-rose-700 border-rose-500/20',
+    dot: 'bg-rose-500',
+    description: 'Cliente revocó consent vía STOP/BAJA/CANCELAR (rev. 105 H.4.1). No recibirá mensajes proactivos. Si vuelve a escribir voluntariamente, el bot puede responder dentro de la ventana de 24h, pero outbound proactivo (templates HSM) sigue bloqueado por consent_revoked_at.',
+  },
 }
 
 const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
@@ -200,6 +206,7 @@ const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
   { value: 'bot_active',     label: 'Bot' },
   { value: 'human_takeover', label: 'Agente' },
   { value: 'closed',         label: 'Cerradas' },
+  { value: 'opted_out',      label: 'Opt-out' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
