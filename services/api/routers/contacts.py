@@ -17,7 +17,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client
 from dependencies.audit import audit_log
-from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.auth import (
+    get_current_tenant,
+    get_service_client,
+    require_owner_role,
+    require_write_role,
+)
 from dependencies.contact_validators import (
     DOCUMENT_TYPES_CO,
     validate_document,
@@ -472,7 +477,10 @@ async def reactivate_consent(
     request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # Rev. 105 H.4.1.x — owner-only por gobierno regulatorio Habeas Data
+    # ART. 11 (responsable legal del tratamiento certifica re-consent
+    # del titular). Manager NO puede reactivar — debe escalar al owner.
+    _role: str = Depends(require_owner_role),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
     """Reactiva consent de un contacto que fue soft-opted-out vía STOP keyword.
