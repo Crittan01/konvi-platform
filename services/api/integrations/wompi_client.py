@@ -340,3 +340,101 @@ async def create_payment_link(
         "amount_in_cents": data.get("amount_in_cents"),
         "expires_at": data.get("expires_at"),
     }
+
+
+# ─── Rev. 105 Sem 4 H.3.1 — GET transaction (audit + reconciliation) ─────────
+# Permite consultar directamente el estado de una transacción a Wompi sin
+# depender del webhook. Cierra el riesgo P0 documentado en dossier Wompi
+# 2026-05-05 sec. 6: Wompi reintenta webhooks 30min/3h/24h pero NO garantiza
+# delivery. Si los retries fallan (red caída del lado nuestro), la orden
+# queda en PENDING aunque el cliente sí pagó. Este endpoint permite
+# reconciliar estado consultando Wompi directamente.
+#
+# Endpoint Wompi: GET /transactions/{id} — pública, requiere Bearer pub_key
+# o prv_key. Documentación: https://docs.wompi.co/docs/colombia/transacciones/
+
+def get_transaction_sync(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+) -> dict:
+    """Consulta una transacción Wompi por ID. Síncrona — para scripts admin
+    y reconciliation desde BackgroundTasks.
+
+    Retorna el objeto transaction completo de Wompi:
+        {
+            "id": "01-1538687528-49201",
+            "amount_in_cents": 4490000,
+            "reference": "MZQ3X2",
+            "customer_email": "...",
+            "currency": "COP",
+            "payment_method_type": "NEQUI",
+            "redirect_url": "...",
+            "status": "APPROVED" | "DECLINED" | "VOIDED" | "ERROR" | "PENDING",
+            "status_message": "...",
+            ...
+        }
+
+    Levanta httpx.HTTPStatusError si Wompi 4xx/5xx (caller decide manejo).
+    Wompi 404 = transaction_id inválido o no existe en este merchant.
+    """
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id no puede ser vacío")
+
+    base_url = wompi_base_url(environment)
+    url = f"{base_url}/transactions/{transaction_id.strip()}"
+
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = client.get(
+            url,
+            headers={"Authorization": f"Bearer {private_key}"},
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "[WOMPI] GET /transactions/%s %d: %s",
+                transaction_id, response.status_code, response.text[:300],
+            )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        if not isinstance(data, dict):
+            logger.warning(
+                "[WOMPI] GET transaction %s: data no es dict: %s",
+                transaction_id, type(data).__name__,
+            )
+            return {}
+        return data
+
+
+async def get_transaction(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+) -> dict:
+    """Async version para llamadas desde request handlers FastAPI."""
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id no puede ser vacío")
+
+    base_url = wompi_base_url(environment)
+    url = f"{base_url}/transactions/{transaction_id.strip()}"
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {private_key}"},
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "[WOMPI] GET /transactions/%s %d: %s",
+                transaction_id, response.status_code, response.text[:300],
+            )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        if not isinstance(data, dict):
+            return {}
+        return data
