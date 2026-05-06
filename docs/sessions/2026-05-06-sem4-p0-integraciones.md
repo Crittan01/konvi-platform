@@ -267,9 +267,71 @@ trabajando en paralelo).
 
 ---
 
-## H.4.1 — STOP detector WhatsApp (⏳ — REQUIERE UAT)
+## H.4.1 — STOP detector WhatsApp (✅ CÓDIGO LISTO — UAT PENDIENTE)
 
-(Pendiente — antes de implementar te coordino plan UAT)
+### Contexto
+
+Meta Business Policy + Habeas Data Ley 1581 ART. 9 exigen revocar consent
+automáticamente cuando cliente dice "STOP" / "BAJA" / "CANCELAR" en WhatsApp.
+Sin esto: riesgo de quality rating bajada por Meta + sanción Habeas Data
+si auditoría pide trail de opt-outs respetados.
+
+### Decisiones founder 2026-05-06 (Q1-Q5 cerradas)
+
+| Q | Decisión |
+|---|---|
+| Q1 | 11 patrones canónicos confirmados |
+| Q2 | "Has sido dado de baja. Ya no recibirás mensajes nuestros. Si cambias de opinión, escríbenos un nuevo mensaje cuando quieras." |
+| Q3 | NO bloquea conversación futura (recomendación mía aceptada) |
+| Q4 | Pruebas con `+573125835649` |
+| Q5 | FIX IN PLACE si UAT falla (no rollback) |
+
+### Cambios
+
+- `services/ai-orchestrator/lib/whatsapp_optout.py` (nuevo, ~150 LOC):
+  - `_OPTOUT_PATTERNS` lista de 11 regex patterns con anchors `^...$`
+  - `is_optout_keyword(text)` — fullmatch trimmed case-insensitive
+  - `soft_revoke_consent(...)` — UPDATE contacts.consent_revoked_at +
+    consent_revoked_reason (NO anonimiza PII — diferencia con SAR-erase)
+  - `mark_conversation_opted_out(...)` — UPDATE conversations.status
+  - `OPTOUT_CONFIRMATION_TEXT` constante con mensaje Q2
+  - `OPTOUT_REVOCATION_REASON = "WhatsApp STOP keyword opt-out"`
+  - `CONVERSATION_STATUS_OPTED_OUT = "opted_out"`
+
+- `services/ai-orchestrator/orchestrator.py`:
+  - Hook injection en `build_and_run_orchestration` después de fetch contact
+    (línea ~5810), antes de history/LLM
+  - Short-circuit: si `is_optout_keyword(content)` → soft_revoke + audit log
+    `revoked_via_stop_keyword` (Art. 9) + mark conversation + send confirmation
+    + mark message processed → return (NO LLM)
+  - Try-except envolvente: errores en detector NO rompen flow normal
+  - Fix typo: `PROCESSING_STATUS_OK` → `PROCESSING_STATUS_PROCESSED` (canónico)
+
+- `tests/test_whatsapp_optout.py` (26 tests):
+  - 11 patrones canónicos (positivos): STOP/stop/" STOP "/BAJA/CANCELAR/
+    cancelar suscripción (con/sin tilde)/no más mensajes/UNSUBSCRIBE/
+    opt-out variantes/SALIR/REMOVER
+  - Negativos críticos: "Stop, espera un momento" / "Quiero cancelar mi
+    pedido" / "No más mensajes por hoy gracias" / vacío/whitespace / texto
+    normal / non-str input
+  - soft_revoke_consent: revoca + reason / NO anonimiza PII (Q3 confirm) /
+    idempotente / DB error retorna False
+  - mark_conversation_opted_out: status update / DB error
+  - Constantes públicas: confirmation text matches Q2, reason canónico,
+    status canónico
+
+### Métricas post-implementación
+
+- Suite tests: 1696 → **1722** (+26)
+- validate.sh: 13 OK / 0 ERR / 0 WARN
+- LOC: +153 (lib) + +257 (tests) + +75 (orchestrator hook)
+- Commit: pendiente
+
+### UAT requerida ⚠️
+
+**Necesito que ejecutes 4 pruebas con `+573125835649`** antes de cerrar este item.
+
+Te detallo en el siguiente turno.
 
 ---
 
@@ -286,6 +348,7 @@ trabajando en paralelo).
 | H.2.1 | `e4ed060` | +8 | +365 | (reusa F.2) |
 | H.3.1 | `0139b5e` | +12 | +274 | — |
 | H.3.2 | `7f1afd6` | +12 | +402 | — |
-| H.2.3 | (pendiente) | +13 | +595 | `20260514170000` |
+| H.2.3 | `684a0d9` | +13 | +595 | `20260514170000` |
+| H.4.1 | (pendiente — UAT antes de cerrar) | +26 | +485 | — |
 
-**Total Sem 4 hasta ahora**: 4 items · +45 tests · +1636 LOC · 1 migration nueva.
+**Total Sem 4 hasta ahora**: 5 items (1 con UAT pendiente) · +71 tests · +2121 LOC · 1 migration nueva.

@@ -5809,6 +5809,86 @@ async def build_and_run_orchestration(
         except Exception as ce:
             logger.warning("[CONTACT] No se pudo fetch contact para FSM: %s", ce)
 
+        # ── Rev. 105 Sem 4 H.4.1 — STOP keyword detector (Habeas Data + Meta) ──
+        # Short-circuit: si el mensaje completo trimmed coincide con un
+        # patrón canónico de opt-out (STOP, BAJA, CANCELAR, etc.), revocamos
+        # consent (soft, NO anonimiza PII), notificamos al cliente y NO
+        # invocamos LLM. Idempotente: STOP repetido refresca timestamp +
+        # emite nuevo audit log event sin romper.
+        if content_type == "text" and contact_id and customer_phone_raw:
+            try:
+                from lib.whatsapp_optout import (  # noqa: PLC0415
+                    OPTOUT_CONFIRMATION_TEXT,
+                    is_optout_keyword,
+                    mark_conversation_opted_out,
+                    soft_revoke_consent,
+                )
+                if is_optout_keyword(content):
+                    logger.info(
+                        "[OPTOUT] Detectado STOP keyword msg=%s conv=%s contact=%s",
+                        message_id, conversation_id, contact_id,
+                    )
+                    revoked = soft_revoke_consent(
+                        supabase,
+                        tenant_id=tenant_id,
+                        contact_id=contact_id,
+                        conversation_id=conversation_id,
+                        phone=customer_phone_raw,
+                    )
+                    if revoked:
+                        # Audit log evento (Art. 9 Habeas Data trail).
+                        _log_consent_event(
+                            supabase,
+                            tenant_id=tenant_id,
+                            contact_id=contact_id,
+                            phone=customer_phone_raw,
+                            event="revoked_via_stop_keyword",
+                            source="whatsapp",
+                            conversation_id=conversation_id,
+                            evidence={
+                                "keyword_matched": content.strip().lower(),
+                                "rev": "105_h41",
+                            },
+                        )
+                        # Marca conversación opted_out (visibilidad UI).
+                        mark_conversation_opted_out(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                        )
+                        # Envía confirmación de baja al cliente.
+                        try:
+                            await send_whatsapp_message(
+                                tenant_id=tenant_id,
+                                supabase=supabase,
+                                to_phone=customer_phone_raw,
+                                text=OPTOUT_CONFIRMATION_TEXT,
+                            )
+                        except Exception as send_err:
+                            logger.error(
+                                "[OPTOUT] Falló envío confirmación: %s", send_err,
+                            )
+                        # Marca el mensaje inbound como procesado.
+                        _mark_message_processing(
+                            supabase,
+                            message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        return  # Short-circuit: NO continuar con LLM.
+                    else:
+                        logger.warning(
+                            "[OPTOUT] Revocación falló — caemos a flow normal "
+                            "msg=%s contact=%s",
+                            message_id, contact_id,
+                        )
+            except Exception as optout_err:
+                # Cualquier error en el detector NO debe romper el flow
+                # normal del bot — caemos a procesamiento LLM standard.
+                logger.error(
+                    "[OPTOUT] Error inesperado en detector (cae a LLM): %s",
+                    optout_err,
+                )
+
         history: list[dict] = await _get_conversation_history(supabase, conversation_id)
 
         # Primer nombre: solo si hay consentimiento explícito en DB
