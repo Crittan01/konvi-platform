@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Tag, Plus, Pencil, Power, AlertTriangle, CheckCircle2, Loader2,
-  Percent, DollarSign, Truck,
+  Percent, DollarSign, Truck, Trash2, ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,6 +23,7 @@ type Props = {
   createCouponAction: (formData: FormData) => Promise<ActionResult>
   updateCouponAction: (formData: FormData) => Promise<ActionResult>
   toggleCouponActiveAction: (formData: FormData) => Promise<ActionResult>
+  deleteCouponAction: (formData: FormData) => Promise<ActionResult>
 }
 
 const DISCOUNT_TYPE_LABEL: Record<DiscountType, string> = {
@@ -62,11 +63,13 @@ export default function PromotionsManager({
   createCouponAction,
   updateCouponAction,
   toggleCouponActiveAction,
+  deleteCouponAction,
 }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<Coupon | null>(null)
+  const [deleting, setDeleting] = useState<Coupon | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
@@ -113,6 +116,28 @@ export default function PromotionsManager({
       setSuccessMsg(
         `Cupón ${c.code} ${!c.is_active ? 'activado' : 'desactivado'}.`,
       )
+      router.refresh()
+    })
+  }
+
+  const handleDelete = () => {
+    if (!deleting) return
+    const fd = new FormData()
+    fd.set('id', deleting.id)
+    setFormError(null)
+    setSuccessMsg(null)
+    startTransition(async () => {
+      const res = await deleteCouponAction(fd)
+      if (!res.ok) {
+        setFormError(res.error || 'Error desconocido')
+        // Mantenemos el dialog abierto para que el owner lea el error
+        // (típicamente: "tiene redenciones, usa Desactivar"). Podría
+        // cerrarlo + mostrar como banner, pero el contexto del dialog
+        // hace el mensaje más entendible.
+        return
+      }
+      setSuccessMsg(`Cupón ${deleting.code} eliminado.`)
+      setDeleting(null)
       router.refresh()
     })
   }
@@ -231,6 +256,32 @@ export default function PromotionsManager({
                           >
                             <Power className="h-3.5 w-3.5" />
                           </Button>
+                          {/*
+                            * Trash condicional (ADR-0015 D6): SOLO si nunca
+                            * tuvo redenciones (Habeas Data Ley 1581 audit
+                            * preservation). Si tiene historiales, mostramos
+                            * un icono read-only con tooltip explicativo
+                            * para que el owner entienda por qué no puede.
+                            */}
+                          {c.has_historical_redemptions ? (
+                            <span
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-slate-50 text-slate-400"
+                              title="No se puede eliminar: este cupón ya tuvo redenciones (audit Habeas Data). Usa Desactivar."
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                            </span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={pending}
+                              onClick={() => { setFormError(null); setDeleting(c) }}
+                              title="Eliminar permanentemente"
+                              className="border-rose-700 text-rose-900 hover:bg-rose-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -279,6 +330,55 @@ export default function PromotionsManager({
               onCancel={() => setEditing(null)}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal confirmar eliminación (hard delete) */}
+      <Dialog open={!!deleting} onOpenChange={(o) => { if (!o) { setDeleting(null); setFormError(null) } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-rose-900">
+              <Trash2 className="h-5 w-5" />
+              Eliminar cupón {deleting?.code}
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción <b>no se puede deshacer</b>. El cupón se borrará
+              permanentemente de la base de datos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border border-emerald-700 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <ShieldCheck className="inline h-4 w-4 mr-1" />
+            Este cupón <b>nunca tuvo redenciones</b>, así que es seguro
+            eliminarlo sin afectar auditoría Habeas Data.
+          </div>
+
+          {formError && (
+            <div className="rounded-md border border-rose-700 bg-rose-50 p-3 text-sm text-rose-900">
+              <AlertTriangle className="inline h-4 w-4 mr-1" />
+              {formError}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { setDeleting(null); setFormError(null) }}
+              disabled={pending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDelete}
+              disabled={pending}
+              className="bg-rose-700 text-white hover:bg-rose-800"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Sí, eliminar permanentemente
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

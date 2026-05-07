@@ -37,6 +37,13 @@ export type Coupon = {
   is_active: boolean
   created_at: string
   updated_at: string
+  /**
+   * True si existe al menos una fila en `coupon_redemptions` referenciando
+   * este cupón (cualquier status: applied/consumed/revoked). Sirve como
+   * gate para hard-delete: si has_historical_redemptions=true, NO
+   * permitimos eliminar (preservar audit Habeas Data).
+   */
+  has_historical_redemptions: boolean
 }
 
 const VALID_DISCOUNT_TYPES = new Set<DiscountType>([
@@ -223,6 +230,76 @@ async function toggleCouponActiveAction(
   return { ok: true }
 }
 
+/**
+ * DELETE condicional — Habeas Data audit preservation.
+ *
+ * Permite hard-delete SOLO cuando el cupón nunca tuvo redenciones
+ * (`coupon_redemptions` count = 0 — incluyendo applied/consumed/revoked).
+ * Caso legítimo: owner crea cupón con error, lo elimina antes que se use.
+ *
+ * Si tiene redenciones históricas → rechazo con mensaje claro. El owner
+ * debe usar `is_active=false` (toggle) en su lugar para preservar audit.
+ *
+ * Defensa server-side: re-verificamos count en backend (no confiamos en
+ * UI flag). Esto cubre el caso race-condition: UI muestra "delete OK"
+ * porque count=0 al renderizar, pero entre el render y el click un
+ * cliente WhatsApp aplicó el cupón.
+ */
+async function deleteCouponAction(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  'use server'
+  const sb = createClient()
+  const { data: { user } } = await sb.auth.getUser()
+  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+  if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
+    return { ok: false, error: 'Sin permisos.' }
+  }
+
+  const id = ((formData.get('id') as string) || '').trim()
+  if (!id) return { ok: false, error: 'ID requerido.' }
+
+  // Re-check defensivo en backend.
+  const { count, error: countErr } = await sb
+    .from('coupon_redemptions')
+    .select('id', { count: 'exact', head: true })
+    .eq('coupon_id', id)
+    .eq('tenant_id', meta.tenant_id)
+
+  if (countErr) {
+    return { ok: false, error: `No pude verificar redenciones: ${countErr.message}` }
+  }
+  if ((count ?? 0) > 0) {
+    return {
+      ok: false,
+      error:
+        'Este cupón ya tuvo redenciones (clientes lo aplicaron). ' +
+        'No se puede eliminar para preservar auditoría Habeas Data. ' +
+        'Usa "Desactivar" en su lugar.',
+    }
+  }
+
+  // Lookup code para mensaje + audit log de la eliminación.
+  const { data: existing } = await sb
+    .from('coupons')
+    .select('code')
+    .eq('id', id)
+    .eq('tenant_id', meta.tenant_id)
+    .single()
+  if (!existing) return { ok: false, error: 'Cupón no encontrado.' }
+
+  const { error } = await sb
+    .from('coupons')
+    .delete()
+    .eq('id', id)
+    .eq('tenant_id', meta.tenant_id)
+
+  if (error) return { ok: false, error: `Error al eliminar: ${error.message}` }
+
+  revalidatePath('/dashboard/promotions')
+  return { ok: true }
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default async function PromotionsPage() {
@@ -246,7 +323,29 @@ export default async function PromotionsPage() {
       .order('is_active', { ascending: false })
       .order('created_at', { ascending: false })
 
-    coupons = Array.isArray(data) ? (data as unknown as Coupon[]) : []
+    const couponsRaw = Array.isArray(data)
+      ? (data as unknown as Omit<Coupon, 'has_historical_redemptions'>[])
+      : []
+
+    // Lookup batch: cuáles cupones tienen redemptions históricas (cualquier
+    // status). Una sola query con DISTINCT evita N round-trips.
+    let usedCouponIds = new Set<string>()
+    if (couponsRaw.length > 0) {
+      const ids = couponsRaw.map((c) => c.id)
+      const { data: redData } = await supabase
+        .from('coupon_redemptions')
+        .select('coupon_id')
+        .in('coupon_id', ids)
+        .eq('tenant_id', tenantId)
+      usedCouponIds = new Set(
+        (redData ?? []).map((r) => r.coupon_id as string),
+      )
+    }
+
+    coupons = couponsRaw.map((c) => ({
+      ...c,
+      has_historical_redemptions: usedCouponIds.has(c.id),
+    })) as Coupon[]
   }
 
   const activeCount = coupons.filter(c => c.is_active).length
@@ -286,6 +385,7 @@ export default async function PromotionsPage() {
         createCouponAction={createCouponAction}
         updateCouponAction={updateCouponAction}
         toggleCouponActiveAction={toggleCouponActiveAction}
+        deleteCouponAction={deleteCouponAction}
       />
     </div>
   )
