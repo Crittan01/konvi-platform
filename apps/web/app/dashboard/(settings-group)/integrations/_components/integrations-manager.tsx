@@ -288,6 +288,18 @@ export function IntegrationsManager(props: Props) {
         ))}
       </div>
 
+      {/* ── SECCIÓN 1: Conectores (overview cards) ─────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Plug className="h-4 w-4 text-primary shrink-0" />
+          <h2 className="text-sm font-semibold text-foreground">Conectores</h2>
+          <span className="text-xs text-muted-foreground">
+            {activeFilter === 'todas'
+              ? '· Estado de cada integración disponible'
+              : `· ${visibleCards.length} en esta categoría`}
+          </span>
+        </div>
+
       {/* Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
@@ -480,15 +492,6 @@ export function IntegrationsManager(props: Props) {
               )}
             </div>
           </div>
-        )}
-
-        {/* ── Sem 5 H.2.7 — Envia Carriers preferences (per-tenant) ──────────── */}
-        {visibleCards.includes('envia') && enviaConnected && canWrite && (
-          <EnviaCarriersSection
-            prefs={enviaCarrierPrefs}
-            upsertAction={upsertEnviaCarrier}
-            resetAction={resetEnviaCarrierPref}
-          />
         )}
 
         {/* ── Mercado Libre ─────────────────────────────────────────────────── */}
@@ -816,6 +819,45 @@ export function IntegrationsManager(props: Props) {
         ))}
 
       </div>
+      </div>{/* ── /SECCIÓN 1 Conectores ── */}
+
+      {/* ── SECCIÓN 2: Configuración avanzada Envía ────────────────────────── */}
+      {visibleCards.includes('envia') && enviaConnected && canWrite && (
+        <div className="border-t border-border pt-5 mt-5">
+          <div className="flex items-start gap-2 mb-3">
+            <Settings2 className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">
+                Configuración avanzada Envía
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Aplica a todas las cotizaciones y operaciones de envío del tenant.
+              </p>
+            </div>
+          </div>
+          <EnviaCarriersSection
+            prefs={enviaCarrierPrefs}
+            upsertAction={upsertEnviaCarrier}
+            resetAction={resetEnviaCarrierPref}
+          />
+        </div>
+      )}
+
+      {/* ── SECCIÓN 3 (futura): tab "Todas" — info contextual ────────────── */}
+      {activeFilter === 'todas' && (
+        <div className="border-t border-border pt-4 mt-4">
+          <div className="rounded-md border border-border bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground flex items-start gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              <b className="text-foreground">¿Necesitas configuración detallada?</b>
+              {' '}Selecciona la categoría correspondiente arriba (Logística para Envía,
+              Canal para WhatsApp, Pagos para Wompi, etc.) — verás opciones avanzadas
+              específicas de cada conector.
+            </span>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
