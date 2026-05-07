@@ -94,12 +94,12 @@ export default async function ContactsPage({
 }: {
   searchParams?: { q?: string; consent?: string }
 }) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  // Sem 5 perf: cached comparte con DashboardLayout.
+  const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   const consentFilter = searchParams?.consent ?? 'all'
 
@@ -786,7 +786,7 @@ export default async function ContactsPage({
       </div>
 
       {/* AI Insight — a demanda */}
-      {(meta.role === 'owner' || meta.role === 'manager') && (
+      {(role === 'owner' || role === 'manager') && (
         <AiInsightPanel module="contacts" label="Contactos" />
       )}
 

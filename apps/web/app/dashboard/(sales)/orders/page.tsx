@@ -64,12 +64,12 @@ export default async function OrdersPage({
 }: {
   searchParams?: { status?: string }
 }) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  // Sem 5 perf: cached.
+  const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   const filterStatus = searchParams?.status ?? 'all'
 
