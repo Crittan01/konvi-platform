@@ -16,6 +16,15 @@ import {
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
 type Integration = { provider: string; status: string; meta: Record<string, string> }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
+export type EnviaCarrierPref = {
+  carrier_code: string
+  enabled: boolean
+  display_label: string | null
+  priority: number
+  supports_cod: boolean
+  supports_insurance: boolean
+  notes: string | null
+}
 
 interface Props {
   waInt: Integration
@@ -41,6 +50,10 @@ interface Props {
   enviaMsg?: string
   saveEnviaKey: (fd: FormData) => Promise<void>
   disconnectEnvia: () => Promise<void>
+  // Sem 5 H.2.7 — preferencias carriers per-tenant.
+  enviaCarrierPrefs: EnviaCarrierPref[]
+  upsertEnviaCarrier: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
+  resetEnviaCarrierPref: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
   disconnectMeli: () => Promise<void>
   saveWompi: (fd: FormData) => Promise<void>
   disconnectWompi: () => Promise<void>
@@ -108,7 +121,9 @@ export function IntegrationsManager(props: Props) {
     tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam,
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
-    saveEnviaKey, disconnectEnvia, disconnectMeli,
+    saveEnviaKey, disconnectEnvia,
+    enviaCarrierPrefs, upsertEnviaCarrier, resetEnviaCarrierPref,
+    disconnectMeli,
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
     testWhatsApp, testEnvia,
@@ -467,6 +482,15 @@ export function IntegrationsManager(props: Props) {
           </div>
         )}
 
+        {/* ── Sem 5 H.2.7 — Envia Carriers preferences (per-tenant) ──────────── */}
+        {visibleCards.includes('envia') && enviaConnected && canWrite && (
+          <EnviaCarriersSection
+            prefs={enviaCarrierPrefs}
+            upsertAction={upsertEnviaCarrier}
+            resetAction={resetEnviaCarrierPref}
+          />
+        )}
+
         {/* ── Mercado Libre ─────────────────────────────────────────────────── */}
         {visibleCards.includes('mercadolibre') && (
           <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${meliConnected ? 'border-yellow-500/30' : 'border-border'}`}>
@@ -791,6 +815,235 @@ export function IntegrationsManager(props: Props) {
           </div>
         ))}
 
+      </div>
+    </div>
+  )
+}
+
+
+// ─── Sem 5 H.2.7 — Envia Carriers Section ──────────────────────────────────
+// Tabla de preferencias per-carrier per-tenant. Owner/manager activan
+// los carriers que el tenant quiere ofrecer, definen prioridad, y
+// flags supports_cod / supports_insurance (para futuros H.2.4 / H.2.5).
+//
+// Comportamiento "default open": si el tenant NO tiene NINGUNA fila,
+// el sistema ofrece TODOS los carriers globales (backward compat).
+// La UI lo refleja con un banner claro.
+//
+// Lista canónica de carriers Envia Colombia hardcoded — coincide con
+// services/api/routers/shipping.py:_resolve_carriers_for_quote
+// fallback list (case-sensitive según API Envia).
+
+const ENVIA_CARRIERS_CO: Array<{ code: string; label: string }> = [
+  { code: 'servientrega',     label: 'Servientrega' },
+  { code: 'coordinadora',     label: 'Coordinadora' },
+  { code: 'interRapidisimo',  label: 'Inter Rapidísimo' },
+  { code: 'envia',            label: 'Envía (carrier propio)' },
+  { code: 'tcc',              label: 'TCC' },
+  { code: 'deprisa',          label: 'Deprisa' },
+  { code: 'mensajerosUrbanos', label: 'Mensajeros Urbanos' },
+  { code: 'noventa9Minutos',  label: '99 Minutos' },
+  { code: 'fedex',            label: 'FedEx' },
+  { code: 'dhl',              label: 'DHL' },
+]
+
+function EnviaCarriersSection({
+  prefs, upsertAction, resetAction,
+}: {
+  prefs: EnviaCarrierPref[]
+  upsertAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
+  resetAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
+}) {
+  const router = useRouter()
+  const [pending, setPending] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+
+  // Map prefs por carrier_code para lookup rápido.
+  const prefByCode = new Map(prefs.map(p => [p.carrier_code.toLowerCase(), p]))
+  const hasAnyPrefs = prefs.length > 0
+
+  const handleToggle = async (code: string, current: EnviaCarrierPref | null) => {
+    setPending(code); setErrorMsg(null); setSuccessMsg(null)
+    const fd = new FormData()
+    fd.set('carrier_code', code)
+    // Si no hay pref previa, el toggle ENABLE crea row enabled=true.
+    // Si hay pref, invertir el current.enabled.
+    const targetEnabled = current ? !current.enabled : true
+    fd.set('enabled', String(targetEnabled))
+    fd.set('priority', String(current?.priority ?? 100))
+    fd.set('supports_cod', String(current?.supports_cod ?? false))
+    fd.set('supports_insurance', String(current?.supports_insurance ?? false))
+    if (current?.display_label) fd.set('display_label', current.display_label)
+    if (current?.notes) fd.set('notes', current.notes)
+    const res = await upsertAction(fd)
+    setPending(null)
+    if (!res.ok) { setErrorMsg(res.error ?? 'Error desconocido'); return }
+    setSuccessMsg(`${code} ${targetEnabled ? 'activado' : 'desactivado'}.`)
+    router.refresh()
+  }
+
+  const handleSetCapability = async (
+    code: string, capability: 'supports_cod' | 'supports_insurance',
+    next: boolean,
+  ) => {
+    setPending(code + ':' + capability); setErrorMsg(null); setSuccessMsg(null)
+    const current = prefByCode.get(code.toLowerCase())
+    const fd = new FormData()
+    fd.set('carrier_code', code)
+    fd.set('enabled', String(current?.enabled ?? true))
+    fd.set('priority', String(current?.priority ?? 100))
+    fd.set('supports_cod', String(
+      capability === 'supports_cod' ? next : (current?.supports_cod ?? false)
+    ))
+    fd.set('supports_insurance', String(
+      capability === 'supports_insurance' ? next : (current?.supports_insurance ?? false)
+    ))
+    if (current?.display_label) fd.set('display_label', current.display_label)
+    if (current?.notes) fd.set('notes', current.notes)
+    const res = await upsertAction(fd)
+    setPending(null)
+    if (!res.ok) { setErrorMsg(res.error ?? 'Error'); return }
+    router.refresh()
+  }
+
+  const handleReset = async (code: string) => {
+    setPending('reset:' + code); setErrorMsg(null); setSuccessMsg(null)
+    const fd = new FormData()
+    fd.set('carrier_code', code)
+    const res = await resetAction(fd)
+    setPending(null)
+    if (!res.ok) { setErrorMsg(res.error ?? 'Error'); return }
+    setSuccessMsg(`${code} restaurado a default.`)
+    router.refresh()
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden col-span-full">
+      <div className="px-4 py-3.5 border-b border-border bg-muted/20 flex items-center gap-2">
+        <Package className="h-4 w-4 text-orange-400 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-sm">Envía — Preferencias de carriers</p>
+          <p className="text-[11px] text-muted-foreground">
+            Selecciona qué carriers ofrecer en cotizaciones de tus clientes.
+          </p>
+        </div>
+      </div>
+      <div className="px-4 py-3.5">
+        {!hasAnyPrefs && (
+          <div className="mb-3 rounded-md border border-blue-700/40 bg-blue-700/5 px-3 py-2 text-xs text-blue-700">
+            <ShieldCheck className="inline h-3.5 w-3.5 mr-1" />
+            <b>Modo abierto.</b> Aún no has configurado preferencias —
+            el bot ofrece <b>todos</b> los carriers disponibles en Envia.
+            Activa al menos uno abajo para empezar a filtrar.
+          </div>
+        )}
+        {successMsg && (
+          <div className="mb-3 rounded-md border border-emerald-700/40 bg-emerald-700/5 px-3 py-2 text-xs text-emerald-700">
+            <CheckCircle2 className="inline h-3.5 w-3.5 mr-1" />
+            {successMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div className="mb-3 rounded-md border border-rose-700/40 bg-rose-700/5 px-3 py-2 text-xs text-rose-700">
+            <AlertCircle className="inline h-3.5 w-3.5 mr-1" />
+            {errorMsg}
+          </div>
+        )}
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="min-w-full text-xs">
+            <thead className="bg-muted/30">
+              <tr className="text-left">
+                <th className="px-3 py-2 font-medium">Carrier</th>
+                <th className="px-3 py-2 font-medium text-center">Activo</th>
+                <th className="px-3 py-2 font-medium text-center" title="Cash on Delivery (futuro H.2.4)">
+                  COD
+                </th>
+                <th className="px-3 py-2 font-medium text-center" title="Insurance / declaredValue (futuro H.2.5)">
+                  Seguro
+                </th>
+                <th className="px-3 py-2 font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {ENVIA_CARRIERS_CO.map(c => {
+                const pref = prefByCode.get(c.code.toLowerCase()) ?? null
+                const enabled = pref ? pref.enabled : !hasAnyPrefs
+                  // Si no hay prefs, default-open lo presenta como enabled
+                  // Si hay prefs y este carrier no tiene fila, NO está enabled
+                const cod = pref?.supports_cod ?? false
+                const ins = pref?.supports_insurance ?? false
+                const isPending = pending === c.code
+                return (
+                  <tr key={c.code} className={enabled ? '' : 'opacity-60'}>
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{c.label}</div>
+                      <div className="font-mono text-[10px] text-muted-foreground">{c.code}</div>
+                      {pref?.notes && (
+                        <div className="mt-0.5 text-[10px] text-muted-foreground italic">{pref.notes}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => handleToggle(c.code, pref)}
+                        title={enabled ? 'Desactivar' : 'Activar'}
+                        className={`inline-flex items-center justify-center h-6 w-12 rounded-full transition ${
+                          enabled
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-300 text-slate-700'
+                        }`}
+                      >
+                        {enabled ? 'ON' : 'OFF'}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={cod}
+                        disabled={!pref || pending !== null}
+                        onChange={(e) => handleSetCapability(c.code, 'supports_cod', e.target.checked)}
+                        title={pref ? 'Marca si este carrier acepta cobro contraentrega (Cash on Delivery)' : 'Activa el carrier primero'}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={ins}
+                        disabled={!pref || pending !== null}
+                        onChange={(e) => handleSetCapability(c.code, 'supports_insurance', e.target.checked)}
+                        title={pref ? 'Marca si declaras valor (Coordinadora lo exige)' : 'Activa el carrier primero'}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {pref && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={pending !== null}
+                          onClick={() => handleReset(c.code)}
+                          className="h-6 text-[10px]"
+                          title="Restaurar a default (eliminar preferencia explícita)"
+                        >
+                          Reset
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          Los carriers desactivados NO aparecen en cotizaciones a clientes.
+          &quot;Reset&quot; elimina la preferencia explícita y vuelve a comportamiento default
+          (modo abierto si no tienes ninguna fila configurada).
+        </p>
       </div>
     </div>
   )
