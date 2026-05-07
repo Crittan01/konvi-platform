@@ -39,7 +39,6 @@ class CarrierPreference:
     enabled: bool
     display_label: Optional[str]
     priority: int
-    supports_cod: bool
     supports_insurance: bool
     notes: Optional[str]
 
@@ -68,7 +67,7 @@ def list_preferences(
         supabase_client.table("tenant_carriers")
         .select(
             "carrier_code, enabled, display_label, priority, "
-            "supports_cod, supports_insurance, notes"
+            "supports_insurance, notes"
         )
         .eq("tenant_id", tenant_id)
         .eq("provider", p)
@@ -83,7 +82,6 @@ def list_preferences(
             enabled=bool(r.get("enabled", False)),
             display_label=r.get("display_label"),
             priority=int(r.get("priority") or 100),
-            supports_cod=bool(r.get("supports_cod", False)),
             supports_insurance=bool(r.get("supports_insurance", False)),
             notes=r.get("notes"),
         )
@@ -145,7 +143,6 @@ def upsert_preference(
     enabled: bool = True,
     display_label: Optional[str] = None,
     priority: int = 100,
-    supports_cod: bool = False,
     supports_insurance: bool = False,
     notes: Optional[str] = None,
 ) -> CarrierPreference:
@@ -163,7 +160,6 @@ def upsert_preference(
         "enabled": enabled,
         "display_label": display_label,
         "priority": int(priority),
-        "supports_cod": bool(supports_cod),
         "supports_insurance": bool(supports_insurance),
         "notes": notes,
     }
@@ -181,7 +177,6 @@ def upsert_preference(
         enabled=bool(r.get("enabled", False)),
         display_label=r.get("display_label"),
         priority=int(r.get("priority") or 100),
-        supports_cod=bool(r.get("supports_cod", False)),
         supports_insurance=bool(r.get("supports_insurance", False)),
         notes=r.get("notes"),
     )

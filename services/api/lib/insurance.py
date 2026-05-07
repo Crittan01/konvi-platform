@@ -125,8 +125,8 @@ def apply_insurance_to_packages(
         # Primer package absorbe el remainder de la división.
         pkg_value = base_value + (remainder if i == 0 else 0)
         new_pkg["declaredValue"] = pkg_value
-        # additional_services es lista — concatenar si ya existe (no
-        # pisar otros services como cash_on_delivery futuro H.2.4).
+        # additional_services es lista — concatenar si ya existe para
+        # no pisar otros services que el caller pueda haber agregado.
         existing = new_pkg.get("additional_services") or []
         if not isinstance(existing, list):
             existing = []

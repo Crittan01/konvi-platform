@@ -319,8 +319,7 @@ def _require_envia_capability(
       - 'tracking_polling' — POST /shipping/tracking
       - 'pickup'           — POST /shipments/{id}/schedule-pickup
       - 'cancel'           — POST /shipments/{id}/cancel
-      - 'cod'              — futuro H.2.4
-      - 'insurance'        — futuro H.2.5
+      - 'insurance'        — H.2.5 declaredValue per-carrier
 
     Backward compat: si el env var global ENVIA_PHASE2_ENABLED=true,
     se permite (durante migración). Tras seed inicial de capabilities

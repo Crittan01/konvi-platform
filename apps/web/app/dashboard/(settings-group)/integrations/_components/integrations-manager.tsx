@@ -21,7 +21,6 @@ export type EnviaCarrierPref = {
   enabled: boolean
   display_label: string | null
   priority: number
-  supports_cod: boolean
   supports_insurance: boolean
   notes: string | null
 }
@@ -876,7 +875,7 @@ export function IntegrationsManager(props: Props) {
 // ─── Sem 5 H.2.7 — Envia Carriers Section ──────────────────────────────────
 // Tabla de preferencias per-carrier per-tenant. Owner/manager activan
 // los carriers que el tenant quiere ofrecer, definen prioridad, y
-// flags supports_cod / supports_insurance (para futuros H.2.4 / H.2.5).
+// flag supports_insurance (H.2.5 declaredValue per-carrier).
 //
 // Comportamiento "default open": si el tenant NO tiene NINGUNA fila,
 // el sistema ofrece TODOS los carriers globales (backward compat).
@@ -924,7 +923,6 @@ function EnviaCarriersSection({
     const targetEnabled = current ? !current.enabled : true
     fd.set('enabled', String(targetEnabled))
     fd.set('priority', String(current?.priority ?? 100))
-    fd.set('supports_cod', String(current?.supports_cod ?? false))
     fd.set('supports_insurance', String(current?.supports_insurance ?? false))
     if (current?.display_label) fd.set('display_label', current.display_label)
     if (current?.notes) fd.set('notes', current.notes)
@@ -936,7 +934,7 @@ function EnviaCarriersSection({
   }
 
   const handleSetCapability = async (
-    code: string, capability: 'supports_cod' | 'supports_insurance',
+    code: string, capability: 'supports_insurance',
     next: boolean,
   ) => {
     setPending(code + ':' + capability); setErrorMsg(null); setSuccessMsg(null)
@@ -945,9 +943,6 @@ function EnviaCarriersSection({
     fd.set('carrier_code', code)
     fd.set('enabled', String(current?.enabled ?? true))
     fd.set('priority', String(current?.priority ?? 100))
-    fd.set('supports_cod', String(
-      capability === 'supports_cod' ? next : (current?.supports_cod ?? false)
-    ))
     fd.set('supports_insurance', String(
       capability === 'supports_insurance' ? next : (current?.supports_insurance ?? false)
     ))
@@ -1008,10 +1003,7 @@ function EnviaCarriersSection({
               <tr className="text-left">
                 <th className="px-3 py-2 font-medium">Carrier</th>
                 <th className="px-3 py-2 font-medium text-center">Activo</th>
-                <th className="px-3 py-2 font-medium text-center" title="Cash on Delivery (futuro H.2.4)">
-                  COD
-                </th>
-                <th className="px-3 py-2 font-medium text-center" title="Insurance / declaredValue (futuro H.2.5)">
+                <th className="px-3 py-2 font-medium text-center" title="Insurance / declaredValue (H.2.5)">
                   Seguro
                 </th>
                 <th className="px-3 py-2 font-medium text-right">Acciones</th>
@@ -1023,7 +1015,6 @@ function EnviaCarriersSection({
                 const enabled = pref ? pref.enabled : !hasAnyPrefs
                   // Si no hay prefs, default-open lo presenta como enabled
                   // Si hay prefs y este carrier no tiene fila, NO está enabled
-                const cod = pref?.supports_cod ?? false
                 const ins = pref?.supports_insurance ?? false
                 const isPending = pending === c.code
                 return (
@@ -1049,16 +1040,6 @@ function EnviaCarriersSection({
                       >
                         {enabled ? 'ON' : 'OFF'}
                       </button>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={cod}
-                        disabled={!pref || pending !== null}
-                        onChange={(e) => handleSetCapability(c.code, 'supports_cod', e.target.checked)}
-                        title={pref ? 'Marca si este carrier acepta cobro contraentrega (Cash on Delivery)' : 'Activa el carrier primero'}
-                        className="h-4 w-4 cursor-pointer"
-                      />
                     </td>
                     <td className="px-3 py-2 text-center">
                       <input
