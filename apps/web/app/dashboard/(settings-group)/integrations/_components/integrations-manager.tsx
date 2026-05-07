@@ -970,15 +970,61 @@ function EnviaCarriersSection({
       <div className="px-4 py-3.5 border-b border-border bg-muted/20 flex items-center gap-2">
         <Package className="h-4 w-4 text-orange-400 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm">Envía — Preferencias de carriers</p>
+          <p className="font-semibold text-sm flex items-center gap-1.5">
+            Envía — Preferencias de carriers
+            <span
+              className="cursor-help text-muted-foreground hover:text-foreground"
+              title={
+                'Cuando un cliente WhatsApp pide cotización de envío, el bot ' +
+                'pregunta a Envía qué transportadoras pueden hacer el envío. ' +
+                'Aquí TÚ controlas qué transportadoras se le ofrecen al ' +
+                'cliente final. Sin configurar = todas las disponibles. ' +
+                'Configurando = solo las que activas aquí.'
+              }
+            >
+              <HelpCircle className="h-4 w-4" />
+            </span>
+          </p>
           <p className="text-[11px] text-muted-foreground">
             Selecciona qué carriers ofrecer en cotizaciones de tus clientes.
           </p>
         </div>
       </div>
       <div className="px-4 py-3.5">
+        {/* Panel "¿Cómo funciona?" prominente. */}
+        <div className="mb-3 rounded-md border border-blue-700/30 bg-blue-700/5 p-3 text-xs text-blue-900 space-y-1.5">
+          <div className="font-semibold flex items-center gap-1">
+            <HelpCircle className="h-3.5 w-3.5" />
+            ¿Cómo funciona?
+          </div>
+          <p>
+            El bot de WhatsApp cotiza envíos con Envía cada vez que un cliente
+            confirma su pedido. Aquí decides <b>qué transportadoras ofrecer</b>:
+          </p>
+          <ul className="list-disc pl-4 space-y-0.5">
+            <li>
+              <b>Modo abierto</b> (sin configurar): el bot ofrece TODAS las
+              transportadoras que Envía exponga (FedEx, DHL, Servientrega, etc.).
+            </li>
+            <li>
+              <b>Modo configurado</b> (1+ carriers activos): el bot ofrece
+              SOLO los que tengan toggle ON. Los que están en OFF nunca
+              aparecen al cliente.
+            </li>
+            <li>
+              <b>Seguro</b> (✓ Coordinadora obligatorio): si el carrier
+              soporta declaredValue, marca el checkbox para que tus envíos
+              vayan asegurados con el valor de la compra del cliente.
+            </li>
+          </ul>
+          <p className="text-blue-900/80">
+            <b>Tip:</b> activa solo los carriers con los que tienes contrato
+            real con Envía — los demás causarán errores en cotización si los
+            dejas abiertos.
+          </p>
+        </div>
         {!hasAnyPrefs && (
-          <div className="mb-3 rounded-md border border-blue-700/40 bg-blue-700/5 px-3 py-2 text-xs text-blue-700">
+          <div className="mb-3 rounded-md border border-amber-700/40 bg-amber-700/5 px-3 py-2 text-xs text-amber-900">
             <ShieldCheck className="inline h-3.5 w-3.5 mr-1" />
             <b>Modo abierto.</b> Aún no has configurado preferencias —
             el bot ofrece <b>todos</b> los carriers disponibles en Envia.
@@ -1155,13 +1201,47 @@ function EnviaCapabilitiesSection({
       <div className="px-4 py-3.5 border-b border-border bg-muted/20 flex items-center gap-2">
         <ShieldCheck className="h-4 w-4 text-orange-400 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm">Capabilities Fase 2</p>
+          <p className="font-semibold text-sm flex items-center gap-1.5">
+            Capabilities Fase 2
+            <span
+              className="cursor-help text-muted-foreground hover:text-foreground"
+              title={
+                'Cada capability es un "interruptor" que habilita o deshabilita ' +
+                'una operación específica de Envía para tu tenant. Si la apagas, ' +
+                'el endpoint correspondiente devolverá HTTP 503 cuando el bot u ' +
+                'otro código intente usarlo. Útil si quieres limitar qué hace ' +
+                'Envía (ej. cotizar pero no generar etiquetas todavía).'
+              }
+            >
+              <HelpCircle className="h-4 w-4" />
+            </span>
+          </p>
           <p className="text-[11px] text-muted-foreground">
             Activa solo las operaciones que usas. Cada capability protege un endpoint específico.
           </p>
         </div>
       </div>
       <div className="px-4 py-3.5">
+        {/* Panel "¿Cómo funciona?" prominente. */}
+        <div className="mb-3 rounded-md border border-blue-700/30 bg-blue-700/5 p-3 text-xs text-blue-900 space-y-1.5">
+          <div className="font-semibold flex items-center gap-1">
+            <HelpCircle className="h-3.5 w-3.5" />
+            ¿Cómo funciona?
+          </div>
+          <p>
+            <b>Hoy todas están activadas</b> (estado por defecto post-onboarding).
+            Cada toggle representa un endpoint Envía. Si lo apagas, ese endpoint
+            queda <b>bloqueado</b> a nivel API (HTTP 503) — útil si quieres,
+            por ejemplo, permitir cotización pero NO permitir cancelar etiquetas
+            ya generadas.
+          </p>
+          <p className="text-blue-900/80">
+            <b>Recomendación:</b> mantenlas todas en <b>ON</b> a menos que tengas
+            una razón comercial específica para limitar (ej. tu account Envía no
+            tiene saldo suficiente para imprimir etiquetas — desactivas
+            <i> Generación de etiquetas</i> hasta recargar).
+          </p>
+        </div>
         {successMsg && (
           <div className="mb-3 rounded-md border border-emerald-700/40 bg-emerald-700/5 px-3 py-2 text-xs text-emerald-700">
             <CheckCircle2 className="inline h-3.5 w-3.5 mr-1" />
@@ -1189,10 +1269,10 @@ function EnviaCapabilitiesSection({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium">{cap.label}</span>
                     <span
-                      className="cursor-help text-muted-foreground hover:text-foreground"
+                      className="cursor-help text-blue-700/70 hover:text-blue-900"
                       title={cap.help}
                     >
-                      <HelpCircle className="h-3 w-3" />
+                      <HelpCircle className="h-4 w-4" />
                     </span>
                   </div>
                   <span className="font-mono text-[10px] text-muted-foreground">{cap.key}</span>
