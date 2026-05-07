@@ -200,11 +200,14 @@ def main():
     import time
     for t in types_to_test:
         # camelCase per Envia internal naming (descubierto empíricamente
-        # 2026-05-06 — error "Undefined property: stdClass::$trackingNumber"
-        # cuando enviado snake_case).
+        # 2026-05-06 — errores progresivos en WebhookTest.php:
+        # :32 $carrier → :33 $trackingNumber → :34 $status. El endpoint
+        # exige stdClass con esos 3 campos. `status` debe ser texto
+        # de status — usamos "Created" (status_parent_id=1 inicial).
         payload = {
             "trackingNumber": tracking_number,
             "carrier": carrier,
+            "status": "Created",
             "webhookUrl": webhook_url,
         }
         if t:

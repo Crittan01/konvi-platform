@@ -27,10 +27,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse
-from supabase import Client
 
-from dependencies.auth import get_service_client
-from fastapi import Depends
+from dependencies.auth import _get_service_client
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +113,11 @@ async def envia_webhook_capture(
     request: Request,
     tenant_id: str = Path(..., min_length=1),
     secret_token: str = Path(..., min_length=1),
-    supabase: Client = Depends(get_service_client),
 ):
+    # Service-role client SIN JWT (webhook externo Envia, IP allowlist
+    # Envia + secret-token URL son la auth — no llega Authorization header).
+    # Patrón usado igual por wompi_webhook y meli_webhook routers.
+    supabase = _get_service_client()
     """Endpoint capture Fase A.
 
     Recibe webhooks Envia, captura payload completo en

@@ -511,3 +511,62 @@ El bloqueo de `/ship/webhooktest/` NO es nuestro problema (provider issue). Cuan
 | Schema baseline tracking | ✅ capturado en `docs/research/empirical-evidence/envia-generaltrack-794813020143.json` |
 | Captura webhook real Envia | ⏸ depende de eventos sandbox naturales o tenant piloto prod |
 
+
+---
+
+## H.2.2 Fase A — CIERRE EXITOSO 2026-05-07 (post bug-fix auth)
+
+### Bug detectado en endpoint capture
+
+`services/api/routers/envia_webhook.py` declaraba `supabase: Client = Depends(get_service_client)`.
+`get_service_client` (línea 149 `dependencies/auth.py`) tiene
+`tenant_id: str = Depends(get_current_tenant)` → **siempre exige JWT**.
+Webhooks externos NO mandan JWT → endpoint respondía HTTP 500 con
+`jwt.exceptions.DecodeError: Not enough segments`.
+
+### Fix aplicado
+
+Reemplazado por `_get_service_client()` (función directa, sin Depends,
+sin JWT). Patrón usado igual en `wompi_webhook.py` y `meli_webhook.py`.
+Restart api → 200 OK + capture log inserts 201 Created.
+
+### Captura empírica completada
+
+Tras fix + re-disparo `/ship/webhooktest/`, **5 webhooks reales
+de Envia capturados** en `envia_webhook_capture_log`:
+
+```json
+{
+  "carrier": "fedex",
+  "tracking_number": "794813020143",
+  "shipment_status": "Created"
+}
+```
+
+**Hallazgos empíricos críticos** (dossier L.7e + evidencia
+`docs/research/empirical-evidence/envia-webhook-payload-2026-05-06.json`):
+
+1. **Payload es snake_case** (no camelCase como el body de `/ship/webhooktest/`).
+2. **Shape mínimo garantizado**: `{carrier, tracking_number, shipment_status}` (3 campos).
+3. **5 tipos webhook = mismo payload**. Diferenciación por URL registrada en panel per `type_id`, no por contenido.
+4. **User-Agent: `Envia-Carriers`** — defensa adicional al secret-token URL.
+5. **Source IP estable: `3.211.106.119`** (AWS Envia) — IP allowlist viable como tercera capa defensa.
+6. **Headers Datadog** (`x-datadog-*`, `traceparent`, `tracestate`) — Envia usa Datadog para tracing; correlable con sus reportes para issues.
+7. **`/ship/webhooktest/` retorna HTTP 500 HTML al caller pero SÍ dispara el webhook async en background**. El 500 al caller NO indica fallo del envío real.
+
+### Lo que cierra Fase A definitivamente
+
+| Pieza | Estado |
+|---|---|
+| Migration capture log | ✅ aplicada |
+| Endpoint capture (sin JWT, secret-match F.10) | ✅ deployed + bug auth corregido |
+| Helper create_test_shipment (DANE8 + carrier auto) | ✅ funcional — sandbox label real generada |
+| Helper webhook_test_dispatch (camelCase + status + loop tipos) | ✅ funcional |
+| Schema canonical webhook payload | ✅ descubierto + persistido (3 campos snake_case) |
+| Schema /ship/generaltrack/ baseline | ✅ persistido |
+| Header User-Agent + IP origen identificados | ✅ documentado |
+| 5 capturas reales en DB | ✅ |
+
+**Fase A → CERRADA**. Listo para Fase B implementar procesadores
+con schema empírico real (no más suposiciones).
+
