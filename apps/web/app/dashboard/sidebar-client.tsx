@@ -10,7 +10,7 @@ import {
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
   Wallet, DollarSign, AlertCircle, Bot, Lock, KeyRound,
-  Store, Crown, Briefcase, Headphones,
+  Store, Crown, Briefcase, Headphones, Tag,
 } from 'lucide-react'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -57,10 +57,11 @@ const NAV_ITEMS: NavItem[] = [
   {
     kind: 'group', id: 'ventas', label: 'Ventas', icon: ShoppingCart, roles: [],
     children: [
-      { kind: 'leaf', href: '/dashboard/orders',   label: 'Pedidos',   icon: Package,     roles: [] },
-      { kind: 'leaf', href: '/dashboard/contacts', label: 'Contactos', icon: Users,       roles: [] },
-      { kind: 'leaf', href: '/dashboard/shipping', label: 'Cotizador', icon: Truck,       roles: [], integration: 'envia' },
-      { kind: 'leaf', href: '/dashboard/claims',   label: 'Reclamos',  icon: AlertCircle, roles: [] },
+      { kind: 'leaf', href: '/dashboard/orders',     label: 'Pedidos',     icon: Package,     roles: [] },
+      { kind: 'leaf', href: '/dashboard/contacts',   label: 'Contactos',   icon: Users,       roles: [] },
+      { kind: 'leaf', href: '/dashboard/shipping',   label: 'Cotizador',   icon: Truck,       roles: [], integration: 'envia' },
+      { kind: 'leaf', href: '/dashboard/promotions', label: 'Promociones', icon: Tag,         roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/claims',     label: 'Reclamos',    icon: AlertCircle, roles: [] },
     ],
   },
 
