@@ -37,6 +37,17 @@ class EnviaConnect(BaseModel):
     sandbox: bool = Field(default=False)
 
 
+class EnviaCarrierUpsert(BaseModel):
+    """Sem 5 H.2.7 — preferencias de carriers per-tenant."""
+    carrier_code: str = Field(..., min_length=2, max_length=64)
+    enabled: bool = Field(default=True)
+    display_label: Optional[str] = Field(default=None, max_length=120)
+    priority: int = Field(default=100, ge=0, le=999)
+    supports_cod: bool = Field(default=False)
+    supports_insurance: bool = Field(default=False)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _mask_token(token: str) -> str:
@@ -169,6 +180,106 @@ async def disconnect_envia(
     supabase.table("tenant_integrations").update({
         "status": "disconnected", "credentials": {},
     }).eq("tenant_id", tenant_id).eq("provider", "envia").execute()
+
+
+# ── Sem 5 H.2.7 — Envia carriers preferences per-tenant ──────────────────────
+
+
+@router.get("/envia/carriers", response_model=list)
+async def list_envia_carriers(
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """Lista preferencias de carriers Envia del tenant. Cualquier rol.
+
+    Retorna lista (puede estar vacía si tenant no configuró aún → quote
+    devuelve todos los carriers globales por default open).
+    """
+    from lib.tenant_carriers import list_preferences
+    prefs = list_preferences(supabase, tenant_id, "envia")
+    return [
+        {
+            "carrier_code": p.carrier_code,
+            "enabled": p.enabled,
+            "display_label": p.display_label,
+            "priority": p.priority,
+            "supports_cod": p.supports_cod,
+            "supports_insurance": p.supports_insurance,
+            "notes": p.notes,
+        }
+        for p in prefs
+    ]
+
+
+@router.put("/envia/carriers", response_model=dict)
+@audit_log(entity_type="integration", action="updated")
+async def upsert_envia_carrier(
+    body: EnviaCarrierUpsert,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Upsert preferencia carrier Envia. Solo owner+manager.
+
+    Idempotente vía UNIQUE constraint (tenant_id, provider, carrier_code).
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner o manager pueden gestionar carriers.",
+        )
+    try:
+        from lib.tenant_carriers import upsert_preference
+        pref = upsert_preference(
+            supabase, tenant_id, "envia",
+            carrier_code=body.carrier_code,
+            enabled=body.enabled,
+            display_label=body.display_label,
+            priority=body.priority,
+            supports_cod=body.supports_cod,
+            supports_insurance=body.supports_insurance,
+            notes=body.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("[CARRIERS] upsert error tenant=%s: %s", tenant_id, exc)
+        raise HTTPException(status_code=500, detail="Error guardando preferencia")
+    return {
+        "carrier_code": pref.carrier_code,
+        "enabled": pref.enabled,
+        "display_label": pref.display_label,
+        "priority": pref.priority,
+        "supports_cod": pref.supports_cod,
+        "supports_insurance": pref.supports_insurance,
+        "notes": pref.notes,
+    }
+
+
+@router.delete("/envia/carriers/{carrier_code}", status_code=204)
+@audit_log(entity_type="integration", action="updated")
+async def delete_envia_carrier(
+    carrier_code: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Borra preferencia de un carrier (vuelve a default global).
+    Solo owner+manager.
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner o manager pueden gestionar carriers.",
+        )
+    code = (carrier_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="carrier_code requerido")
+    supabase.table("tenant_carriers").delete().eq(
+        "tenant_id", tenant_id,
+    ).eq("provider", "envia").eq("carrier_code", code).execute()
 
 
 # ── MeLi ───────────────────────────────────────────────────────────────────
