@@ -236,6 +236,18 @@ class Parcel(BaseModel):
     insuranceAmount: float = Field(default=0, ge=0)
     content: str = Field(default="Mercancía general", max_length=180)
     amount: int = Field(default=1, ge=1)
+    # Sem 5 H.2.5 — declaredValue per parcel para insurance.
+    # Si el caller (orchestrator/cart_tool) lo provee con valor real
+    # del cart subtotal, y el carrier elegido tiene supports_insurance
+    # en tenant_carriers, el helper agrega additional_services:
+    # ['envia_insurance'] al payload de Envia.
+    # Coordinadora EXIGE este flag siempre per dossier sec. 4.
+    declaredValueCop: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Valor declarado en pesos COP (NO cents). Si NULL, "
+                    "no se aplica insurance independiente del carrier.",
+    )
 
 
 class QuoteRequest(BaseModel):
@@ -587,8 +599,40 @@ async def quote_shipment(
             base_payload.get("destination", {}).get("postalCode"),
         )
 
+        # Sem 5 H.2.5 — declaredValue total (suma de parcels) para insurance.
+        total_declared_value_cop = sum(
+            int(p.declaredValueCop or 0) for p in req.parcels
+        )
+
         async def _fetch_carrier(carrier: str):
-            payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
+            # Sem 5 H.2.5 — apply insurance per-carrier según preferencias.
+            carrier_packages = packages
+            try:
+                from lib.insurance import (
+                    should_apply_insurance, apply_insurance_to_packages,
+                )
+                if total_declared_value_cop > 0 and should_apply_insurance(
+                    supabase, tenant_id, carrier,
+                ):
+                    carrier_packages = apply_insurance_to_packages(
+                        packages, declared_value_cop=total_declared_value_cop,
+                    )
+                    logger.info(
+                        "[INSURANCE] tenant=%s carrier=%s declared=%s aplicado",
+                        tenant_id, carrier, total_declared_value_cop,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[INSURANCE] no se pudo aplicar tenant=%s carrier=%s: %s — "
+                    "cotización sigue sin seguro",
+                    tenant_id, carrier, exc,
+                )
+
+            payload = {
+                **base_payload,
+                "packages": carrier_packages,
+                "shipment": {"carrier": carrier, "type": 1},
+            }
             for attempt in range(2):
                 try:
                     resp = await client.get_rates(payload)
