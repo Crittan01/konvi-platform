@@ -8,10 +8,8 @@ Ejemplos de uso:
 
     from lib.capabilities_matrix import is_capability_enabled, get_capability_config
 
-    # Antes de cotizar con COD
-    if is_capability_enabled(client, tenant_id, "envia", "cod"):
-        cfg = get_capability_config(client, tenant_id, "envia", "cod")
-        carriers = cfg.get("carriers", [])
+    # Antes de generar etiqueta Envia
+    if is_capability_enabled(client, tenant_id, "envia", "label_generation"):
         ...
 
     # Antes de enviar HSM template
@@ -33,7 +31,6 @@ logger = logging.getLogger(__name__)
 # `capability` contra este dict antes de set/get para evitar typos silentes.
 CAPABILITIES_BY_PROVIDER: dict[str, frozenset[str]] = {
     "envia": frozenset({
-        "cod",
         "insurance",
         "label_generation",
         "pickup",

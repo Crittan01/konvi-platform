@@ -189,17 +189,17 @@ class ApplyInsuranceToPackagesTests(unittest.TestCase):
         )
 
     def test_preserva_additional_services_existentes(self):
-        # Caso futuro: package ya tiene additional_services con
-        # cash_on_delivery (H.2.4 futuro) — insurance debe AGREGARSE,
-        # no reemplazar.
+        # Defensa: si el package YA tiene algún additional_services
+        # configurado por el caller, insurance debe AGREGARSE al final,
+        # no reemplazar la lista existente.
         pkgs = [{
             "weight": 1,
-            "additional_services": ["cash_on_delivery"],
+            "additional_services": ["electronic_signature"],
         }]
         result = ins.apply_insurance_to_packages(pkgs, declared_value_cop=50000)
         self.assertEqual(
             result[0]["additional_services"],
-            ["cash_on_delivery", "envia_insurance"],
+            ["electronic_signature", "envia_insurance"],
         )
 
     def test_no_muta_input(self):

@@ -132,20 +132,18 @@ class ListPreferencesTests(unittest.TestCase):
         sb._tables["tenant_carriers"].extend([
             {"tenant_id": "tenant-A", "provider": "envia",
              "carrier_code": "fedex", "enabled": True, "priority": 50,
-             "supports_cod": False, "supports_insurance": False},
+             "supports_insurance": False},
             {"tenant_id": "tenant-A", "provider": "envia",
              "carrier_code": "servientrega", "enabled": True, "priority": 10,
-             "supports_cod": True, "supports_insurance": False},
+             "supports_insurance": False},
             {"tenant_id": "tenant-B", "provider": "envia",
              "carrier_code": "dhl", "enabled": True, "priority": 1,
-             "supports_cod": False, "supports_insurance": False},
+             "supports_insurance": False},
         ])
         result = tc.list_preferences(sb, "tenant-A", "envia")
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0].carrier_code, "servientrega")  # priority 10
         self.assertEqual(result[1].carrier_code, "fedex")  # priority 50
-        self.assertTrue(result[0].supports_cod)
-        self.assertFalse(result[1].supports_cod)
 
 
 class FilterEnabledCarriersTests(unittest.TestCase):
@@ -160,10 +158,10 @@ class FilterEnabledCarriersTests(unittest.TestCase):
         sb._tables["tenant_carriers"].extend([
             {"tenant_id": "tenant-A", "provider": "envia",
              "carrier_code": "servientrega", "enabled": True, "priority": 100,
-             "supports_cod": False, "supports_insurance": False},
+             "supports_insurance": False},
             {"tenant_id": "tenant-A", "provider": "envia",
              "carrier_code": "fedex", "enabled": False, "priority": 100,
-             "supports_cod": False, "supports_insurance": False},
+             "supports_insurance": False},
         ])
         candidates = ["fedex", "servientrega", "dhl"]
         result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
@@ -179,7 +177,7 @@ class FilterEnabledCarriersTests(unittest.TestCase):
             "tenant_id": "tenant-A", "provider": "envia",
             "carrier_code": "interrapidisimo",
             "enabled": True, "priority": 100,
-            "supports_cod": False, "supports_insurance": False,
+            "supports_insurance": False,
         })
         candidates = ["FedEx", "interRapidisimo", "DHL"]
         result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
@@ -190,10 +188,10 @@ class FilterEnabledCarriersTests(unittest.TestCase):
         sb._tables["tenant_carriers"].extend([
             {"tenant_id": "tenant-A", "provider": "envia",
              "carrier_code": "fedex", "enabled": True, "priority": 100,
-             "supports_cod": False, "supports_insurance": False},
+             "supports_insurance": False},
             {"tenant_id": "tenant-A", "provider": "envia",
              "carrier_code": "servientrega", "enabled": True, "priority": 100,
-             "supports_cod": False, "supports_insurance": False},
+             "supports_insurance": False},
         ])
         candidates = ["servientrega", "fedex"]
         result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
@@ -204,7 +202,7 @@ class FilterEnabledCarriersTests(unittest.TestCase):
         sb._tables["tenant_carriers"].append({
             "tenant_id": "tenant-A", "provider": "envia",
             "carrier_code": "fedex", "enabled": False, "priority": 100,
-            "supports_cod": False, "supports_insurance": False,
+            "supports_insurance": False,
         })
         candidates = ["fedex", "dhl"]
         result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
