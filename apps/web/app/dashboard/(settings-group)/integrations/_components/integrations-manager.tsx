@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
-  MessageCircle, Settings2, ChevronUp, CreditCard,
+  MessageCircle, Settings2, ChevronUp, CreditCard, HelpCircle,
 } from 'lucide-react'
 
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
@@ -54,6 +54,9 @@ interface Props {
   enviaCarrierPrefs: EnviaCarrierPref[]
   upsertEnviaCarrier: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
   resetEnviaCarrierPref: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
+  // Sem 5 H.2.6 — capabilities Fase 2 granulares.
+  enviaCapabilities: Record<string, boolean>
+  toggleEnviaCapability: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
   disconnectMeli: () => Promise<void>
   saveWompi: (fd: FormData) => Promise<void>
   disconnectWompi: () => Promise<void>
@@ -123,6 +126,7 @@ export function IntegrationsManager(props: Props) {
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
     saveEnviaKey, disconnectEnvia,
     enviaCarrierPrefs, upsertEnviaCarrier, resetEnviaCarrierPref,
+    enviaCapabilities, toggleEnviaCapability,
     disconnectMeli,
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
@@ -835,11 +839,17 @@ export function IntegrationsManager(props: Props) {
               </p>
             </div>
           </div>
-          <EnviaCarriersSection
-            prefs={enviaCarrierPrefs}
-            upsertAction={upsertEnviaCarrier}
-            resetAction={resetEnviaCarrierPref}
-          />
+          <div className="space-y-4">
+            <EnviaCapabilitiesSection
+              capabilities={enviaCapabilities}
+              toggleAction={toggleEnviaCapability}
+            />
+            <EnviaCarriersSection
+              prefs={enviaCarrierPrefs}
+              upsertAction={upsertEnviaCarrier}
+              resetAction={resetEnviaCarrierPref}
+            />
+          </div>
         </div>
       )}
 
@@ -1086,6 +1096,143 @@ function EnviaCarriersSection({
           &quot;Reset&quot; elimina la preferencia explícita y vuelve a comportamiento default
           (modo abierto si no tienes ninguna fila configurada).
         </p>
+      </div>
+    </div>
+  )
+}
+
+
+// ─── Sem 5 H.2.6 — Envia Capabilities Section ──────────────────────────────
+// Toggles granulares de capabilities Fase 2 per-tenant. Cada capability
+// gate un endpoint específico — el tenant activa solo lo que usa.
+//
+// Backend: F.3 capabilities_matrix + tenant_provider_capabilities table.
+// Antes de rev. 105 H.2.6 era un env-var global ENVIA_PHASE2_ENABLED;
+// ahora es flag per-tenant per-capability.
+
+const ENVIA_CAPABILITIES: Array<{
+  key: string
+  label: string
+  help: string
+}> = [
+  {
+    key: 'label_generation',
+    label: 'Generación de etiquetas',
+    help:
+      'Permite generar etiquetas (PDF/ZPL) tras seleccionar tarifa. ' +
+      'Necesario para imprimir y entregar al carrier.',
+  },
+  {
+    key: 'tracking_polling',
+    label: 'Tracking & polling',
+    help:
+      'Habilita consultar estado del envío y polling backup periódico. ' +
+      'Usado por el cron que detecta entregas + actualiza el cliente.',
+  },
+  {
+    key: 'pickup',
+    label: 'Recolección (pickup)',
+    help:
+      'Permite agendar recolección domiciliaria del paquete con el carrier. ' +
+      'No todos los carriers soportan pickup en todas las ciudades.',
+  },
+  {
+    key: 'cancel',
+    label: 'Cancelación',
+    help:
+      'Permite cancelar envíos antes de despacharse (refund según política ' +
+      'del carrier). Útil cuando el cliente cancela la orden tras generar etiqueta.',
+  },
+]
+
+function EnviaCapabilitiesSection({
+  capabilities, toggleAction,
+}: {
+  capabilities: Record<string, boolean>
+  toggleAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
+}) {
+  const router = useRouter()
+  const [pending, setPending] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+
+  const handleToggle = async (key: string, current: boolean) => {
+    setPending(key); setErrorMsg(null); setSuccessMsg(null)
+    const fd = new FormData()
+    fd.set('capability', key)
+    fd.set('enabled', String(!current))
+    const res = await toggleAction(fd)
+    setPending(null)
+    if (!res.ok) { setErrorMsg(res.error ?? 'Error'); return }
+    const cap = ENVIA_CAPABILITIES.find(c => c.key === key)
+    setSuccessMsg(`${cap?.label ?? key} ${!current ? 'activada' : 'desactivada'}.`)
+    router.refresh()
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="px-4 py-3.5 border-b border-border bg-muted/20 flex items-center gap-2">
+        <ShieldCheck className="h-4 w-4 text-orange-400 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-sm">Capabilities Fase 2</p>
+          <p className="text-[11px] text-muted-foreground">
+            Activa solo las operaciones que usas. Cada capability protege un endpoint específico.
+          </p>
+        </div>
+      </div>
+      <div className="px-4 py-3.5">
+        {successMsg && (
+          <div className="mb-3 rounded-md border border-emerald-700/40 bg-emerald-700/5 px-3 py-2 text-xs text-emerald-700">
+            <CheckCircle2 className="inline h-3.5 w-3.5 mr-1" />
+            {successMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div className="mb-3 rounded-md border border-rose-700/40 bg-rose-700/5 px-3 py-2 text-xs text-rose-700">
+            <AlertCircle className="inline h-3.5 w-3.5 mr-1" />
+            {errorMsg}
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {ENVIA_CAPABILITIES.map(cap => {
+            const enabled = !!capabilities[cap.key]
+            const isPending = pending === cap.key
+            return (
+              <div
+                key={cap.key}
+                className={`flex items-center gap-3 rounded-md border px-3 py-2 ${
+                  enabled ? 'border-emerald-700/30 bg-emerald-700/5' : 'border-border bg-muted/10'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium">{cap.label}</span>
+                    <span
+                      className="cursor-help text-muted-foreground hover:text-foreground"
+                      title={cap.help}
+                    >
+                      <HelpCircle className="h-3 w-3" />
+                    </span>
+                  </div>
+                  <span className="font-mono text-[10px] text-muted-foreground">{cap.key}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => handleToggle(cap.key, enabled)}
+                  title={enabled ? 'Desactivar' : 'Activar'}
+                  className={`shrink-0 inline-flex items-center justify-center h-6 w-12 rounded-full transition text-[10px] font-semibold ${
+                    enabled
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-300 text-slate-700'
+                  }`}
+                >
+                  {enabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

@@ -43,9 +43,12 @@ export default async function IntegrationsPage({
     supports_insurance: boolean
     notes: string | null
   }> = []
+  // Sem 5 H.2.6 — capabilities Envia per-tenant (label_generation,
+  // tracking_polling, pickup, cancel) leídas de F.3 matrix.
+  const enviaCapabilities: Record<string, boolean> = {}
 
   if (tenantId) {
-    const [intRes, notifRes, carrRes] = await Promise.all([
+    const [intRes, notifRes, carrRes, capsRes] = await Promise.all([
       supabase.from('tenant_integrations').select('provider, status, meta').eq('tenant_id', tenantId),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
       supabase.from('tenant_carriers')
@@ -54,10 +57,17 @@ export default async function IntegrationsPage({
         .eq('provider', 'envia')
         .order('priority', { ascending: true })
         .order('carrier_code', { ascending: true }),
+      supabase.from('tenant_provider_capabilities')
+        .select('capability, enabled')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'envia'),
     ])
     integrations  = (intRes.data as Integration[])   || []
     notifications = (notifRes.data as NotifSetting[]) || []
     enviaCarrierPrefs = (carrRes.data as typeof enviaCarrierPrefs) || []
+    for (const r of (capsRes.data as Array<{ capability: string; enabled: boolean }>) || []) {
+      enviaCapabilities[r.capability] = r.enabled
+    }
   }
 
   const providers = ['envia', 'mercadolibre', 'whatsapp', 'wompi']
@@ -191,6 +201,40 @@ export default async function IntegrationsPage({
       .eq('tenant_id', m.tenant_id)
       .eq('provider', 'envia')
       .eq('carrier_code', code)
+    if (error) return { ok: false, error: `Error: ${error.message}` }
+    revalidatePath('/dashboard/integrations')
+    return { ok: true }
+  }
+
+  // ── Sem 5 H.2.6 — Capabilities Fase 2 toggles per-tenant ────────────────────
+  async function toggleEnviaCapability(
+    formData: FormData,
+  ): Promise<{ ok: boolean; error?: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos.' }
+    }
+    const VALID_CAPS = new Set(['label_generation', 'tracking_polling', 'pickup', 'cancel'])
+    const capability = ((formData.get('capability') as string) || '').trim()
+    if (!VALID_CAPS.has(capability)) {
+      return { ok: false, error: 'Capability inválida.' }
+    }
+    const enabled = formData.get('enabled') === 'true'
+    const { error } = await sb
+      .from('tenant_provider_capabilities')
+      .upsert(
+        {
+          tenant_id: m.tenant_id,
+          provider: 'envia',
+          capability,
+          enabled,
+          config: {},
+        },
+        { onConflict: 'tenant_id,provider,capability' },
+      )
     if (error) return { ok: false, error: `Error: ${error.message}` }
     revalidatePath('/dashboard/integrations')
     return { ok: true }
@@ -576,6 +620,8 @@ export default async function IntegrationsPage({
       enviaCarrierPrefs={enviaCarrierPrefs}
       upsertEnviaCarrier={upsertEnviaCarrier}
       resetEnviaCarrierPref={resetEnviaCarrierPref}
+      enviaCapabilities={enviaCapabilities}
+      toggleEnviaCapability={toggleEnviaCapability}
       disconnectMeli={disconnectMeli}
       saveWompi={saveWompi}
       disconnectWompi={disconnectWompi}
