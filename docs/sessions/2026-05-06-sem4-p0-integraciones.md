@@ -570,3 +570,63 @@ de Envia capturados** en `envia_webhook_capture_log`:
 **Fase A → CERRADA**. Listo para Fase B implementar procesadores
 con schema empírico real (no más suposiciones).
 
+
+---
+
+## H.2.2 Fase B — CIERRE EXITOSO 2026-05-07
+
+### Implementación
+
+1. **Refactor `lib/envia_polling.py`**: extraído `map_envia_status_text()` como función pura compartida — usable tanto por polling backup (H.2.3) como por webhook handler. Tolerante a casing/espacios. Mapping ampliado con casos empíricos: `"Created"` → `"labeled"`, `"In Transit"` → `"in_transit"`, `"Out for Delivery"` → `"in_transit"`, etc. Si status desconocido, retorna `lower().strip()` (no None) para que upstream emita warning sin perder data.
+
+2. **`routers/envia_webhook.py`** reescrito Fase A → Fase B (capture + procesamiento real):
+
+   - **Defensa en profundidad 3 capas**:
+     - URL secret-token (F.10 `webhook_secret_manager`).
+     - User-Agent debe ser `Envia-Carriers` (header empírico).
+     - Source IP allowlist (`3.211.106.119`, extensible vía `ENVIA_WEBHOOK_ALLOWED_IPS`).
+     - UA + IP: **soft-fail** (warn-only) — secret-token URL es la auth principal. Provider podría rotar IPs sin avisar.
+   - **Captura siempre** en `envia_webhook_capture_log` (audit forensics Habeas Data).
+   - **Idempotency F.4** vía `webhook_dedup`: `event_uid = "{tracking_number}:{shipment_status}"`. Tolera retries.
+   - **Procesador `_process_status_update`**:
+     - Lookup shipment scoped a tenant (defensa cross-tenant aún con service_role).
+     - Map `shipment_status` Envia → status interno.
+     - UPDATE solo si cambió; persiste carrier si no estaba.
+     - Marca `is_terminal=True` si `delivered/cancelled/failed/returned`.
+   - **Outcome enum**: `updated`, `no_change`, `skipped` (con reasons), `error`.
+
+3. **Tests (+21 verde, suite 1745 PASS)**:
+   - `MapEnviaStatusTextTests` (6 tests): empirical Created, lowercase, mapping completo, whitespace, empty/None, unknown → lowered.
+   - `ValidateOriginTests` (5 tests): UA oficial+IP, UA con extra, UA missing, IP not allowlist, no IP.
+   - `ProcessStatusUpdateTests` (10 tests): canonical update, no_change, cross-tenant skip (`shipment_not_found`), missing tracking/status, terminal delivered/cancelled, in_transit no terminal, carrier persist, payload vacío.
+
+### UAT S32 — 4 escenarios PASS
+
+| Escenario | Body | Expected | Actual |
+|---|---|---|---|
+| S32a Delivered | `{tracking, carrier, status: "Delivered"}` con secret OK + UA Envia-Carriers | HTTP 200 outcome=updated, shipment status=delivered | ✅ |
+| S32b Duplicate | mismo body que S32a (retry simulation) | HTTP 200 phase=duplicate (F.4 dedup hit) | ✅ |
+| S32c Wrong tenant | tenant_id `00000000-...` (no existe) | HTTP 200 phase=rejected_silent, no DB change | ✅ |
+| S32d Wrong secret | secret `INVALID-SECRET-XYZ` | HTTP 200 phase=rejected_silent, no DB change | ✅ |
+
+Logs API confirman audit completo: `STATUS_CHANGED labeled → delivered terminal=True`,
+`origin validation soft-fail` (IP del founder no en allowlist Envia oficial — soft fail
+correcto), `duplicate event_uid=... — skip processing`, `secret MISMATCH` warnings.
+
+Capture log post-UAT: 8 filas (5 Fase A Created + 2 Delivered S32a/b + 2 rejected
+S32c/d con `secret_match=False`). Todo persistido para forensics.
+
+### Estado final H.2.2
+
+✅ **CERRADO**. Webhooks Envia con captura forensics + procesamiento canónico
+basado en schema empírico real, defensa 3 capas, idempotency F.4, multi-tenant
+scoped, soft-fail tolerante a rotación provider, tests + UAT verde.
+
+### Métricas H.2.2
+
+| Item | Esfuerzo plan | Esfuerzo real | Tests +Δ | LOC +Δ | Migration |
+|---|---|---|---|---|---|
+| Fase A (capture) | 1d | 1d (con fix bug auth) | +21 | +180 (router) | `20260514190000_envia_webhook_capture_log.sql` |
+| Fase B (procesador) | 1-2d | 0.5d (gracias a F.4 + F.10 + lib previa) | (mismos +21 ya cubrian Fase B) | +220 (router rewrite) + 30 (envia_polling refactor) | — |
+| **Total H.2.2** | **2-3d** | **1.5d** | **+21** | **+430** | **1** |
+
