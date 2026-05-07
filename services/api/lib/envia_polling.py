@@ -146,37 +146,44 @@ def _update_shipment_after_poll(
     return status_changed and bool(res.data)
 
 
-def _extract_status_from_envia_response(envia_response: Any) -> Optional[str]:
-    """Mapea response Envia /ship/generaltrack/ a un status interno.
+def map_envia_status_text(raw_status: Optional[str]) -> Optional[str]:
+    """Mapea texto de status Envia a status interno shipments.
 
-    Envia retorna estructura como:
-        {"data": [{"trackingNumber": "...", "status": "in_transit", ...}]}
+    Reusable entre polling (response /ship/generaltrack/) y webhook
+    (payload directo `shipment_status`).
 
-    Mapping (dossier Envia sec. 4):
+    Mapping documentado (dossier Envia sec. 4 + evidencia empírica
+    2026-05-07 webhook payload {shipment_status: 'Created'}):
       'created'   → 'labeled'
       'picked_up' → 'picked_up'
-      'in_transit' / 'on_route' → 'in_transit'
+      'in_transit' / 'on_route' / 'in transit' → 'in_transit'
+      'out for delivery' → 'in_transit'
       'delivered' → 'delivered'
       'cancelled' / 'canceled' → 'cancelled'
       'returned'  → 'returned'
       'failed' / 'lost' → 'failed'
-    """
-    if not isinstance(envia_response, dict):
-        return None
-    data = envia_response.get("data") or []
-    if not data or not isinstance(data, list):
-        return None
 
-    raw_status = (data[0] or {}).get("status")
+    Tolerante a casing y espacios. Si status NO mapeado, retorna el
+    raw lowercased+stripped (no None) para que upstream pueda persistir
+    raw + emitir warning sin perder data.
+
+    Retorna None solo si raw_status es vacío/no-string.
+    """
     if not raw_status or not isinstance(raw_status, str):
         return None
-
     lowered = raw_status.lower().strip()
+    if not lowered:
+        return None
     mapping = {
         "created": "labeled",
+        "label generated": "labeled",
         "picked_up": "picked_up",
+        "picked up": "picked_up",
         "in_transit": "in_transit",
+        "in transit": "in_transit",
         "on_route": "in_transit",
+        "on route": "in_transit",
+        "out for delivery": "in_transit",
         "delivered": "delivered",
         "cancelled": "cancelled",
         "canceled": "cancelled",
@@ -185,6 +192,24 @@ def _extract_status_from_envia_response(envia_response: Any) -> Optional[str]:
         "lost": "failed",
     }
     return mapping.get(lowered, lowered)
+
+
+def _extract_status_from_envia_response(envia_response: Any) -> Optional[str]:
+    """Mapea response Envia /ship/generaltrack/ a un status interno.
+
+    Envia retorna estructura como:
+        {"data": [{"trackingNumber": "...", "status": "in_transit", ...}]}
+
+    Delega a `map_envia_status_text` para el mapping puro.
+    """
+    if not isinstance(envia_response, dict):
+        return None
+    data = envia_response.get("data") or []
+    if not data or not isinstance(data, list):
+        return None
+
+    raw_status = (data[0] or {}).get("status")
+    return map_envia_status_text(raw_status)
 
 
 async def poll_pending_shipments(
