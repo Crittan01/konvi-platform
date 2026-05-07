@@ -34,14 +34,30 @@ export default async function IntegrationsPage({
 
   let integrations: Integration[]  = []
   let notifications: NotifSetting[] = []
+  let enviaCarrierPrefs: Array<{
+    carrier_code: string
+    enabled: boolean
+    display_label: string | null
+    priority: number
+    supports_cod: boolean
+    supports_insurance: boolean
+    notes: string | null
+  }> = []
 
   if (tenantId) {
-    const [intRes, notifRes] = await Promise.all([
+    const [intRes, notifRes, carrRes] = await Promise.all([
       supabase.from('tenant_integrations').select('provider, status, meta').eq('tenant_id', tenantId),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
+      supabase.from('tenant_carriers')
+        .select('carrier_code, enabled, display_label, priority, supports_cod, supports_insurance, notes')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'envia')
+        .order('priority', { ascending: true })
+        .order('carrier_code', { ascending: true }),
     ])
     integrations  = (intRes.data as Integration[])   || []
     notifications = (notifRes.data as NotifSetting[]) || []
+    enviaCarrierPrefs = (carrRes.data as typeof enviaCarrierPrefs) || []
   }
 
   const providers = ['envia', 'mercadolibre', 'whatsapp', 'wompi']
@@ -110,6 +126,74 @@ export default async function IntegrationsPage({
     await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {} })
       .eq('tenant_id', m.tenant_id).eq('provider', 'envia')
     revalidatePath('/dashboard/integrations')
+  }
+
+  // ── Sem 5 H.2.7 — Carriers preferences per-tenant ──────────────────────────
+  async function upsertEnviaCarrier(
+    formData: FormData,
+  ): Promise<{ ok: boolean; error?: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos.' }
+    }
+    const code = ((formData.get('carrier_code') as string) || '').trim()
+    if (!code || !code.match(/^[A-Za-z][A-Za-z0-9_-]{1,63}$/)) {
+      return { ok: false, error: 'Código de carrier inválido.' }
+    }
+    const enabled = formData.get('enabled') === 'true'
+    const priorityRaw = ((formData.get('priority') as string) || '100').trim()
+    const priority = Math.max(0, Math.min(999, parseInt(priorityRaw, 10) || 100))
+    const supportsCod = formData.get('supports_cod') === 'true'
+    const supportsInsurance = formData.get('supports_insurance') === 'true'
+    const notes = ((formData.get('notes') as string) || '').trim() || null
+    const displayLabel =
+      ((formData.get('display_label') as string) || '').trim() || null
+
+    const { error } = await sb
+      .from('tenant_carriers')
+      .upsert(
+        {
+          tenant_id: m.tenant_id,
+          provider: 'envia',
+          carrier_code: code,
+          enabled,
+          display_label: displayLabel,
+          priority,
+          supports_cod: supportsCod,
+          supports_insurance: supportsInsurance,
+          notes,
+        },
+        { onConflict: 'tenant_id,provider,carrier_code' },
+      )
+    if (error) return { ok: false, error: `Error: ${error.message}` }
+    revalidatePath('/dashboard/integrations')
+    return { ok: true }
+  }
+
+  async function resetEnviaCarrierPref(
+    formData: FormData,
+  ): Promise<{ ok: boolean; error?: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos.' }
+    }
+    const code = ((formData.get('carrier_code') as string) || '').trim()
+    if (!code) return { ok: false, error: 'Código requerido.' }
+    const { error } = await sb
+      .from('tenant_carriers')
+      .delete()
+      .eq('tenant_id', m.tenant_id)
+      .eq('provider', 'envia')
+      .eq('carrier_code', code)
+    if (error) return { ok: false, error: `Error: ${error.message}` }
+    revalidatePath('/dashboard/integrations')
+    return { ok: true }
   }
 
   async function disconnectMeli() {
@@ -489,6 +573,9 @@ export default async function IntegrationsPage({
       enviaMsg={searchParams.envia_msg}
       saveEnviaKey={saveEnviaKey}
       disconnectEnvia={disconnectEnvia}
+      enviaCarrierPrefs={enviaCarrierPrefs}
+      upsertEnviaCarrier={upsertEnviaCarrier}
+      resetEnviaCarrierPref={resetEnviaCarrierPref}
       disconnectMeli={disconnectMeli}
       saveWompi={saveWompi}
       disconnectWompi={disconnectWompi}
