@@ -50,6 +50,10 @@ EVT_CONSENT_RECORDED = "consent_recorded"
 EVT_SUMMARY_RENDERED = "summary_rendered"
 EVT_PAYMENT_LINK_CREATED = "payment_link_created"
 EVT_ORDER_CONFIRMED = "order_confirmed"
+# Sem 6 I.2 — Cupones (ADR-0015 D7).
+EVT_COUPON_APPLIED = "coupon_applied"
+EVT_COUPON_REVOKED = "coupon_revoked"
+EVT_COUPON_CONSUMED = "coupon_consumed"
 
 
 CANONICAL_EVENTS: frozenset[str] = frozenset({
@@ -59,6 +63,7 @@ CANONICAL_EVENTS: frozenset[str] = frozenset({
     EVT_CARRIER_SELECTED, EVT_CITY_CHANGED,
     EVT_CONSENT_RECORDED, EVT_SUMMARY_RENDERED,
     EVT_PAYMENT_LINK_CREATED, EVT_ORDER_CONFIRMED,
+    EVT_COUPON_APPLIED, EVT_COUPON_REVOKED, EVT_COUPON_CONSUMED,
 })
 
 
@@ -88,6 +93,9 @@ def emit(
             • summary_rendered: {total_cents, items_count}
             • payment_link_created: {wompi_link_id, amount_cents, expires_at}
             • order_confirmed: {order_id, txn_id}
+            • coupon_applied: {coupon_id, code, type, discount_cents}
+            • coupon_revoked: {coupon_id, code, reason}
+            • coupon_consumed: {coupon_id, code, discount_cents, order_id}
         triggered_by: 'bot' | 'webhook' | 'human_takeover' | 'cron' | 'system'.
         correlation_id: message_id (uuid string) que originó el evento.
 
