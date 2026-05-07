@@ -512,3 +512,57 @@ URLs adicionales que retornan 404 en investigación 2026-05-07 (suman a las del 
   - **PASOS**: ejecutar barrido `rate` sandbox per carrier × `cash_on_delivery=$X COP` y registrar `cashOnDeliveryCommission` retornado.
   - **CRITERIO ÉXITO**: matriz `carrier × cod_commission_pct × min_amount × max_amount` persistida en `docs/research/empirical-evidence/envia-cod-commissions-CO.json`.
   - **TIEMPO ESTIMADO**: 30 min con script Python una vez sandbox tenga COD habilitado.
+
+---
+
+## L.10 — Confirmación oficial Envia/Ecart Pay (2026-05-07)
+
+**Conversación founder con ejecutivo Envia/Ecart Pay (2026-05-07)**:
+respuestas oficiales que cierran V.1 al 100% y confirman/extienden lo
+hallado por docs en sesión investigación profunda.
+
+**V.1 — Ecart Pay payout cycle / fees (CERRADA 100%)**:
+
+| Pregunta | Respuesta oficial |
+|---|---|
+| ¿Cada cuánto deposita Ecart Pay? | **Semanal: martes y viernes** |
+| Comisión por COD | **$5,000 COP fijo** (NO porcentaje) |
+| Retención antes de depósito | **NO hay retención** |
+| Mínimo COD | **No hay mínimo** explícito |
+| Máximo COD | (no respondido — asumir docs Ecart Pay) |
+| Constraint adicional | **Cada COD debe cubrir al menos los $5,000 COP de comisión** — práctica: COD < $5,000 no tiene sentido económico |
+
+**Implicación arquitectónica MVP H.2.4**:
+- En la UI Settings → Promociones (futuro COD admin), validador `min_amount_cents >= 500000` (= $5,000) por defecto. Owner puede subirlo pero no bajarlo.
+- En el bot, si cliente solicita COD con cart subtotal < $5,000, rechazar con mensaje *"El monto mínimo para contraentrega es $5,000 COP por la comisión del transportador."*
+
+**Documentación oficial**: https://docs.ecartpay.com/docs/all-about-ecart-pay
+
+**V.2 — Carriers que aceptan COD (NO confirmado por ejecutivo, decisión: basarse en docs)**:
+
+Founder confirmó (2026-05-07): "no las pude resolver correctamente con
+el ejecutivo, pero nos deberíamos basar en la documentación."
+
+→ **Decisión arquitectónica**: para H.2.4 MVP usar TIER 1 docs-confirmed
+(`serviEntrega`, `coordinadora`, `envia` propio) per L.1 + L.4. TIER 2
+queda para validación humana V.x post-MVP cuando aparezcan tenants que
+lo pidan.
+
+**V.3 — Webhook flow COD (NO confirmado por ejecutivo, decisión: basarse en docs)**:
+
+Founder confirmó (2026-05-07): "basarnos en la documentación".
+
+→ **Decisión arquitectónica**: implementar reconciliación distributed
+2-webhooks per L.7 + ecartpay-dossier sec.2:
+1. Envia `simpleTracking` (status=Delivered) marca `cod_ledger.status='collected'`.
+2. Ecart Pay `transfer.created` marca `cod_ledger.status='deposited_to_ecartpay'`.
+3. Ecart Pay `withdrawals.paid` marca `cod_ledger.status='paid_to_merchant'`.
+
+UAT S34 deberá cubrir el flow completo. Si docs son insuficientes en
+runtime, ajustar empíricamente con primer tenant productivo COD activo.
+
+**V.4 — Sender DANE Servientrega (parcialmente cerrada)**:
+
+Sigue requiriendo confirmación de account manager Envia (página
+help.envia.com 403 Cloudflare). Aceptado riesgo: implementar H.2.4 MVP
+sin Servientrega COD inicialmente, agregar cuando V.4 quede confirmada.

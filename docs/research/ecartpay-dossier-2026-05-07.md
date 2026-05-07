@@ -310,6 +310,25 @@ Cliente HTTP mínimo `services/api/integrations/ecartpay_client.py` debe exponer
 
 > **INTERVENCIÓN HUMANA REQUERIDA** — bloqueantes antes de implementar EP.G.P0.
 
+### Confirmaciones oficiales recibidas 2026-05-07
+
+Founder confirmó con ejecutivo Envia/Ecart Pay las siguientes
+respuestas (VER también `envia-dossier-2026-05-05.md` sección L.10):
+
+- **Payout cycle**: semanal, martes + viernes ✅
+- **Comisión por COD**: $5,000 COP fijo (NO porcentaje) ✅
+- **Retención**: NO hay ✅
+- **Mínimo**: no hay explícito; constraint práctico: el COD debe cubrir
+  los $5,000 de comisión (NO tiene sentido COD < $5,000) ✅
+
+Items siguientes (EP.V.1 a EP.V.6) NO fueron confirmados por
+ejecutivo. **Decisión founder 2026-05-07**: "basarnos en la
+documentación" → arrancar implementación EP.G.P0 con docs como
+referencia, ajustar empíricamente con primer tenant productivo si
+aparecen sorpresas runtime.
+
+
+
 ### EP.V.1 — Vinculación cuenta Ecart Pay ↔ cuenta Envia (per-tenant onboarding)
 - **RESPONSABLE**: Founder + Envia/Ecart Pay account manager.
 - **PASOS**: confirmar si al activar COD en Envia se provisiona auto cuenta Ecart Pay vinculada o si requiere onboarding manual separado.
