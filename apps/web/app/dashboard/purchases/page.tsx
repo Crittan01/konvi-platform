@@ -1,22 +1,23 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { ShoppingCart } from 'lucide-react'
 import PurchasesClient from './_components/purchases-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function PurchasesPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sem 5 perf: cached comparten con DashboardLayout.
+  const user = await getCachedUser()
   if (!user) redirect('/login')
 
-  const meta = user.app_metadata as { tenant_id?: string; role?: string }
-  if (!meta.tenant_id) {
+  const { tenantId, role } = await getCachedTenantMeta()
+  if (!tenantId) {
     return <div className="p-8 text-center text-destructive">Error: Usuario no asociado a ningún tenant.</div>
   }
-
-  const role = meta.role ?? 'operator'
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
+  const meta = user.app_metadata as { tenant_id?: string; role?: string }
 
   // Fetch Suppliers
   const { data: suppliersRes } = await supabase
@@ -64,8 +65,8 @@ export default async function PurchasesPage() {
         </p>
       </div>
 
-      <PurchasesClient 
-        tenantId={meta.tenant_id}
+      <PurchasesClient
+        tenantId={tenantId}
         role={role}
         canWrite={canWrite}
         initialSuppliers={suppliers}

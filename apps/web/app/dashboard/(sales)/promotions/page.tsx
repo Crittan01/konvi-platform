@@ -10,6 +10,7 @@
  * Routing: /dashboard/promotions (grupo Ventas en sidebar).
  */
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { revalidatePath } from 'next/cache'
 import { Tag, AlertTriangle } from 'lucide-react'
 import PromotionsManager from './_components/promotions-manager'
@@ -311,12 +312,11 @@ async function deleteCouponAction(
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default async function PromotionsPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  // Sem 5 perf: cached deduplicates auth.getUser con DashboardLayout.
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   let coupons: Coupon[] = []
   if (tenantId) {

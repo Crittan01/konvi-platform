@@ -1,21 +1,18 @@
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
 import ClaimsManager from './_components/claims-manager'
 
 export default async function ClaimsPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sem 5 perf: cached.
+  const user = await getCachedUser()
+  if (!user) redirect('/login')
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role || 'operator'
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite   = ['owner', 'manager', 'operator'].includes(role)
   const canResolve = ['owner', 'manager'].includes(role)
+  const supabase = createClient()
 
   // Fetch claims with relationships — filtrado por tenant (defensa en profundidad + RLS)
   const { data: claimsData } = await supabase

@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { revalidatePath } from 'next/cache'
 import ProductsManager from './_components/products-manager'
 import type { Product } from './types'
@@ -7,12 +8,11 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 const DEFAULT_THRESHOLD = 5
 
 export default async function CatalogPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta   = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role     = meta.role ?? 'operator'
+  // Sem 5 perf: cached.
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   // Categories
   const { data: cats } = await supabase

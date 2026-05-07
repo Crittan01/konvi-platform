@@ -1,6 +1,7 @@
 import * as React from "react"
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import SidebarClient from './sidebar-client'
 
@@ -9,14 +10,15 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sem 5 perf: getCachedUser comparte resultado con page server
+  // components anidados via React.cache. Ahorra 1 round-trip por
+  // navegación (~640ms en VM Colombia → Supabase US-East).
+  const user = await getCachedUser()
 
   if (!user) redirect('/login')
 
-  const meta = (user?.app_metadata ?? {}) as { role?: string; tenant_id?: string }
-  const role = meta.role ?? 'operator'
-  const tenantId = meta.tenant_id
+  const { role, tenantId } = await getCachedTenantMeta()
+  const supabase = createClient()
 
   const logoutAction = async () => {
     'use server'
