@@ -317,4 +317,198 @@ Antes de cerrar P0+P1, gatilear:
 - [MCP Server](https://docs.envia.com/docs/mcp-overview) — auditado y rechazado (Plan A.0.1)
 - [Changelog](https://docs.envia.com/docs/changelog)
 
-URLs **404** detectadas (no existen aunque a veces se referencian): `/docs/sandbox-vs-production`, `/docs/rate`, `/docs/generate`, `/docs/tracking`, `/docs/cancel`, `/docs/cash-on-delivery`. La información equivalente sí está distribuida en las páginas listadas arriba.
+URLs **404** detectadas (no existen aunque a veces se referencian): `/docs/sandbox-vs-production`, `/docs/rate`, `/docs/generate`, `/docs/tracking`, `/docs/cancel`, `/docs/cash-on-delivery`, `/reference/quote-shipments` (404 al WebFetch directo), `/reference/createshipping`, `/reference/generate-shipment`. La información equivalente sí está distribuida en las páginas listadas arriba.
+
+---
+
+## L. Hallazgos profundos investigación 2026-05-07
+
+> **Investigación exhaustiva** (~30 fetches/queries) cubriendo `docs.envia.com/*`, `help.envia.com/*` y `docs.ecartpay.com/*` para cerrar V.1–V.4 antes de implementar H.2.4 (COD). Snapshot: 2026-05-07.
+
+### L.1 Cierre V.1 — Ecart Pay payout cycle, fees, retención (Colombia)
+
+> **Estado**: PARCIALMENTE CERRADO por docs públicos. Las cifras críticas están confirmadas; la única ambigüedad residual es la **comisión Envia por shipment COD** (no documentada como % o $ fijo en help center).
+
+**Cifras confirmadas con cita oficial**:
+
+| Concepto | Valor | Fuente |
+|---|---|---|
+| Pago Ecart Pay → cuenta Ecart Pay | **72 horas después del shipment** | help.envia.com/en/shipments-cod/ (vía SERP snippet 2026-05-07): "you collect the cost of your products at the time of delivery and receive your payments **72 hours after shipment** in your Ecart Pay account" |
+| Comisión Ecart Pay sobre COD (Colombia) | **0% — no hay comisión sobre el COD** | help.envia.com/en/withdraw-cod/ (vía SERP snippet 2026-05-07): "For Colombia, **there are no commissions**" |
+| Fee fijo por retiro Ecart Pay → banco merchant | **5,000 COP por transacción** | help.envia.com/en/withdraw-cod/: "there is a charge per transaction of **$5,000 COP** which corresponds to the cost per interbank transfer" |
+| Frecuencia de retiro | **Una solicitud cada 24h, procesadas martes y viernes 9:30 AM hora México** | help.envia.com/en/withdraw-cod/: "Withdrawal requests can be made once every 24 hours and are reviewed on **Tuesdays and Fridays at 9:30 am (Mexico time)**" |
+| Cut-off | **Solicitud el día anterior a martes/viernes** | "Requests must be submitted the day before to be processed on Tuesdays and Fridays" |
+| Payment method | **Transferencia electrónica interbancaria (en Colombia)** | help.envia.com/en/withdraw-cod/: "All Ecart Pay payments are made via electronic transfers, including SPEI" (SPEI=México; en CO es interbancario equivalente) |
+| Tiempo de acreditación banco | **24-48h post-procesamiento** | help.envia.com/en/withdraw-cod/: "The payment will be reflected in your account between 24 and 48 hours, according to the interbank transfer time policies" |
+| Timeline E2E peor caso (entrega → cuenta merchant) | **shipment → +72h → +24h hasta martes/viernes → +24-48h banco ≈ 5-7 días calendario** | derivado de los 4 datos anteriores |
+
+**Comisión Envia por COD (parámetro `cashOnDeliveryCommission` que retorna API)**:
+- **NO documentado como tabla fija**. La doc oficial dice solo: "automatic COD billing" entrega "monthly summary of the commissions" (help.envia.com/en/automatic-cod-billing/).
+- La rate response Envia retorna `cashOnDeliveryCommission` y `cashOnDeliveryAmount` per carrier (dossier §2.5 y additional-services). Confirmado: la **comisión depende del carrier**, no es una cifra plana de Envia.
+- **Validación humana residual V.1.x**: cuántos % cobra cada carrier CO (Servientrega, Coordinadora, Inter Rapidísimo, Envia carrier propio, TCC) — **NO está en docs públicos**, hay que extraer empíricamente con `rate` request + `additional_services.cash_on_delivery` per carrier (cf. V.2).
+
+**Retenciones fiscales (ReteFuente, ReteIVA, ReteICA)**:
+- **NO documentadas públicamente por Ecart Pay ni Envia para Colombia**. Pista cruzada: docs.ecartpay.com/docs/billing-providers indica que **Siigo (provider Colombia) maneja IVA 16%** — pero esto es facturación, no retención sobre payout.
+- Asumimos que Ecart Pay deposita el monto bruto sin retención y la responsabilidad fiscal queda en el merchant (gross payout model). **Validación humana V.1 sigue requerida** para confirmar formalmente con Envia comercial.
+
+**KYC requirements para activar Ecart Pay (Colombia)**:
+- **NO documentados explícitamente** en docs.ecartpay.com/docs/customers-1 (la doc se enfoca en Mexico/CLABE). Sumsub aparece como provider de identity verification de Ecart Pay (per sumsub.com/customers/ecartpay) → KYC se hace con docs estándar Colombia (cédula + comprobante domicilio), pero el requerimiento exacto no está formalizado.
+
+### L.2 Cierre V.2 — Carriers que soportan COD en Colombia
+
+> **Estado**: CERRADO al nivel "qué carriers Envia ofrece para CO con COD"; confirmación empírica exacta sigue requerida (qué responde la rate API per carrier en sandbox).
+
+**Confirmado por landing comercial envia.com (en-US/cod-and-additional-services + carrier pages)**:
+- **Disponibilidad COD por país**: "available in all countries except **Argentina, Chile, the United States and Brazil**" (snippet help.envia.com/en/shipments-cod/ vía SERP 2026-05-07). → Colombia, México, India, Canadá, España, Francia, Italia, Guatemala = COD soportado.
+- **Requisito hard**: COD solo funciona si la orden incluye **número de teléfono del destinatario** (snippet help.envia.com/en/shipments-cod/).
+
+**Carriers Colombia con COD documentado en envia.com**:
+
+| Carrier (identifier) | COD support docs.envia.com supported-carriers | COD según landing comercial CO |
+|---|---|---|
+| `serviEntrega` | Parcel + pickup; no flag explícito de COD en supported-carriers | ✅ Sí (envia.com/en-US/cod-and-additional-services menciona "Servientrega" en CO) |
+| `coordinadora` | Parcel; PDF labels | ✅ Sí (mismo landing) |
+| `interRapidisimo` | Parcel + pickup; **"cannot generate labels"** ⚠️ | ✅ Sí + dato extra: "el mensajero recolecta el dinero al entregar y se deposita en cuenta bancaria/billetera virtual **3 días después**" (la-republica.co + skydropx.com.co cross-source) |
+| `envia` (carrier propio) | Parcel + pickup/pickup_mandatory; commercial invoicing | ✅ Sí (cobertura "más de 900 ciudades" según envia.com landing CO) |
+| `tcc` | Parcel + pickup | ⚠️ NO mencionado explícitamente en landing CO COD (pero capability "Parcel" sugiere soporte; validación V.2 requerida) |
+| `deprisa` | Parcel; PDF/ZPL 4X4 | ⚠️ NO mencionado explícitamente |
+| `dhl` | Parcel | ❌ Improbable (carrier internacional; COD generalmente no aplica DDP/DAP) — validación V.2 |
+| `fedex` | (NO listado en supported-carriers CO actualmente) | ❌ — el changelog Feb 2026 indica "Updated shipping references **from FedEx to DHL**" → FedEx CO probablemente removido |
+| `cabify` | Parcel; PDF/ZPL 4X6 | ❌ Improbable (last-mile urbano sin contracash) |
+| `lastMile`, `noventa9Minutos`, `cainiao` | Parcel | ❌ Improbable |
+
+**Hallazgo nuevo crítico — Inter Rapidísimo**: documentación supported-carriers explícitamente dice **"cannot generate labels"** para interRapidisimo. Esto significa que la `POST /ship/generate/` con `carrier=interRapidisimo` probablemente **falla** a nivel de etiqueta digital, requiriendo workflow manual. **Implicación COD**: aunque Inter Rapidísimo es uno de los 3 grandes carriers Colombia con COD nativo, su integración Envia es de **solo cotización + tracking + pickup**, NO etiqueta digital end-to-end. → Revalidación humana V.2 obligatoria antes de exponer interRapidisimo en H.2.4.
+
+### L.3 Cierre V.3 — Webhook notification flow del COD
+
+> **Estado**: CERRADO con limitación. La doc no enumera un webhook tipo `cash_on_delivery_paid`. La señal de COD pagado llega vía:
+> 1. **Envia webhook tipo `onShipmentStatusUpdate` / `simpleTracking`** (los 5 tipos descubiertos empíricamente en panel — cf. L.7e existente) cuando el `status_parent_id` avanza a "Delivered" → significa que el cliente recibió y pagó (en COD).
+> 2. **Ecart Pay webhook tipo `transfer.created`** ("Emitted when a payment transfer to a merchant is complete") **cuando Ecart Pay deposita el dinero al merchant** — este es el evento "money in your account".
+> 3. **Ecart Pay webhook tipo `withdrawals.paid`** cuando el retiro post-COD se completa al banco.
+
+**Confirmación textual**:
+- docs.ecartpay.com/docs/webhook-events: lista todos los eventos. Hay 4 categorías relevantes para flujo COD:
+  - **`orders.confirmation`** — "Emitted when an order is paid for"
+  - **`transfer.created`** — "Emitted when a payment transfer to a merchant is complete"
+  - **`withdrawals.processing`** — "Emitted when a withdrawal is created (default status)"
+  - **`withdrawals.paid`** — "Withdrawal completion notification"
+  - **`withdrawals.cancelled`** — "Withdrawal cancellation alert"
+- **NO existe** un evento explícito `cash_on_delivery.paid`, `cod.collected` o similar. El tracking de "el cliente pagó al transportador" depende del shipment status update de Envia (status `Delivered`).
+
+**Schema canónico de webhook Envia ya descubierto** (ya en L.7e): `{"carrier": "fedex", "tracking_number": "794813020143", "shipment_status": "Created"}` snake_case, 3 campos garantizados, User-Agent `Envia-Carriers`, source IP `3.211.106.119`.
+
+**Schema webhook Ecart Pay** (hallazgo L.3 nuevo):
+- Headers de seguridad obligatorios (docs.ecartpay.com/docs/webhook-authentication):
+  - `x-pay-timestamp` (millis)
+  - `x-pay-signature` (HMAC-SHA256 sobre `{timestamp}.{webhook_id}.{JSON.stringify(data)}`)
+  - `x-pay-webhook-id`
+- **CRÍTICO**: Ecart Pay **SÍ firma con HMAC-SHA256**, a diferencia de Envia (que NO firma — L.3 original). Esto reduce el riesgo defensivo en /webhooks/ecartpay/ vs /webhooks/envia/.
+- Secret se obtiene en panel Ecart Pay y debe almacenarse cifrado (Vault). Rotación: la doc no documenta rotación programática.
+
+### L.4 Cierre V.4 — DANE sender code per carrier
+
+> **Estado**: PARCIALMENTE CERRADO. Confirmado el formato general, pero el detalle "qué credencial registra cada carrier" sigue requiriendo validación humana.
+
+**Confirmado**:
+- **Postal code Colombia en Envia API = código DANE 6 dígitos**, donde "los primeros 2 dígitos = código de departamento DANE; los siguientes 2 = ruta postal; los últimos 2 = distrito" (Wikipedia + smarty.com cross-confirmados).
+- Envia espera **ciudad y postalCode = código DANE** (snippet vía SERP).
+- Envia documenta cobertura **"1,013 municipalities and 386 populated centers according to DANE nomenclature"** para envia carrier propio.
+
+**Pista de Servientrega-CO (help.envia.com/servientrega-co — bloqueado por Cloudflare 403, snippet vía SERP)**:
+- Servientrega exige **"Sender DANE code"** como credencial al conectar la integración. Es decir: el merchant onboarda su **código de cuenta Servientrega registrada (DANE remitente)** en el dashboard Envia, NO en cada request API.
+- No se confirma si son 5 u 8 dígitos en help.envia.com (la página retorna 403). Otras integraciones (RetailCRM con Servientrega) referencian "Receiver's DANE code" indicando que el formato 5-6 dígitos prevalece en flujos productivos Servientrega API directa.
+
+**Validación humana V.4 residual**:
+- Confirmar via account manager Envia comercial: si los carriers Servientrega / Coordinadora / Inter Rapidísimo requieren registro de "sender DANE code" en el panel Envia (one-time setup) o en cada `generate` payload (per-shipment field).
+- Hipótesis fuerte (validar): el sender DANE se registra **una vez en el dashboard del tenant** durante onboarding de cada carrier. Después la API Envia lo inyecta automáticamente.
+
+### L.5 Hallazgos nuevos — Limitations adicionales (no documentadas en dossier original)
+
+| # | Limitación | Cita / fuente |
+|---|---|---|
+| L.13 | **`POST /ship/manifest` endpoint EXISTE** (no documentado en dossier original): consolida múltiples shipments en un manifest PDF. Body `{trackingNumbers: [...]}`. Retorna `manifest_id`, `manifest_pdf_url`, `package_count`. Útil para B2B "imprime hoja de manifiesto al final del día" — docs.envia.com/docs/pickup-manifest-workflow + docs/shipping-multiple-packages |
+| L.14 | **InterRapidisimo NO genera etiquetas** vía Envia: "cannot generate labels" en supported-carriers. Implicación: H.2.4 NO puede ofrecer Inter Rapidísimo COD con label digital end-to-end |
+| L.15 | **Carrier action flags**: cada carrier tiene un flag `pickup` / `pickup_on_generate` / `pickup_mandatory` que define el flujo de recogida. Antes de `POST /ship/pickup/` hay que consultar "Get Carrier Actions" endpoint para saber qué método aplica |
+| L.16 | **`shipment.type=1` = Parcel** (confirmado en quickstart JSON): valores 2/3 corresponden a LTL/FTL pero no documentados en `/reference` aún. La doc usa string `parcel` también en algunos contextos |
+| L.17 | **Quote response NO retorna `cashOnDeliveryCommission` por defecto**: el quickstart muestra solo `totalPrice`, `currency`, `serviceDescription`, `deliveryEstimate`, `deliveryDate`. Para obtener `cashOnDeliveryCommission` hay que enviar `additional_services.cash_on_delivery.amount` en el request rate, y entonces el response se enriquece con campos COD-específicos. **Implicación P0**: en H.2.4 hay que **siempre** enviar `cash_on_delivery` en rate cuando el cart sea COD para conocer la comisión exacta antes de mostrar al cliente |
+| L.18 | **Geocodes API NO requiere autenticación** ("does not require authentication — you can call it without a Bearer token") y NO consume balance. Ya estábamos asumiendo esto pero ahora está confirmado textualmente. Validación V.0 implícita resuelta |
+| L.19 | **MX y EU intra-comunitario**: tax exemptions documentados ("taxes don't apply to international shipments and certain EU intra-community transactions") — irrelevante para CO pero útil saber |
+| L.20 | **Production Readiness Checklist** menciona "balance monitoring and top-up processes" pero NO referencia COD activation, Ecart Pay setup, KYC. Implicación: **NO hay checklist oficial pre-producción para COD/Ecart Pay** — la activación se hace ad-hoc con account manager Envia |
+| L.21 | **Customs Settings + DDP/DAP**: para CO doméstico no aplica, pero vale documentar que existen 3 modelos para internacional: "Envia Guaranteed" (recommended, all-in upfront), "Sender (DDP)" (post-delivery bill), "Recipient (DAP)" (recipient pays). Útil cuando KAIU expanda fronteras |
+| L.22 | **Changelog Envia es escueto**: solo 2 entries 2026 (Feb + Mar) y todas son docs improvements, no features. NO hay registro de COD/Ecart Pay updates desde inicio de 2026 — la integración COD es estable y no ha cambiado API recientemente |
+
+### L.6 API Reference URLs 404 (post-restructure docs Envia 2026)
+
+URLs adicionales que retornan 404 en investigación 2026-05-07 (suman a las del dossier original):
+- `/reference/quote-shipments` — 404 directo (la entrada existe en SERP pero la página retorna 404 al WebFetch)
+- `/reference/createshipping` — 404
+- `/reference/generate-shipment` — 404
+- `/reference` (raíz) — retorna solo navigation header sin contenido
+
+**Implicación**: la sección /reference de docs.envia.com está en un layout dinámico (ReadMe.io estilo) que requiere JS para renderizar el spec — los WebFetches devuelven HTML vacío. La fuente alternativa más útil para el JSON schema empírico es la **colección Postman pública**: `postman.com/api-envia/envia-com-s-public-workspace/documentation/4b85spz/` (referenciada en SERP, no fetcheable directamente sin auth).
+
+### L.7 Hallazgos profundos Ecart Pay (NUEVO — antes inexistente en dossier)
+
+> Cf. dossier dedicado nuevo `docs/research/ecartpay-dossier-2026-05-07.md` para profundidad completa. Resumen ejecutivo aquí:
+
+- **Ecart Pay = fintech de Grupo Tendencys (México) operando en 10 países** incluyendo Colombia, México, Chile, Argentina, India, USA, Canadá, España, Brasil, Guatemala. 120,000 negocios.
+- **Auth model**: NO es OAuth ni Bearer simple. Es **Basic Auth con Public+Private key Base64-encoded**. Token resultante válido **solo 1 hora** → exige refresh frequente.
+- **Webhooks SÍ firmados HMAC-SHA256** (a diferencia de Envia que no firma) — significa que /webhooks/ecartpay/ puede tener defensa primaria por firma + secundaria por token URL.
+- **Provider Colombia para facturación: Siigo** (IVA 16%). NO hay provider Colombia para retenciones tributarias documentado.
+- **Eventos webhook relevantes para H.2.4**: `transfer.created` (dinero al merchant), `withdrawals.paid` (retiro completado), `orders.confirmation` (orden pagada).
+- **Endpoint `/api/orders` acepta `shipping_items[].carrier="envia"`** → integración Ecart Pay ↔ Envia es **explícita en el modelo de datos**, no es un ad-hoc del lado merchant.
+- **Pricing Ecart Pay**: 2.9%+$0.20 USD para tarjeta, 2.9%+$0.40 USD para cash, 3.5%+$0.20 USD AmEx. Esto NO aplica al flujo COD-Envia (que tiene "no commission" según withdraw-cod página) — aplica solo si el merchant usa Ecart Pay como PSP standalone para tarjeta/cash en frontend.
+- **Multi-tenant Ecart Pay**: NO hay sub-accounts ni keys per-merchant documentadas. Modelo idéntico a Envia → cada tenant onboarda su propia cuenta Ecart Pay (que se vincula automáticamente cuando registra cuenta Envia con COD activo).
+
+### L.8 Implicaciones para H.2.4 (COD Implementation)
+
+**Decisiones que ya se pueden cerrar sin esperar V.1-V.4 totalmente**:
+
+1. **Schema payload COD** (a integrar en `envia_client.py` rate + generate):
+   ```json
+   {
+     "packages": [{
+       "additionalServices": [
+         {"service": "cash_on_delivery", "amount": <cart_subtotal_COP>}
+       ],
+       ...
+     }]
+   }
+   ```
+   El response devuelve `cashOnDeliveryCommission` y `cashOnDeliveryAmount` per carrier.
+
+2. **Carriers MVP COD para KAIU (Colombia)**:
+   - **TIER 1 (cierra mvp)**: `serviEntrega`, `coordinadora`, `envia` (propio) — los 3 generan labels digitales y soportan COD según landing comercial.
+   - **TIER 2 (validar V.2 antes de exponer)**: `tcc`, `deprisa`.
+   - **NO exponer en MVP**: `interRapidisimo` (no genera labels), `dhl`, `fedex`, `cabify`, `lastMile`, `noventa9Minutos`, `cainiao`.
+
+3. **Webhook architecture H.2.4**:
+   - Receiver Envia ya en plan (G.P0.2). Reutilizable: el evento "Delivered" significa COD cobrado.
+   - **NUEVO router /webhooks/ecartpay/{tenant_id}** con validación HMAC-SHA256 + headers x-pay-* (verificable cripto, alta seguridad). Listen para `transfer.created` + `withdrawals.paid`.
+   - Reconcilia COD con Ecart Pay vía `transfer.created` payload (contiene `amount`, `currency`, `reference_id` que mapea al shipment).
+
+4. **Timeline COD operativo merchant** (comunicar a KAIU al activar):
+   - Día 0: Cliente recibe paquete + paga al transportador.
+   - Día 0+72h: Dinero llega a Ecart Pay (no a banco merchant aún).
+   - Día +24-48h hasta próximo martes/viernes: merchant solicita retiro.
+   - Día retiro +24-48h: dinero acreditado en banco merchant (5,000 COP fee descontado).
+   - **Total: 5-7 días calendario worst case desde entrega hasta cuenta bancaria del merchant**.
+
+5. **Comisión carrier-by-carrier**: requiere barrido empírico en sandbox (V.2). Sugerencia: ejecutar script Python que itere `[serviEntrega, coordinadora, envia, tcc, interRapidisimo]` × `rate` con `cash_on_delivery=$50,000 COP` y registre el `cashOnDeliveryCommission` resultante. Persistir en `tenant_carrier_capabilities.cod_commission_pct`.
+
+6. **Retenciones fiscales (ReteFuente/ReteIVA/ReteICA)**: NO bloquea implementación API. Asumimos modelo "gross payout" hasta confirmar lo contrario con Envia comercial. Si en realidad Ecart Pay retiene, se ajusta UI dashboard merchant pero el flujo API es el mismo.
+
+### L.9 Validaciones humanas residuales (post-investigación)
+
+> Validaciones V.1-V.5 originales del dossier siguen vigentes. Investigación 2026-05-07 cierra V.1 al ~80% y V.2/V.3 al ~70%. V.4 sigue al ~50%. V.5 (IPs Envia) sin avance.
+
+**NUEVAS validaciones derivadas de L.7**:
+
+- **V.6 — Vinculación cuenta Ecart Pay ↔ cuenta Envia per-tenant**:
+  - **PASOS**: confirmar con account manager Envia si al activar COD en cuenta Envia tenant, se crea automáticamente cuenta Ecart Pay vinculada o si requiere onboarding separado en docs.ecartpay.com.
+  - **CRITERIO ÉXITO**: documento que confirme "1 cuenta Envia con COD activo = 1 cuenta Ecart Pay automática" o "tenant debe crear cuenta Ecart Pay separada".
+
+- **V.7 — Comisión COD per carrier (matriz empírica)**:
+  - **PASOS**: ejecutar barrido `rate` sandbox per carrier × `cash_on_delivery=$X COP` y registrar `cashOnDeliveryCommission` retornado.
+  - **CRITERIO ÉXITO**: matriz `carrier × cod_commission_pct × min_amount × max_amount` persistida en `docs/research/empirical-evidence/envia-cod-commissions-CO.json`.
+  - **TIEMPO ESTIMADO**: 30 min con script Python una vez sandbox tenga COD habilitado.
