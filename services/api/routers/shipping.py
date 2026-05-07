@@ -129,9 +129,19 @@ def _extract_carrier_name(item: dict) -> str:
     return ""
 
 
-async def _resolve_carriers_for_quote(client: EnviaClient, country_code: str) -> list[str]:
+async def _resolve_carriers_for_quote(
+    client: EnviaClient,
+    country_code: str,
+    *,
+    supabase: Optional[Client] = None,
+    tenant_id: Optional[str] = None,
+) -> list[str]:
     """
     Prioriza Queries API para resolver carriers activos; si falla, usa fallback estable.
+
+    Sem 5 H.2.7: si `supabase + tenant_id` provistos, filtra resultado
+    final por las preferencias del tenant en `tenant_carriers`. Si el
+    tenant NO configuró preferencias → todos enabled (backward compat).
     """
     carriers: list[str] = []
     try:
@@ -177,6 +187,25 @@ async def _resolve_carriers_for_quote(client: EnviaClient, country_code: str) ->
         if token not in seen:
             unique.append(carrier)
             seen.add(token)
+
+    # Sem 5 H.2.7 — aplicar preferencias per-tenant si están provistas.
+    if supabase is not None and tenant_id:
+        try:
+            from lib.tenant_carriers import filter_enabled_carriers
+            filtered = filter_enabled_carriers(
+                supabase, tenant_id, "envia", unique,
+            )
+            logger.info(
+                "[CARRIERS] tenant=%s filtered %d → %d (preferencias DB)",
+                tenant_id, len(unique), len(filtered),
+            )
+            return filtered
+        except Exception as exc:
+            logger.warning(
+                "[CARRIERS] no se pudo aplicar filter tenant=%s: %s — "
+                "devuelvo todos (default open)",
+                tenant_id, exc,
+            )
     return unique
 
 
@@ -247,6 +276,12 @@ def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
 
 
 def _require_envia_phase2() -> None:
+    """
+    DEPRECADO post-rev. 105 Sem 5 H.2.6 — gate global env-var.
+    Usar `_require_envia_capability(supabase, tenant_id, capability)`
+    en su lugar para granularidad per-tenant per-capability.
+    Mantenido como fallback temporal durante migración.
+    """
     if not ENVIA_PHASE2_ENABLED:
         raise HTTPException(
             status_code=503,
@@ -255,6 +290,46 @@ def _require_envia_phase2() -> None:
                 "Activa ENVIA_PHASE2_ENABLED=true para habilitar label/tracking/pickup/cancel."
             ),
         )
+
+
+def _require_envia_capability(
+    supabase: Client,
+    tenant_id: str,
+    capability: str,
+) -> None:
+    """
+    Valida que el tenant tenga una capability Envia habilitada en
+    `tenant_provider_capabilities` (F.3 matrix). Reemplaza el flag
+    global env-var por gate granular per-tenant per-feature.
+
+    Capabilities Envia válidas (ver `lib/capabilities_matrix.py`):
+      - 'label_generation' — POST /shipments/{id}/label
+      - 'tracking_polling' — POST /shipping/tracking
+      - 'pickup'           — POST /shipments/{id}/schedule-pickup
+      - 'cancel'           — POST /shipments/{id}/cancel
+      - 'cod'              — futuro H.2.4
+      - 'insurance'        — futuro H.2.5
+
+    Backward compat: si el env var global ENVIA_PHASE2_ENABLED=true,
+    se permite (durante migración). Tras seed inicial de capabilities
+    para tenants existentes, este fallback se puede retirar.
+    """
+    from lib.capabilities_matrix import is_capability_enabled
+    enabled = is_capability_enabled(
+        supabase, tenant_id, "envia", capability, default=False,
+    )
+    if enabled:
+        return
+    # Fallback transición.
+    if ENVIA_PHASE2_ENABLED:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            f"Capability Envia '{capability}' deshabilitada para este tenant. "
+            f"Actívala en Settings → Integraciones → Envia."
+        ),
+    )
 
 
 def _parse_envia_label_data(raw: dict) -> dict:
@@ -482,12 +557,20 @@ async def quote_shipment(
         }
 
         # Carriers activos: resolver desde Queries API; fallback seguro si el endpoint falla.
+        # Sem 5 H.2.7: filtra por preferencias tenant_carriers per-tenant.
         quote_country = req.origin.country if req.origin.country == req.destination.country else "CO"
-        carriers = await _resolve_carriers_for_quote(client, quote_country)
+        carriers = await _resolve_carriers_for_quote(
+            client, quote_country,
+            supabase=supabase, tenant_id=tenant_id,
+        )
         if not carriers:
             raise HTTPException(
                 status_code=502,
-                detail="No se pudieron obtener carriers disponibles desde Envia Queries API.",
+                detail=(
+                    "No se pudieron obtener carriers disponibles. "
+                    "Verifica preferencias del tenant en Settings → Integraciones → Envia "
+                    "(¿todos los carriers están desactivados?) o estado de Envia Queries API."
+                ),
             )
 
         carrier_errors: dict[str, str] = {}
@@ -755,7 +838,7 @@ async def generate_label(
     """
     Genera etiqueta para un shipment cotizado usando selected_rate o payload explícito.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "label_generation")
     try:
         row = (
             supabase.table("shipments")
@@ -888,7 +971,7 @@ async def track_shipments(
     """
     Consulta tracking en Envia por shipment_id o tracking_numbers.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "tracking_polling")
     tracking_numbers = [n.strip() for n in body.tracking_numbers if isinstance(n, str) and n.strip()]
 
     shipment = None
@@ -978,7 +1061,7 @@ async def schedule_pickup(
     """
     Agenda pickup de un shipment etiquetado.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "pickup")
     row = (
         supabase.table("shipments")
         .select("id, tenant_id, origin_address, tracking_number, carrier")
@@ -1031,7 +1114,7 @@ async def cancel_shipment(
     """
     Cancela un envío etiquetado por tracking_number o shipment_id.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "cancel")
 
     tracking_number = (body.tracking_number or "").strip()
     carrier = (body.carrier or "").strip()
