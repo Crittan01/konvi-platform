@@ -54,10 +54,14 @@ def main():
     parser.add_argument("--tenant-id", required=True, help="UUID del tenant")
     parser.add_argument("--tracking-number", default=None,
                         help="Tracking number sandbox a probar (default: último del tenant)")
+    parser.add_argument("--carrier", default=None,
+                        help="Carrier del shipment (default: lee del shipment row)")
     parser.add_argument("--webhook-url", default=None,
                         help="URL del webhook receiver (default: lee de panel Envia)")
     parser.add_argument("--sandbox", action="store_true", default=True,
                         help="Usar sandbox Envia (default true)")
+    parser.add_argument("--type", default=None,
+                        help="Tipo webhook a probar (onShipmentStatusUpdate, statusUpdateWithEcommerceInfo, simpleTracking, ecommerceTracking, surcharge). Si no se pasa, dispara los 5.")
     args = parser.parse_args()
 
     # Cargar repo paths.
@@ -70,16 +74,17 @@ def main():
         os.environ["SUPABASE_SERVICE_ROLE_KEY"],
     )
 
-    # Resolver tracking_number si no se pasó.
+    # Resolver tracking_number + carrier si no se pasaron.
     tracking_number = args.tracking_number
-    if not tracking_number:
+    carrier = args.carrier
+    if not tracking_number or not carrier:
         res = (
             sb.table("shipments")
-            .select("tracking_number, created_at, status")
+            .select("tracking_number, carrier, created_at, status")
             .eq("tenant_id", args.tenant_id)
             .not_.is_("tracking_number", "null")
             .order("created_at", desc=True)
-            .limit(1)
+            .limit(5)
             .execute()
         )
         rows = res.data or []
@@ -87,15 +92,30 @@ def main():
             logger.error(
                 "[ERROR] No hay shipments con tracking_number para tenant %s. "
                 "Generar uno primero con EnviaClient.generate_label() o pasar "
-                "--tracking-number explícito.",
+                "--tracking-number + --carrier explícitos.",
                 args.tenant_id,
             )
             sys.exit(1)
-        tracking_number = rows[0]["tracking_number"]
-        logger.info(
-            "[INFO] Usando último shipment del tenant: tracking=%s status=%s",
-            tracking_number, rows[0].get("status"),
+        # Si tracking_number fue pasado pero NO carrier, buscarlo por tracking en filas.
+        if tracking_number and not carrier:
+            for r in rows:
+                if r.get("tracking_number") == tracking_number:
+                    carrier = r.get("carrier")
+                    break
+        # Si nada fue pasado, usar el más reciente.
+        if not tracking_number:
+            tracking_number = rows[0]["tracking_number"]
+            carrier = carrier or rows[0].get("carrier")
+            logger.info(
+                "[INFO] Usando último shipment del tenant: tracking=%s carrier=%s status=%s",
+                tracking_number, carrier, rows[0].get("status"),
+            )
+    if not carrier:
+        logger.error(
+            "[ERROR] No se pudo resolver carrier para tracking %s. "
+            "Pasa --carrier explícito.", tracking_number,
         )
+        sys.exit(1)
 
     # Resolver webhook_url. NOTA: idealmente Envia ya lo tiene registrado en
     # panel; este endpoint solo dispara el envío al URL ya registrado para
@@ -145,36 +165,65 @@ def main():
     url = f"{base_url}/ship/webhooktest/"
 
     import httpx
-    payload = {
-        "tracking_number": tracking_number,
-        "webhook_url": webhook_url,
-    }
     headers = {
         "Authorization": f"Bearer {api_token}",
         "Content-Type": "application/json",
     }
 
+    # Tipos de webhook según panel Envia (vista 2026-05-06):
+    # 1=onShipmentStatusUpdate, 2=statusUpdateWithEcommerceInfo,
+    # 3=simpleTracking, 4=ecommerceTracking, 5=surcharge.
+    # Como /ship/webhooktest/ no documenta `type` en body, probamos
+    # a) sin type (default — observar payload), b) con cada type explícito.
+    if args.type:
+        types_to_test = [args.type]
+    else:
+        types_to_test = [
+            None,  # default — qué responde sin type
+            "onShipmentStatusUpdate",
+            "statusUpdateWithEcommerceInfo",
+            "simpleTracking",
+            "ecommerceTracking",
+            "surcharge",
+        ]
+
     logger.info("=" * 70)
-    logger.info("[ENVIA TEST WEBHOOK] Disparando webhook test")
+    logger.info("[ENVIA TEST WEBHOOK] Disparando webhook test (loop tipos)")
     logger.info("  Endpoint:  %s", url)
     logger.info("  Tracking:  %s", tracking_number)
+    logger.info("  Carrier:   %s", carrier)
     logger.info("  Target:    %s", webhook_url)
     logger.info("  Tenant:    %s", args.tenant_id)
+    logger.info("  Tipos:     %s", types_to_test)
     logger.info("=" * 70)
 
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            r = client.post(url, headers=headers, json=payload)
-            logger.info("[RESPUESTA] HTTP %d", r.status_code)
-            try:
-                body = r.json()
-                import json as _json
-                logger.info("[BODY]\n%s", _json.dumps(body, indent=2, ensure_ascii=False))
-            except Exception:
-                logger.info("[BODY raw] %s", r.text[:1000])
-    except Exception as e:
-        logger.error("[ERROR] request falló: %s", e)
-        sys.exit(2)
+    import time
+    for t in types_to_test:
+        # camelCase per Envia internal naming (descubierto empíricamente
+        # 2026-05-06 — error "Undefined property: stdClass::$trackingNumber"
+        # cuando enviado snake_case).
+        payload = {
+            "trackingNumber": tracking_number,
+            "carrier": carrier,
+            "webhookUrl": webhook_url,
+        }
+        if t:
+            payload["type"] = t
+        label = t or "(no_type)"
+        logger.info("\n--- type=%s ---", label)
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                r = client.post(url, headers=headers, json=payload)
+                logger.info("[RESPUESTA type=%s] HTTP %d", label, r.status_code)
+                try:
+                    body = r.json()
+                    import json as _json
+                    logger.info("[BODY]\n%s", _json.dumps(body, indent=2, ensure_ascii=False)[:1500])
+                except Exception:
+                    logger.info("[BODY raw] %s", r.text[:1000])
+        except Exception as e:
+            logger.error("[ERROR type=%s] request falló: %s", label, e)
+        time.sleep(0.5)
 
     logger.info("=" * 70)
     logger.info("[INSTRUCCIONES] Verifica logs API + tabla envia_webhook_capture_log:")
