@@ -883,6 +883,33 @@ Pasos cuando se priorice:
      preservar audit trail de redemptions UAT (Habeas Data ADR-0015 D6).
      Ejemplo: PRUEBA10 desactivado el 2026-05-07 tras certificar S43-S47.
 
+10. **H.2.4 Cash on Delivery (COD) — PAUSADO 2026-05-07**
+    - **Decisión founder 2026-05-07**: aplicada regla "NO suposiciones,
+      solo data verificable". Pausa formal de H.2.4 hasta certificación
+      empírica de fees Ecart Pay + DANE Servientrega.
+    - **Lo certificado** (queda registrado para reanudación):
+      • V.2 — 4 carriers Colombia COD viables: servientrega, tcc,
+        fedex, dhl (evidencia
+        `docs/research/empirical-evidence/envia-cod-carriers-CO-2026-05-07.json`).
+      • V.3 — 5 webhook types reales en Envia (no existe webhook COD
+        dedicado).
+    - **Lo NO certificable** (bloqueante reanudación):
+      • V.1 — fees Ecart Pay Colombia ($5k voz vs $0 API). Sandbox
+        Ecart Pay activado solo MX. Requiere KYC Colombia + cuenta
+        producción + 1 charge real.
+      • V.4 — formato DANE Servientrega. Página help.envia.com 403.
+        Requiere account manager Envia por email/contrato.
+      • Coordinadora habilitación COD: sandbox retorna `1300 Service
+        Unavailable`. Asumimos TIER 1 erróneamente — verificar contrato.
+    - **Trigger reanudación**: KAIU completa KYC Ecart Pay CO +
+      reproducimos Prueba 3 producción + ejecutivo Envia confirma V.4
+      + Coordinadora.
+    - **Roadmap continúa SIN COD**: Multi-agente I.5, Observabilidad
+      F.6, dossier MeLi (~1d), Onboarding Wizard MA-4. KAIU comercial
+      sigue ofreciendo cotización + Wompi online sin COD.
+    - **Detalle completo**: `docs/research/envia-dossier-2026-05-05.md`
+      secciones L.11 + L.12.
+
 ## Migraciones pendientes de aplicar en Supabase
 
 - Ninguna del bloque 2026-04-20 en entorno linked (`***SUPABASE_PROJECT_REF_REDACTED***`), incluyendo:

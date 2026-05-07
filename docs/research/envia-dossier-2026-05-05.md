@@ -566,3 +566,74 @@ runtime, ajustar empíricamente con primer tenant productivo COD activo.
 Sigue requiriendo confirmación de account manager Envia (página
 help.envia.com 403 Cloudflare). Aceptado riesgo: implementar H.2.4 MVP
 sin Servientrega COD inicialmente, agregar cuando V.4 quede confirmada.
+
+---
+
+## L.11 — Pruebas empíricas API real 2026-05-07
+
+Disparador: founder aplicó regla "NO suposiciones — solo data verificable"
+post-confirmación a-voz V.1. Ejecutadas 3 pruebas empíricas con apikeys
+reales (sandbox Envia + sandbox Ecart Pay) para certificar
+documentalmente cada respuesta.
+
+**Evidencia persistida**:
+- `docs/research/empirical-evidence/envia-cod-carriers-CO-2026-05-07.json`
+- Logs ejecutados in-memory (no persistidos por seguridad keys).
+
+**Resultados**:
+
+| Prueba | Pregunta | Estado | Detalle |
+|---|---|---|---|
+| 1 | V.2 carriers COD | ✅ **Certificada** | 4 carriers funcionales: servientrega, tcc, fedex, dhl. Coordinadora retorna code 1300 "Service Unavailable" en sandbox. interRapidisimo retorna 1126. Otros (envia propio, deprisa, mensajerosUrbanos, noventa9Minutos, cabify, lastMile, cainiao) retornan codes 1101/1125/1129/1146 o timeouts. |
+| 2 | V.3 webhook types | ✅ **Certificada** | `GET queries-test/webhook-types` retorna exactamente 5 tipos: onShipmentStatusUpdate, statusUpdateWithEcommerceInfo, simpleTracking, ecommerceTracking, surcharge. NO existe webhook dedicado COD. |
+| 3 | V.1 fees Ecart Pay | ⚠️ **NO certificable sandbox** | Auth funciona (`POST /api/authorizations/token` Basic). JWT payload confirma `country=CO, currency=COP`. PERO `GET /banks` retorna 0 bancos CO (solo MX). Cuenta sandbox virgen sin charges/withdrawals procesados. NO hay endpoint público con fee schedule. **El "$5,000 COP" sigue siendo cita-a-voz, NO documentado**. |
+
+**Hallazgos sorpresa que cambian decisiones del dossier previo**:
+
+1. **Coordinadora NO retorna tarifa COD en sandbox** (asumíamos TIER 1).
+   Posible explicación: cuenta KAIU sandbox no tiene contrato Coordinadora
+   activado, o Coordinadora no soporta COD vía Envia globalmente. Requiere
+   account manager Envia clarificar.
+
+2. **FedEx Y DHL SÍ aceptan COD Colombia en sandbox** (asumíamos NO por
+   ser internacional). Sorpresa positiva — disponibles para tenants si
+   tienen contrato.
+
+3. **`cashOnDeliveryCommission = 0`** en TODAS las responses Envia. El
+   $5,000 COP confirmado a-voz es de Ecart Pay (payout), NO de Envia
+   (per-shipment). Modelo financiero distinto al asumido inicialmente.
+
+4. **Ecart Pay sandbox limitado a MX**: el catálogo `/banks` retorna solo
+   bancos México. Para certificar V.1 Colombia se necesita cuenta Ecart
+   Pay producción + KYC Colombia + al menos 1 charge procesado real.
+
+---
+
+## L.12 — Decisión arquitectónica 2026-05-07: H.2.4 PAUSADO (Opción B)
+
+**Founder aplicó regla literal**: "NO certificable en documentación →
+pausa COD."
+
+**Estado de H.2.4**: PAUSADO formalmente. Razones:
+
+- V.1 fees + payout cycle: NO certificable empíricamente sin Ecart Pay
+  producción + onboarding KYC completado para Colombia.
+- V.4 DANE Servientrega: sigue requiriendo confirmación humana
+  (página help.envia.com 403 Cloudflare).
+
+**Lo certificable hoy queda registrado** para cuando se reanude:
+- V.2 4 carriers viables (evidencia JSON).
+- V.3 5 webhook types (sin webhook COD dedicado).
+
+**Trigger de reanudación**:
+1. KAIU completa KYC Ecart Pay Colombia + activación cuenta.
+2. Reproducir Prueba 3 con producción para certificar V.1 ($5k vs %).
+3. Account manager Envia confirma por email/contrato V.4 + Coordinadora
+   habilitación.
+
+**Impacto roadmap**: H.2.4 saca de Sem 5. Plan continúa con Multi-agente
+I.5, Observabilidad F.6, MeLi H.5 (post-dossier), HSM WhatsApp H.4.2
+(pendiente V.6 piloto). Ninguno depende de COD.
+
+**KAIU comercial**: por ahora ofrece cotización + pago Wompi online (sin
+COD). Cuando comercialmente sea esencial → reanudación.
