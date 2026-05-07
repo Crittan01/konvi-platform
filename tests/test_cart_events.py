@@ -95,6 +95,29 @@ class CartEventsEmitTests(unittest.TestCase):
             if attr.startswith("EVT_"):
                 self.assertIn(getattr(self.mod, attr), self.mod.CANONICAL_EVENTS)
 
+    def test_coupon_events_canonical(self):
+        # Sem 6 I.2 — los 3 eventos de cupones están en CANONICAL_EVENTS.
+        self.assertIn(self.mod.EVT_COUPON_APPLIED, self.mod.CANONICAL_EVENTS)
+        self.assertIn(self.mod.EVT_COUPON_REVOKED, self.mod.CANONICAL_EVENTS)
+        self.assertIn(self.mod.EVT_COUPON_CONSUMED, self.mod.CANONICAL_EVENTS)
+        # Verifica los strings canónicos.
+        self.assertEqual(self.mod.EVT_COUPON_APPLIED, "coupon_applied")
+        self.assertEqual(self.mod.EVT_COUPON_REVOKED, "coupon_revoked")
+        self.assertEqual(self.mod.EVT_COUPON_CONSUMED, "coupon_consumed")
+
+    def test_emit_coupon_applied_event(self):
+        # Smoke: emitir un coupon_applied funciona como cualquier evento.
+        sb = self._mock_sb()
+        row_id = self.mod.emit(
+            sb, cart_id="c1", tenant_id="t1",
+            event_type=self.mod.EVT_COUPON_APPLIED,
+            payload={
+                "coupon_id": "coup-1", "code": "PROMO10",
+                "type": "percent", "discount_cents": 10000,
+            },
+        )
+        self.assertEqual(row_id, "evt-uuid-1")
+
 
 if __name__ == "__main__":
     unittest.main()
