@@ -225,7 +225,8 @@ def ensure_cart(
     res = (
         supabase.table("conversation_carts")
         .select("id, status, version, subtotal_cents, shipping_cents, total_cents, "
-                "shipping_meta, requires_requote, contact_id")
+                "shipping_meta, requires_requote, contact_id, "
+                "coupon_id, coupon_code, discount_cents")
         .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .eq("status", "open")
@@ -287,7 +288,8 @@ def get_cart_with_items(
     cart_res = (
         supabase.table("conversation_carts")
         .select("id, status, version, subtotal_cents, shipping_cents, total_cents, "
-                "shipping_meta, requires_requote, contact_id")
+                "shipping_meta, requires_requote, contact_id, "
+                "coupon_id, coupon_code, discount_cents")
         .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .eq("status", "open")

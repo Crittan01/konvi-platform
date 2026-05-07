@@ -842,6 +842,27 @@ Pasos cuando se priorice:
    - Retirar fallback legacy `NEXT_PUBLIC_API_URL` del código server-side cuando se cierre refactor de rutas restantes.
    - Mantener una sola vía canónica (`API_URL`) para evitar ambigüedad de configuración.
 
+8. **Tenant de test dedicado (`tenant-test` / `kaiu-staging`)**
+   - **Motivación 2026-05-07**: hoy todos los UATs usan KAIU (tenant productivo).
+     Sembrar cupones de prueba (PRUEBA10), conversaciones de UAT, productos
+     fake, etc., contamina datos reales. Los UAT scenarios S01-S47 ejecutan
+     `hard_reset` que limpia conversaciones/contactos pero las redemptions
+     históricas y filas auxiliares sí quedan con `coupon_id` referenciando
+     coupons de test.
+   - **Decisión cuando llegue Platform Console (J.3.1 diferido)**: crear
+     tenant `kaiu-staging` o `platform-test` aislado para UATs.
+   - **Implicaciones**:
+     • Permite re-correr S01-S47 contra staging sin riesgo a data KAIU prod.
+     • Permite sembrar productos/cupones/conversaciones de UAT sin contaminar.
+     • Decoupling user-acceptance de production data.
+     • Soporta multi-environment future (dev/staging/prod por tenant).
+   - **Trigger de implementación**: cuando lleguen 5+ tenants productivos
+     o cuando se materialice Platform Console.
+   - **Workaround actual (hasta entonces)**: cupones/recursos de test se
+     desactivan post-UAT (`is_active=false`) en lugar de hard-delete para
+     preservar audit trail de redemptions UAT (Habeas Data ADR-0015 D6).
+     Ejemplo: PRUEBA10 desactivado el 2026-05-07 tras certificar S43-S47.
+
 ## Migraciones pendientes de aplicar en Supabase
 
 - Ninguna del bloque 2026-04-20 en entorno linked (`***SUPABASE_PROJECT_REF_REDACTED***`), incluyendo:
