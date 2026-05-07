@@ -5928,6 +5928,189 @@ async def build_and_run_orchestration(
                     optout_err,
                 )
 
+        # ── Rev. 105 Sem 6 I.2.2 — Coupon detector pre-LLM (ADR-0015) ──────
+        # Detector híbrido (Decisión 1): regex pre-LLM extrae intent
+        # apply/remove + código → llamada directa al helper Python (no LLM
+        # decide). Mode A (Decisión 2): respuesta corta + return; intents
+        # residuales del cliente ("y quiero 2 jabones") se procesan en
+        # próximo turno.
+        # FSM Guard (Decisión 3): si cart está en 'checkout' (post-link
+        # Wompi), reject con mensaje cita+negrita explicando regla.
+        # UX (Decisión 4): respuestas concisas formato WhatsApp.
+        if content_type == "text" and customer_phone_raw:
+            try:
+                from lib.coupon_detector import (  # noqa: PLC0415
+                    detect_coupon_intent,
+                    INTENT_APPLY,
+                    INTENT_REMOVE,
+                )
+                from lib import coupons as _coupon_helpers  # noqa: PLC0415
+
+                _coupon_intent = detect_coupon_intent(content)
+                if _coupon_intent:
+                    # Lookup cart en cualquier status open|checkout para
+                    # distinguir cupón pre-link vs post-link.
+                    _cart_lookup = (
+                        supabase.table("conversation_carts")
+                        .select(
+                            "id, status, subtotal_cents, shipping_cents, "
+                            "total_cents, coupon_id, coupon_code, discount_cents"
+                        )
+                        .eq("tenant_id", tenant_id)
+                        .eq("conversation_id", conversation_id)
+                        .in_("status", ["open", "checkout"])
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    _cart_rows = _cart_lookup.data or []
+                    _coupon_response: Optional[str] = None
+                    _coupon_event_type: Optional[str] = None
+                    _coupon_event_payload: dict = {}
+                    _coupon_cart_id: Optional[str] = None
+
+                    if not _cart_rows:
+                        # Sin cart vivo — aplicar cupón no tiene sentido aún.
+                        if _coupon_intent.intent == INTENT_APPLY:
+                            _coupon_response = (
+                                "🛒 Aún no tienes un pedido en curso. "
+                                "Cuando agregues productos podemos aplicar tu cupón."
+                            )
+                        else:
+                            _coupon_response = "No tienes ningún cupón aplicado."
+                    else:
+                        _cart = _cart_rows[0]
+                        _coupon_cart_id = _cart["id"]
+
+                        if _cart["status"] == "checkout":
+                            # Decisión 3: cupón post-payment-link → reject.
+                            # Cita+negrita per sugerencia founder.
+                            _coupon_response = (
+                                "> *El cupón debe aplicarse antes de generar el link de pago.*\n"
+                                "Si quieres usarlo, dime y cancelamos el link actual para rehacer el pedido."
+                            )
+                        elif _coupon_intent.intent == INTENT_REMOVE:
+                            _prev_code = _cart.get("coupon_code")
+                            _prev_id = _cart.get("coupon_id")
+                            _revoked = _coupon_helpers.revoke_coupon(
+                                supabase,
+                                tenant_id=tenant_id,
+                                cart_id=_coupon_cart_id,
+                                reason="user_removed",
+                            )
+                            if _revoked:
+                                _coupon_response = "✅ Cupón removido."
+                                _coupon_event_type = "coupon_revoked"
+                                _coupon_event_payload = {
+                                    "coupon_id": _prev_id,
+                                    "code": _prev_code,
+                                    "reason": "user_removed",
+                                }
+                            else:
+                                _coupon_response = "No tenías ningún cupón aplicado."
+                        elif _coupon_intent.intent == INTENT_APPLY:
+                            if not _coupon_intent.code:
+                                _coupon_response = (
+                                    "No detecté el código del cupón. "
+                                    "¿Me lo confirmas?"
+                                )
+                            else:
+                                _result = _coupon_helpers.apply_coupon(
+                                    supabase,
+                                    tenant_id=tenant_id,
+                                    cart_id=_coupon_cart_id,
+                                    code=_coupon_intent.code,
+                                )
+                                if _result.ok:
+                                    _descuento_str = (
+                                        f"${_result.discount_cents / 100:,.0f}"
+                                        .replace(",", ".")
+                                    )
+                                    _coupon_response = (
+                                        f"✅ Cupón *{_result.coupon_code}* aplicado: "
+                                        f"descuento -{_descuento_str}\n"
+                                        f"¿En qué más te puedo ayudar?"
+                                    )
+                                    _coupon_event_type = "coupon_applied"
+                                    _coupon_event_payload = {
+                                        "coupon_id": _result.coupon_id,
+                                        "code": _result.coupon_code,
+                                        "discount_cents": _result.discount_cents,
+                                    }
+                                else:
+                                    # ValidationResult.user_message ya en ES.
+                                    _coupon_response = _result.user_message
+
+                    if _coupon_response:
+                        # Emit cart_event si hubo cambio real (apply/revoke OK).
+                        if _coupon_event_type and _coupon_cart_id:
+                            try:
+                                supabase.table("cart_events").insert({
+                                    "cart_id": _coupon_cart_id,
+                                    "tenant_id": tenant_id,
+                                    "event_type": _coupon_event_type,
+                                    "event_payload": _coupon_event_payload,
+                                    "triggered_by": "bot",
+                                    "correlation_id": message_id,
+                                }).execute()
+                            except Exception as _evt_err:
+                                logger.debug(
+                                    "[COUPON][EVENT] emit %s falló: %s",
+                                    _coupon_event_type, _evt_err,
+                                )
+
+                        logger.info(
+                            "[COUPON][DISPATCH] tenant=%s conv=%s intent=%s "
+                            "code=%s cart=%s event=%s",
+                            tenant_id, conversation_id,
+                            _coupon_intent.intent, _coupon_intent.code,
+                            _coupon_cart_id, _coupon_event_type,
+                        )
+
+                        # Send WhatsApp + persist outbound + mark + return.
+                        _meta_msg_id_coupon: Optional[str] = None
+                        try:
+                            _meta_msg_id_coupon = await send_whatsapp_message(
+                                tenant_id=tenant_id,
+                                supabase=supabase,
+                                to_phone=customer_phone_raw,
+                                text=_coupon_response,
+                            )
+                        except Exception as _send_err:
+                            logger.error(
+                                "[COUPON] Falló envío respuesta: %s", _send_err,
+                            )
+
+                        try:
+                            supabase.table("messages").insert({
+                                "conversation_id": conversation_id,
+                                "tenant_id": tenant_id,
+                                "direction": "outbound",
+                                "content_type": "text",
+                                "content": _coupon_response,
+                                "meta_message_id": _meta_msg_id_coupon,
+                                "processed": True,
+                                "processing_status": PROCESSING_STATUS_PROCESSED,
+                            }).execute()
+                        except Exception as _persist_err:
+                            logger.error(
+                                "[COUPON] Falló persist messages: %s",
+                                _persist_err,
+                            )
+
+                        _mark_message_processing(
+                            supabase, message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        return  # Short-circuit: NO continuar con LLM.
+            except Exception as _coupon_err:
+                # Cualquier error en detector NO debe romper flow normal —
+                # caemos a procesamiento LLM standard.
+                logger.error(
+                    "[COUPON] Error inesperado en detector (cae a LLM): %s",
+                    _coupon_err,
+                )
+
         history: list[dict] = await _get_conversation_history(supabase, conversation_id)
 
         # Primer nombre: solo si hay consentimiento explícito en DB
