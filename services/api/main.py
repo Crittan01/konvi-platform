@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base
+from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, envia_webhook
 from dependencies.auth import get_current_tenant
 
 logger = logging.getLogger("api.startup")
@@ -102,6 +102,8 @@ app.include_router(shipping.router, prefix="/api/v1/shipping")
 app.include_router(marketplace.router, prefix="/api/v1")
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
+# Rev. 105 H.2.2 Fase A — Envia webhook capture endpoint (descubrimiento empírico)
+app.include_router(envia_webhook.router, prefix="/api/v1/webhooks/envia")
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
 app.include_router(claims.router, prefix="/api/v1/claims")
