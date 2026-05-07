@@ -1263,6 +1263,9 @@ def _load_customer_context_block(
             lines.append(label)
         lines.append(f"- Subtotal: {_format_cop(_subtotal_cents)}")
         # Shipping en vivo desde history (último quote del bot)
+        # Sem 6 I.2.7 — incluir descuento de cupón si está aplicado.
+        _discount_cents = int(active_cart_summary.get("discount_cents") or 0)
+        _coupon_code = active_cart_summary.get("coupon_code")
         if history:
             _ship_cents = _extract_shipping_cost_from_history(history) or 0
             _carrier_nm = _extract_shipping_carrier_from_history(history) or ""
@@ -1271,7 +1274,22 @@ def _load_customer_context_block(
                 if _carrier_nm:
                     _ship_label += f" (Económica · {_carrier_nm})"
                 lines.append(f"- {_ship_label}: {_format_cop(_ship_cents)}")
-                lines.append(f"- Total con envío: {_format_cop(_subtotal_cents + _ship_cents)}")
+                if _discount_cents > 0 and _coupon_code:
+                    lines.append(
+                        f"- Descuento: -{_format_cop(_discount_cents)} ({_coupon_code})"
+                    )
+                lines.append(
+                    f"- Total con envío: "
+                    f"{_format_cop(_subtotal_cents + _ship_cents - _discount_cents)}"
+                )
+        elif _discount_cents > 0 and _coupon_code:
+            # Sin shipping aún — pero ya hay cupón aplicado.
+            lines.append(
+                f"- Descuento: -{_format_cop(_discount_cents)} ({_coupon_code})"
+            )
+            lines.append(
+                f"- Total: {_format_cop(_subtotal_cents - _discount_cents)}"
+            )
 
     if active_orders:
         lines.append("")
@@ -3752,11 +3770,16 @@ def _verified_ctx_from_cart(cart: dict) -> Optional[dict]:
             "quantity": int(it.get("quantity") or 1),
             "unit_price_cents": int(it.get("unit_price_cents") or 0),
         })
+    # Sem 6 I.2.7 — propagar cupón aplicado para que el resumen lo muestre.
+    coupon_code = cart.get("coupon_code")
+    discount_cents = int(cart.get("discount_cents") or 0)
     return {
         "items": out_items,
         "subtotal_cents": subtotal,
         "shipping_cost_cents": shipping,
         "total_cents": total,
+        "coupon_code": coupon_code,
+        "discount_cents": discount_cents,
         "_source": "cart_db",
     }
 
@@ -3830,6 +3853,9 @@ def _build_order_summary_text(
     subtotal = int(verified_ctx.get("subtotal_cents") or 0)
     shipping = int(verified_ctx.get("shipping_cost_cents") or 0)
     total = int(verified_ctx.get("total_cents") or 0)
+    # Sem 6 I.2.7 (ADR-0015) — descuento de cupón.
+    discount = int(verified_ctx.get("discount_cents") or 0)
+    coupon_code = verified_ctx.get("coupon_code")
     lines.append("")
     lines.append(f"Subtotal: {_format_cop(subtotal)}")
     # Rev. 103 — incluir carrier en línea de envío para que el cliente
@@ -3840,6 +3866,8 @@ def _build_order_summary_text(
         lines.append(f"Envío (Económica - {carrier_name}): {_format_cop(shipping)}")
     else:
         lines.append(f"Envío: {_format_cop(shipping)}")
+    if discount > 0 and coupon_code:
+        lines.append(f"Descuento: -{_format_cop(discount)} ({coupon_code})")
     lines.append(f"*TOTAL: {_format_cop(total)}*")
 
     contact = contact_record if isinstance(contact_record, dict) else {}

@@ -523,6 +523,64 @@ def _consume_cart_reservations_if_any(
                 "[CART_EVENT] order_confirmed emit falló cart=%s: %s",
                 cart_id, exc,
             )
+
+        # Rev. 105 Sem 6 I.2.4 — consumir cupón aplicado (ADR-0015 D5).
+        # Si el cart tenía cupón en status='applied', incrementamos
+        # atómicamente coupons.redemptions_count y marcamos redemption
+        # como 'consumed'. Best-effort — un fallo aquí NO bloquea el
+        # cierre de orden.
+        try:
+            from lib.coupons import consume_redemption
+            # Lookup cart row para obtener coupon_code (audit log payload).
+            cart_meta = (
+                supabase.table("conversation_carts")
+                .select("coupon_id, coupon_code, discount_cents")
+                .eq("id", cart_id)
+                .single()
+                .execute()
+            )
+            cart_meta_data = cart_meta.data or {}
+            coupon_id_active = cart_meta_data.get("coupon_id")
+            if coupon_id_active:
+                consumed_coupon = consume_redemption(
+                    supabase,
+                    tenant_id=tenant_id,
+                    cart_id=cart_id,
+                    order_id=order_id,
+                )
+                if consumed_coupon:
+                    # Emit cart_events.coupon_consumed (audit + telemetry).
+                    try:
+                        supabase.table("cart_events").insert({
+                            "cart_id": cart_id,
+                            "tenant_id": tenant_id,
+                            "event_type": "coupon_consumed",
+                            "event_payload": {
+                                "coupon_id": coupon_id_active,
+                                "code": cart_meta_data.get("coupon_code"),
+                                "discount_cents": int(
+                                    cart_meta_data.get("discount_cents") or 0
+                                ),
+                                "order_id": order_id,
+                            },
+                            "triggered_by": "webhook",
+                        }).execute()
+                    except Exception as exc:
+                        logger.debug(
+                            "[CART_EVENT] coupon_consumed emit falló: %s", exc,
+                        )
+                    logger.info(
+                        "[COUPON] consumed via wompi_webhook order=%s cart=%s "
+                        "coupon=%s",
+                        order_id, cart_id, cart_meta_data.get("coupon_code"),
+                    )
+        except Exception as exc:
+            logger.warning(
+                "[COUPON] consume_redemption error order=%s cart=%s: %s "
+                "(no bloquea cierre orden)",
+                order_id, cart_id, exc,
+            )
+
         return consumed
     except Exception as exc:
         logger.warning("[STOCK] reservations consume probe failed: %s", exc)
