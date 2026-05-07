@@ -44,6 +44,14 @@ export type Coupon = {
    * permitimos eliminar (preservar audit Habeas Data).
    */
   has_historical_redemptions: boolean
+  /**
+   * Total de filas en `coupon_redemptions` para este cupón (todos los
+   * status). Útil para mostrar al owner un contador de "histórico" en
+   * la tabla, distinto de `redemptions_count` que solo cuenta consumed
+   * (orden APPROVED). Diferenciar evita confusión cuando el contador
+   * de uso oficial es 0 pero hay aplicaciones revocadas en historial.
+   */
+  total_historical_redemptions: number
 }
 
 const VALID_DISCOUNT_TYPES = new Set<DiscountType>([
@@ -327,9 +335,11 @@ export default async function PromotionsPage() {
       ? (data as unknown as Omit<Coupon, 'has_historical_redemptions'>[])
       : []
 
-    // Lookup batch: cuáles cupones tienen redemptions históricas (cualquier
-    // status). Una sola query con DISTINCT evita N round-trips.
-    let usedCouponIds = new Set<string>()
+    // Lookup batch: redemptions históricas (cualquier status) per cupón.
+    // 1 query con todas las rows + agrupación in-memory evita N
+    // round-trips. Para tenants con cientos de cupones puede crecer pero
+    // sigue siendo 1 query — escala razonablemente.
+    const histCounts = new Map<string, number>()
     if (couponsRaw.length > 0) {
       const ids = couponsRaw.map((c) => c.id)
       const { data: redData } = await supabase
@@ -337,15 +347,20 @@ export default async function PromotionsPage() {
         .select('coupon_id')
         .in('coupon_id', ids)
         .eq('tenant_id', tenantId)
-      usedCouponIds = new Set(
-        (redData ?? []).map((r) => r.coupon_id as string),
-      )
+      for (const r of (redData ?? [])) {
+        const cid = r.coupon_id as string
+        histCounts.set(cid, (histCounts.get(cid) ?? 0) + 1)
+      }
     }
 
-    coupons = couponsRaw.map((c) => ({
-      ...c,
-      has_historical_redemptions: usedCouponIds.has(c.id),
-    })) as Coupon[]
+    coupons = couponsRaw.map((c) => {
+      const hist = histCounts.get(c.id) ?? 0
+      return {
+        ...c,
+        has_historical_redemptions: hist > 0,
+        total_historical_redemptions: hist,
+      }
+    }) as Coupon[]
   }
 
   const activeCount = coupons.filter(c => c.is_active).length

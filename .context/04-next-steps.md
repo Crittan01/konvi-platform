@@ -842,6 +842,26 @@ Pasos cuando se priorice:
    - Retirar fallback legacy `NEXT_PUBLIC_API_URL` del código server-side cuando se cierre refactor de rutas restantes.
    - Mantener una sola vía canónica (`API_URL`) para evitar ambigüedad de configuración.
 
+9. **Tipos de descuento extendidos para cupones (P3 backlog)**
+   - **Motivación 2026-05-07** (consulta founder en sesión I.2.8): los 3
+     tipos actuales (`percent`, `fixed_amount`, `free_shipping`) cubren
+     casos comunes pero no permiten:
+     • `percent_on_total`: % sobre subtotal + envío conjuntamente
+       (caso "10% off de la compra completa").
+     • `percent_on_shipping`: % sobre solo el envío (ej. 50% del
+       transporte).
+     • Combos (productos + envío gratis simultáneos) — bloqueado por
+       ADR-0015 D3 (no combinables P1).
+   - **Decisión actual**: NO implementar hasta tener demanda real
+     comercial (al menos 2-3 tenants pidiendo el caso). Pattern actual
+     alineado con Shopify/WooCommerce (subtotal vs shipping separados)
+     simplifica facturación electrónica DIAN (base gravable IVA clara).
+   - **Trigger de implementación**: feedback de tenants productivos +
+     ADR nuevo extendiendo ADR-0015 con D11+ tipos.
+   - **Implicaciones técnicas**: extender enum `discount_type` en
+     migration, `compute_discount` en `services/api/lib/coupons.py`,
+     UI select + subtítulos explicativos.
+
 8. **Tenant de test dedicado (`tenant-test` / `kaiu-staging`)**
    - **Motivación 2026-05-07**: hoy todos los UATs usan KAIU (tenant productivo).
      Sembrar cupones de prueba (PRUEBA10), conversaciones de UAT, productos
