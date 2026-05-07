@@ -470,3 +470,44 @@ re-probar — restore SQL helper queda listo en `scripts/uat/`.
 | H.4.1 | (pendiente — UAT antes de cerrar) | +26 | +485 | — |
 
 **Total Sem 4 hasta ahora**: 5 items (1 con UAT pendiente) · +71 tests · +2121 LOC · 1 migration nueva.
+
+---
+
+## H.2.2 — Fase A capture endpoint (✅ infra cerrada · ⚠️ descubrimiento empírico bloqueado por Envia sandbox bug)
+
+### Lo que sí funcionó (commits `08ff0a1` + posteriores)
+
+1. **Migration `20260514190000_envia_webhook_capture_log.sql`**: tabla append-only para capturar TODO (raw_body, parsed_body, headers, query_params, secret_match, inferred_type, source_ip).
+2. **Endpoint `/api/v1/webhooks/envia/{tenant_id}/{secret_token}`** (`services/api/routers/envia_webhook.py`): captura defensiva, verifica secret via F.10 `WebhookSecretManager`, responde 200 siempre (Envia espera 2xx <5s).
+3. **Helper `scripts/uat/envia_create_test_shipment.py`**: genera shipment sandbox real con `tracking_number` válido. Cotizó FedEx Bogotá→Medellín ($3.060) y generó label sandbox `794813020143` (id=171494). Persistido en `shipments` row id `1f37f24c-d604-407c-8e11-d01aca7441a0`.
+4. **Helper `scripts/uat/envia_webhook_test_dispatch.py`**: invoca `/ship/webhooktest/` con loop de 5 tipos webhook + carrier autoresolved.
+5. **Hallazgos empíricos críticos** documentados en dossier (L.7c + L.7d):
+   - Envia API rate **espera body camelCase** (`trackingNumber`, `carrier`, `webhookUrl`, `type`), NO snake_case (descubierto por error progresivo `Undefined property: stdClass::$carrier` → `$trackingNumber`).
+   - Para Colombia, `city = postalCode = DANE 8 dígitos` (NO el nombre de la ciudad). Crítico — sin esto error 1220 "Impossible obtain the postal code of the country".
+   - **`/ship/webhooktest/` ROTO en sandbox 2026-05-06**: aún con body válido camelCase, retorna `HTTP 500 Internal Server Error` HTML genérico. NO dispara webhook al URL.
+   - **`/ship/generaltrack/` SÍ funciona**: response shape capturado en `docs/research/empirical-evidence/envia-generaltrack-794813020143.json` (2754 bytes). Schema con `data[].content.{tracking_number, status, status_parent_id}`, `data[].eventHistory[]`, `data[].destination`, `data[].origin`, `data[].packages[]`, `data[].shippedAt`, `data[].deliveredAt`, `data[].signedBy`. Alta probabilidad de coincidir con webhook payload `simpleTracking` / `ecommerceTracking` por shape común tracking-info en Envia.
+
+### Decisión arquitectónica
+
+`/ship/webhooktest/` está bug-prone server-side de Envia. NO depender de él para descubrimiento empírico. Camino alternativo:
+
+1. **Fase A queda con infra capture lista + schema baseline tracking conocido**: el endpoint captura cualquier webhook real que Envia envíe. La infra está probada (migration + endpoint + idempotency F.4 + F.10 secret).
+2. **Schema baseline** documentado en dossier L.7d con evidencia JSON real (`/ship/generaltrack/` response). Suficiente para implementar Fase B con confianza alta.
+3. **Captura empírica de webhooks reales**: ocurrirá naturalmente cuando shipments sandbox/prod cambien de estado (`status_parent_id` avanza), o cuando se onboarde primer tenant piloto en producción y haga shipments reales. El endpoint capture queda persistiendo todo.
+4. **Fase B procesadores**: arrancar con base en (a) schema descubierto `/ship/generaltrack/` + (b) docs Envia oficiales (3 campos garantizados: `carrierName`, `trackingNumber`, `status`) + (c) iteración progresiva conforme webhooks reales lleguen al capture log.
+
+### Limitación documentada al founder
+
+El bloqueo de `/ship/webhooktest/` NO es nuestro problema (provider issue). Cuando Envia arregle el endpoint, basta correr `python3.11 scripts/uat/envia_webhook_test_dispatch.py --tenant-id ... --tracking-number 794813020143 --carrier fedex` y los 5 payloads aterrizan en `envia_webhook_capture_log` automáticamente.
+
+### Estado UAT Fase A
+
+| Pieza | Estado |
+|---|---|
+| Migration capture log | ✅ aplicada |
+| Endpoint capture | ✅ deployed (`api.log` registra `[ENVIA_WH]`) |
+| Helper create_test_shipment | ✅ funcional — genera labels sandbox |
+| Helper webhook_test_dispatch | ✅ funcional — bloqueado por bug provider |
+| Schema baseline tracking | ✅ capturado en `docs/research/empirical-evidence/envia-generaltrack-794813020143.json` |
+| Captura webhook real Envia | ⏸ depende de eventos sandbox naturales o tenant piloto prod |
+
