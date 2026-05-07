@@ -134,6 +134,14 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  // Sem 5 perf (rev. 105 2026-05-07): activa gzip en respuestas Next.
+  // Reduce 3-4x el tamaño de bundles JS (.js dev son 6.5MB sin
+  // comprimir; con gzip ~1.5-2MB). Crítico para devs accediendo via
+  // SSH port-forward a VM remota: sin compress, cada page load
+  // descargaba MB de bundles dev por el túnel.
+  // Producción Render no se afecta (static assets ya van por CDN).
+  compress: true,
+
   images: {
     remotePatterns,
   },
