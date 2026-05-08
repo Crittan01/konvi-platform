@@ -39,7 +39,6 @@ export default async function IntegrationsPage({
     enabled: boolean
     display_label: string | null
     priority: number
-    supports_insurance: boolean
     notes: string | null
   }> = []
   // Sem 5 H.2.6 — capabilities Envia per-tenant (label_generation,
@@ -51,7 +50,7 @@ export default async function IntegrationsPage({
       supabase.from('tenant_integrations').select('provider, status, meta').eq('tenant_id', tenantId),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
       supabase.from('tenant_carriers')
-        .select('carrier_code, enabled, display_label, priority, supports_insurance, notes')
+        .select('carrier_code, enabled, display_label, priority, notes')
         .eq('tenant_id', tenantId)
         .eq('provider', 'envia')
         .order('priority', { ascending: true })
@@ -155,7 +154,6 @@ export default async function IntegrationsPage({
     const enabled = formData.get('enabled') === 'true'
     const priorityRaw = ((formData.get('priority') as string) || '100').trim()
     const priority = Math.max(0, Math.min(999, parseInt(priorityRaw, 10) || 100))
-    const supportsInsurance = formData.get('supports_insurance') === 'true'
     const notes = ((formData.get('notes') as string) || '').trim() || null
     const displayLabel =
       ((formData.get('display_label') as string) || '').trim() || null
@@ -170,7 +168,6 @@ export default async function IntegrationsPage({
           enabled,
           display_label: displayLabel,
           priority,
-          supports_insurance: supportsInsurance,
           notes,
         },
         { onConflict: 'tenant_id,provider,carrier_code' },

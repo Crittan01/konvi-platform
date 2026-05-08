@@ -38,12 +38,15 @@ class EnviaConnect(BaseModel):
 
 
 class EnviaCarrierUpsert(BaseModel):
-    """Sem 5 H.2.7 — preferencias de carriers per-tenant."""
+    """Sem 5 H.2.7 — preferencias de carriers per-tenant.
+
+    Nota rev. 2026-05-08: `supports_insurance` removido. Insurance es
+    decisión del carrier (no opt-in tenant) — ver `lib/insurance.py`.
+    """
     carrier_code: str = Field(..., min_length=2, max_length=64)
     enabled: bool = Field(default=True)
     display_label: Optional[str] = Field(default=None, max_length=120)
     priority: int = Field(default=100, ge=0, le=999)
-    supports_insurance: bool = Field(default=False)
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -202,7 +205,6 @@ async def list_envia_carriers(
             "enabled": p.enabled,
             "display_label": p.display_label,
             "priority": p.priority,
-            "supports_insurance": p.supports_insurance,
             "notes": p.notes,
         }
         for p in prefs
@@ -235,7 +237,6 @@ async def upsert_envia_carrier(
             enabled=body.enabled,
             display_label=body.display_label,
             priority=body.priority,
-            supports_insurance=body.supports_insurance,
             notes=body.notes,
         )
     except ValueError as exc:
@@ -248,7 +249,6 @@ async def upsert_envia_carrier(
         "enabled": pref.enabled,
         "display_label": pref.display_label,
         "priority": pref.priority,
-        "supports_insurance": pref.supports_insurance,
         "notes": pref.notes,
     }
 

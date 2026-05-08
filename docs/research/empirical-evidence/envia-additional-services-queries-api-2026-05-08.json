@@ -1,0 +1,1174 @@
+{
+  "discovered_at": "2026-05-08T01:30:00Z",
+  "method": "GET https://queries-test.envia.com/additional-services",
+  "note": "Catálogo OFICIAL de additional_services. Filtrado category_id=7 (insurance).",
+  "shipment_type_meanings": {
+    "1": "Parcel",
+    "2": "LTL",
+    "3": "FTL"
+  },
+  "insurance_services": [
+    {
+      "id": 14,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Seguro (LTL)",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 52,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Insurance (Carrier)",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 59,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Insurance",
+      "shipment_type_id": 1,
+      "active": 0
+    },
+    {
+      "id": 84,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Seguro (FTL)",
+      "shipment_type_id": 3,
+      "active": 1
+    },
+    {
+      "id": 125,
+      "category_id": 7,
+      "name": "envia_insurance",
+      "description": "Seguro Envía",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 140,
+      "category_id": 7,
+      "name": "insurance_mandatory_by_country",
+      "description": "Seguro obligatorio de acuerdo al país de destino",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 167,
+      "category_id": 7,
+      "name": "cmr_coverage",
+      "description": "CMR Coverage",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 169,
+      "category_id": 7,
+      "name": "high_value_protection",
+      "description": "High Value Protection",
+      "shipment_type_id": 1,
+      "active": 1
+    }
+  ],
+  "all_services": [
+    {
+      "id": 1,
+      "category_id": 1,
+      "name": "original_invoice",
+      "description": "Acuse de recibo original",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 2,
+      "category_id": 1,
+      "name": "driver_handle",
+      "description": "Manipulación del operador",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 3,
+      "category_id": 1,
+      "name": "date_out_of_time",
+      "description": "Entrega Fuera de horario",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 4,
+      "category_id": 1,
+      "name": "priority_service",
+      "description": "Servicio prioritario",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 5,
+      "category_id": 1,
+      "name": "hydraulic_lift",
+      "description": "Elevador hidráulico (para recolectar y/o entregar)",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 6,
+      "category_id": 1,
+      "name": "pallet_emplay",
+      "description": "Emplaye de tarima",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 7,
+      "category_id": 1,
+      "name": "delivery_before_evening",
+      "description": "Entregar antes de medio día",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 8,
+      "category_id": 1,
+      "name": "saturday_service",
+      "description": "Servicio Sabatino (recolectar y/o entregar)",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 9,
+      "category_id": 1,
+      "name": "special_handling",
+      "description": "Manejo especial (Campo abierto para indicar cuál)",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 10,
+      "category_id": 1,
+      "name": "hydraulic_skate",
+      "description": "Se requiere Patín o Montacargas",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 11,
+      "category_id": 1,
+      "name": "hazmat",
+      "description": "Producto peligroso",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 12,
+      "category_id": 1,
+      "name": "delivery_appointment",
+      "description": "Agendar entrega",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 13,
+      "category_id": 8,
+      "name": "freezing",
+      "description": "Producto refrigerado",
+      "shipment_type_id": 3,
+      "active": 1
+    },
+    {
+      "id": 14,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Seguro (LTL)",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 15,
+      "category_id": 1,
+      "name": "liftgate_pickup",
+      "description": "Se necesita compuerta elevadora para la recolección",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 16,
+      "category_id": 1,
+      "name": "inside_pickup",
+      "description": "Recolección interna requerida",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 17,
+      "category_id": 1,
+      "name": "arrival_notice",
+      "description": "Llamar/Notificar antes de entregar",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 18,
+      "category_id": 1,
+      "name": "delivery_schedule",
+      "description": "Entrega",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 19,
+      "category_id": 1,
+      "name": "sort_and_segregate",
+      "description": "Clasificar y separar",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 20,
+      "category_id": 1,
+      "name": "protect_from_freezing",
+      "description": "Proteger de la congelación",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 21,
+      "category_id": 1,
+      "name": "import",
+      "description": "Importación",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 22,
+      "category_id": 1,
+      "name": "pickup_schedule",
+      "description": "Recolección",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 23,
+      "category_id": 1,
+      "name": "platform_dock_destination",
+      "description": "Se requiere anden/muelle de carga para el destino",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 24,
+      "category_id": 1,
+      "name": "platform_dock_origin",
+      "description": "Se requiere anden/muelle de carga para el origen",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 25,
+      "category_id": 1,
+      "name": "hydraulic_skate_origin",
+      "description": "Se requiere Patín o Montacargas para el origen",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 26,
+      "category_id": 1,
+      "name": "hydraulic_skate_destination",
+      "description": "Se requiere Patín o Montacargas para el destino",
+      "shipment_type_id": 2,
+      "active": 0
+    },
+    {
+      "id": 27,
+      "category_id": 1,
+      "name": "pickup_appointment",
+      "description": "Agendar recoleccion",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 28,
+      "category_id": 1,
+      "name": "pickup_collection",
+      "description": "Recoleccion ocurre",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 29,
+      "category_id": 1,
+      "name": "delivery_collection",
+      "description": "Entrega ocurre",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 30,
+      "category_id": 8,
+      "name": "dry",
+      "description": "Producto seco",
+      "shipment_type_id": 3,
+      "active": 1
+    },
+    {
+      "id": 31,
+      "category_id": 1,
+      "name": "platform",
+      "description": "Plataforma",
+      "shipment_type_id": 3,
+      "active": 1
+    },
+    {
+      "id": 32,
+      "category_id": 3,
+      "name": "electronic_signature",
+      "description": "Electronic Signature",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 33,
+      "category_id": 1,
+      "name": "photo_dropoff",
+      "description": "Imagen de entrega del producto",
+      "shipment_type_id": 1,
+      "active": 0
+    },
+    {
+      "id": 34,
+      "category_id": 3,
+      "name": "origin_signature_not_required",
+      "description": "Original signature not required",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 35,
+      "category_id": 3,
+      "name": "residential_signature_required",
+      "description": "Residential type signature required",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 36,
+      "category_id": 1,
+      "name": "hold_for_pickup",
+      "description": "Esperar a recoleccion",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 37,
+      "category_id": 3,
+      "name": "adult_signature_required",
+      "description": "Required Adult Firm",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 38,
+      "category_id": 1,
+      "name": "saturday_pickup",
+      "description": "Recolección en Sabado",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 39,
+      "category_id": 12,
+      "name": "saturday_service",
+      "description": "Entrega en Sabado",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 40,
+      "category_id": 3,
+      "name": "chain_of_signature",
+      "description": "Chain of Signature",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 41,
+      "category_id": 1,
+      "name": "special_handling",
+      "description": "Manejo especial",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 42,
+      "category_id": 2,
+      "name": "business_service_center_dropoff",
+      "description": "Entrega en oficina de servicio",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 43,
+      "category_id": 2,
+      "name": "drop_box_dropoff",
+      "description": "Entrega en drop box",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 45,
+      "category_id": 6,
+      "name": "cash_on_delivery",
+      "description": "Pago contra entrega",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 46,
+      "category_id": 4,
+      "name": "hold_at_location",
+      "description": "Hold at Location",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 47,
+      "category_id": 4,
+      "name": "return_clearance",
+      "description": "Returns Clearance",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 48,
+      "category_id": 4,
+      "name": "return_shipment",
+      "description": "Return Shipment",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 49,
+      "category_id": 4,
+      "name": "thirtd_party_consignee",
+      "description": "Third Party Consignee",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 50,
+      "category_id": 4,
+      "name": "broker_select_option",
+      "description": "Broker Select Option",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 51,
+      "category_id": 4,
+      "name": "event_notification",
+      "description": "Event Notification",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 52,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Insurance (Carrier)",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 53,
+      "category_id": 16,
+      "name": "international_broker_select",
+      "description": "International Broker Select",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 54,
+      "category_id": 3,
+      "name": "no_signature_required",
+      "description": "No Signature Required",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 55,
+      "category_id": 3,
+      "name": "indirect_signature_required",
+      "description": "Indirect Signature Required",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 56,
+      "category_id": 3,
+      "name": "restricted_signature_sequired",
+      "description": "Restricted Signature Required",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 57,
+      "category_id": 15,
+      "name": "priority_alert",
+      "description": "Priority Alert Options",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 58,
+      "category_id": 3,
+      "name": "direct_signature",
+      "description": "Person Signature",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 59,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Insurance",
+      "shipment_type_id": 1,
+      "active": 0
+    },
+    {
+      "id": 60,
+      "category_id": 9,
+      "name": "liftgate_delivery",
+      "description": "Se necesita compuerta elevadora para la entrega",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 61,
+      "category_id": 12,
+      "name": "delivery_residential_zone",
+      "description": "Delivery Residential Zone",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 62,
+      "category_id": 11,
+      "name": "pickup_residential_zone",
+      "description": "Pickup Residential Zone",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 63,
+      "category_id": 10,
+      "name": "liftgate_pickup",
+      "description": "Se necesita compuerta elevadora para la recolección",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 64,
+      "category_id": 14,
+      "name": "proff_age_18",
+      "description": "Proof of Age Required 18",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 65,
+      "category_id": 14,
+      "name": "proff_age_19",
+      "description": "Proof of Age Required 19",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 66,
+      "category_id": 13,
+      "name": "return_at_senders_expense",
+      "description": "Return at Sender’s Expense",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 67,
+      "category_id": 13,
+      "name": "return_to_sender",
+      "description": "Return to Sender",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 68,
+      "category_id": 13,
+      "name": "abandon",
+      "description": "Abandon",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 69,
+      "category_id": 1,
+      "name": "handling",
+      "description": "Handling",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 70,
+      "category_id": 1,
+      "name": "additional_handling",
+      "description": "Additional handling",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 71,
+      "category_id": 1,
+      "name": "fuel",
+      "description": "Fuel surcharge",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 72,
+      "category_id": 17,
+      "name": "ship_alert",
+      "description": "Alerta de Envio",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 73,
+      "category_id": 18,
+      "name": "third_party_consigne",
+      "description": "Consignatario Tercero",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 74,
+      "category_id": 19,
+      "name": "dangerous_good",
+      "description": "Dangerous Goods - Inaccessible",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 75,
+      "category_id": 19,
+      "name": "dangerous_good",
+      "description": "Dangerous Goods - Accessible",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 76,
+      "category_id": 20,
+      "name": "saturday_pickup",
+      "description": "Saturday Pickup",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 77,
+      "category_id": 21,
+      "name": "future_day_shipping",
+      "description": "Future Day Shipping",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 78,
+      "category_id": 6,
+      "name": "saturdary_delivery",
+      "description": "Entrega en Sabado",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 79,
+      "category_id": 22,
+      "name": "electronic_trade_document",
+      "description": "Electronic Trade Document",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 80,
+      "category_id": 23,
+      "name": "international_controlled_export",
+      "description": "International Controlled Export",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 81,
+      "category_id": 1,
+      "name": "single_shipment",
+      "description": "Single Shipment",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 84,
+      "category_id": 7,
+      "name": "insurance",
+      "description": "Seguro (FTL)",
+      "shipment_type_id": 3,
+      "active": 1
+    },
+    {
+      "id": 85,
+      "category_id": 1,
+      "name": "tip",
+      "description": "Uber Tip",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 88,
+      "category_id": 1,
+      "name": "green_tax",
+      "description": "Green Tax",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 89,
+      "category_id": 1,
+      "name": "docket_fee",
+      "description": "Docket fee",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 90,
+      "category_id": 1,
+      "name": "renewable_energy",
+      "description": "Renewable Energy",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 91,
+      "category_id": 1,
+      "name": "oda",
+      "description": "Out of delivery area",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 92,
+      "category_id": 6,
+      "name": "cash_on_delivery",
+      "description": "Pago contra entrega",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 94,
+      "category_id": 1,
+      "name": "eq_rampa",
+      "description": "Rampa",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 95,
+      "category_id": 1,
+      "name": "eq_patin",
+      "description": "Patin",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 96,
+      "category_id": 1,
+      "name": "eq_casco ",
+      "description": "Casco",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 97,
+      "category_id": 1,
+      "name": "eq_chaleco",
+      "description": "Chaleco",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 98,
+      "category_id": 1,
+      "name": "eq_careta",
+      "description": "Careta",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 99,
+      "category_id": 1,
+      "name": "eq_confia",
+      "description": "Confia",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 100,
+      "category_id": 1,
+      "name": "eq_manga_larga",
+      "description": "Manga larga",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 101,
+      "category_id": 1,
+      "name": "eq_cubrebocas",
+      "description": "Cubrebocas",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 102,
+      "category_id": 1,
+      "name": "eq_sua",
+      "description": "Sua impreso",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 103,
+      "category_id": 1,
+      "name": "eq_seguro",
+      "description": "Seguro vigente impreso",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 104,
+      "category_id": 1,
+      "name": "eq_certificado",
+      "description": "Certificado de vacunacion",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 105,
+      "category_id": 4,
+      "name": "big_format",
+      "description": "Big Format",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 106,
+      "category_id": 1,
+      "name": "acknowledgment_receipt",
+      "description": "Acknowledgment Receipt",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 107,
+      "category_id": 1,
+      "name": "security_charge",
+      "description": "Security Fee",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 111,
+      "category_id": 1,
+      "name": "freight_on_value",
+      "description": "Cargo de flete",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 112,
+      "category_id": 1,
+      "name": "freight_on_value",
+      "description": "Cargo de flete",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 113,
+      "category_id": 1,
+      "name": "bulky_shipping",
+      "description": "Envio voluminoso",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 114,
+      "category_id": 1,
+      "name": "higher_dimensions",
+      "description": "Dimensiones superiores",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 125,
+      "category_id": 7,
+      "name": "envia_insurance",
+      "description": "Seguro Envía",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 127,
+      "category_id": 1,
+      "name": "minimum_dimensions",
+      "description": "Dimensiones minimas no superadas",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 130,
+      "category_id": 1,
+      "name": "state_charge",
+      "description": "State Charge",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 131,
+      "category_id": 1,
+      "name": "additional_handling",
+      "description": "Additional handling (LTL)",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 132,
+      "category_id": 1,
+      "name": "green_tax",
+      "description": "Green Tax",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 138,
+      "category_id": 1,
+      "name": "california_compliance",
+      "description": "California Compliance",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 140,
+      "category_id": 7,
+      "name": "insurance_mandatory_by_country",
+      "description": "Seguro obligatorio de acuerdo al país de destino",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 142,
+      "category_id": 1,
+      "name": "reverse_pickup",
+      "description": "Reverse pickup",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 144,
+      "category_id": 1,
+      "name": "oda",
+      "description": "Out of delivery area",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 145,
+      "category_id": 1,
+      "name": "security_charge",
+      "description": "Security Fee LTL",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 147,
+      "category_id": 25,
+      "name": "exceeded_dimensions",
+      "description": "Dimensiones excedidas",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 148,
+      "category_id": 25,
+      "name": "handling_at_pickup",
+      "description": "Maniobras en recolección",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 149,
+      "category_id": 25,
+      "name": "handling_at_delivery",
+      "description": "Maniobras en destino",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 150,
+      "category_id": 25,
+      "name": "failed_pickup_attempt",
+      "description": "Vuelta en falso en recolección",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 151,
+      "category_id": 25,
+      "name": "failed_delivery_attempt",
+      "description": "Vuelta en falso en entrega",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 152,
+      "category_id": 25,
+      "name": "delay_at_pickup",
+      "description": "Demora en recolección",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 153,
+      "category_id": 25,
+      "name": "delay_at_delivery",
+      "description": "Demora en entrega",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 154,
+      "category_id": 25,
+      "name": "detailed_delivery",
+      "description": "Entrega a detalle",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 155,
+      "category_id": 25,
+      "name": "detailed_pickup",
+      "description": "Recolección a detalle",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 156,
+      "category_id": 1,
+      "name": "cert_fumigacion",
+      "description": "Certificado Fumigacion",
+      "shipment_type_id": 3,
+      "active": 1
+    },
+    {
+      "id": 157,
+      "category_id": 1,
+      "name": "customs_duties",
+      "description": "Customs Duties",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 158,
+      "category_id": 1,
+      "name": "customs_fees",
+      "description": "Customs Fees",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 159,
+      "category_id": 1,
+      "name": "customs_taxes",
+      "description": "Customs Taxes",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 161,
+      "category_id": 1,
+      "name": "dua",
+      "description": "Documento Único Administrativo",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 162,
+      "category_id": 1,
+      "name": "fuel",
+      "description": "Fuel surcharge",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 163,
+      "category_id": 12,
+      "name": "delivery_residential_zone",
+      "description": "Delivery Residential Zone",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 166,
+      "category_id": 1,
+      "name": "california_capacity",
+      "description": "California Capacity",
+      "shipment_type_id": 2,
+      "active": 1
+    },
+    {
+      "id": 167,
+      "category_id": 7,
+      "name": "cmr_coverage",
+      "description": "CMR Coverage",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 168,
+      "category_id": 1,
+      "name": "exchange_surcharge",
+      "description": "Exchange surcharge",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 169,
+      "category_id": 7,
+      "name": "high_value_protection",
+      "description": "High Value Protection",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 170,
+      "category_id": 1,
+      "name": "non_machinable",
+      "description": "Non machinable",
+      "shipment_type_id": 1,
+      "active": 1
+    },
+    {
+      "id": 171,
+      "category_id": 1,
+      "name": "direct_delivery_only",
+      "description": "Solo entrega directa",
+      "shipment_type_id": 1,
+      "active": 1
+    }
+  ]
+}

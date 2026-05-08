@@ -21,7 +21,6 @@ export type EnviaCarrierPref = {
   enabled: boolean
   display_label: string | null
   priority: number
-  supports_insurance: boolean
   notes: string | null
 }
 
@@ -874,8 +873,11 @@ export function IntegrationsManager(props: Props) {
 
 // ─── Sem 5 H.2.7 — Envia Carriers Section ──────────────────────────────────
 // Tabla de preferencias per-carrier per-tenant. Owner/manager activan
-// los carriers que el tenant quiere ofrecer, definen prioridad, y
-// flag supports_insurance (H.2.5 declaredValue per-carrier).
+// los carriers que el tenant quiere ofrecer, definen prioridad.
+//
+// Nota rev. 2026-05-08: el toggle "Seguro" per-carrier fue removido —
+// declaredValue se envía siempre y el carrier aplica su política interna
+// (ver services/api/lib/insurance.py + dossier sec. 2.5).
 //
 // Comportamiento "default open": si el tenant NO tiene NINGUNA fila,
 // el sistema ofrece TODOS los carriers globales (backward compat).
@@ -923,34 +925,12 @@ function EnviaCarriersSection({
     const targetEnabled = current ? !current.enabled : true
     fd.set('enabled', String(targetEnabled))
     fd.set('priority', String(current?.priority ?? 100))
-    fd.set('supports_insurance', String(current?.supports_insurance ?? false))
     if (current?.display_label) fd.set('display_label', current.display_label)
     if (current?.notes) fd.set('notes', current.notes)
     const res = await upsertAction(fd)
     setPending(null)
     if (!res.ok) { setErrorMsg(res.error ?? 'Error desconocido'); return }
     setSuccessMsg(`${code} ${targetEnabled ? 'activado' : 'desactivado'}.`)
-    router.refresh()
-  }
-
-  const handleSetCapability = async (
-    code: string, capability: 'supports_insurance',
-    next: boolean,
-  ) => {
-    setPending(code + ':' + capability); setErrorMsg(null); setSuccessMsg(null)
-    const current = prefByCode.get(code.toLowerCase())
-    const fd = new FormData()
-    fd.set('carrier_code', code)
-    fd.set('enabled', String(current?.enabled ?? true))
-    fd.set('priority', String(current?.priority ?? 100))
-    fd.set('supports_insurance', String(
-      capability === 'supports_insurance' ? next : (current?.supports_insurance ?? false)
-    ))
-    if (current?.display_label) fd.set('display_label', current.display_label)
-    if (current?.notes) fd.set('notes', current.notes)
-    const res = await upsertAction(fd)
-    setPending(null)
-    if (!res.ok) { setErrorMsg(res.error ?? 'Error'); return }
     router.refresh()
   }
 
@@ -1011,17 +991,40 @@ function EnviaCarriersSection({
               SOLO los que tengan toggle ON. Los que están en OFF nunca
               aparecen al cliente.
             </li>
-            <li>
-              <b>Seguro</b> (✓ Coordinadora obligatorio): si el carrier
-              soporta declaredValue, marca el checkbox para que tus envíos
-              vayan asegurados con el valor de la compra del cliente.
-            </li>
           </ul>
           <p className="text-blue-900/80">
             <b>Tip:</b> activa solo los carriers con los que tienes contrato
             real con Envía — los demás causarán errores en cotización si los
             dejas abiertos.
           </p>
+        </div>
+        {/* Panel "Cómo funciona el seguro" — basado en docs Envia + empírico prod */}
+        <div className="mb-3 rounded-md border border-emerald-700/30 bg-emerald-700/5 p-3 text-xs text-emerald-900 space-y-1.5">
+          <div className="font-semibold flex items-center gap-1">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            ¿Cómo funciona el seguro de los envíos?
+          </div>
+          <p>
+            El <b>valor declarado</b> (subtotal del pedido) se envía siempre
+            con cada cotización. Cada transportadora aplica su política de
+            seguro automáticamente sobre ese valor — <b>NO es decisión tuya
+            por carrier</b>:
+          </p>
+          <ul className="list-disc pl-4 space-y-0.5">
+            <li>
+              <b>Coordinadora</b>: cobra prima automática proporcional al valor
+              declarado (validado prod 2026-05-07).
+            </li>
+            <li>
+              <b>FedEx, DHL, Servientrega, TCC</b>: aceptan el valor declarado;
+              su seguro queda regulado por su contrato con Envía.
+            </li>
+            <li>
+              <b>Envía (carrier propio)</b>: además del valor declarado, recibe
+              el additional service <code className="text-[10px]">envia_insurance</code>
+              ({' '}id=125 en catálogo oficial Envia).
+            </li>
+          </ul>
         </div>
         {!hasAnyPrefs && (
           <div className="mb-3 rounded-md border border-amber-700/40 bg-amber-700/5 px-3 py-2 text-xs text-amber-900">
@@ -1049,9 +1052,6 @@ function EnviaCarriersSection({
               <tr className="text-left">
                 <th className="px-3 py-2 font-medium">Carrier</th>
                 <th className="px-3 py-2 font-medium text-center">Activo</th>
-                <th className="px-3 py-2 font-medium text-center" title="Insurance / declaredValue (H.2.5)">
-                  Seguro
-                </th>
                 <th className="px-3 py-2 font-medium text-right">Acciones</th>
               </tr>
             </thead>
@@ -1061,7 +1061,6 @@ function EnviaCarriersSection({
                 const enabled = pref ? pref.enabled : !hasAnyPrefs
                   // Si no hay prefs, default-open lo presenta como enabled
                   // Si hay prefs y este carrier no tiene fila, NO está enabled
-                const ins = pref?.supports_insurance ?? false
                 const isPending = pending === c.code
                 return (
                   <tr key={c.code} className={enabled ? '' : 'opacity-60'}>
@@ -1086,16 +1085,6 @@ function EnviaCarriersSection({
                       >
                         {enabled ? 'ON' : 'OFF'}
                       </button>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={ins}
-                        disabled={!pref || pending !== null}
-                        onChange={(e) => handleSetCapability(c.code, 'supports_insurance', e.target.checked)}
-                        title={pref ? 'Marca si declaras valor (Coordinadora lo exige)' : 'Activa el carrier primero'}
-                        className="h-4 w-4 cursor-pointer"
-                      />
                     </td>
                     <td className="px-3 py-2 text-right">
                       {pref && (

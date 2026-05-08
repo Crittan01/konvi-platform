@@ -51,18 +51,28 @@ La página `/docs/sandbox-vs-production` retorna **404**, pero los hechos difere
 - **Implicación arquitectónica**: el patrón "cart-as-SoT con recotización lazy" del repo (ADR-0011 §6.4.1) **es exigido por la propia limitación de Envia**, no es over-engineering.
 
 ### 2.5 Additional services documentados
-([additional-services](https://docs.envia.com/docs/additional-services))
+([additional-services](https://docs.envia.com/docs/additional-services) +
+fuente canónica `GET https://queries-test.envia.com/additional-services` —
+snapshot persistido en `docs/research/empirical-evidence/envia-additional-services-queries-api-2026-05-08.json`)
 
-| Identifier | Parámetro requerido | Aplica a | Notas |
-|---|---|---|---|
-| `envia_insurance` | `amount` (declared value) | Parcel, LTL | Cobertura por Envia |
-| (carrier_insurance) | — | Parcel, LTL, FTL | Cobertura por términos del carrier; **identifier no documentado** |
-| `cash_on_delivery` | `amount` | Parcel | "Integrated with Ecart Pay for automated payment reconciliation"; rate response devuelve `cashOnDeliveryCommission` y `cashOnDeliveryAmount` |
-| `electronic_signature` | — | Parcel | Firma digital legal |
-| (pickup_point_delivery) | — | Parcel | identifier no documentado |
-| (delivery_appointment) | — | LTL, FTL | identifier no documentado |
-| (hydraulic_ramp) | — | LTL | identifier no documentado |
-| (dedicated_service) | — | FTL | identifier no documentado |
+**Corrección importante 2026-05-08**: la fila histórica "(carrier_insurance) — identifier no documentado" estaba equivocada. El catálogo oficial del Queries API no expone ese nombre — el identifier real para "Insurance (Carrier)" es simplemente **`insurance`** (id=52). Tabla actualizada:
+
+| Identifier | id | Parámetro requerido | Aplica a | Notas |
+|---|---|---|---|---|
+| `envia_insurance` | 125 | `declaredValue` per package | Parcel | Descripción oficial: "Seguro Envía". **Sólo aplicable a `carrier="envia"` (carrier propio)** — Coordinadora rompe con Bad Gateway al recibir este servicio (validado empíricamente prod 2026-05-07, ver `docs/research/empirical-evidence/envia-insurance-carriers-CO-2026-05-07-PROD.json`). |
+| `insurance` | 52 | `declaredValue` per package | Parcel | Descripción oficial: "Insurance (Carrier)". Cobertura por términos del carrier. |
+| `insurance` | 14 | `declaredValue` | LTL | "Seguro (LTL)" |
+| `insurance` | 84 | `declaredValue` | FTL | "Seguro (FTL)" |
+| `insurance_mandatory_by_country` | 140 | `declaredValue` | Parcel | Seguro obligatorio por país destino |
+| `high_value_protection` | 169 | `declaredValue` | Parcel | Coordinadora aplica prima automática equivalente sobre `declaredValue` sin additional_service explícito (empírico: $50k→$17.270 vs $3M→$18.850, Δ +$1.580). |
+| `cash_on_delivery` | 45/92 | `amount` | Parcel/LTL | "Integrated with Ecart Pay" |
+| `electronic_signature` | 32 | — | Parcel | Firma digital legal |
+
+**Decisión arquitectónica derivada (rev. 2026-05-08)**:
+- `declaredValue` se envía SIEMPRE en cada package (campo de paquete, no additional_service).
+- `additional_services: ["envia_insurance"]` se agrega ÚNICAMENTE cuando `carrier == "envia"` (carrier propio).
+- Carriers como Coordinadora aplican su seguro internamente sobre `declaredValue` sin requerir additional_service.
+- El claim previo "G.P1.2 — Insurance enforcement: cuando carrier=coordinadora, forzar envia_insurance" queda **invalidado por evidencia empírica + docs oficiales**.
 
 ---
 
@@ -99,7 +109,7 @@ Limitaciones **citadas textualmente desde docs públicos**:
 | L.7e | **PAYLOAD WEBHOOK CANÓNICO DESCUBIERTO 2026-05-07** (evidencia empírica en `docs/research/empirical-evidence/envia-webhook-payload-2026-05-06.json`): los 5 tipos webhook registrados en panel (onShipmentStatusUpdate, statusUpdateWithEcommerceInfo, simpleTracking, ecommerceTracking, surcharge) **comparten el mismo shape mínimo** cuando el endpoint `/ship/webhooktest/` despacha al URL registrado: `{"carrier": "fedex", "tracking_number": "794813020143", "shipment_status": "Created"}` (snake_case, 3 campos). User-Agent oficial: `Envia-Carriers`. Source IP estable: `3.211.106.119` (AWS Envia). Implicaciones cruciales: (a) NO se pueden distinguir tipos de webhook por payload — la diferenciación se hace por URL registrada en panel per `type_id`; (b) el body de `/ship/webhooktest/` exige camelCase pero el payload entregado al URL final es snake_case (asimétrico); (c) el endpoint `/ship/webhooktest/` retorna HTTP 500 HTML genérico al caller PERO sí dispara el webhook async en background al URL registrado — el 500 al caller NO indica fallo del webhook real |
 | L.8 | **Cobertura per-carrier dispersa**: la matriz de capabilities (¿qué carrier soporta `cash_on_delivery`? ¿`envia_insurance`?) NO existe en docs como tabla. Hay que combinar [supported-carriers](https://docs.envia.com/docs/supported-carriers) con [Queries API](https://docs.envia.com/docs/queries-api-overview) en runtime |
 | L.9 | **Sin SLA documentado**: ni latencia, ni uptime, ni RTO/RPO formales en docs |
-| L.10 | **Identifiers de servicios incompletos**: `carrier_insurance`, `pickup_point_delivery`, `delivery_appointment`, `hydraulic_ramp`, `dedicated_service` **no exponen identifier en docs** ([additional-services](https://docs.envia.com/docs/additional-services)) |
+| L.10 | **Identifiers de servicios incompletos en docs HTML** (corregido vía Queries API 2026-05-08): el catálogo OFICIAL está en `GET https://queries-test.envia.com/additional-services`. Hallazgo crítico: el identifier `carrier_insurance` **no existe** — el real es `insurance` (id=52, descripción "Insurance (Carrier)"). Otros identifiers como `pickup_point_delivery`, `dedicated_service` siguen sin aparecer en el catálogo oficial. |
 | L.11 | **Webhook secret rotable: no soportado**: el body de creación documentado en [webhooks](https://docs.envia.com/docs/webhooks) sólo tiene `type_id`, `url`, `active`. **No hay campo `secret`/`token`** |
 | L.12 | **Códigos HTTP retornables**: `400, 401, 422, 429, 500, 502, 503` ([error-codes](https://docs.envia.com/docs/error-codes)) + el caso especial 200+`meta:error` |
 

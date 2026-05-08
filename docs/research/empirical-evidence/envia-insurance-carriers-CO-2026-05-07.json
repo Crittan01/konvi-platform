@@ -1,0 +1,222 @@
+{
+  "discovered_at": "2026-05-08T00:13:45.125550+00:00",
+  "method": "POST /ship/rate/ con 3 escenarios (baseline_low, with_insurance, baseline_high) per carrier",
+  "tenant_id": "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9",
+  "endpoint": "https://api-test.envia.com",
+  "package_base": {
+    "weight": 1.0,
+    "dimensions": {
+      "length": 20,
+      "width": 15,
+      "height": 10
+    },
+    "content": "insurance test",
+    "amount": 1,
+    "type": "box",
+    "lengthUnit": "CM",
+    "weightUnit": "KG"
+  },
+  "origin_city": "11001000",
+  "destination_city": "05001000",
+  "results": [
+    {
+      "carrier": "servientrega",
+      "category": "supported",
+      "baseline_low_50k": {
+        "ok": true,
+        "totalPrice": 16200,
+        "service": "premier",
+        "additional_services": null
+      },
+      "with_insurance_100k": {
+        "ok": true,
+        "totalPrice": 16200,
+        "service": "premier",
+        "additional_services": null
+      },
+      "baseline_high_3M": {
+        "ok": true,
+        "totalPrice": 16200,
+        "service": "premier",
+        "additional_services": null
+      }
+    },
+    {
+      "carrier": "coordinadora",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Service Unavailable"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Service Unavailable"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Service Unavailable"
+      }
+    },
+    {
+      "carrier": "interRapidisimo",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": 1126,
+        "error_msg": "Unknown error in InterRapidisimo"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": 1126,
+        "error_msg": "Unknown error in InterRapidisimo"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": 1126,
+        "error_msg": "Unknown error in InterRapidisimo"
+      }
+    },
+    {
+      "carrier": "envia",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": 1125,
+        "error_msg": "Service provided not available or incorrect"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": 1125,
+        "error_msg": "Service provided not available or incorrect"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": 1125,
+        "error_msg": "Service provided not available or incorrect"
+      }
+    },
+    {
+      "carrier": "tcc",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Bad Gateway"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Bad Gateway"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Bad Gateway"
+      }
+    },
+    {
+      "carrier": "deprisa",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": "timeout",
+        "error_msg": "request timed out"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": "timeout",
+        "error_msg": "request timed out"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": "timeout",
+        "error_msg": "request timed out"
+      }
+    },
+    {
+      "carrier": "mensajerosUrbanos",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": 1146,
+        "error_msg": "There is no coverage in the requested city"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": 1146,
+        "error_msg": "There is no coverage in the requested city"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": 1146,
+        "error_msg": "There is no coverage in the requested city"
+      }
+    },
+    {
+      "carrier": "noventa9Minutos",
+      "category": "not_supported",
+      "baseline_low_50k": {
+        "ok": false,
+        "error_code": 1125,
+        "error_msg": "Service provided not available or incorrect"
+      },
+      "with_insurance_100k": {
+        "ok": false,
+        "error_code": 1125,
+        "error_msg": "Service provided not available or incorrect"
+      },
+      "baseline_high_3M": {
+        "ok": false,
+        "error_code": 1125,
+        "error_msg": "Service provided not available or incorrect"
+      }
+    },
+    {
+      "carrier": "fedex",
+      "category": "supported",
+      "baseline_low_50k": {
+        "ok": true,
+        "totalPrice": 3060,
+        "service": "ground",
+        "additional_services": null
+      },
+      "with_insurance_100k": {
+        "ok": true,
+        "totalPrice": 3060,
+        "service": "ground",
+        "additional_services": null
+      },
+      "baseline_high_3M": {
+        "ok": true,
+        "totalPrice": 3060,
+        "service": "ground",
+        "additional_services": null
+      }
+    },
+    {
+      "carrier": "dhl",
+      "category": "supported",
+      "baseline_low_50k": {
+        "ok": true,
+        "totalPrice": 33740,
+        "service": "ground",
+        "additional_services": null
+      },
+      "with_insurance_100k": {
+        "ok": true,
+        "totalPrice": 33740,
+        "service": "ground",
+        "additional_services": null
+      },
+      "baseline_high_3M": {
+        "ok": true,
+        "totalPrice": 33740,
+        "service": "ground",
+        "additional_services": null
+      }
+    }
+  ]
+}
