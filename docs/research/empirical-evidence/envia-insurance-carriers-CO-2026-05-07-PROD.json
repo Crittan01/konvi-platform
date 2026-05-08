@@ -1,0 +1,157 @@
+{
+  "discovered_at": "2026-05-08T01:24:01.973340+00:00",
+  "method": "POST /ship/rate/ PRODUCCIÓN — escenarios baseline/insurance/high_value",
+  "endpoint": "https://api.envia.com",
+  "carriers_tested": [
+    "coordinadora",
+    "interRapidisimo",
+    "envia",
+    "tcc",
+    "deprisa"
+  ],
+  "routes_tried": [
+    "BOG→MDE",
+    "BOG→BOG",
+    "BOG→CLO"
+  ],
+  "results": [
+    {
+      "carrier": "coordinadora",
+      "category": "supported",
+      "working_route": "BOG→MDE",
+      "baseline_low_50k": {
+        "ok": true,
+        "totalPrice": 17270,
+        "service": "ecommerce"
+      },
+      "with_insurance_100k": {
+        "ok": true,
+        "totalPrice": 17270,
+        "service": "ecommerce"
+      },
+      "baseline_high_3M": {
+        "ok": true,
+        "totalPrice": 18850,
+        "service": "ground"
+      },
+      "high_with_insurance_3M": {
+        "ok": false,
+        "error_code": 1300,
+        "error_msg": "Error: Bad Gateway"
+      },
+      "price_premium_for_insurance": 0
+    },
+    {
+      "carrier": "interRapidisimo",
+      "category": "supported",
+      "working_route": "BOG→MDE",
+      "baseline_low_50k": {
+        "ok": true,
+        "totalPrice": 16470,
+        "service": "ground_small"
+      },
+      "with_insurance_100k": {
+        "ok": true,
+        "totalPrice": 16470,
+        "service": "ground_small"
+      },
+      "baseline_high_3M": {
+        "ok": true,
+        "totalPrice": 16470,
+        "service": "ground_small"
+      },
+      "high_with_insurance_3M": {
+        "ok": true,
+        "totalPrice": 16470,
+        "service": "ground_small"
+      },
+      "price_premium_for_insurance": 0
+    },
+    {
+      "carrier": "envia",
+      "category": "not_certifiable_in_prod",
+      "route_attempts": [
+        {
+          "route": "BOG→MDE",
+          "result": {
+            "ok": false,
+            "error_code": 1125,
+            "error_msg": "Service provided not available or incorrect"
+          }
+        },
+        {
+          "route": "BOG→BOG",
+          "result": {
+            "ok": false,
+            "error_code": 1125,
+            "error_msg": "Service provided not available or incorrect"
+          }
+        },
+        {
+          "route": "BOG→CLO",
+          "result": {
+            "ok": false,
+            "error_code": 1125,
+            "error_msg": "Service provided not available or incorrect"
+          }
+        }
+      ]
+    },
+    {
+      "carrier": "tcc",
+      "category": "supported",
+      "working_route": "BOG→MDE",
+      "baseline_low_50k": {
+        "ok": true,
+        "totalPrice": 16510,
+        "service": "mensajeria"
+      },
+      "with_insurance_100k": {
+        "ok": true,
+        "totalPrice": 16510,
+        "service": "mensajeria"
+      },
+      "baseline_high_3M": {
+        "ok": true,
+        "totalPrice": 16510,
+        "service": "mensajeria"
+      },
+      "high_with_insurance_3M": {
+        "ok": true,
+        "totalPrice": 16510,
+        "service": "mensajeria"
+      },
+      "price_premium_for_insurance": 0
+    },
+    {
+      "carrier": "deprisa",
+      "category": "not_certifiable_in_prod",
+      "route_attempts": [
+        {
+          "route": "BOG→MDE",
+          "result": {
+            "ok": false,
+            "error_code": "timeout",
+            "error_msg": "timed out"
+          }
+        },
+        {
+          "route": "BOG→BOG",
+          "result": {
+            "ok": false,
+            "error_code": "timeout",
+            "error_msg": "timed out"
+          }
+        },
+        {
+          "route": "BOG→CLO",
+          "result": {
+            "ok": false,
+            "error_code": "timeout",
+            "error_msg": "timed out"
+          }
+        }
+      ]
+    }
+  ]
+}

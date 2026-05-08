@@ -34,12 +34,16 @@ VALID_PROVIDERS = frozenset({"envia"})
 
 @dataclass(frozen=True)
 class CarrierPreference:
-    """Snapshot de una fila tenant_carriers."""
+    """Snapshot de una fila tenant_carriers.
+
+    Nota rev. 2026-05-08: `supports_insurance` removido (col dropeada).
+    Insurance es decisión del carrier (no opt-in del tenant) — ver
+    `services/api/lib/insurance.py:apply_insurance_to_packages`.
+    """
     carrier_code: str
     enabled: bool
     display_label: Optional[str]
     priority: int
-    supports_insurance: bool
     notes: Optional[str]
 
 
@@ -65,10 +69,7 @@ def list_preferences(
     p = _validate_provider(provider)
     res = (
         supabase_client.table("tenant_carriers")
-        .select(
-            "carrier_code, enabled, display_label, priority, "
-            "supports_insurance, notes"
-        )
+        .select("carrier_code, enabled, display_label, priority, notes")
         .eq("tenant_id", tenant_id)
         .eq("provider", p)
         .order("priority", desc=False)
@@ -82,7 +83,6 @@ def list_preferences(
             enabled=bool(r.get("enabled", False)),
             display_label=r.get("display_label"),
             priority=int(r.get("priority") or 100),
-            supports_insurance=bool(r.get("supports_insurance", False)),
             notes=r.get("notes"),
         )
         for r in rows
@@ -143,7 +143,6 @@ def upsert_preference(
     enabled: bool = True,
     display_label: Optional[str] = None,
     priority: int = 100,
-    supports_insurance: bool = False,
     notes: Optional[str] = None,
 ) -> CarrierPreference:
     """Upsert (idempotente vía UNIQUE constraint). Usado por endpoint
@@ -160,7 +159,6 @@ def upsert_preference(
         "enabled": enabled,
         "display_label": display_label,
         "priority": int(priority),
-        "supports_insurance": bool(supports_insurance),
         "notes": notes,
     }
     res = (
@@ -177,6 +175,5 @@ def upsert_preference(
         enabled=bool(r.get("enabled", False)),
         display_label=r.get("display_label"),
         priority=int(r.get("priority") or 100),
-        supports_insurance=bool(r.get("supports_insurance", False)),
         notes=r.get("notes"),
     )

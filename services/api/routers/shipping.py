@@ -236,17 +236,17 @@ class Parcel(BaseModel):
     insuranceAmount: float = Field(default=0, ge=0)
     content: str = Field(default="Mercancía general", max_length=180)
     amount: int = Field(default=1, ge=1)
-    # Sem 5 H.2.5 — declaredValue per parcel para insurance.
-    # Si el caller (orchestrator/cart_tool) lo provee con valor real
-    # del cart subtotal, y el carrier elegido tiene supports_insurance
-    # en tenant_carriers, el helper agrega additional_services:
-    # ['envia_insurance'] al payload de Envia.
-    # Coordinadora EXIGE este flag siempre per dossier sec. 4.
+    # Sem 5 H.2.5 v2 (2026-05-08) — declaredValue per parcel.
+    # Se envía SIEMPRE en el payload Envia. Carriers como Coordinadora,
+    # FedEx, DHL aplican su política interna de seguro automáticamente
+    # sobre este valor. Solo el carrier propio "envia" recibe además
+    # `additional_services:["envia_insurance"]` (id=125 en Queries API).
+    # Evidencia: docs/research/empirical-evidence/envia-insurance-carriers-CO-2026-05-07-PROD.json
     declaredValueCop: Optional[int] = Field(
         default=None,
         ge=0,
-        description="Valor declarado en pesos COP (NO cents). Si NULL, "
-                    "no se aplica insurance independiente del carrier.",
+        description="Valor declarado en pesos COP (NO cents). Si NULL o 0, "
+                    "no se reparte declaredValue al payload.",
     )
 
 
@@ -319,7 +319,8 @@ def _require_envia_capability(
       - 'tracking_polling' — POST /shipping/tracking
       - 'pickup'           — POST /shipments/{id}/schedule-pickup
       - 'cancel'           — POST /shipments/{id}/cancel
-      - 'insurance'        — H.2.5 declaredValue per-carrier
+      (Nota: `insurance` removido 2026-05-08 — declaredValue se envía
+       siempre, decisión per-carrier, no opt-in tenant.)
 
     Backward compat: si el env var global ENVIA_PHASE2_ENABLED=true,
     se permite (durante migración). Tras seed inicial de capabilities
@@ -604,28 +605,27 @@ async def quote_shipment(
         )
 
         async def _fetch_carrier(carrier: str):
-            # Sem 5 H.2.5 — apply insurance per-carrier según preferencias.
+            # Sem 5 H.2.5 v2 (2026-05-08): declaredValue se envía SIEMPRE per
+            # package. `additional_services:["envia_insurance"]` se agrega
+            # SOLO cuando carrier=="envia" (carrier propio). Carriers como
+            # Coordinadora aplican prima automática sobre declaredValue
+            # (validado empíricamente prod 2026-05-07).
+            # Evidencia: docs/research/empirical-evidence/envia-insurance-carriers-CO-2026-05-07-PROD.json
             carrier_packages = packages
-            try:
-                from lib.insurance import (
-                    should_apply_insurance, apply_insurance_to_packages,
-                )
-                if total_declared_value_cop > 0 and should_apply_insurance(
-                    supabase, tenant_id, carrier,
-                ):
+            if total_declared_value_cop > 0:
+                try:
+                    from lib.insurance import apply_insurance_to_packages
                     carrier_packages = apply_insurance_to_packages(
-                        packages, declared_value_cop=total_declared_value_cop,
+                        packages,
+                        declared_value_cop=total_declared_value_cop,
+                        carrier=carrier,
                     )
-                    logger.info(
-                        "[INSURANCE] tenant=%s carrier=%s declared=%s aplicado",
-                        tenant_id, carrier, total_declared_value_cop,
+                except Exception as exc:
+                    logger.warning(
+                        "[INSURANCE] no se pudo aplicar declaredValue tenant=%s "
+                        "carrier=%s: %s — cotización sigue sin seguro",
+                        tenant_id, carrier, exc,
                     )
-            except Exception as exc:
-                logger.warning(
-                    "[INSURANCE] no se pudo aplicar tenant=%s carrier=%s: %s — "
-                    "cotización sigue sin seguro",
-                    tenant_id, carrier, exc,
-                )
 
             payload = {
                 **base_payload,
