@@ -1,4 +1,47 @@
-# Próximos Pasos — Estado 2026-05-03 (rev. 103)
+# Próximos Pasos — Estado 2026-05-08 (rev. 106 — cierre Sem 5)
+
+**Reporte de cierre**: [`docs/reports/rev106_sem5_envia_p1_complete.md`](../docs/reports/rev106_sem5_envia_p1_complete.md).
+**Estado branch**: `phase-0-pre-prod` (107 commits ahead, sin commits a `develop`/`main`).
+**Suite tests**: 1867 verde · 0 fail · 0 flaky.
+
+---
+
+## Prioridades post-rev106 (orden recomendado)
+
+### P0 — Sem 6: Re-uso framework común para HSM templates (~2-3 días)
+
+Pre-requisito de F2 WhatsApp HSM templates. Validar que:
+- `IntegrationClient` (F.2) cubre Meta Cloud API quirks (rate-limits per WABA, Idempotency-Key not server-side, retry policy).
+- `WebhookHandler` (F.1) maneja `message_template_status_update` payload + signature HMAC-SHA256 con `app_secret`.
+- Si gaps → completarlos antes de iniciar HSM.
+
+### P1 — Sem 7-8: F2 WhatsApp HSM templates (~11 días)
+
+**Trigger comercial**: 10 tenants en cola integración Platform Console; 6 de 10 requieren proactivos fuera CSW (`payment_reminder_v1`, `cart_abandonment_v1`, `delivery_notification_v1`, etc.). Sin templates aprobados, bot mudo fuera de CSW de 24h Meta.
+
+**Specs verificadas** + diseño 3 niveles modularidad: ver sección "Backlog rev. 103 — WhatsApp Templates HSM (F2-templates)" más abajo.
+
+**Dossier**: [`docs/research/whatsapp-meta-dossier-2026-05-05.md`](../docs/research/whatsapp-meta-dossier-2026-05-05.md).
+
+### P1 — UAT residual S10-S25 dual-mode (~3-5 días, paralelizable)
+
+16 escenarios pendientes (lista abajo). **Bloqueante constraint operacional vivo del plan K**: cero PRs a `main` sin estos UAT en 100% PASS dual-mode (`new` + `known`). Ejecutables por bloques entre items P1 mientras Meta revisa templates HSM (review window hasta 24h).
+
+### P2 — Sem 9: H.5 MeLi Q&A + messages topics (~5 días)
+
+Tras HSM. Trigger: tenants con presencia en MeLi necesitan auto-reply en preguntas + post-venta. Dossier MeLi listo.
+
+### P3 — Backlog largo (post-MVP producción)
+
+- Multi-agente per-tenant (I.5) — ADR-0014 nuevo.
+- Storefront base (I.1) — preparación arquitectónica solo (founder pidió diferir UI).
+- Channel Registry pluggable (I.3.1-I.3.4) para Messenger/Instagram.
+- MA-4 Onboarding Wizard.
+- MA-5 tenant_billing_aggregator + UI desglose costos.
+- MA-6 tenant_provider_health dashboard.
+- MA-8 logs forensics → Supabase tabla append-only.
+
+---
 
 ## ADRs activos
 
