@@ -2,6 +2,8 @@
 
 **Sesión**: 2026-05-08.
 **Estado tras ejecución**: ✅ Sem 6 pre-HSM cerrado en la misma sesión. Items A.1, A.2, A.4, A.5, A.6, A.8 ejecutados; A.3 cancelado por decisión arquitectónica (ver §7.bis abajo); A.7 (`MetaTierLimiter`) diferido a Sem 7 dentro de F2 HSM. Suite tests **+22 nuevos** (`test_meta_hmac_per_tenant.py`).
+
+**Re-revisión 2026-05-08 (post-clarificación founder)**: A.2 fue **simplificada** tras clarificar el modelo arquitectónico real con el founder. Ver §7.quat al final. La fuente única de verdad arquitectónica ahora es [`docs/research/meta-app-architecture-2026-05-08.md`](./meta-app-architecture-2026-05-08.md).
 **Scope**: validar reusabilidad del framework común (F.1 webhook framework + F.2 IntegrationClient base + F.11 TenantCredentialsFacade) para implementar **F2 HSM templates** y subscripciones webhook adicionales (`message_template_status_update`, `phone_number_quality_update`, etc.) sin reescribir.
 **Disparador**: orden recomendado al founder y aceptado — auditar framework antes de iniciar HSM (~11 días) para evitar duplicar lógica ad-hoc.
 **Fuente principal**: [`docs/research/whatsapp-meta-dossier-2026-05-05.md`](./whatsapp-meta-dossier-2026-05-05.md).
@@ -317,6 +319,40 @@ Durante ejecución de A.2 se descubrió que `services/connector-whatsapp` es **d
 F.1 sigue siendo el patrón canónico para webhooks que viven dentro de `services/api/` (Wompi, MeLi, Envia inbound). Cuando/si el connector se consolide en `services/api/` (futuro refactor), migrar a F.1 será trivial.
 
 **Trade-off documentado**: ~80 LOC de duplicación de patrones HMAC + cache + Vault, a cambio de aislamiento de deploy unit. Aceptado.
+
+## 7.quat Corrección post-clarificación founder (2026-05-08, mismo día)
+
+Tras la primera implementación de A.2, conversación con el founder reveló:
+- **No es partner Meta** (no Tech Provider Program).
+- Tiene **UNA Meta App** "Commerce Ops App" (id=`819229210624423`) creada en su cuenta personal Facebook.
+- Configuró WhatsApp + Webhooks en esa App.
+- KAIU (Kaiu Natural Living) es el primer tenant + es del founder mismo (eCommerce real).
+- Otros tenants futuros agregarán sus propias WABAs a la **misma** Meta App vía Solution Partner App + System User token.
+
+**Implicación crítica**: el `app_secret` de la Meta App es **GLOBAL** (de la App), no per-tenant. Mi implementación A.2 inicial intentaba lookup per-tenant del `app_secret` con fallback global — eso era **arquitecturalmente incorrecto** (el lookup nunca iba a encontrar nada porque ningún tenant tiene ni nunca tendrá su propio `app_secret`).
+
+**Cambios aplicados**:
+- ✅ `services/connector-whatsapp/dependencies/meta.py` reescrito (simplificado):
+  - HMAC verify usa **`META_APP_SECRET` global directo** (del env var en Render).
+  - Removido lookup per-tenant del `app_secret` (~80 LOC menos).
+  - **Mantenido** lookup `phone_number_id → tenant_id` con propósito FORENSICS (loguear tenant_id por webhook + future routing). NO afecta HMAC.
+  - Si `META_APP_SECRET` no configurado → 503 (server misconfigured).
+  - Cache TTL 5min para forensics lookup (incluyendo negativos).
+- ✅ Tests actualizados: HmacGlobalTests + TenantResolutionForensicsTests (22 verde).
+- ✅ `.context/06-contracts.md` §7.1-§7.3 reescrito con modelo correcto.
+- ✅ KAIU `tenant_integrations.credentials.waba_id = '2159052118202272'` agregado vía UPDATE (estaba NULL — bloqueante para F2 HSM).
+- ✅ Doc nueva: [`docs/research/meta-app-architecture-2026-05-08.md`](./meta-app-architecture-2026-05-08.md) — fuente única de verdad arquitectónica.
+- ✅ Doc nueva: [`docs/onboarding/whatsapp-tenant-setup.md`](../onboarding/whatsapp-tenant-setup.md) — guía paso-a-paso para tenants nuevos.
+- ✅ Checklist humano: [`docs/onboarding/H1-H5-checklist.md`](../onboarding/H1-H5-checklist.md) — trámites Meta pendientes (Business Verification + App Review).
+
+**Trámites humanos detectados** (no bloquean código pero sí producción multi-tenant):
+- H1: decidir nombre platform (founder no está seguro de "Commerce Ops").
+- H2: crear Business Portfolio platform + transferir Meta App `819229210624423` del personal a ese portfolio.
+- H3: iniciar Business Verification del portfolio (1-3 sem Meta).
+- H4: submit App Review post-verification (1-2 sem Meta).
+- H5: doc onboarding ✅ ya creada.
+
+**Lección aprendida**: aplicar regla "no suposiciones" más estricto. Antes de codear A.2 debí haber confirmado el modelo de App con el founder. La doc de arquitectura ahora documenta esto explícitamente para futuras sesiones.
 
 ## 7.ter Items NO ejecutados Sem 6
 

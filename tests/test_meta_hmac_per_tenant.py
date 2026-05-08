@@ -1,11 +1,15 @@
-"""Tests A.2 — HMAC per-tenant + parser multi-field dispatcher.
+"""Tests A.2 (simplificado 2026-05-08) + A.4 — HMAC global + tenant
+forensics + parser multi-field dispatcher.
 
 Cubre `services/connector-whatsapp/dependencies/meta.py` y
-`services/connector-whatsapp/services/parser.py:parse_webhook_events`
-introducidos en rev. 106 Sem 6 pre-HSM (2026-05-08).
+`services/connector-whatsapp/services/parser.py:parse_webhook_events`.
 
-Tests unitarios SIN Supabase real — usamos monkeypatching para inyectar
-el resultado del lookup tenant_integrations.
+Modelo arquitectónico (post-clarificación con founder):
+  - HMAC verify usa META_APP_SECRET GLOBAL (de la Meta App de la plataforma).
+  - Lookup phone_number_id → tenant_id es FORENSICS, no auth.
+  - Per-tenant: phone_number_id, waba_id, access_token (no app_secret).
+
+Ver `docs/research/meta-app-architecture-2026-05-08.md`.
 """
 from __future__ import annotations
 
@@ -24,8 +28,6 @@ CONNECTOR_PATH = REPO_ROOT / "services" / "connector-whatsapp"
 
 
 def _load_module(rel_path: str, module_name: str):
-    """Carga módulo del connector evitando que importe el paquete services
-    completo (que asume db_persistence + Supabase env vars)."""
     full_path = CONNECTOR_PATH / rel_path
     spec = importlib.util.spec_from_file_location(module_name, str(full_path))
     mod = importlib.util.module_from_spec(spec)
@@ -35,7 +37,6 @@ def _load_module(rel_path: str, module_name: str):
     return mod
 
 
-# Cargar parser sin sys.path completo (parser solo tiene typing + logging).
 _parser = _load_module("services/parser.py", "_test_meta_parser")
 
 
@@ -169,7 +170,6 @@ class ParserDispatcherTests(unittest.TestCase):
         self.assertEqual(events, [])
 
     def test_multi_change_un_post_emite_multiples_eventos(self):
-        """Meta puede mandar varios changes en un POST. Dispatcher itera todos."""
         payload = {
             "object": "whatsapp_business_account",
             "entry": [{
@@ -199,50 +199,36 @@ class ParserDispatcherTests(unittest.TestCase):
         self.assertEqual(events, [])
 
 
-# ─── verify_meta_signature per-tenant (unit) ─────────────────────────────────
-#
-# Cargamos `dependencies/meta.py` con monkeypatch para evitar import real
-# de `services.db_persistence` (que requiere Supabase env vars).
+# ─── HMAC global + tenant forensics (rev. 2026-05-08) ────────────────────────
+
 
 class _FakeSupabaseQuery:
     def __init__(self, response: list[dict]):
         self._response = response
-        self._filters: list = []
 
     def select(self, *args, **kwargs):
         return self
 
     def eq(self, col, val):
-        self._filters.append((col, val))
         return self
 
     def execute(self):
-        # Filtra in-Python (igual que el código real hace).
         return SimpleNamespace(data=self._response)
 
 
 class _FakeSupabaseClient:
     def __init__(self, integrations: list[dict]):
         self._integrations = integrations
-        self.rpc_calls: list[tuple[str, dict]] = []
 
     def table(self, name: str):
         if name == "tenant_integrations":
             return _FakeSupabaseQuery(self._integrations)
         return _FakeSupabaseQuery([])
 
-    def rpc(self, name: str, params: dict):
-        self.rpc_calls.append((name, params))
-        # Simular Vault read — devolver "vault_secret_xxx".
-        return SimpleNamespace(execute=lambda: SimpleNamespace(
-            data="vault_resolved_secret_for_" + str(params.get("p_id", "?")),
-        ))
 
-
-def _load_meta_dep_with_fake_supabase(fake_sb):
-    """Carga dependencies/meta.py con import de get_supabase mockeado.
-    Returns el módulo cargado."""
-    # Crear stub package services.db_persistence
+def _load_meta_dep_with_fake_supabase(fake_sb, env_app_secret: str = "test_global_secret"):
+    """Carga dependencies/meta.py con import de get_supabase mockeado +
+    META_APP_SECRET env-var inyectado."""
     services_pkg = sys.modules.get("services")
     if services_pkg is None:
         services_pkg = type(sys)("services")
@@ -253,7 +239,10 @@ def _load_meta_dep_with_fake_supabase(fake_sb):
     db_persistence_stub.get_supabase = lambda: fake_sb  # type: ignore
     sys.modules["services.db_persistence"] = db_persistence_stub
 
-    # Forzar reload del módulo bajo test (limpia cache + lookups).
+    # Inyectar env var ANTES del import (el módulo lo lee a nivel-modulo).
+    import os
+    os.environ["META_APP_SECRET"] = env_app_secret
+
     if "_test_meta_dep" in sys.modules:
         del sys.modules["_test_meta_dep"]
     spec = importlib.util.spec_from_file_location(
@@ -264,13 +253,16 @@ def _load_meta_dep_with_fake_supabase(fake_sb):
     sys.modules["_test_meta_dep"] = mod
     assert spec.loader is not None
     spec.loader.exec_module(mod)
-    # Limpiar cache in-module entre tests.
     mod._cache_invalidate()
     return mod
 
 
-class HmacPerTenantTests(unittest.TestCase):
-    """Sem 6 A.2 — verify_meta_signature usa app_secret per-tenant."""
+class HmacGlobalTests(unittest.TestCase):
+    """Sem 6 (simplificado 2026-05-08) — HMAC verify usa META_APP_SECRET global.
+
+    El secret NO es per-tenant. Es de la Meta App de la plataforma (única).
+    Tests verifican el comportamiento del helper sin per-tenant dispatch.
+    """
 
     def test_extract_phone_number_id_payload_canonico(self):
         body = json.dumps({
@@ -287,85 +279,6 @@ class HmacPerTenantTests(unittest.TestCase):
         self.assertIsNone(mod._extract_phone_number_id(b"not json"))
         self.assertIsNone(mod._extract_phone_number_id(b'{"object":"x"}'))
 
-    def test_resolve_app_secret_plaintext(self):
-        """Tenant con app_secret en plaintext — fallback aceptable con WARN."""
-        sb = _FakeSupabaseClient([
-            {"tenant_id": "tenant-A", "credentials": {
-                "phone_number_id": "990364001",
-                "app_secret": "plaintext_secret_abc",
-            }},
-        ])
-        mod = _load_meta_dep_with_fake_supabase(sb)
-        secret = mod._resolve_app_secret_for_phone_number("990364001")
-        self.assertEqual(secret, "plaintext_secret_abc")
-
-    def test_resolve_app_secret_via_vault(self):
-        """Tenant con app_secret_secret_id → Vault lookup."""
-        sb = _FakeSupabaseClient([
-            {"tenant_id": "tenant-A", "credentials": {
-                "phone_number_id": "990364001",
-                "app_secret_secret_id": "vault-uuid-xxx",
-            }},
-        ])
-        mod = _load_meta_dep_with_fake_supabase(sb)
-        secret = mod._resolve_app_secret_for_phone_number("990364001")
-        self.assertEqual(secret, "vault_resolved_secret_for_vault-uuid-xxx")
-        self.assertEqual(len(sb.rpc_calls), 1)
-        self.assertEqual(sb.rpc_calls[0][0], "pgsec_read_secret")
-
-    def test_resolve_app_secret_phone_no_encontrado(self):
-        sb = _FakeSupabaseClient([
-            {"tenant_id": "tenant-A", "credentials": {
-                "phone_number_id": "DIFERENTE",
-                "app_secret": "secret",
-            }},
-        ])
-        mod = _load_meta_dep_with_fake_supabase(sb)
-        self.assertIsNone(mod._resolve_app_secret_for_phone_number("990364001"))
-
-    def test_resolve_app_secret_aislamiento_multi_tenant(self):
-        """2 tenants con phone_number_id distinto, secret distinto. Verifica
-        que el lookup retorna SOLO el correcto, NO mezcla."""
-        sb = _FakeSupabaseClient([
-            {"tenant_id": "tenant-A", "credentials": {
-                "phone_number_id": "PHONE_A",
-                "app_secret": "SECRET_A",
-            }},
-            {"tenant_id": "tenant-B", "credentials": {
-                "phone_number_id": "PHONE_B",
-                "app_secret": "SECRET_B",
-            }},
-        ])
-        mod = _load_meta_dep_with_fake_supabase(sb)
-        self.assertEqual(mod._resolve_app_secret_for_phone_number("PHONE_A"), "SECRET_A")
-        self.assertEqual(mod._resolve_app_secret_for_phone_number("PHONE_B"), "SECRET_B")
-        # Tenant inexistente.
-        self.assertIsNone(mod._resolve_app_secret_for_phone_number("PHONE_C"))
-
-    def test_cache_evita_segundo_lookup_db(self):
-        sb = _FakeSupabaseClient([
-            {"tenant_id": "tenant-A", "credentials": {
-                "phone_number_id": "PHONE_A",
-                "app_secret": "SECRET_A",
-            }},
-        ])
-        mod = _load_meta_dep_with_fake_supabase(sb)
-        # Reemplazar el método table() para contar invocaciones.
-        original_table = sb.table
-        call_counter = {"n": 0}
-        def counting_table(name):
-            call_counter["n"] += 1
-            return original_table(name)
-        sb.table = counting_table  # type: ignore
-
-        # Primera llamada: hit DB.
-        s1 = mod._resolve_app_secret_for_phone_number("PHONE_A")
-        # Segunda llamada: cache hit, NO debe tocar DB.
-        s2 = mod._resolve_app_secret_for_phone_number("PHONE_A")
-        self.assertEqual(s1, "SECRET_A")
-        self.assertEqual(s2, "SECRET_A")
-        self.assertEqual(call_counter["n"], 1, "cache TTL debe evitar el segundo lookup DB")
-
     def test_hmac_verify_correcto(self):
         mod = _load_meta_dep_with_fake_supabase(_FakeSupabaseClient([]))
         body = b'{"object":"whatsapp_business_account"}'
@@ -379,12 +292,76 @@ class HmacPerTenantTests(unittest.TestCase):
         self.assertFalse(mod._hmac_verify(body, "0" * 64, "test_secret"))
 
     def test_hmac_verify_secret_distinto_falla(self):
-        """Tenant A no debe validar contra secret de Tenant B (aislamiento)."""
         mod = _load_meta_dep_with_fake_supabase(_FakeSupabaseClient([]))
         body = b'{"object":"whatsapp_business_account","tenant":"A"}'
         sig_a = hmac.new(b"SECRET_A", body, hashlib.sha256).hexdigest()
-        # Verify con secret B sobre body firmado por A → debe fallar.
         self.assertFalse(mod._hmac_verify(body, sig_a, "SECRET_B"))
+
+
+class TenantResolutionForensicsTests(unittest.TestCase):
+    """Forensics: lookup phone_number_id → tenant_id para auditoría
+    Habeas Data + debugging multi-tenant. NO se usa para HMAC."""
+
+    def test_resolve_tenant_id_encontrado(self):
+        sb = _FakeSupabaseClient([
+            {"tenant_id": "tenant-A", "credentials": {"phone_number_id": "PHONE_A"}},
+        ])
+        mod = _load_meta_dep_with_fake_supabase(sb)
+        self.assertEqual(mod._resolve_tenant_id_for_phone_number("PHONE_A"), "tenant-A")
+
+    def test_resolve_tenant_id_no_encontrado(self):
+        sb = _FakeSupabaseClient([
+            {"tenant_id": "tenant-A", "credentials": {"phone_number_id": "OTRO"}},
+        ])
+        mod = _load_meta_dep_with_fake_supabase(sb)
+        self.assertIsNone(mod._resolve_tenant_id_for_phone_number("PHONE_A"))
+
+    def test_resolve_tenant_id_aislamiento_multi_tenant(self):
+        """Lookup retorna SOLO el tenant correcto, NO mezcla."""
+        sb = _FakeSupabaseClient([
+            {"tenant_id": "tenant-A", "credentials": {"phone_number_id": "PHONE_A"}},
+            {"tenant_id": "tenant-B", "credentials": {"phone_number_id": "PHONE_B"}},
+        ])
+        mod = _load_meta_dep_with_fake_supabase(sb)
+        self.assertEqual(mod._resolve_tenant_id_for_phone_number("PHONE_A"), "tenant-A")
+        self.assertEqual(mod._resolve_tenant_id_for_phone_number("PHONE_B"), "tenant-B")
+        self.assertIsNone(mod._resolve_tenant_id_for_phone_number("PHONE_C"))
+
+    def test_cache_evita_segundo_lookup_db(self):
+        sb = _FakeSupabaseClient([
+            {"tenant_id": "tenant-A", "credentials": {"phone_number_id": "PHONE_A"}},
+        ])
+        mod = _load_meta_dep_with_fake_supabase(sb)
+        original_table = sb.table
+        call_counter = {"n": 0}
+        def counting_table(name):
+            call_counter["n"] += 1
+            return original_table(name)
+        sb.table = counting_table  # type: ignore
+
+        t1 = mod._resolve_tenant_id_for_phone_number("PHONE_A")
+        t2 = mod._resolve_tenant_id_for_phone_number("PHONE_A")
+        self.assertEqual(t1, "tenant-A")
+        self.assertEqual(t2, "tenant-A")
+        self.assertEqual(call_counter["n"], 1)
+
+    def test_cache_negativo_tambien_evita_db(self):
+        """No-encontrado se cachea — evita lookups repetidos para
+        phone_number_ids huérfanos (e.g., tenant offboarded)."""
+        sb = _FakeSupabaseClient([])
+        mod = _load_meta_dep_with_fake_supabase(sb)
+        original_table = sb.table
+        call_counter = {"n": 0}
+        def counting_table(name):
+            call_counter["n"] += 1
+            return original_table(name)
+        sb.table = counting_table  # type: ignore
+
+        t1 = mod._resolve_tenant_id_for_phone_number("HUERFANO")
+        t2 = mod._resolve_tenant_id_for_phone_number("HUERFANO")
+        self.assertIsNone(t1)
+        self.assertIsNone(t2)
+        self.assertEqual(call_counter["n"], 1)
 
 
 if __name__ == "__main__":
