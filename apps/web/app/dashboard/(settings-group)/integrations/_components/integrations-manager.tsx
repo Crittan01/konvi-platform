@@ -11,6 +11,7 @@ import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
   MessageCircle, Settings2, ChevronUp, CreditCard, HelpCircle,
+  Loader2,
 } from 'lucide-react'
 
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
@@ -408,8 +409,8 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Envia ─────────────────────────────────────────────────────────── */}
         {visibleCards.includes('envia') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${enviaConnected ? 'border-emerald-500/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${enviaConnected ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-muted/20'}`}>
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${enviaConnected ? 'border-orange-500/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${enviaConnected ? 'border-orange-500/20 bg-orange-500/5' : 'border-border bg-muted/20'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="h-9 w-9 rounded-xl bg-orange-500/15 border border-orange-500/20 flex items-center justify-center shrink-0">
@@ -420,7 +421,7 @@ export function IntegrationsManager(props: Props) {
                     <p className="text-[11px] text-muted-foreground truncate">Shipping & Logistics</p>
                   </div>
                 </div>
-                <StatusBadge connected={enviaConnected} colorClass="bg-emerald-500/15 text-emerald-400 border-emerald-500/30" />
+                <StatusBadge connected={enviaConnected} colorClass="bg-orange-500/15 text-orange-400 border-orange-500/30" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
@@ -1074,16 +1075,18 @@ function EnviaCarriersSection({
                     <td className="px-3 py-2 text-center">
                       <button
                         type="button"
-                        disabled={isPending}
+                        disabled={pending !== null}
                         onClick={() => handleToggle(c.code, pref)}
                         title={enabled ? 'Desactivar' : 'Activar'}
-                        className={`inline-flex items-center justify-center h-6 w-12 rounded-full transition ${
+                        className={`inline-flex items-center justify-center h-6 w-12 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed text-[11px] font-semibold ${
                           enabled
                             ? 'bg-emerald-600 text-white'
                             : 'bg-slate-300 text-slate-700'
                         }`}
                       >
-                        {enabled ? 'ON' : 'OFF'}
+                        {isPending
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : (enabled ? 'ON' : 'OFF')}
                       </button>
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -1094,9 +1097,12 @@ function EnviaCarriersSection({
                           variant="outline"
                           disabled={pending !== null}
                           onClick={() => handleReset(c.code)}
-                          className="h-6 text-[10px]"
+                          className="h-6 text-[10px] gap-1"
                           title="Restaurar a default (eliminar preferencia explícita)"
                         >
+                          {pending === 'reset:' + c.code && (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          )}
                           Reset
                         </Button>
                       )}
@@ -1268,16 +1274,18 @@ function EnviaCapabilitiesSection({
                 </div>
                 <button
                   type="button"
-                  disabled={isPending}
+                  disabled={pending !== null}
                   onClick={() => handleToggle(cap.key, enabled)}
                   title={enabled ? 'Desactivar' : 'Activar'}
-                  className={`shrink-0 inline-flex items-center justify-center h-6 w-12 rounded-full transition text-[10px] font-semibold ${
+                  className={`shrink-0 inline-flex items-center justify-center h-6 w-12 rounded-full transition text-[10px] font-semibold disabled:opacity-60 disabled:cursor-not-allowed ${
                     enabled
                       ? 'bg-emerald-600 text-white'
                       : 'bg-slate-300 text-slate-700'
                   }`}
                 >
-                  {enabled ? 'ON' : 'OFF'}
+                  {isPending
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : (enabled ? 'ON' : 'OFF')}
                 </button>
               </div>
             )
