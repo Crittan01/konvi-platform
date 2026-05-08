@@ -1,29 +1,24 @@
-"""HMAC verification per-tenant para webhooks Meta WhatsApp.
+"""HMAC verification webhooks Meta WhatsApp + tenant resolution forensics.
 
-Rev. 106 Sem 6 pre-HSM (2026-05-08): rewrite del módulo histórico que
-usaba `META_APP_SECRET` global env-var. Ahora resuelve el `app_secret`
-**per-tenant** via lookup en `tenant_integrations.credentials` por
-`phone_number_id` extraído del payload Meta.
+Rev. 106 Sem 6 (rewrite 2026-05-08, simplificado post-clarificación
+arquitectónica con founder).
 
-Por qué inline (no F.1 webhook framework):
-  - `connector-whatsapp` es deploy unit independiente en Render
-    (rootDir: services/connector-whatsapp). NO puede importar de
-    `services/api/lib/webhook_framework/` sin cross-service coupling.
-  - F.1 sigue siendo el patrón canónico para webhooks que viven en
-    `services/api/` (Wompi, MeLi, Envia inbound).
-  - Cuando el connector se consolide en services/api (futuro refactor
-    arquitectónico), migrar a F.1 será trivial — la lógica HMAC es
-    idéntica.
+Modelo arquitectónico real (ver `docs/research/meta-app-architecture-2026-05-08.md`):
 
-Trade-off: pequeña duplicación (HMAC SHA-256 + constant-time compare)
-a cambio de aislamiento de deploy unit. Aceptado en gap audit
-docs/research/f1-f2-meta-gap-audit-2026-05-08.md sec. 2.4.
+  Hay UNA SOLA Meta App, propiedad del Business Portfolio de la plataforma.
+  Cada tenant conecta su propia WABA + Phone Number a esa App vía System
+  User token generado en el Business Manager del tenant.
 
-Backward compat: si `META_APP_SECRET` env-var está presente Y NO se
-encuentra `phone_number_id` en payload, usa el secret global (modo
-mono-tenant legacy). Logueado como WARN para forzar migración.
+  → `app_secret` es GLOBAL (de nuestra App): `META_APP_SECRET` env-var.
+  → `phone_number_id`, `waba_id`, `access_token` son PER-TENANT.
+  → HMAC `X-Hub-Signature-256` se valida con el global. Punto.
 
-Cache TTL 5min para evitar hit DB en cada webhook (similar pattern F.11).
+  Lo que SÍ es útil per-tenant aquí: lookup `phone_number_id → tenant_id`
+  para forensics + future routing. Cada webhook loguea qué tenant lo
+  generó (auditoría Habeas Data + debugging multi-tenant).
+
+Trade-off: no usa F.1 webhook framework por aislamiento de deploy unit
+(Render rootDir distinto). Cuando se consolide en services/api, migrar.
 """
 from __future__ import annotations
 
@@ -40,56 +35,59 @@ from fastapi import Request, HTTPException, Header
 
 logger = logging.getLogger(__name__)
 
-# Backward compat env-var. Si presente, se usa como fallback cuando no se
-# resuelve secret per-tenant (warn). Borrar tras migración completa.
-LEGACY_META_APP_SECRET = os.getenv("META_APP_SECRET", "")
+# App Secret de la Meta App de la plataforma. Único, global.
+# Configurado en Render env: services/connector-whatsapp/META_APP_SECRET.
+# Meta firma TODOS los webhooks con este secret (todos los tenants comparten).
+META_APP_SECRET = os.getenv("META_APP_SECRET", "")
 
-# Cache TTL para (phone_number_id → app_secret) lookups. 5min balance
-# entre frescura post-rotación y reducción hits Supabase + Vault.
+# Cache TTL para lookup `phone_number_id → tenant_id`. 5min balance entre
+# frescura post-onboarding nuevo tenant y reducción hits Supabase.
 _CACHE_TTL_SECONDS = 300
 
-# In-memory cache thread-safe. NO persiste — single-process FastAPI.
 _cache_lock = threading.RLock()
-_secret_cache: dict[str, tuple[str, float]] = {}  # phone_number_id → (secret, expires_at)
+_tenant_cache: dict[str, tuple[Optional[str], float]] = {}  # phone_number_id → (tenant_id, expires_at)
 
 
-def _cache_get(phone_number_id: str) -> Optional[str]:
+def _cache_get_tenant(phone_number_id: str) -> tuple[bool, Optional[str]]:
+    """Retorna (cache_hit, tenant_id_or_none). cache_hit=False puede ser
+    miss o expiración. tenant_id_or_none=None es un valor cacheable
+    legítimo ("ningún tenant tiene este phone_number_id")."""
     with _cache_lock:
-        entry = _secret_cache.get(phone_number_id)
+        entry = _tenant_cache.get(phone_number_id)
         if entry is None:
-            return None
-        secret, expires_at = entry
+            return False, None
+        tenant_id, expires_at = entry
         if time.time() >= expires_at:
-            del _secret_cache[phone_number_id]
-            return None
-        return secret
+            del _tenant_cache[phone_number_id]
+            return False, None
+        return True, tenant_id
 
 
-def _cache_put(phone_number_id: str, secret: str) -> None:
+def _cache_put_tenant(phone_number_id: str, tenant_id: Optional[str]) -> None:
+    """Cachea el resultado del lookup (puede ser None — "no encontrado")."""
     with _cache_lock:
-        _secret_cache[phone_number_id] = (secret, time.time() + _CACHE_TTL_SECONDS)
+        _tenant_cache[phone_number_id] = (tenant_id, time.time() + _CACHE_TTL_SECONDS)
 
 
 def _cache_invalidate(phone_number_id: Optional[str] = None) -> int:
-    """Invalida cache. Útil tras rotación de credenciales/offboarding.
-    Si phone_number_id=None borra todo. Retorna # entradas borradas."""
+    """Invalida cache. Útil tras onboarding nuevo tenant. Retorna # entries."""
     with _cache_lock:
         if phone_number_id is None:
-            n = len(_secret_cache)
-            _secret_cache.clear()
+            n = len(_tenant_cache)
+            _tenant_cache.clear()
             return n
-        if phone_number_id in _secret_cache:
-            del _secret_cache[phone_number_id]
+        if phone_number_id in _tenant_cache:
+            del _tenant_cache[phone_number_id]
             return 1
         return 0
 
 
 def _extract_phone_number_id(raw_body: bytes) -> Optional[str]:
-    """Parsea raw_body como JSON Meta y extrae el primer phone_number_id
+    """Parsea raw_body como JSON Meta y extrae el primer `phone_number_id`
     encontrado en `entry[].changes[].value.metadata.phone_number_id`.
 
     Retorna None si payload no es JSON o no tiene phone_number_id (caso
-    GET handshake o payload malformado — handler superior decide qué hacer).
+    GET handshake, payload de account_alerts, etc.). Caller decide.
     """
     try:
         payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
@@ -115,22 +113,22 @@ def _extract_phone_number_id(raw_body: bytes) -> Optional[str]:
     return None
 
 
-def _resolve_app_secret_for_phone_number(phone_number_id: str) -> Optional[str]:
-    """Resuelve app_secret para el WABA dueño de phone_number_id.
+def _resolve_tenant_id_for_phone_number(phone_number_id: str) -> Optional[str]:
+    """Lookup `phone_number_id → tenant_id` para forensics + routing.
 
-    Lookup:
-      1. Cache TTL 5min.
-      2. Si miss: SELECT credentials FROM tenant_integrations
-         WHERE provider='whatsapp' AND credentials->>'phone_number_id' = ?
-      3. Resolver app_secret: Vault first (`app_secret_secret_id`) → plaintext fallback.
-      4. Cache result.
+    NO se usa para HMAC (el secret es global). Sólo para:
+      - Loguear `tenant_id` en cada webhook (auditoría + debugging).
+      - Future: routing per-tenant si fuera necesario.
+
+    Cache TTL 5min para evitar hits Supabase en cada webhook.
+    Resultado None se cachea ("no hay tenant con ese phone_number_id"
+    — caso edge: tenant offboarded pero Meta sigue enviando webhooks
+    durante ventana de propagación).
     """
-    cached = _cache_get(phone_number_id)
-    if cached is not None:
+    cache_hit, cached = _cache_get_tenant(phone_number_id)
+    if cache_hit:
         return cached
 
-    # Lazy import — evita romper el módulo si Supabase no está configurado
-    # en runtime (ej. tests unitarios sin DB).
     try:
         from services.db_persistence import get_supabase  # noqa: PLC0415
     except ImportError as e:
@@ -144,10 +142,6 @@ def _resolve_app_secret_for_phone_number(phone_number_id: str) -> Optional[str]:
         return None
 
     try:
-        # PostgREST: usar `eq()` con notación JSONB `->>` no se soporta directo,
-        # pero podemos filtrar con `.eq("credentials->>phone_number_id", ...)`
-        # vía la sintaxis `select(...).filter(...)`. Más simple: select todos
-        # whatsapp connected y filtrar in-Python (pocos tenants por ahora).
         res = (
             sb.table("tenant_integrations")
             .select("tenant_id, credentials")
@@ -164,55 +158,15 @@ def _resolve_app_secret_for_phone_number(phone_number_id: str) -> Optional[str]:
         creds = (row or {}).get("credentials") or {}
         if not isinstance(creds, dict):
             continue
-        if str(creds.get("phone_number_id") or "") != phone_number_id:
-            continue
+        if str(creds.get("phone_number_id") or "") == phone_number_id:
+            tenant_id = row.get("tenant_id")
+            _cache_put_tenant(phone_number_id, tenant_id)
+            return tenant_id
 
-        # Match — resolver app_secret.
-        secret_id = creds.get("app_secret_secret_id")
-        if secret_id:
-            secret = _read_vault_secret(sb, secret_id)
-            if secret:
-                _cache_put(phone_number_id, secret)
-                return secret
-            logger.warning(
-                "[META_HMAC] app_secret_secret_id presente pero Vault retornó vacío "
-                "tenant=%s phone_number_id=%s",
-                row.get("tenant_id"), phone_number_id,
-            )
-
-        plain = creds.get("app_secret")
-        if plain:
-            logger.warning(
-                "[META_HMAC] app_secret en plaintext — migrar a Vault recomendado "
-                "tenant=%s phone_number_id=%s",
-                row.get("tenant_id"), phone_number_id,
-            )
-            _cache_put(phone_number_id, plain)
-            return plain
-
-        logger.warning(
-            "[META_HMAC] tenant matchea phone_number_id=%s pero no tiene "
-            "app_secret_secret_id ni app_secret en credentials",
-            phone_number_id,
-        )
-        return None
-
-    logger.warning(
-        "[META_HMAC] no se encontró tenant con phone_number_id=%s",
-        phone_number_id,
-    )
+    # No tenant found — cache también (TTL 5min limit) para evitar
+    # hits repetidos en webhooks de phone_number_ids huérfanos.
+    _cache_put_tenant(phone_number_id, None)
     return None
-
-
-def _read_vault_secret(sb, secret_id: str) -> Optional[str]:
-    """Lee secret de Vault via RPC pgsec_read_secret. Inline para evitar
-    dep de services/api/vault_helper.py (cross-service coupling)."""
-    try:
-        r = sb.rpc("pgsec_read_secret", {"p_id": secret_id}).execute()
-        return r.data
-    except Exception as e:
-        logger.error("[META_HMAC] Vault read '%s' error: %s", secret_id, e)
-        return None
 
 
 def _hmac_verify(raw_body: bytes, signature_hex: str, app_secret: str) -> bool:
@@ -231,68 +185,64 @@ async def verify_meta_signature(
 ) -> bytes:
     """Dependencia FastAPI: bloquea requests con HMAC inválido.
 
-    Resolución per-tenant rev. 2026-05-08:
+    Modelo (rev. 2026-05-08):
       1. Lee raw_body.
-      2. Extrae phone_number_id del payload (JSON entry[].changes[].value.metadata).
-      3. Lookup tenant via tenant_integrations.credentials.phone_number_id.
-      4. Resuelve app_secret per-tenant (Vault o plaintext).
-      5. Verifica HMAC SHA-256 contra X-Hub-Signature-256.
+      2. Verifica HMAC SHA-256 con `META_APP_SECRET` global (de nuestra
+         Meta App, propiedad del Business Portfolio de la plataforma).
+      3. (Forensics) Extrae phone_number_id del payload, resuelve
+         tenant_id, loguea para auditoría/debugging. NO bloquea ni
+         cambia el HMAC verify — sólo informativo.
 
-    Backward compat: si phone_number_id NO se extrae Y `META_APP_SECRET`
-    env-var está presente, usa el secret global (warn). Útil durante
-    transición; remover env-var fuerza modo per-tenant exclusivamente.
+    Levanta HTTPException 403 ante:
+      - Missing X-Hub-Signature-256
+      - Algoritmo distinto a sha256
+      - META_APP_SECRET no configurado en runtime
+      - HMAC mismatch (payload manipulado o secret incorrecto)
 
-    Levanta HTTPException 403 ante cualquier fallo de verificación.
     Retorna raw_body para uso downstream (BackgroundTask procesamiento).
     """
     if not x_hub_signature_256:
         logger.warning("[META_HMAC] firma X-Hub-Signature-256 ausente")
         raise HTTPException(status_code=403, detail="Missing signature")
 
-    # Header puede venir con prefijo "sha256=".
     algo, _, signature_hex = x_hub_signature_256.partition("=")
     if algo != "sha256" or not signature_hex:
         raise HTTPException(status_code=403, detail="Unsupported signature algorithm")
 
+    if not META_APP_SECRET:
+        logger.error("[META_HMAC] META_APP_SECRET no configurado en runtime")
+        raise HTTPException(status_code=503, detail="Server misconfigured: app_secret missing")
+
     raw_body = await request.body()
 
-    # Resolver app_secret per-tenant.
-    phone_number_id = _extract_phone_number_id(raw_body)
-    app_secret: Optional[str] = None
-
-    if phone_number_id:
-        app_secret = _resolve_app_secret_for_phone_number(phone_number_id)
-
-    if not app_secret:
-        # Fallback global (legacy mono-tenant). Warn agresivo para forzar migración.
-        if LEGACY_META_APP_SECRET and not phone_number_id:
-            logger.warning(
-                "[META_HMAC] usando META_APP_SECRET global (legacy) — "
-                "phone_number_id no extraído del payload"
-            )
-            app_secret = LEGACY_META_APP_SECRET
-        elif LEGACY_META_APP_SECRET:
-            logger.warning(
-                "[META_HMAC] usando META_APP_SECRET global (legacy) — "
-                "phone_number_id=%s no resolvió tenant. Migrar tenant a "
-                "credentials.app_secret_secret_id",
-                phone_number_id,
-            )
-            app_secret = LEGACY_META_APP_SECRET
-
-    if not app_secret:
-        logger.error(
-            "[META_HMAC] app_secret no resuelto. phone_number_id=%s legacy_present=%s",
-            phone_number_id, bool(LEGACY_META_APP_SECRET),
-        )
-        raise HTTPException(status_code=403, detail="App secret not resolved")
-
-    if not _hmac_verify(raw_body, signature_hex, app_secret):
+    if not _hmac_verify(raw_body, signature_hex, META_APP_SECRET):
         logger.warning(
-            "[META_HMAC] HMAC mismatch — payload manipulado o app_secret incorrecto. "
-            "phone_number_id=%s",
-            phone_number_id,
+            "[META_HMAC] HMAC mismatch — payload manipulado o META_APP_SECRET "
+            "no coincide con el de la Meta App registrada en developers.facebook.com"
         )
         raise HTTPException(status_code=403, detail="Invalid signature")
+
+    # Forensics (no-bloqueante): resolver tenant_id por phone_number_id.
+    # Sirve para loguear auditoría Habeas Data Ley 1581 + debugging
+    # multi-tenant. Si no resuelve, payload sigue procesándose normal.
+    phone_number_id = _extract_phone_number_id(raw_body)
+    if phone_number_id:
+        tenant_id = _resolve_tenant_id_for_phone_number(phone_number_id)
+        if tenant_id:
+            logger.info(
+                "[META_HMAC] webhook OK tenant=%s phone_number_id=%s",
+                tenant_id, phone_number_id,
+            )
+        else:
+            # phone_number_id no resuelve a tenant — log INFO, no warn.
+            # Casos legítimos: GET handshake, account_alerts pre-onboarding,
+            # webhooks durante propagación post-disconnect tenant.
+            logger.info(
+                "[META_HMAC] webhook OK pero phone_number_id=%s no resuelve "
+                "tenant (puede ser pre-onboarding o tenant disconnected)",
+                phone_number_id,
+            )
+    # Si no hay phone_number_id → payload no-message (account_alerts,
+    # GET handshake, etc.). No log adicional — sigue flujo normal.
 
     return raw_body
