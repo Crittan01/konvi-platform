@@ -20,7 +20,7 @@ from supabase import Client
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.getenv(
-    "RESEND_FROM_EMAIL", "Commerce Ops <noreply@commerce-ops.local>"
+    "RESEND_FROM_EMAIL", "Konvi <noreply@commerce-ops.local>"
 )
 
 logger = logging.getLogger("orchestrator.notifications")
@@ -149,7 +149,7 @@ def _dispatch_email_placeholder(config: dict[str, Any], payload: dict[str, Any])
         return True
     # Resolución asíncrona via asyncio.run en sync context (caller actual).
     import asyncio
-    subject = f"[Commerce Ops] {payload.get('event_type', 'notification')}"
+    subject = f"[Konvi] {payload.get('event_type', 'notification')}"
     html = (
         f"<p>Evento operacional: <b>{payload.get('event_type')}</b></p>"
         f"<pre>{payload}</pre>"
@@ -194,7 +194,7 @@ async def notify_consent_revoked(
             f"(Art. 15 Ley 1581/2012). Esta notificación es solo para tu "
             f"registro de cumplimiento.</p>"
             f"<hr>"
-            f"<small>Generado automáticamente por Commerce Ops Platform.</small>"
+            f"<small>Generado automáticamente por Konvi Platform.</small>"
         ),
     )
 

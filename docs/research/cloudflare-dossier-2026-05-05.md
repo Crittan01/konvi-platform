@@ -31,7 +31,7 @@ URL: `/application-services/products/ssl/` (única página oficial donde aparece
 - Log Explorer / Logpush a R2: `$1/GB ingested` (10 GB free). Logpush requiere Enterprise (excepto Workers Trace Events).
 - Cloudflare for SaaS: 100 hostnames incluidos; adicionales `$0.10 c/u`. URL: `/cloudflare-for-platforms/cloudflare-for-saas/plans/`.
 
-**Recomendación tier para Commerce Ops Platform (5–20 tenants Colombia)**:
+**Recomendación tier para Konvi Platform (5–20 tenants Colombia)**:
 - **Pro $25/mo** (mensual) o **$20/mo** (annual). Cubre 80 % de los gaps Render: WAF custom rules, full Managed Rules, Rate Limiting (2 reglas), Super Bot Fight Mode, CDN tiered, 20 Page Rules.
 - **Cloudflare for SaaS bundleado en Pro**: 100 custom hostnames sin costo adicional → suficiente para storefront tenant `tienda.tenant-x.com` por bastante tiempo. Pasa a `$0.10` por hostname extra a partir de #101.
 - **NO adoptar inicialmente**: Workers, R2, Turnstile (no resuelven problema priorizado), Bot Management Enterprise, Logpush.
@@ -126,7 +126,7 @@ URL: `/workers/platform/pricing/`.
 | KV storage | 1 GB | 1 GB + `$0.50/GB-mo` |
 | Durable Objects | — | 1 M req/mes; `$0.15/M` + `$12.50/M GB-s` |
 
-Para Commerce Ops: NO necesitamos Workers en producción Sem 0–11. Útil sólo para edge logic per-tenant futuro (A/B test, geofencing, cache invalidation).
+Para Konvi: NO necesitamos Workers en producción Sem 0–11. Útil sólo para edge logic per-tenant futuro (A/B test, geofencing, cache invalidation).
 
 ### 2.10 R2 Object Storage
 URL: `/r2/pricing/`.
@@ -173,7 +173,7 @@ URL: `/turnstile/plans/`.
 - Free: hasta 20 widgets, 10 hostnames/widget, analítica 7 días. Ilimitadas challenge requests.
 - Enterprise (contract): 200 hostnames/widget, analítica 30 días, ephemeral IDs, off-label.
 - WCAG 2.2 AAA. Funciona aunque el sitio NO esté en Cloudflare CDN.
-- Para Commerce Ops: **no priorizado** — añade fricción UX a flujo conversacional WhatsApp-first.
+- Para Konvi: **no priorizado** — añade fricción UX a flujo conversacional WhatsApp-first.
 
 ### 2.15 Logpush
 URL: `/logs/logpush/`.
@@ -194,7 +194,7 @@ URL: `/network/`.
 ## 3. Multi-tenant compatibility
 
 ### 3.1 Custom hostnames per tenant
-**El feature killer** para Commerce Ops es Cloudflare for SaaS:
+**El feature killer** para Konvi es Cloudflare for SaaS:
 
 - Cada tenant crea CNAME desde su dominio (`tienda.tenant-x.com`) hacia nuestro `customers.commerce-ops-platform.com`.
 - API REST permite: `POST /custom_hostnames` con `hostname`, `ssl.method`, `ssl.type`, `ssl.wildcard` → Cloudflare emite cert, valida (HTTP-01 o TXT), levanta el hostname.
@@ -248,7 +248,7 @@ URL: `/network/`.
 
 ## 5. Lo que necesitamos vs lo que ofrece
 
-| Necesidad Commerce Ops | Cloudflare feature | Plan mínimo | Cubre 100 % |
+| Necesidad Konvi | Cloudflare feature | Plan mínimo | Cubre 100 % |
 |---|---|---|---|
 | WAF L7 (Render no tiene) | WAF Managed + Custom Rules | Pro | ✅ |
 | CDN (Render no tiene) | Cache + Tiered Cache + Cache Rules | Free | ✅ |
@@ -376,7 +376,7 @@ Ventana **Sem 11**:
 
 2. **Modelo comercial custom hostnames per tenant**:
    - ¿Incluido en plan tenant o cobro extra?
-   - ¿Quién paga si el tenant llega al hostname #101 ($0.10/mo extra)? ¿Cliente o Commerce Ops?
+   - ¿Quién paga si el tenant llega al hostname #101 ($0.10/mo extra)? ¿Cliente o Konvi?
    - **Acción**: definir en pricing comercial Sem 11.
 
 3. **WAF rules iniciales** — definir whitelist:
@@ -390,7 +390,7 @@ Ventana **Sem 11**:
    - **Recomendación**: empezar IP+path con 2 reglas Pro. Reevaluar tras 3 meses con datos reales.
 
 5. **Cloudflare account ownership**:
-   - ¿Cuenta Cloudflare a nombre de Commerce Ops legal entity con MFA + 2 admins?
+   - ¿Cuenta Cloudflare a nombre de Konvi legal entity con MFA + 2 admins?
    - ¿Quién custodia API token con scope `Zone:Edit + SSL Cert:Edit`?
    - **Acción**: crear cuenta y definir RBAC Sem 11.
 

@@ -1,7 +1,7 @@
 import { PauseCircle } from 'lucide-react'
 
 export const metadata = {
-  title: 'Cuenta suspendida — Commerce Ops',
+  title: 'Cuenta suspendida — Konvi',
 }
 
 export default function CuentaSuspendidaPage() {

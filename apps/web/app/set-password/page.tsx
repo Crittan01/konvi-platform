@@ -6,7 +6,7 @@ import { ShieldCheck, AlertCircle } from 'lucide-react'
 import SetPasswordForm from './set-password-form'
 
 export const metadata = {
-  title: 'Crear contraseña — Commerce Ops',
+  title: 'Crear contraseña — Konvi',
   description: 'Establece tu contraseña para acceder a la consola.',
 }
 
@@ -54,7 +54,7 @@ export default async function SetPasswordPage({
             <CardTitle className="text-xl font-bold">Crear contraseña</CardTitle>
           </div>
           <CardDescription>
-            Bienvenido a <strong>Commerce Ops</strong>. Establece una contraseña segura para tu cuenta.
+            Bienvenido a <strong>Konvi</strong>. Establece una contraseña segura para tu cuenta.
           </CardDescription>
           {user.email && (
             <p className="text-xs text-muted-foreground pt-1">

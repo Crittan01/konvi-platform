@@ -16,7 +16,7 @@ import { Tag, AlertTriangle } from 'lucide-react'
 import PromotionsManager from './_components/promotions-manager'
 
 export const metadata = {
-  title: 'Promociones — Commerce Ops',
+  title: 'Promociones — Konvi',
   description: 'Gestión de cupones y descuentos del tenant.',
 }
 

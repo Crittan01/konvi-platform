@@ -49,7 +49,7 @@ checkbox de consent rompía flujos legítimos de operación.
 
 ## 3. Decisión
 
-La plataforma **Commerce Ops Platform** es **Encargado puro** bajo el
+La plataforma **Konvi Platform** es **Encargado puro** bajo el
 modelo SaaS B2B (estilo Wati/Mailchimp/Respond.io):
 
 - El tenant es Responsable del tratamiento; firma DPA con la plataforma

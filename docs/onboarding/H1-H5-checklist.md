@@ -1,6 +1,6 @@
-# Checklist trámites Meta humanos — Commerce Ops platform readiness
+# Checklist trámites Meta humanos — Konvi platform readiness
 
-**Audiencia**: founder de Commerce Ops.
+**Audiencia**: founder de Konvi.
 **Disparador**: clarificación arquitectónica 2026-05-08. Para escalar a 10+ tenants en producción WhatsApp Cloud API, hay que destrabar 4 trámites humanos en Meta. Cada uno tiene su propio tiempo de espera.
 
 **Principio**: estos trámites **NO bloquean desarrollo** del código (sigo construyendo features). Bloquean **deployment a producción multi-tenant**. KAIU funciona en Development Mode mientras tanto.
@@ -36,7 +36,7 @@
    - `@konvi` en [X/Twitter](https://x.com/konvi)
    - [LinkedIn → crear empresa "Konvi"](https://www.linkedin.com/company/setup/new/) (requiere algún detalle de empresa, OK con nombre legal personal)
 
-4. ✅ **Volver a sesión técnica**: confirmar a Claude que Konvi pasó SIC + dominios registrados → procede con find&replace `Commerce Ops` → `Konvi` en código y documentación (~30 min, controlado, una sola sesión).
+4. ✅ **Volver a sesión técnica**: confirmar a Claude que Konvi pasó SIC + dominios registrados → procede con find&replace `Konvi` → `Konvi` en código y documentación (~30 min, controlado, una sola sesión).
 
 **Si SIC colisiona en Konvi** (plan B):
 - Verificar `KONVAI` en mismas clases.
@@ -62,7 +62,7 @@
 - [ ] Verificar handles disponibles: Instagram + Twitter/X + LinkedIn.
 - [ ] Pronunciable y memorable a primera escucha (test con 3 personas no-técnicas).
 
-**Sugerencia operativa**: hasta decidir, código y docs usan **`Commerce Ops`** como placeholder. Cuando elijas, find&replace controlado en una sola sesión.
+**Sugerencia operativa**: hasta decidir, código y docs usan **`Konvi`** como placeholder. Cuando elijas, find&replace controlado en una sola sesión.
 
 ---
 
@@ -70,14 +70,14 @@
 
 **Estado**: pendiente.
 **Tiempo estimado**: 30 min.
-**Pre-requisito**: H1 (idealmente decidido) o usar placeholder "Commerce Ops".
+**Pre-requisito**: H1 (idealmente decidido) o usar placeholder "Konvi".
 
 ### H2.1 — Crear Business Portfolio platform
 
 1. Entrá a [business.facebook.com](https://business.facebook.com) con tu cuenta personal de Facebook (la misma que usaste para crear la Meta App).
 2. Esquina superior izquierda: **selector** de Business → **Crear cuenta**.
 3. Llenar:
-   - **Nombre del negocio**: `Commerce Ops` (o el nombre final post-H1).
+   - **Nombre del negocio**: `Konvi` (o el nombre final post-H1).
    - **Tu nombre**: tu nombre completo.
    - **Email comercial**: idealmente uno con dominio del platform (`founder@commerce-ops.com`). Si aún no tenés dominio, usar email principal.
 4. **Configuración → Información del negocio** → llenar:
@@ -100,14 +100,14 @@
 
 ### H2.3 — Verificar transferencia
 
-- En [developers.facebook.com](https://developers.facebook.com) → My Apps → seleccionar Commerce Ops App → **Settings → Basic** → **App Owner** debe decir "Commerce Ops" (el Business Portfolio).
+- En [developers.facebook.com](https://developers.facebook.com) → My Apps → seleccionar Konvi App → **Settings → Basic** → **App Owner** debe decir "Konvi" (el Business Portfolio).
 - Si dice "Personal" o tu nombre individual: la transferencia no se completó — re-intentar.
 
 ### H2.4 — Mover el System User commerce-ops (opcional)
 
 **Pregunta clave**: ¿el System User `commerce-ops` debe estar en el Business Portfolio platform o en el del tenant (Kaiu Natural Living)?
 
-**Respuesta**: del **tenant** (Kaiu Natural Living). Cada tenant genera su propio System User en su propio Business Portfolio para autorizar Commerce Ops App.
+**Respuesta**: del **tenant** (Kaiu Natural Living). Cada tenant genera su propio System User en su propio Business Portfolio para autorizar Konvi App.
 
 **Acción**: dejar el System User actual en Kaiu Natural Living. Cuando vengan otros tenants, ellos crearán los suyos en sus propios Business Portfolios.
 
@@ -166,7 +166,7 @@ Estados posibles en Business Verification dashboard:
 
 ### H4.1 — Permisos a solicitar
 
-En developers.facebook.com → Commerce Ops App → **App Review → Permissions and Features**:
+En developers.facebook.com → Konvi App → **App Review → Permissions and Features**:
 
 | Permiso | Por qué lo necesitás |
 |---|---|
@@ -176,7 +176,7 @@ En developers.facebook.com → Commerce Ops App → **App Review → Permissions
 ### H4.2 — Preparar screencast de uso
 
 Meta pide demo de uso real del permiso. Grabar (5-10 min) mostrando:
-1. Tenant (KAIU) onboardado en Commerce Ops admin panel.
+1. Tenant (KAIU) onboardado en Konvi admin panel.
 2. Cliente real escribe a WhatsApp KAIU.
 3. Bot responde + cotiza producto + genera link Wompi.
 4. Cliente paga → orden confirmada → mensaje de confirmación enviado por bot.
@@ -190,7 +190,7 @@ Meta pide demo de uso real del permiso. Grabar (5-10 min) mostrando:
 ### H4.3 — Llenar formulario App Review
 
 - **Use case description** (cómo se usa el permiso): texto claro, sin tecnicismos. Ejemplo:
-  > Commerce Ops is a SaaS B2B platform for Colombian merchants. We use whatsapp_business_messaging to allow merchants to receive customer messages and respond automatically with our AI bot. Each merchant connects their own WABA + System User token to our platform. We do NOT use this to send unsolicited messages or marketing content without consent.
+  > Konvi is a SaaS B2B platform for Colombian merchants. We use whatsapp_business_messaging to allow merchants to receive customer messages and respond automatically with our AI bot. Each merchant connects their own WABA + System User token to our platform. We do NOT use this to send unsolicited messages or marketing content without consent.
 - **Privacy policy URL**: requerida. Si no tenés sitio web aún, crear landing simple con `/privacy`.
 - **Terms of Service URL**: idem.
 - **Data deletion instructions URL**: idem (Habeas Data + Meta exigen flow para que usuarios pidan borrar datos).
@@ -252,5 +252,5 @@ SEMANA 7+ (post App Review approved):
 ---
 
 **Última actualización**: 2026-05-08.
-**Owner del checklist**: founder de Commerce Ops.
+**Owner del checklist**: founder de Konvi.
 **Tracking**: actualizar este doc cuando un item pase de [ ] a [x] con fecha al lado.

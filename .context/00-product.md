@@ -1,4 +1,4 @@
-# Commerce Ops Platform — Árbol Funcional y Reglas Base
+# Konvi Platform — Árbol Funcional y Reglas Base
 
 **Este archivo es L1 — Autoridad Máxima.**
 Ningún agente ni humano puede rediseñar la arquitectura funcional sin actualizar este archivo primero.
@@ -8,7 +8,7 @@ Toda decisión de navegación, creación de módulos o dominio debe ser validada
 
 ## 1. El Producto
 
-**Commerce Ops Platform** es un SaaS multi-tenant de operaciones e-commerce conversacionales.
+**Konvi Platform** es un SaaS multi-tenant de operaciones e-commerce conversacionales.
 Los tenants (empresas B2B2C) venden por WhatsApp. El sistema centraliza catálogo, pedidos, inventario, despachos, KB e integraciones con aislamiento total por tenant (RLS en PostgreSQL).
 
 **Lo que NO es:**

@@ -1,4 +1,4 @@
-# CLAUDE.md — Commerce Ops Platform
+# CLAUDE.md — Konvi Platform
 
 Contexto rápido para desarrollo.  
 No sustituye el código ni la jerarquía documental de `.context/`.

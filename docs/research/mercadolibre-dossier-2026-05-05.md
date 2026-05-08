@@ -13,7 +13,7 @@
 ## 1. TL;DR ejecutivo
 
 - **MercadoLibre Developers** es la API REST + sistema de notificaciones (IPN webhooks) con la que un seller (vendedor) automatiza catálogo, ventas, envíos, preguntas y mensajería post-venta de su cuenta. Cubre los sites `MCO` (Colombia), `MLA` (Argentina), `MLM` (México), `MLB` (Brasil), `MLC` (Chile), `MLU` (Uruguay), etc. — la API es **única**; el "site" se selecciona en cada operación que lo requiere.
-- **Sites de Commerce Ops Platform**: solo `MCO` (Colombia). `MLA`/`MLM` aparecen únicamente como hosts OAuth alternativos (`auth.mercadolibre.com.ar`/`.com.mx`) — fuera de scope.
+- **Sites de Konvi Platform**: solo `MCO` (Colombia). `MLA`/`MLM` aparecen únicamente como hosts OAuth alternativos (`auth.mercadolibre.com.ar`/`.com.mx`) — fuera de scope.
 - **OAuth 2.0**: Authorization Code Grant, sin scopes granulares por recurso. La app se registra **una vez** en el portal de developers y **cada tenant autoriza esa app** para su cuenta MeLi (modelo B confirmado).
 - **Pricing del marketplace** (no de la API): comisión por venta (% sobre precio de venta) + costo fijo cuando aplica (productos baratos) + tarifa por tipo de listado (Clásica vs Premium) + costo de Mercado Envíos cuando el seller asume el envío. La API en sí **no cobra** — el desarrollador no paga por usarla. **[VALIDAR humano]** porcentaje exacto por categoría MCO (varía 10–18 % según vertical).
 - **¿Comisión por categoría?**: sí, MeLi escala % por categoría y por tipo de listado. La comisión es **transparente al seller pero no al desarrollador integrador** — no hay endpoint público para "tarifa estimada" que cubra todas las categorías. Existe `/sites/MCO/listing_prices` para previsualizar costos por tipo de listado, no comisión final.
@@ -135,7 +135,7 @@ URL: https://developers.mercadolibre.com.co/es_ar/buenas-practicas
 ### 4.3 Restricciones por categoría / productos prohibidos
 
 - **Categorías reguladas** (Salud, Belleza, Alimentos, Armas, Tabaco, Medicamentos, Servicios financieros): requieren documentación adicional + a veces deshabilitadas vía API para seller no homologado.
-- **Atributos requeridos por categoría**: cada categoría MCO tiene un set de `attributes` con `value_type`/`tags.required`. Sin completarlos, el `POST /items` falla con 400. La integración actual **NO crea items vía API** (publica manualmente desde MeLi UI y luego se vincula con `marketplace_listings`), por lo que este gap NO bloquea hoy. Si se quiere onboarding "publicar desde Commerce Ops" → ver gap P3.
+- **Atributos requeridos por categoría**: cada categoría MCO tiene un set de `attributes` con `value_type`/`tags.required`. Sin completarlos, el `POST /items` falla con 400. La integración actual **NO crea items vía API** (publica manualmente desde MeLi UI y luego se vincula con `marketplace_listings`), por lo que este gap NO bloquea hoy. Si se quiere onboarding "publicar desde Konvi" → ver gap P3.
 - **Productos prohibidos**: lista cerrada (armas reales, drogas, animales vivos, contenido ilegal, NFT, criptomonedas, etc.) — aplicada por moderación MeLi al publicar; la API rechaza el `POST /items` con error de policy.
 - **Variations**: items con variations NO aceptan `available_quantity` a nivel raíz — debe enviarse en `variations[].available_quantity` con TODAS las variaciones existentes (`meli_client.py:594-622`).
 

@@ -1,4 +1,4 @@
-# Política de Documentación — Commerce Ops Platform
+# Política de Documentación — Konvi Platform
 
 **Este archivo define cómo se gobierna la documentación de este repositorio.**
 Todo agente y desarrollador debe respetar estas normas antes de crear, modificar o eliminar archivos de documentación.

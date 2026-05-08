@@ -14,7 +14,7 @@ import StorePresenceForm from './store-presence-form'
 import { DaysSelector } from './days-selector'
 
 export const metadata = {
-  title: 'General — Configuración — Commerce Ops',
+  title: 'General — Configuración — Konvi',
   description: 'Configuración general del negocio: datos, logo y dirección de despacho.',
 }
 

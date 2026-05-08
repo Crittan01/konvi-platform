@@ -2,7 +2,7 @@
 
 > **Template inicial — requiere revisión legal antes de firma vinculante.**
 > Este documento sirve como punto de partida del acuerdo entre el Tenant
-> (Responsable) y Commerce Ops Platform (Encargado) bajo Ley 1581/2012.
+> (Responsable) y Konvi Platform (Encargado) bajo Ley 1581/2012.
 
 ---
 
@@ -10,7 +10,7 @@
 
 - **Responsable del Tratamiento:** el Tenant que opera el negocio
   comercial. Identificado por `tenant_id` en la plataforma.
-- **Encargado del Tratamiento:** Commerce Ops Platform (la "Plataforma").
+- **Encargado del Tratamiento:** Konvi Platform (la "Plataforma").
 
 ## 2. Objeto
 

@@ -1,4 +1,4 @@
-# Bot Flowchart Canónico — Commerce Ops Platform
+# Bot Flowchart Canónico — Konvi Platform
 
 **Estado:** rev. 73 (post-fixes del log UAT 2026-04-29 conv `615a9902`).
 **Fuente de verdad visual:** este documento. Si el código diverge, este archivo deja de servir como contrato del refactor rev. 74.

@@ -222,7 +222,7 @@ def resolve_tenant_messenger(page_id: str):
 **Pasos:**
 1. Ve a [business.facebook.com](https://business.facebook.com).
 2. Si no tienes una Meta Business Account, haz clic en **"Crear cuenta"**.
-3. Ingresa el nombre de tu negocio (ej: "Commerce Ops"), tu nombre, y tu email corporativo.
+3. Ingresa el nombre de tu negocio (ej: "Konvi"), tu nombre, y tu email corporativo.
 4. Verifica el email que Meta te envíe.
 
 ---
@@ -254,7 +254,7 @@ La verificación es obligatoria para obtener acceso avanzado a las APIs.
 1. Ve a [developers.facebook.com/apps](https://developers.facebook.com/apps).
 2. Haz clic en **"Crear app"**.
 3. Selecciona el tipo: **"Empresa"** (Business).
-4. Nombre de la app: `Commerce Ops Platform` (este nombre lo ven los tenants en el popup de autorización).
+4. Nombre de la app: `Konvi Platform` (este nombre lo ven los tenants en el popup de autorización).
 5. Email de contacto del desarrollador: tu email.
 6. Asociar al Meta Business Account que verificaste en el PASO 2.
 7. Haz clic en **"Crear app"**.
@@ -350,7 +350,7 @@ Los tokens de usuario expiran. Para producción se usa un System User Token sin 
 1. [Meta Business Suite](https://business.facebook.com) → **Configuración del negocio** → **Usuarios** → **"Usuarios del sistema"**.
 2. Haz clic en **"Agregar"** → nombre: `commerce-ops-api` → rol: **Admin**.
 3. Haz clic en el usuario → **"Generar nuevo token"**.
-4. Selecciona tu App (`Commerce Ops Platform`).
+4. Selecciona tu App (`Konvi Platform`).
 5. Permisos a otorgar:
    - `whatsapp_business_management`
    - `whatsapp_business_messaging`
