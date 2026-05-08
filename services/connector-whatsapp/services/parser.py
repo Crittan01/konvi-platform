@@ -145,3 +145,235 @@ def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Compat legacy: retorna solo el primer mensaje parseado o None."""
     parsed = parse_webhook_payloads(payload)
     return parsed[0] if parsed else None
+
+
+# ─── Sem 6 pre-HSM (rev. 106 / 2026-05-08) — Multi-field dispatcher ──────────
+#
+# Meta envía un POST con `entry[].changes[]`. Cada `change` tiene un `field`
+# que discrimina el tipo de evento. Hasta rev. 105 sólo procesábamos el field
+# "messages". A partir de F2 HSM templates necesitamos:
+#
+#   - "messages" + statuses[]    → delivery receipts (delivered_at, read_at,
+#                                   failed_code, pricing.category, etc.)
+#   - "message_template_status_update"
+#                                → template aprobado/rechazado/pausado
+#   - "message_template_quality_update"
+#                                → quality YELLOW/RED de un template
+#   - "phone_number_quality_update"
+#                                → quality del WABA phone (signal early)
+#   - "account_alerts" / "account_review_update"
+#                                → alertas comerciales/operativas
+#
+# Esta función NO ejecuta side-effects — devuelve eventos tipados. Los
+# handlers downstream (DB persistence per tipo) se implementan en F2 HSM
+# cuando lleguen las tablas (`whatsapp_templates`, `whatsapp_status_events`).
+
+
+# Tipos canónicos del dispatcher. Strings (no enum) para serialización
+# directa en el log / pgmq message.
+EVENT_TYPE_INBOUND_MESSAGE = "inbound_message"
+EVENT_TYPE_OUTBOUND_STATUS = "outbound_status"
+EVENT_TYPE_TEMPLATE_STATUS_UPDATE = "template_status_update"
+EVENT_TYPE_TEMPLATE_QUALITY_UPDATE = "template_quality_update"
+EVENT_TYPE_PHONE_QUALITY_UPDATE = "phone_quality_update"
+EVENT_TYPE_ACCOUNT_ALERT = "account_alert"
+EVENT_TYPE_UNKNOWN = "unknown"
+
+
+def _classify_change(field: str, value: Dict[str, Any]) -> str:
+    """Clasifica el tipo de evento según `change.field` + presencia de
+    sub-objetos típicos."""
+    if field == "messages":
+        # El field "messages" puede traer messages[] (inbound) Y statuses[]
+        # (outbound). Si statuses está presente Y messages NO, es status puro;
+        # si messages presente, es inbound (statuses pueden ser secundarios
+        # — tratarlos en handler downstream).
+        if value.get("messages"):
+            return EVENT_TYPE_INBOUND_MESSAGE
+        if value.get("statuses"):
+            return EVENT_TYPE_OUTBOUND_STATUS
+        return EVENT_TYPE_UNKNOWN
+    if field == "message_template_status_update":
+        return EVENT_TYPE_TEMPLATE_STATUS_UPDATE
+    if field == "message_template_quality_update":
+        return EVENT_TYPE_TEMPLATE_QUALITY_UPDATE
+    if field == "phone_number_quality_update":
+        return EVENT_TYPE_PHONE_QUALITY_UPDATE
+    if field in ("account_alerts", "account_review_update", "account_update"):
+        return EVENT_TYPE_ACCOUNT_ALERT
+    return EVENT_TYPE_UNKNOWN
+
+
+def _parse_status_event(
+    waba_account_id: str,
+    phone_number_id: str,
+    status: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Mapea un item de `value.statuses[]` a evento normalizado."""
+    pricing = status.get("pricing") or {}
+    return {
+        "event_type": EVENT_TYPE_OUTBOUND_STATUS,
+        "meta_waba_id": waba_account_id,
+        "destination_phone_id": phone_number_id,
+        "meta_message_id": status.get("id"),
+        "recipient_phone": status.get("recipient_id"),
+        "status": status.get("status"),  # 'sent' | 'delivered' | 'read' | 'failed'
+        "timestamp": status.get("timestamp"),
+        "conversation_id": (status.get("conversation") or {}).get("id"),
+        "conversation_origin": (status.get("conversation") or {}).get("origin", {}).get("type"),
+        "pricing_category": pricing.get("category"),  # 'utility' | 'marketing' | 'authentication' | 'service'
+        "pricing_billable": pricing.get("billable"),
+        "pricing_model": pricing.get("pricing_model"),
+        "errors": status.get("errors") or [],  # [{code, title, message}]
+    }
+
+
+def _parse_template_status_update(
+    waba_account_id: str,
+    value: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Field message_template_status_update — envía cuando un template
+    cambia de estado en review Meta (PENDING → APPROVED/REJECTED/PAUSED/DISABLED).
+
+    Schema verificado per dossier sec. 2 + Meta docs:
+      {message_template_id, message_template_name, message_template_language,
+       event, reason, ...}
+    """
+    return {
+        "event_type": EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
+        "meta_waba_id": waba_account_id,
+        "meta_template_id": value.get("message_template_id"),
+        "template_name": value.get("message_template_name"),
+        "template_language": value.get("message_template_language"),
+        "new_status": value.get("event"),  # APPROVED|REJECTED|PENDING|PAUSED|DISABLED|FLAGGED|LIMIT_EXCEEDED
+        "reason": value.get("reason"),
+    }
+
+
+def _parse_template_quality_update(
+    waba_account_id: str,
+    value: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Field message_template_quality_update — quality YELLOW/RED de template.
+
+    Schema:
+      {message_template_id, message_template_name, message_template_language,
+       previous_quality_score, new_quality_score}
+    """
+    return {
+        "event_type": EVENT_TYPE_TEMPLATE_QUALITY_UPDATE,
+        "meta_waba_id": waba_account_id,
+        "meta_template_id": value.get("message_template_id"),
+        "template_name": value.get("message_template_name"),
+        "template_language": value.get("message_template_language"),
+        "previous_quality": value.get("previous_quality_score"),  # GREEN|YELLOW|RED
+        "new_quality": value.get("new_quality_score"),
+    }
+
+
+def _parse_phone_quality_update(
+    waba_account_id: str,
+    value: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Field phone_number_quality_update — quality del phone (GREEN/YELLOW/RED).
+
+    Schema:
+      {display_phone_number, current_limit, event}
+    """
+    return {
+        "event_type": EVENT_TYPE_PHONE_QUALITY_UPDATE,
+        "meta_waba_id": waba_account_id,
+        "display_phone_number": value.get("display_phone_number"),
+        "current_limit": value.get("current_limit"),  # tier: TIER_50|TIER_250|TIER_1K|TIER_10K|TIER_100K|TIER_UNLIMITED
+        "event": value.get("event"),  # FLAGGED|UNFLAGGED|UPGRADED|DOWNGRADED|...
+    }
+
+
+def _parse_account_alert(
+    waba_account_id: str,
+    field: str,
+    value: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Catch-all para account_alerts, account_review_update, account_update."""
+    return {
+        "event_type": EVENT_TYPE_ACCOUNT_ALERT,
+        "meta_waba_id": waba_account_id,
+        "field": field,  # preservar field original para handler ops
+        "raw_value": value,  # log completo — caller decide qué hacer
+    }
+
+
+def parse_webhook_events(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """Multi-field dispatcher: clasifica TODOS los `change.field` del payload.
+
+    Para `field="messages"`:
+      - Si tiene `messages[]` (inbound): NO incluido aquí — usar
+        `parse_webhook_payloads()` (legacy, downstream `db_persistence`).
+      - Si tiene `statuses[]` (outbound delivery): incluido como `outbound_status`.
+
+    Para fields no-messages:
+      - Cada change emite UN evento normalizado.
+
+    Retorna lista vacía si payload no tiene fields procesables.
+
+    Diseño F2 HSM: el caller (typically `decouple_and_enqueue` extendido)
+    invoca AMBAS funciones — `parse_webhook_payloads` para inbound y
+    `parse_webhook_events` para el resto. Backward compat preservado.
+    """
+    try:
+        if payload.get("object") != "whatsapp_business_account":
+            return []
+        entries = payload.get("entry") or []
+        if not entries:
+            return []
+
+        events: list[Dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            waba_account_id = entry.get("id") or ""
+            changes = entry.get("changes") or []
+            for change in changes:
+                if not isinstance(change, dict):
+                    continue
+                field = (change.get("field") or "").strip()
+                value = change.get("value") or {}
+                if not isinstance(value, dict):
+                    continue
+
+                event_type = _classify_change(field, value)
+
+                if event_type == EVENT_TYPE_INBOUND_MESSAGE:
+                    # Inbound queda en parse_webhook_payloads — no duplicar.
+                    continue
+
+                if event_type == EVENT_TYPE_OUTBOUND_STATUS:
+                    metadata = value.get("metadata") or {}
+                    phone_number_id = metadata.get("phone_number_id") or ""
+                    statuses = value.get("statuses") or []
+                    for status in statuses:
+                        if isinstance(status, dict):
+                            events.append(_parse_status_event(
+                                waba_account_id, phone_number_id, status,
+                            ))
+
+                elif event_type == EVENT_TYPE_TEMPLATE_STATUS_UPDATE:
+                    events.append(_parse_template_status_update(waba_account_id, value))
+
+                elif event_type == EVENT_TYPE_TEMPLATE_QUALITY_UPDATE:
+                    events.append(_parse_template_quality_update(waba_account_id, value))
+
+                elif event_type == EVENT_TYPE_PHONE_QUALITY_UPDATE:
+                    events.append(_parse_phone_quality_update(waba_account_id, value))
+
+                elif event_type == EVENT_TYPE_ACCOUNT_ALERT:
+                    events.append(_parse_account_alert(waba_account_id, field, value))
+
+                else:
+                    logger.debug(
+                        "[WH_DISPATCH] field desconocido ignorado: %r", field,
+                    )
+        return events
+    except Exception as e:
+        logger.error("[WH_DISPATCH] error procesando webhook events: %s", e)
+        return []

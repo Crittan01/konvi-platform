@@ -386,7 +386,7 @@ export default async function IntegrationsPage({
       const controller = new AbortController()
       const timeout    = setTimeout(() => controller.abort(), 10000)
       try {
-        const res  = await fetch(`https://graph.facebook.com/v21.0/${phoneId}`, {
+        const res  = await fetch(`https://graph.facebook.com/v22.0/${phoneId}`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         })

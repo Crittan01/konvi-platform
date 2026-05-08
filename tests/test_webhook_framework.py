@@ -70,7 +70,7 @@ class HMACSha256Tests(unittest.TestCase):
     def _make(self):
         return signature.HMACSha256Strategy(
             header_name="X-Hub-Signature-256",
-            secret_resolver=lambda h: self.SECRET,
+            secret_resolver=lambda h, b: self.SECRET,
         )
 
     def _valid_sig(self) -> str:
@@ -112,7 +112,7 @@ class HMACSha256Tests(unittest.TestCase):
     def test_secret_no_resuelto_levanta(self):
         s = signature.HMACSha256Strategy(
             header_name="X-Hub-Signature-256",
-            secret_resolver=lambda h: "",
+            secret_resolver=lambda h, b: "",
         )
         with self.assertRaises(errors.SignatureError) as ctx:
             s.verify(
@@ -121,6 +121,29 @@ class HMACSha256Tests(unittest.TestCase):
                 query_params={},
             )
         self.assertIn("secret no resuelto", str(ctx.exception))
+
+    def test_resolver_recibe_raw_body_para_lookup_multi_tenant(self):
+        """Sem 6 pre-HSM: el resolver puede inspeccionar raw_body para
+        extraer phone_number_id (Meta) y mapear tenant_id → app_secret.
+        Verificamos que ambos parámetros se pasan correctamente."""
+        captured = {}
+
+        def resolver(headers: dict, raw_body: bytes) -> str:
+            captured["headers"] = headers
+            captured["raw_body"] = raw_body
+            return self.SECRET
+
+        s = signature.HMACSha256Strategy(
+            header_name="X-Hub-Signature-256",
+            secret_resolver=resolver,
+        )
+        s.verify(
+            raw_body=self.BODY,
+            headers={"X-Hub-Signature-256": self._valid_sig()},
+            query_params={},
+        )
+        self.assertEqual(captured["raw_body"], self.BODY)
+        self.assertIn("x-hub-signature-256", captured["headers"])
 
 
 class WompiChecksumTests(unittest.TestCase):
