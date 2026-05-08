@@ -1,4 +1,4 @@
-# render.yaml — Commerce Ops Platform
+# render.yaml — Konvi Platform
 # Infraestructura como código para Render.com
 # Referencia oficial: https://render.com/docs/blueprint-spec
 # Última actualización: 2026-04-25 (v8 — nuevas vars post sesiones rev. 57-59)
@@ -297,7 +297,7 @@ services:
       - key: RESEND_API_KEY
         sync: false                              # Configurar en Render Dashboard
       - key: RESEND_FROM_EMAIL
-        value: "Commerce Ops <noreply@commerce-ops.local>"
+        value: "Konvi <noreply@commerce-ops.local>"
     healthCheckPath: /health
     # Rev. 92.b: auto-deploy desactivado para iterar el orchestrator
     # localmente sin que cada push a develop lance redeploy en Render.

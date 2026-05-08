@@ -279,7 +279,7 @@ Es **global por proceso**, no per-tenant. Implicación: cuando se habilite gener
 ## 10. Veredicto final
 
 ### DECISION FINAL
-**GO arquitectónico**. Envia es el stack correcto para Commerce Ops Platform en Colombia: 1 contrato técnico habilita acceso a 70+ carriers (Servientrega, Coordinadora, TCC, Interrapidísimo, Envia carrier propio, Deprisa, DHL, FedEx, etc.). Modelo B (key per tenant) es el único viable y ya está implementado correctamente.
+**GO arquitectónico**. Envia es el stack correcto para Konvi Platform en Colombia: 1 contrato técnico habilita acceso a 70+ carriers (Servientrega, Coordinadora, TCC, Interrapidísimo, Envia carrier propio, Deprisa, DHL, FedEx, etc.). Modelo B (key per tenant) es el único viable y ya está implementado correctamente.
 
 ### VALIDAR EN DOCUMENTACIÓN OFICIAL
 Antes de cerrar P0+P1, gatilear:

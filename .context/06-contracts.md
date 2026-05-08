@@ -80,7 +80,7 @@ generado en su propio Business Manager. Ver detalle completo en
 
 **NO existen `app_secret` ni `verify_token` per-tenant** — sería arquitectura
 multi-app (raro, requiere que cada tenant tenga su propia Meta App). El modelo
-actual de Commerce Ops es 1 Meta App + N tenants conectados.
+actual de Konvi es 1 Meta App + N tenants conectados.
 
 ### 7.2 Schema canónico `tenant_integrations.credentials` (provider='whatsapp')
 

@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Commerce Ops Core API", description="Síncrona REST", lifespan=lifespan)
+app = FastAPI(title="Konvi Core API", description="Síncrona REST", lifespan=lifespan)
 
 # ─── CORS — restringido a dominios permitidos ──────────────────────────────────
 # En desarrollo: ALLOWED_ORIGINS=http://localhost:3000

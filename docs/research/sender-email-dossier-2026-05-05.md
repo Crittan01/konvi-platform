@@ -2,7 +2,7 @@
 
 **Fecha**: 2026-05-05 · **Sesión**: investigación previa Sem 0 (J.0.0) · **Sin pruebas en vivo**.
 **Fuentes**: docs públicos `resend.com/docs`, `postmarkapp.com`, `docs.aws.amazon.com/ses`, `twilio.com/docs/sendgrid`, `sender.net/pricing`.
-**Alcance**: Commerce Ops Platform — SaaS B2B multi-tenant Colombia. **Estado actual: NO hay sender de email transaccional integrado**. Casos de uso pendientes: magic-link/OTP login (Supabase Auth Custom SMTP), notificaciones tenant→cliente (orden creada, pago recibido, despacho), notificaciones internas (alerta error, daily digest), respuestas Habeas Data SAR (Ley 1581 exige medio escrito).
+**Alcance**: Konvi Platform — SaaS B2B multi-tenant Colombia. **Estado actual: NO hay sender de email transaccional integrado**. Casos de uso pendientes: magic-link/OTP login (Supabase Auth Custom SMTP), notificaciones tenant→cliente (orden creada, pago recibido, despacho), notificaciones internas (alerta error, daily digest), respuestas Habeas Data SAR (Ley 1581 exige medio escrito).
 **Aviso de ambigüedad**: el founder mencionó "sender" en su lista de proveedores. Ese término **no es unívoco** — puede referirse a Sender.net (proveedor literal con ese nombre, focus marketing/LATAM) o a un nombre genérico para el sender transaccional ("el sender de email"). Este dossier compara los 5 candidatos relevantes y deja la desambiguación como validación humana CRÍTICA (§ 9).
 
 ## 1. TL;DR ejecutivo

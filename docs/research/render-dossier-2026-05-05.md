@@ -18,7 +18,7 @@
 - Filesystem efímero, Postgres free `expire 30 days after creation` (gracia 14d), Key Value free sin persistencia.
 - Sin SLA, sin autoscaling, sin preview envs, sin Pre-deploy command, sin Private Links.
 
-**Recomendación de tier para Commerce Ops Platform (5–20 tenants Colombia)**:
+**Recomendación de tier para Konvi Platform (5–20 tenants Colombia)**:
 - Workspace **Pro** (mínimo) — desbloquea autoscaling, preview envs, HTTP request logs, retención 14d, Private Links, environment isolation.
 - Compute por servicio: `Starter` para `web` (estático SSR liviano), `Standard` para `api` y `connector-whatsapp` (críticos, SLA-sensible), `Standard` o `Pro` para `ai-orchestrator` (latencia LLM + carga variable).
 - Región **Virginia (us-east)** — la más cercana a Colombia entre las 5 disponibles. **No hay región LATAM**.
@@ -146,7 +146,7 @@ URL: `/docs/disks`.
 - Solo paid services. Mismos SSDs que Postgres/Key Value. Encriptados at-rest.
 - Snapshots automáticos cada 24h, retención `at least 7 days`.
 - ❌ **No reduce size**. ❌ Bloquea zero-downtime deploys. ❌ No soporta multi-instance scaling. ❌ No cron jobs.
-- Para Commerce Ops: **no usamos disks** (Supabase Storage para archivos), sin riesgo.
+- Para Konvi: **no usamos disks** (Supabase Storage para archivos), sin riesgo.
 
 ### 4.6 Request/payload limits
 - **Request timeout HTTP máximo**: ⚠️ **no documentado oficialmente**. La única referencia es troubleshooting Node.js (`server.keepAliveTimeout` configurable hasta 120s). Asumir cap edge ≈ 100s por convención Cloudflare. **VALIDAR con Render Sales**.

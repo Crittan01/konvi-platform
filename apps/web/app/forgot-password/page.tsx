@@ -3,7 +3,7 @@ import { Mail } from 'lucide-react'
 import ForgotPasswordForm from './forgot-password-form'
 
 export const metadata = {
-  title: 'Recuperar contraseña — Commerce Ops',
+  title: 'Recuperar contraseña — Konvi',
 }
 
 export default function ForgotPasswordPage() {

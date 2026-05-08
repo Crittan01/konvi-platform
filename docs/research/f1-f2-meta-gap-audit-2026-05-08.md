@@ -324,7 +324,7 @@ F.1 sigue siendo el patrón canónico para webhooks que viven dentro de `service
 
 Tras la primera implementación de A.2, conversación con el founder reveló:
 - **No es partner Meta** (no Tech Provider Program).
-- Tiene **UNA Meta App** "Commerce Ops App" (id=`819229210624423`) creada en su cuenta personal Facebook.
+- Tiene **UNA Meta App** "Konvi App" (id=`819229210624423`) creada en su cuenta personal Facebook.
 - Configuró WhatsApp + Webhooks en esa App.
 - KAIU (Kaiu Natural Living) es el primer tenant + es del founder mismo (eCommerce real).
 - Otros tenants futuros agregarán sus propias WABAs a la **misma** Meta App vía Solution Partner App + System User token.
@@ -346,7 +346,7 @@ Tras la primera implementación de A.2, conversación con el founder reveló:
 - ✅ Checklist humano: [`docs/onboarding/H1-H5-checklist.md`](../onboarding/H1-H5-checklist.md) — trámites Meta pendientes (Business Verification + App Review).
 
 **Trámites humanos detectados** (no bloquean código pero sí producción multi-tenant):
-- H1: decidir nombre platform (founder no está seguro de "Commerce Ops").
+- H1: decidir nombre platform (founder no está seguro de "Konvi").
 - H2: crear Business Portfolio platform + transferir Meta App `819229210624423` del personal a ese portfolio.
 - H3: iniciar Business Verification del portfolio (1-3 sem Meta).
 - H4: submit App Review post-verification (1-2 sem Meta).

@@ -1,4 +1,4 @@
-# Workspace AI Guidelines — Commerce Ops Platform
+# Workspace AI Guidelines — Konvi Platform
 
 **Leer siempre antes de tocar código o documentación.**
 

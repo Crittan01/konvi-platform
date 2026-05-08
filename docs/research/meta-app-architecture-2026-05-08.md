@@ -1,7 +1,7 @@
-# Meta App Architecture — Commerce Ops (modelo definitivo)
+# Meta App Architecture — Konvi (modelo definitivo)
 
 **Sesión**: 2026-05-08.
-**Disparador**: founder clarificó setup actual (Meta App "Commerce Ops App" id=`819229210624423` en cuenta personal Facebook + Business Portfolio "Kaiu Natural Living" alojando System User commerce-ops). Mi A.2 implementación inicial sobre-ingenió el lookup `app_secret` per-tenant — el modelo real es **1 Meta App + N tenants conectados**.
+**Disparador**: founder clarificó setup actual (Meta App "Commerce Ops App" → renombrar a "Konvi App", id=`819229210624423` en cuenta personal Facebook + Business Portfolio "Kaiu Natural Living" alojando System User commerce-ops). Mi A.2 implementación inicial sobre-ingenió el lookup `app_secret` per-tenant — el modelo real es **1 Meta App + N tenants conectados**.
 
 **Estado**: este documento es la fuente única de verdad arquitectónica. Cualquier diff entre código y este doc → re-leer y corregir código (no doc).
 
@@ -11,13 +11,13 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  BUSINESS PORTFOLIO "Commerce Ops"  (TARGET — a crear)      │
+│  BUSINESS PORTFOLIO "Konvi"  (TARGET — a crear)      │
 │  ─────────────────────────────────────────────────────────  │
-│  Owner: legal entity Commerce Ops o founder con NIT          │
+│  Owner: legal entity Konvi o founder con NIT          │
 │  Business Verification: ⚠️ pendiente (1-3 semanas Meta)       │
 │                                                              │
 │  Aloja:                                                      │
-│    • Meta App "Commerce Ops App" (id=819229210624423)       │
+│    • Meta App "Konvi App" (id=819229210624423)       │
 │      - App Secret  → META_APP_SECRET env var (global)        │
 │      - Verify Token → META_VERIFY_TOKEN env var (global)     │
 │      - Webhook URL: connector commerce-ops (UNA URL)         │
@@ -67,9 +67,10 @@
 
 | Elemento | Actual (2026-05-08) | Target | Acción |
 |---|---|---|---|
-| Meta App owner | Cuenta personal del founder | Business Portfolio "Commerce Ops" | Migrar (30 min) |
-| Business Portfolio "Commerce Ops" | NO existe | Existe + verificado | Crear (30 min) + Business Verification (1-3 sem Meta) |
-| Business Portfolio "Kaiu Natural Living" | Existe + aloja KAIU + System User commerce-ops | Existe + aloja sólo KAIU (tenant) | Mover System User commerce-ops a Commerce Ops portfolio? **Innecesario** — el System User es del tenant, queda en SU Business Portfolio (Kaiu Natural Living es el tenant) |
+| Nombre Meta App en developers.facebook.com | "Commerce Ops App" (legacy) | "Konvi App" | **Rename en developers.facebook.com** (Settings → Basic → App Display Name). 5 min. App ID `819229210624423` no cambia. |
+| Meta App owner | Cuenta personal del founder | Business Portfolio "Konvi" | Migrar (30 min) |
+| Business Portfolio "Konvi" | NO existe | Existe + verificado | Crear (30 min) + Business Verification (1-3 sem Meta) |
+| Business Portfolio "Kaiu Natural Living" | Existe + aloja KAIU + System User commerce-ops | Existe + aloja sólo KAIU (tenant) | Mover System User commerce-ops a Konvi portfolio? **Innecesario** — el System User es del tenant, queda en SU Business Portfolio (Kaiu Natural Living es el tenant) |
 | App Mode | Development | Live | Toggle post-App Review |
 | App Review whatsapp_business_messaging | Standard Access (limitado) | Advanced Access | Submit post Business Verification (1-2 sem Meta) |
 | `META_APP_SECRET` (Render) | ✅ presente en commerce-ops-connector | ✅ idem | Sin cambio |
@@ -113,13 +114,13 @@ Aplica per-WABA. Cada tenant es responsable de su contenido. La plataforma:
 - Provee compliance decoradores para template approval (F2).
 - NO interpone contenido entre tenant y Meta — sólo es transport.
 
-Habeas Data Ley 1581 Colombia: cada tenant es Responsable del Tratamiento de sus contactos. Commerce Ops actúa como Encargado. Audit log + consent storage per-tenant.
+Habeas Data Ley 1581 Colombia: cada tenant es Responsable del Tratamiento de sus contactos. Konvi actúa como Encargado. Audit log + consent storage per-tenant.
 
 ---
 
 ## 4. Multi-canal Meta (Instagram, Messenger) — extensión natural
 
-Mismo modelo. La Meta App de Commerce Ops puede tener varios productos habilitados:
+Mismo modelo. La Meta App de Konvi puede tener varios productos habilitados:
 - WhatsApp Cloud API (hoy)
 - Instagram Direct Messaging (futuro)
 - Messenger Platform (futuro)
@@ -143,7 +144,7 @@ Ver checklist accionable en [`docs/onboarding/H1-H5-checklist.md`](../onboarding
 
 | # | Trámite | Quién | Tiempo estimado |
 |---|---|---|---|
-| H1 | Decidir nombre platform (no necesariamente "Commerce Ops") | Founder | Sesión aparte |
+| H1 | Decidir nombre platform (no necesariamente "Konvi") | Founder | Sesión aparte |
 | H2.1 | Crear Business Portfolio platform en business.facebook.com | Founder | 30 min |
 | H2.2 | Transferir Meta App `819229210624423` del personal al nuevo Business Portfolio | Founder | 5 min |
 | H3 | Iniciar Business Verification del nuevo Business Portfolio | Founder + docs | 1-3 semanas Meta |

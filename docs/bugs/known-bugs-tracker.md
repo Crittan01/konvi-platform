@@ -1,4 +1,4 @@
-# Known Bugs Tracker — Commerce Ops Platform
+# Known Bugs Tracker — Konvi Platform
 
 **Convención**: bugs detectados en producción / UAT que no se arreglan inmediatamente. Cada entry documenta reproducción, severidad, plan de fix, y queda en este archivo hasta cierre.
 

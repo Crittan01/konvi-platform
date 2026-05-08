@@ -14,7 +14,7 @@
 - **Modelo de negocio Meta = 3 roles**:
   - **Direct (cliente final)**: el negocio gestiona su propia WABA y App Meta — mínimo viable, no escala multi-tenant.
   - **Solution Partner / BSP**: empresa certificada por Meta (Twilio, Infobip, 360dialog, Wati). Ofrece reventa con margen.
-  - **Tech Provider**: ISV no-BSP que se enrola en programa Meta Tech Provider y onboardea clientes vía Embedded Signup. **Esta es la figura aplicable a Commerce Ops Platform** — somos plataforma B2B SaaS multi-tenant, cada cliente trae su WABA pero la app de integración es la nuestra.
+  - **Tech Provider**: ISV no-BSP que se enrola en programa Meta Tech Provider y onboardea clientes vía Embedded Signup. **Esta es la figura aplicable a Konvi Platform** — somos plataforma B2B SaaS multi-tenant, cada cliente trae su WABA pero la app de integración es la nuestra.
   URL: https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview/
 - **Pricing model = PMP (Per-Message Pricing) desde 1-Jul-2025.** Antes era CBP (Conversation-Based, ventana 24h por categoría). Hoy se factura **por mensaje template entregado**. Categorías:
   - **MARKETING** — siempre paid.
@@ -110,7 +110,7 @@ URL: https://developers.facebook.com/documentation/business-messaging/whatsapp/w
 ### 3.1 Modelo arquitectónico Meta
 
 - **WABA per-tenant** es **obligatorio** — Meta NO permite que múltiples negocios distintos compartan una WABA. Cada cliente B2B (tenant) debe tener su propia WABA bajo su Business Portfolio (Meta Business Manager). Modelo actual de `tenant_integrations.meta` (un set de credenciales WhatsApp per-tenant) es el correcto y único viable.
-- **App Meta puede ser ÚNICA** — Commerce Ops Platform mantiene **una sola Meta App** (App ID + App Secret) que se usa contra todas las WABAs de los tenants. Los tenants NO necesitan crear su propia Meta App.
+- **App Meta puede ser ÚNICA** — Konvi Platform mantiene **una sola Meta App** (App ID + App Secret) que se usa contra todas las WABAs de los tenants. Los tenants NO necesitan crear su propia Meta App.
 - **System User**: cada WABA onboardeada vía Embedded Signup recibe asignación automática a un System User compartido bajo el Tech Provider. NO es un System User por tenant; es un System User del partner (nuestro), que adquiere acceso al asset del cliente (WABA, phone numbers).
 - **Phone Number ID vs WABA ID**:
   - `WABA_ID` — identifica la cuenta. Necesario para crear templates, leer quality, configurar webhooks.
@@ -146,7 +146,7 @@ URL alterna (Twilio guide cita Meta): https://www.twilio.com/docs/whatsapp/isv/t
 
 ### 3.3 Direct Provider vs Tech Provider — decisión
 
-Hoy Commerce Ops Platform opera en modo **Direct Provider de facto**: cada tenant manualmente:
+Hoy Konvi Platform opera en modo **Direct Provider de facto**: cada tenant manualmente:
 - Crea su propia App Meta (no compartida).
 - Genera su System User Token.
 - Configura webhook URL del tenant.
@@ -419,7 +419,7 @@ Auditoría contra `services/connector-whatsapp/` + `services/ai-orchestrator/wha
 
 ## 10. Veredicto final
 
-**GO arquitectónico** — WhatsApp Cloud API es correcta para Commerce Ops Platform. No hay alternativa real:
+**GO arquitectónico** — WhatsApp Cloud API es correcta para Konvi Platform. No hay alternativa real:
 - WhatsApp Business App (no-API) no escala B2B.
 - On-Premise está sunset.
 - BSP intermediario nos margina costos.

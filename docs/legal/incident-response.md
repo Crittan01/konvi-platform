@@ -1,6 +1,6 @@
 # Plan de Respuesta a Incidentes
 
-**Aplicable a:** Commerce Ops Platform (rev. ≥ 98)
+**Aplicable a:** Konvi Platform (rev. ≥ 98)
 **Marco legal:** Ley 1581/2012 Art. 18 + Decreto 1377/2013
 
 ---

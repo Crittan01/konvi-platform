@@ -1,4 +1,4 @@
-# Commerce Ops Platform
+# Konvi Platform
 
 SaaS multi-tenant de operaciones e-commerce conversacionales vía WhatsApp (B2B2C, foco Colombia).
 

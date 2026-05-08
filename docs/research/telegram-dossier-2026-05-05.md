@@ -22,7 +22,7 @@ Telegram Bot API es una API HTTPS pública, **gratuita para usuarios y desarroll
 
 Aspectos que importan operacionalmente: (a) el bot **no puede iniciar conversaciones** — el operador debe enviarle `/start` primero (https://core.telegram.org/bots); (b) los webhooks exigen **HTTPS con TLS ≥1.2** y solo aceptan puertos `443, 80, 88, 8443` (https://core.telegram.org/bots/webhooks); (c) la única autenticación inbound es el header `X-Telegram-Bot-Api-Secret-Token` configurable en `setWebhook` (https://core.telegram.org/bots/api#setwebhook) — **no hay HMAC criptográfico**; (d) rate limits razonables: ~30 msg/seg globales, 1 msg/seg por chat, 20 msg/min por grupo (https://core.telegram.org/bots/faq).
 
-Para Commerce Ops Platform, multi-bot per-tenant es trivial técnicamente: cada tenant crea su bot vía BotFather (paso humano), guarda `bot_token` cifrado y un script automatizable invoca `setWebhook` con un `secret_token` único. Esfuerzo P1+P2 estimado: **~2 días**. Sin riesgos críticos; el único "humano requerido" es la creación inicial del bot por tenant en BotFather (no automatizable, es UX deliberada de Telegram).
+Para Konvi Platform, multi-bot per-tenant es trivial técnicamente: cada tenant crea su bot vía BotFather (paso humano), guarda `bot_token` cifrado y un script automatizable invoca `setWebhook` con un `secret_token` único. Esfuerzo P1+P2 estimado: **~2 días**. Sin riesgos críticos; el único "humano requerido" es la creación inicial del bot por tenant en BotFather (no automatizable, es UX deliberada de Telegram).
 
 ---
 
@@ -375,10 +375,10 @@ Nada significativo. El scope actual (canal interno, comandos básicos) está ali
   3. Copiar el token devuelto.
   4. (Opcional) `/setprivacy` → `Disable` si el bot vivirá en grupo y quiere leer todos los mensajes (no recomendado para nuestro caso; dejar default).
   5. (Opcional) `/setdescription`, `/setuserpic`.
-  6. En la UI Commerce Ops: Settings → Notifications → Telegram → pegar token → click "Verificar y registrar".
+  6. En la UI Konvi: Settings → Notifications → Telegram → pegar token → click "Verificar y registrar".
   7. Abrir el bot en Telegram, enviar `/start` desde el chat personal del operador (o añadir el bot al grupo de operadores).
   8. Copiar el `chat_id` mostrado en UI (lo obtenemos del primer mensaje recibido) → guardar.
-- **INSUMOS**: cuenta Telegram del operador, navegador con sesión Commerce Ops Console.
+- **INSUMOS**: cuenta Telegram del operador, navegador con sesión Konvi Console.
 - **CRITERIO DE EXITO**: en la página Settings se muestra "✅ Webhook activo, último heartbeat: <timestamp>" y un mensaje de prueba enviado desde el botón "Enviar prueba" llega al chat configurado en <5 segundos.
 
 ---
@@ -410,7 +410,7 @@ Nada significativo. El scope actual (canal interno, comandos básicos) está ali
 1. Aísla el bug actual de cross-talk (§5.3.1) — hoy ya es un riesgo latente.
 2. Esfuerzo 1 día, sin costo recurrente.
 3. Onboarding humano es mínimo (~3 min) y solo una vez por tenant.
-4. Branding propio por tenant es coherente con posicionamiento "Commerce Ops Platform como infraestructura, el tenant como marca".
+4. Branding propio por tenant es coherente con posicionamiento "Konvi Platform como infraestructura, el tenant como marca".
 5. Aislamiento de seguridad alineado con principio "service_role exige filtros explícitos por tenant" (CLAUDE.md §3).
 
 **Pregunta abierta para Stakeholder**:
@@ -425,7 +425,7 @@ Hoy descartado por decisión consensuada. Validar formalmente que sigue fuera de
 
 ## 10. Veredicto final
 
-Telegram Bot API es **óptimo** para el caso de uso "canal interno de notificaciones a operadores del tenant" en Commerce Ops Platform:
+Telegram Bot API es **óptimo** para el caso de uso "canal interno de notificaciones a operadores del tenant" en Konvi Platform:
 
 - **Económico**: gratis tanto para nosotros como para el tenant. Sin costos recurrentes ni por mensaje.
 - **Operacionalmente confiable**: aunque sin SLA contractual, la plataforma de Telegram aloja "más de 10 millones de bots" sobre infra propia con disponibilidad histórica alta. No hemos visto incidentes mayores documentados que afecten Bot API en años recientes.
