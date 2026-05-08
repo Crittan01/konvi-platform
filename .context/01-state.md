@@ -1,9 +1,43 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-05-03 (rev. 103 · SaaS B2B pivot Contactos + UAT S1–S9 PASS + F1 reminder dentro de CSW)
+**Última actualización**: 2026-05-08 (rev. 106 · cierre Sem 5 Envia P1 + Cupones I.2 + GUI consistency)
 **Fuente de verdad**: DB live (Supabase `***SUPABASE_PROJECT_REF_REDACTED***`) + contratos en código.
 **Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).
+**Reporte de cierre**: [`docs/reports/rev106_sem5_envia_p1_complete.md`](../docs/reports/rev106_sem5_envia_p1_complete.md).
+
+---
+
+## Cierre rev. 106 (2026-05-08) — Sem 5 Envia P1 + Cupones + GUI consistency
+
+**Branch**: `phase-0-pre-prod` (107 commits ahead of `develop` — constraint vivo).
+**Suite tests**: **1867 verde** (+453 desde rev. 105). 0 errors, 0 flaky.
+**Migraciones aplicadas a remote**: 17 nuevas (range `20260514100000` → `20260521000000`) con protocolo seguro pre-checks → apply → post-check → ledger repair.
+**Roadmap K progress**: Sem 0 (dossiers) + Sem 1 (CI/CD) + Sem 2 (F.* framework) + Sem 4 (P0 integraciones) + Sem 5 (P1 Envia + Cupones) cerrados.
+
+**Items cerrados Sem 5** (detalle en reporte rev106):
+
+- **H.2.1-H.2.8** Envia P1 productivo (idempotency, webhooks, polling, COD pause, insurance v2, capabilities, carriers, smoke E2E).
+- **H.3.1-H.3.2** Wompi GET transaction + retry+circuit breaker (resilience).
+- **H.4.1** WhatsApp STOP detector + soft opt-out + reactivar consent.
+- **I.2.1-I.2.9** Cupones engine completo (P1 esencial MVP) + ADR-0015. UAT S43-S47 PASS dual-mode 10/10.
+- **F.1-F.4 + F.9-F.12** Framework común (webhook generic + IntegrationClient base + capabilities matrix + webhook_events_seen + compliance decoradores + secret manager + credentials facade + identity registry).
+- **Hardening DB**: `vw_consent_events_unified` security_invoker fix (potencial CVE Habeas Data); RLS `tenant_provider_capabilities` FOR ALL (bug toggle UI).
+- **Performance VM**: Turbopack + cached-user (React.cache) + gzip compression.
+- **GUI**: Color brand Envia naranja; spinner toggles; paneles "¿Cómo funciona?" consolidados verde; Promociones theme variables (0 slate hardcoded).
+
+**Decisiones arquitectónicas** (con cita docs + empírico):
+
+- **H.2.5 v2 Insurance**: `envia_insurance` (id=125) sólo a `carrier="envia"` propio. `declaredValue` siempre. Drop `tenant_carriers.supports_insurance` (abstracción errada). Evidencia empírica prod en `docs/research/empirical-evidence/`.
+- **H.2.4 COD pausado**: V.1 + V.4 no certificables — todo código eliminado. Dossier Ecart Pay preservado para reactivación futura.
+- **`carrier_insurance` no existe**: identifier real es `insurance` (id=52). Dossier sec. L.10 corregido 2026-05-08.
+
+**Outstanding** (pendientes para próximas Sem 6+):
+
+- UAT S10-S25 dual-mode (16 escenarios) — bloqueante constraint operacional para PR a `main`.
+- Sem 6 — Validar reuso F.1+F.2 para Meta Cloud API antes de HSM.
+- Sem 7-8 — F2 WhatsApp HSM templates (10 tenants en cola, 6 requieren proactivos fuera CSW).
+- Sem 9 — H.5 MeLi Q&A + messages.
 
 ---
 
