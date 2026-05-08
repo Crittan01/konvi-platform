@@ -9,7 +9,39 @@
 
 ## H1 — Decidir nombre platform (sesión aparte)
 
-**Estado**: pendiente.
+**Estado**: 🟡 EN PROGRESO — **Konvi** seleccionado en sesión 2026-05-08, pendiente verificación SIC + registro dominios.
+
+**Decisión documentada**:
+- Nombre elegido: **Konvi**
+- Justificación: evoca "konvi-versación" (bot conversacional) + sonoridad latino-tech (≈ Wompi, Rappi) + 5 letras memorables + dominios `.co` y `.io` libres + sin colisión cultural sensible.
+- Alternativas evaluadas: Konvai (variant AI explícito), Klipa (tabula rasa style), Koru (descartado — todos los TLDs tomados + trademark Air New Zealand).
+
+**Acciones inmediatas (founder, ~45 min total)**:
+
+1. ✅ **Verificación SIC marca** (15 min, gratis):
+   - Ir a [sic.gov.co → Trámites → Búsqueda de marcas](https://www.sic.gov.co/)
+   - Buscar `KONVI` en clases:
+     - Clase 9 — Software / aplicaciones / programas computación
+     - Clase 35 — Servicios publicidad / gestión negocio / comercio
+   - Si **0 colisiones** en estas clases → Konvi viable. Continuar.
+   - Si colisión → fallback a **Konvai** (con AI explícito) o **Klipa**.
+
+2. ✅ **Registrar dominios** (15 min, ~$95 USD/año):
+   - **Primario**: `konvi.co` ($25-30/año en [openhost.com.co](https://www.openhost.com.co/) o GoDaddy)
+   - **Secundario**: `konvi.io` ($45-60/año en [namecheap.com](https://www.namecheap.com/))
+   - **Defensivo opcional**: `konvi.com.co` ($25/año, redirect 301 → konvi.co)
+
+3. ✅ **Reservar handles redes sociales** (15 min, gratis):
+   - `@konvi` en [Instagram](https://instagram.com/konvi)
+   - `@konvi` en [X/Twitter](https://x.com/konvi)
+   - [LinkedIn → crear empresa "Konvi"](https://www.linkedin.com/company/setup/new/) (requiere algún detalle de empresa, OK con nombre legal personal)
+
+4. ✅ **Volver a sesión técnica**: confirmar a Claude que Konvi pasó SIC + dominios registrados → procede con find&replace `Commerce Ops` → `Konvi` en código y documentación (~30 min, controlado, una sola sesión).
+
+**Si SIC colisiona en Konvi** (plan B):
+- Verificar `KONVAI` en mismas clases.
+- Si pasa → ese es el nombre. Re-validar dominios `konvai.co` + `konvai.io`.
+- Si Konvai también colisiona → escalar a Klipa o nueva ronda creativa.
 
 **Por qué importa**: el nombre se usa en:
 - Business Portfolio Meta (visible a tenants cuando autorizan la App).
