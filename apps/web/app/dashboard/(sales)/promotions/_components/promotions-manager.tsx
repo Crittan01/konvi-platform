@@ -145,13 +145,13 @@ export default function PromotionsManager({
   return (
     <div className="space-y-4">
       {successMsg && (
-        <div className="rounded-md border border-emerald-700 bg-emerald-50 p-3 text-sm text-emerald-900">
+        <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-3 text-sm text-emerald-900">
           <CheckCircle2 className="inline h-4 w-4 mr-1" />
           {successMsg}
         </div>
       )}
       {formError && (
-        <div className="rounded-md border border-rose-700 bg-rose-50 p-3 text-sm text-rose-900">
+        <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-3 text-sm text-rose-900">
           <AlertTriangle className="inline h-4 w-4 mr-1" />
           {formError}
         </div>
@@ -160,7 +160,6 @@ export default function PromotionsManager({
       {canWrite && (
         <Button
           onClick={() => { setFormError(null); setCreateOpen(true) }}
-          className="bg-emerald-700 text-white hover:bg-emerald-800"
         >
           <Plus className="h-4 w-4 mr-1" />
           Nuevo cupón
@@ -168,14 +167,14 @@ export default function PromotionsManager({
       )}
 
       {initialCoupons.length === 0 ? (
-        <div className="rounded-md border border-slate-300 bg-slate-50 p-6 text-center text-slate-700">
-          <Tag className="mx-auto h-8 w-8 text-slate-500 mb-2" />
+        <div className="rounded-md border border-border bg-muted/20 p-6 text-center text-muted-foreground">
+          <Tag className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
           <p className="text-sm">Aún no tienes cupones. Crea el primero arriba.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-slate-300 bg-white">
+        <div className="overflow-x-auto rounded-md border border-border bg-card">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-100 text-left text-slate-800">
+            <thead className="bg-muted/30 text-left text-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">Código</th>
                 <th className="px-3 py-2 font-medium">Tipo</th>
@@ -187,23 +186,23 @@ export default function PromotionsManager({
                 <th className="px-3 py-2 font-medium text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200">
+            <tbody className="divide-y divide-border">
               {initialCoupons.map((c) => {
                 const Icon = DISCOUNT_TYPE_ICON[c.discount_type]
                 const usageStr = c.max_redemptions
                   ? `${c.redemptions_count} / ${c.max_redemptions}`
                   : `${c.redemptions_count} / ∞`
                 return (
-                  <tr key={c.id} className={c.is_active ? '' : 'bg-slate-50 text-slate-600'}>
+                  <tr key={c.id} className={c.is_active ? '' : 'bg-muted/20 text-muted-foreground'}>
                     <td className="px-3 py-2">
                       <div className="font-mono font-semibold">{c.code}</div>
                       {c.description && (
-                        <div className="text-xs text-slate-700 mt-0.5">{c.description}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">{c.description}</div>
                       )}
                     </td>
                     <td className="px-3 py-2">
                       <span className="inline-flex items-center gap-1">
-                        <Icon className="h-3.5 w-3.5 text-slate-700" />
+                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                         {DISCOUNT_TYPE_LABEL[c.discount_type]}
                       </span>
                     </td>
@@ -220,7 +219,7 @@ export default function PromotionsManager({
                         </span>
                         {c.total_historical_redemptions > c.redemptions_count && (
                           <span
-                            className="inline-flex items-center rounded-full border border-slate-400 bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700"
+                            className="inline-flex items-center rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                             title={
                               `${c.total_historical_redemptions} aplicaciones en historial ` +
                               `(incluye revocadas y consumidas). El contador principal solo ` +
@@ -241,11 +240,11 @@ export default function PromotionsManager({
                     </td>
                     <td className="px-3 py-2">
                       {c.is_active ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-700 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-700/40 bg-emerald-700/5 px-2 py-0.5 text-xs text-emerald-900">
                           Activo
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-400 bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2 py-0.5 text-xs text-muted-foreground">
                           Inactivo
                         </span>
                       )}
@@ -269,8 +268,8 @@ export default function PromotionsManager({
                             onClick={() => handleToggle(c)}
                             title={c.is_active ? 'Desactivar' : 'Activar'}
                             className={c.is_active
-                              ? 'border-amber-700 text-amber-900 hover:bg-amber-50'
-                              : 'border-emerald-700 text-emerald-900 hover:bg-emerald-50'}
+                              ? 'border-amber-700/40 text-amber-900 hover:bg-amber-700/5'
+                              : 'border-emerald-700/40 text-emerald-900 hover:bg-emerald-700/5'}
                           >
                             <Power className="h-3.5 w-3.5" />
                           </Button>
@@ -283,7 +282,7 @@ export default function PromotionsManager({
                             */}
                           {c.has_historical_redemptions ? (
                             <span
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-slate-50 text-slate-400"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/20 text-muted-foreground"
                               title="No se puede eliminar: este cupón ya tuvo redenciones (audit Habeas Data). Usa Desactivar."
                             >
                               <ShieldCheck className="h-3.5 w-3.5" />
@@ -295,7 +294,7 @@ export default function PromotionsManager({
                               disabled={pending}
                               onClick={() => { setFormError(null); setDeleting(c) }}
                               title="Eliminar permanentemente"
-                              className="border-rose-700 text-rose-900 hover:bg-rose-50"
+                              className="border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -355,8 +354,8 @@ export default function PromotionsManager({
       <Dialog open={!!deleting} onOpenChange={(o) => { if (!o) { setDeleting(null); setFormError(null) } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-rose-900">
-              <Trash2 className="h-5 w-5" />
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Trash2 className="h-5 w-5 text-rose-700" />
               Eliminar cupón {deleting?.code}
             </DialogTitle>
             <DialogDescription>
@@ -365,14 +364,14 @@ export default function PromotionsManager({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="rounded-md border border-emerald-700 bg-emerald-50 p-3 text-sm text-emerald-900">
+          <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-3 text-sm text-emerald-900">
             <ShieldCheck className="inline h-4 w-4 mr-1" />
             Este cupón <b>nunca tuvo redenciones</b>, así que es seguro
             eliminarlo sin afectar auditoría Habeas Data.
           </div>
 
           {formError && (
-            <div className="rounded-md border border-rose-700 bg-rose-50 p-3 text-sm text-rose-900">
+            <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-3 text-sm text-rose-900">
               <AlertTriangle className="inline h-4 w-4 mr-1" />
               {formError}
             </div>
@@ -389,9 +388,9 @@ export default function PromotionsManager({
             </Button>
             <Button
               type="button"
+              variant="destructive"
               onClick={handleDelete}
               disabled={pending}
-              className="bg-rose-700 text-white hover:bg-rose-800"
             >
               {pending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
               Sí, eliminar permanentemente
@@ -412,7 +411,7 @@ function LabelWithHelp({
     <Label htmlFor={htmlFor} className="flex items-center gap-1.5">
       <span>{label}</span>
       <span
-        className="inline-flex cursor-help text-slate-500 hover:text-slate-800"
+        className="inline-flex cursor-help text-muted-foreground hover:text-foreground"
         title={help}
       >
         <HelpCircle className="h-3.5 w-3.5" />
@@ -559,8 +558,8 @@ function CouponForm({
 
       {/* Subtítulo explicativo per tipo (lo más importante: aclara
           comportamiento que owner no conoce sin leer ADR-0015). */}
-      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-        <b className="text-slate-900">¿Cómo funciona?</b>{' '}
+      <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        <b className="text-foreground">¿Cómo funciona?</b>{' '}
         {DISCOUNT_TYPE_BEHAVIOR_HINT[discountType]}
       </div>
 

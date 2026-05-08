@@ -366,33 +366,24 @@ export default async function PromotionsPage() {
   const activeCount = coupons.filter(c => c.is_active).length
 
   return (
-    <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-6 flex items-center gap-3">
-        <Tag className="h-6 w-6 text-emerald-700" />
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Promociones
-          </h1>
-          <p className="text-sm text-slate-700">
-            Gestiona los cupones de descuento de tu tienda.
-            Los clientes los aplican vía WhatsApp con &quot;tengo el cupón XXX&quot;.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+          <Tag className="h-5 w-5 text-primary" /> Promociones
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {coupons.length} cupones totales · {activeCount} activos.
+          Los clientes los aplican vía WhatsApp con &quot;tengo el cupón XXX&quot;.
+        </p>
       </div>
 
       {!canWrite && (
-        <div className="mb-4 rounded-md border border-amber-700 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="rounded-md border border-amber-700/40 bg-amber-700/5 p-3 text-sm text-amber-900">
           <AlertTriangle className="inline h-4 w-4 mr-1" />
           Solo el rol Administrador o Supervisor puede crear/editar cupones.
           Tú (operador) puedes ver el catálogo en modo lectura.
         </div>
       )}
-
-      <div className="mb-4 flex flex-wrap gap-3 text-sm text-slate-700">
-        <span><b>{coupons.length}</b> cupones totales</span>
-        <span className="text-emerald-700">·</span>
-        <span><b>{activeCount}</b> activos</span>
-      </div>
 
       <PromotionsManager
         initialCoupons={coupons}

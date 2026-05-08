@@ -972,60 +972,61 @@ function EnviaCarriersSection({
         </div>
       </div>
       <div className="px-4 py-3.5">
-        {/* Panel "¿Cómo funciona?" prominente. */}
-        <div className="mb-3 rounded-md border border-blue-700/30 bg-blue-700/5 p-3 text-xs text-blue-900 space-y-1.5">
+        {/* Panel consolidado: cómo funcionan carriers + seguro. */}
+        <div className="mb-3 rounded-md border border-emerald-700/30 bg-emerald-700/5 p-3 text-xs text-emerald-900 space-y-2">
           <div className="font-semibold flex items-center gap-1">
             <HelpCircle className="h-3.5 w-3.5" />
             ¿Cómo funciona?
           </div>
-          <p>
-            El bot de WhatsApp cotiza envíos con Envía cada vez que un cliente
-            confirma su pedido. Aquí decides <b>qué transportadoras ofrecer</b>:
-          </p>
-          <ul className="list-disc pl-4 space-y-0.5">
-            <li>
-              <b>Modo abierto</b> (sin configurar): el bot ofrece TODAS las
-              transportadoras que Envía exponga (FedEx, DHL, Servientrega, etc.).
-            </li>
-            <li>
-              <b>Modo configurado</b> (1+ carriers activos): el bot ofrece
-              SOLO los que tengan toggle ON. Los que están en OFF nunca
-              aparecen al cliente.
-            </li>
-          </ul>
-          <p className="text-blue-900/80">
-            <b>Tip:</b> activa solo los carriers con los que tienes contrato
-            real con Envía — los demás causarán errores en cotización si los
-            dejas abiertos.
-          </p>
-        </div>
-        {/* Panel "Cómo funciona el seguro" — basado en docs Envia + empírico prod */}
-        <div className="mb-3 rounded-md border border-emerald-700/30 bg-emerald-700/5 p-3 text-xs text-emerald-900 space-y-1.5">
-          <div className="font-semibold flex items-center gap-1">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            ¿Cómo funciona el seguro de los envíos?
+          <div className="space-y-1.5">
+            <p className="font-medium">Selección de carriers</p>
+            <p>
+              El bot de WhatsApp cotiza envíos con Envía cada vez que un cliente
+              confirma su pedido. Aquí decides <b>qué transportadoras ofrecer</b>:
+            </p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              <li>
+                <b>Modo abierto</b> (sin configurar): el bot ofrece TODAS las
+                transportadoras que Envía exponga (FedEx, DHL, Servientrega, etc.).
+              </li>
+              <li>
+                <b>Modo configurado</b> (1+ carriers activos): el bot ofrece
+                SOLO los que tengan toggle ON. Los que están en OFF nunca
+                aparecen al cliente.
+              </li>
+            </ul>
+            <p className="text-emerald-900/80">
+              <b>Tip:</b> activa solo los carriers con los que tienes contrato
+              real con Envía — los demás causarán errores en cotización si los
+              dejas abiertos.
+            </p>
           </div>
-          <p>
-            El <b>valor declarado</b> (subtotal del pedido) se envía siempre
-            con cada cotización. Cada transportadora aplica su política de
-            seguro automáticamente sobre ese valor — <b>NO es decisión tuya
-            por carrier</b>:
-          </p>
-          <ul className="list-disc pl-4 space-y-0.5">
-            <li>
-              <b>Coordinadora</b>: cobra prima automática proporcional al valor
-              declarado (validado prod 2026-05-07).
-            </li>
-            <li>
-              <b>FedEx, DHL, Servientrega, TCC</b>: aceptan el valor declarado;
-              su seguro queda regulado por su contrato con Envía.
-            </li>
-            <li>
-              <b>Envía (carrier propio)</b>: además del valor declarado, recibe
-              el additional service <code className="text-[10px]">envia_insurance</code>
-              ({' '}id=125 en catálogo oficial Envia).
-            </li>
-          </ul>
+          <div className="space-y-1.5 pt-1.5 border-t border-emerald-700/20">
+            <p className="font-medium flex items-center gap-1">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Seguro de envíos
+            </p>
+            <p>
+              El <b>valor declarado</b> (subtotal del pedido) se envía siempre
+              con cada cotización. Cada transportadora aplica su política de
+              seguro automáticamente — <b>no es decisión por carrier</b>:
+            </p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              <li>
+                <b>Coordinadora</b>: cobra prima automática proporcional al valor
+                declarado (validado prod 2026-05-07).
+              </li>
+              <li>
+                <b>FedEx, DHL, Servientrega, TCC</b>: aceptan el valor declarado;
+                su seguro queda regulado por su contrato con Envía.
+              </li>
+              <li>
+                <b>Envía (carrier propio)</b>: además del valor declarado, recibe
+                el additional service <code className="text-[10px]">envia_insurance</code>
+                {' '}(id=125 en catálogo oficial Envia).
+              </li>
+            </ul>
+          </div>
         </div>
         {!hasAnyPrefs && (
           <div className="mb-3 rounded-md border border-amber-700/40 bg-amber-700/5 px-3 py-2 text-xs text-amber-900">
@@ -1218,7 +1219,7 @@ function EnviaCapabilitiesSection({
       </div>
       <div className="px-4 py-3.5">
         {/* Panel "¿Cómo funciona?" prominente. */}
-        <div className="mb-3 rounded-md border border-blue-700/30 bg-blue-700/5 p-3 text-xs text-blue-900 space-y-1.5">
+        <div className="mb-3 rounded-md border border-emerald-700/30 bg-emerald-700/5 p-3 text-xs text-emerald-900 space-y-1.5">
           <div className="font-semibold flex items-center gap-1">
             <HelpCircle className="h-3.5 w-3.5" />
             ¿Cómo funciona?
@@ -1230,7 +1231,7 @@ function EnviaCapabilitiesSection({
             por ejemplo, permitir cotización pero NO permitir cancelar etiquetas
             ya generadas.
           </p>
-          <p className="text-blue-900/80">
+          <p className="text-emerald-900/80">
             <b>Recomendación:</b> mantenlas todas en <b>ON</b> a menos que tengas
             una razón comercial específica para limitar (ej. tu account Envía no
             tiene saldo suficiente para imprimir etiquetas — desactivas
@@ -1264,7 +1265,7 @@ function EnviaCapabilitiesSection({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium">{cap.label}</span>
                     <span
-                      className="cursor-help text-blue-700/70 hover:text-blue-900"
+                      className="cursor-help text-emerald-700/70 hover:text-emerald-900"
                       title={cap.help}
                     >
                       <HelpCircle className="h-4 w-4" />
