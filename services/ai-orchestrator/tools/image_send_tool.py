@@ -248,7 +248,7 @@ def _get_tenant_products_with_images(supabase: Client, tenant_id: str) -> list[d
     return res.data or []
 
 
-# Meta v21.0 limita caption a 1024 chars. Dejamos margen para CTA + título.
+# Meta Graph API limita caption a 1024 chars. Dejamos margen para CTA + título.
 _MAX_DESCRIPTION_IN_CAPTION = 600
 
 

@@ -1,6 +1,7 @@
 # F.1/F.2 vs Meta Cloud API — Gap Audit (rev. 106 Sem 6 pre-HSM)
 
 **Sesión**: 2026-05-08.
+**Estado tras ejecución**: ✅ Sem 6 pre-HSM cerrado en la misma sesión. Items A.1, A.2, A.4, A.5, A.6, A.8 ejecutados; A.3 cancelado por decisión arquitectónica (ver §7.bis abajo); A.7 (`MetaTierLimiter`) diferido a Sem 7 dentro de F2 HSM. Suite tests **+22 nuevos** (`test_meta_hmac_per_tenant.py`).
 **Scope**: validar reusabilidad del framework común (F.1 webhook framework + F.2 IntegrationClient base + F.11 TenantCredentialsFacade) para implementar **F2 HSM templates** y subscripciones webhook adicionales (`message_template_status_update`, `phone_number_quality_update`, etc.) sin reescribir.
 **Disparador**: orden recomendado al founder y aceptado — auditar framework antes de iniciar HSM (~11 días) para evitar duplicar lógica ad-hoc.
 **Fuente principal**: [`docs/research/whatsapp-meta-dossier-2026-05-05.md`](./whatsapp-meta-dossier-2026-05-05.md).
@@ -288,12 +289,41 @@ Estos 5 días sostienen los siguientes ~11 días de F2 HSM templates en una **ba
 ## 7. Decisiones registradas
 
 1. ✅ F.1 + F.2 + F.11 son reusables casi al 100% — **NO requieren refactor mayor**.
-2. ✅ Migrar `connector-whatsapp` a usar F.1 antes de F2 HSM (no después) — orden recomendado al founder.
+2. ⚠️ **REVISADA durante ejecución**: NO migrar `connector-whatsapp` a usar F.1 (ver §7.bis). Migración inline en `dependencies/meta.py` con misma garantía per-tenant.
 3. ✅ `secret_resolver` signature cambia a `(headers, raw_body)` — único cambio breaking del framework, controlado.
 4. ✅ `MetaTierLimiter` queda como módulo Meta-específico (`lib/meta_tier_limiter.py`), NO se generaliza a F.2 todavía (YAGNI hasta segundo provider con tier).
-5. ✅ Multi-field webhook dispatch se resuelve en `MetaWebhookHandler` subclass, sin tocar F.1 base.
+5. ✅ Multi-field webhook dispatch se resuelve en `parse_webhook_events()` (parser nuevo en connector), sin tocar F.1 base.
 6. ✅ Graph API v21 → v22 incluido en bloque pre-HSM (oportunidad).
-7. ✅ Estimado Sem 6 pre-HSM: **5 días-dev bloqueantes + 2 días recomendados (tier limiter)**.
+7. ✅ Estimado Sem 6 pre-HSM: ejecutado en una sesión (8 items menores).
+
+## 7.bis Decisión arquitectónica nueva — connector-whatsapp NO migra a F.1
+
+Durante ejecución de A.2 se descubrió que `services/connector-whatsapp` es **deploy unit independiente** en Render (`rootDir: services/connector-whatsapp` en `render.yaml`). NO puede importar `services/api/lib/webhook_framework/` sin cross-service coupling que rompería el aislamiento de deploys.
+
+**Opciones evaluadas**:
+
+| # | Opción | Pros | Contras |
+|---|---|---|---|
+| A | Mover `webhook_framework/` a top-level package compartido | Reuso máximo | Requiere reorganizar `render.yaml` + paths de imports en 4 servicios; no trivial |
+| B | Symlink/duplicar el módulo en cada deploy unit | DRY parcial | Frágil; symlinks no funcionan bien en Render Buildpacks |
+| C | **Mantener HMAC inline en connector-whatsapp con misma garantía per-tenant** | Cero cross-service coupling; deploy aislado preservado; lógica idéntica funcional | Pequeña duplicación (~80 LOC HMAC + cache + lookup) |
+
+**Decisión C aceptada**: el connector mantiene `dependencies/meta.py` inline con:
+- Lookup `phone_number_id` → `tenant_integrations` per-tenant.
+- Vault-first secret resolution (con plaintext fallback + WARN).
+- Cache TTL 5min (mismo pattern F.11 inline).
+- Backward compat con `META_APP_SECRET` env var legacy (con WARN).
+
+F.1 sigue siendo el patrón canónico para webhooks que viven dentro de `services/api/` (Wompi, MeLi, Envia inbound). Cuando/si el connector se consolide en `services/api/` (futuro refactor), migrar a F.1 será trivial.
+
+**Trade-off documentado**: ~80 LOC de duplicación de patrones HMAC + cache + Vault, a cambio de aislamiento de deploy unit. Aceptado.
+
+## 7.ter Items NO ejecutados Sem 6
+
+| Item | Razón | Plan |
+|---|---|---|
+| A.3 (refactor router con `MetaWebhookHandler`) | Cancelado — connector mantiene inline (§7.bis). Router actual con `verify_meta_signature` dep + `BackgroundTasks` + dispatcher integrado en `decouple_and_enqueue` ES suficiente. | — |
+| A.7 (`MetaTierLimiter`) | Diferido a Sem 7 dentro de F2 HSM | Construir cuando exista la suscripción a `phone_number_quality_update` que mantiene `tier` actualizado en `tenant_integrations.credentials.tier` |
 
 ---
 

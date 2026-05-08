@@ -4,7 +4,7 @@ Usado por el orquestador multimodal: cuando llega un audio del cliente,
 necesitamos los bytes para enviarlos inline al modelo Gemini.
 
 Flujo Meta:
-    1. GET https://graph.facebook.com/v21.0/{media_id}
+    1. GET https://graph.facebook.com/v22.0/{media_id}
        → retorna {url, mime_type, sha256, file_size, ...}
     2. GET <url> con Bearer
        → retorna binary
@@ -23,7 +23,7 @@ import httpx
 
 logger = logging.getLogger("orchestrator.meta_media")
 
-META_API_VERSION = "v21.0"
+META_API_VERSION = "v22.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("META_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "10"))

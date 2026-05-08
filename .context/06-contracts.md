@@ -64,6 +64,57 @@ Callback rechaza state faltante/inválido/expirado/reutilizado.
 Fuente única: `tenant_integrations` por `tenant_id` (`provider='whatsapp'`).  
 No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en env vars.
 
+### 7.1 Schema canónico `tenant_integrations.credentials` (provider='whatsapp')
+
+Verificado 2026-05-08 (rev. 106 Sem 6 pre-HSM). Refs: dossier
+`docs/research/whatsapp-meta-dossier-2026-05-05.md` + Meta Cloud API docs.
+
+```jsonc
+{
+  // Identificadores públicos (NO sensitive — plaintext OK)
+  "phone_number_id": "990364...1295",        // requerido outbound /messages + lookup HMAC
+  "waba_id": "215905...8202272",             // requerido templates CRUD F2 (POST /{WABA_ID}/message_templates)
+  "display_phone_number": "+57 311 5678910", // opcional, solo display
+
+  // Secretos (preferir Vault)
+  "access_token_secret_id": "<vault_uuid>",  // Bearer Graph API outbound
+  "access_token": "...",                      // (legacy, migrar a Vault)
+  "app_secret_secret_id": "<vault_uuid>",    // HMAC X-Hub-Signature-256 verify (per-tenant rev. 106)
+  "app_secret": "...",                        // (legacy fallback)
+  "verify_token_secret_id": "<vault_uuid>",  // GET handshake hub.verify_token (per-tenant — TODO migración)
+
+  // Metadata operativa
+  "tier": "TIER_250",                         // TIER_50|250|1K|10K|100K|UNLIMITED — synced via phone_number_quality_update webhook (F2)
+  "quality_rating": "GREEN"                   // GREEN|YELLOW|RED — synced via phone_number_quality_update
+}
+```
+
+**Notas**:
+- `app_secret` se usa por `services/connector-whatsapp/dependencies/meta.py` para
+  HMAC SHA-256 SAID(payload). Resolución per-tenant via lookup por `phone_number_id`
+  extraído del payload Meta (ver §7.2).
+- `access_token` se usa por `services/ai-orchestrator/whatsapp_sender.py` para
+  outbound `/messages`. Mismo Vault lookup, distinto callsite.
+- `tier` + `quality_rating` se actualizan automáticamente cuando Meta envía
+  `phone_number_quality_update` (suscripción F2 pendiente Sem 7).
+
+### 7.2 HMAC verification per-tenant (rev. 106 Sem 6)
+
+`services/connector-whatsapp/dependencies/meta.py` (no usa F.1 framework por
+isolation deploy unit Render — ver `docs/research/f1-f2-meta-gap-audit-2026-05-08.md`):
+
+1. Lee raw_body de la request POST.
+2. Extrae `phone_number_id` de `entry[].changes[].value.metadata.phone_number_id`.
+3. Lookup `tenant_integrations` WHERE `provider='whatsapp'` AND `status='connected'`
+   filtra in-Python por `credentials.phone_number_id == phone_number_id`.
+4. Resuelve `app_secret` (Vault first, plaintext fallback con WARN).
+5. HMAC SHA-256 verify constant-time contra header `X-Hub-Signature-256`.
+6. Cache TTL 5min para evitar hit DB en cada webhook.
+
+Backward compat: si `META_APP_SECRET` env-var presente Y `phone_number_id` no
+se extrae → usa secret global (legacy mono-tenant). Logueado WARN para forzar
+migración. Remover env-var post-migración completa.
+
 ## 8) Seguridad multi-tenant (service_role)
 
 `service_role` bypasea RLS → el aislamiento depende de filtros explícitos `tenant_id` en cada query.  

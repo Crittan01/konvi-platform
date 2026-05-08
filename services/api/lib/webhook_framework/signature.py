@@ -25,7 +25,7 @@ Uso (en concrete handler):
     class MetaWebhookHandler(WebhookHandler):
         signature_strategy = HMACSha256Strategy(
             header_name="X-Hub-Signature-256",
-            secret_resolver=lambda req: get_meta_app_secret(req.tenant_id),
+            secret_resolver=lambda headers, raw_body: resolve_meta_app_secret_per_tenant(raw_body),
         )
 """
 from __future__ import annotations
@@ -58,13 +58,21 @@ class HMACSha256Strategy(SignatureStrategy):
     """HMAC SHA-256 con header configurable. Patrón Meta WhatsApp.
 
     Header puede venir con prefijo (`sha256=<hex>`) — se strip automáticamente.
-    Comparación constant-time vía hmac.compare_digest."""
+    Comparación constant-time vía hmac.compare_digest.
+
+    `secret_resolver(headers, raw_body) → str`: rev. 2026-05-08 (Sem 6 pre-HSM)
+    la signature del resolver se extiende a `(headers, raw_body)` para casos
+    multi-tenant donde el secret se resuelve via lookup en payload (ej. Meta
+    WhatsApp: `phone_number_id` viene en `entry[].changes[].value.metadata`
+    → lookup tenant_id → app_secret per-tenant via F.11). Callers que sólo
+    necesiten headers ignoran `raw_body` (parámetro positional).
+    """
 
     def __init__(
         self,
         *,
         header_name: str = "X-Hub-Signature-256",
-        secret_resolver: Callable[[dict[str, str]], str],
+        secret_resolver: Callable[[dict[str, str], bytes], str],
         prefix: str = "sha256=",
     ):
         self._header = header_name.lower()
@@ -80,7 +88,7 @@ class HMACSha256Strategy(SignatureStrategy):
         if self._prefix and sig_received.startswith(self._prefix):
             sig_received = sig_received[len(self._prefix):]
 
-        secret = self._secret_resolver(norm_headers)
+        secret = self._secret_resolver(norm_headers, raw_body)
         if not secret:
             raise SignatureError("HMAC secret no resuelto para esta request")
 

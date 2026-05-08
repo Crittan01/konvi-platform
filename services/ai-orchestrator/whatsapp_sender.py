@@ -5,7 +5,7 @@ from supabase import Client
 
 logger = logging.getLogger("orchestrator.whatsapp_sender")
 
-META_API_VERSION = "v21.0"
+META_API_VERSION = "v22.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
 REQUEST_TIMEOUT_SECONDS = 10
@@ -51,7 +51,7 @@ async def send_whatsapp_message(
 
     Modo TEXTO (default, backwards-compat): pasar `text`.
     Modo IMAGEN (F8.B): pasar `image_link` (URL HTTPS) y opcionalmente
-    `image_caption`. Meta v21.0 exige HTTPS y MIME image/jpeg|png|webp.
+    `image_caption`. Meta v22.0 exige HTTPS y MIME image/jpeg|png|webp.
 
     Si se pasan ambos, IMAGEN tiene prioridad — el caller debe enviar texto
     como mensaje separado si lo necesita.
@@ -71,7 +71,7 @@ async def send_whatsapp_message(
         # F8.B.1 — payload type=image. Meta exige link HTTPS público.
         if not image_link.startswith("https://"):
             logger.error(
-                "[META API] image_link debe ser HTTPS (Meta v21.0 lo exige). Recibido=%s",
+                "[META API] image_link debe ser HTTPS (Meta v22.0 lo exige). Recibido=%s",
                 image_link,
             )
             return None
