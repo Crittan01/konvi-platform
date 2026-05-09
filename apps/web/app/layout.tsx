@@ -2,8 +2,8 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Konvi Platform',
-  description: 'Multi-Tenant Backoffice for WhatsApp Commerce',
+  title: 'Konvi · Tu tienda en WhatsApp',
+  description: 'Plataforma SaaS para vender por WhatsApp con bot AI, pagos y despachos integrados.',
 }
 
 export default function RootLayout({
