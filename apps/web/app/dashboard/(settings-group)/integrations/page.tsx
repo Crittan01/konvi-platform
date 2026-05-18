@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { IntegrationsManager } from './_components/integrations-manager'
 
 export const metadata = {
-  title: 'Integraciones — Configuración — Konvi',
+  title: 'Integraciones — Configuración',
   description: 'Conectores activos para tu negocio.',
 }
 
@@ -306,12 +306,17 @@ export default async function IntegrationsPage({
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
 
-    const { data: notif } = await sb
-      .from('notification_settings').select('config')
-      .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').single()
+    const [notifRes, tenantRes] = await Promise.all([
+      sb.from('notification_settings').select('config')
+        .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').single(),
+      sb.from('tenants').select('name').eq('id', m.tenant_id).maybeSingle(),
+    ])
 
-    const cfg    = (notif?.config ?? {}) as Record<string, string>
+    const cfg    = (notifRes.data?.config ?? {}) as Record<string, string>
     const chatId = cfg.chat_id
+    // Tenant-centric: el mensaje test va desde el bot del tenant, no el de
+    // Konvi. Cliente final = operador del tenant → ve la marca de SU tienda.
+    const tenantName = (tenantRes.data?.name ?? 'Tu tienda').trim()
     // Leer token desde Vault
     const { data: token } = cfg.bot_token_secret_id
       ? await sb.rpc('pgsec_read_secret', { p_id: cfg.bot_token_secret_id })
@@ -330,7 +335,7 @@ export default async function IntegrationsPage({
         const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: 'Konvi — Conexión Telegram verificada.' }),
+          body: JSON.stringify({ chat_id: chatId, text: `${tenantName} — Conexión Telegram verificada.` }),
           signal: controller.signal,
         })
         clearTimeout(timeout)

@@ -23,14 +23,16 @@
  * RBAC: owner / manager pueden CRUD; operator redirect (no acceso).
  */
 import { createClient } from '@/utils/supabase/server'
-import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
+import {
+  getCachedUser, getCachedTenantMeta, getCachedTenantName,
+} from '@/utils/supabase/cached-user'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { MessageSquareText, AlertTriangle } from 'lucide-react'
 import TemplatesManager from './_components/templates-manager'
 
 export const metadata = {
-  title: 'Plantillas WhatsApp — Configuración — Konvi',
+  title: 'Plantillas WhatsApp — Configuración',
   description:
     'Gestión de templates HSM aprobados por Meta para mensajería fuera de CSW 24h.',
 }
@@ -349,6 +351,7 @@ async function deleteDraftAction(
 export default async function WhatsAppTemplatesPage() {
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
+  const tenantName = (await getCachedTenantName()) ?? 'Tu tienda'
 
   // Protección por navegación directa — operators no acceden.
   if (role === 'operator') redirect('/dashboard')
@@ -430,6 +433,7 @@ export default async function WhatsAppTemplatesPage() {
         initialTemplates={templates}
         canWrite={canWrite && wabaConfigured}
         tenantId={tenantId ?? ''}
+        tenantName={tenantName}
         createDraftAction={createDraftAction}
         updateDraftAction={updateDraftAction}
         deleteDraftAction={deleteDraftAction}

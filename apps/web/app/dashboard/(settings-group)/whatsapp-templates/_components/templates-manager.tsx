@@ -24,6 +24,7 @@ type Props = {
   initialTemplates: WhatsAppTemplate[]
   canWrite: boolean
   tenantId: string
+  tenantName: string
   createDraftAction: (formData: FormData) => Promise<ActionResult>
   updateDraftAction: (formData: FormData) => Promise<ActionResult>
   deleteDraftAction: (formData: FormData) => Promise<ActionResult>
@@ -73,21 +74,24 @@ const QUALITY_CHIP: Record<string, string> = {
 const EDITABLE = new Set<TemplateStatus>(['LOCAL_DRAFT', 'REJECTED'])
 
 // Template starter para crear nuevo — body con 4 placeholders al estilo
-// payment_reminder_v1 ya seedeado para KAIU.
-const COMPONENTS_PLACEHOLDER = JSON.stringify(
-  [
-    {
-      type: 'BODY',
-      text:
-        'Hola {{1}}, te recordamos que tu pedido #{{2}} por {{3}} sigue pendiente de pago. ' +
-        'Podés pagarlo aquí: {{4}}',
-      example: { body_text: [['Carlos', 'A1B2C3', '$87.500 COP', 'https://checkout.wompi.co/...']] },
-    },
-    { type: 'FOOTER', text: 'Konvi — gracias por tu compra' },
-  ],
-  null,
-  2,
-)
+// payment_reminder_v1. El FOOTER usa el nombre del tenant interpolado
+// (segregación Konvi/tenant: el cliente final ve la marca de su tienda).
+function buildComponentsPlaceholder(tenantName: string): string {
+  return JSON.stringify(
+    [
+      {
+        type: 'BODY',
+        text:
+          'Hola {{1}}, te recordamos que tu pedido #{{2}} por {{3}} sigue pendiente de pago. ' +
+          'Podés pagarlo aquí: {{4}}',
+        example: { body_text: [['Carlos', 'A1B2C3', '$87.500 COP', 'https://checkout.wompi.co/...']] },
+      },
+      { type: 'FOOTER', text: `${tenantName} — gracias por tu compra` },
+    ],
+    null,
+    2,
+  )
+}
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -116,6 +120,7 @@ export default function TemplatesManager({
   initialTemplates,
   canWrite,
   tenantId,
+  tenantName,
   createDraftAction,
   updateDraftAction,
   deleteDraftAction,
@@ -397,7 +402,7 @@ export default function TemplatesManager({
               <textarea
                 id="components" name="components" required
                 rows={14}
-                defaultValue={COMPONENTS_PLACEHOLDER}
+                defaultValue={buildComponentsPlaceholder(tenantName)}
                 className="font-mono text-xs w-full rounded-md border border-input bg-background px-3 py-2"
               />
               <p className="text-xs text-muted-foreground">
