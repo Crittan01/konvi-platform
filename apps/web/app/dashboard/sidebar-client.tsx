@@ -10,7 +10,7 @@ import {
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
   Wallet, DollarSign, AlertCircle, Bot, Lock, KeyRound,
-  Store, Crown, Briefcase, Headphones, Tag,
+  Store, Crown, Briefcase, Headphones, Tag, MessageSquareText,
 } from 'lucide-react'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -116,6 +116,7 @@ const NAV_ITEMS: NavItem[] = [
       { kind: 'leaf', href: '/dashboard/settings',     label: 'General',            icon: Building2, roles: ['owner'] },
       { kind: 'leaf', href: '/dashboard/team',         label: 'Usuarios y Acceso',  icon: Users,     roles: ['owner'] },
       { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',      icon: Plug,      roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/whatsapp-templates', label: 'Plantillas WhatsApp', icon: MessageSquareText, roles: ['owner', 'manager'], integration: 'whatsapp' },
     ],
   },
 ]
