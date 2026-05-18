@@ -1,9 +1,32 @@
 import * as React from "react"
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
-import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
+import {
+  getCachedUser, getCachedTenantMeta, getCachedTenantName,
+} from '@/utils/supabase/cached-user'
 import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import SidebarClient from './sidebar-client'
+
+/**
+ * Browser title tenant-centric (Sem 7 F2 cierre — segregación Konvi/tenant).
+ *
+ * Cada página dashboard provee solo el segmento (`title: 'Pedidos'`) y
+ * Next.js completa con el template `'%s — {tenantName}'`. Páginas sin
+ * metadata propia caen en el `default` (solo el nombre del tenant).
+ *
+ * Pre-auth (login, forgot-password, etc.) mantiene "Konvi" porque vive
+ * fuera del layout dashboard.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const tenantName = (await getCachedTenantName()) ?? 'Tu tienda'
+  return {
+    title: {
+      template: `%s — ${tenantName}`,
+      default: tenantName,
+    },
+  }
+}
 
 export default async function DashboardLayout({
   children,

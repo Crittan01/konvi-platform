@@ -243,7 +243,7 @@ export default function SidebarClient({
               </div>
             )}
             <span className="font-semibold text-sm text-foreground truncate">
-              {tenantName ?? 'Konvi'}
+              {tenantName ?? 'Tu tienda'}
             </span>
           </div>
 

@@ -82,3 +82,30 @@ export const getCachedTenantMeta = cache(async (): Promise<TenantMeta> => {
     userId: user?.id,
   }
 })
+
+/**
+ * Tenant-centric branding (Sem 7 F2 cierre — segregación Konvi/tenant).
+ *
+ * Lookup del nombre del tenant para sidebar + browser title +
+ * placeholders de templates. Cached per-request — múltiples llamadas en
+ * el mismo render tree (layout + page + components) comparten 1 query.
+ *
+ * Returns:
+ *   null si tenantId undefined (caller decide fallback como 'Tu tienda').
+ *   El nombre real (e.g. "KAIU") si existe en la tabla `tenants`.
+ *
+ * NO levanta excepción si la query falla — devuelve null defensivamente
+ * (un title degradado es mejor que un crash en SSR).
+ */
+export const getCachedTenantName = cache(async (): Promise<string | null> => {
+  const { tenantId } = await getCachedTenantMeta()
+  if (!tenantId) return null
+  const supabase = createClient()
+  const { data } = await supabase
+    .from('tenants')
+    .select('name')
+    .eq('id', tenantId)
+    .maybeSingle()
+  const name = (data?.name ?? '').trim()
+  return name.length > 0 ? name : null
+})

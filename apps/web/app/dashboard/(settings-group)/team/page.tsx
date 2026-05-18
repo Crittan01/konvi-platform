@@ -14,7 +14,7 @@ import InactivateMemberButton from './inactivate-member-button'
 import { TeamUrlCleaner } from './url-cleaner'
 
 export const metadata = {
-  title: 'Usuarios y Acceso — Konvi',
+  title: 'Usuarios y Acceso',
   description: 'Gestiona los miembros del equipo y sus roles de acceso a la consola del tenant.',
 }
 

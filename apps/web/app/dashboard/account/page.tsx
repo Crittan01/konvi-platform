@@ -6,7 +6,7 @@ import { KeyRound } from 'lucide-react'
 import SetPasswordForm from '@/app/set-password/set-password-form'
 
 export const metadata = {
-  title: 'Mi cuenta — Konvi',
+  title: 'Mi cuenta',
 }
 
 export default async function AccountPage({

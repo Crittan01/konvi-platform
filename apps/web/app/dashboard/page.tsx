@@ -13,7 +13,7 @@ export default async function DashboardPage() {
   const canWrite = role === 'owner' || role === 'manager'
   const supabase = createClient()
 
-  let tenantName = 'Konvi'
+  let tenantName = 'Tu tienda'
   let stats = { conversations: 0, orders: 0, contacts: 0, products: 0 }
   let ops = { activeConversations: 0, humanTakeovers: 0, pendingOrders: 0, lowStockCount: 0 }
   let messagesPerDay: { day: string; total: number }[] = []
@@ -69,7 +69,7 @@ export default async function DashboardPage() {
       supabase.from('orders').select('status').eq('tenant_id', tenantId),
     ])
 
-    tenantName = tenantRes.data?.name ?? 'Konvi'
+    tenantName = tenantRes.data?.name ?? 'Tu tienda'
 
     stats = {
       conversations: convRes.count ?? 0,
