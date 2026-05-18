@@ -7,7 +7,12 @@ from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
-from whatsapp_sender import send_whatsapp_message
+from whatsapp_sender import (
+    send_whatsapp_message,
+    send_whatsapp_template,
+    TEMPLATE_ERR_TEMPLATE_NOT_APPROVED,
+    TEMPLATE_ERR_TEMPLATE_NOT_FOUND,
+)
 
 logger = logging.getLogger("orchestrator.worker")
 
@@ -64,6 +69,29 @@ PAYMENT_REMINDER_WINDOW_MINUTES = int(os.getenv("PAYMENT_REMINDER_WINDOW_MINUTES
 # Ventana CSW de Meta — fuente: developers.facebook.com (24h tras último
 # mensaje del cliente). Si cambia el SLA de Meta, ajustar aquí.
 META_CSW_HOURS = int(os.getenv("META_CSW_HOURS", "24"))
+
+# Sem 7 F2 item 6.b — Cron HSM cart_abandoned_24h MARKETING fuera CSW.
+# Dispara template MARKETING cart_abandoned_24h_v1 a carritos sin actividad
+# >24h cuyo cliente tiene consent_given=TRUE (Habeas Data Ley 1581).
+# Costo: ~$0.025 USD/msg (MARKETING tier). ROI esperado positivo por recovery.
+CART_ABANDONED_REMINDER_ENABLED = os.getenv("CART_ABANDONED_REMINDER_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+CART_ABANDONED_REMINDER_INTERVAL_SECONDS = int(
+    os.getenv("CART_ABANDONED_REMINDER_INTERVAL_SECONDS", "300")  # cada 5min
+)
+# Mínimo de horas desde última actividad del carrito para disparar el HSM.
+# Debe ser > META_CSW_HOURS porque dentro CSW free-form ya cubrió (cero costo).
+CART_ABANDONED_THRESHOLD_HOURS = int(
+    os.getenv("CART_ABANDONED_THRESHOLD_HOURS", "24")
+)
+# Tope superior para no enviar recordatorios infinitos (carrito >7d se abandona).
+CART_ABANDONED_MAX_AGE_HOURS = int(
+    os.getenv("CART_ABANDONED_MAX_AGE_HOURS", "72")
+)
+# Descuento default que ofrece el template MARKETING (placeholder {{3}}).
+# Tenants pueden override per-tenant en futuro. Hoy 10% por default.
+CART_ABANDONED_DISCOUNT_LABEL = os.getenv("CART_ABANDONED_DISCOUNT_LABEL", "10%")
 # Anti-hibernación Render Free: ping al propio endpoint /health para prevenir que
 # el servicio web se hiberne. Solo necesario en plan Free (sin keep-alive nativo).
 ANTI_HIBERNATION_ENABLED = os.getenv("ANTI_HIBERNATION_ENABLED", "false").lower() in {
@@ -97,6 +125,8 @@ class OrchestratorWorker:
         self._last_release_at = 0.0
         self._reminder_enabled = PAYMENT_REMINDER_ENABLED
         self._last_reminder_at = 0.0
+        self._cart_abandoned_enabled = CART_ABANDONED_REMINDER_ENABLED
+        self._last_cart_abandoned_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
         self._metrics = {
@@ -112,6 +142,14 @@ class OrchestratorWorker:
             "expired_orders_cancelled": 0,
             "payment_reminders_sent": 0,
             "payment_reminders_skipped_csw_closed": 0,
+            # Sem 7 F2 item 6.b: HSM templates fallback fuera CSW
+            "payment_reminders_sent_via_hsm": 0,
+            "payment_reminders_hsm_failed": 0,
+            "payment_reminders_hsm_not_approved": 0,
+            "cart_abandoned_reminders_sent": 0,
+            "cart_abandoned_reminders_skipped_no_consent": 0,
+            "cart_abandoned_reminders_hsm_failed": 0,
+            "cart_abandoned_reminders_hsm_not_approved": 0,
         }
 
     def stop(self):
@@ -137,6 +175,7 @@ class OrchestratorWorker:
         await self._poll_whatsapp_outbound_messages()
         await self._run_idempotency_cleanup_if_due()
         await self._send_payment_reminders_if_due()
+        await self._send_cart_abandoned_reminders_if_due()
         await self._release_expired_pending_payment_orders()
         await self._anti_hibernation_ping_if_due()
 
@@ -709,19 +748,34 @@ class OrchestratorWorker:
                 and (last_inbound_rows[0].get("created_at") or "") >= csw_cutoff
             )
             if not csw_open:
-                # Fuera de CSW: free-form bloqueado por Meta. Mark como
-                # salteado para no reintentar; F2 (templates) lo manejará.
+                # Fuera de CSW: free-form bloqueado por Meta. Intentar HSM
+                # template payment_reminder_v1 (Sem 7 F2 item 6.b).
+                # Si template no APPROVED → marcar skipped + métrica.
+                # Si HSM envía OK → marcar sent_via_hsm + métrica.
                 self._metrics["payment_reminders_skipped_csw_closed"] += 1
-                try:
-                    self.supabase.table("orders").update({
-                        "payment_reminder_sent_at": now_dt.isoformat(),
-                    }).eq("id", order_id).is_("payment_reminder_sent_at", "null").execute()
-                except Exception:
-                    pass
-                logger.info(
-                    "[REMINDER] CSW cerrada — order=%s skip (F2 pendiente: HSM template)",
-                    order_id[:8],
+                hsm_handled = await self._try_send_payment_reminder_hsm(
+                    order_id=order_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    customer_phone=customer_phone,
+                    now_dt=now_dt,
                 )
+                if not hsm_handled:
+                    # HSM no aplicó (template no aprobado o falló). Igualmente
+                    # marcamos idempotencia para no reintentar — el cron solo
+                    # debería disparar 1 vez por orden.
+                    try:
+                        self.supabase.table("orders").update({
+                            "payment_reminder_sent_at": now_dt.isoformat(),
+                        }).eq("id", order_id).is_(
+                            "payment_reminder_sent_at", "null",
+                        ).execute()
+                    except Exception:
+                        pass
+                    logger.info(
+                        "[REMINDER] CSW cerrada — order=%s skip (HSM no disponible)",
+                        order_id[:8],
+                    )
                 continue
 
             short_id = str(order_id)[:8].upper()
@@ -782,6 +836,365 @@ class OrchestratorWorker:
             except Exception as exc:
                 logger.warning("[REMINDER] No pude marcar idempotencia order=%s: %s",
                                order_id[:8], exc)
+
+    # ── Sem 7 F2 item 6.b — HSM payment_reminder fuera CSW ──────────────────
+
+    async def _try_send_payment_reminder_hsm(
+        self,
+        *,
+        order_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        customer_phone: str,
+        now_dt: datetime,
+    ) -> bool:
+        """Intenta enviar HSM template payment_reminder_v1 cuando CSW está
+        cerrada. Retorna True si HSM envió OK (marcado idempotente + persistido
+        outbound). False si template no APPROVED, falló o data incompleta —
+        caller marca skipped.
+
+        Costo: ~$0.004 USD/msg (UTILITY tier fuera CSW). Compensa con creces
+        si recupera al menos 1 de cada 10 pedidos abandonados (ROI ~200x).
+        """
+        # Fetch datos completos de la orden para hidratar template
+        try:
+            order_res = (
+                self.supabase.table("orders")
+                .select("id, total_amount, contact_id")
+                .eq("id", order_id)
+                .limit(1)
+                .execute()
+            )
+            order_rows = order_res.data or []
+        except Exception as exc:
+            logger.error("[REMINDER_HSM] error fetch order=%s: %s",
+                         order_id[:8], exc)
+            return False
+        if not order_rows:
+            return False
+        order = order_rows[0]
+        total_amount = float(order.get("total_amount") or 0)
+
+        # Resolver nombre cliente via contacts si disponible
+        customer_name = "cliente"
+        contact_id = order.get("contact_id")
+        if contact_id:
+            try:
+                contact_res = (
+                    self.supabase.table("contacts")
+                    .select("first_name, full_name")
+                    .eq("id", contact_id)
+                    .limit(1)
+                    .execute()
+                )
+                contact_rows = contact_res.data or []
+                if contact_rows:
+                    first = (contact_rows[0].get("first_name") or "").strip()
+                    full = (contact_rows[0].get("full_name") or "").strip()
+                    customer_name = first or (full.split(" ")[0] if full else "cliente")
+            except Exception:
+                pass
+
+        # Resolver checkout_url del payment más reciente
+        checkout_url = ""
+        try:
+            pay_res = (
+                self.supabase.table("payments")
+                .select("checkout_url, created_at")
+                .eq("order_id", order_id)
+                .eq("tenant_id", tenant_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            pay_rows = pay_res.data or []
+            if pay_rows:
+                checkout_url = (pay_rows[0].get("checkout_url") or "").strip()
+        except Exception:
+            pass
+        if not checkout_url:
+            logger.warning(
+                "[REMINDER_HSM] order=%s sin checkout_url — no se puede armar template",
+                order_id[:8],
+            )
+            return False
+
+        # Format total COP: $87.500 COP (entero, punto cada 3)
+        try:
+            pesos = int(total_amount)  # total_amount ya está en pesos en orders schema
+            total_str = f"${pesos:,}".replace(",", ".") + " COP"
+        except Exception:
+            total_str = "$0 COP"
+
+        order_number = str(order_id)[:8].upper()
+
+        body_params = [customer_name, order_number, total_str, checkout_url]
+
+        msg_id, err = await send_whatsapp_template(
+            tenant_id=tenant_id,
+            supabase=self.supabase,
+            to_phone=customer_phone,
+            template_name="payment_reminder_v1",
+            language="es_CO",
+            body_params=body_params,
+        )
+
+        if err in (TEMPLATE_ERR_TEMPLATE_NOT_APPROVED, TEMPLATE_ERR_TEMPLATE_NOT_FOUND):
+            self._metrics["payment_reminders_hsm_not_approved"] += 1
+            logger.info(
+                "[REMINDER_HSM] order=%s template payment_reminder_v1 no disponible "
+                "(err=%s). Submitear via scripts/admin/submit_template_to_meta.py",
+                order_id[:8], err,
+            )
+            return False
+
+        if err:
+            self._metrics["payment_reminders_hsm_failed"] += 1
+            logger.warning(
+                "[REMINDER_HSM] order=%s falló HSM send: %s",
+                order_id[:8], err,
+            )
+            return False
+
+        # OK: marcar idempotencia + persistir outbound en messages
+        try:
+            self.supabase.table("messages").insert({
+                "tenant_id": tenant_id,
+                "conversation_id": conversation_id,
+                "direction": "outbound",
+                "content_type": "template",
+                "content": (
+                    f"[TEMPLATE payment_reminder_v1] {customer_name}, recordatorio "
+                    f"pago orden {order_number} por {total_str}"
+                ),
+                "meta_message_id": msg_id,
+                "processing_status": "processed",
+                "processed": True,
+                "processed_at": now_dt.isoformat(),
+            }).execute()
+        except Exception as exc:
+            logger.warning("[REMINDER_HSM] no pude persistir outbound order=%s: %s",
+                           order_id[:8], exc)
+
+        try:
+            self.supabase.table("orders").update({
+                "payment_reminder_sent_at": now_dt.isoformat(),
+            }).eq("id", order_id).is_(
+                "payment_reminder_sent_at", "null",
+            ).execute()
+        except Exception:
+            pass
+
+        self._metrics["payment_reminders_sent_via_hsm"] += 1
+        logger.info(
+            "[REMINDER_HSM] ✓ order=%s template payment_reminder_v1 enviado "
+            "to=%s meta_msg_id=%s",
+            order_id[:8], customer_phone, msg_id,
+        )
+        return True
+
+    async def _send_cart_abandoned_reminders_if_due(self) -> None:
+        """Sem 7 F2 item 6.b — Cron HSM cart_abandoned_24h_v1 MARKETING.
+
+        Detecta carritos sin actividad >CART_ABANDONED_THRESHOLD_HOURS (24h
+        default) y <CART_ABANDONED_MAX_AGE_HOURS (72h default) cuyo cliente:
+          - Tiene customer_phone
+          - Tiene consent_given=TRUE en contacts (Habeas Data Ley 1581)
+          - NO recibió abandoned_reminder previo (idempotencia)
+        y dispara template MARKETING cart_abandoned_24h_v1.
+
+        Costo: ~$0.025 USD/msg. Compensa con recovery de carritos
+        abandonados que de otra forma se perderían 100%.
+
+        NO cubre carritos dentro CSW <24h — el bot conversacional + F1
+        recordatorios free-form ya los cubren gratis. Este cron es
+        complementario para los que se fueron y no volvieron.
+        """
+        if not self._cart_abandoned_enabled:
+            return
+        now = time.time()
+        if now - self._last_cart_abandoned_at < max(
+            60, CART_ABANDONED_REMINDER_INTERVAL_SECONDS,
+        ):
+            return
+        self._last_cart_abandoned_at = now
+
+        now_dt = datetime.now(timezone.utc)
+        upper_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_THRESHOLD_HOURS)).isoformat()
+        lower_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_MAX_AGE_HOURS)).isoformat()
+
+        # Buscar carritos en open/abandoned con updated_at en rango [24h, 72h]
+        # sin recordatorio enviado.
+        try:
+            carts_res = (
+                self.supabase.table("conversation_carts")
+                .select(
+                    "id, tenant_id, conversation_id, contact_id, status, "
+                    "updated_at, conversations(customer_phone)"
+                )
+                .in_("status", ["open", "abandoned"])
+                .is_("abandoned_reminder_sent_at", "null")
+                .lt("updated_at", upper_cutoff)
+                .gte("updated_at", lower_cutoff)
+                .limit(50)
+                .execute()
+            )
+            carts = carts_res.data or []
+        except Exception as exc:
+            logger.error("[CART_ABANDONED] error consultando carts: %s", exc)
+            return
+
+        if not carts:
+            return
+
+        for cart in carts:
+            cart_id = cart.get("id")
+            tenant_id = cart.get("tenant_id")
+            conversation_id = cart.get("conversation_id")
+            contact_id = cart.get("contact_id")
+            conv = cart.get("conversations") or {}
+            customer_phone = conv.get("customer_phone") if isinstance(conv, dict) else None
+
+            if not (cart_id and tenant_id and conversation_id and customer_phone):
+                continue
+
+            # Habeas Data Ley 1581: necesita consent_given=TRUE explícito
+            # para enviar MARKETING. Sin consent → skip.
+            consent_ok = False
+            customer_name = "cliente"
+            if contact_id:
+                try:
+                    contact_res = (
+                        self.supabase.table("contacts")
+                        .select("consent_given, first_name, full_name")
+                        .eq("id", contact_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    contact_rows = contact_res.data or []
+                    if contact_rows:
+                        consent_ok = bool(contact_rows[0].get("consent_given"))
+                        first = (contact_rows[0].get("first_name") or "").strip()
+                        full = (contact_rows[0].get("full_name") or "").strip()
+                        customer_name = first or (full.split(" ")[0] if full else "cliente")
+                except Exception:
+                    pass
+
+            if not consent_ok:
+                self._metrics["cart_abandoned_reminders_skipped_no_consent"] += 1
+                # Marcar idempotencia igualmente — no reintentar
+                try:
+                    self.supabase.table("conversation_carts").update({
+                        "abandoned_reminder_sent_at": now_dt.isoformat(),
+                    }).eq("id", cart_id).is_(
+                        "abandoned_reminder_sent_at", "null",
+                    ).execute()
+                except Exception:
+                    pass
+                logger.info(
+                    "[CART_ABANDONED] cart=%s skipped (sin consent_given marketing — "
+                    "Habeas Data Ley 1581)",
+                    str(cart_id)[:8],
+                )
+                continue
+
+            # Items del carrito — resumen corto
+            cart_summary = "tu carrito"
+            try:
+                items_res = (
+                    self.supabase.table("conversation_cart_items")
+                    .select("product_title, quantity")
+                    .eq("cart_id", cart_id)
+                    .limit(3)
+                    .execute()
+                )
+                items = items_res.data or []
+                if items:
+                    parts = []
+                    for it in items:
+                        title = (it.get("product_title") or "").strip()
+                        qty = int(it.get("quantity") or 1)
+                        if title:
+                            parts.append(f"{title} x{qty}" if qty > 1 else title)
+                    if parts:
+                        cart_summary = ", ".join(parts[:3])
+                        if len(items) > 3:
+                            cart_summary += " y más"
+            except Exception:
+                pass
+
+            body_params = [customer_name, cart_summary, CART_ABANDONED_DISCOUNT_LABEL]
+
+            msg_id, err = await send_whatsapp_template(
+                tenant_id=tenant_id,
+                supabase=self.supabase,
+                to_phone=customer_phone,
+                template_name="cart_abandoned_24h_v1",
+                language="es_CO",
+                body_params=body_params,
+            )
+
+            if err in (TEMPLATE_ERR_TEMPLATE_NOT_APPROVED, TEMPLATE_ERR_TEMPLATE_NOT_FOUND):
+                self._metrics["cart_abandoned_reminders_hsm_not_approved"] += 1
+                # Idempotencia: si template no está aprobado, no reintentar
+                # cada 5min. Mark + skip.
+                try:
+                    self.supabase.table("conversation_carts").update({
+                        "abandoned_reminder_sent_at": now_dt.isoformat(),
+                    }).eq("id", cart_id).is_(
+                        "abandoned_reminder_sent_at", "null",
+                    ).execute()
+                except Exception:
+                    pass
+                logger.info(
+                    "[CART_ABANDONED] cart=%s template no disponible (err=%s)",
+                    str(cart_id)[:8], err,
+                )
+                continue
+
+            if err:
+                self._metrics["cart_abandoned_reminders_hsm_failed"] += 1
+                logger.warning(
+                    "[CART_ABANDONED] cart=%s HSM falló: %s",
+                    str(cart_id)[:8], err,
+                )
+                continue
+
+            # OK: persistir outbound + marcar idempotencia
+            try:
+                self.supabase.table("messages").insert({
+                    "tenant_id": tenant_id,
+                    "conversation_id": conversation_id,
+                    "direction": "outbound",
+                    "content_type": "template",
+                    "content": (
+                        f"[TEMPLATE cart_abandoned_24h_v1] {customer_name}, "
+                        f"recordatorio carrito: {cart_summary}"
+                    ),
+                    "meta_message_id": msg_id,
+                    "processing_status": "processed",
+                    "processed": True,
+                    "processed_at": now_dt.isoformat(),
+                }).execute()
+            except Exception as exc:
+                logger.warning("[CART_ABANDONED] no pude persistir outbound cart=%s: %s",
+                               str(cart_id)[:8], exc)
+
+            try:
+                self.supabase.table("conversation_carts").update({
+                    "abandoned_reminder_sent_at": now_dt.isoformat(),
+                }).eq("id", cart_id).is_(
+                    "abandoned_reminder_sent_at", "null",
+                ).execute()
+            except Exception:
+                pass
+
+            self._metrics["cart_abandoned_reminders_sent"] += 1
+            logger.info(
+                "[CART_ABANDONED] ✓ cart=%s template cart_abandoned_24h_v1 enviado "
+                "to=%s meta_msg_id=%s",
+                str(cart_id)[:8], customer_phone, msg_id,
+            )
 
     async def _release_expired_pending_payment_orders(self) -> None:
         """
