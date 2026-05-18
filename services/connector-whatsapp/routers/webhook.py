@@ -37,16 +37,22 @@ async def verify_webhook(
 
 from services.parser import parse_webhook_payloads, parse_webhook_events
 from services.db_persistence import persist_whatsapp_message
+from services.template_events import handle_event as handle_template_event
 
 async def decouple_and_enqueue(body_dict: dict):
     """
     Función que corre asíncronamente (Background Task).
 
     Sem 6 pre-HSM (rev. 106 / 2026-05-08): además del flow inbound original,
-    invoca `parse_webhook_events()` para clasificar fields no-`messages`
-    (template_status_update, phone_quality_update, account_alerts, etc.).
-    Por ahora SOLO se loggean — handlers DB se construyen en F2 HSM cuando
-    existan tablas `whatsapp_templates` + `whatsapp_status_events`.
+    invoca `parse_webhook_events()` para clasificar fields no-`messages`.
+
+    Sem 7 F2 HSM (rev. 106 / 2026-05-17 item 4): cada evento dispatch a
+    `template_events.handle_event()` que persiste:
+      - template_status_update → whatsapp_templates.status + approved_at
+      - template_quality_update → whatsapp_templates.quality_rating
+      - phone_quality_update → tenant_integrations.credentials.tier
+    Eventos sin handler asociado (outbound_status, account_alert, etc.)
+    se loggean por ahora — persistence futura Sem 11.
     """
     try:
         parsed_messages = parse_webhook_payloads(body_dict)
@@ -56,17 +62,31 @@ async def decouple_and_enqueue(body_dict: dict):
         else:
             logger.debug("Webhook recibido crudio asincrono no contenía un mensaje puro o malformado.")
 
-        # Sem 6 pre-HSM: dispatcher multi-field. Eventos no-messages se
-        # loggean por ahora; F2 HSM agregará persistence per tipo.
+        # Sem 6 → Sem 7 F2: dispatcher multi-field con persistence per tipo.
         try:
             events = parse_webhook_events(body_dict)
             for event in events:
-                logger.info(
-                    "[WH_EVENT] type=%s waba=%s payload=%s",
-                    event.get("event_type"),
-                    event.get("meta_waba_id"),
-                    {k: v for k, v in event.items() if k not in {"event_type", "meta_waba_id", "raw_value"}},
-                )
+                event_type = event.get("event_type")
+                # Persistence handler para events HSM (Sem 7 item 4)
+                result = handle_template_event(event)
+                if result is None:
+                    # Sin handler asociado — solo log informativo
+                    logger.info(
+                        "[WH_EVENT] type=%s waba=%s (no persistence) payload=%s",
+                        event_type,
+                        event.get("meta_waba_id"),
+                        {k: v for k, v in event.items()
+                         if k not in {"event_type", "meta_waba_id", "raw_value"}},
+                    )
+                elif result is True:
+                    logger.debug(
+                        "[WH_EVENT] type=%s persisted OK", event_type,
+                    )
+                else:
+                    logger.warning(
+                        "[WH_EVENT] type=%s persistence retornó False (template no encontrado o error)",
+                        event_type,
+                    )
         except Exception as e_disp:
             logger.error(f"Dispatcher multi-field fallo (no crítico, inbound ya procesado): {e_disp}")
     except Exception as e:
