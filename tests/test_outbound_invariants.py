@@ -92,6 +92,29 @@ class ResumenBeforeLinkTests(unittest.TestCase):
         result = self.inv.assert_summary_shown_before_link(candidate, history)
         self.assertIsNotNone(result)
 
+    def test_candidato_combina_resumen_y_link_ok(self):
+        """Sem 7 F2 cierre (fix Opción B) — el resumen y el link pueden viajar
+        en el MISMO outbound. La garantía contractual (cliente VE resumen
+        antes del link) se cumple incluso sin resumen previo en history."""
+        history = []  # NO hay resumen previo
+        candidate = (
+            "📋 *Resumen de tu pedido:*\n\n"
+            "*Productos:*\n"
+            "• 1x Jabón de Coco (60g): $18.500 COP\n\n"
+            "Subtotal: $18.500\nEnvío: $5.000\n*TOTAL: $23.500*\n\n"
+            "Listo, paga aquí: https://checkout.wompi.co/l/abc123"
+        )
+        result = self.inv.assert_summary_shown_before_link(candidate, history)
+        self.assertIsNone(result)
+
+    def test_candidato_solo_link_sin_resumen_sigue_fallando(self):
+        """Defensa: el fix Opción B NO debilita el invariant cuando el
+        candidato es SOLO link (sin resumen) — sigue bloqueando."""
+        history = [{"direction": "outbound", "content": "Hola, ¿algo más?"}]
+        candidate = "Listo, paga aquí: https://checkout.wompi.co/l/abc"
+        result = self.inv.assert_summary_shown_before_link(candidate, history)
+        self.assertIsNotNone(result)
+
 
 class NoPIIPreConsentTests(unittest.TestCase):
     @classmethod
