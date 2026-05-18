@@ -41,6 +41,39 @@ Tras HSM. Trigger: tenants con presencia en MeLi necesitan auto-reply en pregunt
 - MA-6 tenant_provider_health dashboard.
 - MA-8 logs forensics → Supabase tabla append-only.
 
+### 🆕 Camino D — "Konvi Studio" módulo personalización (decidido 2026-05-17)
+
+**Contexto**: la esposa del founder está construyendo Lucams_shop ([github.com/jullieth93/lucams](https://github.com/jullieth93/lucams)), eCommerce de imanes personalizados. Decisión estratégica: NO construir Lucams como repo separado; en su lugar Konvi extiende sus módulos para soportar tenants con productos personalizables (canvas + 3D + AI design assistant). Lucams entra como **tenant premium pilot** de Konvi.
+
+**Justificación comercial**:
+- Diferenciador SaaS B2B nicho (otros competidores Colombia no ofrecen módulo personalización integrado).
+- Aplicable a múltiples nichos personalizables: imanes, tazas, estampados, joyas, llaveros, etc.
+- Lucams es el primer caso comercial demostrable.
+
+**Items nuevos a sumar al roadmap K (post-Sem 14)**:
+- **Konvi Studio Editor** — editor canvas embeddable (react-konva: capas, plantillas, texto, fotos).
+- **Preview 3D** — Three.js + react-three-fiber (imán sobre nevera 3D rotable, taza con foto rotable, etc.).
+- **Claude API design assistant** — sugiere plantillas según ocasión + paleta. Reusa la infra de `services/ai-orchestrator` con tier separado.
+- **Storage buckets per-tenant** (3 buckets): `customer-uploads` privado, `design-previews` público, `production-assets` admin 300 DPI.
+- **`cart_items.custom_design JSONB` + `production_asset_url`** — extensión schema cart-as-SoT existente.
+- **Workflow producción**: admin descarga 300 DPI para impresión + marca orden ready-to-ship.
+
+**Estimado adicional**: ~6-8 semanas dev post-Konvi-base (Sem 14+).
+
+**Pre-requisito comercial**: Lucams debe validar demanda con flow manual (Instagram + WhatsApp + Wompi link directo + diseño a mano) hasta >30 órdenes/mes antes de invertir el dev del módulo Studio. NO arrancar antes.
+
+**Stack Lucams compatibilidad** (lo que YA reusa con Konvi sin trabajo):
+- Wompi (mismo provider ya en Konvi)
+- Supabase Auth + Storage + Postgres (mismo)
+- Cupones (ADR-0015 Konvi cubre)
+- Cart + Order + checkout flow (Konvi cubre)
+- Resend email transaccional (planeado Sem 11 plan K)
+
+**Stack Lucams diff** (lo que requiere desarrollo en Konvi):
+- Logística: Lucams usa Venndelo, Konvi usa Envia → sumar Venndelo como segundo provider opcional en `tenant_integrations`. Estimado: ~3 días.
+- Editor canvas + 3D + AI: módulo Konvi Studio entero (~6-8 sem).
+- Storefront público con catálogo personalizable: I.1 del plan K original (planeado).
+
 ---
 
 ## ADRs activos
