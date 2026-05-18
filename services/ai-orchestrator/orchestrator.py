@@ -1811,11 +1811,89 @@ async def _send_outbound_text(
             )
             text = result.text
         elif result.blocked:
-            logger.error(
-                "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s reason=%s",
-                conversation_id, result.block_reason,
+            # Sem 7 F2 cierre (S12 UAT diagnosis) — fix Opción B:
+            # cuando el invariant `summary-before-link` bloquea, en vez de
+            # quedarnos mudos (loop silencioso si el bypass reintenta el
+            # mismo flow), construimos el resumen desde cart-as-SoT y lo
+            # PREFIJAMOS al outbound. Re-validamos: si pasa, enviamos el
+            # outbound combinado (resumen + link en mismo mensaje).
+            # Cumple ADR-0011 §A.10 sin dejar al cliente sin respuesta.
+            _is_summary_block = (
+                "summary-before-link" in (result.block_reason or "")
             )
-            return False  # NO enviar
+            if _is_summary_block:
+                try:
+                    # Fix Opción B: usar `get_cart_with_items` para obtener
+                    # cart + items + variation+product join. Una query simple
+                    # a `conversation_carts` no trae items → _verified_ctx_from_cart
+                    # retorna None → resumen no se construye.
+                    from tools.cart_tool import (  # type: ignore
+                        get_cart_with_items as _get_cart_with_items,
+                    )
+                    _cart_db = _get_cart_with_items(
+                        supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                    )
+                    _contact_record = {"phone": _customer_phone}
+                    _summary_text = _build_order_summary_text(
+                        contact_record=_contact_record,
+                        verified_ctx=None,
+                        history=recent.data or [],
+                        cart_from_db=_cart_db,
+                    )
+                except Exception as _sum_exc:
+                    logger.warning(
+                        "[OUTPUT_VALIDATOR] fix Opción B: error armando "
+                        "resumen conv=%s: %s",
+                        conversation_id, _sum_exc,
+                    )
+                    _summary_text = None
+                if _summary_text:
+                    _combined = _summary_text + "\n\n" + text
+                    _revalidated = OutputValidator().validate(
+                        ValidationContext(
+                            candidate_text=_combined,
+                            history=recent.data or [],
+                            contact_consent_given=_consent_given,
+                            consent_question_template=CONSENT_QUESTION_TEMPLATE,
+                            server_time_greeting=None,  # ya no es el primero
+                        )
+                    )
+                    if not _revalidated.blocked:
+                        logger.info(
+                            "[OUTPUT_VALIDATOR] fix Opción B aplicado "
+                            "conv=%s — resumen prefijado al link",
+                            conversation_id,
+                        )
+                        text = (
+                            _revalidated.text
+                            if (_revalidated.rewrote and _revalidated.text)
+                            else _combined
+                        )
+                    else:
+                        logger.error(
+                            "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s "
+                            "reason=%s (fix Opción B re-validó pero sigue "
+                            "bloqueado: %s)",
+                            conversation_id, result.block_reason,
+                            _revalidated.block_reason,
+                        )
+                        return False
+                else:
+                    logger.error(
+                        "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s "
+                        "reason=%s (fix Opción B: cart-as-SoT no provee "
+                        "resumen — verified_ctx None)",
+                        conversation_id, result.block_reason,
+                    )
+                    return False
+            else:
+                logger.error(
+                    "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s reason=%s",
+                    conversation_id, result.block_reason,
+                )
+                return False  # NO enviar
     except Exception as _inv_exc:
         logger.debug("[OUTPUT_VALIDATOR] falló (no-bloqueante): %s", _inv_exc)
 
@@ -7548,6 +7626,43 @@ async def build_and_run_orchestration(
                 tenant_id=tenant_id,
                 history=history_for_fsm,
             )
+
+        # Sem 7 F2 cierre — Sólo una noción de "shipping resuelto" / "carrier
+        # elegido", computada desde TODAS las fuentes de verdad coherentemente:
+        #   1. History reciente (`shipping_quoted` de _has_shipping_quoted_in_conversation).
+        #   2. DB carrier_selected_db (carrier persistido en cart).
+        #   3. DB orders.pending_payment — si existe orden creada con
+        #      shipping_amount > 0, AMBAS condiciones (shipping_quoted +
+        #      carrier_selected) son TRUE por definición: la orden no se
+        #      pudo crear sin esos pasos.
+        # Caso runtime descubierto: cliente conocido retoma orden pendiente
+        # ("Tengo carrito pendiente?"). History nuevo no muestra cotización
+        # pero la orden DB ya la tiene → FSM caía en NEEDS_SHIPPING_CITY,
+        # bypass payment_link no disparaba, LLM alucinaba "te genero el link".
+        if contact_id and not (shipping_quoted and _carrier_selected_db):
+            try:
+                _po_check = (
+                    supabase.table("orders")
+                    .select("id, shipping_amount, status")
+                    .eq("tenant_id", tenant_id)
+                    .eq("contact_id", contact_id)
+                    .eq("conversation_id", conversation_id)
+                    .eq("status", "pending_payment")
+                    .gt("shipping_amount", 0)
+                    .limit(1)
+                    .execute()
+                )
+                if _po_check.data:
+                    if not shipping_quoted:
+                        shipping_quoted = True
+                    if not _carrier_selected_db:
+                        _carrier_selected_db = True
+            except Exception as _po_exc:
+                logger.debug(
+                    "[FSM] order DB lookup como fuente de verdad shipping/carrier "
+                    "falló conv=%s: %s",
+                    conversation_id, _po_exc,
+                )
 
         display_state = _resolve_display_state(
             contact_record=contact_record,

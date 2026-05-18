@@ -335,6 +335,12 @@ def assert_summary_shown_before_link(
     outbound antes de enviarlo al cliente. La acción de rewrite es
     responsabilidad del caller (ej: forzar render del resumen primero).
 
+    Sem 7 F2 cierre (fix Opción B): aceptamos también que el resumen y el
+    link viajen en el MISMO outbound. Esto permite que el orchestrator,
+    al detectar la violación, prefije el resumen al texto y re-valide
+    sin tener que esperar 2 outbounds separados — la garantía contractual
+    (cliente VE el resumen antes de pulsar el link) se cumple igual.
+
     Args:
       candidate_text: el texto que el bot está por enviar.
       history: mensajes previos de la conversación (oldest first).
@@ -342,6 +348,11 @@ def assert_summary_shown_before_link(
     """
     if not text_contains_wompi_link(candidate_text):
         return None  # No es un envío de link, invariant no aplica.
+    # Sem 7 F2 cierre — combined-message variant: si el candidato mismo
+    # contiene el resumen (📋 o phrase canónica) ADEMÁS del link, el
+    # cliente lo verá junto. Variante aceptable: resumen + link en 1 msg.
+    if text_is_summary(candidate_text):
+        return None  # OK: resumen + link viajan juntos.
     if last_outbound_was_summary(history, lookback=lookback):
         return None  # OK: hubo resumen reciente.
     return (
