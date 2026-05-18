@@ -1,10 +1,19 @@
 /**
- * Tab Setup — WhatsApp.
+ * Tab Setup — WhatsApp Business.
  *
- * Muestra credenciales + status de la integración. Read-only por ahora
- * (configuración via Embedded Signup en /dashboard/integrations hub).
+ * Estructura canónica unificada (Sem 7 F2 cierre):
+ *   1. Identidad — WABA + Phone Number + tokens
+ *   2. Webhook & Eventos — URL + status topics
+ *   3. Cumplimiento — ventana 24h · opt-out · Habeas Data
+ *   4. Zona de riesgo — desconectar (deshabilitado hoy)
+ *   + Banner migración
  */
-import { Copy, KeyRound, Webhook, Shield, ShieldCheck, ShieldOff } from 'lucide-react'
+import { MessageSquareText, KeyRound, Webhook, Copy } from 'lucide-react'
+import {
+  SetupSection, SetupField, SetupGrid,
+  ComplianceSection, DangerZoneSection,
+  MigrationBanner, EmptyDisconnected,
+} from '../../_components/setup-primitives'
 
 type Props = {
   connected: boolean
@@ -12,77 +21,52 @@ type Props = {
   canWrite: boolean
 }
 
-function MaskedField({ label, value }: { label: string; value: string | null | undefined }) {
-  if (!value) {
+export default function WhatsAppSetup({ connected, credentials }: Props) {
+  if (!connected) {
     return (
-      <div className="space-y-0.5">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="text-sm text-muted-foreground italic">No configurado</div>
-      </div>
+      <EmptyDisconnected
+        icon={MessageSquareText}
+        providerLabel="WhatsApp Business"
+        helpText="La conexión se realiza vía Embedded Signup desde el panel principal de Integraciones."
+      />
     )
   }
-  return (
-    <div className="space-y-0.5">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-mono text-sm">{value}</div>
-    </div>
-  )
-}
 
-export default function WhatsAppSetup({ connected, credentials }: Props) {
   const wabaId = credentials.waba_id ?? null
   const phoneNumberId = credentials.phone_number_id ?? null
   const displayPhone = credentials.display_phone_number ?? null
   const accessTokenSecretId = credentials.access_token_secret_id ?? null
   const tokenRotatedAt = credentials.access_token_rotated_at ?? null
 
-  if (!connected) {
-    return (
-      <div className="rounded-xl border border-dashed border-muted-foreground/30 p-10 text-center space-y-3">
-        <Shield className="h-8 w-8 mx-auto text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">
-          WhatsApp Business aún no está conectado para este tenant.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          La conexión se realiza vía Embedded Signup desde el panel de Integraciones.
-          Próximamente podrás iniciar el flujo desde aquí.
-        </p>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-5">
-      {/* Credenciales WABA */}
-      <section className="rounded-xl border border-border bg-card p-4 space-y-4">
-        <div className="flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold text-foreground">Credenciales WABA</h3>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <MaskedField label="WABA ID" value={wabaId} />
-          <MaskedField label="Phone Number ID" value={phoneNumberId} />
-          <MaskedField label="Número visible" value={displayPhone} />
-          <MaskedField
+      {/* 1. Identidad */}
+      <SetupSection icon={KeyRound} title="Identidad">
+        <SetupGrid>
+          <SetupField label="WABA ID" value={wabaId} />
+          <SetupField label="Phone Number ID" value={phoneNumberId} />
+          <SetupField label="Número visible" value={displayPhone} />
+          <SetupField
             label="Access Token (Vault)"
-            value={accessTokenSecretId ? `secret_${accessTokenSecretId.slice(0, 8)}…` : null}
+            value={
+              accessTokenSecretId
+                ? `secret_${accessTokenSecretId.slice(0, 8)}…`
+                : null
+            }
           />
-        </div>
+        </SetupGrid>
         {tokenRotatedAt && (
           <p className="text-xs text-muted-foreground">
-            Última rotación de token: {new Date(tokenRotatedAt).toLocaleDateString('es-CO')}
+            Última rotación de token:{' '}
+            {new Date(tokenRotatedAt).toLocaleDateString('es-CO')}
           </p>
         )}
-      </section>
+      </SetupSection>
 
-      {/* Webhook */}
-      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Webhook className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold text-foreground">Webhook</h3>
-        </div>
+      {/* 2. Webhook & Eventos */}
+      <SetupSection icon={Webhook} title="Webhook & Eventos">
         <div className="space-y-2">
-          <div className="text-xs text-muted-foreground">URL recibido por Meta</div>
+          <div className="text-xs text-muted-foreground">URL recibida por Meta</div>
           <div className="flex items-center gap-2">
             <code className="flex-1 truncate font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
               https://api.konvi.co/api/v1/whatsapp/webhook
@@ -90,62 +74,46 @@ export default function WhatsAppSetup({ connected, credentials }: Props) {
             <button
               type="button"
               className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-              data-copy="https://api.konvi.co/api/v1/whatsapp/webhook"
             >
               <Copy className="h-3 w-3" /> Copiar
             </button>
           </div>
         </div>
-      </section>
+        <div className="text-xs text-muted-foreground pt-1 border-t border-border">
+          Eventos: <span className="font-mono">messages · message_template_status_update · message_template_quality_update · phone_number_quality_update</span>
+        </div>
+      </SetupSection>
 
-      {/* Compliance gates activos */}
-      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-emerald-700" />
-          <h3 className="font-semibold text-foreground">Gates de cumplimiento</h3>
-        </div>
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Ventana 24h CSW Meta</span>
-            <span className="inline-flex items-center gap-1 text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              <ShieldCheck className="h-3 w-3" /> Enforcement activo
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Auto opt-out STOP</span>
-            <span className="inline-flex items-center gap-1 text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              <ShieldCheck className="h-3 w-3" /> Activo
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Habeas Data Ley 1581</span>
-            <span className="inline-flex items-center gap-1 text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              <ShieldCheck className="h-3 w-3" /> Certified
-            </span>
-          </div>
-        </div>
-      </section>
+      {/* 3. Cumplimiento */}
+      <ComplianceSection
+        gates={[
+          { label: 'Ventana 24h CSW Meta', value: 'Enforcement activo' },
+          { label: 'Auto opt-out STOP', value: 'Activo' },
+          { label: 'Habeas Data Ley 1581', value: 'Certified' },
+        ]}
+      />
 
-      {/* Danger zone */}
-      <section className="rounded-xl border border-rose-700/30 bg-rose-700/5 p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <ShieldOff className="h-4 w-4 text-rose-800" />
-          <h3 className="font-semibold text-rose-900">Zona de riesgo</h3>
-        </div>
-        <p className="text-sm text-rose-900/80">
-          Desconectar WhatsApp interrumpe el bot conversacional y deja al cliente
-          sin canal automático. Tus plantillas aprobadas se conservan; podrás
-          reconectar luego sin perderlas.
-        </p>
-        <button
-          type="button"
-          className="text-sm font-medium text-rose-800 hover:text-rose-900 underline"
-          disabled
-          title="Disponible próximamente"
-        >
-          Desconectar WhatsApp (próximamente)
-        </button>
-      </section>
+      {/* 4. Zona de riesgo */}
+      <DangerZoneSection
+        description={
+          <>
+            Desconectar WhatsApp interrumpe el bot conversacional y deja al cliente
+            sin canal automático. Tus plantillas aprobadas se conservan; podrás
+            reconectar luego sin perderlas.
+          </>
+        }
+        actionLabel="Desconectar WhatsApp"
+        actionDisabled
+      />
+
+      {/* Banner migración */}
+      <MigrationBanner>
+        Editar credenciales o reconectar se hace desde{' '}
+        <a href="/dashboard/integrations" className="underline font-medium">
+          /dashboard/integrations
+        </a>
+        . Migración a este panel: Sem 8.
+      </MigrationBanner>
     </div>
   )
 }
