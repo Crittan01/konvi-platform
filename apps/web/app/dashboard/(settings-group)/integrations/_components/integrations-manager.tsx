@@ -17,17 +17,13 @@ import {
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
 type Integration = { provider: string; status: string; meta: Record<string, string> }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
-export type EnviaCarrierPref = {
-  carrier_code: string
-  enabled: boolean
-  display_label: string | null
-  priority: number
-  notes: string | null
-}
 
 interface Props {
   waInt: Integration
   waConnected: boolean
+  // Sem 7 F2 — métricas plantillas WhatsApp aprobadas para mostrar en card.
+  templatesApproved?: number
+  templatesTotal?: number
   enviaInt: Integration
   enviaConnected: boolean
   meliInt: Integration
@@ -49,13 +45,8 @@ interface Props {
   enviaMsg?: string
   saveEnviaKey: (fd: FormData) => Promise<void>
   disconnectEnvia: () => Promise<void>
-  // Sem 5 H.2.7 — preferencias carriers per-tenant.
-  enviaCarrierPrefs: EnviaCarrierPref[]
-  upsertEnviaCarrier: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
-  resetEnviaCarrierPref: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
-  // Sem 5 H.2.6 — capabilities Fase 2 granulares.
-  enviaCapabilities: Record<string, boolean>
-  toggleEnviaCapability: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
+  // (Sem 7 F2 cierre) Envia carriers + capabilities movidos al panel
+  // dedicado /integrations/envia (tabs Carriers + Capacidades).
   disconnectMeli: () => Promise<void>
   saveWompi: (fd: FormData) => Promise<void>
   disconnectWompi: () => Promise<void>
@@ -118,14 +109,13 @@ function MetaPill({ label, value, className }: { label: string; value: string; c
 
 export function IntegrationsManager(props: Props) {
   const {
-    waInt, waConnected, enviaInt, enviaConnected, meliInt, meliConnected,
+    waInt, waConnected, templatesApproved, templatesTotal,
+    enviaInt, enviaConnected, meliInt, meliConnected,
     wompiInt, wompiConnected,
     tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam,
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
     saveEnviaKey, disconnectEnvia,
-    enviaCarrierPrefs, upsertEnviaCarrier, resetEnviaCarrierPref,
-    enviaCapabilities, toggleEnviaCapability,
     disconnectMeli,
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
@@ -332,6 +322,27 @@ export function IntegrationsManager(props: Props) {
                     <MetaPill label="Token" value={waInt.meta?.token_preview ?? '●●●●'} />
                   </div>
                   <MetaPill label="Phone Number ID" value={waInt.meta?.phone_id_preview ?? ''} />
+                  {typeof templatesTotal === 'number' && templatesTotal > 0 && (
+                    <MetaPill
+                      label="Plantillas"
+                      value={`${templatesApproved ?? 0}/${templatesTotal} aprobadas`}
+                    />
+                  )}
+                  {/* Gestionar panel completo (Sem 7 F2 — restructura Integraciones).
+                      Lleva a /integrations/whatsapp con tabs Setup + Plantillas +
+                      Calidad + Opt-outs. */}
+                  <a
+                    href="/dashboard/integrations/whatsapp"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <div className="flex gap-2">
                       <form action={testWhatsApp} className="flex-1">
@@ -436,6 +447,18 @@ export function IntegrationsManager(props: Props) {
                       className={enviaInt.meta?.environment === 'sandbox' ? 'text-amber-400' : 'text-emerald-400'}
                     />
                   </div>
+                  <a
+                    href="/dashboard/integrations/envia"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <div className="flex gap-2">
                       <form action={testEnvia} className="flex-1">
@@ -529,6 +552,18 @@ export function IntegrationsManager(props: Props) {
               ) : meliConnected ? (
                 <div className="space-y-2.5">
                   <MetaPill label="Usuario MeLi ID" value={meliInt.meta?.user_id ?? '—'} />
+                  <a
+                    href="/dashboard/integrations/mercadolibre"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <DisconnectIntegrationButton
                       provider="mercadolibre" providerLabel="Mercado Libre"
@@ -620,6 +655,18 @@ export function IntegrationsManager(props: Props) {
                       className={wompiInt.meta?.environment === 'production' ? 'text-emerald-400' : 'text-amber-400'}
                     />
                   </div>
+                  <a
+                    href="/dashboard/integrations/wompi"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <DisconnectIntegrationButton
                       provider="wompi" providerLabel="Wompi"
@@ -718,6 +765,18 @@ export function IntegrationsManager(props: Props) {
                   <div className="flex items-center gap-1.5 text-xs text-emerald-400">
                     <ShieldCheck className="h-3 w-3 shrink-0" /> Alertas habilitadas
                   </div>
+                  <a
+                    href="/dashboard/integrations/telegram"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   <div className="flex gap-2">
                     <form action={testTelegram} className="flex-1">
                       <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
@@ -824,33 +883,8 @@ export function IntegrationsManager(props: Props) {
       </div>
       </div>{/* ── /SECCIÓN 1 Conectores ── */}
 
-      {/* ── SECCIÓN 2: Configuración avanzada Envía ────────────────────────── */}
-      {visibleCards.includes('envia') && enviaConnected && canWrite && (
-        <div className="border-t border-border pt-5 mt-5">
-          <div className="flex items-start gap-2 mb-3">
-            <Settings2 className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">
-                Configuración avanzada Envía
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Aplica a todas las cotizaciones y operaciones de envío del tenant.
-              </p>
-            </div>
-          </div>
-          <div className="space-y-4">
-            <EnviaCapabilitiesSection
-              capabilities={enviaCapabilities}
-              toggleAction={toggleEnviaCapability}
-            />
-            <EnviaCarriersSection
-              prefs={enviaCarrierPrefs}
-              upsertAction={upsertEnviaCarrier}
-              resetAction={resetEnviaCarrierPref}
-            />
-          </div>
-        </div>
-      )}
+      {/* SECCIÓN 2 (Configuración avanzada Envía) movida al panel
+          /integrations/envia (tabs Carriers + Capacidades) — Sem 7 F2 cierre. */}
 
       {/* ── SECCIÓN 3 (futura): tab "Todas" — info contextual ────────────── */}
       {activeFilter === 'todas' && (
@@ -872,427 +906,3 @@ export function IntegrationsManager(props: Props) {
 }
 
 
-// ─── Sem 5 H.2.7 — Envia Carriers Section ──────────────────────────────────
-// Tabla de preferencias per-carrier per-tenant. Owner/manager activan
-// los carriers que el tenant quiere ofrecer, definen prioridad.
-//
-// Nota rev. 2026-05-08: el toggle "Seguro" per-carrier fue removido —
-// declaredValue se envía siempre y el carrier aplica su política interna
-// (ver services/api/lib/insurance.py + dossier sec. 2.5).
-//
-// Comportamiento "default open": si el tenant NO tiene NINGUNA fila,
-// el sistema ofrece TODOS los carriers globales (backward compat).
-// La UI lo refleja con un banner claro.
-//
-// Lista canónica de carriers Envia Colombia hardcoded — coincide con
-// services/api/routers/shipping.py:_resolve_carriers_for_quote
-// fallback list (case-sensitive según API Envia).
-
-const ENVIA_CARRIERS_CO: Array<{ code: string; label: string }> = [
-  { code: 'servientrega',     label: 'Servientrega' },
-  { code: 'coordinadora',     label: 'Coordinadora' },
-  { code: 'interRapidisimo',  label: 'Inter Rapidísimo' },
-  { code: 'envia',            label: 'Envía (carrier propio)' },
-  { code: 'tcc',              label: 'TCC' },
-  { code: 'deprisa',          label: 'Deprisa' },
-  { code: 'mensajerosUrbanos', label: 'Mensajeros Urbanos' },
-  { code: 'noventa9Minutos',  label: '99 Minutos' },
-  { code: 'fedex',            label: 'FedEx' },
-  { code: 'dhl',              label: 'DHL' },
-]
-
-function EnviaCarriersSection({
-  prefs, upsertAction, resetAction,
-}: {
-  prefs: EnviaCarrierPref[]
-  upsertAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
-  resetAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
-}) {
-  const router = useRouter()
-  const [pending, setPending] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
-
-  // Map prefs por carrier_code para lookup rápido.
-  const prefByCode = new Map(prefs.map(p => [p.carrier_code.toLowerCase(), p]))
-  const hasAnyPrefs = prefs.length > 0
-
-  const handleToggle = async (code: string, current: EnviaCarrierPref | null) => {
-    setPending(code); setErrorMsg(null); setSuccessMsg(null)
-    const fd = new FormData()
-    fd.set('carrier_code', code)
-    // Si no hay pref previa, el toggle ENABLE crea row enabled=true.
-    // Si hay pref, invertir el current.enabled.
-    const targetEnabled = current ? !current.enabled : true
-    fd.set('enabled', String(targetEnabled))
-    fd.set('priority', String(current?.priority ?? 100))
-    if (current?.display_label) fd.set('display_label', current.display_label)
-    if (current?.notes) fd.set('notes', current.notes)
-    const res = await upsertAction(fd)
-    setPending(null)
-    if (!res.ok) { setErrorMsg(res.error ?? 'Error desconocido'); return }
-    setSuccessMsg(`${code} ${targetEnabled ? 'activado' : 'desactivado'}.`)
-    router.refresh()
-  }
-
-  const handleReset = async (code: string) => {
-    setPending('reset:' + code); setErrorMsg(null); setSuccessMsg(null)
-    const fd = new FormData()
-    fd.set('carrier_code', code)
-    const res = await resetAction(fd)
-    setPending(null)
-    if (!res.ok) { setErrorMsg(res.error ?? 'Error'); return }
-    setSuccessMsg(`${code} restaurado a default.`)
-    router.refresh()
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden col-span-full">
-      <div className="px-4 py-3.5 border-b border-border bg-muted/20 flex items-center gap-2">
-        <Package className="h-4 w-4 text-orange-400 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm flex items-center gap-1.5">
-            Envía — Preferencias de carriers
-            <span
-              className="cursor-help text-muted-foreground hover:text-foreground"
-              title={
-                'Cuando un cliente WhatsApp pide cotización de envío, el bot ' +
-                'pregunta a Envía qué transportadoras pueden hacer el envío. ' +
-                'Aquí TÚ controlas qué transportadoras se le ofrecen al ' +
-                'cliente final. Sin configurar = todas las disponibles. ' +
-                'Configurando = solo las que activas aquí.'
-              }
-            >
-              <HelpCircle className="h-4 w-4" />
-            </span>
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Selecciona qué carriers ofrecer en cotizaciones de tus clientes.
-          </p>
-        </div>
-      </div>
-      <div className="px-4 py-3.5">
-        {/* Panel consolidado: cómo funcionan carriers + seguro. */}
-        <div className="mb-3 rounded-md border border-emerald-700/30 bg-emerald-700/5 p-3 text-xs text-emerald-900 space-y-2">
-          <div className="font-semibold flex items-center gap-1">
-            <HelpCircle className="h-3.5 w-3.5" />
-            ¿Cómo funciona?
-          </div>
-          <div className="space-y-1.5">
-            <p className="font-medium">Selección de carriers</p>
-            <p>
-              El bot de WhatsApp cotiza envíos con Envía cada vez que un cliente
-              confirma su pedido. Aquí decides <b>qué transportadoras ofrecer</b>:
-            </p>
-            <ul className="list-disc pl-4 space-y-0.5">
-              <li>
-                <b>Modo abierto</b> (sin configurar): el bot ofrece TODAS las
-                transportadoras que Envía exponga (FedEx, DHL, Servientrega, etc.).
-              </li>
-              <li>
-                <b>Modo configurado</b> (1+ carriers activos): el bot ofrece
-                SOLO los que tengan toggle ON. Los que están en OFF nunca
-                aparecen al cliente.
-              </li>
-            </ul>
-            <p className="text-emerald-900/80">
-              <b>Tip:</b> activa solo los carriers con los que tienes contrato
-              real con Envía — los demás causarán errores en cotización si los
-              dejas abiertos.
-            </p>
-          </div>
-          <div className="space-y-1.5 pt-1.5 border-t border-emerald-700/20">
-            <p className="font-medium flex items-center gap-1">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              Seguro de envíos
-            </p>
-            <p>
-              El <b>valor declarado</b> (subtotal del pedido) se envía siempre
-              con cada cotización. Cada transportadora aplica su política de
-              seguro automáticamente — <b>no es decisión por carrier</b>:
-            </p>
-            <ul className="list-disc pl-4 space-y-0.5">
-              <li>
-                <b>Coordinadora</b>: cobra prima automática proporcional al valor
-                declarado (validado prod 2026-05-07).
-              </li>
-              <li>
-                <b>FedEx, DHL, Servientrega, TCC</b>: aceptan el valor declarado;
-                su seguro queda regulado por su contrato con Envía.
-              </li>
-              <li>
-                <b>Envía (carrier propio)</b>: además del valor declarado, recibe
-                el additional service <code className="text-[10px]">envia_insurance</code>
-                {' '}(id=125 en catálogo oficial Envia).
-              </li>
-            </ul>
-          </div>
-        </div>
-        {!hasAnyPrefs && (
-          <div className="mb-3 rounded-md border border-amber-700/40 bg-amber-700/5 px-3 py-2 text-xs text-amber-900">
-            <ShieldCheck className="inline h-3.5 w-3.5 mr-1" />
-            <b>Modo abierto.</b> Aún no has configurado preferencias —
-            el bot ofrece <b>todos</b> los carriers disponibles en Envia.
-            Activa al menos uno abajo para empezar a filtrar.
-          </div>
-        )}
-        {successMsg && (
-          <div className="mb-3 rounded-md border border-emerald-700/40 bg-emerald-700/5 px-3 py-2 text-xs text-emerald-700">
-            <CheckCircle2 className="inline h-3.5 w-3.5 mr-1" />
-            {successMsg}
-          </div>
-        )}
-        {errorMsg && (
-          <div className="mb-3 rounded-md border border-rose-700/40 bg-rose-700/5 px-3 py-2 text-xs text-rose-700">
-            <AlertCircle className="inline h-3.5 w-3.5 mr-1" />
-            {errorMsg}
-          </div>
-        )}
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full text-xs">
-            <thead className="bg-muted/30">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-medium">Carrier</th>
-                <th className="px-3 py-2 font-medium text-center">Activo</th>
-                <th className="px-3 py-2 font-medium text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {ENVIA_CARRIERS_CO.map(c => {
-                const pref = prefByCode.get(c.code.toLowerCase()) ?? null
-                const enabled = pref ? pref.enabled : !hasAnyPrefs
-                  // Si no hay prefs, default-open lo presenta como enabled
-                  // Si hay prefs y este carrier no tiene fila, NO está enabled
-                const isPending = pending === c.code
-                return (
-                  <tr key={c.code} className={enabled ? '' : 'opacity-60'}>
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{c.label}</div>
-                      <div className="font-mono text-[10px] text-muted-foreground">{c.code}</div>
-                      {pref?.notes && (
-                        <div className="mt-0.5 text-[10px] text-muted-foreground italic">{pref.notes}</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        type="button"
-                        disabled={pending !== null}
-                        onClick={() => handleToggle(c.code, pref)}
-                        title={enabled ? 'Desactivar' : 'Activar'}
-                        className={`inline-flex items-center justify-center h-6 w-12 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed text-[11px] font-semibold ${
-                          enabled
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-300 text-slate-700'
-                        }`}
-                      >
-                        {isPending
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : (enabled ? 'ON' : 'OFF')}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {pref && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={pending !== null}
-                          onClick={() => handleReset(c.code)}
-                          className="h-6 text-[10px] gap-1"
-                          title="Restaurar a default (eliminar preferencia explícita)"
-                        >
-                          {pending === 'reset:' + c.code && (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          )}
-                          Reset
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">
-          Los carriers desactivados NO aparecen en cotizaciones a clientes.
-          &quot;Reset&quot; elimina la preferencia explícita y vuelve a comportamiento default
-          (modo abierto si no tienes ninguna fila configurada).
-        </p>
-      </div>
-    </div>
-  )
-}
-
-
-// ─── Sem 5 H.2.6 — Envia Capabilities Section ──────────────────────────────
-// Toggles granulares de capabilities Fase 2 per-tenant. Cada capability
-// gate un endpoint específico — el tenant activa solo lo que usa.
-//
-// Backend: F.3 capabilities_matrix + tenant_provider_capabilities table.
-// Antes de rev. 105 H.2.6 era un env-var global ENVIA_PHASE2_ENABLED;
-// ahora es flag per-tenant per-capability.
-
-const ENVIA_CAPABILITIES: Array<{
-  key: string
-  label: string
-  help: string
-}> = [
-  {
-    key: 'label_generation',
-    label: 'Generación de etiquetas',
-    help:
-      'Permite generar etiquetas (PDF/ZPL) tras seleccionar tarifa. ' +
-      'Necesario para imprimir y entregar al carrier.',
-  },
-  {
-    key: 'tracking_polling',
-    label: 'Tracking & polling',
-    help:
-      'Habilita consultar estado del envío y polling backup periódico. ' +
-      'Usado por el cron que detecta entregas + actualiza el cliente.',
-  },
-  {
-    key: 'pickup',
-    label: 'Recolección (pickup)',
-    help:
-      'Permite agendar recolección domiciliaria del paquete con el carrier. ' +
-      'No todos los carriers soportan pickup en todas las ciudades.',
-  },
-  {
-    key: 'cancel',
-    label: 'Cancelación',
-    help:
-      'Permite cancelar envíos antes de despacharse (refund según política ' +
-      'del carrier). Útil cuando el cliente cancela la orden tras generar etiqueta.',
-  },
-]
-
-function EnviaCapabilitiesSection({
-  capabilities, toggleAction,
-}: {
-  capabilities: Record<string, boolean>
-  toggleAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>
-}) {
-  const router = useRouter()
-  const [pending, setPending] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
-
-  const handleToggle = async (key: string, current: boolean) => {
-    setPending(key); setErrorMsg(null); setSuccessMsg(null)
-    const fd = new FormData()
-    fd.set('capability', key)
-    fd.set('enabled', String(!current))
-    const res = await toggleAction(fd)
-    setPending(null)
-    if (!res.ok) { setErrorMsg(res.error ?? 'Error'); return }
-    const cap = ENVIA_CAPABILITIES.find(c => c.key === key)
-    setSuccessMsg(`${cap?.label ?? key} ${!current ? 'activada' : 'desactivada'}.`)
-    router.refresh()
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="px-4 py-3.5 border-b border-border bg-muted/20 flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-orange-400 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm flex items-center gap-1.5">
-            Capabilities Fase 2
-            <span
-              className="cursor-help text-muted-foreground hover:text-foreground"
-              title={
-                'Cada capability es un "interruptor" que habilita o deshabilita ' +
-                'una operación específica de Envía para tu tenant. Si la apagas, ' +
-                'el endpoint correspondiente devolverá HTTP 503 cuando el bot u ' +
-                'otro código intente usarlo. Útil si quieres limitar qué hace ' +
-                'Envía (ej. cotizar pero no generar etiquetas todavía).'
-              }
-            >
-              <HelpCircle className="h-4 w-4" />
-            </span>
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Activa solo las operaciones que usas. Cada capability protege un endpoint específico.
-          </p>
-        </div>
-      </div>
-      <div className="px-4 py-3.5">
-        {/* Panel "¿Cómo funciona?" prominente. */}
-        <div className="mb-3 rounded-md border border-emerald-700/30 bg-emerald-700/5 p-3 text-xs text-emerald-900 space-y-1.5">
-          <div className="font-semibold flex items-center gap-1">
-            <HelpCircle className="h-3.5 w-3.5" />
-            ¿Cómo funciona?
-          </div>
-          <p>
-            <b>Hoy todas están activadas</b> (estado por defecto post-onboarding).
-            Cada toggle representa un endpoint Envía. Si lo apagas, ese endpoint
-            queda <b>bloqueado</b> a nivel API (HTTP 503) — útil si quieres,
-            por ejemplo, permitir cotización pero NO permitir cancelar etiquetas
-            ya generadas.
-          </p>
-          <p className="text-emerald-900/80">
-            <b>Recomendación:</b> mantenlas todas en <b>ON</b> a menos que tengas
-            una razón comercial específica para limitar (ej. tu account Envía no
-            tiene saldo suficiente para imprimir etiquetas — desactivas
-            <i> Generación de etiquetas</i> hasta recargar).
-          </p>
-        </div>
-        {successMsg && (
-          <div className="mb-3 rounded-md border border-emerald-700/40 bg-emerald-700/5 px-3 py-2 text-xs text-emerald-700">
-            <CheckCircle2 className="inline h-3.5 w-3.5 mr-1" />
-            {successMsg}
-          </div>
-        )}
-        {errorMsg && (
-          <div className="mb-3 rounded-md border border-rose-700/40 bg-rose-700/5 px-3 py-2 text-xs text-rose-700">
-            <AlertCircle className="inline h-3.5 w-3.5 mr-1" />
-            {errorMsg}
-          </div>
-        )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {ENVIA_CAPABILITIES.map(cap => {
-            const enabled = !!capabilities[cap.key]
-            const isPending = pending === cap.key
-            return (
-              <div
-                key={cap.key}
-                className={`flex items-center gap-3 rounded-md border px-3 py-2 ${
-                  enabled ? 'border-emerald-700/30 bg-emerald-700/5' : 'border-border bg-muted/10'
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-medium">{cap.label}</span>
-                    <span
-                      className="cursor-help text-emerald-700/70 hover:text-emerald-900"
-                      title={cap.help}
-                    >
-                      <HelpCircle className="h-4 w-4" />
-                    </span>
-                  </div>
-                  <span className="font-mono text-[10px] text-muted-foreground">{cap.key}</span>
-                </div>
-                <button
-                  type="button"
-                  disabled={pending !== null}
-                  onClick={() => handleToggle(cap.key, enabled)}
-                  title={enabled ? 'Desactivar' : 'Activar'}
-                  className={`shrink-0 inline-flex items-center justify-center h-6 w-12 rounded-full transition text-[10px] font-semibold disabled:opacity-60 disabled:cursor-not-allowed ${
-                    enabled
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-300 text-slate-700'
-                  }`}
-                >
-                  {isPending
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : (enabled ? 'ON' : 'OFF')}
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}

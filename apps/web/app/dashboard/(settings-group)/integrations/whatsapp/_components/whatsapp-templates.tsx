@@ -116,7 +116,7 @@ function buildSubmitCommand(tenantId: string, name: string, language: string): s
   )
 }
 
-export default function TemplatesManager({
+export default function WhatsAppTemplates({
   initialTemplates,
   canWrite,
   tenantId,
