@@ -1,11 +1,19 @@
 /**
  * Tab Setup — Envia.
  *
- * Display-only hoy. Save/disconnect siguen en /integrations (manager legacy).
+ * Estructura canónica unificada (Sem 7 F2 cierre):
+ *   1. Identidad — API token + ambiente
+ *   2. Webhook & Eventos — URL polling backup
+ *   3. Cumplimiento — idempotency + HMAC + polling + scope CO
+ *   4. Zona de riesgo — desconectar (deshabilitado hoy)
+ *   + Banner migración
  */
+import { Truck, KeyRound, Webhook, MapPin } from 'lucide-react'
 import {
-  Truck, KeyRound, MapPin, ShieldCheck, AlertCircle,
-} from 'lucide-react'
+  SetupSection, SetupField, SetupGrid,
+  ComplianceSection, DangerZoneSection,
+  MigrationBanner, EmptyDisconnected,
+} from '../../_components/setup-primitives'
 
 type Props = {
   connected: boolean
@@ -19,15 +27,11 @@ export default function EnviaSetup({
 }: Props) {
   if (!connected) {
     return (
-      <div className="rounded-xl border border-dashed border-muted-foreground/30 p-10 text-center space-y-3">
-        <Truck className="h-8 w-8 mx-auto text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">
-          Envia aún no está conectado para este tenant.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          La conexión se realiza desde el panel principal de Integraciones.
-        </p>
-      </div>
+      <EmptyDisconnected
+        icon={Truck}
+        providerLabel="Envia"
+        helpText="La conexión se realiza configurando tu API token desde el panel principal de Integraciones."
+      />
     )
   }
 
@@ -35,78 +39,90 @@ export default function EnviaSetup({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-xl border border-border bg-card p-4 space-y-4">
-        <div className="flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold text-foreground">API Token</h3>
-          <span className="ml-auto text-xs text-muted-foreground bg-muted/30 border rounded-full px-2 py-0.5">
-            Ambiente: {sandbox ? 'Sandbox' : 'Producción'}
-          </span>
-        </div>
-        <div className="space-y-0.5">
-          <div className="text-xs text-muted-foreground">Token (Vault)</div>
-          <div className="font-mono text-sm">
-            {apiTokenSecretId ? `secret_${apiTokenSecretId.slice(0, 8)}…` : '—'}
-          </div>
-        </div>
-      </section>
+      {/* 1. Identidad */}
+      <SetupSection
+        icon={KeyRound}
+        title="Identidad / API Token"
+        badge={`Ambiente: ${sandbox ? 'Sandbox' : 'Producción'}`}
+      >
+        <SetupGrid>
+          <SetupField
+            label="Token (Vault)"
+            value={
+              apiTokenSecretId
+                ? `secret_${apiTokenSecretId.slice(0, 8)}…`
+                : null
+            }
+          />
+          <SetupField
+            label="Scope geográfico"
+            value="Solo Colombia (country='CO')"
+            mono={false}
+          />
+        </SetupGrid>
+      </SetupSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 space-y-4">
-        <div className="flex items-center gap-2">
-          <MapPin className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold text-foreground">Origen de despacho</h3>
-        </div>
-        <div className="space-y-0.5">
-          <div className="text-xs text-muted-foreground">Código postal DANE</div>
-          <div className="font-mono text-sm">
-            {danePostal ?? '— (configurar en Configuración → General)'}
-          </div>
-        </div>
+      {/* Origen despacho (sub-sección dentro de Identidad logística) */}
+      <SetupSection icon={MapPin} title="Origen de despacho">
+        <SetupField
+          label="Código postal DANE"
+          value={
+            danePostal ?? (
+              <span className="text-muted-foreground italic font-sans">
+                — configurar en Configuración → General
+              </span>
+            )
+          }
+        />
         <p className="text-xs text-muted-foreground">
           Usado por todos los carriers para calcular tarifas desde tu ciudad.
         </p>
-      </section>
+      </SetupSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-emerald-700" />
-          <h3 className="font-semibold text-foreground">Gates de cumplimiento</h3>
+      {/* 2. Webhook & Eventos */}
+      <SetupSection icon={Webhook} title="Webhook & Eventos">
+        <div className="space-y-2">
+          <div className="text-xs text-muted-foreground">URL configurada en panel Envia</div>
+          <code className="block font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
+            https://api.konvi.co/api/v1/envia/webhook/{'<tenant_id>'}/{'<secret>'}
+          </code>
         </div>
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Idempotency-Key local</span>
-            <span className="text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              Activo (H.2.1)
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Webhook HMAC</span>
-            <span className="text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              Activo (H.2.2)
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Polling backup tracking</span>
-            <span className="text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              Activo (H.2.3)
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Scope country='CO'</span>
-            <span className="text-xs text-emerald-900 bg-emerald-700/10 border border-emerald-700/40 rounded-full px-2 py-0.5">
-              Enforced (H.2.12)
-            </span>
-          </div>
+        <div className="text-xs text-muted-foreground pt-1 border-t border-border">
+          Eventos: <span className="font-mono">tracking.update · label.generated · shipment.cancelled</span>
         </div>
-      </section>
+      </SetupSection>
 
-      <section className="rounded-xl border border-amber-700/30 bg-amber-700/5 p-4 flex items-start gap-3">
-        <AlertCircle className="h-4 w-4 text-amber-800 mt-0.5 shrink-0" />
-        <p className="text-sm text-amber-900">
-          Editar token o desconectar se hace desde la página principal de
-          Integraciones. Migración a este panel: Sem 8.
-        </p>
-      </section>
+      {/* 3. Cumplimiento */}
+      <ComplianceSection
+        gates={[
+          { label: 'Idempotency-Key local', value: 'Activo (H.2.1)' },
+          { label: 'Webhook HMAC propio', value: 'Activo (H.2.2)' },
+          { label: 'Polling backup tracking', value: 'Activo (H.2.3)' },
+          { label: "Scope country='CO'", value: 'Enforced (H.2.12)' },
+        ]}
+      />
+
+      {/* 4. Zona de riesgo */}
+      <DangerZoneSection
+        description={
+          <>
+            Desconectar Envia detiene cotizaciones, generación de etiquetas y
+            polling de tracking. Los envíos en curso se siguen sirviendo via
+            sus tracking_numbers existentes pero sin actualizaciones automáticas.
+          </>
+        }
+        actionLabel="Desconectar Envia"
+        actionDisabled
+      />
+
+      {/* Banner migración */}
+      <MigrationBanner>
+        Editar token o desconectar se hace desde{' '}
+        <a href="/dashboard/integrations" className="underline font-medium">
+          /dashboard/integrations
+        </a>
+        . Migración a este panel: Sem 8.
+      </MigrationBanner>
     </div>
   )
 }
