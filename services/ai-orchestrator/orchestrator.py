@@ -7556,6 +7556,13 @@ async def build_and_run_orchestration(
                 _variant_confirmed if _variant_confirmed
                 else _multi_explicit
             )
+            # Sem 7 F2 cierre — fix arquitectónico Bug A multi-variant.
+            # Antes: el `return` dentro del for loop (post emisión resumen
+            # unificado) terminaba prematuramente sin procesar items restantes.
+            # Resultado: "1 de 100ml y 1 de 250ml" solo agregaba el 100ml.
+            # Fix: el for SOLO persiste items + acumula `_invalidation_info`.
+            # Después del loop, UNA emisión de resumen unificado con cart final.
+            _invalidation_info: Optional[dict] = None
             if _items_to_add:
                 _cart = _get_cart()
                 for _item in _items_to_add:
@@ -7624,105 +7631,12 @@ async def build_and_run_orchestration(
                                 _sync_exc,
                             )
 
-                    # Plan A.0.1 / ADR-0011 §6.4.2 — flow unificado post
-                    # invalidación. Si add_item canceló una orden
-                    # `pending_payment` previa, emitir UN SOLO outbound que
-                    # combine: aviso de invalidación + resumen recotizado +
-                    # pregunta de confirmación final. Antes había 2 mensajes:
-                    # un notice ("Cuando confirmes el resumen, recotizo...") y
-                    # luego el resumen — eso forzaba al cliente a confirmar
-                    # algo que aún no veía. Ahora la recotización ya ocurrió
-                    # arriba (cart tiene shipping nuevo) y el resumen muestra
-                    # el monto real → cliente confirma una sola vez con todos
-                    # los datos visibles.
+                    # Sem 7 F2 cierre — solo acumular info de invalidación.
+                    # NO emitir outbound aquí (eso bloquearía items restantes
+                    # del multi-variant input). Se emitirá DESPUÉS del loop
+                    # con el cart final que tiene TODOS los items.
                     if isinstance(_add_payload, dict) and _add_payload.get("order_invalidated"):
-                        _inv = _add_payload["order_invalidated"]
-                        _short_id = str(_inv.get("order_id") or "")[:8].upper()
-                        _unified_emitted = False
-                        try:
-                            from tools.cart_tool import get_cart_with_items as _get_cart_post
-                            _cart_post = _get_cart_post(
-                                supabase,
-                                conversation_id=conversation_id,
-                                tenant_id=tenant_id,
-                            )
-                            _vctx_post = (
-                                _verified_ctx_from_cart(_cart_post)
-                                if _cart_post else None
-                            )
-                            if _vctx_post and int(_vctx_post.get("total_cents") or 0) > 0:
-                                _summary_post = _build_order_summary_text(
-                                    contact_record=contact_record,
-                                    verified_ctx=_vctx_post,
-                                    catalog=catalog,
-                                    history=history,
-                                    cart_from_db=_cart_post,
-                                )
-                                if _summary_post:
-                                    _prefix = (
-                                        f"Listo, actualicé tu carrito. "
-                                        f"El link de pago anterior "
-                                        f"(*#{_short_id}*) ya no es válido.\n\n"
-                                    )
-                                    _unified_text = _prefix + _summary_post
-                                    await _send_outbound_text(
-                                        supabase=supabase,
-                                        conversation_id=conversation_id,
-                                        tenant_id=tenant_id,
-                                        text=_unified_text,
-                                    )
-                                    _emit_summary_rendered_event(
-                                        supabase,
-                                        conversation_id=conversation_id,
-                                        tenant_id=tenant_id,
-                                        summary_text=_unified_text,
-                                    )
-                                    _mark_message_processing(
-                                        supabase, message_id,
-                                        processing_status=PROCESSING_STATUS_PROCESSED,
-                                    )
-                                    logger.info(
-                                        "[CART_INVALIDATE] resumen unificado emitido "
-                                        "conv=%s order=%s shipping=%s",
-                                        conversation_id, _short_id,
-                                        _vctx_post.get("shipping_cost_cents"),
-                                    )
-                                    _unified_emitted = True
-                        except Exception as _unified_exc:
-                            logger.warning(
-                                "[CART_INVALIDATE] resumen unificado falló: %s "
-                                "— fallback a notice + LLM resumen",
-                                _unified_exc,
-                            )
-
-                        if _unified_emitted:
-                            return
-
-                        # Fallback (no se pudo construir resumen unificado):
-                        # emitir notice básico y dejar que el flujo normal
-                        # del LLM construya su respuesta.
-                        _notice = (
-                            f"Actualicé tu carrito. El link de pago anterior "
-                            f"(*#{_short_id}*) ya no es válido. Cuando confirmes "
-                            f"el resumen, *recotizo el envío* con los productos "
-                            f"actualizados y te genero un link nuevo."
-                        )
-                        try:
-                            await _send_outbound_text(
-                                supabase=supabase,
-                                conversation_id=conversation_id,
-                                tenant_id=tenant_id,
-                                text=_notice,
-                            )
-                            logger.info(
-                                "[CART_INVALIDATE] fallback notice conv=%s order=%s",
-                                conversation_id, _short_id,
-                            )
-                        except Exception as _notice_exc:
-                            logger.warning(
-                                "[CART_INVALIDATE] notice fallback falló: %s",
-                                _notice_exc,
-                            )
+                        _invalidation_info = _add_payload["order_invalidated"]
                     # Cierre de la propuesta (si la consumimos arriba).
                     if _proposal and _proposal.get("event_id"):
                         emit_proposal_resolved(
@@ -7737,6 +7651,100 @@ async def build_and_run_orchestration(
                     logger.info(
                         "[CART][MULTI_PRODUCT] %d items distintos detectados conv=%s",
                         len(_items_to_add), conversation_id[:8],
+                    )
+
+            # Sem 7 F2 cierre — Plan A.0.1 / ADR-0011 §6.4.2: emitir resumen
+            # unificado UNA VEZ después del loop con el cart final que ya
+            # tiene TODOS los items procesados. Antes esto vivía dentro del
+            # for y hacía `return` prematuro al primer item invalidante,
+            # bloqueando items restantes del multi-variant input.
+            if _invalidation_info:
+                _short_id = str(_invalidation_info.get("order_id") or "")[:8].upper()
+                _unified_emitted = False
+                try:
+                    from tools.cart_tool import get_cart_with_items as _get_cart_post
+                    _cart_post = _get_cart_post(
+                        supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                    )
+                    _vctx_post = (
+                        _verified_ctx_from_cart(_cart_post)
+                        if _cart_post else None
+                    )
+                    if _vctx_post and int(_vctx_post.get("total_cents") or 0) > 0:
+                        _summary_post = _build_order_summary_text(
+                            contact_record=contact_record,
+                            verified_ctx=_vctx_post,
+                            catalog=catalog,
+                            history=history,
+                            cart_from_db=_cart_post,
+                        )
+                        if _summary_post:
+                            _prefix = (
+                                f"Listo, actualicé tu carrito. "
+                                f"El link de pago anterior "
+                                f"(*#{_short_id}*) ya no es válido.\n\n"
+                            )
+                            _unified_text = _prefix + _summary_post
+                            await _send_outbound_text(
+                                supabase=supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                text=_unified_text,
+                            )
+                            _emit_summary_rendered_event(
+                                supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                summary_text=_unified_text,
+                            )
+                            _mark_message_processing(
+                                supabase, message_id,
+                                processing_status=PROCESSING_STATUS_PROCESSED,
+                            )
+                            logger.info(
+                                "[CART_INVALIDATE] resumen unificado emitido "
+                                "conv=%s order=%s shipping=%s items=%d",
+                                conversation_id, _short_id,
+                                _vctx_post.get("shipping_cost_cents"),
+                                len(_items_to_add or []),
+                            )
+                            _unified_emitted = True
+                except Exception as _unified_exc:
+                    logger.warning(
+                        "[CART_INVALIDATE] resumen unificado falló: %s "
+                        "— fallback a notice + LLM resumen",
+                        _unified_exc,
+                    )
+
+                if _unified_emitted:
+                    return
+
+                # Fallback (no se pudo construir resumen unificado):
+                # emitir notice básico y dejar que el flujo normal del LLM
+                # construya su respuesta.
+                _notice = (
+                    f"Actualicé tu carrito. El link de pago anterior "
+                    f"(*#{_short_id}*) ya no es válido. Cuando confirmes "
+                    f"el resumen, *recotizo el envío* con los productos "
+                    f"actualizados y te genero un link nuevo."
+                )
+                try:
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_notice,
+                    )
+                    logger.info(
+                        "[CART_INVALIDATE] fallback notice conv=%s order=%s",
+                        conversation_id, _short_id,
+                    )
+                except Exception as _notice_exc:
+                    logger.warning(
+                        "[CART_INVALIDATE] notice fallback falló: %s",
+                        _notice_exc,
                     )
         except Exception as _vc_exc:
             logger.warning(
