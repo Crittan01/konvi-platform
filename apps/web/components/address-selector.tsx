@@ -5,7 +5,17 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DEPARTAMENTOS, getMunicipiosByDpto } from '@/lib/dane-colombia'
-import { BUILDING_TYPES, BUILDING_TYPE_LABELS, type BuildingType } from '@/lib/validators/address'
+import {
+  BUILDING_TYPES,
+  BUILDING_TYPE_LABELS,
+  CONJUNTO_TYPES,
+  CONJUNTO_TYPE_LABELS,
+  DELIVERY_CONTEXTS,
+  DELIVERY_CONTEXT_LABELS,
+  type BuildingType,
+  type ConjuntoType,
+  type DeliveryContext,
+} from '@/lib/validators/address'
 
 export interface AddressValue {
   street:        string
@@ -21,6 +31,10 @@ export interface AddressValue {
   apartment?:    string
   complex_name?: string
   reference?:    string
+  // Sem 7 F2 cierre 2026-05-19 — sub-modalidades address
+  conjunto_type?:     ConjuntoType
+  delivery_context?:  DeliveryContext
+  company_name?:      string
 }
 
 interface Props {
@@ -45,6 +59,8 @@ export default function AddressSelector({
   const [city, setCity]                  = useState(defaultValue.city ?? '')
   const [municipioCodigo, setMuniCodigo] = useState(initMuniCode)
   const [buildingType, setBuildingType]  = useState<BuildingType | ''>(defaultValue.building_type ?? '')
+  const [conjuntoType, setConjuntoType]    = useState<ConjuntoType | ''>(defaultValue.conjunto_type ?? '')
+  const [deliveryContext, setDeliveryCtx]  = useState<DeliveryContext | ''>(defaultValue.delivery_context ?? '')
 
   const municipios  = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre  = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
@@ -187,38 +203,125 @@ export default function AddressSelector({
 
           {buildingType === 'conjunto' && (
             <>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Torre / Bloque <span className="text-destructive">*</span></Label>
-                  <Input
-                    name={`${fieldPrefix}_tower`}
-                    defaultValue={defaultValue.tower ?? ''}
-                    placeholder="Torre 3"
-                    required
-                    className="h-8 text-xs"
-                  />
+              {/* Sem 7 F2 cierre 2026-05-19 — Sub-tipo conjunto:
+                  torres (con torre + apto) vs casas (con casa #). */}
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  Modalidad del conjunto <span className="text-destructive">*</span>
+                </Label>
+                <input type="hidden" name={`${fieldPrefix}_conjunto_type`} value={conjuntoType} />
+                <div className="flex gap-2">
+                  {CONJUNTO_TYPES.map(ct => (
+                    <button
+                      key={ct}
+                      type="button"
+                      onClick={() => setConjuntoType(ct)}
+                      className={`flex-1 h-8 text-xs rounded-lg border transition-colors ${
+                        conjuntoType === ct
+                          ? 'border-primary bg-primary/10 text-primary font-medium'
+                          : 'border-border text-muted-foreground hover:bg-secondary/30'
+                      }`}
+                    >
+                      {CONJUNTO_TYPE_LABELS[ct]}
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              {conjuntoType === 'torres' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Torre / Bloque <span className="text-destructive">*</span></Label>
+                    <Input
+                      name={`${fieldPrefix}_tower`}
+                      defaultValue={defaultValue.tower ?? ''}
+                      placeholder="Torre 3"
+                      required
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Apartamento <span className="text-destructive">*</span></Label>
+                    <Input
+                      name={`${fieldPrefix}_apartment`}
+                      defaultValue={defaultValue.apartment ?? ''}
+                      placeholder="401"
+                      required
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {conjuntoType === 'casas' && (
                 <div className="space-y-1">
-                  <Label className="text-xs">Apartamento <span className="text-destructive">*</span></Label>
+                  <Label className="text-xs">
+                    Número de casa <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     name={`${fieldPrefix}_apartment`}
                     defaultValue={defaultValue.apartment ?? ''}
-                    placeholder="401"
+                    placeholder="Casa 12"
                     required
                     className="h-8 text-xs"
                   />
+                  <p className="text-[10px] text-muted-foreground">
+                    Guardado en el mismo campo que apartamento (alias semántico).
+                  </p>
                 </div>
-              </div>
+              )}
+
               <div className="space-y-1">
                 <Label className="text-xs">Nombre del conjunto</Label>
                 <Input
                   name={`${fieldPrefix}_complex_name`}
                   defaultValue={defaultValue.complex_name ?? ''}
-                  placeholder="(opcional) ej. Torres del Parque"
+                  placeholder="(opcional) ej. Torres del Parque / Conjunto Los Almendros"
                   className="h-8 text-xs"
                 />
               </div>
             </>
+          )}
+
+          {/* Sem 7 F2 cierre 2026-05-19 — Contexto de entrega (oficina vs residencia).
+              Ortogonal a building_type. Default residencia si vacío. */}
+          <div className="space-y-1">
+            <Label className="text-xs">Tipo de destino</Label>
+            <input type="hidden" name={`${fieldPrefix}_delivery_context`} value={deliveryContext} />
+            <div className="flex gap-2">
+              {DELIVERY_CONTEXTS.map(dc => (
+                <button
+                  key={dc}
+                  type="button"
+                  onClick={() => setDeliveryCtx(dc)}
+                  className={`flex-1 h-8 text-xs rounded-lg border transition-colors ${
+                    deliveryContext === dc
+                      ? 'border-primary bg-primary/10 text-primary font-medium'
+                      : 'border-border text-muted-foreground hover:bg-secondary/30'
+                  }`}
+                >
+                  {DELIVERY_CONTEXT_LABELS[dc]}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Si entregamos en lugar de trabajo, el repartidor usará horario laboral y portería empresarial.
+            </p>
+          </div>
+
+          {deliveryContext === 'oficina' && (
+            <div className="space-y-1">
+              <Label className="text-xs">Nombre de la empresa</Label>
+              <Input
+                name={`${fieldPrefix}_company_name`}
+                defaultValue={defaultValue.company_name ?? ''}
+                placeholder="Acme S.A.S."
+                className="h-8 text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                El repartidor entregará a la recepción/portería de la empresa.
+              </p>
+            </div>
           )}
 
           <div className="space-y-1">
