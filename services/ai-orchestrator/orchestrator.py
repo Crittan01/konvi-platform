@@ -3731,14 +3731,25 @@ def _truncate_at_first_question(text: str) -> str:
 
 def _detect_building_type_from_text(text: str) -> Optional[str]:
     """Rev. 86 — Si el LLM olvida setear building_type pero el cliente
-    menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa' en el
-    texto, lo inferimos para que el FSM exija los campos correctos.
+    menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa'/'oficina'
+    en el texto, lo inferimos para que el FSM exija los campos correctos.
 
-    Returns: "conjunto" | "edificio" | "casa" | None
+    Sem 7 F2 cierre 2026-05-19 — agrega 'oficina' como tipo descubrible.
+    'oficina' tiene precedencia sobre 'edificio' cuando ambos están presentes
+    ("oficina en el edificio Acme" → oficina).
+
+    Returns: "conjunto" | "edificio" | "casa" | "oficina" | None
     """
     if not text:
         return None
     normalized = _normalize_text_simple(text)
+    # Oficina primero — más específico (precedencia sobre edificio).
+    if any(kw in normalized for kw in (
+        "oficina", "mi trabajo", "en el trabajo", "lugar de trabajo",
+        "donde trabajo", "horario laboral", "en horario de oficina",
+        "la empresa", "en la empresa",
+    )):
+        return "oficina"
     if any(kw in normalized for kw in ("conjunto", "unidad residencial", "torres del", "torre ")):
         return "conjunto"
     if any(kw in normalized for kw in ("edificio", "apartamento", "apto ", "apto.", " apto", "piso ", "torre")):
@@ -3776,37 +3787,10 @@ def _detect_conjunto_type_from_text(text: str) -> Optional[str]:
     return None
 
 
-def _detect_delivery_context_from_text(text: str) -> Optional[str]:
-    """Sem 7 F2 cierre 2026-05-19 — Detecta si el destino de entrega es
-    oficina/lugar de trabajo vs residencia. Independiente de building_type.
-
-    Returns: "oficina" | "residencia" | None.
-
-    Usado por el FSM/prompt para guardar `delivery_context` en address
-    y, si aplica, pedir `company_name`.
-    """
-    if not text:
-        return None
-    normalized = _normalize_text_simple(text)
-    if any(kw in normalized for kw in (
-        "oficina", "mi trabajo", "en el trabajo", "lugar de trabajo",
-        "la empresa", "en la empresa", "donde trabajo",
-        "horario laboral", "en horario de oficina",
-    )):
-        return "oficina"
-    if any(kw in normalized for kw in (
-        "mi casa", "en casa", "en mi residencia", "en la residencia",
-        "vivienda", "donde vivo",
-    )):
-        return "residencia"
-    return None
-
-
 # Rev. 104 (F1-2) — extraídos a fsm/address.py.
 from fsm.address import (
     normalize_building_type as _normalize_building_type,
     normalize_conjunto_type as _normalize_conjunto_type,
-    normalize_delivery_context as _normalize_delivery_context,
     missing_address_fields as _missing_address_fields,
     has_real_address_data as _has_real_address_data,
 )
@@ -3830,38 +3814,27 @@ def _merge_address_data(existing: Optional[dict], incoming: Optional[dict]) -> d
     normalized_type = _normalize_building_type(merged.get("building_type"))
     if normalized_type:
         merged["building_type"] = normalized_type
-    # Sem 7 F2 cierre — normalizar sub-tipos si vienen presentes.
+    # Sem 7 F2 cierre — normalizar sub-tipo conjunto si viene presente.
     normalized_conjunto = _normalize_conjunto_type(merged.get("conjunto_type"))
     if normalized_conjunto:
         merged["conjunto_type"] = normalized_conjunto
-    normalized_dc = _normalize_delivery_context(merged.get("delivery_context"))
-    if normalized_dc:
-        merged["delivery_context"] = normalized_dc
     return merged
 
 
 def _build_address_request_prompt(contact_record: dict, first_name: Optional[str]) -> str:
     """Rev. 92.d — Prompt de address diferenciado por tipo de vivienda.
 
-    Sem 7 F2 cierre 2026-05-19 — ampliado con:
-      • conjunto_type ∈ {torres, casas}: cuando building_type='conjunto' pero
-        no sabemos si es de torres o de casas, pedimos clarificación.
-      • delivery_context (oficina): mencionado como opcional descubrible
-        en el bloque "_Opcional_". No bloquea, solo informa al cliente que
-        puede declararlo si aplica (entrega laboral en lugar de residencia).
+    Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY):
+      • `building_type` con 4 escenarios: casa, edificio, conjunto, oficina.
+      • Para conjunto sin sub-tipo → pide clarificación torres/casas.
+      • Para oficina → pide número de oficina (apartment) y menciona
+        floor + nombre empresa como opcionales.
 
     Reglas:
       • Solo lista los OBLIGATORIOS faltantes (nunca pide lo ya dado).
       • Marca explícitamente cada faltante como obligatorio.
       • Sugiere OPCIONALES contextuales según tipo conocido (o
         condicionales si tipo aún se desconoce).
-
-    Spec módulo Contactos:
-      • Casa: street + city + type [+ reference opcional].
-      • Edificio: + apartment [+ complex_name + reference opcionales].
-      • Conjunto torres: + tower + apartment [+ complex_name + reference].
-      • Conjunto casas: + apartment (= casa #) [+ complex_name + reference].
-      • Oficina (delivery_context): opcional; si aplica → company_name.
     """
     name_prefix = f", {first_name}" if first_name else ""
     address = contact_record.get("address") if isinstance(contact_record, dict) else None
@@ -3869,10 +3842,6 @@ def _build_address_request_prompt(contact_record: dict, first_name: Optional[str
     building_type = _normalize_building_type(
         (address or {}).get("building_type") if isinstance(address, dict) else None
     )
-    conjunto_type = ""
-    if isinstance(address, dict):
-        from fsm.address import normalize_conjunto_type as _norm_conj
-        conjunto_type = _norm_conj(address.get("conjunto_type"))
 
     # Address completa — defensivo.
     if not missing:
@@ -3892,26 +3861,22 @@ def _build_address_request_prompt(contact_record: dict, first_name: Optional[str
         )
     elif building_type == "edificio":
         optional_msg = (
-            "_Opcional_: nombre del edificio, punto de referencia. "
-            "Si la entrega es en oficina, dime el nombre de la empresa."
+            "_Opcional_: piso, nombre del edificio, punto de referencia."
+        )
+    elif building_type == "oficina":
+        optional_msg = (
+            "_Opcional_: piso, nombre de la empresa, punto de referencia."
         )
     elif building_type == "conjunto":
-        if conjunto_type == "casas":
-            optional_msg = (
-                "_Opcional_: nombre del conjunto, punto de referencia."
-            )
-        else:
-            # 'torres' o aún sin definir → texto genérico conjunto.
-            optional_msg = (
-                "_Opcional_: nombre del conjunto, punto de referencia."
-            )
+        optional_msg = (
+            "_Opcional_: nombre del conjunto, punto de referencia."
+        )
     else:
         # Tipo aún se desconoce — sugerir condicionales sin pedir
-        # lo que ya tenemos. Mencionar también la opción oficina.
+        # lo que ya tenemos.
         optional_msg = (
-            "_Opcional_ (según el tipo): nombre del edificio/conjunto, "
-            "o punto de referencia. Si la entrega es en oficina, "
-            "dime el nombre de la empresa."
+            "_Opcional_ (según el tipo): nombre del edificio/conjunto/empresa, "
+            "piso, o punto de referencia."
         )
 
     lines.append("")
@@ -4018,11 +3983,13 @@ def _format_phone_for_summary(phone: Optional[str]) -> str:
 def _format_address_for_summary(address: Optional[dict]) -> str:
     """Renderiza la dirección persistida en una sola línea legible para el resumen.
 
-    Sem 7 F2 cierre 2026-05-19 — diferencia semántica de `apartment`:
-      • building_type='conjunto' + conjunto_type='casas' → "Casa #X".
-      • delivery_context='oficina' → "Oficina X".
-      • Resto → "Apto X" como histórico.
-    También anexa "(entrega en oficina · {company})" cuando aplica.
+    Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY) — render condicional según
+    `building_type`:
+      • casa → solo street + barrio + city.
+      • edificio → + "Piso X" (si floor) + "Apto Y".
+      • conjunto torres → + complex + "Torre X" + "Apto Y".
+      • conjunto casas → + complex + "Casa #Y" (sin torre).
+      • oficina → + "Piso X" (si floor) + "Oficina Y" + "(Empresa: Z)" si company_name.
     """
     if not isinstance(address, dict):
         return ""
@@ -4032,15 +3999,8 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
         parts.append(street)
     btype = _normalize_building_type(address.get("building_type"))
     ctype = _normalize_conjunto_type(address.get("conjunto_type"))
-    dcontext = _normalize_delivery_context(address.get("delivery_context"))
+    floor = str(address.get("floor") or "").strip()
     company = str(address.get("company_name") or "").strip()
-
-    def _unit_label(apt_value: str) -> str:
-        if btype == "conjunto" and ctype == "casas":
-            return f"Casa #{apt_value}"
-        if dcontext == "oficina":
-            return f"Oficina {apt_value}"
-        return f"Apto {apt_value}"
 
     sub_parts: list[str] = []
     if btype == "conjunto":
@@ -4049,18 +4009,29 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
         complex_name = str(address.get("complex_name") or "").strip()
         if complex_name:
             sub_parts.append(complex_name)
-        # Torre solo aplica a conjunto de torres (no de casas).
-        if tower and ctype != "casas":
-            sub_parts.append(f"Torre {tower}" if not tower.lower().startswith("torre") else tower)
-        if apt:
-            sub_parts.append(_unit_label(apt))
+        if ctype == "casas":
+            if apt:
+                sub_parts.append(f"Casa #{apt}")
+        else:
+            if tower:
+                sub_parts.append(f"Torre {tower}" if not tower.lower().startswith("torre") else tower)
+            if apt:
+                sub_parts.append(f"Apto {apt}")
     elif btype == "edificio":
         apt = str(address.get("apartment") or "").strip()
         complex_name = str(address.get("complex_name") or "").strip()
         if complex_name:
             sub_parts.append(complex_name)
+        if floor:
+            sub_parts.append(f"Piso {floor}")
         if apt:
-            sub_parts.append(_unit_label(apt))
+            sub_parts.append(f"Apto {apt}")
+    elif btype == "oficina":
+        apt = str(address.get("apartment") or "").strip()
+        if floor:
+            sub_parts.append(f"Piso {floor}")
+        if apt:
+            sub_parts.append(f"Oficina {apt}")
     if sub_parts:
         parts.append(", ".join(sub_parts))
     neighborhood = str(address.get("neighborhood") or "").strip()
@@ -4071,8 +4042,8 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
         parts.append(city)
 
     base = " — ".join(parts)
-    if dcontext == "oficina" and company:
-        return f"{base} _(entrega en oficina · {company})_"
+    if btype == "oficina" and company:
+        return f"{base} _(Empresa: {company})_"
     return base
 
 

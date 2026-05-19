@@ -125,15 +125,16 @@ def _format_phone_co(phone: str) -> str:
 
 
 def _format_address(address: dict) -> str:
-    """Sem 7 F2 cierre 2026-05-19 — renderiza address humanamente.
+    """Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY) — renderiza address humanamente.
 
-    Diferencia semántica de `apartment` según el contexto:
-      • building_type='conjunto' + conjunto_type='casas' → "Casa #X".
-      • delivery_context='oficina' → "Oficina X" (en vez de "Apto X").
-      • Resto → "Apto X" como histórico.
+    Diferencia semántica de `apartment` según building_type:
+      • conjunto+casas → "Casa #X".
+      • oficina → "Oficina X" (+ "Piso Y" si floor).
+      • edificio → "Apto X" (+ "Piso Y" si floor).
+      • conjunto torres → "Torre X" + "Apto Y".
+      • casa → solo street + ciudad.
 
-    Anexa `delivery_context='oficina'` + `company_name` cuando aplica
-    ("📍 Oficina · Acme S.A.S.").
+    Anexa "Empresa: X" cuando building_type='oficina' + company_name.
     """
     if not isinstance(address, dict):
         return ""
@@ -146,22 +147,28 @@ def _format_address(address: dict) -> str:
 
     building_type = (address.get("building_type") or "").strip().lower()
     conjunto_type = (address.get("conjunto_type") or "").strip().lower()
-    delivery_context = (address.get("delivery_context") or "").strip().lower()
+    floor = str(address.get("floor") or "").strip()
     company_name = (address.get("company_name") or "").strip()
 
-    # Torre solo cuando aplica (conjunto torres o edificio).
-    show_tower = address.get("tower") and not (
-        building_type == "conjunto" and conjunto_type == "casas"
-    )
-    if show_tower:
-        parts.append(f"Torre {address['tower']}")
+    # Torre cuando aplica (conjunto torres) o legacy sin building_type.
+    if address.get("tower"):
+        if not building_type:
+            # Back-compat: contacto antiguo con tower pero sin building_type.
+            parts.append(f"Torre {address['tower']}")
+        elif building_type == "conjunto" and conjunto_type != "casas":
+            parts.append(f"Torre {address['tower']}")
 
-    # Unit label: Casa # / Oficina / Apto según el contexto.
+    # Piso visible solo para edificio y oficina.
+    if floor and building_type in {"edificio", "oficina"}:
+        parts.append(f"Piso {floor}")
+
+    # Unit label: Casa # / Oficina / Apto según building_type.
+    # Default = "Apto" (back-compat para contactos legacy sin building_type).
     if address.get("apartment"):
         unit_value = str(address["apartment"]).strip()
         if building_type == "conjunto" and conjunto_type == "casas":
             unit_label = f"Casa #{unit_value}"
-        elif delivery_context == "oficina":
+        elif building_type == "oficina":
             unit_label = f"Oficina {unit_value}"
         else:
             unit_label = f"Apto {unit_value}"
@@ -172,8 +179,8 @@ def _format_address(address: dict) -> str:
     if address.get("city"):
         parts.append(str(address["city"]).strip())
 
-    # Anexar empresa si entrega es en oficina.
-    if delivery_context == "oficina" and company_name:
+    # Anexar empresa si building_type='oficina'.
+    if building_type == "oficina" and company_name:
         parts.append(f"Empresa: {company_name}")
 
     return " — ".join(p for p in parts if p)

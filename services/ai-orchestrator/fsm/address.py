@@ -1,22 +1,24 @@
-"""Address validation — reglas Wompi/Envía para FSM (rev. 104, F1-2 · ampliado Sem 7 F2 cierre 2026-05-19).
+"""Address validation — reglas Wompi/Envía para FSM (rev. 104, F1-2 · simplificado Sem 7 F2 cierre 2026-05-19).
 
-Extraído de orchestrator.py:
-  • `_normalize_building_type` → `normalize_building_type`
-  • `_missing_address_fields` → `missing_address_fields`
-  • `_has_real_address_data` → `has_real_address_data`
+Decisión arquitectónica founder 2026-05-19 (Opción 1 SIMPLIFY):
+`building_type` con 4 escenarios reales del usuario colombiano, sin
+`delivery_context` ortogonal.
 
 Reglas alineadas al formulario Contactos (Wompi/Envía):
   • street: obligatorio.
   • city: obligatorio.
-  • building_type: obligatorio (casa | edificio | conjunto).
+  • building_type: obligatorio (casa | edificio | conjunto | oficina).
   • conjunto_type ∈ {torres, casas} — obligatorio si building_type='conjunto'.
-  • apartment: obligatorio si building_type ∈ {edificio, conjunto}.
+  • apartment: obligatorio si building_type ∈ {edificio, conjunto, oficina}.
+    En 'oficina' es el número de oficina; en 'conjunto casas' es el número
+    de casa (alias semántico).
   • tower: obligatorio si building_type='conjunto' AND conjunto_type='torres'.
-  • delivery_context ∈ {residencia, oficina, otro} — opcional, default 'residencia'
-    (metadata informativa, no obligatorio para envío).
+  • floor: SIEMPRE opcional (metadata útil para edificio y oficina,
+    no obligatorio).
+  • company_name: SIEMPRE opcional (informativo, oficina solo).
 
-Sin estos campos, el bot NO puede declarar la dirección "lista para envío"
-y el FSM debe quedarse en NEEDS_DIRECTION.
+Sin estos campos obligatorios, el bot NO puede declarar la dirección
+"lista para envío" y el FSM debe quedarse en NEEDS_DIRECTION.
 """
 from __future__ import annotations
 
@@ -33,7 +35,7 @@ def _normalize_text_simple(text: str) -> str:
 
 
 def normalize_building_type(value: Optional[str]) -> str:
-    """Normaliza variantes coloquiales a uno de {casa, edificio, conjunto}.
+    """Normaliza variantes coloquiales a uno de {casa, edificio, conjunto, oficina}.
 
     Vacío si el valor no encaja en ningún canon — caller debe pedir clarificación.
     """
@@ -44,6 +46,8 @@ def normalize_building_type(value: Optional[str]) -> str:
         return "edificio"
     if normalized in {"conjunto", "unidad", "unidad residencial"}:
         return "conjunto"
+    if normalized in {"oficina", "trabajo", "empresa", "laboral", "negocio"}:
+        return "oficina"
     return ""
 
 
@@ -61,28 +65,12 @@ def normalize_conjunto_type(value: Optional[str]) -> str:
     return ""
 
 
-def normalize_delivery_context(value: Optional[str]) -> str:
-    """Normaliza el contexto de entrega a uno de {residencia, oficina, otro}.
-
-    Vacío si no encaja — caller puede asumir 'residencia' como default.
-    """
-    normalized = _normalize_text_simple(str(value or ""))
-    if normalized in {"residencia", "casa", "hogar", "vivienda"}:
-        return "residencia"
-    if normalized in {"oficina", "trabajo", "empresa", "laboral", "negocio"}:
-        return "oficina"
-    if normalized in {"otro", "otra"}:
-        return "otro"
-    return ""
-
-
 def missing_address_fields(direction: Optional[dict]) -> list[str]:
     """Lista de campos faltantes para que `address` quede lista para envío.
 
     Devuelve descripciones legibles ("Calle y número", "Ciudad", etc.) para
     que el bot las pueda usar directamente al pedirlas al cliente.
 
-    `delivery_context` NO es obligatorio (default 'residencia' si ausente).
     `conjunto_type` SÍ es obligatorio cuando building_type='conjunto' — sin él
     no se sabe si pedir torre/apto o solo casa#.
     """
@@ -103,6 +91,8 @@ def missing_address_fields(direction: Optional[dict]) -> list[str]:
         missing.append("Tipo de vivienda (casa, edificio, conjunto u oficina)")
     elif building_type == "edificio" and not apartment:
         missing.append("Apartamento")
+    elif building_type == "oficina" and not apartment:
+        missing.append("Número de oficina")
     elif building_type == "conjunto":
         if not conjunto_type:
             missing.append("Tipo de conjunto (torres o casas)")

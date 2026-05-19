@@ -10,11 +10,8 @@ import {
   BUILDING_TYPE_LABELS,
   CONJUNTO_TYPES,
   CONJUNTO_TYPE_LABELS,
-  DELIVERY_CONTEXTS,
-  DELIVERY_CONTEXT_LABELS,
   type BuildingType,
   type ConjuntoType,
-  type DeliveryContext,
 } from '@/lib/validators/address'
 
 export interface AddressValue {
@@ -31,10 +28,10 @@ export interface AddressValue {
   apartment?:    string
   complex_name?: string
   reference?:    string
-  // Sem 7 F2 cierre 2026-05-19 — sub-modalidades address
-  conjunto_type?:     ConjuntoType
-  delivery_context?:  DeliveryContext
-  company_name?:      string
+  // Sem 7 F2 cierre 2026-05-19 — sub-modalidades address (SIMPLIFY)
+  conjunto_type?: ConjuntoType
+  floor?:         string
+  company_name?:  string
 }
 
 interface Props {
@@ -59,8 +56,7 @@ export default function AddressSelector({
   const [city, setCity]                  = useState(defaultValue.city ?? '')
   const [municipioCodigo, setMuniCodigo] = useState(initMuniCode)
   const [buildingType, setBuildingType]  = useState<BuildingType | ''>(defaultValue.building_type ?? '')
-  const [conjuntoType, setConjuntoType]    = useState<ConjuntoType | ''>(defaultValue.conjunto_type ?? '')
-  const [deliveryContext, setDeliveryCtx]  = useState<DeliveryContext | ''>(defaultValue.delivery_context ?? '')
+  const [conjuntoType, setConjuntoType]  = useState<ConjuntoType | ''>(defaultValue.conjunto_type ?? '')
 
   const municipios  = dptoCode ? getMunicipiosByDpto(dptoCode) : []
   const dptoNombre  = DEPARTAMENTOS.find(d => d.codigo === dptoCode)?.nombre ?? ''
@@ -155,16 +151,17 @@ export default function AddressSelector({
 
           <div className="space-y-1">
             <Label className="text-xs">
-              Tipo de vivienda <span className="text-destructive">*</span>
+              Tipo de destino <span className="text-destructive">*</span>
             </Label>
             <input type="hidden" name={`${fieldPrefix}_building_type`} value={buildingType} />
-            <div className="flex gap-2">
+            {/* 4 opciones: 2 cols x 2 rows. Sem 7 F2 cierre 2026-05-19 (SIMPLIFY). */}
+            <div className="grid grid-cols-2 gap-2">
               {BUILDING_TYPES.map(bt => (
                 <button
                   key={bt}
                   type="button"
                   onClick={() => setBuildingType(bt)}
-                  className={`flex-1 h-8 text-xs rounded-lg border transition-colors ${
+                  className={`h-8 text-xs rounded-lg border transition-colors ${
                     buildingType === bt
                       ? 'border-primary bg-primary/10 text-primary font-medium'
                       : 'border-border text-muted-foreground hover:bg-secondary/30'
@@ -176,18 +173,29 @@ export default function AddressSelector({
             </div>
           </div>
 
-          {/* Campos condicionales por tipo de vivienda */}
+          {/* Campos condicionales por tipo de destino */}
           {buildingType === 'edificio' && (
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Apartamento <span className="text-destructive">*</span></Label>
-                <Input
-                  name={`${fieldPrefix}_apartment`}
-                  defaultValue={defaultValue.apartment ?? ''}
-                  placeholder="401"
-                  required
-                  className="h-8 text-xs"
-                />
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Apartamento <span className="text-destructive">*</span></Label>
+                  <Input
+                    name={`${fieldPrefix}_apartment`}
+                    defaultValue={defaultValue.apartment ?? ''}
+                    placeholder="401"
+                    required
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Piso</Label>
+                  <Input
+                    name={`${fieldPrefix}_floor`}
+                    defaultValue={defaultValue.floor ?? ''}
+                    placeholder="(opcional) ej. 4"
+                    className="h-8 text-xs"
+                  />
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Nombre del edificio</Label>
@@ -198,13 +206,49 @@ export default function AddressSelector({
                   className="h-8 text-xs"
                 />
               </div>
-            </div>
+            </>
+          )}
+
+          {buildingType === 'oficina' && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Número de oficina <span className="text-destructive">*</span></Label>
+                  <Input
+                    name={`${fieldPrefix}_apartment`}
+                    defaultValue={defaultValue.apartment ?? ''}
+                    placeholder="502"
+                    required
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Piso</Label>
+                  <Input
+                    name={`${fieldPrefix}_floor`}
+                    defaultValue={defaultValue.floor ?? ''}
+                    placeholder="(opcional) ej. 5"
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Nombre de la empresa</Label>
+                <Input
+                  name={`${fieldPrefix}_company_name`}
+                  defaultValue={defaultValue.company_name ?? ''}
+                  placeholder="(opcional) Acme S.A.S."
+                  className="h-8 text-xs"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  El repartidor entregará a la recepción/portería de la empresa.
+                </p>
+              </div>
+            </>
           )}
 
           {buildingType === 'conjunto' && (
             <>
-              {/* Sem 7 F2 cierre 2026-05-19 — Sub-tipo conjunto:
-                  torres (con torre + apto) vs casas (con casa #). */}
               <div className="space-y-1">
                 <Label className="text-xs">
                   Modalidad del conjunto <span className="text-destructive">*</span>
@@ -281,47 +325,6 @@ export default function AddressSelector({
                 />
               </div>
             </>
-          )}
-
-          {/* Sem 7 F2 cierre 2026-05-19 — Contexto de entrega (oficina vs residencia).
-              Ortogonal a building_type. Default residencia si vacío. */}
-          <div className="space-y-1">
-            <Label className="text-xs">Tipo de destino</Label>
-            <input type="hidden" name={`${fieldPrefix}_delivery_context`} value={deliveryContext} />
-            <div className="flex gap-2">
-              {DELIVERY_CONTEXTS.map(dc => (
-                <button
-                  key={dc}
-                  type="button"
-                  onClick={() => setDeliveryCtx(dc)}
-                  className={`flex-1 h-8 text-xs rounded-lg border transition-colors ${
-                    deliveryContext === dc
-                      ? 'border-primary bg-primary/10 text-primary font-medium'
-                      : 'border-border text-muted-foreground hover:bg-secondary/30'
-                  }`}
-                >
-                  {DELIVERY_CONTEXT_LABELS[dc]}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              Si entregamos en lugar de trabajo, el repartidor usará horario laboral y portería empresarial.
-            </p>
-          </div>
-
-          {deliveryContext === 'oficina' && (
-            <div className="space-y-1">
-              <Label className="text-xs">Nombre de la empresa</Label>
-              <Input
-                name={`${fieldPrefix}_company_name`}
-                defaultValue={defaultValue.company_name ?? ''}
-                placeholder="Acme S.A.S."
-                className="h-8 text-xs"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                El repartidor entregará a la recepción/portería de la empresa.
-              </p>
-            </div>
           )}
 
           <div className="space-y-1">

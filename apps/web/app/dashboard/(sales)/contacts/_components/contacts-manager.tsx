@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import AddressSelector from '@/components/address-selector'
 import { validateColombianDocument } from '@/lib/validators/document'
-import { validateAddress, type StructuredAddress, type BuildingType, type ConjuntoType, type DeliveryContext } from '@/lib/validators/address'
+import { validateAddress, type StructuredAddress, type BuildingType, type ConjuntoType } from '@/lib/validators/address'
 import HabeasDataActions from './habeas-data-actions'
 import DocumentFields, { type DocType } from './document-fields'
 import { PHONE_COUNTRIES, formatPhone } from './helpers/phone-countries'
@@ -24,14 +24,14 @@ type ContactAddress = {
   state?: string; country?: string; dane_code?: string
   // Rev. 69 — schema canónico extendido
   neighborhood?: string
-  building_type?: 'casa' | 'edificio' | 'conjunto'
+  building_type?: 'casa' | 'edificio' | 'conjunto' | 'oficina'
   tower?: string
   apartment?: string
   complex_name?: string
   reference?: string
-  // Sem 7 F2 cierre 2026-05-19 — sub-modalidades address
+  // Sem 7 F2 cierre 2026-05-19 — SIMPLIFY (Opción 1)
   conjunto_type?: 'torres' | 'casas'
-  delivery_context?: 'residencia' | 'oficina' | 'otro'
+  floor?: string
   company_name?: string
 }
 
@@ -199,9 +199,10 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     if (!docResult.ok) return docResult.error || 'Documento inválido'
 
     // 2) Address: building_type + sub-campos según tipo
-    // Sem 7 F2 cierre — `conjunto_type` (torres|casas) y `delivery_context`
-    // (residencia|oficina|otro) son sub-modalidades ortogonales documentadas
-    // en lib/validators/address.ts.
+    // Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY):
+    //   building_type ∈ {casa, edificio, conjunto, oficina}
+    //   conjunto_type ∈ {torres, casas} solo si building_type='conjunto'.
+    //   floor + company_name opcionales para edificio/oficina.
     const addr: StructuredAddress = {
       street: (fd.get('addr_street') as string) || '',
       neighborhood: (fd.get('addr_neighborhood') as string) || '',
@@ -212,7 +213,7 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       tower: (fd.get('addr_tower') as string) || '',
       apartment: (fd.get('addr_apartment') as string) || '',
       conjunto_type: ((fd.get('addr_conjunto_type') as string) || null) as ConjuntoType | null,
-      delivery_context: ((fd.get('addr_delivery_context') as string) || null) as DeliveryContext | null,
+      floor: (fd.get('addr_floor') as string) || '',
       company_name: (fd.get('addr_company_name') as string) || '',
     }
     // Solo valido address si hay AL MENOS un campo de address presente
