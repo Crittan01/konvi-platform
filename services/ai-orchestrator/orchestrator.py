@@ -1550,10 +1550,17 @@ class OrchestratorOutput(BaseModel):
     extracted_direction: Optional[dict] = Field(
         default=None,
         description=(
-            "Dirección estructurada con claves canónicas rev. 68: "
-            "street, number, city, neighborhood, building_type (casa|edificio|conjunto), "
-            "tower (solo conjunto), apartment, complex_name (nombre del edificio/conjunto), "
-            "reference (punto de referencia). 'additional_info' queda solo para residuos legacy."
+            "Dirección estructurada con claves canónicas. Rev. 68 + Sem 7 F2 cierre: "
+            "street, number, city, neighborhood, "
+            "building_type (casa|edificio|conjunto|oficina), "
+            "conjunto_type (torres|casas, solo si building_type=conjunto), "
+            "tower (solo conjunto/torres), "
+            "floor (piso, opcional para edificio/oficina), "
+            "apartment (apartamento/casa#/oficina# según building_type), "
+            "complex_name (nombre del edificio/conjunto residencial), "
+            "company_name (nombre de la empresa, solo building_type=oficina), "
+            "reference (punto de referencia genérico — NO uses para piso ni empresa). "
+            "'additional_info' queda solo para residuos legacy."
         ),
     )
     extracted_email: Optional[str] = Field(
@@ -1806,14 +1813,27 @@ async def _send_outbound_text(
         from outbound.validator import OutputValidator, ValidationContext
 
         # Una sola query a `messages` para construir history compartido.
+        # Sem 7 F2 cierre 2026-05-19 — Bug 3a founder UAT (conv 11c2dbde):
+        # ANTES: `desc=False.limit(20)` tomaba los 20 más VIEJOS de la conv.
+        # En conversaciones largas (45+ msgs) el resumen pre-link queda
+        # fuera de la ventana → invariant `summary-before-link` dispara
+        # falso positivo → Opción B ejecuta con contact incompleto →
+        # texto acumulado caótico al cliente.
+        # FIX: traer los 20 más RECIENTES (`desc=True`) y reordenar en
+        # memoria como ascendente — los invariants esperan oldest-first
+        # (`_is_first_outbound`, `last_outbound_was_summary` con lookback).
         recent = (
             supabase.table("messages")
             .select("direction, content")
             .eq("conversation_id", conversation_id)
-            .order("created_at", desc=False)
+            .order("created_at", desc=True)
             .limit(20)
             .execute()
         )
+        try:
+            recent.data = list(reversed(recent.data or []))
+        except Exception:
+            pass  # data inmutable o nula — preservar tal cual
         # Lookup contact.consent_given. Rev. 104 (F1 fix): la tabla
         # `conversations` NO tiene columna `contact_id` — el lookup correcto
         # es vía `customer_phone` → `contacts.phone`. La query previa
@@ -1878,11 +1898,20 @@ async def _send_outbound_text(
                 "summary-before-link" in (result.block_reason or "")
             )
             if _is_summary_block:
+                # Sem 7 F2 cierre 2026-05-19 — Bug 3b founder UAT (conv 11c2dbde):
+                # ANTES: contact_record={"phone": ...} solo, y se concatenaba
+                # `_summary_text + text`. Si `text` venía del bypass payment_link
+                # con "Perfecto! Tu pedido #X listo + link", quedaba duplicado:
+                # 2 resúmenes + pregunta confirmación obsoleta + mensaje pedido.
+                # FIX:
+                #   1. Cargar contact COMPLETO (name, email, doc, address) por
+                #      phone para que el resumen tenga todos los datos.
+                #   2. Si `text` ya contiene "Pedido #XXXX" + Wompi link
+                #      (formato canónico del bypass), REEMPLAZAR el outbound
+                #      por uno determinístico limpio. NO concatenar.
+                #   3. Si `text` es solo un link suelto del LLM (sin formato
+                #      canónico), PREFIJAR resumen como antes.
                 try:
-                    # Fix Opción B: usar `get_cart_with_items` para obtener
-                    # cart + items + variation+product join. Una query simple
-                    # a `conversation_carts` no trae items → _verified_ctx_from_cart
-                    # retorna None → resumen no se construye.
                     from tools.cart_tool import (  # type: ignore
                         get_cart_with_items as _get_cart_with_items,
                     )
@@ -1891,7 +1920,30 @@ async def _send_outbound_text(
                         conversation_id=conversation_id,
                         tenant_id=tenant_id,
                     )
+
+                    # Cargar contact completo (no solo phone).
                     _contact_record = {"phone": _customer_phone}
+                    if _customer_phone:
+                        _phone_digits = _customer_phone.lstrip("+")
+                        _full_contact = (
+                            supabase.table("contacts")
+                            .select(
+                                "id, name, email, phone, shipping_phone, "
+                                "document_type, document_number, address, "
+                                "consent_given"
+                            )
+                            .eq("tenant_id", tenant_id)
+                            .or_(
+                                f"phone.eq.{_phone_digits},"
+                                f"phone.eq.+{_phone_digits}"
+                            )
+                            .limit(1)
+                            .execute()
+                        )
+                        _rows = _full_contact.data or []
+                        if _rows:
+                            _contact_record = _rows[0]
+
                     _summary_text = _build_order_summary_text(
                         contact_record=_contact_record,
                         verified_ctx=None,
@@ -1905,23 +1957,70 @@ async def _send_outbound_text(
                         conversation_id, _sum_exc,
                     )
                     _summary_text = None
+
                 if _summary_text:
-                    _combined = _summary_text + "\n\n" + text
+                    # Detectar si `text` viene del bypass payment_link
+                    # (contiene "Pedido *#" formato canónico + Wompi link).
+                    # Si sí → REPLACE limpio. Si no → PREFIX legacy.
+                    import re as _re
+                    _order_match = _re.search(
+                        r"Pedido\s+\*?#([A-F0-9]{4,12})\*?", text or "",
+                        flags=_re.IGNORECASE,
+                    )
+                    _link_match = _re.search(
+                        r"https?://checkout\.wompi\.co/l/[A-Za-z0-9_-]+",
+                        text or "",
+                    )
+                    _bypass_emit = bool(_order_match and _link_match)
+                    if _bypass_emit:
+                        # REPLACE: armar outbound determinístico limpio.
+                        _short_id = _order_match.group(1)
+                        _link_url = _link_match.group(0)
+                        _first_name = ""
+                        try:
+                            _full_name = str(
+                                _contact_record.get("name") or ""
+                            ).strip()
+                            _first_name = _full_name.split()[0] if _full_name else ""
+                        except Exception:
+                            pass
+                        _greeting = (
+                            f"Perfecto *{_first_name}*! "
+                            if _first_name else "Perfecto! "
+                        )
+                        _combined = (
+                            f"{_summary_text}\n\n"
+                            f"{_greeting}Tu pedido *#{_short_id}* está listo.\n\n"
+                            f"*Paga aquí:*\n{_link_url}\n\n"
+                            f"> El link es válido por 30 minutos. Una vez "
+                            f"confirmado el pago recibirás la confirmación por "
+                            f"este chat."
+                        )
+                        logger.info(
+                            "[OUTPUT_VALIDATOR] fix Opción B REPLACE aplicado "
+                            "conv=%s order=#%s — bypass emit detectado",
+                            conversation_id, _short_id,
+                        )
+                    else:
+                        # PREFIX legacy: el texto del LLM no tiene formato
+                        # canónico; prefijar resumen al final del LLM.
+                        _combined = _summary_text + "\n\n" + text
+                        logger.info(
+                            "[OUTPUT_VALIDATOR] fix Opción B PREFIX aplicado "
+                            "conv=%s — resumen prefijado al texto LLM",
+                            conversation_id,
+                        )
+
                     _revalidated = OutputValidator().validate(
                         ValidationContext(
                             candidate_text=_combined,
                             history=recent.data or [],
                             contact_consent_given=_consent_given,
                             consent_question_template=CONSENT_QUESTION_TEMPLATE,
-                            server_time_greeting=None,  # ya no es el primero
+                            server_time_greeting=None,
                         )
                     )
                     if not _revalidated.blocked:
-                        logger.info(
-                            "[OUTPUT_VALIDATOR] fix Opción B aplicado "
-                            "conv=%s — resumen prefijado al link",
-                            conversation_id,
-                        )
                         text = (
                             _revalidated.text
                             if (_revalidated.rewrote and _revalidated.text)
@@ -4344,6 +4443,30 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
     if state == "NEEDS_NAME":
         return "Gracias. Para continuar, compárteme tu nombre completo."
     if state == "NEEDS_DOCUMENT":
+        # Sem 7 F2 cierre 2026-05-19 — Bug 1 founder UAT: prompt contextual.
+        # Si el cliente ya dio el tipo en un turno previo (persistido como
+        # partial), pedir SOLO el número. Evita que el bot re-pregunte
+        # ambos como si nada hubiera avanzado.
+        _doc_type_actual = str(
+            (contact_record or {}).get("document_type") or ""
+        ).strip().upper()
+        _doc_num_actual = str(
+            (contact_record or {}).get("document_number") or ""
+        ).strip()
+        if _doc_type_actual and not _doc_num_actual:
+            return (
+                f"Gracias{name_prefix}. Tengo registrado tu tipo de documento "
+                f"como *{_doc_type_actual}*. Ahora compárteme el número, por favor."
+            )
+        if _doc_num_actual and not _doc_type_actual:
+            return (
+                f"Gracias{name_prefix}. Tengo el número de documento. "
+                "¿Qué tipo es: Cédula (CC), Cédula de extranjería (CE), "
+                "NIT, Pasaporte (PP) o Tarjeta de identidad (TI)?"
+            )
+        # Caso inicial: ambos vacíos. Pedir ambos en una sola pregunta
+        # pero aceptar respuesta parcial (el LLM/extractor persiste lo
+        # que venga y este prompt re-itera con contexto en el próximo turno).
         return (
             "Para procesar tu pago, necesito tu documento de identidad. "
             "¿Qué tipo es: Cédula (CC), Cédula de extranjería (CE), NIT, Pasaporte (PP) o Tarjeta de identidad (TI)? "
@@ -9580,13 +9703,22 @@ async def build_and_run_orchestration(
                 update_data["email"] = str(parsed.extracted_email).strip().lower()
             if parsed.extracted_name and str(parsed.extracted_name).strip():
                 update_data["name"] = " ".join(str(parsed.extracted_name).split())
-            # Rev. 68 — documento. Solo persiste si tipo+número son válidos juntos.
+            # Rev. 68 — documento.
+            # Sem 7 F2 cierre 2026-05-19 — Bug 1 founder UAT (conv 11c2dbde):
+            # ANTES exigía tipo+número JUNTOS para persistir. Cliente dio
+            # solo "CC" → no persistía → FSM seguía en NEEDS_DOCUMENT → bot
+            # re-preguntaba ambos como si nada hubiera avanzado.
+            # AHORA admite persistencia parcial: tipo solo o número solo
+            # son válidos progresivos. El FSM sigue en NEEDS_DOCUMENT hasta
+            # que ambos estén; el prompt es contextual (pide solo lo que falta).
             if _has_doc_extract:
                 _doc_type = (str(parsed.extracted_document_type or "").strip().upper() or None)
                 _doc_num_raw = str(parsed.extracted_document_number or "").strip()
                 _doc_num = re.sub(r"[\s.]", "", _doc_num_raw) or None
-                if _doc_type and _doc_num and _doc_type in {"CC", "CE", "NIT", "PP", "TI", "OTHER"}:
+                _valid_types = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
+                if _doc_type and _doc_type in _valid_types:
                     update_data["document_type"] = _doc_type
+                if _doc_num:
                     update_data["document_number"] = _doc_num
             # Rev. 91 — Reconciliación cross-cutting de building_type.
             # El detector textual tiene precedencia sobre la clasificación
