@@ -117,33 +117,68 @@ def validate_document(doc_type: Optional[str], doc_number: Optional[str]) -> Opt
     return None
 
 
-# ── Address structured (rev. 68) ────────────────────────────────────────────
+# ── Address structured (rev. 68 · ampliado Sem 7 F2 cierre 2026-05-19) ──────
+#
+# Tres dimensiones ortogonales:
+#
+#   1. building_type ∈ {casa, edificio, conjunto}
+#      Tipo de construcción.
+#
+#   2. conjunto_type ∈ {torres, casas} — solo aplica si building_type='conjunto'.
+#      Modalidad del conjunto:
+#        - 'torres': torre + apartamento (modelo original).
+#        - 'casas': conjunto cerrado de casas — solo `apartment` (alias
+#          semántico de "casa #X" — no se duplica columna).
+#
+#   3. delivery_context ∈ {residencia, oficina, otro} — ortogonal al
+#      building_type. Indica si el destino es vivienda o lugar de trabajo
+#      (horario laboral, recepción empresarial, etc.). Default 'residencia'.
+#      Si 'oficina' → `company_name` opcional.
 
 BUILDING_TYPES = frozenset({"casa", "edificio", "conjunto"})
+CONJUNTO_TYPES = frozenset({"torres", "casas"})
+DELIVERY_CONTEXTS = frozenset({"residencia", "oficina", "otro"})
 
 
-def address_required_fields(building_type: Optional[str]) -> list[str]:
-    """Campos requeridos según building_type.
+def address_required_fields(
+    building_type: Optional[str],
+    conjunto_type: Optional[str] = None,
+) -> list[str]:
+    """Campos requeridos según building_type + conjunto_type.
 
     Casa: street, neighborhood, city, state, dane_code.
     Edificio: + apartment.
-    Conjunto: + tower, apartment.
+    Conjunto torres (default si conjunto_type ausente): + tower, apartment.
+    Conjunto casas: + apartment (alias "casa #X" — sin torre).
     """
     base = ["street", "neighborhood", "city", "state", "dane_code"]
     if building_type == "edificio":
         return base + ["apartment"]
     if building_type == "conjunto":
+        if conjunto_type == "casas":
+            return base + ["apartment"]
+        # Default + 'torres': comportamiento legacy (back-compat).
         return base + ["tower", "apartment"]
     return base  # casa o no especificado
 
 
 def is_address_complete(address: Optional[dict]) -> tuple[bool, list[str]]:
-    """Retorna (completa, faltantes). Si address es None o vacío → False, lista total."""
+    """Retorna (completa, faltantes). Si address es None o vacío → False, lista total.
+
+    `delivery_context` y `company_name` NO son obligatorios para "completa" —
+    son metadata informativa (default 'residencia' si ausente).
+    """
     if not address:
         return False, address_required_fields("casa")
     bt = (address.get("building_type") or "").strip().lower() or None
     if bt and bt not in BUILDING_TYPES:
         return False, [f"building_type inválido (debe ser uno de {sorted(BUILDING_TYPES)})"]
-    required = address_required_fields(bt)
+    ct = (address.get("conjunto_type") or "").strip().lower() or None
+    if ct and ct not in CONJUNTO_TYPES:
+        return False, [f"conjunto_type inválido (debe ser uno de {sorted(CONJUNTO_TYPES)})"]
+    dc = (address.get("delivery_context") or "").strip().lower() or None
+    if dc and dc not in DELIVERY_CONTEXTS:
+        return False, [f"delivery_context inválido (debe ser uno de {sorted(DELIVERY_CONTEXTS)})"]
+    required = address_required_fields(bt, ct)
     missing = [f for f in required if not (address.get(f) or "").strip()]
     return (not missing), missing

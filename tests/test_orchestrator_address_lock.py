@@ -34,7 +34,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
         missing = _missing_address_fields({})
         self.assertIn("Calle y número", missing)
         self.assertIn("Ciudad", missing)
-        self.assertIn("Tipo de vivienda (casa, edificio o conjunto)", missing)
+        self.assertIn("Tipo de vivienda (casa, edificio, conjunto u oficina)", missing)
 
     def test_street_city_only_still_missing_building_type(self):
         """Caso real reportado: bot avanzaba con solo street+city."""
@@ -42,7 +42,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
             "street": "Calle 3 sur # 70-84",
             "city": "Bogotá D.C.",
         })
-        self.assertIn("Tipo de vivienda (casa, edificio o conjunto)", missing)
+        self.assertIn("Tipo de vivienda (casa, edificio, conjunto u oficina)", missing)
         self.assertFalse(_has_real_address_data({
             "street": "Calle 3 sur # 70-84",
             "city": "Bogotá D.C.",
@@ -61,25 +61,75 @@ class MissingAddressFieldsTests(unittest.TestCase):
         addr = {"street": "Calle 100", "city": "Bogotá", "building_type": "edificio"}
         self.assertIn("Apartamento", _missing_address_fields(addr))
 
-    def test_conjunto_requires_tower_and_apartment(self):
-        """Caso real: cliente dijo 'Es un conjunto residencial' sin dar torre/apto."""
+    def test_conjunto_requires_conjunto_type_first(self):
+        """Sem 7 F2 cierre — conjunto sin conjunto_type pide clarificación
+        antes de torre/apto (puede ser conjunto de torres o de casas)."""
         addr = {
             "street": "CL 3 SUR 70-84",
             "city": "Bogotá D.C.",
             "building_type": "conjunto",
         }
         missing = _missing_address_fields(addr)
-        self.assertIn("Torre", missing)
-        self.assertIn("Apartamento", missing)
+        self.assertIn("Tipo de conjunto (torres o casas)", missing)
         self.assertFalse(_has_real_address_data(addr))
 
-    def test_conjunto_complete_with_tower_apt(self):
+    def test_conjunto_torres_requires_tower_and_apartment(self):
+        """Conjunto de torres exige torre + apartamento."""
         addr = {
             "street": "CL 3 SUR 70-84",
             "city": "Bogotá D.C.",
             "building_type": "conjunto",
+            "conjunto_type": "torres",
+        }
+        missing = _missing_address_fields(addr)
+        self.assertIn("Torre", missing)
+        self.assertIn("Apartamento", missing)
+        self.assertFalse(_has_real_address_data(addr))
+
+    def test_conjunto_torres_complete_with_tower_apt(self):
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "building_type": "conjunto",
+            "conjunto_type": "torres",
             "tower": "5",
             "apartment": "502",
+        }
+        self.assertEqual(_missing_address_fields(addr), [])
+
+    def test_conjunto_casas_requires_only_house_number(self):
+        """Sem 7 F2 cierre — conjunto de casas pide solo casa # (apartment
+        como alias semántico). NO pide torre."""
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+        }
+        missing = _missing_address_fields(addr)
+        self.assertIn("Número de casa", missing)
+        self.assertNotIn("Torre", missing)
+
+    def test_conjunto_casas_complete_with_house_number(self):
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",  # alias semántico de "casa #12"
+        }
+        self.assertEqual(_missing_address_fields(addr), [])
+
+    def test_oficina_delivery_context_does_not_block_completeness(self):
+        """delivery_context='oficina' NO bloquea completeness (metadata opcional).
+        Sigue requiriendo street + city + building_type estándar."""
+        addr = {
+            "street": "Cra 7 # 80-50",
+            "city": "Bogotá D.C.",
+            "building_type": "edificio",
+            "apartment": "501",
+            "delivery_context": "oficina",
+            "company_name": "Acme S.A.S.",
         }
         self.assertEqual(_missing_address_fields(addr), [])
 

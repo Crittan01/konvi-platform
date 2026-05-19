@@ -125,6 +125,16 @@ def _format_phone_co(phone: str) -> str:
 
 
 def _format_address(address: dict) -> str:
+    """Sem 7 F2 cierre 2026-05-19 — renderiza address humanamente.
+
+    Diferencia semántica de `apartment` según el contexto:
+      • building_type='conjunto' + conjunto_type='casas' → "Casa #X".
+      • delivery_context='oficina' → "Oficina X" (en vez de "Apto X").
+      • Resto → "Apto X" como histórico.
+
+    Anexa `delivery_context='oficina'` + `company_name` cuando aplica
+    ("📍 Oficina · Acme S.A.S.").
+    """
     if not isinstance(address, dict):
         return ""
     parts: list[str] = []
@@ -133,14 +143,39 @@ def _format_address(address: dict) -> str:
         parts.append(street)
     if address.get("complex_name"):
         parts.append(str(address["complex_name"]).strip())
-    if address.get("tower"):
+
+    building_type = (address.get("building_type") or "").strip().lower()
+    conjunto_type = (address.get("conjunto_type") or "").strip().lower()
+    delivery_context = (address.get("delivery_context") or "").strip().lower()
+    company_name = (address.get("company_name") or "").strip()
+
+    # Torre solo cuando aplica (conjunto torres o edificio).
+    show_tower = address.get("tower") and not (
+        building_type == "conjunto" and conjunto_type == "casas"
+    )
+    if show_tower:
         parts.append(f"Torre {address['tower']}")
+
+    # Unit label: Casa # / Oficina / Apto según el contexto.
     if address.get("apartment"):
-        parts.append(f"Apto {address['apartment']}")
+        unit_value = str(address["apartment"]).strip()
+        if building_type == "conjunto" and conjunto_type == "casas":
+            unit_label = f"Casa #{unit_value}"
+        elif delivery_context == "oficina":
+            unit_label = f"Oficina {unit_value}"
+        else:
+            unit_label = f"Apto {unit_value}"
+        parts.append(unit_label)
+
     if address.get("neighborhood"):
         parts.append(str(address["neighborhood"]).strip())
     if address.get("city"):
         parts.append(str(address["city"]).strip())
+
+    # Anexar empresa si entrega es en oficina.
+    if delivery_context == "oficina" and company_name:
+        parts.append(f"Empresa: {company_name}")
+
     return " — ".join(p for p in parts if p)
 
 

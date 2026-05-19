@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import AddressSelector from '@/components/address-selector'
 import { validateColombianDocument } from '@/lib/validators/document'
-import { validateAddress, type StructuredAddress, type BuildingType } from '@/lib/validators/address'
+import { validateAddress, type StructuredAddress, type BuildingType, type ConjuntoType, type DeliveryContext } from '@/lib/validators/address'
 import HabeasDataActions from './habeas-data-actions'
 import DocumentFields, { type DocType } from './document-fields'
 import { PHONE_COUNTRIES, formatPhone } from './helpers/phone-countries'
@@ -29,6 +29,10 @@ type ContactAddress = {
   apartment?: string
   complex_name?: string
   reference?: string
+  // Sem 7 F2 cierre 2026-05-19 — sub-modalidades address
+  conjunto_type?: 'torres' | 'casas'
+  delivery_context?: 'residencia' | 'oficina' | 'otro'
+  company_name?: string
 }
 
 type Contact = {
@@ -195,6 +199,9 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     if (!docResult.ok) return docResult.error || 'Documento inválido'
 
     // 2) Address: building_type + sub-campos según tipo
+    // Sem 7 F2 cierre — `conjunto_type` (torres|casas) y `delivery_context`
+    // (residencia|oficina|otro) son sub-modalidades ortogonales documentadas
+    // en lib/validators/address.ts.
     const addr: StructuredAddress = {
       street: (fd.get('addr_street') as string) || '',
       neighborhood: (fd.get('addr_neighborhood') as string) || '',
@@ -204,6 +211,9 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       building_type: ((fd.get('addr_building_type') as string) || null) as BuildingType | null,
       tower: (fd.get('addr_tower') as string) || '',
       apartment: (fd.get('addr_apartment') as string) || '',
+      conjunto_type: ((fd.get('addr_conjunto_type') as string) || null) as ConjuntoType | null,
+      delivery_context: ((fd.get('addr_delivery_context') as string) || null) as DeliveryContext | null,
+      company_name: (fd.get('addr_company_name') as string) || '',
     }
     // Solo valido address si hay AL MENOS un campo de address presente
     // (el form permite crear contactos sin dirección — el bot la pide después).

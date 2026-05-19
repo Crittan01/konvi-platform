@@ -172,8 +172,14 @@ export default async function ContactsPage({
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
     // Rev. 69 — campos estructurados de address.
+    // Sem 7 F2 cierre 2026-05-19 — `conjunto_type` y `delivery_context`
+    // sub-modalidades validadas por whitelist antes de persistir.
     const buildingTypeRaw = (formData.get('addr_building_type') as string) || ''
     const buildingType = ['casa', 'edificio', 'conjunto'].includes(buildingTypeRaw) ? buildingTypeRaw : undefined
+    const conjuntoTypeRaw = (formData.get('addr_conjunto_type') as string) || ''
+    const conjuntoType = ['torres', 'casas'].includes(conjuntoTypeRaw) ? conjuntoTypeRaw : undefined
+    const deliveryContextRaw = (formData.get('addr_delivery_context') as string) || ''
+    const deliveryContext = ['residencia', 'oficina', 'otro'].includes(deliveryContextRaw) ? deliveryContextRaw : undefined
     const address  = street ? {
       street,
       number:        (formData.get('addr_number')        as string) || undefined,
@@ -187,6 +193,9 @@ export default async function ContactsPage({
       apartment:     (formData.get('addr_apartment')     as string) || undefined,
       complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
       reference:     (formData.get('addr_reference')     as string) || undefined,
+      conjunto_type:    conjuntoType,
+      delivery_context: deliveryContext,
+      company_name:     (formData.get('addr_company_name') as string) || undefined,
     } : null
     // Rev. 69 — documento de identidad.
     const docTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
@@ -382,8 +391,13 @@ export default async function ContactsPage({
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
     // Rev. 69 — campos estructurados de address (igual que addAction).
+    // Sem 7 F2 cierre 2026-05-19 — conjunto_type + delivery_context.
     const editBuildingTypeRaw = (formData.get('addr_building_type') as string) || ''
     const editBuildingType = ['casa', 'edificio', 'conjunto'].includes(editBuildingTypeRaw) ? editBuildingTypeRaw : undefined
+    const editConjuntoTypeRaw = (formData.get('addr_conjunto_type') as string) || ''
+    const editConjuntoType = ['torres', 'casas'].includes(editConjuntoTypeRaw) ? editConjuntoTypeRaw : undefined
+    const editDeliveryContextRaw = (formData.get('addr_delivery_context') as string) || ''
+    const editDeliveryContext = ['residencia', 'oficina', 'otro'].includes(editDeliveryContextRaw) ? editDeliveryContextRaw : undefined
     const address  = street ? {
       street,
       number:        (formData.get('addr_number')        as string) || undefined,
@@ -397,6 +411,9 @@ export default async function ContactsPage({
       apartment:     (formData.get('addr_apartment')     as string) || undefined,
       complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
       reference:     (formData.get('addr_reference')     as string) || undefined,
+      conjunto_type:    editConjuntoType,
+      delivery_context: editDeliveryContext,
+      company_name:     (formData.get('addr_company_name') as string) || undefined,
     } : null
     // Rev. 69 — documento de identidad en edit. Rev. 102: TI removido.
     const editDocTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
