@@ -154,16 +154,26 @@ _WOMPI_LEGAL_ID_TYPES_ACCEPTED = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
 def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
     """Construye el bloque customer_data Wompi a partir del contacto.
 
-    Reglas (rev. 68, validadas en producción):
-      - Solo se incluyen claves con valor (Wompi devuelve 422 ante nulls
-        explícitos en strings).
-      - ``legal_id_type`` se envía tal cual el cliente lo dió, dentro del
-        set aceptado por el repo. Si el tipo no está en el set, no se
-        envía documento (mejor que pre-mapear a otro tipo y mentirle al
-        merchant en su backoffice).
-      - ``phone_number_prefix`` separado (ej. ``+57``) según schema oficial.
+    ⚠️ NO USAR EN /v1/payment_links (Sem 7 F2 cierre, 2026-05-19).
 
-    Ref: https://docs.wompi.co/docs/colombia/widget-checkout-web/
+    Reconfirmado en doc oficial Wompi
+    (https://docs.wompi.co/en/docs/colombia/links-de-pago/): el campo
+    ``customer_data`` del endpoint ``POST /v1/payment_links`` SOLO acepta
+    ``customer_references`` (array máx 2 de ``{label, is_required}``)
+    para campos custom adicionales. NO acepta email/full_name/phone_number/
+    legal_id para pre-poblar el formulario del checkout hosted — Wompi
+    ignora silenciosamente cualquier otra clave.
+
+    Este builder queda preservado para FUTURA migración a:
+      - Widget & Checkout Web (JS embebido en página propia, requiere
+        storefront I.1 — diferido por decisión founder 2026-05-05).
+      - POST /v1/transactions directo (Third-Party Payments API, requiere
+        cerrar gap Habeas Data H.3.8 acceptance_token).
+
+    Reglas (rev. 68, validadas contra schema teórico de Widget/Transactions):
+      - Solo se incluyen claves con valor.
+      - ``legal_id_type`` se envía tal cual dentro del set aceptado.
+      - ``phone_number_prefix`` separado (ej. ``+57``).
     """
     if not contact:
         return None
@@ -218,7 +228,13 @@ def create_payment_link_sync(
 ) -> dict:
     """
     Versión síncrona de create_payment_link — para BackgroundTasks y webhooks síncronos.
-    Rev. 68 — recibe `contact` opcional para pre-poblar customer_data en checkout.
+
+    Param ``contact``: aceptado por compat con caller (rev. 68 lo pasaba para
+    pre-poblar customer_data en checkout). Sem 7 F2 cierre 2026-05-19: doc
+    oficial Wompi confirma que /v1/payment_links NO pre-popula comprador desde
+    ``customer_data`` (ese campo solo acepta ``customer_references`` custom).
+    El parámetro permanece en la firma por estabilidad de callers; el dato
+    queda preservado para futura migración a Widget Web / /transactions.
     """
     if not private_key:
         raise ValueError("private_key Wompi no configurada para este tenant")
@@ -236,18 +252,13 @@ def create_payment_link_sync(
     }
     if redirect_url:
         payload["redirect_url"] = redirect_url
-    customer_data = _build_customer_data(contact)
-    if customer_data:
-        payload["customer_data"] = customer_data
-        logger.info(
-            "[WOMPI] payment_link customer_data fields=%s",
-            sorted(customer_data.keys()),
-        )
-    else:
-        logger.warning(
-            "[WOMPI] payment_link sin customer_data — checkout pedirá datos al cliente. order=%s",
-            order_id,
-        )
+    # Sem 7 F2 cierre — NO enviar customer_data al endpoint /v1/payment_links.
+    # Doc oficial Wompi confirma que ese campo solo acepta customer_references
+    # (campos custom), NO pre-popula comprador. Cliente tipea email/nombre/
+    # celular en el checkout hosted (~10s friction aceptable para WhatsApp
+    # commerce). Builder _build_customer_data preservado para futura
+    # migración a Widget Web / /transactions directo.
+    # Ver docstring de _build_customer_data para detalles.
 
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = client.post(
@@ -285,7 +296,13 @@ async def create_payment_link(
 
     Campos requeridos por Wompi: name, description, single_use, collect_shipping.
     Correlación orden↔pago: order_id en campo `sku` (UUID v4 = 36 chars exactos).
-    Rev. 68 — pre-popula `customer_data` desde el contacto para checkout sin re-tipear.
+
+    Param ``contact``: aceptado por compat con caller (rev. 68 lo pasaba para
+    pre-poblar customer_data en checkout). Sem 7 F2 cierre 2026-05-19: doc
+    oficial Wompi confirma que /v1/payment_links NO pre-popula comprador desde
+    ``customer_data`` (ese campo solo acepta ``customer_references`` custom).
+    El parámetro permanece en la firma por estabilidad de callers; el dato
+    queda preservado para futura migración a Widget Web / /transactions.
 
     Returns dict con:
       - link_id: str (id del payment link)
@@ -309,19 +326,8 @@ async def create_payment_link(
     }
     if redirect_url:
         payload["redirect_url"] = redirect_url
-    customer_data = _build_customer_data(contact)
-    if customer_data:
-        payload["customer_data"] = customer_data
-        logger.info(
-            "[WOMPI] payment_link customer_data fields=%s order=%s",
-            sorted(customer_data.keys()),
-            order_id,
-        )
-    else:
-        logger.warning(
-            "[WOMPI] payment_link sin customer_data — checkout pedirá datos al cliente. order=%s",
-            order_id,
-        )
+    # Sem 7 F2 cierre — NO enviar customer_data al endpoint /v1/payment_links.
+    # (Ver docstring de _build_customer_data para justificación completa.)
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = await client.post(
