@@ -1,9 +1,9 @@
 # Bugs Sem 7 F2 cierre — historial completo
 
-**Estado al cierre de sesión 2026-05-19 ~02:25 UTC.**
+**Estado al cierre de sesión 2026-05-19 ~16:30 UTC.**
 
-Documento histórico de los 2 bugs descubiertos en UAT manual del founder
-durante la sesión Sem 7 F2 cierre. **Ambos arreglados arquitectónicamente
+Documento histórico de los 4 bugs descubiertos en UAT manual del founder
+durante la sesión Sem 7 F2 cierre. **Todos arreglados arquitectónicamente
 sin parches**. Validados end-to-end en runtime real del founder.
 
 ---
@@ -148,3 +148,139 @@ Subsiguiente add Aceite preservó Jabón Coco en resumen final.
 - Cuando el detector tiene un contrato "1 input → 1 output" en un
   dominio que naturalmente puede tener N matches (multi-variant), el
   contrato es el bug — no parche en el caller.
+
+---
+
+## ✅ Bug 1 — Saludo "Buenos días" duplicado — RESUELTO (commit 4c375d6)
+
+### Síntomas observados (UAT founder 2026-05-19 ~16:18 UTC, conv b36ecb31)
+
+```
+T2 bot: "Buenos días! Soy Sara Camila de KAIU Living Natural. ¿En qué te ayudo?"
+T3 cliente: "Que venden?"
+T4 bot: "Buenos días! Soy Sara Camila de KAIU Living Natural. Trabajamos..."
+```
+
+Saludo + identidad completa duplicados en outbounds consecutivos del mismo
+turno conversacional. Founder reportó "se siente extraño".
+
+### Root cause
+
+Prompt define "tu identidad: Sara Camila de KAIU" como bloque de persona.
+LLM la re-incluye en outbounds posteriores al primero. Sin invariant
+determinístico que lo prevenga, el LLM cae en este patrón.
+
+### Fix arquitectónico aplicado (commit 4c375d6)
+
+Nuevo invariant `assert_no_double_greeting()` en
+`services/ai-orchestrator/outbound/invariants.py` (mismo patrón que
+`time-aware-greeting` y `cordial-connector-for-direct-question`):
+- Activa cuando NO es primer outbound de la conv Y candidato abre con
+  "Buenos días/tardes/noches" o "Hola".
+- Strippea el prefijo de saludo.
+- Adicionalmente strippea "Soy {nombre} de {tenant}." si aparece directo
+  tras el saludo (auto-presentación repetida).
+- Capitaliza primera letra del remainder para que quede natural.
+
+Invocado en `outbound/validator.validate()` como paso 0c, después de
+time-aware-greeting (0a) y cordial-connector (0b).
+
+### Tests
+- `test_outbound_invariants.py::NoDoubleGreetingTests` (7 nuevos).
+
+---
+
+## ✅ Bug 2 — Categoría perdida (jabón → bot ofrece aceite) — RESUELTO (commit 5219c75)
+
+### Síntomas observados (UAT founder 2026-05-19 ~16:18 UTC, conv b36ecb31)
+
+```
+T5 cliente: "Que jabones artesanales venden?"
+T6 bot: lista 4 jabones específicos              ← framing 'jabón'
+T7 cliente: "Me peudes vender 1 Jabon de Cogo y 1 de Lavanda"
+T8 bot: "Confírmame la presentación de cada jabón"
+T9 cliente: "Ok, deseo 1 de Coco 100g y 1 de Lavanda de 150g"
+T10 bot: ❌ "Tenemos varios productos relacionados:
+            * Aceite de Coco Virgen      ← NO, contexto era jabón
+            * Jabón Artesanal de Coco
+            * Jabón Artesanal de Lavanda"
+```
+
+Bot ofreció Aceite Coco como opción cuando contexto era jabón.
+
+### Root cause (2 capas)
+
+**Capa 1 — Detector contextual-blind**: `_detect_add_item_intent_with_resolution`
+recibe `(content, catalog_completo)` sin filtro de contexto conversacional.
+"coco" matchea Aceite Coco + Jabón Coco → `product_ambiguous`.
+
+**Capa 2 — Atribución cruzada en multi-segment**: `_resolve_variant_from_inbound`
+atribuía variantes cruzadas — el segmento "1 de Lavanda 150g" matcheaba la
+variante 150g de Jabón Coco solo porque ese producto también tenía 150g,
+sin verificar que el segmento mencionara "lavanda".
+
+### Fix arquitectónico aplicado (commit 5219c75) — 5 capas sin parches
+
+**Capa A** — `_extract_category_token_from_recent_context(history, catalog)`:
+- Helper puro. Itera últimos N=5 mensajes (más reciente primero).
+- Prefiere `category_head_words` (primer token significativo de cada
+  título — sustantivos "jabon", "aceite") sobre `generic_terms` (que
+  incluiría adjetivos como "artesanal").
+- Despluralización ingenua (-s, -es) para español comercial.
+
+**Capa B** — `_filter_catalog_by_category_token(catalog, token)`:
+- Helper puro. Match por palabra exacta en title tokens. Back-compat: si
+  filtro deja 0 productos → retorna catalog completo.
+
+**Capa C** — `_resolve_variant_from_inbound(..., require_discriminative_per_segment=True)`:
+- Nuevo parámetro opt-in (default False = back-compat con Bug A multi-variant).
+- En multi-segment, cada segmento DEBE contener al menos 1 palabra
+  discriminativa del título del producto (≥4 chars, no stop). Sin esto,
+  el segmento se ignora para ese producto.
+
+**Capa D** — tier-2: nueva resolución `resolved_multi`:
+- Cuando `len(product_hits) > 1 AND has_explicit_variant AND cada uno
+  tiene variante compatible resuelta` → retorna `matches=list[N]`.
+- Antes era `product_ambiguous`; ahora reconoce N productos distintos
+  con N variantes distintas.
+
+**Capa E** — caller orchestrator (orchestrator.py:~7345):
+- Antes de invocar tier-2 aplica capa A (extract) + capa B (filter).
+  Loggea `[TIER2] category-lock 'jabon' aplicado`.
+- Después de tier-2: nuevo handler para `resolution='resolved_multi'`
+  que persiste cada match con `cart_tool.add_item` y deja que el flujo
+  normal post-add continúe.
+
+### Validación caso founder (test e2e)
+
+```python
+1. History b36ecb31 → category="jabon" ✓
+2. Filter catalog → 3 jabones (sin aceites) ✓
+3. Inbound "1 de Coco 100g y 1 de Lavanda 150g" + catalog filtrado →
+   tier-2 = resolved_multi, matches = [Jabón Coco 100g, Jabón Lavanda 150g] ✓
+```
+
+### Tests
+- `test_rev106_category_lock_multi_product.py` (21 nuevos):
+  - `CategoryTokenExtractorTests` (8): edge cases del extractor.
+  - `CatalogFilterByCategoryTests` (5): filtros y back-compat.
+  - `ResolveVariantDiscriminativePerSegmentTests` (4): opt-in semántico.
+  - `Tier2ResolvedMultiTests` (3): nueva resolución multi-product.
+  - `IntegrationFounderBugScenarioTests` (1): caso exacto founder e2e.
+
+### Lección registrada
+
+La disciplina de separar concerns evita parches: el detector NO debe
+"adivinar contexto" por sí mismo. El caller que conoce el history
+gestiona contexto y pasa el catalog apropiado. El detector permanece
+puro y testeable.
+
+---
+
+## Métricas sesión 2026-05-19 (cierre)
+
+- Bugs runtime cerrados arquitectónicamente: **4** (A, B, 1, 2)
+- Commits Sem 7 F2 cierre: 8+ (incluyendo address SIMPLIFY)
+- Suite tests: 2040 verde (+50 vs inicio sesión)
+- LOC `orchestrator.py`: estable (~8400, sin crecer significativamente
+  por extracción a helpers puros).
