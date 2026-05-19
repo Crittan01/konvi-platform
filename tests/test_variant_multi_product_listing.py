@@ -146,9 +146,9 @@ class DetectVariantConfirmationMultiProductTests(unittest.TestCase):
             _HISTORY_BOTH,
             [_COCO, _SERUM],
         )
-        self.assertIsNotNone(result, "Bug-C: detector debe resolver Coco")
-        self.assertEqual(result["product_id"], "p-coco")
-        self.assertEqual(result["variation_id"], "v-60g")
+        self.assertEqual(len(result), 1, "Bug-C: detector debe resolver Coco")
+        self.assertEqual(result[0]["product_id"], "p-coco")
+        self.assertEqual(result[0]["variation_id"], "v-60g")
 
     def test_resolves_serum_when_30_ml(self):
         # T-1 lista AMBOS productos. Cliente dice "30 ml" → debe
@@ -159,8 +159,8 @@ class DetectVariantConfirmationMultiProductTests(unittest.TestCase):
             [_COCO, _SERUM],
         )
         self.assertIsNotNone(result)
-        self.assertEqual(result["product_id"], "p-serum")
-        self.assertEqual(result["variation_id"], "v-30ml")
+        self.assertEqual(result[0]["product_id"], "p-serum")
+        self.assertEqual(result[0]["variation_id"], "v-30ml")
 
     def test_returns_none_when_no_match(self):
         # Cliente dice algo que no matchea ninguna variante.
@@ -169,7 +169,7 @@ class DetectVariantConfirmationMultiProductTests(unittest.TestCase):
             _HISTORY_BOTH,
             [_COCO, _SERUM],
         )
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":
