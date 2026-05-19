@@ -199,6 +199,21 @@ _SHIPPING_KEYWORDS = (
     "adicional", "nuevo numero", "nuevo número",
     "diferente", "secundario",
     "su celular es", "su numero es", "su número es",
+    # Sem 7 F2 cierre — verbos de cambio explícito sobre número (caso
+    # runtime: "Deseo cambiar el número 322... por 3003919461"). Sin
+    # estos verbos, el regex no disparaba PRE_BYPASS → LLM componía
+    # outbound libre con resumen mal renderizado.
+    "cambiar el numero", "cambiar el número",
+    "cambia el numero", "cambia el número",
+    "cambiar mi numero", "cambiar mi número",
+    "cambia mi numero", "cambia mi número",
+    "reemplazar el numero", "reemplazar el número",
+    "reemplaza el numero", "reemplaza el número",
+    "modificar el numero", "modificar el número",
+    "modifica el numero", "modifica el número",
+    "cambiar el celular", "cambia el celular",
+    "reemplazar el celular", "reemplaza el celular",
+    "modificar el celular", "modifica el celular",
 )
 
 _SHIPPING_PHONE_DIGITS_RE = re.compile(r"(?:\+?57\s*)?(\d{10})\b")
@@ -213,9 +228,15 @@ def _detect_shipping_phone_update(text: str) -> Optional[str]:
       - "actualiza mi celular: 3001234567"
       - "el pedido lo recibe mi mamá, su celular es 3001234567"
       - "número adicional 3009998877"
+      - "cambiar el número 3001234567 por 3009998877"  (Sem 7 F2 cierre)
 
     Defensivo: si el cliente solo da su WhatsApp normal sin keyword
     contextual, NO extrae (evita sobrescribir contacts.phone).
+
+    Sem 7 F2 cierre — cuando hay frase de cambio ("X por Y") con dos
+    números, captura el ÚLTIMO (el nuevo), no el primero (el viejo).
+    findall + tomar el último match es la captura correcta semánticamente
+    (cliente referencia número actual antes de declarar el nuevo).
 
     Retorna 10 dígitos sin prefijo (+57 implícito) o None.
     """
@@ -224,10 +245,11 @@ def _detect_shipping_phone_update(text: str) -> Optional[str]:
     normalized = _normalize_text_simple(text).lower()
     if not any(kw in normalized for kw in _SHIPPING_KEYWORDS):
         return None
-    m = _SHIPPING_PHONE_DIGITS_RE.search(text)
-    if not m:
+    matches = _SHIPPING_PHONE_DIGITS_RE.findall(text)
+    if not matches:
         return None
-    digits = m.group(1)
+    # Último match: caso "cambiar X por Y" → Y (el nuevo).
+    digits = matches[-1]
     if len(digits) != 10 or digits[0] == "0":
         return None
     return digits
@@ -273,6 +295,17 @@ _ORDER_CONFIRMATION_MARKERS = (
     # del cliente al resumen ("Si, confirmo") avance directo a payment link.
     "generar tu link de pago",
     "datos estan correctos para generar",
+    # Sem 7 F2 cierre — variantes con determinante "el" (no solo "tu").
+    # Caso runtime: bot dijo "Para confirmar tu pedido y generar el link
+    # de pago, respóndeme con un Sí, confirmo" → marker "generar tu link"
+    # NO matchea por el "tu" vs "el". Sin matcher, el bypass payment_link
+    # directo NO dispara → LLM compone "te genero el link" → anti-hallu
+    # bloquea → fallback "armamos pedido?" = 1 turno extra (smell B).
+    "generar el link de pago",
+    "para generar el link",
+    "confirmo para generar",
+    "respondeme con un si confirmo",
+    "respondeme con un si, confirmo",
 )
 _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re.IGNORECASE)
 # Versión search-friendly (sin ^$) para extraer email embebido en texto libre.
@@ -7939,15 +7972,119 @@ async def build_and_run_orchestration(
         #     LLM de extracted_shipping_phone — caso S12 known T6 "3223840887"
         #     respondiendo a "¿Cuál es tu número alterno?").
         #   • inbound NO contiene email/document (PII update midflow).
+        #
+        # Sem 7 F2 cierre — Caso shipping_phone update post-resumen.
+        # Cliente dice "Deseo cambiar el número X por Y" tras el resumen.
+        # Fix arquitectónico completo:
+        #   1. Persistir shipping_phone en DB
+        #   2. Re-cargar contact_record fresh
+        #   3. Emitir resumen determinístico DIRECTAMENTE con ambos
+        #      celulares (NO delegar al bypass general — ese solo dispara
+        #      para READY_FOR_SUMMARY, no AWAITING_ORDER_CONFIRMATION).
+        #   4. Return early — LLM NO compone.
+        # Garantiza: contrato resumen siempre por builder determinístico.
+        _shipping_phone_pre_persist = _detect_shipping_phone_update(content or "")
+        _shipping_phone_just_persisted = False
+        if (
+            _shipping_phone_pre_persist
+            and contact_id
+            and display_state in {"READY_FOR_SUMMARY", "AWAITING_ORDER_CONFIRMATION"}
+        ):
+            _ship_digits = re.sub(r"\D", "", str(_shipping_phone_pre_persist))
+            if len(_ship_digits) >= 10 and _ship_digits[-10] != "0":
+                _new_ship = f"+57{_ship_digits[-10:]}"
+                try:
+                    supabase.table("contacts").update(
+                        {"shipping_phone": _new_ship}
+                    ).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
+                    # Re-cargar contact_record fresh.
+                    _fresh_res = (
+                        supabase.table("contacts")
+                        .select(
+                            "id, consent_given, name, email, address, "
+                            "document_type, document_number, phone, shipping_phone"
+                        )
+                        .eq("id", contact_id)
+                        .single()
+                        .execute()
+                    )
+                    if _fresh_res.data:
+                        contact_record = _fresh_res.data
+                        _shipping_phone_just_persisted = True
+                        logger.info(
+                            "[PRE_BYPASS] shipping_phone=%s persisted conv=%s",
+                            _new_ship, conversation_id[:8],
+                        )
+                        # Emitir resumen determinístico inmediato (no delegar).
+                        try:
+                            from tools.cart_tool import get_cart_with_items as _gcwi_sp
+                            _cart_sp = _gcwi_sp(
+                                supabase, conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                            )
+                        except Exception:
+                            _cart_sp = None
+                        if _cart_sp and (_cart_sp.get("items") or []):
+                            _vctx_sp = _verified_ctx_from_cart(_cart_sp)
+                            if _vctx_sp and not _vctx_sp.get("shipping_cost_cents"):
+                                _ship_h = (
+                                    _extract_shipping_cost_from_history(history or [])
+                                    or _extract_shipping_cost_from_db(supabase, conversation_id)
+                                    or 0
+                                )
+                                if _ship_h > 0:
+                                    _vctx_sp["shipping_cost_cents"] = _ship_h
+                                    _vctx_sp["total_cents"] = (
+                                        int(_vctx_sp.get("subtotal_cents") or 0) + _ship_h
+                                    )
+                            if _vctx_sp and int(_vctx_sp.get("total_cents") or 0) > 0:
+                                _resumen_sp = _build_order_summary_text(
+                                    contact_record=contact_record,
+                                    verified_ctx=_vctx_sp,
+                                    catalog=catalog,
+                                    history=history,
+                                    cart_from_db=_cart_sp,
+                                )
+                                if _resumen_sp:
+                                    # Preámbulo cordial + resumen actualizado.
+                                    _outbound_sp = (
+                                        f"Listo, *{_new_ship}* quedó como "
+                                        f"celular para el envío.\n\n{_resumen_sp}"
+                                    )
+                                    await _send_outbound_text(
+                                        supabase=supabase,
+                                        conversation_id=conversation_id,
+                                        tenant_id=tenant_id,
+                                        text=_outbound_sp,
+                                    )
+                                    _mark_message_processing(
+                                        supabase, message_id,
+                                        processing_status=PROCESSING_STATUS_PROCESSED,
+                                    )
+                                    logger.info(
+                                        "[PRE_BYPASS] shipping_phone update → "
+                                        "resumen determinístico emitido conv=%s",
+                                        conversation_id[:8],
+                                    )
+                                    return
+                except Exception as _sp_exc:
+                    logger.warning(
+                        "[PRE_BYPASS] shipping_phone persist/emit falló conv=%s: "
+                        "%s — sigue flow normal post-LLM",
+                        conversation_id, _sp_exc,
+                    )
+
         _is_pii_update = bool(
-            _detect_shipping_phone_update(content or "")
+            (_detect_shipping_phone_update(content or "") and not _shipping_phone_just_persisted)
             or _detect_data_update_intent(content or "")
         )
         # Heurística adicional: si el inbound es 10+ dígitos consecutivos
         # respondiendo a una pregunta del bot sobre número, es phone update.
+        # Sem 7 F2 cierre: si ya persistimos shipping_phone arriba, ya NO
+        # bloquea bypass (el resumen actualizado es lo correcto a emitir).
         _looks_like_phone = bool(
             re.search(r"\b\+?5?7?\s?\d{10}\b", content or "")
-        )
+        ) and not _shipping_phone_just_persisted
         # Rev. 104 — guard add_item intent (Plan A.0.1, ADR-0011 §6.4.1):
         # si el cliente pide agregar producto explícitamente, NO interceptar
         # con resumen. Dejar que el flujo normal procese variant detector +
