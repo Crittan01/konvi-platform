@@ -160,5 +160,109 @@ class NoPIIPreConsentTests(unittest.TestCase):
             self.assertIsNone(r, f"texto neutro {txt!r} no debe violar")
 
 
+class NoDoubleGreetingTests(unittest.TestCase):
+    """Invariant `no-double-greeting` — bug founder 2026-05-19 (conv b36ecb31).
+
+    Strip saludo + auto-presentación cuando ya hubo outbound previo en la conv.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.inv = _load_invariants()
+
+    def test_primer_outbound_saludo_no_aplica(self):
+        """Primer outbound de la conv puede saludar libremente."""
+        r = self.inv.assert_no_double_greeting(
+            "Buenos días! Soy Sara Camila de KAIU. ¿En qué te ayudo?",
+            history=[{"direction": "inbound", "content": "Hola"}],
+        )
+        self.assertIsNone(r)
+
+    def test_segundo_outbound_con_saludo_repetido_strippea(self):
+        """T4 outbound repite "Buenos días! Soy ..." → strip."""
+        history = [
+            {"direction": "inbound",  "content": "Hola"},
+            {"direction": "outbound", "content": "Buenos días! ¿En qué te ayudo?"},
+            {"direction": "inbound",  "content": "Que venden?"},
+        ]
+        r = self.inv.assert_no_double_greeting(
+            "Buenos días! Soy Sara Camila de KAIU. Trabajamos cosmética artesanal...",
+            history=history,
+        )
+        self.assertIsNotNone(r)
+        violation, rewrite = r
+        self.assertIn("no-double-greeting", violation)
+        self.assertNotIn("Buenos días", rewrite)
+        self.assertNotIn("Soy Sara Camila", rewrite)
+        self.assertIn("Trabajamos cosmética artesanal", rewrite)
+
+    def test_segundo_outbound_sin_saludo_no_aplica(self):
+        """Si bot ya va directo al contenido en outbound subsiguiente → OK."""
+        history = [
+            {"direction": "outbound", "content": "Buenos días!"},
+            {"direction": "inbound",  "content": "Gracias"},
+        ]
+        r = self.inv.assert_no_double_greeting(
+            "Tenemos jabones artesanales y sérums.",
+            history=history,
+        )
+        self.assertIsNone(r)
+
+    def test_saludo_con_buenas_tardes_tambien_strippea(self):
+        history = [
+            {"direction": "outbound", "content": "Hola!"},
+            {"direction": "inbound",  "content": "ok"},
+        ]
+        r = self.inv.assert_no_double_greeting(
+            "Buenas tardes! Te paso el catálogo.",
+            history=history,
+        )
+        self.assertIsNotNone(r)
+        _, rewrite = r
+        self.assertNotIn("Buenas tardes", rewrite)
+        self.assertIn("Te paso el catálogo", rewrite)
+
+    def test_saludo_hola_simple_strippea(self):
+        history = [
+            {"direction": "outbound", "content": "Hola, soy Sara."},
+            {"direction": "inbound",  "content": "que mas?"},
+        ]
+        r = self.inv.assert_no_double_greeting(
+            "Hola, tenemos varias opciones.",
+            history=history,
+        )
+        self.assertIsNotNone(r)
+        _, rewrite = r
+        self.assertNotIn("Hola", rewrite)
+        self.assertIn("Tenemos varias opciones", rewrite)
+
+    def test_capitaliza_primera_letra_post_strip(self):
+        """Tras strip, primera letra debe quedar capitalizada."""
+        history = [
+            {"direction": "outbound", "content": "Buenos días!"},
+            {"direction": "inbound",  "content": "ok"},
+        ]
+        r = self.inv.assert_no_double_greeting(
+            "Buenos días! soy Sara. tenemos varios productos.",
+            history=history,
+        )
+        self.assertIsNotNone(r)
+        _, rewrite = r
+        # Primera letra capitalizada.
+        self.assertTrue(rewrite[0].isupper(), f"esperado capital, got: {rewrite!r}")
+
+    def test_history_solo_inbound_es_primer_outbound(self):
+        """Si history tiene solo inbounds, el outbound candidato ES el primero."""
+        history = [
+            {"direction": "inbound", "content": "Hola"},
+            {"direction": "inbound", "content": "Que tal"},
+        ]
+        r = self.inv.assert_no_double_greeting(
+            "Buenos días! Soy Sara.",
+            history=history,
+        )
+        self.assertIsNone(r)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,7 @@ from .invariants import (
     assert_no_pii_request_pre_consent,
     assert_time_aware_greeting_first_outbound,
     assert_cordial_connector_for_direct_question,
+    assert_no_double_greeting,
     text_contains_wompi_link,
     text_requests_pii,
 )
@@ -155,6 +156,18 @@ class OutputValidator:
         )
         if cc_check is not None:
             violation, rewrite = cc_check
+            violations.append(violation)
+            text = rewrite
+
+        # 0c. No double-greeting — strip saludo + auto-presentación si ya hubo
+        # outbound previo en la conv. Bug founder 2026-05-19 (conv b36ecb31):
+        # bot repetía "Buenos días! Soy Sara Camila..." en cada outbound.
+        # Aplicar DESPUÉS de time-aware-greeting + cordial-connector para que
+        # esos invariants vean el texto original (que podría tener saludo
+        # válido en primer outbound).
+        dg_check = assert_no_double_greeting(text, ctx.history)
+        if dg_check is not None:
+            violation, rewrite = dg_check
             violations.append(violation)
             text = rewrite
 
