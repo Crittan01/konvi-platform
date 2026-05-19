@@ -542,7 +542,16 @@ export default function InboxPage() {
           headers: { 'Authorization': `Bearer ${token}` },
           signal: controller.signal,
         })
-        if (!res.ok) return
+        if (!res.ok) {
+          // Sem 7 F2 cierre 2026-05-19 — si la conversación ya no existe
+          // (ej. tras purge del contact desde UI), deseleccionar para
+          // evitar loop de fetches cada 5s. El usuario verá la lista de
+          // conversaciones vacía/actualizada en lugar del panel roto.
+          if (res.status === 404 && !cancelled && !controller.signal.aborted) {
+            setSelectedId(null)
+          }
+          return
+        }
         const json = await res.json()
         if (!cancelled && !controller.signal.aborted) setConvContext(json)
       } catch (e) {

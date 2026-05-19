@@ -229,15 +229,21 @@ async def get_conversation_context(
     """
     try:
         # 1. Obtener conversación para extraer customer_phone
+        # Sem 7 F2 cierre 2026-05-19 — uso `.maybe_single()` en vez de
+        # `.single()` para que 0 rows retorne data=None (en vez de raise
+        # PGRST116). Caso runtime founder UAT: tras eliminar contact desde
+        # UI, el frontend seguía pidiendo /context de la conv borrada y
+        # recibía 500 (Cannot coerce to single JSON). Ahora devuelve 404
+        # limpio que el UI puede manejar (volver a la lista).
         conv_res = (
             supabase.table("conversations")
             .select("id, customer_phone, status")
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not conv_res.data:
+        if not conv_res or not conv_res.data:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
         customer_phone = conv_res.data.get("customer_phone")
