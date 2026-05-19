@@ -120,15 +120,35 @@ class MissingAddressFieldsTests(unittest.TestCase):
         }
         self.assertEqual(_missing_address_fields(addr), [])
 
-    def test_oficina_delivery_context_does_not_block_completeness(self):
-        """delivery_context='oficina' NO bloquea completeness (metadata opcional).
-        Sigue requiriendo street + city + building_type estándar."""
+    def test_oficina_requires_office_number(self):
+        """Sem 7 F2 cierre — building_type='oficina' pide número de oficina
+        (= apartment alias). floor + company_name son opcionales."""
         addr = {
             "street": "Cra 7 # 80-50",
             "city": "Bogotá D.C.",
-            "building_type": "edificio",
-            "apartment": "501",
-            "delivery_context": "oficina",
+            "building_type": "oficina",
+        }
+        missing = _missing_address_fields(addr)
+        self.assertIn("Número de oficina", missing)
+
+    def test_oficina_complete_with_apartment(self):
+        """Oficina con solo apartment (número oficina) ya es completa."""
+        addr = {
+            "street": "Cra 7 # 80-50",
+            "city": "Bogotá D.C.",
+            "building_type": "oficina",
+            "apartment": "502",
+        }
+        self.assertEqual(_missing_address_fields(addr), [])
+
+    def test_oficina_with_floor_and_company_is_complete(self):
+        """floor + company_name son opcionales — los aceptamos pero no bloquean."""
+        addr = {
+            "street": "Cra 7 # 80-50",
+            "city": "Bogotá D.C.",
+            "building_type": "oficina",
+            "apartment": "502",
+            "floor": "5",
             "company_name": "Acme S.A.S.",
         }
         self.assertEqual(_missing_address_fields(addr), [])

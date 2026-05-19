@@ -1,28 +1,32 @@
 /**
- * Validators de dirección estructurada (rev. 69 · ampliado Sem 7 F2 cierre 2026-05-19).
+ * Validators de dirección estructurada (rev. 69 · simplificado Sem 7 F2 cierre 2026-05-19).
  *
  * Espejo del helper Python en
  * services/api/dependencies/contact_validators.py.
  *
- * Schema canónico documentado en migración 20260429000000_contacts_document_and_address.
+ * Decisión arquitectónica founder 2026-05-19 (Opción 1 SIMPLIFY):
+ * `building_type` con 4 escenarios reales, sin `delivery_context` ortogonal.
  *
- * Tres dimensiones ortogonales del modelo address:
- *   1. building_type ∈ {casa, edificio, conjunto} — tipo de construcción.
- *   2. conjunto_type ∈ {torres, casas} — solo aplica si building_type='conjunto'.
- *      - torres: torre + apartamento (modelo original).
- *      - casas: solo apartment (alias semántico de "casa #X" — sin torre).
- *   3. delivery_context ∈ {residencia, oficina, otro} — ortogonal al
- *      building_type. Default 'residencia'. Si 'oficina' → company_name
- *      opcional. NO obligatorio para envío.
+ *   building_type ∈ {casa, edificio, conjunto, oficina}
+ *
+ *   - casa: street + city + barrio (+ reference opcional).
+ *   - edificio: + apartment (+ floor opcional + complex_name opcional).
+ *   - conjunto: + conjunto_type ∈ {torres, casas}:
+ *       - torres: tower + apartment.
+ *       - casas: apartment (alias semántico "casa #X").
+ *   - oficina: + apartment (= oficina #) (+ floor opcional + company_name opcional).
+ *
+ * Floor + company_name son SIEMPRE opcionales — no entran en required.
  */
 
-export const BUILDING_TYPES = ['casa', 'edificio', 'conjunto'] as const
+export const BUILDING_TYPES = ['casa', 'edificio', 'conjunto', 'oficina'] as const
 export type BuildingType = (typeof BUILDING_TYPES)[number]
 
 export const BUILDING_TYPE_LABELS: Record<BuildingType, string> = {
   casa: 'Casa',
   edificio: 'Edificio / Apartamento',
   conjunto: 'Conjunto residencial',
+  oficina: 'Oficina / Lugar de trabajo',
 }
 
 export const CONJUNTO_TYPES = ['torres', 'casas'] as const
@@ -31,15 +35,6 @@ export type ConjuntoType = (typeof CONJUNTO_TYPES)[number]
 export const CONJUNTO_TYPE_LABELS: Record<ConjuntoType, string> = {
   torres: 'Torres (torre + apartamento)',
   casas: 'Casas (conjunto cerrado de casas)',
-}
-
-export const DELIVERY_CONTEXTS = ['residencia', 'oficina', 'otro'] as const
-export type DeliveryContext = (typeof DELIVERY_CONTEXTS)[number]
-
-export const DELIVERY_CONTEXT_LABELS: Record<DeliveryContext, string> = {
-  residencia: 'Residencia',
-  oficina: 'Oficina / Lugar de trabajo',
-  otro: 'Otro',
 }
 
 export interface StructuredAddress {
@@ -56,7 +51,8 @@ export interface StructuredAddress {
   apartment?: string | null
   complex_name?: string | null
   reference?: string | null
-  delivery_context?: DeliveryContext | null
+  // Sem 7 F2 cierre 2026-05-19 — campos opcionales para oficina y edificio.
+  floor?: string | null
   company_name?: string | null
 }
 
@@ -67,6 +63,7 @@ export function addressRequiredFields(
 ): string[] {
   const base = ['street', 'neighborhood', 'city', 'state', 'dane_code']
   if (buildingType === 'edificio') return [...base, 'apartment']
+  if (buildingType === 'oficina') return [...base, 'apartment']
   if (buildingType === 'conjunto') {
     if (conjuntoType === 'casas') return [...base, 'apartment']
     // 'torres' (o conjunto_type ausente — back-compat) → tower + apartment.
@@ -84,8 +81,7 @@ export interface AddressValidationResult {
  * Valida que la dirección esté completa según building_type + conjunto_type.
  * Retorna lista de campos faltantes si no está completa.
  *
- * `delivery_context` y `company_name` NO son obligatorios para completeness —
- * son metadata informativa (default 'residencia' si ausente).
+ * `floor` y `company_name` NO son obligatorios — son metadata informativa.
  */
 export function validateAddress(addr: StructuredAddress | null | undefined): AddressValidationResult {
   if (!addr) return { ok: false, missing: addressRequiredFields(null) }
@@ -96,10 +92,6 @@ export function validateAddress(addr: StructuredAddress | null | undefined): Add
   const ct = (addr.conjunto_type || '').toString().toLowerCase().trim() as ConjuntoType | ''
   if (ct && !(CONJUNTO_TYPES as readonly string[]).includes(ct)) {
     return { ok: false, missing: [`conjunto_type inválido (debe ser ${CONJUNTO_TYPES.join(', ')})`] }
-  }
-  const dc = (addr.delivery_context || '').toString().toLowerCase().trim() as DeliveryContext | ''
-  if (dc && !(DELIVERY_CONTEXTS as readonly string[]).includes(dc)) {
-    return { ok: false, missing: [`delivery_context inválido (debe ser ${DELIVERY_CONTEXTS.join(', ')})`] }
   }
   // Si conjunto sin sub-tipo declarado → tower+apt por back-compat
   // (matching Python contact_validators.py).
