@@ -536,56 +536,54 @@ export default async function ContactsPage({
   async function deleteContact(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
+    const { data: { session } } = await sb.auth.getSession()
+    const u = session?.user
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    // Sem 7 F2 cierre 2026-05-19 — purge endpoint requiere role 'owner'
+    // (hard cascade es destructivo, no debe ser permitido a 'manager').
+    if (!m.tenant_id || m.role !== 'owner') {
+      throw new Error('Solo el owner puede eliminar contactos en cascade.')
+    }
     const contactId = (formData.get('contact_id') as string) || ''
     if (!contactId) return
     const reason = ((formData.get('delete_reason') as string) || '').trim()
-
-    // Rev. 103 (SaaS B2B) — audit ANTES del DELETE físico. El audit log
-    // es append-only e inmutable; la fila persiste con phone hasheado
-    // aunque el contact_id quede huérfano. Trazabilidad ante SIC.
-    //
-    // RLS de consent_audit_log: GRANT INSERT TO service_role solamente.
-    // El cliente user-auth NO puede escribir; el insert silenciosamente
-    // devuelve { error } sin throw. Por eso usamos createAdminClient()
-    // SOLO para el audit insert. El delete del contact sigue usando el
-    // cliente user-auth (RLS contacts permite owner/manager del tenant).
-    const { data: snapshot } = await sb.from('contacts')
-      .select('phone')
-      .eq('id', contactId)
-      .eq('tenant_id', m.tenant_id)
-      .single()
-    if (!snapshot) return
-
-    const admin = createAdminClient()
-    const auditResult = await admin.from('consent_audit_log').insert({
-      tenant_id: m.tenant_id,
-      contact_id: contactId,
-      phone_hash: hashPhone((snapshot as { phone?: string | null }).phone),
-      event: 'deleted',
-      source: 'tenant_console',
-      actor_email: u?.email ?? null,
-      actor_user_id: u?.id ?? null,
-      evidence: {
-        reason: reason || null,
-        deleted_by: u?.email ?? null,
-      },
-    })
-    if (auditResult.error) {
-      // Audit log es legal-required; no procedemos al delete si falla.
-      console.error('[deleteContact] audit log insert falló', auditResult.error)
-      throw new Error(
-        'No se pudo registrar el audit log del eliminado. El contacto NO fue eliminado. ' +
-        `(detalle: ${auditResult.error.message})`
-      )
+    const token = session?.access_token
+    if (!token) {
+      throw new Error('Sesión expirada — recarga la página.')
     }
 
-    await sb.from('contacts')
-      .delete()
-      .eq('id', contactId)
-      .eq('tenant_id', m.tenant_id)
+    // Sem 7 F2 cierre 2026-05-19 — Bug founder UAT (conv 056490b8):
+    // ANTES esta server action hacía DELETE directo a tabla contacts. Eso
+    // dejaba carts/conversations/orders huérfanos en DB que el cart-recovery
+    // del bot recuperaba silenciosamente en próximas conversaciones del
+    // mismo phone → cart contaminado con items históricos.
+    //
+    // AHORA delega al endpoint `POST /api/v1/contacts/{id}/purge` que
+    // ejecuta cascade completo (audit log + helper `purge_contact_completely`).
+    // Misma lógica reusable desde `scripts/wipe_conversation.py --purge-contact`.
+    try {
+      const res = await fetch(
+        `${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(contactId)}/purge`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ reason: reason || null }),
+          cache: 'no-store',
+        },
+      )
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(
+          `Purge falló (${res.status}): ${errText.slice(0, 200)}`
+        )
+      }
+    } catch (e) {
+      console.error('[deleteContact] purge API call falló', e)
+      throw e
+    }
     revalidatePath('/dashboard/contacts')
   }
 

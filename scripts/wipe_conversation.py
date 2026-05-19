@@ -359,6 +359,11 @@ def main():
     ap.add_argument("--tenant-id", default=None)
     ap.add_argument("--keep-conversation", action="store_true",
                     help="Conserva la conversation; limpia el resto (cart/orders/etc).")
+    ap.add_argument("--purge-contact", action="store_true",
+                    help=("HARD-DELETE en cascade: borra contact + conversations + "
+                          "carts + orders + payments + shipments + messages. "
+                          "Usa el helper compartido `lib.contact_cleanup.purge_contact_completely`. "
+                          "Para reset total durante testing."))
     ap.add_argument("--yes", action="store_true", help="Salta confirmación interactiva.")
     args = ap.parse_args()
 
@@ -420,12 +425,39 @@ def main():
             return
 
     print("\nEjecutando...")
-    for c, _, _, _, _ in rows:
-        try:
-            r = _wipe_one(supabase, c, keep_conversation=args.keep_conversation)
-            print(f"  OK conv={r['conversation_id'][:8]} → {r}")
-        except Exception as exc:
-            print(f"  ERROR conv={c['id'][:8]}: {exc}", file=sys.stderr)
+    if args.purge_contact:
+        # Sem 7 F2 cierre 2026-05-19 — usar helper compartido para purge total
+        # del contact (lo mismo que invoca el endpoint API y, vía éste, el UI
+        # delete físico desde el Tenant Console).
+        # Path setup para import desde services/api/lib.
+        sys.path.insert(
+            0,
+            str(Path(__file__).resolve().parents[1] / "services/api"),
+        )
+        from lib.contact_cleanup import purge_contact_completely
+
+        # Resolver contact_ids únicos desde las conversations encontradas.
+        contact_ids_done: set[str] = set()
+        for c, _, _, _, _ in rows:
+            tenant_id = c["tenant_id"]
+            contact_id = _resolve_contact_id_for_phone(
+                supabase, tenant_id, c.get("customer_phone"),
+            )
+            if not contact_id or contact_id in contact_ids_done:
+                continue
+            try:
+                r = purge_contact_completely(supabase, tenant_id, contact_id)
+                print(f"  OK contact={contact_id[:8]} tenant={tenant_id[:8]} → {r}")
+                contact_ids_done.add(contact_id)
+            except Exception as exc:
+                print(f"  ERROR contact={contact_id[:8]}: {exc}", file=sys.stderr)
+    else:
+        for c, _, _, _, _ in rows:
+            try:
+                r = _wipe_one(supabase, c, keep_conversation=args.keep_conversation)
+                print(f"  OK conv={r['conversation_id'][:8]} → {r}")
+            except Exception as exc:
+                print(f"  ERROR conv={c['id'][:8]}: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

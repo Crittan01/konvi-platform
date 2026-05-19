@@ -615,6 +615,88 @@ async def reactivate_consent(
 
 # ─── Soft-delete con anonimización (Q3: retención Ley 1581) ───────────────────────
 
+@router.post("/{contact_id}/purge", response_model=dict)
+@audit_log(entity_type="contact", action="purged")
+async def purge_contact(
+    contact_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_owner_role),
+    _rl: None = Depends(RL_WRITE_DEFAULT),
+):
+    """⚠️ HARD-DELETE en cascade — uso testing/admin (NO producción regular).
+
+    Sem 7 F2 cierre 2026-05-19 — fix del gap reportado por founder:
+    el server action UI `deleteContact` (apps/web) borraba SOLO la fila
+    `contacts`. Carts/conversations/orders del contact quedaban huérfanos
+    en DB y el cart-recovery flow del bot los recuperaba en próximas
+    conversaciones del mismo phone → cart contaminado.
+
+    Diferencia con `DELETE /{contact_id}` (anonimización soft):
+      - DELETE → anonimiza PII pero preserva el contact + orders + audit.
+        Para PRODUCCIÓN cumpliendo Habeas Data Art. 15.
+      - POST /purge → borra cascade COMPLETO (contact + conversations +
+        carts + orders + payments + shipments + messages). Para TESTING.
+
+    Requiere role `owner` (no `manager` ni `operator`).
+
+    Audit log con phone_hash inmutable ANTES del purge (trazabilidad SIC).
+    """
+    from lib.contact_cleanup import purge_contact_completely
+    from lib.phone import hash_phone
+
+    try:
+        snapshot = (
+            supabase.table("contacts")
+            .select("phone")
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+    except Exception:
+        snapshot = None
+
+    if not snapshot or not snapshot.data:
+        raise HTTPException(status_code=404, detail="Contacto no encontrado")
+
+    phone = snapshot.data.get("phone")
+
+    actor_email = None
+    try:
+        from routers.data_subject_request import _actor_from_request
+        _, actor_email = _actor_from_request(request)
+    except Exception:
+        pass
+
+    try:
+        supabase.table("consent_audit_log").insert({
+            "tenant_id": tenant_id,
+            "contact_id": contact_id,
+            "phone_hash": hash_phone(phone) if phone else None,
+            "event": "purged",
+            "source": "api_purge_endpoint",
+            "actor_email": actor_email,
+            "evidence": {
+                "endpoint": "POST /api/v1/contacts/{id}/purge",
+                "reason": "Hard cascade delete (testing/admin)",
+            },
+        }).execute()
+    except Exception as audit_exc:
+        logger.error("[CONTACT][PURGE] audit log falló: %s", audit_exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo registrar audit log del purge. El contacto NO "
+                f"fue purgado. ({audit_exc})"
+            ),
+        )
+
+    summary = purge_contact_completely(supabase, tenant_id, contact_id)
+    return {"ok": True, "summary": summary}
+
+
 @router.delete("/{contact_id}", response_model=dict)
 @audit_log(entity_type="contact", action="deleted")
 async def delete_contact(

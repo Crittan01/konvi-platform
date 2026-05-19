@@ -77,61 +77,34 @@ class DeleteContactServerActionTests(unittest.TestCase):
             self.page_src,
         )
 
-    def test_uses_admin_client_for_audit_insert(self):
-        # consent_audit_log RLS solo permite INSERT a service_role.
-        # El cliente user-auth (cookies) silenciosamente falla.
-        # deleteContact debe usar createAdminClient() para el audit.
-        self.assertIn(
-            "import { createAdminClient } from '@/utils/supabase/admin'",
-            self.page_src,
-        )
-        self.assertIn('createAdminClient()', self.page_src)
-        self.assertIn("admin.from('consent_audit_log')", self.page_src)
+    def test_delegates_to_purge_api_endpoint(self):
+        """Sem 7 F2 cierre 2026-05-19 — UI server action ya NO hace DELETE
+        directo a tabla contacts. Delega al endpoint Python `POST /api/v1/
+        contacts/{id}/purge` que ejecuta cascade completo (audit + cleanup).
+        Esto cierra el bug founder UAT 2026-05-19 (conv 056490b8): carts
+        huérfanos no se limpiaban tras delete UI.
+        """
+        self.assertIn('/api/v1/contacts/', self.page_src)
+        self.assertIn('/purge', self.page_src)
 
-    def test_aborts_delete_if_audit_fails(self):
-        # Audit log es legal-required; si falla, NO procedemos al delete.
-        self.assertIn('auditResult.error', self.page_src)
-        self.assertIn('NO fue eliminado', self.page_src)
+    def test_purge_uses_authorization_header(self):
+        """El call al API pasa el JWT del usuario en Authorization header."""
+        self.assertIn('Authorization: `Bearer ${token}`', self.page_src)
 
-    def test_reads_phone_snapshot_before_delete(self):
-        # Antes del DELETE, lee el phone para hashearlo.
-        # Patrón: select('phone') → eq('id', contactId) → eq('tenant_id') → single()
-        self.assertIn("from('contacts')", self.page_src)
-        self.assertIn(".select('phone')", self.page_src)
+    def test_purge_requires_owner_role(self):
+        """Hard cascade es destructivo — solo owner puede invocarlo."""
+        self.assertIn("m.role !== 'owner'", self.page_src)
 
-    def test_inserts_audit_log_with_deleted_event(self):
-        self.assertIn("from('consent_audit_log')", self.page_src)
-        self.assertIn("event: 'deleted'", self.page_src)
-
-    def test_audit_uses_tenant_console_source(self):
-        self.assertIn("source: 'tenant_console'", self.page_src)
-
-    def test_audit_includes_phone_hash(self):
-        self.assertIn('phone_hash: hashPhone(', self.page_src)
-
-    def test_audit_includes_actor_email_and_reason(self):
-        # Evidence shape:
-        #   { reason: reason || null, deleted_by: u?.email ?? null }
-        self.assertIn('actor_email: u?.email', self.page_src)
+    def test_purge_passes_reason_in_body(self):
+        """El motivo del operador viaja al endpoint API para que el audit
+        log Python lo registre en evidence."""
         self.assertIn('reason: reason || null', self.page_src)
-        self.assertIn('deleted_by: u?.email', self.page_src)
 
-    def test_audit_runs_before_delete(self):
-        # El INSERT en consent_audit_log debe aparecer antes del DELETE
-        # físico de la tabla contacts.
-        idx_audit = self.page_src.find("from('consent_audit_log')")
-        idx_delete_chain = self.page_src.find('.delete()\n      .eq')
-        self.assertGreater(idx_audit, 0)
-        self.assertGreater(idx_delete_chain, 0)
-        self.assertLess(
-            idx_audit, idx_delete_chain,
-            'INSERT en audit log debe ocurrir ANTES del DELETE físico',
-        )
-
-    def test_no_check_constraint_violation_if_no_reason(self):
-        # Cuando reason no está, evidence.reason es null (no string vacío)
-        # — confirmamos que el código pasa null, no '' (mejor para JSONB query).
-        self.assertIn('reason: reason || null', self.page_src)
+    def test_purge_propagates_errors_to_ui(self):
+        """Si el endpoint falla, el UI debe propagar el error al cliente
+        (no fallar silente)."""
+        self.assertIn('Purge falló', self.page_src)
+        self.assertIn('throw new Error', self.page_src)
 
 
 class DeleteUIRev103Tests(unittest.TestCase):
