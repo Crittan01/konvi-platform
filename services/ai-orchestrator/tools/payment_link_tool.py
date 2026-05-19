@@ -348,7 +348,11 @@ async def handle_payment_link_if_applicable(
 
     # Formato Colombia: separador miles punto, sin centavos.
     _total_co = f"${int(round(total_amount)):,}".replace(",", ".")
-    order_notes = notes or f"Pedido conversacional — Total: {_total_co} COP"
+    # Sem 7 F2 cierre — description Wompi profesional. Antes decía
+    # "Pedido conversacional — Total: $X COP" que sonaba técnico al
+    # cliente en el checkout Wompi. Ahora: "Total a pagar: $X COP"
+    # combina bien con el `name` ya formateado como "Pedido #XXXX — {cliente}".
+    order_notes = notes or f"Total a pagar: {_total_co} COP"
 
     # ── 2. Construir ítems del pedido ─────────────────────────────────────────
     # Multi-producto (rev. 71): si verified_ctx tiene 'items' (lista), persistir
@@ -386,8 +390,11 @@ async def handle_payment_link_if_applicable(
             line_item["variation_id"] = verified_ctx["variation_id"]
         items_to_persist.append(line_item)
     else:
+        # Sem 7 F2 cierre — fallback title profesional (antes "Pedido
+        # conversacional"). Solo se usa cuando NO hay verified_ctx (caso
+        # warning loggeado abajo). Stock NO se decrementa en este caso.
         items_to_persist.append({
-            "title": "Pedido conversacional",
+            "title": "Pedido vía WhatsApp",
             "unit_price": max(products_amount, 0.01),
             "quantity": 1,
         })

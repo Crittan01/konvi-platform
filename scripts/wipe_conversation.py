@@ -127,6 +127,106 @@ def _collect_conv_resources(supabase, conversation_id: str) -> dict:
     return {"order_ids": order_ids, "cart_ids": cart_ids}
 
 
+def _resolve_contact_id_for_phone(
+    supabase, tenant_id: str, customer_phone: Optional[str],
+) -> Optional[str]:
+    """Lookup contact_id desde customer_phone — usado para encontrar
+    huérfanos del contact tras borrar la conv específica.
+    """
+    if not customer_phone:
+        return None
+    variants = _phone_variants(customer_phone)
+    try:
+        q = (
+            supabase.table("contacts")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+        )
+        or_clause = ",".join(f"phone.eq.{v}" for v in variants)
+        if hasattr(q, "or_"):
+            q = q.or_(or_clause)
+        res = q.limit(1).execute()
+        rows = res.data or []
+        return rows[0]["id"] if rows else None
+    except Exception as exc:
+        print(f"    [skip] contact lookup falló: {exc}", file=sys.stderr)
+        return None
+
+
+def _wipe_contact_orphans(
+    supabase, tenant_id: str, contact_id: str, valid_conv_ids: set[str],
+) -> dict:
+    """Sem 7 F2 cierre — borra recursos huérfanos del contact: orders/carts
+    cuya `conversation_id` ya NO existe en `conversations` (porque fueron
+    borradas por wipes anteriores con script viejo que no las limpiaba).
+
+    Sin esto, el bot al detectar cart_retake del contact ve órdenes
+    cancelled huérfanas y dice "tenías Jabón Coco $18.000" persistente
+    aún tras wipe.
+
+    valid_conv_ids: set de conversation_ids que SIGUEN existiendo (no se
+    deben tocar sus orders/carts).
+    """
+    summary: dict = {"orphan_orders_deleted": 0, "orphan_carts_deleted": 0}
+
+    # 1. Identificar orders del contact con conversation_id no-válido (huérfano).
+    try:
+        orders_res = (
+            supabase.table("orders")
+            .select("id, conversation_id")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .execute()
+        )
+        all_orders = orders_res.data or []
+    except Exception as exc:
+        print(f"    [skip] orphan orders lookup falló: {exc}", file=sys.stderr)
+        all_orders = []
+
+    orphan_order_ids = [
+        o["id"] for o in all_orders
+        if (o.get("conversation_id") not in valid_conv_ids)
+    ]
+
+    if orphan_order_ids:
+        # Borrar dependientes hijos (payments + shipments + order_items) primero.
+        _safe_delete(supabase, "payments", "order_id", orphan_order_ids, in_list=True)
+        _safe_delete(supabase, "shipments", "order_id", orphan_order_ids, in_list=True)
+        _safe_delete(supabase, "order_items", "order_id", orphan_order_ids, in_list=True)
+        summary["orphan_orders_deleted"] = _safe_delete(
+            supabase, "orders", "id", orphan_order_ids, in_list=True,
+        )
+
+    # 2. Identificar conversation_carts huérfanos del contact (mismo criterio).
+    try:
+        carts_res = (
+            supabase.table("conversation_carts")
+            .select("id, conversation_id")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .execute()
+        )
+        all_carts = carts_res.data or []
+    except Exception as exc:
+        print(f"    [skip] orphan carts lookup falló: {exc}", file=sys.stderr)
+        all_carts = []
+
+    orphan_cart_ids = [
+        c["id"] for c in all_carts
+        if (c.get("conversation_id") not in valid_conv_ids)
+    ]
+
+    if orphan_cart_ids:
+        # Borrar dependientes (cart_events + cart_items) primero.
+        _safe_delete(supabase, "cart_events", "cart_id", orphan_cart_ids, in_list=True)
+        _safe_delete(supabase, "conversation_cart_items", "cart_id", orphan_cart_ids, in_list=True)
+        summary["orphan_carts_deleted"] = _safe_delete(
+            supabase, "conversation_carts", "id", orphan_cart_ids, in_list=True,
+        )
+
+    return summary
+
+
 def _safe_delete(supabase, table: str, column: str, value, *, in_list: bool = False) -> int:
     """Intenta DELETE. Si la tabla no existe o falla, retorna 0 silencioso.
     Útil cuando una migración aún no creó la tabla en este ambiente."""
@@ -159,9 +259,19 @@ def _wipe_one(supabase, conv: dict, *, keep_conversation: bool) -> dict:
       7. orders (FK conversations)
       8. messages + conversation_reads (FK conversations, CASCADE OK)
       9. conversations (la última)
+      10. Sem 7 F2 cierre — orphan cleanup del contact: orders/carts del
+          mismo contact cuya conversation_id ya no existe (huérfanos de
+          wipes anteriores con script viejo). Sin esto, bot detecta
+          órdenes históricas y dice "tenías X producto" persistente.
     """
     cid = conv["id"]
-    summary = {"conversation_id": cid, "tenant_id": conv["tenant_id"]}
+    tenant_id = conv["tenant_id"]
+    summary = {"conversation_id": cid, "tenant_id": tenant_id}
+    # Resolver contact_id ANTES de borrar la conv (necesario para orphan
+    # cleanup post-delete).
+    contact_id = _resolve_contact_id_for_phone(
+        supabase, tenant_id, conv.get("customer_phone"),
+    )
     res = _collect_conv_resources(supabase, cid)
     order_ids = res["order_ids"]
     cart_ids = res["cart_ids"]
@@ -216,6 +326,30 @@ def _wipe_one(supabase, conv: dict, *, keep_conversation: bool) -> dict:
         cdel = supabase.table("conversations").delete().eq("id", cid).execute()
         summary["mode"] = "full_delete"
         summary["conversations_deleted"] = len(cdel.data or [])
+
+    # ── 10. Orphan cleanup del contact (Sem 7 F2 cierre). ─────────────
+    # Tras borrar la conv, hay orders/carts del MISMO contact cuya
+    # conversation_id ya no existe (huérfanos de wipes anteriores con
+    # script viejo). Los identificamos y borramos para que el bot no
+    # detecte cart histórico inexistente.
+    if contact_id:
+        try:
+            remaining_convs_res = (
+                supabase.table("conversations")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            valid_conv_ids = {
+                r["id"] for r in (remaining_convs_res.data or [])
+                if r.get("id")
+            }
+            orphan_summary = _wipe_contact_orphans(
+                supabase, tenant_id, contact_id, valid_conv_ids,
+            )
+            summary.update(orphan_summary)
+        except Exception as exc:
+            print(f"    [skip] orphan cleanup falló: {exc}", file=sys.stderr)
     return summary
 
 
