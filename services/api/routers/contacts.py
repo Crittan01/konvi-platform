@@ -676,7 +676,10 @@ async def purge_contact(
             "contact_id": contact_id,
             "phone_hash": hash_phone(phone) if phone else None,
             "event": "purged",
-            "source": "api_purge_endpoint",
+            # 'tenant_console' es el source canónico (CHECK constraint
+            # acepta: whatsapp | tenant_console | api | system).
+            # El caller real ES la UI; el event='purged' distingue acción.
+            "source": "tenant_console",
             "actor_email": actor_email,
             "evidence": {
                 "endpoint": "POST /api/v1/contacts/{id}/purge",
