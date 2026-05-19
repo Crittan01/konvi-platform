@@ -39,41 +39,111 @@ logger = logging.getLogger(__name__)
 
 def _safe_delete(
     supabase, table: str, column: str, value, *, in_list: bool = False,
-) -> int:
-    """Intenta DELETE silencioso. Si la tabla no existe (migración pendiente
-    en algún ambiente), retorna 0 sin levantar excepción.
+) -> tuple[int, Optional[str]]:
+    """Intenta DELETE. Retorna (count, error_msg).
+
+    Sem 7 F2 cierre — separamos "no data" (count=0, error=None) de "query
+    fallida" (count=0, error="msg"). Antes silenciábamos errores como
+    `logger.debug`; ahora el caller PUEDE saber si la operación realmente
+    no afectó nada vs si falló silenciosamente (caso bug founder UAT
+    2026-05-19: SELECT/DELETE conversations daba 400 silente porque la
+    tabla NO tiene columna contact_id; antes el helper reportaba count=0
+    falsamente).
     """
     try:
         q = supabase.table(table).delete()
         if in_list:
             if not value:
-                return 0
+                return (0, None)
             q = q.in_(column, value)
         else:
             q = q.eq(column, value)
         res = q.execute()
-        return len(res.data or [])
+        return (len(res.data or []), None)
     except Exception as exc:
-        logger.debug("[purge_contact] skip %s.%s: %s", table, column, exc)
-        return 0
+        # Warning visible — NO silenciamos errores reales de la DB.
+        # Tabla inexistente (migración pendiente) también caería aquí —
+        # el caller decide si tratarlo como fatal o continuar.
+        logger.warning("[purge_contact] DELETE %s.%s falló: %s", table, column, exc)
+        return (0, str(exc))
 
 
-def _collect_contact_resources(supabase, tenant_id: str, contact_id: str) -> dict:
-    """Recolecta IDs de recursos asociados al contact (conversations, orders,
-    carts) para borrarlos en orden hijos-primero.
+def _phone_variants(raw: str) -> list[str]:
+    """Variantes equivalentes del phone para queries (paridad con
+    scripts/wipe_conversation.py).
+
+    KAIU/connector-whatsapp normaliza customer_phone como digits-only
+    ("573125835649") pero contactos legacy pueden tener "+57..." prefix.
     """
-    out = {"conversation_ids": [], "order_ids": [], "cart_ids": []}
+    if not raw:
+        return []
+    raw = raw.strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    out = {raw, digits}
+    if digits and not digits.startswith("57") and len(digits) == 10:
+        out.add(f"57{digits}")
+    if digits.startswith("57") and len(digits) == 12:
+        out.add(digits[2:])
+    if not raw.startswith("+") and digits:
+        out.add(f"+{digits}")
+    return [v for v in out if v]
+
+
+def _lookup_contact_phone(supabase, tenant_id: str, contact_id: str) -> Optional[str]:
+    """Lookup phone del contact ANTES de borrarlo. Necesario porque
+    `conversations` no tiene `contact_id` — se enlaza por customer_phone.
+    """
     try:
-        conv_res = (
-            supabase.table("conversations")
-            .select("id")
+        res = (
+            supabase.table("contacts")
+            .select("phone")
+            .eq("id", contact_id)
             .eq("tenant_id", tenant_id)
-            .eq("contact_id", contact_id)
+            .limit(1)
             .execute()
         )
-        out["conversation_ids"] = [r["id"] for r in (conv_res.data or []) if r.get("id")]
+        rows = res.data or []
+        return rows[0].get("phone") if rows else None
     except Exception as exc:
-        logger.debug("[purge_contact] convs lookup: %s", exc)
+        logger.debug("[purge_contact] phone lookup: %s", exc)
+        return None
+
+
+def _collect_contact_resources(
+    supabase, tenant_id: str, contact_id: str,
+    *,
+    phone: Optional[str] = None,
+) -> dict:
+    """Recolecta IDs de recursos asociados al contact (conversations, orders,
+    carts) para borrarlos en orden hijos-primero.
+
+    Sem 7 F2 cierre 2026-05-19 — `conversations` NO tiene columna
+    `contact_id` (solo `customer_phone`). El lookup correcto requiere el
+    phone del contact (resuelto antes de invocar este helper).
+    """
+    out = {"conversation_ids": [], "order_ids": [], "cart_ids": []}
+
+    # Conversations: lookup por customer_phone (variantes equivalentes).
+    if phone:
+        try:
+            q = (
+                supabase.table("conversations")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+            )
+            variants = _phone_variants(phone)
+            if variants:
+                or_clause = ",".join(f"customer_phone.eq.{v}" for v in variants)
+                if hasattr(q, "or_"):
+                    q = q.or_(or_clause)
+                else:
+                    q = q.eq("customer_phone", variants[0])
+            conv_res = q.execute()
+            out["conversation_ids"] = [
+                r["id"] for r in (conv_res.data or []) if r.get("id")
+            ]
+        except Exception as exc:
+            logger.debug("[purge_contact] convs lookup: %s", exc)
 
     try:
         ord_res = (
@@ -126,9 +196,29 @@ def purge_contact_completely(
     summary: dict = {
         "tenant_id": tenant_id,
         "contact_id": contact_id,
+        "errors": [],
     }
 
-    resources = _collect_contact_resources(supabase, tenant_id, contact_id)
+    def _exec(label: str, table: str, column: str, value, *, in_list=False) -> int:
+        """Wrapper: ejecuta _safe_delete, registra count y errores en summary."""
+        if in_list and not value:
+            summary[f"{label}_deleted"] = 0
+            return 0
+        count, err = _safe_delete(supabase, table, column, value, in_list=in_list)
+        summary[f"{label}_deleted"] = count
+        if err:
+            summary["errors"].append(f"{label} ({table}.{column}): {err}")
+        return count
+
+    # Sem 7 F2 cierre — lookup phone ANTES de borrar el contact (necesario
+    # para encontrar conversations vía customer_phone, ya que conversations
+    # NO tiene columna contact_id).
+    phone = _lookup_contact_phone(supabase, tenant_id, contact_id)
+    summary["phone_resolved"] = bool(phone)
+
+    resources = _collect_contact_resources(
+        supabase, tenant_id, contact_id, phone=phone,
+    )
     order_ids = resources["order_ids"]
     cart_ids = resources["cart_ids"]
     conv_ids = resources["conversation_ids"]
@@ -138,51 +228,31 @@ def purge_contact_completely(
     summary["conversations_found"] = len(conv_ids)
 
     # ── 1-2. payments + shipments (FK orders) ──────────────────────────
-    summary["payments_deleted"] = _safe_delete(
-        supabase, "payments", "order_id", order_ids, in_list=True,
-    ) if order_ids else 0
-    summary["shipments_deleted"] = _safe_delete(
-        supabase, "shipments", "order_id", order_ids, in_list=True,
-    ) if order_ids else 0
+    _exec("payments", "payments", "order_id", order_ids, in_list=True)
+    _exec("shipments", "shipments", "order_id", order_ids, in_list=True)
 
     # ── 3-4. cart_events + cart_items (FK conversation_carts) ──────────
-    summary["cart_events_deleted"] = _safe_delete(
-        supabase, "cart_events", "cart_id", cart_ids, in_list=True,
-    ) if cart_ids else 0
-    summary["cart_items_deleted"] = _safe_delete(
-        supabase, "conversation_cart_items", "cart_id", cart_ids, in_list=True,
-    ) if cart_ids else 0
+    _exec("cart_events", "cart_events", "cart_id", cart_ids, in_list=True)
+    _exec("cart_items", "conversation_cart_items", "cart_id", cart_ids, in_list=True)
 
     # ── 5. conversation_carts ──────────────────────────────────────────
     # Borrar por contact_id directamente para cubrir carts con
     # conversation_id huérfano también.
-    summary["carts_deleted"] = _safe_delete(
-        supabase, "conversation_carts", "contact_id", contact_id,
-    )
+    _exec("carts", "conversation_carts", "contact_id", contact_id)
 
     # ── 6-7. order_items + orders (FK conversations o contact) ─────────
-    summary["order_items_deleted"] = _safe_delete(
-        supabase, "order_items", "order_id", order_ids, in_list=True,
-    ) if order_ids else 0
-    summary["orders_deleted"] = _safe_delete(
-        supabase, "orders", "contact_id", contact_id,
-    )
+    _exec("order_items", "order_items", "order_id", order_ids, in_list=True)
+    _exec("orders", "orders", "contact_id", contact_id)
 
     # ── 8. messages + conversation_reads (FK conversations) ────────────
-    # CASCADE FK normalmente las limpia al borrar conversation, pero las
-    # purgamos explícitamente por defensa (algunos ambientes pueden no
-    # tener CASCADE configurado).
-    summary["messages_deleted"] = _safe_delete(
-        supabase, "messages", "conversation_id", conv_ids, in_list=True,
-    ) if conv_ids else 0
-    summary["reads_deleted"] = _safe_delete(
-        supabase, "conversation_reads", "conversation_id", conv_ids, in_list=True,
-    ) if conv_ids else 0
+    # Sem 7 F2 cierre — conversations NO tiene contact_id; usamos conv_ids
+    # resueltos por phone arriba.
+    _exec("messages", "messages", "conversation_id", conv_ids, in_list=True)
+    _exec("reads", "conversation_reads", "conversation_id", conv_ids, in_list=True)
 
     # ── 9. conversations ───────────────────────────────────────────────
-    summary["conversations_deleted"] = _safe_delete(
-        supabase, "conversations", "contact_id", contact_id,
-    )
+    # DELETE por id (lista resuelta arriba via phone).
+    _exec("conversations", "conversations", "id", conv_ids, in_list=True)
 
     # ── 10. contact final ──────────────────────────────────────────────
     try:
