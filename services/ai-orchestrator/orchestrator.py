@@ -3181,8 +3181,19 @@ def _detect_variant_confirmation(
     # Para cada producto presentado, evaluar TODAS las variantes que
     # matcheen el inbound (multi-variant support).
     products = _last_outbound_presented_variants_all(catalog, history)
+    # Sem 7 F2 cierre 2026-05-19 — Bug 2.2 founder UAT:
+    # Si T-1 listó múltiples productos (ej. Coco + Lavanda), aplicar
+    # discriminative-per-segment para evitar atribución cruzada de
+    # variantes entre productos distintos en un mismo inbound. Caso
+    # runtime: "1 de Coco 100g y 1 de Lavanda 150g" matcheaba la
+    # variante 150g de Coco (porque Coco tiene 150g) y la 100g de
+    # Lavanda (porque Lavanda tiene 100g) → 4 items en cart en vez de 2.
+    multi_product_context = len(products) > 1
     for product in products:
-        variant_matches = _resolve_variant_from_inbound(content, product)
+        variant_matches = _resolve_variant_from_inbound(
+            content, product,
+            require_discriminative_per_segment=multi_product_context,
+        )
         for variant, qty in variant_matches:
             unit_price = float(variant.get("price") or 0)
             if unit_price <= 0:
@@ -7580,17 +7591,26 @@ async def build_and_run_orchestration(
                 )
                 return
             if _resolution == "resolved_multi":
-                # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+                # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT (refinado).
                 # Cliente declaró N productos con variantes explícitas en un
                 # solo inbound (ej. "1 de Coco 100g y 1 de Lavanda 150g").
                 # Tier-2 ya resolvió todos los matches deterministically.
-                # Aquí los persistimos en el cart y emitimos resumen unificado.
+                #
+                # Bug 2.1 (UAT 2026-05-19 conv ee6cc665): "dejar que el flow
+                # normal arme el resumen" producía DOBLE add_item porque
+                # `_detect_variant_confirmation` posterior re-procesaba el
+                # mismo inbound. Resultado: qty duplicado en cart.
+                #
+                # Fix: persistir + emitir resumen determinístico + RETURN
+                # explícito (mismo patrón que product_ambiguous y
+                # variant_ambiguous).
                 _matches_multi = _tier2.get("matches") or []
                 if _matches_multi:
                     try:
                         from tools.cart_tool import (
                             add_item as _add_item_multi,
                             ensure_cart as _ensure_cart_multi,
+                            get_cart_with_items as _get_cart_multi,
                         )
                         _cart_multi = _ensure_cart_multi(
                             supabase,
@@ -7613,23 +7633,64 @@ async def build_and_run_orchestration(
                                 _m["title"], _m["quantity"],
                                 _cart_multi["id"][:8], conversation_id[:8],
                             )
-                        # Continúa al flow post-add_item (recotización lazy +
-                        # resumen unificado). NO emite outbound aquí — deja
-                        # que el ciclo normal arme el resumen con cart
-                        # actualizado. NO retorna.
+
+                        # Resumen determinístico del cart actualizado
+                        # (lee cart-as-SoT, NO history-parsing).
+                        _cart_after = _get_cart_multi(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                        )
+                        _items_after = (_cart_after or {}).get("items") or []
+                        _lines = ["Listo, agregué a tu carrito:"]
+                        for _m in _matches_multi:
+                            _price_fmt = (
+                                f"${int(_m['unit_price_cents'] / 100):,}".replace(",", ".")
+                            )
+                            _label = _m.get("variant_label") or ""
+                            _label_str = f" ({_label})" if _label else ""
+                            _lines.append(
+                                f"* {_m['quantity']}x *{_m['title']}{_label_str}*: "
+                                f"*{_price_fmt} COP*"
+                            )
+                        if _items_after and len(_items_after) > len(_matches_multi):
+                            # Hay items previos en el cart — mostrar resumen total.
+                            _subtotal_cents = sum(
+                                int(it.get("subtotal_cents") or 0) for it in _items_after
+                            )
+                            _subtotal_fmt = (
+                                f"${int(_subtotal_cents / 100):,}".replace(",", ".")
+                            )
+                            _lines.append("")
+                            _lines.append(f"Subtotal: *{_subtotal_fmt} COP*")
+                        _lines.append("")
+                        _lines.append(
+                            "¿Quieres agregar algo más, cotizar envío o avanzar al pedido?"
+                        )
+                        _resumen_text = "\n".join(_lines)
+                        await _send_outbound_text(
+                            supabase=supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            text=_resumen_text,
+                        )
+                        _mark_message_processing(
+                            supabase, message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
                         logger.info(
-                            "[TIER2] resolved_multi N=%d items añadidos al cart conv=%s",
+                            "[TIER2] resolved_multi N=%d items añadidos + resumen "
+                            "emitido — conv=%s",
                             len(_matches_multi), conversation_id[:8],
                         )
+                        return
                     except Exception as _rm_exc:
                         logger.warning(
-                            "[TIER2][RESOLVED_MULTI] persist falló (no bloquea): %s",
+                            "[TIER2][RESOLVED_MULTI] persist+emit falló: %s",
                             _rm_exc,
                         )
-                # Después de persistir, dejar que el flujo normal continúe:
-                # va a recotización lazy + resumen unificado (mismo path
-                # del Bug A multi-variant cerrado). NO emitimos outbound
-                # determinístico aquí — el ciclo normal lo hace bien.
+                        # Si falla, NO retornamos — dejamos que el flow
+                        # tradicional intente recuperar (degrade gracefully).
             if _resolution == "variant_ambiguous":
                 _cands = _tier2.get("candidates") or []
                 if _cands:
