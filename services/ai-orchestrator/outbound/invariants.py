@@ -322,6 +322,86 @@ def assert_cordial_connector_for_direct_question(
     return (violation, rewritten)
 
 
+# ─── Invariant — saludo solo en primer outbound ─────────────────────────────
+# Bug reportado por founder 2026-05-19 (conv b36ecb31, UAT manual):
+#   T2 bot: "Buenos días! Soy Sara Camila..."        ← saludo inicial (correcto)
+#   T3 cliente: "Que venden?"
+#   T4 bot: "Buenos días! Soy Sara Camila..."        ← REPITIÓ el saludo + identidad
+#
+# Causa: el prompt define la identidad como parte de la persona, y el LLM la
+# re-incluye en outbounds posteriores al primero. Sin invariant determinístico
+# que lo prevenga, el LLM puede caer en este patrón.
+#
+# Comportamiento esperado:
+#   • Primer outbound de la conversación: saludo + identidad como hoy.
+#   • Outbounds subsiguientes: ir directo al contenido, sin re-saludar ni
+#     re-presentarse.
+
+_GREETING_PREFIX_PATTERN = re.compile(
+    r"^\s*(buenos?\s+d[ií]as?|buenas?\s+(tardes?|noches?)|hola)\b[\s,.!¡]*",
+    re.IGNORECASE,
+)
+
+# Identidad típica que el bot a veces repite: "Soy {nombre} de {tenant}".
+# Se elimina del rewrite si aparece directo tras el saludo.
+_IDENTITY_REPEAT_PATTERN = re.compile(
+    r"^\s*soy\s+[^.!]{1,80}?\.\s*",
+    re.IGNORECASE,
+)
+
+
+def assert_no_double_greeting(
+    candidate_text: str,
+    history: list[dict],
+) -> Optional[tuple[str, str]]:
+    """Invariant — strip saludo + auto-presentación si ya hubo outbound
+    previo en la conversación.
+
+    Aplica SOLO si NO es el primer outbound. Si ya hubo outbound previo en
+    `history` y el candidato abre con "Buenos días/tardes/noches" o "Hola",
+    se elimina el prefijo de saludo. Adicionalmente, si tras el saludo viene
+    una auto-presentación ("Soy X de Y."), también se elimina.
+
+    No dispara cuando:
+      • Es el primer outbound (saludo + identidad son correctos ahí).
+      • El candidato no abre con saludo.
+
+    Returns:
+      (violation_msg, rewritten_text) si hay rewrite a aplicar, None si OK.
+    """
+    if not candidate_text:
+        return None
+    if _is_first_outbound(history):
+        return None  # primer outbound — saludo válido.
+
+    greet_match = _GREETING_PREFIX_PATTERN.match(candidate_text)
+    if not greet_match:
+        return None  # no abre con saludo — nada que strippear.
+
+    # Strip del saludo.
+    remainder = candidate_text[greet_match.end():]
+    # Si tras el saludo viene "Soy X de Y." → strip también.
+    id_match = _IDENTITY_REPEAT_PATTERN.match(remainder)
+    if id_match:
+        remainder = remainder[id_match.end():]
+
+    rewritten = remainder.lstrip()
+    # Capitalizar primera letra para que la frase quede natural.
+    if rewritten and rewritten[0].islower():
+        rewritten = rewritten[0].upper() + rewritten[1:]
+
+    if not rewritten.strip():
+        # Si el outbound entero era solo saludo+identidad → no podemos strippear
+        # (quedaría vacío). Mejor dejar pasar; no debería ocurrir en práctica.
+        return None
+
+    violation = (
+        "Outbound subsiguiente repite saludo/identidad cuando ya hubo "
+        "outbound previo en la conv — invariant 'no-double-greeting' violado."
+    )
+    return (violation, rewritten)
+
+
 def assert_summary_shown_before_link(
     candidate_text: str,
     history: list[dict],
