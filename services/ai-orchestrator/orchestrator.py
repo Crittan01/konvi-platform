@@ -923,22 +923,45 @@ def _fetch_recoverable_cart_items(
 
 def _last_outbound_offered_cart_retake(history: list[dict]) -> bool:
     """True si el último outbound del bot ofreció retomar el cart previo.
-    Markers conservadores que aparecen en el cart_recovery prompt cuando el
-    LLM hace la oferta ("Veo que tenías X items en tu carrito reciente",
-    "¿Lo retomamos o nuevo pedido?").
+    Markers que aparecen cuando el LLM ofrece retake en distintas variantes
+    fraseológicas. La detección debe ser AMPLIA porque el LLM compone con
+    variabilidad — sin matcher, `_persist_recovered_cart_items` no dispara
+    y el cart queda vacío → bot enuncia items via history-parsing pero
+    add_item posterior los pierde (caso UAT runtime 2026-05-19 conv a4db1801).
     """
     markers = (
+        # Variantes "carrito ..."
         "carrito reciente",
+        "carrito anterior",
         "tu carrito anterior",
+        "carrito previo",
+        "tu carrito previo",
+        # Sem 7 F2 cierre — variantes "carrito que se canceló/abandonó"
+        # que el LLM usa cuando descubre cart histórico cancelled.
+        "carrito que se cancel",
+        "carrito que se cancelo",
+        "carrito que cancel",
+        "carrito que abandon",
+        "un carrito que",
+        # Variantes "retomar/retomamos"
         "¿lo retomamos",
         "lo retomamos o",
-        "carrito previo",
+        "te gustaria retomarlo",
+        "te gustaria retomar",
+        "retomarlo o prefieres",
+        "retomar o prefieres",
+        "retomarlo o quieres",
+        "lo retomamos",
+        # Variantes "X items en tu carrito"
         "tenias x items",
         "tenias 1 items",
         "tenias 2 items",
         "tenias 3 items",
         "ítems en tu carrito",
         "items en tu carrito",
+        # Variantes "tenías un [producto]" (caso single-item)
+        "tenias un ",
+        "tenias una ",
     )
     for msg in reversed(history or []):
         if str(msg.get("direction") or "").strip().lower() == "outbound":
@@ -2408,29 +2431,113 @@ def _extract_qty_for_product(content_norm: str, product: dict) -> int:
 
 def _resolve_variant_from_inbound(
     inbound_text: str, product: dict,
-) -> tuple[Optional[dict], int]:
-    """Match el inbound del cliente a una variante específica del producto.
+) -> list[tuple[dict, int]]:
+    """Match el inbound del cliente a una o más variantes del producto.
 
-    Estrategia:
+    Sem 7 F2 cierre: cambio de contrato — retorna `list[tuple[variant, qty]]`
+    (puede ser vacía, 1 elemento, o N) en lugar de tupla única.
+
+    Caso runtime motivador (UAT 2026-05-19): cliente dice "1 de 100ml y 1
+    de 250ml" para Aceite de Almendras. El contrato anterior (1 inbound →
+    1 variant) tomaba solo "100ml" y descartaba "250ml". El cliente perdía
+    el segundo item.
+
+    Estrategia (por cada match encontrado, agregar a la lista):
       1. Match por value de attributes (ej. "60g" matches attribute valor "60g").
       2. Match por sustring numérico + unidad (ej. "60 gramos" matches "60g").
       3. Match por label completo de la variant.
 
-    Devuelve (variant_dict, quantity). Si no resuelve, (None, 1).
+    Si el inbound contiene separator (" y ", " + "), procesa segmentos
+    independientes para asignar qty correcta a cada variante.
+
+    Default: si producto tiene 1 sola variante y no resolvió arriba, asume
+    esa variante (rev. 104 F1-8 BUG-7).
     """
     if not inbound_text or not product:
-        return None, 1
+        return []
     norm = _normalize_text(inbound_text)
     variants = product.get("variants") or []
     if not variants:
-        return None, 1
+        return []
 
-    # Extraer cantidad ESPECÍFICA del producto. Solo dígitos que aparezcan
-    # cerca (±3 tokens) de una palabra discriminativa del título — evita
-    # cross-attribution en inbounds multi-producto ("2 jabones de coco y
-    # 1 sérum"): el "2" no debe atribuirse a sérum, y el "1" no a coco.
-    # Excluye dígitos seguidos de unidad (60g, 30ml — atributos, no qty).
-    qty = _extract_qty_for_product(norm, product)
+    # Detectar separadores que indican multi-variant intent.
+    # "1 de 100ml y 1 de 250ml" → segments=["1 de 100ml", "1 de 250ml"]
+    segments: list[str] = []
+    if any(sep in norm for sep in (" y ", " + ", ", ", "tambien", "ademas")):
+        # Split por separators conocidos.
+        for sep in [" y ", " + ", "; "]:
+            if sep in norm:
+                segments = [s.strip() for s in norm.split(sep) if s.strip()]
+                break
+        if not segments:
+            segments = [norm]
+    else:
+        segments = [norm]
+
+    # Si solo 1 segment, procesarlo igual que antes (1 variante o default).
+    # Si N segments, procesar cada uno por separado y juntar matches únicos.
+    results: list[tuple[dict, int]] = []
+    seen_variation_ids: set[str] = set()
+
+    for segment in segments:
+        # Por segmento, intentar resolver una variante.
+        segment_qty = _extract_qty_for_product(segment, product) if len(segments) == 1 else _extract_qty_from_segment(segment)
+        segment_variant = _match_single_variant_in_text(segment, variants)
+        if segment_variant:
+            variation_id = str(segment_variant.get("id") or "")
+            if variation_id and variation_id not in seen_variation_ids:
+                results.append((segment_variant, segment_qty))
+                seen_variation_ids.add(variation_id)
+
+    # Default: si no resolvió ninguna variante Y producto tiene 1 sola, asumir.
+    # Solo cuando había 1 segment (no multi-variant input ambiguo).
+    if not results and len(segments) == 1 and len(variants) == 1:
+        qty = _extract_qty_for_product(norm, product)
+        results.append((variants[0], qty))
+
+    return results
+
+
+def _extract_qty_from_segment(segment: str) -> int:
+    """Sem 7 F2 cierre — extract qty from a multi-variant segment.
+
+    Para "1 de 100ml" → qty=1. Para "2 de 250ml" → qty=2.
+    Si no hay qty explícita, default 1.
+    """
+    if not segment:
+        return 1
+    # Primer dígito SIN unidad seguida (60g, 30ml son atributos, no qty).
+    m = re.search(r"\b(\d+)\s*(?!\s*(?:g|gr|gramos|ml|mililitros|cc|kg|oz)\b)\d*", segment, re.IGNORECASE)
+    if not m:
+        # Patrón más simple: cualquier número que NO esté seguido de unidad.
+        nums = re.findall(r"\b(\d+)\b", segment)
+        if not nums:
+            return 1
+        # Tomar el primer número que NO esté seguido inmediatamente por unidad.
+        for num in nums:
+            # Check si está seguido de unidad en el segment.
+            num_unit_pattern = rf"\b{num}\s*(g|gr|gramos|ml|mililitros|cc|kg|oz)\b"
+            if not re.search(num_unit_pattern, segment, re.IGNORECASE):
+                try:
+                    return max(1, min(100, int(num)))
+                except ValueError:
+                    continue
+        return 1
+    try:
+        return max(1, min(100, int(m.group(1))))
+    except (ValueError, IndexError):
+        return 1
+
+
+def _match_single_variant_in_text(text: str, variants: list) -> Optional[dict]:
+    """Helper de `_resolve_variant_from_inbound`: matchea UNA variante
+    contra un trozo de texto (segment) usando las 3 estrategias estándar.
+
+    Returns: variant dict o None.
+    """
+    if not text or not variants:
+        return None
+    norm = _normalize_text(text)
 
     # 1. Match por attribute value (más confiable).
     for v in variants:
@@ -2440,10 +2547,9 @@ def _resolve_variant_from_inbound(
         for av in attrs.values():
             av_n = _normalize_text(str(av or "")).strip()
             if av_n and av_n in norm and len(av_n) >= 2:
-                return v, qty
+                return v
 
-    # 2. Match por número + unidad (ej. cliente dice "60 gramos" pero
-    #    attribute value es "60g").
+    # 2. Match por número + unidad.
     num_unit = re.search(
         r"(\d{1,4})\s*(g|gr|gramos|ml|mililitros|cc|kg|oz)\b",
         norm, re.IGNORECASE,
@@ -2457,22 +2563,15 @@ def _resolve_variant_from_inbound(
             for av in attrs.values():
                 av_n = _normalize_text(str(av or ""))
                 if target_num and target_num in av_n:
-                    return v, qty
+                    return v
 
     # 3. Match por label de la variant.
     for v in variants:
         label_n = _normalize_text(str(v.get("label") or "")).strip()
         if label_n and label_n in norm and len(label_n) >= 3:
-            return v, qty
+            return v
 
-    # 4. Rev. 104 (F1-8 / BUG-7): si el producto tiene una sola variante,
-    # asumimos esa por default (no hay ambigüedad). Caso real: cliente dice
-    # "1 sérum vit C" sin especificar 30ml/60ml; si solo hay 1 variante,
-    # usarla en lugar de retornar None (que dejaba al sérum fuera del cart).
-    if len(variants) == 1:
-        return variants[0], qty
-
-    return None, qty
+    return None
 
 
 def _detect_explicit_products_in_inbound(
@@ -2539,7 +2638,16 @@ def _detect_explicit_products_in_inbound(
             continue
         if not (discriminative & norm_tokens):
             continue
-        variant, qty = _resolve_variant_from_inbound(content, prod)
+        # Sem 7 F2 cierre — `_resolve_variant_from_inbound` ahora retorna
+        # `list[tuple]`. Para callers que esperan single, tomar el primero.
+        # Si no hay match de variant, qty se extrae del content (preserva
+        # comportamiento previo para Camino B / proposals).
+        _variant_matches = _resolve_variant_from_inbound(content, prod)
+        if _variant_matches:
+            variant, qty = _variant_matches[0]
+        else:
+            variant = None
+            qty = _extract_qty_for_product(_normalize_text(content), prod)
         if not variant:
             # Sin variante resoluble. Si el cliente declaró una qty
             # explícita >=2, registrar PROPUESTA para no perder la cantidad
@@ -2680,8 +2788,9 @@ def _detect_add_item_intent_with_resolution(
     if len(product_hits) > 1 and has_explicit_variant:
         compatible: list[dict] = []
         for h in product_hits:
-            v, q = _resolve_variant_from_inbound(content, h["product"])
-            if v:
+            _matches_h = _resolve_variant_from_inbound(content, h["product"])
+            if _matches_h:
+                v, q = _matches_h[0]
                 compatible.append({**h, "_resolved_variant": v, "_resolved_qty": q})
         if compatible:
             product_hits = compatible
@@ -2689,7 +2798,11 @@ def _detect_add_item_intent_with_resolution(
     # Si solo 1 producto en el top, intentar resolver variante.
     if len(product_hits) == 1:
         prod = product_hits[0]["product"]
-        variant, qty = _resolve_variant_from_inbound(content, prod)
+        _matches_p = _resolve_variant_from_inbound(content, prod)
+        if _matches_p:
+            variant, qty = _matches_p[0]
+        else:
+            variant, qty = None, 1
         if variant:
             unit_price = float(variant.get("price") or 0)
             return {
@@ -2915,8 +3028,12 @@ def _detect_explicit_product_in_inbound(
         # Necesita ALGUNA discriminativa en el inbound
         if not (discriminative & norm_tokens):
             continue
-        # Match — ahora resolver variante
-        variant, qty = _resolve_variant_from_inbound(content, prod)
+        # Match — ahora resolver variante (Sem 7 F2: lista[tuple], single)
+        _vmatch = _resolve_variant_from_inbound(content, prod)
+        if _vmatch:
+            variant, qty = _vmatch[0]
+        else:
+            variant, qty = None, 1
         if not variant:
             continue
         unit_price = float(variant.get("price") or 0)
@@ -2943,52 +3060,67 @@ def _detect_explicit_product_in_inbound(
 
 def _detect_variant_confirmation(
     content: str, history: list[dict], catalog: list,
-) -> Optional[dict]:
+) -> list[dict]:
     """Rev. 103 — Detector pre-LLM determinístico cart-as-SoT.
 
+    Sem 7 F2 cierre: contrato cambiado a `list[dict]` (puede ser vacía, 1
+    elemento, o N) para soportar multi-variant input ("1 de 100ml y 1 de
+    250ml"). El caller itera la lista llamando `add_item` por cada item.
+
     Dos caminos:
-      A. Bot acaba de presentar variantes → cliente elige una con
-         mensaje corto ("60g"). Match por variant attribute.
+      A. Bot acaba de presentar variantes → cliente elige una o más
+         ("60g" o "1 de 100ml y 1 de 250ml"). Match por variant attribute.
       B. Cliente especifica producto+variante en un mensaje
          ("quiero jabón de coco 60g") sin esperar presentación.
          Match por discriminative word del título + variant attribute.
 
-    Devuelve dict listo para `cart_tool.add_item` o None.
+    Devuelve lista de dicts listos para `cart_tool.add_item`.
     """
     if not content or not catalog:
-        return None
+        return []
     if "?" in content:
-        return None
+        return []
     norm = _normalize_text(content)
     tokens = norm.split()
     if not tokens or len(tokens) > 14:
-        return None  # Mensajes muy largos descartados (probablemente
-                     # consulta o address dump, no intent de compra)
+        return []  # Mensajes muy largos descartados (probablemente
+                   # consulta o address dump, no intent de compra)
+
+    results: list[dict] = []
+    seen_variation_ids: set[str] = set()
 
     # Camino A: ¿bot presentó variantes de uno o más productos en T-1?
-    # Bug-C fix: cuando T-1 lista variantes de varios productos (ej.
-    # "Coco: 60g/100g/150g; Sérum: 15ml/30ml"), iteramos cada producto
-    # candidato y seleccionamos el primero cuya variante resuelva con el
-    # inbound actual ("60 gramos" → Coco 60g).
+    # Para cada producto presentado, evaluar TODAS las variantes que
+    # matcheen el inbound (multi-variant support).
     products = _last_outbound_presented_variants_all(catalog, history)
     for product in products:
-        variant, qty = _resolve_variant_from_inbound(content, product)
-        if not variant:
-            continue
-        unit_price = float(variant.get("price") or 0)
-        if unit_price <= 0:
-            continue
-        return {
-            "product_id": str(product.get("id") or ""),
-            "variation_id": str(variant.get("id") or ""),
-            "quantity": qty,
-            "unit_price_cents": int(round(unit_price * 100)),
-            "title": str(product.get("title") or "Producto"),
-            "variant_label": str(variant.get("label") or ""),
-        }
+        variant_matches = _resolve_variant_from_inbound(content, product)
+        for variant, qty in variant_matches:
+            unit_price = float(variant.get("price") or 0)
+            if unit_price <= 0:
+                continue
+            variation_id = str(variant.get("id") or "")
+            if not variation_id or variation_id in seen_variation_ids:
+                continue
+            results.append({
+                "product_id": str(product.get("id") or ""),
+                "variation_id": variation_id,
+                "quantity": qty,
+                "unit_price_cents": int(round(unit_price * 100)),
+                "title": str(product.get("title") or "Producto"),
+                "variant_label": str(variant.get("label") or ""),
+            })
+            seen_variation_ids.add(variation_id)
 
-    # Camino B: producto+variante explícitos en el inbound
-    return _detect_explicit_product_in_inbound(content, catalog)
+    if results:
+        return results
+
+    # Camino B: producto+variante explícitos en el inbound (single).
+    # Si el detector explícito retorna un dict, envolverlo en lista.
+    single = _detect_explicit_product_in_inbound(content, catalog)
+    if single:
+        return [single]
+    return []
 
 
 def _save_product_snapshot(
@@ -7366,6 +7498,9 @@ async def build_and_run_orchestration(
             #     emitimos `cart_event(item_proposed)` para preservar la qty
             #     hasta que se resuelva la variante. Cuando Camino A
             #     resuelve la variante, elevamos la qty desde la propuesta.
+            # Sem 7 F2 cierre — `_detect_variant_confirmation` ahora retorna
+            # `list[dict]` (puede ser vacía, 1 elemento, o N) para soportar
+            # multi-variant input ("1 de 100ml y 1 de 250ml" → 2 items).
             _variant_confirmed = _detect_variant_confirmation(
                 content, history_for_prompt, catalog or [],
             )
@@ -7415,8 +7550,10 @@ async def build_and_run_orchestration(
                 )
 
             # Items a persistir + reconciliación con propuestas pendientes.
+            # Sem 7 F2 cierre: `_variant_confirmed` ahora es lista (no
+            # single dict), soporta multi-variant input directamente.
             _items_to_add = (
-                [_variant_confirmed] if _variant_confirmed
+                _variant_confirmed if _variant_confirmed
                 else _multi_explicit
             )
             if _items_to_add:
