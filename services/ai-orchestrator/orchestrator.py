@@ -2431,6 +2431,8 @@ def _extract_qty_for_product(content_norm: str, product: dict) -> int:
 
 def _resolve_variant_from_inbound(
     inbound_text: str, product: dict,
+    *,
+    require_discriminative_per_segment: bool = False,
 ) -> list[tuple[dict, int]]:
     """Match el inbound del cliente a una o más variantes del producto.
 
@@ -2452,6 +2454,17 @@ def _resolve_variant_from_inbound(
 
     Default: si producto tiene 1 sola variante y no resolvió arriba, asume
     esa variante (rev. 104 F1-8 BUG-7).
+
+    Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+    `require_discriminative_per_segment` (default False, opt-in): cuando True
+    Y hay multi-segments, exige que cada segmento contenga al menos una
+    palabra discriminativa del título del producto. Usado por el caller
+    tier-2 cuando hay múltiples productos potenciales en juego (caso
+    "1 de Coco 100g y 1 de Lavanda 150g" — el segmento "1 de Lavanda 150g"
+    NO debe matchearse contra Jabón Coco solo porque "150g" esté en sus
+    variantes). El caller que conoce el contexto "un solo producto" (ej.
+    `_detect_variant_confirmation` cuando el bot acaba de presentar UN
+    producto) deja este flag en False para mantener back-compat.
     """
     if not inbound_text or not product:
         return []
@@ -2474,12 +2487,42 @@ def _resolve_variant_from_inbound(
     else:
         segments = [norm]
 
+    # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+    # OPT-IN (require_discriminative_per_segment=True): cuando hay multi-segments
+    # Y el caller indica que hay múltiples productos potenciales en juego,
+    # calculamos las palabras DISCRIMINATIVAS del título y exigimos que cada
+    # segmento contenga al menos una. Sin esto: inbound "1 de Coco 100g y 1
+    # de Lavanda 150g" matcheaba la variante 150g a Jabón Coco falsamente.
+    # Cuando el caller sabe "este detector es para UN producto" (post-pregunta
+    # de variantes), deja el flag en False y se preserva la semántica original.
+    discriminative_words: set[str] = set()
+    if require_discriminative_per_segment and len(segments) > 1:
+        title_norm = _normalize_text(str(product.get("title") or ""))
+        title_words = set(re.findall(r"[a-z0-9ñ]+", title_norm))
+        _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+        title_words -= _stop
+        # Palabras del título ≥4 chars (heurística: descarta stop-words y
+        # conectores como "de"/"con"; preserva sustantivos del título tipo
+        # "coco", "lavanda", "jabon", "artesanal", "almendras"). Adjetivos
+        # genéricos compartidos por todo el catálogo (ej. "artesanal") son
+        # filtrados naturalmente por el caller que aplica category-lock.
+        discriminative_words = {w for w in title_words if len(w) >= 4}
+
     # Si solo 1 segment, procesarlo igual que antes (1 variante o default).
     # Si N segments, procesar cada uno por separado y juntar matches únicos.
     results: list[tuple[dict, int]] = []
     seen_variation_ids: set[str] = set()
 
     for segment in segments:
+        # Sem 7 F2 cierre — Bug 2 (OPT-IN): en multi-segment con
+        # require_discriminative_per_segment, exigir match discriminative
+        # para evitar atribución cruzada de variantes.
+        if discriminative_words:
+            seg_tokens = set(re.findall(r"[a-z0-9ñ]+", segment))
+            if not (seg_tokens & discriminative_words):
+                # Este segmento NO menciona el producto actual — skip.
+                continue
+
         # Por segmento, intentar resolver una variante.
         segment_qty = _extract_qty_for_product(segment, product) if len(segments) == 1 else _extract_qty_from_segment(segment)
         segment_variant = _match_single_variant_in_text(segment, variants)
@@ -2788,12 +2831,57 @@ def _detect_add_item_intent_with_resolution(
     if len(product_hits) > 1 and has_explicit_variant:
         compatible: list[dict] = []
         for h in product_hits:
-            _matches_h = _resolve_variant_from_inbound(content, h["product"])
+            # Sem 7 F2 cierre — Bug 2: opt-in discriminative-per-segment para
+            # evitar atribución cruzada de variantes entre productos distintos
+            # en un mismo inbound (caso "1 de Coco 100g y 1 de Lavanda 150g").
+            _matches_h = _resolve_variant_from_inbound(
+                content, h["product"],
+                require_discriminative_per_segment=True,
+            )
             if _matches_h:
+                # Sem 7 F2 cierre — Bug 2: tomar todas las variantes que
+                # matcheen (no solo la primera). Necesario cuando el cliente
+                # declara 2+ variantes de un mismo producto en un inbound.
+                # Para multi-product (1 variante por producto), tomamos
+                # solo la primera, que es la que el segmento del producto
+                # ya filtró con discriminative_words.
                 v, q = _matches_h[0]
                 compatible.append({**h, "_resolved_variant": v, "_resolved_qty": q})
         if compatible:
             product_hits = compatible
+
+    # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+    # Caso "N productos × 1 variante c/u" en un solo inbound (ej. "1 de Coco
+    # 100g y 1 de Lavanda 150g"). Si después del filtro de compatibility
+    # tenemos >1 productos Y cada uno tiene su variante explícita resolvida,
+    # NO es ambiguo — el cliente declaró todos. Resolver como resolved_multi.
+    if (
+        len(product_hits) > 1
+        and has_explicit_variant
+        and all(
+            isinstance(h.get("_resolved_variant"), dict) for h in product_hits
+        )
+    ):
+        matches = []
+        for h in product_hits:
+            prod = h["product"]
+            v = h["_resolved_variant"]
+            q = h.get("_resolved_qty") or 1
+            unit_price = float(v.get("price") or 0)
+            matches.append({
+                "product_id": str(prod.get("id") or ""),
+                "variation_id": str(v.get("id") or ""),
+                "title": str(prod.get("title") or "Producto"),
+                "variant_label": str(v.get("label") or ""),
+                "quantity": q if q >= 1 else 1,
+                "unit_price_cents": int(round(unit_price * 100)),
+            })
+        return {
+            "resolution": "resolved_multi",
+            "matches": matches,
+            "candidates": [],
+            "qty": sum(m["quantity"] for m in matches),
+        }
 
     # Si solo 1 producto en el top, intentar resolver variante.
     if len(product_hits) == 1:
@@ -4567,6 +4655,109 @@ def _generic_catalog_terms(catalog: list) -> set[str]:
         return set()
     threshold = max(2, int(n * 0.4))
     return {w for w, c in counts.items() if c >= threshold}
+
+
+def _category_head_words(catalog: list) -> set[str]:
+    """Sem 7 F2 cierre — primer token significativo (>=3 chars, no stop) de
+    cada título. Esto identifica el SUSTANTIVO DE CATEGORÍA (ej. "jabon" en
+    "Jabón Artesanal de Coco", "aceite" en "Aceite de Coco Virgen"). Útil
+    para preferir el sustantivo de categoría sobre adjetivos comunes
+    ("artesanal") al detectar el contexto declarado por el cliente.
+    """
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+    heads: set[str] = set()
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        tokens = re.findall(r"[a-z0-9ñ]+", _normalize_text(title))
+        for t in tokens:
+            if len(t) >= 3 and t not in _stop:
+                heads.add(t)
+                break  # primera palabra significativa solamente
+    return heads
+
+
+def _extract_category_token_from_recent_context(
+    history: list[dict],
+    catalog: list,
+    max_lookback: int = 5,
+) -> Optional[str]:
+    """Sem 7 F2 cierre 2026-05-19 — Extrae el token de categoría declarado
+    en el contexto conversacional reciente (Bug 2 founder UAT manual).
+
+    Caso runtime motivador (conv b36ecb31):
+      T5 cliente: "Que jabones artesanales venden?"   ← declara "jabones"
+      T6 bot:    lista 4 jabones específicos          ← framing jabón
+      T7 cliente: "Me peudes vender 1 Jabon de Cogo..." ← declara "jabón"
+      T8 bot:    "Confírmame la presentación de cada jabón"
+      T9 cliente: "Ok, deseo 1 de Coco 100g y 1 de Lavanda 150g"
+        ← NO declara "jabón" pero el contexto sigue siendo jabón.
+
+    Estrategia:
+      1. `category_head_words` (primer token significativo de cada título)
+         identifica los SUSTANTIVOS de categoría (ej. "jabon", "aceite").
+         Se prefiere sobre `generic_terms` para evitar matchear adjetivos
+         comunes como "artesanal" que aparecen pluri-categóricamente.
+      2. Fallback: `generic_terms` si head_words no matchea.
+      3. Iterar últimos `max_lookback` mensajes desde el más reciente.
+
+    Returns: token de categoría o None si no se identifica framing.
+    """
+    if not history or not catalog:
+        return None
+    head_words = _category_head_words(catalog)
+    generic_terms = _generic_catalog_terms(catalog) if head_words else set()
+    if not head_words and not generic_terms:
+        return None
+    # Iterar de más reciente a más viejo.
+    for msg in reversed(history[-max_lookback:]):
+        content = str(msg.get("content") or "")
+        if not content:
+            continue
+        norm = _normalize_text(content)
+        tokens = re.findall(r"[a-zñ]+", norm)  # lista preserva orden
+        # PASS 1: priorizar head_words (sustantivos de categoría).
+        for token in tokens:
+            if token in head_words:
+                return token
+            if token.endswith("es") and token[:-2] in head_words:
+                return token[:-2]
+            if token.endswith("s") and token[:-1] in head_words:
+                return token[:-1]
+        # PASS 2: fallback a generic_terms si head_words no matchea.
+        for token in tokens:
+            if token in generic_terms:
+                return token
+            if token.endswith("es") and token[:-2] in generic_terms:
+                return token[:-2]
+            if token.endswith("s") and token[:-1] in generic_terms:
+                return token[:-1]
+    return None
+
+
+def _filter_catalog_by_category_token(
+    catalog: list, category_token: Optional[str],
+) -> list:
+    """Sem 7 F2 cierre 2026-05-19 — Filtra el catalog dejando solo productos
+    cuyo título contiene `category_token`. Pure, sin side effects.
+
+    Si `category_token` es None o vacío → retorna catalog completo (no-op).
+    Si el filtro deja 0 productos → retorna catalog completo (back-compat).
+    """
+    if not category_token or not catalog:
+        return catalog
+    token_norm = _normalize_text(category_token).strip()
+    if not token_norm:
+        return catalog
+    filtered = []
+    for prod in catalog:
+        title_norm = _normalize_text(str(prod.get("title") or ""))
+        # Match por palabra completa (token está en tokens del título).
+        title_tokens = set(re.findall(r"[a-zñ]+", title_norm))
+        if token_norm in title_tokens:
+            filtered.append(prod)
+    return filtered if filtered else catalog
 
 
 def _build_verified_multi_product_context(
@@ -7343,7 +7534,24 @@ async def build_and_run_orchestration(
         #   "*Jabón Artesanal de Lavanda* lo tenemos en: 60g, 100g, 150g.
         #   ¿Cuál presentación?" — determinístico, sin alucinación LLM.
         try:
-            _tier2 = _detect_add_item_intent_with_resolution(content, catalog or [])
+            # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+            # Pre-filtrar catalog por categoría declarada en contexto reciente
+            # (capas A+B). Si el cliente/bot encuadraron "jabones" en turnos
+            # previos, el detector tier-2 solo evalúa jabones, evitando que
+            # "coco" matchee Aceite Coco + Jabón Coco como ambiguo.
+            _category_token = _extract_category_token_from_recent_context(
+                history or [], catalog or [],
+            )
+            _eff_catalog = _filter_catalog_by_category_token(
+                catalog or [], _category_token,
+            )
+            if _category_token and len(_eff_catalog) != len(catalog or []):
+                logger.info(
+                    "[TIER2] category-lock '%s' aplicado: catalog %d → %d productos (conv=%s)",
+                    _category_token, len(catalog or []), len(_eff_catalog),
+                    conversation_id[:8],
+                )
+            _tier2 = _detect_add_item_intent_with_resolution(content, _eff_catalog)
             _resolution = _tier2.get("resolution")
             if _resolution == "product_ambiguous":
                 _cands = _tier2.get("candidates") or []
@@ -7371,6 +7579,57 @@ async def build_and_run_orchestration(
                     len(_cands), conversation_id[:8],
                 )
                 return
+            if _resolution == "resolved_multi":
+                # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+                # Cliente declaró N productos con variantes explícitas en un
+                # solo inbound (ej. "1 de Coco 100g y 1 de Lavanda 150g").
+                # Tier-2 ya resolvió todos los matches deterministically.
+                # Aquí los persistimos en el cart y emitimos resumen unificado.
+                _matches_multi = _tier2.get("matches") or []
+                if _matches_multi:
+                    try:
+                        from tools.cart_tool import (
+                            add_item as _add_item_multi,
+                            ensure_cart as _ensure_cart_multi,
+                        )
+                        _cart_multi = _ensure_cart_multi(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            contact_id=contact_id,
+                        )
+                        for _m in _matches_multi:
+                            _add_item_multi(
+                                supabase,
+                                cart_id=_cart_multi["id"],
+                                tenant_id=tenant_id,
+                                product_id=_m["product_id"],
+                                variation_id=_m["variation_id"],
+                                quantity=int(_m["quantity"]),
+                                unit_price_cents=int(_m["unit_price_cents"]),
+                            )
+                            logger.info(
+                                "[TIER2][RESOLVED_MULTI] add_item %s × %d (cart=%s conv=%s)",
+                                _m["title"], _m["quantity"],
+                                _cart_multi["id"][:8], conversation_id[:8],
+                            )
+                        # Continúa al flow post-add_item (recotización lazy +
+                        # resumen unificado). NO emite outbound aquí — deja
+                        # que el ciclo normal arme el resumen con cart
+                        # actualizado. NO retorna.
+                        logger.info(
+                            "[TIER2] resolved_multi N=%d items añadidos al cart conv=%s",
+                            len(_matches_multi), conversation_id[:8],
+                        )
+                    except Exception as _rm_exc:
+                        logger.warning(
+                            "[TIER2][RESOLVED_MULTI] persist falló (no bloquea): %s",
+                            _rm_exc,
+                        )
+                # Después de persistir, dejar que el flujo normal continúe:
+                # va a recotización lazy + resumen unificado (mismo path
+                # del Bug A multi-variant cerrado). NO emitimos outbound
+                # determinístico aquí — el ciclo normal lo hace bien.
             if _resolution == "variant_ambiguous":
                 _cands = _tier2.get("candidates") or []
                 if _cands:
