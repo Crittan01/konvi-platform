@@ -298,20 +298,28 @@ export default function AddressSelector({
               )}
 
               {conjuntoType === 'casas' && (
-                <div className="space-y-1">
-                  <Label className="text-xs">
-                    Número de casa <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    name={`${fieldPrefix}_apartment`}
-                    defaultValue={defaultValue.apartment ?? ''}
-                    placeholder="Casa 12"
-                    required
-                    className="h-8 text-xs"
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Guardado en el mismo campo que apartamento (alias semántico).
-                  </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">
+                      Número de casa <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      name={`${fieldPrefix}_apartment`}
+                      defaultValue={defaultValue.apartment ?? ''}
+                      placeholder="Casa 12"
+                      required
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Manzana / Bloque</Label>
+                    <Input
+                      name={`${fieldPrefix}_tower`}
+                      defaultValue={defaultValue.tower ?? ''}
+                      placeholder="(opcional) ej. Manzana A"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -328,14 +336,23 @@ export default function AddressSelector({
           )}
 
           <div className="space-y-1">
-            <Label className="text-xs">Punto de referencia (opcional)</Label>
+            <Label className="text-xs">Punto de referencia</Label>
             <Input
               name={`${fieldPrefix}_reference`}
               defaultValue={defaultValue.reference ?? ''}
-              placeholder="Frente al parque / Al lado del Éxito"
+              placeholder="(opcional) Frente al parque / Al lado del Éxito"
               className="h-8 text-xs"
             />
+            <p className="text-[10px] text-muted-foreground">
+              Detalle libre para el repartidor (portería, esquina, etc.). NO uses este campo para piso ni nombre de empresa — tienen su propio campo arriba.
+            </p>
           </div>
+
+          {/* Sem 7 F2 cierre 2026-05-19 — leyenda visual del contrato.
+              Espejo de las reglas del bot conversacional (mismo schema). */}
+          <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/40 mt-2">
+            <span className="text-destructive">*</span> Campos obligatorios — los demás son opcionales pero mejoran la entrega.
+          </p>
         </>
       )}
     </div>

@@ -120,6 +120,61 @@ class MissingAddressFieldsTests(unittest.TestCase):
         }
         self.assertEqual(_missing_address_fields(addr), [])
 
+    def test_conjunto_casas_render_with_manzana(self):
+        """Sem 7 F2 cierre 2026-05-20 (D4) — manzana/bloque opcional en
+        conjunto_casas. Reusa `tower` semánticamente: "Manzana X".
+        """
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",
+            "tower": "A",  # cliente dijo "Manzana A"
+            "complex_name": "Conjunto Los Almendros",
+        }
+        # Address completa pese a `tower` presente (no es obligatoria).
+        self.assertEqual(_missing_address_fields(addr), [])
+        # Render del summary: "Manzana A" + "Casa #12".
+        rendered = _format_address_for_summary(addr)
+        self.assertIn("Manzana A", rendered)
+        self.assertIn("Casa #12", rendered)
+        # NO debe decir "Torre".
+        self.assertNotIn("Torre", rendered)
+
+    def test_conjunto_casas_render_sin_manzana(self):
+        """Conjunto casas sin manzana — renderiza solo Casa #X."""
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",
+        }
+        rendered = _format_address_for_summary(addr)
+        self.assertIn("Casa #12", rendered)
+        self.assertNotIn("Manzana", rendered)
+        self.assertNotIn("Torre", rendered)
+
+    def test_conjunto_casas_render_manzana_con_prefijo(self):
+        """Si el cliente ya dijo "Manzana A" literal, render preserva sin
+        prefijar otra vez."""
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",
+            "tower": "Manzana A",
+        }
+        rendered = _format_address_for_summary(addr)
+        # Debe haber EXACTAMENTE 1 ocurrencia de "Manzana A" (no "Manzana Manzana A").
+        self.assertEqual(rendered.count("Manzana A"), 1)
+        self.assertNotIn("Manzana Manzana", rendered)
+
     def test_oficina_requires_office_number(self):
         """Sem 7 F2 cierre — building_type='oficina' pide número de oficina
         (= apartment alias). floor + company_name son opcionales."""

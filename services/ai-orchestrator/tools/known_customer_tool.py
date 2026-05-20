@@ -150,13 +150,22 @@ def _format_address(address: dict) -> str:
     floor = str(address.get("floor") or "").strip()
     company_name = (address.get("company_name") or "").strip()
 
-    # Torre cuando aplica (conjunto torres) o legacy sin building_type.
+    # Torre / Manzana cuando aplica.
+    # Sem 7 F2 cierre 2026-05-20 (D4) — `tower` reusado como Manzana/Bloque
+    # cuando conjunto_type='casas'.
     if address.get("tower"):
+        _tower_raw = str(address['tower']).strip()
         if not building_type:
             # Back-compat: contacto antiguo con tower pero sin building_type.
-            parts.append(f"Torre {address['tower']}")
+            parts.append(f"Torre {_tower_raw}")
+        elif building_type == "conjunto" and conjunto_type == "casas":
+            _tlow = _tower_raw.lower()
+            if _tlow.startswith("manzana") or _tlow.startswith("bloque"):
+                parts.append(_tower_raw)
+            else:
+                parts.append(f"Manzana {_tower_raw}")
         elif building_type == "conjunto" and conjunto_type != "casas":
-            parts.append(f"Torre {address['tower']}")
+            parts.append(f"Torre {_tower_raw}")
 
     # Piso visible solo para edificio y oficina.
     if floor and building_type in {"edificio", "oficina"}:

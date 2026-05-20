@@ -806,7 +806,7 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
     "neighborhood": "barrio del cliente, ej 'Chicó', 'El Poblado', 'Granada' o null",
     "building_type": "casa|edificio|conjunto|oficina o null. Sem 7 F2 cierre: 'oficina' aplica si la entrega es en lugar de trabajo (edificio empresarial, oficina corporativa).",
     "conjunto_type": "SOLO si building_type=conjunto: torres|casas o null. 'torres' = conjunto de torres con apartamentos; 'casas' = conjunto cerrado de casas individuales.",
-    "tower": "SOLO si building_type=conjunto AND conjunto_type=torres: nombre/número de la torre o bloque, ej 'Torre 3' o null",
+    "tower": "SOLO si building_type=conjunto. Si conjunto_type=torres: torre/bloque OBLIGATORIO ('Torre 3'). Si conjunto_type=casas: manzana/bloque OPCIONAL ('Manzana A', 'Bloque 2'). null si no aplica.",
     "floor": "piso, ej '5'. SOLO números o texto corto. Aplica si building_type=edificio o oficina. Si el cliente dice 'Piso 3' o 'piso quinto', extrae '3' o '5'. NO null si el cliente lo mencionó explícitamente.",
     "apartment": "número de unidad. building_type=edificio→número de apartamento; conjunto/torres→apartamento; conjunto/casas→número de casa; oficina→número de oficina. Ej '502', '301', '12'.",
     "complex_name": "SOLO si building_type=edificio O conjunto: nombre del edificio/conjunto residencial, ej 'Torre Norte', 'Edificio Avantgarde', 'Conjunto Los Almendros' o null. NO uses este campo para oficinas — usa `company_name`.",
