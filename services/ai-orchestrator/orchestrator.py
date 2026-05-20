@@ -4066,9 +4066,19 @@ def _build_address_request_prompt(contact_record: dict, first_name: Optional[str
             "_Opcional_: piso, nombre de la empresa, punto de referencia."
         )
     elif building_type == "conjunto":
-        optional_msg = (
-            "_Opcional_: nombre del conjunto, punto de referencia."
-        )
+        # Si es conjunto de casas, mencionar manzana/bloque como opcional
+        # (reusa el campo `tower` semánticamente).
+        from fsm.address import normalize_conjunto_type as _norm_ct
+        _ct = _norm_ct((address or {}).get("conjunto_type"))
+        if _ct == "casas":
+            optional_msg = (
+                "_Opcional_: manzana/bloque, nombre del conjunto, "
+                "punto de referencia."
+            )
+        else:
+            optional_msg = (
+                "_Opcional_: nombre del conjunto, punto de referencia."
+            )
     else:
         # Tipo aún se desconoce — sugerir condicionales sin pedir
         # lo que ya tenemos.
@@ -4208,6 +4218,15 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
         if complex_name:
             sub_parts.append(complex_name)
         if ctype == "casas":
+            # Sem 7 F2 cierre 2026-05-20 (D4) — manzana opcional en
+            # conjunto de casas. Reusa `tower` semánticamente como
+            # "Manzana / Bloque". Sin migración de schema.
+            if tower:
+                _tlow = tower.lower()
+                if _tlow.startswith("manzana") or _tlow.startswith("bloque"):
+                    sub_parts.append(tower)
+                else:
+                    sub_parts.append(f"Manzana {tower}")
             if apt:
                 sub_parts.append(f"Casa #{apt}")
         else:
