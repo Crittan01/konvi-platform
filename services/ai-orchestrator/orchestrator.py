@@ -219,40 +219,96 @@ _SHIPPING_KEYWORDS = (
 _SHIPPING_PHONE_DIGITS_RE = re.compile(r"(?:\+?57\s*)?(\d{10})\b")
 
 
-def _detect_shipping_phone_update(text: str) -> Optional[str]:
-    """Rev. 103 — Pre-LLM: extrae phone alternativo de envío SOLO si el
-    cliente lo menciona con keyword discriminante.
+def _detect_shipping_phone_update(
+    text: str, history: Optional[list[dict]] = None,
+) -> Optional[str]:
+    """Rev. 103 — Pre-LLM: extrae phone alternativo de envío.
 
-    Patrones cubiertos (requieren keyword + dígitos):
-      - "celular alternativo: 3001234567"
-      - "actualiza mi celular: 3001234567"
-      - "el pedido lo recibe mi mamá, su celular es 3001234567"
-      - "número adicional 3009998877"
-      - "cambiar el número 3001234567 por 3009998877"  (Sem 7 F2 cierre)
+    Patrones cubiertos:
+      - Con keyword en mismo inbound (legacy):
+        * "celular alternativo: 3001234567"
+        * "actualiza mi celular: 3001234567"
+        * "el pedido lo recibe mi mamá, su celular es 3001234567"
+        * "número adicional 3009998877"
+        * "cambiar el número 3001234567 por 3009998877"
+      - Sem 7 F2 cierre 2026-05-20 — Bug P7 founder UAT (conv 7053666a):
+        Sin keyword en inbound PERO outbound anterior pidió número alterno
+        ("dime cuál es el número", "compárteme tu celular alterno").
+        Cliente responde solo "3223840887" → debe interpretarse como
+        update. Sin esto, el resumen post-update perdía el número y el
+        cliente debía señalar la omisión explícitamente.
 
-    Defensivo: si el cliente solo da su WhatsApp normal sin keyword
-    contextual, NO extrae (evita sobrescribir contacts.phone).
-
-    Sem 7 F2 cierre — cuando hay frase de cambio ("X por Y") con dos
-    números, captura el ÚLTIMO (el nuevo), no el primero (el viejo).
-    findall + tomar el último match es la captura correcta semánticamente
-    (cliente referencia número actual antes de declarar el nuevo).
+    Defensivo: si el cliente solo da su WhatsApp normal sin contexto
+    (no keyword en inbound + no pregunta previa del bot), NO extrae.
 
     Retorna 10 dígitos sin prefijo (+57 implícito) o None.
     """
     if not text:
         return None
+    digits_matches = _SHIPPING_PHONE_DIGITS_RE.findall(text)
+    if not digits_matches:
+        return None
+
+    # Camino A: keyword discriminante en el inbound mismo.
     normalized = _normalize_text_simple(text).lower()
-    if not any(kw in normalized for kw in _SHIPPING_KEYWORDS):
+    has_keyword = any(kw in normalized for kw in _SHIPPING_KEYWORDS)
+
+    # Camino B: outbound anterior pidió explícitamente el número alterno
+    # (Sem 7 F2 cierre 2026-05-20 — Bug P7).
+    contextual_request = False
+    if not has_keyword and history:
+        contextual_request = _last_outbound_requested_shipping_phone(history)
+
+    if not (has_keyword or contextual_request):
         return None
-    matches = _SHIPPING_PHONE_DIGITS_RE.findall(text)
-    if not matches:
-        return None
+
     # Último match: caso "cambiar X por Y" → Y (el nuevo).
-    digits = matches[-1]
+    digits = digits_matches[-1]
     if len(digits) != 10 or digits[0] == "0":
         return None
     return digits
+
+
+# Markers de outbounds que piden número alterno de envío.
+# Sem 7 F2 cierre 2026-05-20 — Bug P7 founder UAT.
+_SHIPPING_PHONE_REQUEST_MARKERS = (
+    "cuál es el número que quieres agregar",
+    "cual es el numero que quieres agregar",
+    "dime cuál es el número",
+    "dime cual es el numero",
+    "compárteme el celular alterno",
+    "comparteme el celular alterno",
+    "compárteme tu celular alterno",
+    "comparteme tu celular alterno",
+    "el celular adicional",
+    "celular para el envío",
+    "celular para el envio",
+    "dame el número adicional",
+    "dame el numero adicional",
+    "número para el envío",
+    "numero para el envio",
+)
+
+
+def _last_outbound_requested_shipping_phone(history: list[dict]) -> bool:
+    """True si el último outbound (no context_snapshot) pidió al cliente
+    un número alterno de envío. Permite que el cliente responda solo con
+    dígitos ("3223840887") sin keyword y aún así extraerlo correctamente.
+
+    Mira solo el outbound MÁS RECIENTE (1 turno atrás) — más allá podría
+    estar fuera de contexto.
+    """
+    if not history:
+        return False
+    for msg in reversed(history):
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content = str(msg.get("content") or "")
+        if not content.strip():
+            continue
+        normalized = _normalize_text_simple(content).lower()
+        return any(m in normalized for m in _SHIPPING_PHONE_REQUEST_MARKERS)
+    return False
 
 
 # Rev. 83: detección de cancelación de pedido. UX: el cliente que cancela
@@ -5823,6 +5879,10 @@ def _build_system_prompt(
     tenant_after_hours_message: str = "",
     tenant_is_outside_hours: bool = False,
     customer_context_block: str = "",
+    # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant.
+    tenant_business_pitch: str = "",
+    tenant_product_groups: Optional[list] = None,
+    tenant_show_prices: bool = True,
 ) -> str:
     """Thin wrapper — delega a `prompt.builder.build_system_prompt` (rev. 104, F1-4).
 
@@ -5859,6 +5919,9 @@ def _build_system_prompt(
         tenant_after_hours_message=tenant_after_hours_message,
         tenant_is_outside_hours=tenant_is_outside_hours,
         customer_context_block=customer_context_block,
+        tenant_business_pitch=tenant_business_pitch,
+        tenant_product_groups=tenant_product_groups or [],
+        tenant_show_prices=tenant_show_prices,
     )
 
 
@@ -6493,11 +6556,16 @@ async def build_and_run_orchestration(
         # Rev. 71 — Saca columnas legacy (business_hours/cutoff_message/dispatch_lead_time)
         # del SELECT. El horario textual se deriva de support_schedule;
         # cutoff_message y dispatch_lead_time eran orphan (sin UI) y se moverán a KB envios.
+        # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant: agregar
+        # business_pitch + product_groups + show_prices_in_catalog al
+        # SELECT para que el bot use lenguaje del tenant en vez de
+        # hardcoded "KAIU/cosmética".
         tenant_res = supabase.table("tenants").select(
             "name, nit, email_contacto, telefono_contacto, "
             "shipping_origin, store_type, social_links, store_locations, "
             "mision, vision, valores, tono_comunicacion, "
-            "support_schedule, after_hours_message, escalation_role"
+            "support_schedule, after_hours_message, escalation_role, "
+            "business_pitch, product_groups, show_prices_in_catalog"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
@@ -6524,6 +6592,12 @@ async def build_and_run_orchestration(
         # cabe en cualquier vertical. Tenant puede sobrescribir por
         # `escalation_role` en `tenants` si prefiere otro término.
         tenant_escalation_role  = tenant_row.get("escalation_role") or "especialista"
+        # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant config.
+        tenant_business_pitch   = (tenant_row.get("business_pitch") or "").strip()
+        tenant_product_groups   = tenant_row.get("product_groups") or []
+        if not isinstance(tenant_product_groups, list):
+            tenant_product_groups = []
+        tenant_show_prices      = bool(tenant_row.get("show_prices_in_catalog", True))
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -8722,7 +8796,9 @@ async def build_and_run_orchestration(
         #      para READY_FOR_SUMMARY, no AWAITING_ORDER_CONFIRMATION).
         #   4. Return early — LLM NO compone.
         # Garantiza: contrato resumen siempre por builder determinístico.
-        _shipping_phone_pre_persist = _detect_shipping_phone_update(content or "")
+        # Sem 7 F2 cierre 2026-05-20 — pasar history para detectar contexto
+        # cuando el outbound anterior pidió el número alterno (Bug P7).
+        _shipping_phone_pre_persist = _detect_shipping_phone_update(content or "", history or [])
         _shipping_phone_just_persisted = False
         if (
             _shipping_phone_pre_persist
@@ -8814,7 +8890,7 @@ async def build_and_run_orchestration(
                     )
 
         _is_pii_update = bool(
-            (_detect_shipping_phone_update(content or "") and not _shipping_phone_just_persisted)
+            (_detect_shipping_phone_update(content or "", history or []) and not _shipping_phone_just_persisted)
             or _detect_data_update_intent(content or "")
         )
         # Heurística adicional: si el inbound es 10+ dígitos consecutivos
@@ -8961,6 +9037,10 @@ async def build_and_run_orchestration(
             tenant_after_hours_message=tenant_after_hours_msg,
             tenant_is_outside_hours=_is_outside_support_hours(tenant_support_schedule),
             customer_context_block=customer_context_block,
+            # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant config.
+            tenant_business_pitch=tenant_business_pitch,
+            tenant_product_groups=tenant_product_groups,
+            tenant_show_prices=tenant_show_prices,
         )
         user_context = _build_user_context(history, content)
 
@@ -9771,7 +9851,7 @@ async def build_and_run_orchestration(
         # Rev. 103 — pre-LLM dual cobertura: regex defensivo si LLM no extrajo.
         _shipping_phone_extracted = (
             getattr(parsed, "extracted_shipping_phone", None)
-            or _detect_shipping_phone_update(content or "")
+            or _detect_shipping_phone_update(content or "", history or [])
         )
         if contact_id and _consent_ok and (
             parsed.extracted_name

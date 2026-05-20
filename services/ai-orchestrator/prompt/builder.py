@@ -43,6 +43,10 @@ def build_system_prompt(
     tenant_after_hours_message: str = "",
     tenant_is_outside_hours: bool = False,
     customer_context_block: str = "",
+    # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant.
+    tenant_business_pitch: str = "",
+    tenant_product_groups: Optional[list] = None,
+    tenant_show_prices: bool = True,
 ) -> str:
     """Construye el system prompt con FSM contextual para venta vs consulta.
 
@@ -370,6 +374,35 @@ ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
         )
 
     _greet_phrase, _greet_label = _co_time_of_day_greeting()
+
+    # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant:
+    # `business_pitch` opcional del tenant. Si vacío, omitir frase pitch
+    # (saludo simple). NO hardcoded a cosmética/KAIU.
+    _pitch_clean = (tenant_business_pitch or "").strip()
+    _business_pitch_phrase = f" {_pitch_clean}." if _pitch_clean else ""
+
+    # `product_groups` opcional. Si configurado → usar tal cual. Si vacío,
+    # heurística: primer token significativo del title de cada producto.
+    _groups_list = list(tenant_product_groups or [])
+    if not _groups_list and catalog:
+        _seen: set[str] = set()
+        _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+        for prod in catalog:
+            title = str(prod.get("title") or "").strip()
+            if not title:
+                continue
+            tokens = [t for t in re.findall(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]+", title) if t.lower() not in _stop]
+            if tokens:
+                # Pluralización ingenua del primer sustantivo (ej. "Aceite" → "Aceites").
+                first = tokens[0]
+                plural = first if first.lower().endswith("s") else first + "s"
+                if plural not in _seen:
+                    _seen.add(plural)
+                    _groups_list.append(plural)
+                if len(_groups_list) >= 6:
+                    break
+    _product_groups_str = ", ".join(_groups_list) if _groups_list else "varios productos"
+
     time_aware_greeting_block = (
         f"\nHORA LOCAL ({_greet_label}, Colombia UTC-5): el saludo CANÓNICO "
         f"para el primer mensaje es \"{_greet_phrase}\" (NO \"¡Hola!\" "
@@ -730,6 +763,27 @@ Patrón canónico — categoría ESPECÍFICA con productos+precios (cliente preg
 
 ¿Cuál te llama la atención?
 
+REGLA DE PAGINACIÓN DINÁMICA (Sem 7 F2 cierre 2026-05-20):
+- Si la categoría tiene ≤ 4 productos → lístalos TODOS.
+- Si tiene 5-8 productos → muestra los 5 más relevantes (top sellers / con más
+  variantes), y cierra con `* _Y X más opciones — dime cuál te interesa o
+  filtra por tipo de piel/necesidad._`.
+- Si tiene > 8 productos → muestra solo 4-5 destacados, OMITE precios para no
+  abrumar, y pregunta al cliente qué busca específicamente para luego mostrar
+  precios de su selección. Patrón ejemplo (N=22 jabones):
+
+  *Jabones artesanales* (22 referencias):
+  * *Avena y Miel*
+  * *Coco*
+  * *Lavanda*
+  * *Menta y Eucalipto*
+
+  Tenemos 18 más. ¿Qué tipo de piel o necesidad tienes? Así te recomiendo lo
+  ideal sin abrumar con la lista completa.
+
+NUNCA listes 10+ productos en un solo mensaje WhatsApp — el cliente no los
+lee, se pierde, y la conversación pierde tracción.
+
 Patrón canónico — confirmación de dato del cliente:
 
 > Calle 3 sur # 70-84 — barrio Olaya, Bogotá
@@ -746,7 +800,7 @@ hora local manda):
 Patrón canónico — saludo cliente nuevo (usa "{_greet_phrase}" — la
 hora local manda; NO "¡Hola!" genérico):
 
-¡{_greet_phrase}! Soy *Sara Camila* de *KAIU Living Natural*. Trabajamos cosmética artesanal 100% natural.
+¡{_greet_phrase}! Soy *{ai_agent.get('name', 'el asistente')}* de *{tenant_name}*.{_business_pitch_phrase}
 
 ¿En qué te puedo ayudar?
 
