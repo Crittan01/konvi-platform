@@ -536,8 +536,13 @@ export default async function ContactsPage({
   async function deleteContact(formData: FormData) {
     'use server'
     const sb = createClient()
-    const { data: { session } } = await sb.auth.getSession()
-    const u = session?.user
+    // Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (web.log alerta):
+    // ANTES usábamos `session.user` directamente — Supabase lo marcaba
+    // como `insecure` porque viene de cookies sin verificación de JWT.
+    // AHORA: `getUser()` contacta al Auth Server y valida autenticidad
+    // (operación segura). `getSession()` solo para el `access_token`
+    // que va al endpoint API (que también verifica el JWT server-side).
+    const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     // Sem 7 F2 cierre 2026-05-19 — purge endpoint requiere role 'owner'
     // (hard cascade es destructivo, no debe ser permitido a 'manager').
@@ -547,6 +552,7 @@ export default async function ContactsPage({
     const contactId = (formData.get('contact_id') as string) || ''
     if (!contactId) return
     const reason = ((formData.get('delete_reason') as string) || '').trim()
+    const { data: { session } } = await sb.auth.getSession()
     const token = session?.access_token
     if (!token) {
       throw new Error('Sesión expirada — recarga la página.')
