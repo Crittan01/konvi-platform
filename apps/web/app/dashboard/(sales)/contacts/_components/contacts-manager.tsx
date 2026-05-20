@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2, Paperclip, ExternalLink } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Users, Phone, Search, Loader2, Trash2, MapPin, Mail, Pencil, AlertTriangle, CheckCircle2, Paperclip, ExternalLink, RefreshCw } from 'lucide-react'
 import { getConsentEvidenceSignedUrl } from './helpers/upload-evidence'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -154,6 +154,11 @@ function ExistingAttachmentCard({
 export default function ContactsManager({ initialContacts, canWrite, userRole, addAction, editAction, deleteAction, sarAction, sarPrintableAction, reactivateConsentAction }: Props) {
   const isOwner = userRole === 'owner'
   const [search, setSearch] = useState('')
+  // Sem 7 F2 cierre 2026-05-20 — P7 founder UAT: botón refresh manual.
+  // El bot persiste contacts/updates y el operador necesita ver el cambio
+  // sin recargar la página entera. router.refresh() re-fetcha el RSC
+  // payload — más ligero que reload completo.
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [consentFilter, setConsentFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [isPending, startTransition] = useTransition()
@@ -303,6 +308,14 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
   }
 
   const router = useRouter()
+
+  const handleRefresh = () => {
+    setIsRefreshing(true)
+    router.refresh()
+    // router.refresh() es fire-and-forget. 600ms cubre el round-trip
+    // típico sin parecer instantáneo (feedback visible al operador).
+    setTimeout(() => setIsRefreshing(false), 600)
+  }
 
   // Rev. 102 — feedback visual de éxito tras Guardar (no usamos modal
   // para no agregar fricción a la acción explícita del operador).
@@ -600,6 +613,19 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
               {opt.label}
             </button>
           ))}
+          {/* Sem 7 F2 cierre 2026-05-20 — P7 founder UAT: botón refresh
+              manual para ver contactos recién creados/actualizados por
+              el bot u otros operadores sin recargar la página. */}
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            title="Refrescar lista (ver cambios recientes del bot u otros operadores)"
+            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Actualizando…' : 'Refrescar'}
+          </button>
         </div>
       </div>
 
