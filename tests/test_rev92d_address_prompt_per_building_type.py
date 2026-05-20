@@ -52,9 +52,12 @@ class CasaBuildingTypeTests(unittest.TestCase):
     """Tipo casa — solo punto de referencia es opcional."""
 
     def test_casa_address_complete(self):
-        # Address completa para casa (street + city + type=casa).
+        # Address completa para casa (street + city + barrio + type=casa).
+        # Sem 7 F2 cierre 2026-05-20 — P6 opción C: barrio obligatorio en residencial.
         contact = {"address": {
-            "street": "Calle 5 #6-7", "city": "Bogotá", "building_type": "casa"
+            "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
+            "building_type": "casa",
         }}
         out = _build_address_request_prompt(contact, None)
         # No debería pedir nada — address completa.
@@ -91,6 +94,7 @@ class EdificioBuildingTypeTests(unittest.TestCase):
     def test_edificio_address_complete(self):
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
             "building_type": "edificio", "apartment": "501"
         }}
         out = _build_address_request_prompt(contact, None)
@@ -143,6 +147,7 @@ class ConjuntoBuildingTypeTests(unittest.TestCase):
     def test_conjunto_torres_address_complete(self):
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
             "building_type": "conjunto",
             "conjunto_type": "torres",
             "tower": "3", "apartment": "401",
@@ -165,6 +170,7 @@ class ConjuntoBuildingTypeTests(unittest.TestCase):
     def test_conjunto_casas_address_complete(self):
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
             "building_type": "conjunto",
             "conjunto_type": "casas",
             "apartment": "12",  # alias semántico de "casa #12"

@@ -73,10 +73,17 @@ def missing_address_fields(direction: Optional[dict]) -> list[str]:
 
     `conjunto_type` SÍ es obligatorio cuando building_type='conjunto' — sin él
     no se sabe si pedir torre/apto o solo casa#.
+
+    Sem 7 F2 cierre 2026-05-20 — P6 founder UAT (acuerdo opción C):
+    `neighborhood` SÍ es obligatorio en residencial (casa/edificio/conjunto)
+    porque transportadoras CO lo usan para sub-zonificar tarifa+ETA. En
+    OFICINA no aplica naturalmente — opcional. Sincronizado con
+    `services/api/dependencies/contact_validators.py::address_required_fields`.
     """
     address = direction if isinstance(direction, dict) else {}
     street = str(address.get("street") or "").strip()
     city = str(address.get("city") or "").strip()
+    neighborhood = str(address.get("neighborhood") or "").strip()
     building_type = normalize_building_type(address.get("building_type"))
     conjunto_type = normalize_conjunto_type(address.get("conjunto_type"))
     tower = str(address.get("tower") or "").strip()
@@ -87,13 +94,25 @@ def missing_address_fields(direction: Optional[dict]) -> list[str]:
         missing.append("Calle y número")
     if not city:
         missing.append("Ciudad")
+    # Barrio: obligatorio en residencial (casa/edificio/conjunto), opcional
+    # en oficina y cuando aún no se sabe el building_type (se exige
+    # condicionalmente más abajo según el tipo declarado).
     if not building_type:
         missing.append("Tipo de vivienda (casa, edificio, conjunto u oficina)")
-    elif building_type == "edificio" and not apartment:
-        missing.append("Apartamento")
-    elif building_type == "oficina" and not apartment:
-        missing.append("Número de oficina")
+        # Sin building_type, no podemos saber si neighborhood es obligatorio.
+        # Lo pediremos en el siguiente turno cuando el cliente declare tipo.
+    elif building_type == "edificio":
+        if not neighborhood:
+            missing.append("Barrio")
+        if not apartment:
+            missing.append("Apartamento")
+    elif building_type == "oficina":
+        # Sin barrio obligatorio (P6 opción C).
+        if not apartment:
+            missing.append("Número de oficina")
     elif building_type == "conjunto":
+        if not neighborhood:
+            missing.append("Barrio")
         if not conjunto_type:
             missing.append("Tipo de conjunto (torres o casas)")
         elif conjunto_type == "torres":
@@ -104,6 +123,9 @@ def missing_address_fields(direction: Optional[dict]) -> list[str]:
         elif conjunto_type == "casas":
             if not apartment:
                 missing.append("Número de casa")
+    elif building_type == "casa":
+        if not neighborhood:
+            missing.append("Barrio")
     return missing
 
 

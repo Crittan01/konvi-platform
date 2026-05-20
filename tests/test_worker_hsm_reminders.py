@@ -252,10 +252,11 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
             ))
         self.assertTrue(result)
         self.assertEqual(captured["template_name"], "payment_reminder_v1")
-        # body_params = [nombre, order_number, total formateado COP, checkout_url]
+        # body_params = [nombre, order_number, total formateado (sin "COP"
+        # post Sem 7 F2 cierre 2026-05-20 — P5), checkout_url]
         self.assertEqual(captured["body_params"][0], "Camila")
         self.assertEqual(captured["body_params"][1], "ORDER_XY")
-        self.assertEqual(captured["body_params"][2], "$87.500 COP")
+        self.assertEqual(captured["body_params"][2], "$87.500")
         self.assertEqual(captured["body_params"][3], "https://wompi.co/p/abc123")
         self.assertEqual(self.w._metrics["payment_reminders_sent_via_hsm"], 1)
         # Idempotencia: payment_reminder_sent_at debe estar set

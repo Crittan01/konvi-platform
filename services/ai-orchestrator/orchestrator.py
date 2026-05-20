@@ -1156,7 +1156,7 @@ def _load_cart_recovery_block(
 
     lines = ["", f"CARRITO PREVIO (cancelado por timeout, {when}):"]
     lines.extend(item_lines)
-    lines.append(f"Total recalculado al precio actual: {_format_pesos(new_total)} COP.")
+    lines.append(f"Total recalculado al precio actual: {_format_pesos(new_total)}.")
     lines.append(
         "INSTRUCCIÓN: si el cliente quiere retomar, ofrece el total recalculado "
         "y advierte si algún precio cambió. Si algo está SIN STOCK, ofrece "
@@ -1354,7 +1354,7 @@ def _load_customer_context_block(
             short = (o.get("id") or "")[:8].upper()
             status = o.get("status", "?")
             total = o.get("total_amount") or 0
-            lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)} COP")
+            lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)}")
 
     if open_claims:
         lines.append("")
@@ -3927,6 +3927,42 @@ def _truncate_at_first_question(text: str) -> str:
     return truncated
 
 
+def _detect_document_type_from_text(text: str) -> Optional[str]:
+    """Sem 7 F2 cierre 2026-05-20 — P4 founder UAT (conv 7053666a):
+    Detector determinístico de tipo de documento colombiano.
+
+    Caso runtime motivador: cliente dijo "Cedula de Ciudadania" → LLM no
+    extrajo `CC` → bot re-preguntó como si nada hubiera entendido.
+
+    Reconoce variantes coloquiales típicas en español CO:
+      • Cédula / Cedula / Cédula de Ciudadanía → CC
+      • Cédula de Extranjería / Extranjeria → CE
+      • NIT (también "RUT" mal usado) → NIT
+      • Pasaporte / Passport → PP
+      • Tarjeta de Identidad / TI → TI
+
+    Returns: "CC" | "CE" | "NIT" | "PP" | "TI" | None.
+    Defensa en profundidad: si LLM no extrajo, este detector cubre.
+    """
+    if not text:
+        return None
+    norm = _normalize_text_simple(text)
+    # Orden importante: más específicos primero (extranjería antes que cédula).
+    if "extranjeria" in norm or "cedula extranjera" in norm:
+        return "CE"
+    if "tarjeta de identidad" in norm or re.search(r"\bti\b", norm):
+        return "TI"
+    if "pasaporte" in norm or "passport" in norm:
+        return "PP"
+    if re.search(r"\bnit\b", norm) or re.search(r"\brut\b", norm):
+        # Algunos clientes dicen "RUT" por error (es Chile/España). Asumimos NIT en CO.
+        return "NIT"
+    # "Cedula" cubre CC + "Cédula de Ciudadanía". Va al final por especificidad.
+    if "cedula" in norm or re.search(r"\bcc\b", norm):
+        return "CC"
+    return None
+
+
 def _detect_building_type_from_text(text: str) -> Optional[str]:
     """Rev. 86 — Si el LLM olvida setear building_type pero el cliente
     menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa'/'oficina'
@@ -4396,7 +4432,28 @@ def _build_order_summary_text(
     # Rev. 103 — incluir carrier en línea de envío para que el cliente
     # vea qué transportadora cotizó (Económica = default cuando dice
     # "sigamos" sin elegir explícitamente).
-    carrier_name = _extract_shipping_carrier_from_history(history or [])
+    #
+    # Sem 7 F2 cierre 2026-05-20 — Bug P9 founder UAT (conv 7053666a):
+    # En conversaciones largas (≥25 msgs), el outbound de cotización queda
+    # FUERA del window de history → extractor retorna None → resumen
+    # muestra "Envío: $X" sin carrier (regresión visual).
+    # Fix: usar `cart_from_db.shipping_meta.carrier` como FUENTE PRIMARIA
+    # (cart-as-SoT, ADR-0011) y caer a history solo si DB no tiene.
+    carrier_name: Optional[str] = None
+    if isinstance(cart_from_db, dict):
+        _meta = cart_from_db.get("shipping_meta") or {}
+        if isinstance(_meta, dict):
+            _carrier_db = str(_meta.get("carrier") or "").strip()
+            _service_db = str(_meta.get("service_level") or "").strip()
+            if _carrier_db:
+                # Componer "Coordinadora Ground" o "FedEx Express®" con
+                # service_level si está disponible.
+                carrier_name = (
+                    f"{_carrier_db} {_service_db}".strip()
+                    if _service_db else _carrier_db
+                )
+    if not carrier_name:
+        carrier_name = _extract_shipping_carrier_from_history(history or [])
     if carrier_name and shipping > 0:
         lines.append(f"Envío (Económica - {carrier_name}): {_format_cop(shipping)}")
     else:
@@ -7793,7 +7850,7 @@ async def build_and_run_orchestration(
                             _label_str = f" ({_label})" if _label else ""
                             _lines.append(
                                 f"* {_m['quantity']}x *{_m['title']}{_label_str}*: "
-                                f"*{_price_fmt} COP*"
+                                f"*{_price_fmt}*"
                             )
                         if _items_after and len(_items_after) > len(_matches_multi):
                             # Hay items previos en el cart — mostrar resumen total.
@@ -7804,7 +7861,7 @@ async def build_and_run_orchestration(
                                 f"${int(_subtotal_cents / 100):,}".replace(",", ".")
                             )
                             _lines.append("")
-                            _lines.append(f"Subtotal: *{_subtotal_fmt} COP*")
+                            _lines.append(f"Subtotal: *{_subtotal_fmt}*")
                         _lines.append("")
                         _lines.append(
                             "¿Quieres agregar algo más, cotizar envío o avanzar al pedido?"
@@ -9698,6 +9755,18 @@ async def build_and_run_orchestration(
         # mencionar datos en su pitch pero el bot los retiene en el contexto
         # de la conversación sin escribirlos en DB hasta que autorice.
         _consent_ok = bool(contact_record and contact_record.get("consent_given"))
+        # Sem 7 F2 cierre 2026-05-20 — P4 founder UAT: defensa en profundidad.
+        # Si el LLM no extrajo el tipo de documento (caso "Cedula de Ciudadania"
+        # que el LLM no mapeó a CC), regex pre-LLM cubre las variantes
+        # coloquiales típicas en español CO.
+        if not parsed.extracted_document_type:
+            _doc_type_detected = _detect_document_type_from_text(content or "")
+            if _doc_type_detected:
+                parsed.extracted_document_type = _doc_type_detected
+                logger.info(
+                    "[DOC] tipo detectado por regex pre-LLM: %s (LLM no extrajo)",
+                    _doc_type_detected,
+                )
         _has_doc_extract = bool(parsed.extracted_document_type or parsed.extracted_document_number)
         # Rev. 103 — pre-LLM dual cobertura: regex defensivo si LLM no extrajo.
         _shipping_phone_extracted = (

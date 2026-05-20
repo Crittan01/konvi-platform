@@ -103,6 +103,7 @@ class FsmNeedsDocumentTests(unittest.TestCase):
                     "city": "Bogotá",
                     "state": "DC",
                     "dane_code": "11001000",
+                    "neighborhood": "Chapinero",  # P6 opción C: residencial.
                     "building_type": "casa",
                 },
             }),

@@ -108,7 +108,11 @@ class DetermineTransactionalStateTests(unittest.TestCase):
             self.r.determine_transactional_state({
                 "consent_given": True, "email": "x@y.com", "name": "C",
                 "document_type": "CC", "document_number": "1032414179",
-                "address": {"street": "Calle 1", "city": "Bogotá", "building_type": "casa"},
+                "address": {
+                    "street": "Calle 1", "city": "Bogotá",
+                    "neighborhood": "Chapinero",  # P6 opción C.
+                    "building_type": "casa",
+                },
             }),
             "READY_FOR_SUMMARY",
         )
@@ -123,7 +127,11 @@ class ResolveDisplayStateTests(unittest.TestCase):
         return {
             "consent_given": True, "email": "x@y.com", "name": "C",
             "document_type": "CC", "document_number": "1032414179",
-            "address": {"street": "Calle 1", "city": "Bogotá", "building_type": "casa"},
+            "address": {
+                "street": "Calle 1", "city": "Bogotá",
+                "neighborhood": "Chapinero",  # P6 opción C: obligatorio residencial.
+                "building_type": "casa",
+            },
         }
 
     def test_no_buying_intent_catalog_mode(self):
@@ -233,8 +241,12 @@ class HasRealAddressDataTests(unittest.TestCase):
     def test_both_present(self):
         # Rev. 104 — el resolver delega a fsm.address.has_real_address_data
         # que también requiere building_type.
+        # Sem 7 F2 cierre 2026-05-20 — P6 opción C: barrio obligatorio
+        # en residencial (casa).
         self.assertTrue(self.r._has_real_address_data({
-            "street": "Calle 1", "city": "Bogotá", "building_type": "casa",
+            "street": "Calle 1", "city": "Bogotá",
+            "neighborhood": "Chapinero",
+            "building_type": "casa",
         }))
 
     def test_empty_strings_treated_as_missing(self):
