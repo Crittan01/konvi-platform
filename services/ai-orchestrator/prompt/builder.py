@@ -814,7 +814,7 @@ Responde SIEMPRE en JSON puro con este esquema exacto:
     "reference": "punto de referencia o portería, ej 'Frente al parque', 'Al lado del Éxito'. NO uses este campo para piso (usa `floor`) ni para nombre de empresa (usa `company_name`).",
     "additional_info": null
   }},
-  "extracted_document_type": "CC|CE|NIT|PP|TI|OTHER o null si no se mencionó documento",
+  "extracted_document_type": "CC|CE|NIT|PP|TI|OTHER o null. Reconocer variantes coloquiales CO: 'Cédula'/'Cedula'/'Cédula de Ciudadanía'→CC, 'Cédula de Extranjería'/'Extranjeria'→CE, 'NIT'→NIT, 'Pasaporte'/'Passport'→PP, 'Tarjeta de Identidad'→TI.",
   "extracted_document_number": "solo dígitos sin puntos/espacios, ej '1234567890' o null",
   "extracted_shipping_phone": "10 dígitos del celular alternativo de envío, ej '3001234567', o null si solo dio su WhatsApp",
   "total_in_cents": null,

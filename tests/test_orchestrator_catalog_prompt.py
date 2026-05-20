@@ -141,7 +141,7 @@ class OrchestratorCatalogPromptTests(unittest.TestCase):
                 # Rev. 68 — document obligatorio antes de address en el FSM.
                 "document_type": "CC",
                 "document_number": "1234567890",
-                "address": {"street": "Calle 1", "city": "Bogotá", "state": "Cundinamarca", "building_type": "casa"},
+                "address": {"street": "Calle 1", "city": "Bogotá", "state": "Cundinamarca", "neighborhood": "Chapinero", "building_type": "casa"},
             },
             query_text="Si deseo 2 color Rojo",
             history=[

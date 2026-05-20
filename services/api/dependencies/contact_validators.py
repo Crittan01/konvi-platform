@@ -149,21 +149,28 @@ def address_required_fields(
     Edificio: + apartment.
     Conjunto torres (default si conjunto_type ausente): + tower, apartment.
     Conjunto casas: + apartment (alias "casa #X" — sin torre).
-    Oficina: + apartment (= oficina #).
+    Oficina: + apartment (= oficina #). NO exige neighborhood.
+
+    Sem 7 F2 cierre 2026-05-20 — P6 founder UAT (acuerdo opción C):
+    `neighborhood` es OBLIGATORIO en residencial (casa/edificio/conjunto)
+    porque las transportadoras CO (Coordinadora, Servientrega) lo usan
+    para sub-zonificar tarifa + ETA. En OFICINA (edificio empresarial
+    en zona céntrica) el barrio no aplica naturalmente — opcional.
 
     `floor` y `company_name` son SIEMPRE opcionales — no entran en required.
     """
-    base = ["street", "neighborhood", "city", "state", "dane_code"]
+    base_residencial = ["street", "neighborhood", "city", "state", "dane_code"]
+    base_oficina = ["street", "city", "state", "dane_code"]  # sin neighborhood
+    if building_type == "oficina":
+        return base_oficina + ["apartment"]
     if building_type == "edificio":
-        return base + ["apartment"]
+        return base_residencial + ["apartment"]
     if building_type == "conjunto":
         if conjunto_type == "casas":
-            return base + ["apartment"]
+            return base_residencial + ["apartment"]
         # Default + 'torres': comportamiento legacy (back-compat).
-        return base + ["tower", "apartment"]
-    if building_type == "oficina":
-        return base + ["apartment"]
-    return base  # casa o no especificado
+        return base_residencial + ["tower", "apartment"]
+    return base_residencial  # casa o no especificado
 
 
 def is_address_complete(address: Optional[dict]) -> tuple[bool, list[str]]:

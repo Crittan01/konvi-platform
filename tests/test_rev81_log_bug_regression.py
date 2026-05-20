@@ -127,10 +127,10 @@ class LogBugRegressionTests(unittest.TestCase):
         # Cantidades correctas
         self.assertIn("1x Jabón Artesanal de Coco", out)
         self.assertIn("2x Jabón Artesanal de Lavanda", out)
-        # Subtotal y total
-        self.assertIn("$82.000 COP", out)   # subtotal
-        self.assertIn("$11.000 COP", out)   # shipping
-        self.assertIn("$93.000 COP", out)   # total
+        # Subtotal y total — Sem 7 F2 cierre 2026-05-20: sin " COP" (P5).
+        self.assertIn("$82.000", out)   # subtotal
+        self.assertIn("$11.000", out)   # shipping
+        self.assertIn("$93.000", out)   # total
         # El total bug del log NO debe aparecer
         self.assertNotIn("$26.000", out)
 

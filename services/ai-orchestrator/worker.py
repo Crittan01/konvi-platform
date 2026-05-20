@@ -919,12 +919,13 @@ class OrchestratorWorker:
             )
             return False
 
-        # Format total COP: $87.500 COP (entero, punto cada 3)
+        # Format total: $87.500 (entero, punto cada 3).
+        # Sem 7 F2 cierre 2026-05-20 — P5: sin sufijo " COP" (UX limpio).
         try:
             pesos = int(total_amount)  # total_amount ya está en pesos en orders schema
-            total_str = f"${pesos:,}".replace(",", ".") + " COP"
+            total_str = f"${pesos:,}".replace(",", ".")
         except Exception:
-            total_str = "$0 COP"
+            total_str = "$0"
 
         order_number = str(order_id)[:8].upper()
 

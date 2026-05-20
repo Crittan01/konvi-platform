@@ -56,20 +56,30 @@ export interface StructuredAddress {
   company_name?: string | null
 }
 
-/** Campos requeridos según building_type + conjunto_type. */
+/** Campos requeridos según building_type + conjunto_type.
+ *
+ * Sem 7 F2 cierre 2026-05-20 — P6 opción C (acuerdo founder):
+ * `neighborhood` es OBLIGATORIO en residencial (casa/edificio/conjunto)
+ * — transportadoras CO lo usan para sub-zonificar tarifa+ETA.
+ * En OFICINA es OPCIONAL — edificios empresariales en zonas céntricas
+ * no necesitan barrio para entrega.
+ *
+ * Espejo de `services/api/dependencies/contact_validators.py::address_required_fields`.
+ */
 export function addressRequiredFields(
   buildingType: BuildingType | null | undefined,
   conjuntoType?: ConjuntoType | null,
 ): string[] {
-  const base = ['street', 'neighborhood', 'city', 'state', 'dane_code']
-  if (buildingType === 'edificio') return [...base, 'apartment']
-  if (buildingType === 'oficina') return [...base, 'apartment']
+  const baseResidencial = ['street', 'neighborhood', 'city', 'state', 'dane_code']
+  const baseOficina = ['street', 'city', 'state', 'dane_code']  // sin neighborhood
+  if (buildingType === 'oficina') return [...baseOficina, 'apartment']
+  if (buildingType === 'edificio') return [...baseResidencial, 'apartment']
   if (buildingType === 'conjunto') {
-    if (conjuntoType === 'casas') return [...base, 'apartment']
+    if (conjuntoType === 'casas') return [...baseResidencial, 'apartment']
     // 'torres' (o conjunto_type ausente — back-compat) → tower + apartment.
-    return [...base, 'tower', 'apartment']
+    return [...baseResidencial, 'tower', 'apartment']
   }
-  return base // casa o no especificado
+  return baseResidencial // casa o no especificado
 }
 
 export interface AddressValidationResult {

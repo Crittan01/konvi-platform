@@ -135,18 +135,30 @@ export default function AddressSelector({
       {/* Rev. 69 — campos estructurados (Contactos del cliente final). */}
       {showBuildingDetails && (
         <>
+          {/* Sem 7 F2 cierre 2026-05-20 — P6 opción C: barrio obligatorio
+              en residencial (casa/edificio/conjunto) — transportadoras CO
+              lo usan para sub-zonificar tarifa+ETA. Opcional en oficina
+              (edificios empresariales en zonas céntricas no lo necesitan). */}
           <div className="space-y-1">
             <Label className="text-xs">
-              Barrio <span className="text-destructive">*</span>
+              Barrio {buildingType === 'oficina' ? null : <span className="text-destructive">*</span>}
             </Label>
             <Input
               name={`${fieldPrefix}_neighborhood`}
               defaultValue={defaultValue.neighborhood ?? ''}
-              placeholder="Chapinero / El Poblado / Granada"
-              required
+              placeholder={
+                buildingType === 'oficina'
+                  ? '(opcional) Chapinero / Centro Internacional'
+                  : 'Chapinero / El Poblado / Granada'
+              }
+              required={buildingType !== 'oficina'}
               className="h-8 text-xs"
             />
-            <p className="text-[10px] text-muted-foreground">Carriers (Coordinadora, Servientrega) lo usan para optimizar zona.</p>
+            <p className="text-[10px] text-muted-foreground">
+              {buildingType === 'oficina'
+                ? 'En oficinas, el barrio es opcional — el edificio empresarial suele bastar.'
+                : 'Carriers (Coordinadora, Servientrega) lo usan para optimizar zona.'}
+            </p>
           </div>
 
           <div className="space-y-1">

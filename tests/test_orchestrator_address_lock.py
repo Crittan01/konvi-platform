@@ -49,9 +49,12 @@ class MissingAddressFieldsTests(unittest.TestCase):
         }))
 
     def test_casa_complete_with_street_city_type(self):
+        # Sem 7 F2 cierre 2026-05-20 — P6 opción C: barrio obligatorio
+        # en residencial. Address completa requiere neighborhood.
         addr = {
             "street": "Calle 10 # 5-23",
             "city": "Bogotá",
+            "neighborhood": "Chapinero",
             "building_type": "casa",
         }
         self.assertEqual(_missing_address_fields(addr), [])
@@ -90,6 +93,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
         addr = {
             "street": "CL 3 SUR 70-84",
             "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",  # P6 opción C: obligatorio en residencial.
             "building_type": "conjunto",
             "conjunto_type": "torres",
             "tower": "5",
@@ -114,6 +118,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
         addr = {
             "street": "CL 3 SUR 70-84",
             "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",  # P6 opción C: obligatorio en residencial.
             "building_type": "conjunto",
             "conjunto_type": "casas",
             "apartment": "12",  # alias semántico de "casa #12"
@@ -230,6 +235,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
             "address": {
                 "street": "Calle 1",
                 "city": "Bogotá",
+                "neighborhood": "Chapinero",  # P6 opción C.
                 "building_type": "casa",
             },
         }
