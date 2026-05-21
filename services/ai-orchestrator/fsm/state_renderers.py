@@ -41,10 +41,44 @@ def _format_price_cop(price: float) -> str:
     return f"${int(price):,}".replace(",", ".")
 
 
+def _normalize_for_match(text: str) -> str:
+    """Normaliza para matching (lowercase + sin acentos)."""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _product_mentioned_in_inbound(
+    product: dict, inbound_norm: str,
+) -> bool:
+    """True si el inbound menciona alguna palabra discriminativa del título
+    del producto. Heurística simple: palabras del título ≥4 chars
+    (filtrando stop-words y conectores) presentes en el inbound."""
+    title = str(product.get("title") or "")
+    if not title:
+        return False
+    import re as _re
+    title_norm = _normalize_for_match(title)
+    title_words = {
+        w for w in _re.findall(r"[a-z0-9ñ]+", title_norm)
+        if len(w) >= 4
+    }
+    _stop = {"jabon", "aceite", "serum", "artesanal", "esencial",
+             "vegetal", "facial", "natural"}
+    discriminative = title_words - _stop
+    if not discriminative:
+        # Si todo el título es stop-words (raro), aceptar palabras
+        # cortas también para no fallar silenciosamente.
+        discriminative = title_words
+    inbound_tokens = set(_re.findall(r"[a-z0-9ñ]+", inbound_norm))
+    return bool(discriminative & inbound_tokens)
+
+
 def render_needs_shipping_city(
     *,
     cart_items: list,
     last_outbound_products: list,
+    inbound_text: Optional[str] = None,
 ) -> Optional[str]:
     """Renderer determinístico para `display_state=NEEDS_SHIPPING_CITY`.
 
@@ -54,6 +88,12 @@ def render_needs_shipping_city(
       B. Cart vacío Y bot listó productos en T-1 → preguntar variante.
          Texto: lista las opciones de cada producto presentado + pregunta.
 
+    Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    Si `inbound_text` está disponible Y menciona productos específicos del
+    catálogo presentado en T-1 (e.g. "1 Coco y 1 Lavanda"), filtramos
+    `last_outbound_products` a esos productos. Sin esto, el renderer
+    listaría los 4 jabones aunque cliente solo quiere 2 (UX ruidosa).
+
     Si ni A ni B aplican (cart vacío sin contexto previo de productos),
     retorna None — el caller continúa al LLM (CATALOG_MODE-like behavior).
 
@@ -62,6 +102,8 @@ def render_needs_shipping_city(
       last_outbound_products: lista de productos cuyas variantes fueron
         presentadas en el último outbound del bot
         (`_last_outbound_presented_variants_all`).
+      inbound_text: texto del cliente (opcional). Si presente, filtra
+        productos por mención.
 
     Returns:
       Texto determinístico u None.
@@ -74,12 +116,25 @@ def render_needs_shipping_city(
     if not last_outbound_products:
         return None
 
+    # Sem 7 F2 cierre 2026-05-21 — filtrar por mención si tenemos inbound.
+    products_to_show: list = last_outbound_products
+    if inbound_text:
+        inbound_norm = _normalize_for_match(inbound_text)
+        mentioned = [
+            p for p in last_outbound_products
+            if _product_mentioned_in_inbound(p, inbound_norm)
+        ]
+        if mentioned:
+            products_to_show = mentioned
+        # Si NO matchea ninguno (e.g. "quiero algo"), fallback a la lista
+        # completa — mostrar las opciones disponibles.
+
     lines: list[str] = [
         "Para procesar tu pedido necesito la presentación de cada producto.",
         "",
     ]
     rendered_any = False
-    for product in last_outbound_products[:4]:  # límite defensivo
+    for product in products_to_show[:4]:  # límite defensivo
         title = str(product.get("title") or "Producto")
         variants = product.get("variants") or []
         opts: list[str] = []

@@ -2917,6 +2917,22 @@ _ADD_ITEM_VERB_MARKERS = (
     "puedo incluir", "puedo sumar", "puedo pedir",
     "podria agregar", "podría agregar", "podria adicionar", "podría adicionar",
     "podria pedir", "podría pedir",
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    # cliente dijo "Me peudes vender 1 Jabon de Coco y 1 de Lavanda".
+    # Faltaban verbos de venta/compra en español CO + petición con
+    # "vender" + typo común "peudes". Sin esto, tier-2 retornaba
+    # `no_intent` → flow caía al LLM → alucinación de gramaje.
+    "vender", "vende", "vendeme", "véndeme", "vendes", "venderme",
+    "comprar", "compro", "compra", "comprarte", "comprarles",
+    "me lo llevo", "me los llevo", "llevame", "llévame", "me llevo",
+    "dame", "deme", "déme", "regalame", "regálame",
+    "puedes vender", "puedes venderme", "peudes vender", "peudes venderme",
+    "puede venderme", "podrias vender", "podrías vender",
+    "podrias venderme", "podrías venderme",
+    "me vendes", "me vendrias", "me vendrías",
+    "quiero comprar", "quiero llevar", "quiero pedir",
+    "quisiera comprar", "quisiera llevar", "quisiera pedir",
+    "necesito", "necesitamos",
 )
 
 
@@ -3606,6 +3622,17 @@ ANÁLISIS DE VARIANTE (QUERY ACTUAL):
 _BUYING_INTENT_STRONG_TOKENS = {
     "comprar", "compra", "lo compro", "lo quiero comprar", "agregar al pedido", "hacer pedido",
     "proceder", "procede", "confirmo", "confirmar pedido", "me lo llevo", "pagar", "pago",
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    # frases coloquiales CO de "véndeme/vendeme" + typo "peudes" que NO
+    # estaban listadas. Sin estos, "Me peudes vender 1 Coco y 1 Lavanda"
+    # caía a buying_intent=False → CATALOG_MODE → LLM libre → alucinación.
+    "vendeme", "véndeme", "me vendes", "venderme",
+    "puedes vender", "peudes vender", "puede venderme", "puedes venderme",
+    "podrias vender", "podrías vender", "podrias venderme", "podrías venderme",
+    "quiero comprar", "quiero llevar", "quiero pedir",
+    "quisiera comprar", "quisiera llevar", "quisiera pedir",
+    "necesito comprar", "necesito llevar",
+    "dame", "regalame", "regálame",
 }
 _BUYING_INTENT_CONTEXT_MARKERS = {
     "cotice el envio", "cotizar envio", "envio de", "economica", "rapida", "direccion de entrega",
@@ -9154,6 +9181,7 @@ async def build_and_run_orchestration(
                 _override_text = _state_renderers.render_needs_shipping_city(
                     cart_items=_cart_items_sr,
                     last_outbound_products=_last_products,
+                    inbound_text=content,
                 )
             elif display_state == "AWAITING_CARRIER_SELECTION":
                 _override_text = _state_renderers.render_awaiting_carrier_selection(
