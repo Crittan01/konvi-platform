@@ -269,24 +269,44 @@ def _detect_shipping_phone_update(
     return digits
 
 
-# Markers de outbounds que piden número alterno de envío.
+# Detección semántica de outbounds que piden número alterno de envío.
 # Sem 7 F2 cierre 2026-05-20 — Bug P7 founder UAT.
-_SHIPPING_PHONE_REQUEST_MARKERS = (
-    "cuál es el número que quieres agregar",
-    "cual es el numero que quieres agregar",
-    "dime cuál es el número",
-    "dime cual es el numero",
-    "compárteme el celular alterno",
-    "comparteme el celular alterno",
-    "compárteme tu celular alterno",
-    "comparteme tu celular alterno",
-    "el celular adicional",
-    "celular para el envío",
-    "celular para el envio",
-    "dame el número adicional",
-    "dame el numero adicional",
-    "número para el envío",
-    "numero para el envio",
+#
+# Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv f6ec7213):
+# El bot dijo "Cuál es el número de celular que quieres agregar para el
+# envío?" y los markers substring rígidos no machearon (faltaba contigüidad
+# por "de celular" intercalado). Cliente respondió "3223840887" → detector
+# no disparó → resumen rendereado con contact_record stale (sin segundo
+# número). Solución arquitectónica: reemplazar lista de substrings frágiles
+# por una regex SEMÁNTICA que captura la intención independiente del
+# fraseo exacto del LLM.
+#
+# Intención capturada: "outbound pide al cliente un número/teléfono/celular
+# alterno o adicional para envío". Tres patrones complementarios para evitar
+# tanto falsos negativos (markers rígidos previos) como falsos positivos
+# ("Te envío tu link de pago a tu celular" — informativo, no petición).
+_SHIPPING_PHONE_REQUEST_REGEX = re.compile(
+    # P1 — interrogativo/imperativo + sustantivo + cualidad de petición.
+    #      "Cuál es el número de celular que quieres agregar para el envío?"
+    r"\b(?:cual|dime|dame|comparteme)\b.*?"
+    r"\b(?:numero|telefono|celular)\b.*?"
+    r"\b(?:agregar|adicional|alterno|alternativo|envio|entrega)\b"
+    r"|"
+    # P2 — verbo de petición + sustantivo.
+    #      "Agrega tu celular", "Compárteme el número adicional"
+    r"\b(?:agrega|agregar|comparteme|dame)\b.*?"
+    r"\b(?:numero|telefono|celular)\b"
+    r"|"
+    # P3 — sustantivo + cualidad alterna (orden inverso o adyacente).
+    #      "El celular adicional", "número alternativo"
+    r"\b(?:numero|telefono|celular)\b\s+\w*\s*"
+    r"\b(?:adicional|alterno|alternativo)\b"
+    r"|"
+    # P4 — sustantivo + "para" + envío/entrega.
+    #      "celular para el envío", "número para la entrega"
+    r"\b(?:numero|telefono|celular)\b\s+(?:para|de)\s+(?:el\s+|la\s+)?"
+    r"\b(?:envio|entrega)\b",
+    flags=re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -297,6 +317,9 @@ def _last_outbound_requested_shipping_phone(history: list[dict]) -> bool:
 
     Mira solo el outbound MÁS RECIENTE (1 turno atrás) — más allá podría
     estar fuera de contexto.
+
+    Sem 7 F2 cierre 2026-05-21 — detección semántica vía regex (antes:
+    lista de substrings frágiles que perdían matches con filler words).
     """
     if not history:
         return False
@@ -307,7 +330,7 @@ def _last_outbound_requested_shipping_phone(history: list[dict]) -> bool:
         if not content.strip():
             continue
         normalized = _normalize_text_simple(content).lower()
-        return any(m in normalized for m in _SHIPPING_PHONE_REQUEST_MARKERS)
+        return bool(_SHIPPING_PHONE_REQUEST_REGEX.search(normalized))
     return False
 
 
@@ -2620,6 +2643,12 @@ def _resolve_variant_from_inbound(
     variantes). El caller que conoce el contexto "un solo producto" (ej.
     `_detect_variant_confirmation` cuando el bot acaba de presentar UN
     producto) deja este flag en False para mantener back-compat.
+
+    Sem 7 F2 cierre 2026-05-21 — la disambiguación CROSS-PRODUCT (caso
+    "3 sérums presentados, cliente dice 'Sérum Vitamina C 30ml'") NO vive
+    aquí — está en `_detect_variant_confirmation` que aplica la lógica
+    post-resolución basada en si la variante matched es ambigua (label
+    compartido entre productos del set).
     """
     if not inbound_text or not product:
         return []
@@ -3344,6 +3373,55 @@ def _detect_variant_confirmation(
     # variante 150g de Coco (porque Coco tiene 150g) y la 100g de
     # Lavanda (porque Lavanda tiene 100g) → 4 items en cart en vez de 2.
     multi_product_context = len(products) > 1
+
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv f6ec7213):
+    # disambiguación CROSS-PRODUCT a nivel de VARIANTE (post-resolución).
+    # Caso: bot listó 3 sérums; cliente dijo "Sérum Vitamina C 30ml".
+    # Cada sérum tenía variante 30ml → matcheaban los 3 → cart con 3 items.
+    #
+    # Arquitectura limpia:
+    #   1. Computar `ambiguous_variant_labels`: labels (e.g. "30ml") que
+    #      aparecen en ≥2 productos del set presentado. Si solo 1 producto
+    #      tiene "60g", "60g" NO es ambigua y matchea sin requerir mención
+    #      del nombre del producto (caso Coco/Sérum: 60g solo en Coco).
+    #   2. Computar `product_discriminative_words` por producto: palabras
+    #      del título exclusivas de ese producto vs los otros del set.
+    #   3. Para cada match (producto, variante): si la variante es ambigua
+    #      (compartida), exigir que el inbound contenga ≥1 palabra
+    #      discriminativa del producto matched. Si la variante NO es
+    #      ambigua, aceptar sin requerir mención (la variante misma
+    #      identifica al producto unívocamente).
+    ambiguous_variant_labels: set[str] = set()
+    product_discriminative: dict[str, set[str]] = {}
+    if multi_product_context:
+        _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+        # Conteo de labels de variante a través de productos.
+        _variant_label_counts: dict[str, int] = {}
+        for _prod in products:
+            for _v in _prod.get("variants") or []:
+                _label = _normalize_text(str(_v.get("label") or "")).strip()
+                if _label:
+                    _variant_label_counts[_label] = _variant_label_counts.get(_label, 0) + 1
+        ambiguous_variant_labels = {
+            lbl for lbl, c in _variant_label_counts.items() if c >= 2
+        }
+        # Conteo de palabras de título a través de productos (para
+        # identificar palabras compartidas que NO sirven como discriminadores).
+        _title_word_counts: dict[str, int] = {}
+        for _prod in products:
+            _tn = _normalize_text(str(_prod.get("title") or ""))
+            _tw = {w for w in re.findall(r"[a-z0-9ñ]+", _tn) if len(w) >= 4} - _stop
+            for w in _tw:
+                _title_word_counts[w] = _title_word_counts.get(w, 0) + 1
+        _shared_title_words = {w for w, c in _title_word_counts.items() if c >= 2}
+        # Per-producto: palabras exclusivas del título.
+        for _prod in products:
+            _tn = _normalize_text(str(_prod.get("title") or ""))
+            _tw = {w for w in re.findall(r"[a-z0-9ñ]+", _tn) if len(w) >= 4} - _stop
+            product_discriminative[str(_prod.get("id") or "")] = _tw - _shared_title_words
+
+    _content_tokens = set(re.findall(r"[a-z0-9ñ]+", _normalize_text(content)))
+
     for product in products:
         variant_matches = _resolve_variant_from_inbound(
             content, product,
@@ -3356,6 +3434,19 @@ def _detect_variant_confirmation(
             variation_id = str(variant.get("id") or "")
             if not variation_id or variation_id in seen_variation_ids:
                 continue
+            # Sem 7 F2 cierre 2026-05-21 — gate cross-product post-resolución.
+            # Si la variante matched tiene label compartido con otros productos
+            # presentados, exigir que el inbound mencione palabra exclusiva
+            # del título de ESTE producto. Si la variante es única (solo este
+            # producto la tiene), aceptar sin requerir mención.
+            if multi_product_context:
+                _label_norm = _normalize_text(str(variant.get("label") or "")).strip()
+                if _label_norm in ambiguous_variant_labels:
+                    _disc = product_discriminative.get(str(product.get("id") or ""), set())
+                    if not (_content_tokens & _disc):
+                        # Variante ambigua + inbound no menciona producto.
+                        # Rechazar para evitar atribución cruzada.
+                        continue
             results.append({
                 "product_id": str(product.get("id") or ""),
                 "variation_id": variation_id,
