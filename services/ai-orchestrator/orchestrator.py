@@ -2521,7 +2521,12 @@ _QTY_UNIT_TOKENS: frozenset[str] = frozenset({
 })
 
 
-def _extract_qty_for_product(content_norm: str, product: dict) -> int:
+def _extract_qty_for_product(
+    content_norm: str,
+    product: dict,
+    *,
+    generic_terms: Optional[set[str]] = None,
+) -> int:
     """Devuelve la cantidad declarada para `product` en el inbound, o 1.
 
     Atribución *product-local*: solo cuenta dígitos que estén dentro de
@@ -2531,16 +2536,27 @@ def _extract_qty_for_product(content_norm: str, product: dict) -> int:
     coco y 1 sérum" — el "2" es de coco, el "1" es de sérum, NUNCA al
     revés.
 
+    Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv febcec09):
+    inbound "1 Jabón Coco y 2 Lavanda" producía qty=2 para Coco porque:
+      a) La ventana ±3 tokens desde "coco" alcanzaba al "2" de Lavanda.
+      b) "jabon" + "artesanal" se trataban como discriminativos de cada
+         producto aunque son palabras GENÉRICAS entre jabones.
+    Fix doble:
+      1. SEGMENTAR el inbound por separators ("y", ",", "+", ";") y
+         evaluar la ventana SOLO dentro del segmento del producto.
+      2. Aceptar `generic_terms` opcional del catálogo y RESTARLO de
+         las palabras discriminativas (igual lógica que
+         `_detect_explicit_products_in_inbound`).
+
     Reglas:
-      • Tokens del título (sin stop-words) = `discriminative`.
+      • Segmentar por " y "/", "/"; "/"+ ".
+      • Tokens del título − stop-words − generic_terms = `discriminative`.
       • Match laxo: token del inbound coincide con discriminative si son
-        iguales OR comparten prefijo de ≥4 chars (cubre plurales tipo
-        "jabones" → "jabón", "sérums" → "sérum").
-      • Para cada match en el inbound, busca dígitos 1-2 cifras a ≤3
-        tokens de distancia. Excluye dígitos cuyo siguiente token es
-        unidad (g/ml/etc.) — esos son atributos de variante.
-      • Devuelve el MÁXIMO encontrado (caso múltiples menciones del mismo
-        producto: el cliente reafirmó). Default 1.
+        iguales OR comparten prefijo de ≥4 chars (cubre plurales).
+      • Para cada segmento que contenga discriminativo del producto,
+        busca dígitos 1-2 cifras dentro de ESE segmento. Excluye dígitos
+        cuyo siguiente token es unidad (g/ml/etc.).
+      • Devuelve el MÁXIMO encontrado entre segmentos. Default 1.
     """
     if not content_norm or not product:
         return 1
@@ -2548,10 +2564,14 @@ def _extract_qty_for_product(content_norm: str, product: dict) -> int:
     title_words = (
         set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _QTY_STOPWORDS
     )
+    # Restar palabras genéricas del catálogo (e.g. "jabon"/"artesanal"
+    # compartidas por todos los jabones). Sin esto, el caller que llame
+    # con producto Coco para inbound "2 lavanda" obtendría qty=2 porque
+    # "jabon"/"artesanal" matchearían en el segmento "2 jabon artesanal
+    # de lavanda" como discriminativos espurios de Coco.
+    if generic_terms:
+        title_words = title_words - generic_terms
     if not title_words:
-        return 1
-    tokens = re.findall(r"[a-z0-9ñ]+", content_norm)
-    if not tokens:
         return 1
 
     def _is_discriminative(tok: str) -> bool:
@@ -2566,44 +2586,78 @@ def _extract_qty_for_product(content_norm: str, product: dict) -> int:
                 return True
         return False
 
-    qty = 1
-    has_discriminative_match = any(_is_discriminative(t) for t in tokens)
-    if has_discriminative_match:
-        # Atribución product-local: dígitos cerca de las palabras del producto.
-        for i, tok in enumerate(tokens):
-            if not _is_discriminative(tok):
-                continue
-            lo = max(0, i - 3)
-            hi = min(len(tokens), i + 4)
-            for j in range(lo, hi):
-                w = tokens[j]
-                if not re.fullmatch(r"\d{1,2}", w):
-                    continue
-                if j + 1 < len(tokens) and tokens[j + 1] in _QTY_UNIT_TOKENS:
-                    continue
-                try:
-                    v = int(w)
-                    if 2 <= v <= 99:
-                        qty = max(qty, v)
-                except ValueError:
-                    continue
-    else:
-        # Sin discriminativos del producto en el inbound (caso típico Camino
-        # A: bot acaba de presentar variantes, cliente responde "2 unidades
-        # de 60g" sin repetir el nombre). Aquí cualquier dígito no-unidad
-        # puede ser qty — el contexto producto ya está fijado por el
-        # `_last_outbound_presented_variants` del caller.
-        for j, w in enumerate(tokens):
+    def _scan_qty_in_tokens(tokens_list: list[str], require_discriminative: bool) -> int:
+        """Escanea una lista de tokens y retorna el MAX qty (≥2) detectado.
+        Si `require_discriminative=True` el segmento DEBE contener un
+        discriminativo del producto; cualquier dígito ≥2 no-unidad del
+        segmento cuenta (la segmentación ya garantizó localización al
+        producto)."""
+        local_qty = 1
+        if require_discriminative and not any(_is_discriminative(t) for t in tokens_list):
+            return local_qty
+        # Escanear todo el segmento (no ventana ±3) — segmentación previa
+        # ya garantiza que este segmento corresponde a UN solo producto.
+        # Ventana ±3 era anti-cross-attribution; ahora la segmentación
+        # cumple esa función con mejor precisión.
+        for j, w in enumerate(tokens_list):
             if not re.fullmatch(r"\d{1,2}", w):
                 continue
-            if j + 1 < len(tokens) and tokens[j + 1] in _QTY_UNIT_TOKENS:
+            if j + 1 < len(tokens_list) and tokens_list[j + 1] in _QTY_UNIT_TOKENS:
                 continue
             try:
                 v = int(w)
                 if 2 <= v <= 99:
-                    qty = max(qty, v)
+                    local_qty = max(local_qty, v)
             except ValueError:
                 continue
+        return local_qty
+
+    # Sem 7 F2 cierre 2026-05-21 — segmentar primero por separators.
+    # Caso runtime: "1 jabon coco y 2 lavanda" → ["1 jabon coco", "2 lavanda"].
+    # Cada segmento se evalúa de forma aislada → qty no se contagia entre
+    # productos. Tipos de separators reconocidos: " y ", ", ", " + ", "; ".
+    segments_raw: list[str] = []
+    # Aplicar split secuencial: si el inbound tiene varios separators,
+    # iterativamente cada split divide segmentos resultantes.
+    _segments_tmp: list[str] = [content_norm]
+    for sep in [" y ", ", ", " + ", "; "]:
+        _next: list[str] = []
+        for seg in _segments_tmp:
+            if sep in seg:
+                _next.extend(s.strip() for s in seg.split(sep) if s.strip())
+            else:
+                _next.append(seg)
+        _segments_tmp = _next
+    segments_raw = _segments_tmp or [content_norm]
+
+    qty = 1
+    # Si hay discriminativo en cualquier segmento, aplicar atribución
+    # product-local POR SEGMENTO (cada segmento evalúa qty solo si tiene
+    # discriminativo del producto). Si NINGÚN segmento tiene
+    # discriminativo:
+    #   • Caller pasó `generic_terms` (identificando productos en
+    #     contexto multi-producto) → qty=1 default. NO usar Camino A
+    #     porque significaría inventar qty para un producto NO mencionado.
+    #   • Caller NO pasó `generic_terms` (contexto producto único, ej.
+    #     bot recién presentó variantes) → Camino A: cualquier dígito
+    #     no-unidad del inbound puede ser qty.
+    all_tokens = re.findall(r"[a-z0-9ñ]+", content_norm)
+    if not all_tokens:
+        return 1
+    has_any_discriminative = any(_is_discriminative(t) for t in all_tokens)
+    if has_any_discriminative:
+        for seg in segments_raw:
+            seg_tokens = re.findall(r"[a-z0-9ñ]+", seg)
+            if not seg_tokens:
+                continue
+            seg_qty = _scan_qty_in_tokens(seg_tokens, require_discriminative=True)
+            qty = max(qty, seg_qty)
+    elif generic_terms is None:
+        # Camino A: contexto producto fijado por presentación previa,
+        # cliente solo da "2 unidades de 60g" sin nombre.
+        qty = _scan_qty_in_tokens(all_tokens, require_discriminative=False)
+    # else: generic_terms provisto + no discriminativo → qty=1 default
+    # (defensa contra cross-attribution en contexto multi-producto).
     return qty
 
 
@@ -2874,7 +2928,12 @@ def _detect_explicit_products_in_inbound(
             variant, qty = _variant_matches[0]
         else:
             variant = None
-            qty = _extract_qty_for_product(_normalize_text(content), prod)
+            # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv febcec09):
+            # pasar generic_terms para que "jabon"/"artesanal" no se traten
+            # como discriminativos del producto al extraer qty.
+            qty = _extract_qty_for_product(
+                _normalize_text(content), prod, generic_terms=generic_terms,
+            )
         if not variant:
             # Sin variante resoluble. Si el cliente declaró una qty
             # explícita >=2, registrar PROPUESTA para no perder la cantidad
@@ -8342,8 +8401,22 @@ async def build_and_run_orchestration(
             _multi_explicit: list[dict] = []
             _proposals: list[dict] = []
             if not _variant_confirmed:
+                # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv febcec09):
+                # Catalog FULL produce false positives multi-categoría.
+                # Caso runtime: cliente dijo "1 Jabón Coco y 2 Lavanda" tras
+                # ver listado de jabones → detector hizo 5 propuestas
+                # (incluyó Aceite de Coco Virgen + Avena/Menta por overlap
+                # de "jabon" + "artesanal"). Fix: filtrar catalog por
+                # categoría reciente (mismo helper que tier-2 ya usa) ANTES
+                # del detector explícito.
+                _category_token_pre = _extract_category_token_from_recent_context(
+                    history_for_prompt or [], catalog or [],
+                )
+                _eff_catalog_pre = _filter_catalog_by_category_token(
+                    catalog or [], _category_token_pre,
+                )
                 _multi_explicit, _proposals = _detect_explicit_products_in_inbound(
-                    content, catalog or [],
+                    content, _eff_catalog_pre,
                 )
 
             from tools.cart_tool import ensure_cart, add_item
