@@ -66,12 +66,40 @@ class Rev76SummaryGuardTests(unittest.TestCase):
         )]
         self.assertFalse(_is_shipping_followup_query("Sí", history))
 
-    def test_subtotal_marker_blocks(self):
-        """Resúmenes con 'Subtotal:' deben bloquear el followup."""
+    def test_subtotal_solo_no_bloquea_followup(self):
+        """Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (conv 56ff85d8).
+
+        ANTES: cualquier outbound con "Subtotal:" disparaba el guard y
+        bloqueaba el followup. Eso era demasiado amplio — el mini-resumen
+        pre-cotización (que el bot emite ANTES de pedir ciudad) también
+        contiene "Subtotal:" pero NO es resumen FINAL.
+
+        AHORA: "Subtotal:" solo NO basta. Necesita combinarse con markers
+        ESPECÍFICOS del resumen final ("Resumen de tu pedido", "link de
+        pago", "datos correctos"). Los outbounds tipo mini-resumen
+        pre-cotización deben PASAR el guard para que el tool pueda
+        procesar la ciudad que el cliente da inmediatamente después.
+        """
         history = [_outbound(
-            "Tu pedido:\n• 1x Coco — $18.000\nSubtotal: $18.000\nEnvío: $12.000"
+            "Perfecto, vamos a cotizar el envío.\n"
+            "*Productos en tu carrito:*\n"
+            "* 1x Jabón Coco (100g): *$24.000*\n"
+            "Subtotal: *$56.000 COP*\n"
+            "Para qué ciudad es el envío?"
         )]
-        self.assertFalse(_is_shipping_followup_query("Ok", history))
+        # Cliente da ciudad → DEBE activar followup (no bloquear).
+        result = _is_shipping_followup_query("Bogota", history)
+        self.assertTrue(
+            result,
+            "Mini-resumen pre-cotización con 'Subtotal:' NO debe bloquear "
+            "respuesta del cliente con ciudad — el bot acaba de preguntar 'Para qué ciudad'.",
+        )
+
+    def test_resumen_final_completo_si_bloquea(self):
+        """Caso original rev. 76 preservado: el resumen FINAL completo
+        (con TODOS los markers específicos) SÍ bloquea el followup."""
+        history = [_outbound(self._summary_outbound())]
+        self.assertFalse(_is_shipping_followup_query("Ok, gracias", history))
 
     def test_followup_real_envio_sigue_funcionando(self):
         """Caso legítimo: bot ofrece cotizar, cliente dice 'sí'.
@@ -80,6 +108,40 @@ class Rev76SummaryGuardTests(unittest.TestCase):
             "¿Te gustaría cotizar el envío a tu ciudad?"
         )]
         self.assertTrue(_is_shipping_followup_query("Sí", history))
+
+    # ── Bug founder UAT 2026-05-21 (conv 56ff85d8) ────────────────────────
+
+    def test_ciudad_tras_pregunta_para_que_ciudad_activa_followup(self):
+        """Bug founder: el bot pregunta "Para qué ciudad es el envío?",
+        cliente responde "Bogota". ANTES no había marker para esa frase
+        → tool retornaba False → LLM tomaba control → respondía texto
+        genérico de KB sin cotizar realmente.
+        Ahora: el marker `'para que ciudad es el envio'` matchea."""
+        history = [_outbound(
+            "Perfecto, vamos a cotizar el envío.\n"
+            "*Productos en tu carrito:*\n"
+            "* 1x Jabón Coco (100g): *$24.000*\n"
+            "Subtotal: *$56.000 COP*\n"
+            "Para qué ciudad es el envío?"
+        )]
+        self.assertTrue(_is_shipping_followup_query("Bogota", history))
+
+    def test_ciudad_tras_pregunta_a_que_ciudad_enviamos_activa_followup(self):
+        """Variante: bot pregunta "¿A qué ciudad enviamos?" (frase canónica
+        con verbo de envío + marker "a que ciudad enviamos")."""
+        history = [_outbound(
+            "Tienes 1x Coco + 1x Lavanda.\n"
+            "A qué ciudad enviamos tu pedido?"
+        )]
+        self.assertTrue(_is_shipping_followup_query("Medellín", history))
+
+    def test_ciudad_tras_pregunta_ciudad_de_entrega_activa_followup(self):
+        """Variante: bot pregunta "Cuál es la ciudad de entrega?"."""
+        history = [_outbound(
+            "Listo, productos en carrito.\n"
+            "Cuál es la ciudad de entrega?"
+        )]
+        self.assertTrue(_is_shipping_followup_query("Cali", history))
 
 
 if __name__ == "__main__":
