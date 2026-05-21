@@ -9216,69 +9216,86 @@ async def build_and_run_orchestration(
                         )
                         return
 
-        # ── Sem 7 F2 cierre 2026-05-21 — State renderers determinísticos ───
-        # Bug founder UAT (conv 72e3f77e): el FSM resuelve correctamente
-        # `display_state=NEEDS_SHIPPING_CITY` pero el LLM, dentro de ese
-        # estado, redactaba libremente y a veces pedía consent/email/etc.
-        # aunque cliente conocido ya tenía esos datos en DB. Solución:
-        # override determinístico pre-LLM para estados transaccionales.
-        # Patrón idéntico al bypass `READY_FOR_SUMMARY → resumen` arriba.
+        # ── Sem 1 refactor (ADR-0017) — State Handler Layer ──────────────
+        # Reemplaza el bypass legacy `State renderers determinísticos`
+        # (commits 18a3a5d + 78f6ac6) por dispatch unificado vía
+        # `fsm/handlers/dispatcher.py`. Cada bypass legacy se está
+        # migrando uno por uno a un handler concreto en `fsm/handlers/`.
         #
-        # CATALOG_MODE y NEEDS_X PII se delegan al LLM/conductor existente
-        # (esos paths funcionan; el bug runtime estaba en NEEDS_SHIPPING_CITY).
+        # Handlers actualmente migrados (Sem 1):
+        #   • NEEDS_SHIPPING_CITY → handlers/needs_shipping_city.py
+        #   • AWAITING_CARRIER_SELECTION → handlers/awaiting_carrier_selection.py
         #
-        # Guards: solo bypass cuando el inbound NO es una respuesta a otro
-        # flow paralelo (shipping_phone update, qty_change, etc.) — esos
-        # detectores ya corrieron arriba y emitieron sus propios outbounds.
-        if (
-            display_state in {"NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}
-            and not _is_pii_update
-            and not _looks_like_phone
-            and not _has_add_item_intent
-        ):
-            from fsm import state_renderers as _state_renderers
-            _override_text: Optional[str] = None
-            if display_state == "NEEDS_SHIPPING_CITY":
-                try:
-                    from tools.cart_tool import get_cart_with_items as _gcwi_sr
-                    _cart_sr = _gcwi_sr(
-                        supabase, conversation_id=conversation_id,
-                        tenant_id=tenant_id,
-                    )
-                except Exception:
-                    _cart_sr = None
-                _cart_items_sr = (_cart_sr or {}).get("items") or []
-                _last_products = _last_outbound_presented_variants_all(
-                    catalog or [], history or [],
+        # Pendientes Sem 1 (próximos commits):
+        #   • READY_FOR_SUMMARY → resumen determinístico.
+        #   • NEEDS_CONSENT → consent question.
+        #   • Correction intent en READY_FOR_SUMMARY.
+        #
+        # NOTA: los guards (_is_pii_update, _looks_like_phone,
+        # _has_add_item_intent) ahora viven DENTRO de cada handler como
+        # condición de no-aplicabilidad. Esto elimina la lógica
+        # multiplicativa de guards anti-interferencia en el orchestrator.
+        try:
+            # Importar handlers triggerea auto-registro en el dispatcher.
+            import fsm.handlers.needs_shipping_city  # noqa: F401
+            import fsm.handlers.awaiting_carrier_selection  # noqa: F401
+            from fsm.handlers import dispatch as _handler_dispatch, TurnInput
+
+            # Cargar cart actual para el TurnInput (handlers que lo
+            # necesitan lo leen del input; los que no, lo ignoran).
+            _turn_cart = None
+            try:
+                from tools.cart_tool import get_cart_with_items as _gcwi_h
+                _turn_cart = _gcwi_h(
+                    supabase, conversation_id=conversation_id,
+                    tenant_id=tenant_id,
                 )
-                _override_text = _state_renderers.render_needs_shipping_city(
-                    cart_items=_cart_items_sr,
-                    last_outbound_products=_last_products,
-                    inbound_text=content,
-                )
-            elif display_state == "AWAITING_CARRIER_SELECTION":
-                _override_text = _state_renderers.render_awaiting_carrier_selection(
-                    last_outbound_was_quote=
-                        _state_renderers.last_outbound_was_shipping_quote(
-                            history or [],
-                        ),
-                )
-            if _override_text:
+            except Exception:
+                pass
+
+            _turn = TurnInput(
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                message_id=message_id,
+                contact_id=contact_id,
+                inbound_text=content or "",
+                content_type="text",
+                display_state=display_state,
+                buying_intent=buying_intent,
+                shipping_quoted=shipping_quoted,
+                carrier_selected=_has_carrier_been_selected(history or []),
+                contact_record=contact_record or {},
+                cart=_turn_cart,
+                catalog=catalog or [],
+                history=history or [],
+                supabase=supabase,
+            )
+            _h_result = await _handler_dispatch(_turn)
+            if _h_result is not None:
                 await _send_outbound_text(
                     supabase=supabase,
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
-                    text=_override_text,
+                    text=_h_result.outbound_text,
                 )
-                _mark_message_processing(
-                    supabase, message_id,
-                    processing_status=PROCESSING_STATUS_PROCESSED,
-                )
+                if _h_result.mark_processed:
+                    _mark_message_processing(
+                        supabase, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
                 logger.info(
-                    "[STATE_RENDER] %s → outbound determinístico conv=%s",
-                    display_state, conversation_id[:8],
+                    "[STATE_HANDLER] resolved state=%s handler=%s conv=%s",
+                    display_state, _h_result.handler_name,
+                    conversation_id[:8],
                 )
                 return
+        except Exception as _hd_exc:
+            # Degradación graceful: si el dispatcher rompe, cae al flow
+            # legacy/LLM. NO bloqueamos el turn.
+            logger.warning(
+                "[STATE_HANDLER] dispatch falló conv=%s: %s — cae al LLM",
+                conversation_id[:8], _hd_exc,
+            )
 
         # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
         if display_state == "READY_FOR_SUMMARY" and contact_id:
