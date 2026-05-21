@@ -115,6 +115,91 @@ class RenderNeedsShippingCityTests(unittest.TestCase):
         self.assertNotIn("Producto 5", out)
 
 
+class RenderNeedsShippingCityFilterByMentionTests(unittest.TestCase):
+    """Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    cliente dijo "1 Coco y 1 Lavanda" tras ver listado de 4 jabones.
+    Renderer debe filtrar a los 2 productos mencionados, NO listar los 4."""
+
+    _4_JABONES = [
+        {
+            "id": "p-avena",
+            "title": "Jabón Artesanal de Avena y Miel",
+            "variants": [
+                {"id": "av-60", "label": "60g", "price": 20000},
+                {"id": "av-100", "label": "100g", "price": 27000},
+            ],
+        },
+        _PROD_COCO,
+        _PROD_LAVANDA,
+        {
+            "id": "p-menta",
+            "title": "Jabón Artesanal de Menta y Eucalipto",
+            "variants": [
+                {"id": "me-60", "label": "60g", "price": 18000},
+                {"id": "me-100", "label": "100g", "price": 24000},
+            ],
+        },
+    ]
+
+    def test_caso_founder_filtra_a_coco_y_lavanda(self):
+        """Cliente dice "1 Coco y 1 Lavanda" → renderer muestra SOLO esos 2,
+        no los 4 jabones presentados en T-1."""
+        out = state_renderers.render_needs_shipping_city(
+            cart_items=[],
+            last_outbound_products=self._4_JABONES,
+            inbound_text="Me peudes vender 1 Jabon de Coco y 1 de Lavanda, por favor",
+        )
+        self.assertIsNotNone(out)
+        # Debe mencionar Coco y Lavanda.
+        self.assertIn("Coco", out)
+        self.assertIn("Lavanda", out)
+        # NO debe mencionar Avena ni Menta (no fueron pedidos).
+        self.assertNotIn("Avena", out)
+        self.assertNotIn("Menta", out)
+        # Eucalipto sí podría aparecer si Menta apareciera (forma parte del título),
+        # pero como filtramos Menta, no debe aparecer.
+        self.assertNotIn("Eucalipto", out)
+
+    def test_sin_mencion_explicita_muestra_todos(self):
+        """Cliente dice "Quiero un jabón" (sin nombre específico) → fallback:
+        lista los 4 (al menos los primeros 4 con variantes)."""
+        out = state_renderers.render_needs_shipping_city(
+            cart_items=[],
+            last_outbound_products=self._4_JABONES,
+            inbound_text="Quiero un jabón, por favor",
+        )
+        self.assertIsNotNone(out)
+        # Sin match específico → muestra todos.
+        self.assertIn("Coco", out)
+        self.assertIn("Lavanda", out)
+        self.assertIn("Avena", out)
+
+    def test_solo_coco_filtra_a_coco(self):
+        out = state_renderers.render_needs_shipping_city(
+            cart_items=[],
+            last_outbound_products=self._4_JABONES,
+            inbound_text="Quiero 1 jabón de coco",
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("Coco", out)
+        self.assertNotIn("Lavanda", out)
+        self.assertNotIn("Avena", out)
+        self.assertNotIn("Menta", out)
+
+    def test_sin_inbound_text_back_compat(self):
+        """Sin `inbound_text` (back-compat), comportamiento original: lista
+        todos los productos presentados."""
+        out = state_renderers.render_needs_shipping_city(
+            cart_items=[],
+            last_outbound_products=self._4_JABONES,
+            # inbound_text omitido
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("Coco", out)
+        self.assertIn("Lavanda", out)
+        self.assertIn("Avena", out)
+
+
 class RenderAwaitingCarrierSelectionTests(unittest.TestCase):
 
     def test_post_quote_recuerda_opciones(self):
@@ -198,6 +283,74 @@ class IntegrationFounderUATScenarioTests(unittest.TestCase):
         self.assertIn("Coco", out)
         self.assertIn("Lavanda", out)
         self.assertTrue("presentaci" in out.lower())
+
+
+class BuyingIntentDetectionExpandedTokensTests(unittest.TestCase):
+    """Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    `_has_buying_intent` y `_ADD_ITEM_VERB_MARKERS` no incluían verbos
+    coloquiales CO. Sin ellos:
+      • FSM → CATALOG_MODE (LLM libre).
+      • Tier-2 → `no_intent`.
+      • state_renderer → no dispara.
+      → LLM alucinó gramaje "60g" sin que cliente lo pidiera.
+
+    Tests verifican que tokens nuevos disparan correctamente."""
+
+    @classmethod
+    def setUpClass(cls):
+        import orchestrator
+        cls.orch = orchestrator
+
+    def test_peudes_vender_es_buying_intent(self):
+        """Typo común "peudes" (en lugar de "puedes"). Caso runtime exacto
+        founder UAT."""
+        self.assertTrue(
+            self.orch._has_buying_intent(
+                "Me peudes vender 1 Jabon de Coco y 1 de Lavanda",
+                history=[],
+            )
+        )
+
+    def test_puedes_vender_es_buying_intent(self):
+        self.assertTrue(
+            self.orch._has_buying_intent(
+                "Me puedes vender 1 jabón",
+                history=[],
+            )
+        )
+
+    def test_vendeme_es_buying_intent(self):
+        self.assertTrue(
+            self.orch._has_buying_intent("Vendeme 1 coco", history=[])
+        )
+
+    def test_quiero_comprar_es_buying_intent(self):
+        self.assertTrue(
+            self.orch._has_buying_intent(
+                "Quiero comprar un jabón de coco", history=[],
+            )
+        )
+
+    def test_pregunta_neutra_no_es_buying_intent(self):
+        """"Tienen?" / "Qué venden?" NO son buying intent (consultas)."""
+        self.assertFalse(
+            self.orch._has_buying_intent("Que venden?", history=[])
+        )
+        self.assertFalse(
+            self.orch._has_buying_intent("Tienen jabones?", history=[])
+        )
+
+    def test_add_item_marker_peudes_vender_detected_in_tier2(self):
+        """Tier-2 detector debe ahora cazar "peudes vender" para emitir
+        outbound determinístico en lugar de pasar al LLM."""
+        # Mock catalog mínimo con Coco para verificar tier-2.
+        catalog = [_PROD_COCO, _PROD_LAVANDA]
+        out = self.orch._detect_add_item_intent_with_resolution(
+            "Me peudes vender 1 Jabon de Coco y 1 de Lavanda, por favor",
+            catalog,
+        )
+        # Debe haber buying intent → NO `no_intent`.
+        self.assertNotEqual(out["resolution"], "no_intent")
 
 
 if __name__ == "__main__":
