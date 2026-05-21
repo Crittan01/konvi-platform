@@ -3955,6 +3955,49 @@ def _emit_summary_rendered_event(
         logger.debug("[CART_EVENT] summary_rendered emit falló: %s", exc)
 
 
+# Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv e0d7c539):
+# Detector determinístico de "LLM intentó confirmar cart-add sin que
+# `cart_tool.add_item` haya corrido". El detector busca CONFIRMACIÓN
+# verbal + VARIANTE explícita (peso/volumen entre paréntesis) + PRECIO
+# en un mismo segmento. Los 3 elementos juntos = LLM afirmando estado
+# de carrito concreto que no existe en DB. Sin los 3, podría ser solo
+# acuse-de-recibo neutral ("Claro, te muestro...") que no requiere
+# rewrite.
+#
+# Caso runtime: "Listo, 1x Jabón Artesanal de Coco (60g) por $18.000 COP"
+#   → confirmación "Listo" ✓
+#   → variante "(60g)" ✓
+#   → precio "$18.000" ✓
+#   → REWRITE: pedir presentación al cliente.
+#
+# Falso positivo defensa: el caller solo invoca este detector cuando
+# `_cart_add_executed_this_turn=False`. Si add_item corrió legítimamente,
+# la confirmación es real y no se reescribe.
+_CART_ADD_CONFIRMATION_VERBS = (
+    r"listo|agregue|agregu[eé]|a[nñ]ad[ií]|te\s+vendo|"
+    r"agreg[oó]\s+a\s+tu\s+carrito|sum[eé]|agregad[oa]s?"
+)
+_CART_ADD_CONFIRMATION_REGEX = re.compile(
+    rf"\b(?:{_CART_ADD_CONFIRMATION_VERBS})\b"
+    r"[\s\S]{0,250}?"                                  # filler tolerante
+    r"\(\s*\d+\s*(?:g|gr|gramos|ml|mililitros|cc|kg|oz)\s*\)"   # variante
+    r"[\s\S]{0,80}?"
+    r"\$\s*\d",                                        # precio
+    flags=re.IGNORECASE,
+)
+
+
+def _looks_like_cart_add_confirmation(text: str) -> bool:
+    """True si el texto del LLM afirma haber agregado item(s) al carrito
+    con variante + precio explícitos. Caller debe gatear con
+    `_cart_add_executed_this_turn` para evitar falsos positivos sobre
+    confirmaciones legítimas post add_item."""
+    if not text:
+        return False
+    norm = _normalize_text(text)
+    return bool(_CART_ADD_CONFIRMATION_REGEX.search(norm))
+
+
 def _last_outbound_was_summary(history: list[dict]) -> bool:
     """Rev. 103+ — True si el último outbound del bot ya fue un resumen.
 
@@ -8249,6 +8292,12 @@ async def build_and_run_orchestration(
         # READY_FOR_SUMMARY) leyendo del history truncado → producto
         # alucinado. Ahora el cart es la fuente de verdad turn-by-turn.
         # El Inbox del Tenant Console (F-Inbox-1) leerá del cart real.
+        # Sem 7 F2 cierre 2026-05-21 — flag turn-by-turn para invariante
+        # anti-alucinación cart-add (orchestrator.py:~9820). Se setea a
+        # True si CUALQUIER `cart_tool.add_item` corre exitosamente durante
+        # este turn. Si LLM dice "Listo, 1x ... (60g) por $X" pero este
+        # flag es False, REWRITE para pedir variante en lugar de mentir.
+        _cart_add_executed_this_turn = False
         try:
             # Rev. 104 — Detector de variantes con propuestas (Plan A.3).
             #   Camino A: bot presentó opciones → cliente elige una variante.
@@ -8353,6 +8402,8 @@ async def build_and_run_orchestration(
                         quantity=_item["quantity"],
                         unit_price_cents=_item["unit_price_cents"],
                     )
+                    # Sem 7 F2 cierre 2026-05-21 — flag para anti-hallu cart-add.
+                    _cart_add_executed_this_turn = True
                     logger.info(
                         "[CART][VARIANT_CONFIRMED] %dx %s (%s) → cart=%s conv=%s",
                         _item["quantity"], _item["title"],
@@ -9866,6 +9917,38 @@ async def build_and_run_orchestration(
                         "Antes de confirmarte el pedido necesito tu visto bueno. "
                         "¿Confirmas para generar tu link de pago?"
                     )
+
+            # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv e0d7c539):
+            # Anti-alucinación CART-ADD. Cliente pidió "1 Coco y 1 Lavanda"
+            # SIN gramaje; detector determinístico retornó [] (correcto,
+            # ambiguo entre 60g/100g/150g) → NO se ejecutó add_item; LLM
+            # compuso "Listo, 1x Coco (60g) por $18.000 y 1x Lavanda (60g)
+            # por $18.000" — alucinó el gramaje + alucinó la confirmación
+            # de carrito. Mismo patrón que el guard payment_link arriba.
+            #
+            # Detector determinístico: el texto contiene confirmación
+            # ("listo", "agregué", "te vendo", "añadí", "sumé") + variante
+            # con unidad de peso/volumen en paréntesis ("(60g)", "(100g)",
+            # "(15ml)", etc.) + precio ($X). Tres elementos juntos = LLM
+            # afirmando estado de carrito concreto.
+            #
+            # Gate: `_cart_add_executed_this_turn=False` (no corrió
+            # add_item en este turn). Cuando sí corrió, la confirmación
+            # es legítima — no se reescribe.
+            if (
+                not _cart_add_executed_this_turn
+                and _looks_like_cart_add_confirmation(parsed.response_text or "")
+            ):
+                logger.warning(
+                    "[ANTI_HALLU][CART_ADD] LLM confirmó cart-add sin que add_item "
+                    "haya corrido conv=%s. Texto original: %r",
+                    conversation_id, (parsed.response_text or "")[:300],
+                )
+                parsed.response_text = (
+                    "Para procesar el pedido necesito saber la presentación "
+                    "exacta de cada producto. ¿Cuál presentación y cuántas "
+                    "unidades te gustaría llevar?"
+                )
 
             # Bug 30 — sincronizar texto y status. Si el response_text promete
             # handover ("te paso con un asesor") pero requires_human=False, el

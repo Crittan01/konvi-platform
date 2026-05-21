@@ -314,5 +314,70 @@ class DetectVariantConfirmationCrossProductPreserveCoco60gTests(unittest.TestCas
         self.assertEqual(result[0]["product_id"], "p-serum-c")
 
 
+# ── Fix C: anti-hallucination cart-add ─────────────────────────────────────
+
+class LooksLikeCartAddConfirmationTests(unittest.TestCase):
+    """Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv e0d7c539).
+
+    LLM compuso "Listo, 1x Jabón Artesanal de Coco (60g) por $18.000 COP
+    y 1x Jabón Artesanal de Lavanda (60g)..." cuando cliente NO mencionó
+    gramaje. Detector determinístico para que el bloque anti-hallu del
+    orchestrator pueda interceptar y reescribir."""
+
+    def test_caso_founder_exacto(self):
+        text = ("Listo, 1x Jabón Artesanal de Coco (60g) por $18.000 COP y "
+                "1x Jabón Artesanal de Lavanda (60g) por $18.000 COP.\n\n"
+                "Te gustaría cotizar el envío o tienes otra consulta?")
+        self.assertTrue(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_te_vendo_con_variante_y_precio(self):
+        text = "Te vendo 1x Aceite Esencial de Lavanda (30ml) por $45.000."
+        self.assertTrue(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_agregue_con_variante(self):
+        text = "Agregué a tu carrito 2x Sérum de Vitamina C (15ml): $52.000."
+        self.assertTrue(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_anadi_con_variante(self):
+        text = "Añadí 1x Jabón (100g) por $24.000 a tu carrito."
+        self.assertTrue(orchestrator._looks_like_cart_add_confirmation(text))
+
+    # ── True negatives (NO debe disparar rewrite) ─────────────────────────
+    def test_pregunta_de_variante_no_dispara(self):
+        """Bot pregunta variante — NO confirmación: detector debe ser False."""
+        text = ("Claro! Te vendo Jabón Artesanal de Coco y Jabón Artesanal "
+                "de Lavanda. ¿En qué presentación cada uno (60g, 100g o "
+                "150g)?")
+        # No tiene precio + paréntesis variante junto a verbo de confirmación
+        # con secuencia "Listo/agregué". El "te vendo" está antes de "?" sin
+        # paréntesis-variante + precio en mismo segmento.
+        self.assertFalse(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_catalog_listing_no_dispara(self):
+        """Listado de catálogo (no confirmación)."""
+        text = ("Jabones artesanales:\n* Coco — 60g por $18.000\n* Lavanda "
+                "— 100g por $24.000\nCuál te llama la atención?")
+        self.assertFalse(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_resumen_pedido_no_dispara(self):
+        """Resumen formal (📋) tiene precio y variante pero arquitectónicamente
+        siempre lo emite el builder determinístico — NO entra al path
+        anti-hallu (gate `_last_outbound_was_summary`). Aún así, el regex
+        sí matchearía 'Listo,' inicial — verificamos que el detector
+        depende del prefix; un resumen real empieza con 📋."""
+        text = ("📋 *Resumen de tu pedido:*\n\n*Productos:*\n* 1x Jabón "
+                "Artesanal de Coco (60g): $18.000\n\nSubtotal: $18.000")
+        # NO contiene verbo de confirmación al inicio → no dispara.
+        self.assertFalse(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_pregunta_general_no_dispara(self):
+        text = "¿En qué te puedo ayudar?"
+        self.assertFalse(orchestrator._looks_like_cart_add_confirmation(text))
+
+    def test_texto_vacio(self):
+        self.assertFalse(orchestrator._looks_like_cart_add_confirmation(""))
+        self.assertFalse(orchestrator._looks_like_cart_add_confirmation(None))  # type: ignore
+
+
 if __name__ == "__main__":
     unittest.main()
