@@ -9162,59 +9162,9 @@ async def build_and_run_orchestration(
                 )
                 if _matches_pre or _proposals_pre:
                     _has_add_item_intent = True
-        if (
-            display_state == "READY_FOR_SUMMARY"
-            and not _last_outbound_was_summary(history or [])
-            and not _is_affirmative_confirmation(content or "")
-            and not _is_pii_update
-            and not _looks_like_phone
-            and not _has_add_item_intent
-        ):
-            try:
-                from tools.cart_tool import get_cart_with_items
-                _cart_resumen = get_cart_with_items(
-                    supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                )
-            except Exception as _ce:
-                logger.warning("[BYPASS_RESUMEN] cart fetch falló: %s", _ce)
-                _cart_resumen = None
-            if _cart_resumen and (_cart_resumen.get("items") or []):
-                _vctx = _verified_ctx_from_cart(_cart_resumen)
-                if _vctx and not _vctx.get("shipping_cost_cents"):
-                    _ship = (
-                        _extract_shipping_cost_from_history(history or []) or
-                        _extract_shipping_cost_from_db(supabase, conversation_id) or
-                        0
-                    )
-                    if _ship > 0:
-                        _vctx["shipping_cost_cents"] = _ship
-                        _vctx["total_cents"] = (
-                            int(_vctx.get("subtotal_cents") or 0) + _ship
-                        )
-                if _vctx and int(_vctx.get("total_cents") or 0) > 0:
-                    _resumen_text = _build_order_summary_text(
-                        contact_record=contact_record,
-                        verified_ctx=_vctx,
-                        catalog=catalog,
-                        history=history,
-                        cart_from_db=_cart_resumen,
-                    )
-                    if _resumen_text:
-                        await _send_outbound_text(
-                            supabase=supabase,
-                            conversation_id=conversation_id,
-                            tenant_id=tenant_id,
-                            text=_resumen_text,
-                        )
-                        _mark_message_processing(
-                            supabase, message_id,
-                            processing_status=PROCESSING_STATUS_PROCESSED,
-                        )
-                        logger.info(
-                            "[BYPASS] READY_FOR_SUMMARY → resumen determinístico conv=%s",
-                            conversation_id[:8],
-                        )
-                        return
+        # Sem 1 refactor (ADR-0017): bypass legacy `READY_FOR_SUMMARY →
+        # resumen determinístico` migrado a `fsm/handlers/ready_for_summary.py`.
+        # Se invoca vía dispatch unificado más abajo.
 
         # ── Sem 1 refactor (ADR-0017) — State Handler Layer ──────────────
         # Reemplaza el bypass legacy `State renderers determinísticos`
@@ -9239,6 +9189,8 @@ async def build_and_run_orchestration(
             # Importar handlers triggerea auto-registro en el dispatcher.
             import fsm.handlers.needs_shipping_city  # noqa: F401
             import fsm.handlers.awaiting_carrier_selection  # noqa: F401
+            import fsm.handlers.ready_for_summary  # noqa: F401
+            import fsm.handlers.ready_for_summary_correction  # noqa: F401
             from fsm.handlers import dispatch as _handler_dispatch, TurnInput
 
             # Cargar cart actual para el TurnInput (handlers que lo
@@ -9297,25 +9249,9 @@ async def build_and_run_orchestration(
                 conversation_id[:8], _hd_exc,
             )
 
-        # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
-        if display_state == "READY_FOR_SUMMARY" and contact_id:
-            correction_field = _detect_correction_intent(content)
-            if correction_field:
-                _clear_contact_field(supabase, contact_id, tenant_id, correction_field)
-                _variants = _CORRECTION_PROMPT_VARIANTS.get(correction_field) or [
-                    "Sin problema. ¿Qué dato quieres corregir?",
-                    "Listo, ¿qué dato actualizo?",
-                ]
-                reply = _pick_variant(_variants, seed=_today_seed(conversation_id))
-                await _send_outbound_text(
-                    supabase=supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    text=reply,
-                )
-                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-                logger.info("[CORR] Corrección solicitada campo='%s' | conv=%s", correction_field, conversation_id)
-                return
+        # Sem 1 refactor (ADR-0017): bypass legacy `GAP-1 corrección de
+        # datos en resumen` migrado a `fsm/handlers/ready_for_summary_correction.py`
+        # (sub-handler priority 50, corre ANTES del resumen default).
 
         # Rev. 68 — contexto cliente conocido: pedidos activos + reclamos abiertos.
         _customer_first_name = (
