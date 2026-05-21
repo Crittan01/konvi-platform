@@ -643,7 +643,7 @@ async def purge_contact(
 
     Audit log con phone_hash inmutable ANTES del purge (trazabilidad SIC).
     """
-    from lib.contact_cleanup import purge_contact_completely
+    from lib.contact_cleanup import purge_contact_completely, PurgeBlockedError
     from lib.phone import hash_phone
 
     try:
@@ -670,33 +670,64 @@ async def purge_contact(
     except Exception:
         pass
 
+    # Sem 7 F2 cierre 2026-05-21 — Capa A+C founder UAT:
+    # 1. Intentar purge PRIMERO. Si está bloqueado por payment link Wompi
+    #    activo → 409 SIN escribir audit (audit refleja solo eventos reales).
+    # 2. Si succeed → audit log "purged" con phone_hash inmutable.
+    try:
+        summary = purge_contact_completely(supabase, tenant_id, contact_id)
+    except PurgeBlockedError as blocked:
+        logger.info(
+            "[CONTACT][PURGE] bloqueado por payment link activo "
+            "tenant=%s contact=%s pending=%d",
+            tenant_id[:8] if tenant_id else "?",
+            contact_id[:8] if contact_id else "?",
+            len(blocked.pending_payments),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "purge_blocked_active_payment_link",
+                "message": blocked.reason,
+                "pending_payments": [
+                    {
+                        "wompi_link_id": p.get("wompi_link_id"),
+                        "checkout_url": p.get("checkout_url"),
+                        "created_at": p.get("created_at"),
+                    }
+                    for p in blocked.pending_payments
+                ],
+            },
+        )
+
+    # Audit log POST-purge — solo si la operación realmente ocurrió.
+    # consent_audit_log es append-only; phone_hash permite trazabilidad SIC
+    # aunque el contact_id quede huérfano.
     try:
         supabase.table("consent_audit_log").insert({
             "tenant_id": tenant_id,
             "contact_id": contact_id,
             "phone_hash": hash_phone(phone) if phone else None,
             "event": "purged",
-            # 'tenant_console' es el source canónico (CHECK constraint
-            # acepta: whatsapp | tenant_console | api | system).
-            # El caller real ES la UI; el event='purged' distingue acción.
             "source": "tenant_console",
             "actor_email": actor_email,
             "evidence": {
                 "endpoint": "POST /api/v1/contacts/{id}/purge",
                 "reason": "Hard cascade delete (testing/admin)",
+                "purge_summary": {
+                    k: v for k, v in summary.items()
+                    if k.endswith("_deleted") or k.endswith("_found")
+                },
             },
         }).execute()
     except Exception as audit_exc:
-        logger.error("[CONTACT][PURGE] audit log falló: %s", audit_exc)
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "No se pudo registrar audit log del purge. El contacto NO "
-                f"fue purgado. ({audit_exc})"
-            ),
+        # Purge ya ocurrió — audit log es informativo aquí (no bloqueante).
+        # Loggear como warning sin lanzar 503.
+        logger.warning(
+            "[CONTACT][PURGE] audit log post-purge falló (purge ya ejecutado): %s",
+            audit_exc,
         )
 
-    summary = purge_contact_completely(supabase, tenant_id, contact_id)
     return {"ok": True, "summary": summary}
 
 
