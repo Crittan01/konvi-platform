@@ -9116,6 +9116,69 @@ async def build_and_run_orchestration(
                         )
                         return
 
+        # ── Sem 7 F2 cierre 2026-05-21 — State renderers determinísticos ───
+        # Bug founder UAT (conv 72e3f77e): el FSM resuelve correctamente
+        # `display_state=NEEDS_SHIPPING_CITY` pero el LLM, dentro de ese
+        # estado, redactaba libremente y a veces pedía consent/email/etc.
+        # aunque cliente conocido ya tenía esos datos en DB. Solución:
+        # override determinístico pre-LLM para estados transaccionales.
+        # Patrón idéntico al bypass `READY_FOR_SUMMARY → resumen` arriba.
+        #
+        # CATALOG_MODE y NEEDS_X PII se delegan al LLM/conductor existente
+        # (esos paths funcionan; el bug runtime estaba en NEEDS_SHIPPING_CITY).
+        #
+        # Guards: solo bypass cuando el inbound NO es una respuesta a otro
+        # flow paralelo (shipping_phone update, qty_change, etc.) — esos
+        # detectores ya corrieron arriba y emitieron sus propios outbounds.
+        if (
+            display_state in {"NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}
+            and not _is_pii_update
+            and not _looks_like_phone
+            and not _has_add_item_intent
+        ):
+            from fsm import state_renderers as _state_renderers
+            _override_text: Optional[str] = None
+            if display_state == "NEEDS_SHIPPING_CITY":
+                try:
+                    from tools.cart_tool import get_cart_with_items as _gcwi_sr
+                    _cart_sr = _gcwi_sr(
+                        supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                    )
+                except Exception:
+                    _cart_sr = None
+                _cart_items_sr = (_cart_sr or {}).get("items") or []
+                _last_products = _last_outbound_presented_variants_all(
+                    catalog or [], history or [],
+                )
+                _override_text = _state_renderers.render_needs_shipping_city(
+                    cart_items=_cart_items_sr,
+                    last_outbound_products=_last_products,
+                )
+            elif display_state == "AWAITING_CARRIER_SELECTION":
+                _override_text = _state_renderers.render_awaiting_carrier_selection(
+                    last_outbound_was_quote=
+                        _state_renderers.last_outbound_was_shipping_quote(
+                            history or [],
+                        ),
+                )
+            if _override_text:
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=_override_text,
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+                logger.info(
+                    "[STATE_RENDER] %s → outbound determinístico conv=%s",
+                    display_state, conversation_id[:8],
+                )
+                return
+
         # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
         if display_state == "READY_FOR_SUMMARY" and contact_id:
             correction_field = _detect_correction_intent(content)
