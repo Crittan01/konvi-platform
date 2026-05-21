@@ -68,6 +68,20 @@ _SHIPPING_FOLLOWUP_PROMPT_MARKERS = (
     # Frases que el LLM genera libremente al pedir ciudad de entrega en contexto de envío
     "ciudad de destino",     # "ciudad de destino"
     "ciudad del envio",      # "ciudad del envío"
+    # Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (conv 56ff85d8):
+    # El bot emite "Para qué ciudad es el envío?" tras "Cotizar" del cliente.
+    # Cuando el cliente respondía solo "Bogota", el detector NO matcheaba
+    # ningún marker → tool retornaba False → LLM tomaba control → respondía
+    # texto genérico de KB sobre tiempos de entrega y saltaba a flow PII
+    # SIN cotizar realmente. Faltaba esta familia de markers canónicos.
+    "para que ciudad es el envio",       # "Para qué ciudad es el envío?"
+    "para que ciudad es",                 # variante corta
+    "a que ciudad va",                    # "¿A qué ciudad va tu pedido?"
+    "a que ciudad enviamos",              # "¿A qué ciudad enviamos?"
+    "cual es la ciudad",                  # "¿Cuál es la ciudad de entrega?"
+    "ciudad de entrega",                  # general
+    "me dices la ciudad",                 # "me dices la ciudad de entrega"
+    "me dices a que ciudad",              # variante
     # Frases de ofrecimiento de cotización por parte del bot
     "deseas que te cotice",
     "quieres que te cotice",
@@ -349,6 +363,17 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
     # malinterpretaba "Ok, gracias" tras el resumen como "sí cotiza" porque
     # el resumen contiene la palabra "envío" + un costo.
     # Detectado en UAT E2E real (conv c2043f98 turn 12).
+    #
+    # Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (conv 56ff85d8):
+    # ANTES "subtotal:" estaba en summary_markers. Eso causaba falso
+    # positivo en el mini-resumen pre-cotización (T10 del log: "Productos
+    # en tu carrito... Subtotal: $56.000 ... Para qué ciudad es el envío?")
+    # — el detector lo confundía con el resumen FINAL → retornaba False →
+    # tool no se invocaba → bot saltaba a flow PII sin cotizar.
+    # FIX: "subtotal:" es genérico (aparece tanto en mini-resumen pre-cot
+    # como en resumen final). Los otros markers son ESPECÍFICOS al resumen
+    # final (header "Resumen de tu pedido", CTA "link de pago", "datos
+    # correctos") y bastan para distinguir.
     summary_markers = [
         "resumen de tu pedido",
         "datos estan correctos",
@@ -356,15 +381,33 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
         "generar tu link de pago",
         "para generar tu link",
         "tu link de pago",
-        "subtotal:",
     ]
     if any(m in outbound_text for m in summary_markers):
         return False
 
     has_separator = "/" in query_text or "," in query_text
-    shipping_context_tokens = {"envio", "cotizar", "cotice", "costo", "flete", "despacho", "domicilio", "delivery"}
+    # Sem 7 F2 cierre 2026-05-20 — prefijos en vez de tokens exactos para
+    # cubrir variantes verbales del español: "envio"/"envia"/"enviamos"/
+    # "enviar", "cotizar"/"cotizamos"/"cotice", "entrega"/"entregar"/
+    # "entregamos", etc. El guard previo `personal_data_markers` ya
+    # bloquea outbounds de captura PII ("dirección de entrega..."), por
+    # lo que estos prefijos aquí solo matchean cotización legítima.
+    _shipping_context_prefixes = (
+        "envi",       # envio, envía, enviamos, enviar, envío
+        "cotiz",      # cotizar, cotizamos, cotizo
+        "cotice",     # subjuntivo
+        "costo",      # costos también
+        "flete",
+        "despach",    # despacho, despachar, despachamos
+        "domicili",
+        "deliver",    # delivery, deliveries
+        "entreg",     # entrega, entregar, entregamos
+    )
     marker_matched = any(marker in outbound_text for marker in _SHIPPING_FOLLOWUP_PROMPT_MARKERS)
-    has_shipping_context = bool(_tokenize_words(outbound_text) & shipping_context_tokens)
+    has_shipping_context = any(
+        any(tok.startswith(p) for p in _shipping_context_prefixes)
+        for tok in _tokenize_words(outbound_text)
+    )
     if marker_matched:
         if not has_shipping_context:
             return False
