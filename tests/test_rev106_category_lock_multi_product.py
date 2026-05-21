@@ -210,12 +210,14 @@ class ResolveVariantDiscriminativePerSegmentTests(unittest.TestCase):
         self.assertEqual(q, 1)
 
     def test_single_segment_no_aplica_discriminative(self):
-        """Single segment con opt-in no exige discriminative (no aplica)."""
+        """Single segment con opt-in no exige discriminative en
+        `_resolve_variant_from_inbound` (la disambiguación cross-product
+        cuando la variante es ambigua vive en `_detect_variant_confirmation`).
+        Aquí: "60g" + Jabón Coco → matchea variante 60g."""
         out = orchestrator._resolve_variant_from_inbound(
             "60g", self._jab_coco(),
             require_discriminative_per_segment=True,
         )
-        # 60g matchea variante Jabón Coco 60g.
         self.assertEqual(len(out), 1)
 
 
