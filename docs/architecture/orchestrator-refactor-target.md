@@ -466,3 +466,53 @@ Sin TODOS estos criterios, no se cierra el refactor:
 3. Cierre Sem 1: smoke UAT + métricas.
 
 Documento vivo. Actualizar al cierre de cada semana con métricas reales.
+
+---
+
+## Apéndice A — Progreso Sem 1 (en curso)
+
+### Commits del refactor
+
+| Commit | Fecha | Entrega | LOC orchestrator | Tests |
+|---|---|---|---|---|
+| `8efcf19` | 2026-05-21 | Doc + ADR-0017 | 10,262 | 2,184 |
+| `554cd35` | 2026-05-21 | Sem 1.1: base + dispatcher + 2 handlers | 10,229 | 2,201 (+17) |
+| `b1097a2` | 2026-05-21 | Sem 1.2: READY_FOR_SUMMARY + correction | 10,215 | 2,209 (+8) |
+| (pendiente Sem 1.3+) | — | NEEDS_CONSENT + handlers restantes | — | — |
+
+### Handlers migrados a `fsm/handlers/` (4 de ~12 objetivo Sem 1)
+
+- ✅ `needs_shipping_city.py` — bypass commit 18a3a5d (cart vacío→variante, armado→ciudad).
+- ✅ `awaiting_carrier_selection.py` — bypass commit 18a3a5d (recordatorio Económica/Rápida).
+- ✅ `ready_for_summary.py` — bypass legacy `[BYPASS] READY_FOR_SUMMARY → resumen determinístico`.
+- ✅ `ready_for_summary_correction.py` — bypass legacy `GAP-1 corrección de datos`.
+
+### Bypasses restantes a migrar (Sem 1.3+)
+
+- ⏳ `NEEDS_CONSENT` bypass (línea 8693 legacy).
+- ⏳ `shipping_phone update` bypass (línea 8943+) — complejo, posiblemente Sem 3.
+- ⏳ Anti-hallu cart-add bypass (línea ~9930) — posiblemente Sem 3 (OutputValidator Layer).
+- ⏳ Anti-hallu payment_link bypass (línea ~9890) — Sem 3.
+
+### Estado del refactor (snapshot)
+
+- **Branch**: `phase-1-orchestrator-refactor` (separada de `phase-0-pre-prod`).
+- **orchestrator.py LOC**: 10,262 → **10,215** (-47, -0.5%).
+- **Tests verde**: 2,184 → **2,209** (+25).
+- **Bypasses migrados**: 4 de los 13 dispersos legacy.
+- **Funciones top-level orchestrator**: 124 (sin cambio aún; reducción esperada al borrar helpers que solo usa el monolito en Sem 7+).
+- **Zero regresión verificable**: handlers tienen guards 100% equivalentes a bypasses legacy. Comportamiento externo del bot idéntico.
+
+### Decisiones de diseño confirmadas durante Sem 1
+
+1. **`TurnInput` inmutable como dataclass(frozen=True)**: handlers no pueden mutar input. Si necesitan state derivado, lo computan localmente. Esto elimina el problema de `contact_record` stale entre handlers.
+2. **Auto-registro al importar handler**: cada handler hace `register(MyHandler())` al final del módulo. El orchestrator solo necesita `import fsm.handlers.X` para activarlo. Trade-off: requiere imports explícitos en tests, pero hace el wiring declarativo y observable vía `get_handlers_for_state(state)`.
+3. **Priority-based ordering dentro del mismo state**: sub-handlers especializados (correction = 50) corren ANTES del handler default (summary = 100). Permite extender comportamiento sin modificar el default.
+4. **Late imports DENTRO de handlers**: cada handler importa de `orchestrator` los helpers que necesita en su función `handle()`. Esto evita ciclo de imports al inicializar fsm/handlers (orchestrator todavía importa fsm.handlers para registro). En Sem 7-8 los helpers se moverán a sus propios módulos y los late imports desaparecerán.
+5. **Degradación graceful en dispatcher**: si un handler lanza excepción, dispatcher loggea WARNING y prueba siguiente. NUNCA un handler roto colapsa el turn.
+
+### Lecciones operativas
+
+- **`asyncio.get_event_loop()` está deprecated en Python 3.11**: usar `asyncio.new_event_loop().run_until_complete()` en helpers de test async.
+- **Registry global + tests aislados con clear_registry**: requiere snapshot/restore en setUp/tearDown para no contaminar otros tests del proyecto. Patrón implementado en `tests/test_handler_dispatcher.py`.
+- **Tests de handlers reproducen bugs runtime del founder UAT**: ej. `test_cart_vacio_con_productos_presentados_y_mencion_filtra` reproduce conv bae0f6a2 con "1 Coco y 1 Lavanda" y verifica filtrado de productos mencionados. Es behavioral golden test.
