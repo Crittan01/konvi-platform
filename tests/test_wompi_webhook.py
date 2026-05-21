@@ -196,6 +196,28 @@ class WompiWebhookTests(unittest.TestCase):
 
     @patch("routers.orders._decrement_stock_on_confirm")
     @patch("routers.wompi_webhook._get_service_client")
+    def test_orphan_webhook_logs_and_returns_early(self, mock_get_client, mock_decrement):
+        """Sem 7 F2 cierre 2026-05-21 — Capa C (Wompi payment link guard):
+        webhook con payment_link_id pero sin `payments` row matching → log
+        `[WOMPI][ORPHAN]` + return early SIN verificar firma (no podemos
+        sin tenant_id). Anteriormente este caso producía un misleading
+        'firma_invalida' log."""
+        payload = WompiPayloadBuilder().with_approved_txn(
+            payment_link_id="plink-orphan", txn_id="txn-orphan",
+        ).build()
+        supabase = _make_supabase_mock({})  # vacío → link_to_order={}
+        mock_get_client.return_value = supabase
+
+        with self.assertLogs("routers.wompi_webhook", level="WARNING") as cm:
+            wompi_webhook._process_wompi_event(payload)
+
+        joined = "\n".join(cm.output)
+        self.assertIn("[WOMPI][ORPHAN]", joined)
+        self.assertIn("plink-orphan", joined)
+        mock_decrement.assert_not_called()
+
+    @patch("routers.orders._decrement_stock_on_confirm")
+    @patch("routers.wompi_webhook._get_service_client")
     def test_approved_order_already_confirmed_idempotent(self, mock_get_client, mock_decrement):
         payload = WompiPayloadBuilder().with_approved_txn(
             payment_link_id="plink-1", txn_id="txn-1"

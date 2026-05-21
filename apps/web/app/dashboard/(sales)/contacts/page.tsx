@@ -581,6 +581,35 @@ export default async function ContactsPage({
         },
       )
       if (!res.ok) {
+        // Sem 7 F2 cierre 2026-05-21 — Capa A.3 (Wompi payment link guard):
+        // 409 = purge bloqueada por link Wompi activo (<30 min). Wompi NO
+        // permite invalidar links existentes, así que propagamos mensaje
+        // claro al operador en lugar de error genérico.
+        if (res.status === 409) {
+          type PurgeBlockedDetail = {
+            code?: string
+            message?: string
+            pending_payments?: unknown[]
+          }
+          let parsed: PurgeBlockedDetail | null = null
+          try {
+            const body = (await res.json()) as { detail?: PurgeBlockedDetail }
+            parsed = body?.detail ?? null
+          } catch {
+            parsed = null
+          }
+          if (parsed?.code === 'purge_blocked_active_payment_link') {
+            const count = Array.isArray(parsed.pending_payments)
+              ? parsed.pending_payments.length
+              : 0
+            throw new Error(
+              parsed.message ||
+                `No se puede eliminar: el contacto tiene ${count} link(s) de pago Wompi activo(s). ` +
+                  'Wompi no permite invalidar links existentes — espera ~30 min a que expire(n) ' +
+                  'o cancela la(s) orden(es) manualmente antes de reintentar.'
+            )
+          }
+        }
         const errText = await res.text()
         throw new Error(
           `Purge falló (${res.status}): ${errText.slice(0, 200)}`

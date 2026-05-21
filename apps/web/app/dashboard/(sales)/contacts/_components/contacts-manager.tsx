@@ -379,9 +379,19 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     setPendingDeleteId(null)
     setPendingDeleteReason('')
     startTransition(async () => {
-      await deleteAction(fd)
-      router.refresh()
-      showSuccess('Contacto eliminado.')
+      try {
+        await deleteAction(fd)
+        router.refresh()
+        showSuccess('Contacto eliminado.')
+      } catch (e) {
+        // Sem 7 F2 cierre 2026-05-21 — Capa A.3 (Wompi payment link guard):
+        // si la purge falla por link Wompi activo (HTTP 409), el server
+        // action propaga el mensaje en e.message. `alert` es bloqueante a
+        // propósito: operador DEBE leer la condición (esperar 30 min o
+        // cancelar orden) antes de reintentar.
+        const msg = e instanceof Error ? e.message : 'No se pudo eliminar el contacto.'
+        window.alert(msg)
+      }
     })
   }
 

@@ -85,6 +85,36 @@ def _process_wompi_event(payload: dict) -> None:
         order_preview = _get_order_by_id(supabase, order_id)
         tenant_id_for_sig = (order_preview or {}).get("tenant_id")
 
+    # ── 2.5. Detección de webhook huérfano (Capa C) ──────────────────────────
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (Opción A+C):
+    # Cuando el operador eliminaba un contacto que tenía un payment_link
+    # Wompi activo (TTL ~30 min) y el cliente pagaba ese link después de
+    # eliminado, Wompi enviaba el webhook APPROVED pero NUESTRA DB ya no
+    # tenía el `payments` row → `order_id=None`. Antes este caso producía
+    # un misleading "firma_invalida" log (no se puede verificar sin
+    # `events_key` del tenant). Wompi NO expone endpoint para invalidar
+    # payment_links → única defensa = guard de purga (Capa A) + audit log
+    # claro aquí para reconciliación manual con dashboard Wompi.
+    #
+    # La Capa A previene NUEVOS huérfanos. Esta Capa C captura:
+    #   - Huérfanos legacy (purges previas a 2026-05-21).
+    #   - Race conditions extremas (purge entre check y delete).
+    #   - Webhooks fraudulentos con payment_link_id inexistente (atacante).
+    #
+    # No persistimos en tabla porque `wompi_events_seen.tenant_id` es
+    # NOT NULL. El log con prefijo `[WOMPI][ORPHAN]` es greppable para
+    # auditoría. Si reconciliación se vuelve regular, crear tabla
+    # `wompi_orphan_events` en migration futura.
+    if payment_link_id and not order_id:
+        logger.warning(
+            "[WOMPI][ORPHAN] webhook_sin_orden link=%s txn_id=%s ref=%s "
+            "status=%s amount_cents=%s — Wompi reporta pago pero no hay "
+            "fila `payments` que matchee (contacto purgado o link inválido). "
+            "Reconciliar manualmente con dashboard Wompi si APPROVED.",
+            payment_link_id, txn_id, wompi_reference, txn_status, amount_in_cents,
+        )
+        return
+
     # ── 3. Verificar firma con events_key del tenant ──────────────────────────
     events_key: str = ""
     if tenant_id_for_sig:

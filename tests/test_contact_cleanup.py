@@ -19,6 +19,8 @@ from lib.contact_cleanup import (  # noqa: E402
     purge_contact_completely,
     _safe_delete,
     _collect_contact_resources,
+    _check_active_wompi_payment_links,
+    PurgeBlockedError,
 )
 
 
@@ -55,6 +57,10 @@ class _FakeQuery:
 
     def or_(self, clause):
         self.calls.append(("or_", clause))
+        return self
+
+    def gte(self, col, val):
+        self.calls.append(("gte", col, val))
         return self
 
     def execute(self):
@@ -233,6 +239,104 @@ class SafeDeleteTests(unittest.TestCase):
         self.assertEqual(count, 0)
         self.assertIsNotNone(err)
         self.assertIn("relation does not exist", err)
+
+
+class WompiPaymentLinkGuardTests(unittest.TestCase):
+    """Sem 7 F2 cierre 2026-05-21 — Capa A: guard pre-purge contra links Wompi
+    activos. Wompi NO permite invalidar payment_links; única defensa contra
+    pago tardío en link huérfano = bloquear purga cuando hay link <30 min."""
+
+    def test_sin_orders_returns_lista_vacia(self):
+        sb = _FakeSupabase()
+        # No orders → no payments posibles.
+        out = _check_active_wompi_payment_links(sb, "tenant-1", "contact-1")
+        self.assertEqual(out, [])
+
+    def test_orders_sin_payments_pending_returns_vacia(self):
+        sb = _FakeSupabase()
+        sb.set_table("orders", returns=[{"id": "ord-1"}])
+        # payments default returns=[] → sin pending activos.
+        out = _check_active_wompi_payment_links(sb, "tenant-1", "contact-1")
+        self.assertEqual(out, [])
+
+    def test_payment_pending_activo_se_reporta(self):
+        sb = _FakeSupabase()
+        sb.set_table("orders", returns=[{"id": "ord-1"}])
+        sb.set_table("payments", returns=[
+            {
+                "id": "pay-1",
+                "order_id": "ord-1",
+                "wompi_link_id": "link-xyz",
+                "checkout_url": "https://checkout.wompi.co/l/link-xyz",
+                "status": "pending",
+                "created_at": "2026-05-21T19:00:00Z",
+            },
+        ])
+        out = _check_active_wompi_payment_links(sb, "tenant-1", "contact-1")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["payment_id"], "pay-1")
+        self.assertEqual(out[0]["wompi_link_id"], "link-xyz")
+        self.assertIn("checkout.wompi.co", out[0]["checkout_url"])
+
+    def test_orders_lookup_falla_degrade_gracefully(self):
+        """Si SELECT orders falla, no bloquea (operador opera ciego pero
+        mejor que false-positive bloqueo total)."""
+        sb = _FakeSupabase()
+        sb.set_table("orders", raises=Exception("permission denied"))
+        out = _check_active_wompi_payment_links(sb, "tenant-1", "contact-1")
+        self.assertEqual(out, [])
+
+    def test_payments_lookup_falla_degrade_gracefully(self):
+        sb = _FakeSupabase()
+        sb.set_table("orders", returns=[{"id": "ord-1"}])
+        sb.set_table("payments", raises=Exception("rls"))
+        out = _check_active_wompi_payment_links(sb, "tenant-1", "contact-1")
+        self.assertEqual(out, [])
+
+
+class PurgeBlockedByActiveWompiLinkTests(unittest.TestCase):
+    """`purge_contact_completely` levanta `PurgeBlockedError` cuando hay link
+    Wompi activo. La excepción incluye `pending_payments` para que el endpoint
+    API la propague al UI con detalle."""
+
+    def test_bloqueado_si_hay_link_activo(self):
+        sb = _FakeSupabase()
+        sb.set_table("orders", returns=[{"id": "ord-1"}])
+        sb.set_table("payments", returns=[
+            {
+                "id": "pay-1",
+                "order_id": "ord-1",
+                "wompi_link_id": "link-xyz",
+                "checkout_url": "https://checkout.wompi.co/l/link-xyz",
+                "status": "pending",
+                "created_at": "2026-05-21T19:00:00Z",
+            },
+        ])
+        with self.assertRaises(PurgeBlockedError) as ctx:
+            purge_contact_completely(sb, "tenant-1", "contact-1")
+        self.assertEqual(len(ctx.exception.pending_payments), 1)
+        self.assertIn("Wompi", ctx.exception.reason)
+
+    def test_skip_wompi_guard_bypassa(self):
+        """`skip_wompi_guard=True` permite cascade aún con links activos
+        (script CLI admin que SABE qué hace)."""
+        sb = _FakeSupabase()
+        sb.set_table("orders", returns=[{"id": "ord-1"}])
+        sb.set_table("payments", returns=[
+            {
+                "id": "pay-1",
+                "order_id": "ord-1",
+                "wompi_link_id": "link-xyz",
+                "checkout_url": "https://checkout.wompi.co/l/link-xyz",
+                "status": "pending",
+                "created_at": "2026-05-21T19:00:00Z",
+            },
+        ])
+        # NO levanta — bypass del guard.
+        out = purge_contact_completely(
+            sb, "tenant-1", "contact-1", skip_wompi_guard=True,
+        )
+        self.assertIn("orders_found", out)
 
 
 if __name__ == "__main__":

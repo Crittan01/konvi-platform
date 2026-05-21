@@ -1,4 +1,5 @@
-"""Contact deletion cascade — helper compartido (Sem 7 F2 cierre 2026-05-19).
+"""Contact deletion cascade — helper compartido (Sem 7 F2 cierre 2026-05-19,
+extendido 2026-05-21 con guard Wompi pending payments).
 
 Founder UAT 2026-05-19 (conv 056490b8) reportó: tras eliminar contact
 desde UI, los carts históricos persisten en DB. Próxima conversación
@@ -32,9 +33,36 @@ phone_hash inmutable para trazabilidad ante SIC (Habeas Data Ley 1581).
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── Wompi payment link TTL ────────────────────────────────────────────────
+# Sem 7 F2 cierre 2026-05-21 — guard arquitectónico A+C founder UAT.
+# Wompi NO expone endpoint para invalidar `/v1/payment_links/{id}` activos
+# (confirmado en doc oficial: solo POST/GET disponibles). El control único
+# es `expires_at` al crear. Si el operador purga un contact MIENTRAS hay
+# un link Wompi activo (cliente podría entrar a checkout y pagar), nuestra
+# DB pierde la order pero Wompi sigue cobrando.
+#
+# Mitigación: pre-check bloquea el purge si hay `payments.status='pending'`
+# creado en los últimos `_WOMPI_PAYMENT_LINK_TTL_MINUTES` minutos. El
+# operador debe esperar el TTL o cancelar la orden manualmente primero.
+_WOMPI_PAYMENT_LINK_TTL_MINUTES = 30
+
+
+class PurgeBlockedError(Exception):
+    """Bloqueo arquitectónico del purge cuando hay payment link Wompi
+    activo. Endpoint API debe traducir a HTTP 409 Conflict con detail
+    claro al UI para que el operador entienda qué esperar.
+    """
+
+    def __init__(self, *, reason: str, pending_payments: list[dict]):
+        self.reason = reason
+        self.pending_payments = pending_payments
+        super().__init__(reason)
 
 
 def _safe_delete(
@@ -172,8 +200,81 @@ def _collect_contact_resources(
     return out
 
 
+def _check_active_wompi_payment_links(
+    supabase, tenant_id: str, contact_id: str,
+) -> list[dict]:
+    """Sem 7 F2 cierre 2026-05-21 — Capa A guard pre-purge.
+
+    Retorna lista de payments en estado pending creados en los últimos
+    `_WOMPI_PAYMENT_LINK_TTL_MINUTES` minutos. Si la lista NO está vacía,
+    el purge debe bloquearse (PurgeBlockedError) — un link Wompi activo
+    sigue siendo pagable aunque borremos la order localmente.
+
+    Cada elemento: {payment_id, order_id, wompi_link_id, checkout_url, created_at}.
+    """
+    cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(minutes=_WOMPI_PAYMENT_LINK_TTL_MINUTES)
+    ).isoformat()
+
+    # Recolectar orders del contact PRIMERO (payments enlaza por order_id).
+    try:
+        ord_res = (
+            supabase.table("orders")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("contact_id", contact_id)
+            .execute()
+        )
+        order_ids = [r["id"] for r in (ord_res.data or []) if r.get("id")]
+    except Exception as exc:
+        logger.warning(
+            "[purge_contact][guard] orders lookup falló: %s — bloqueo conservador",
+            exc,
+        )
+        # En caso de error de lectura, NO bloquear (degrade gracefully).
+        # Si hubiera pending realmente, otra cosa fallaría antes en el cascade.
+        return []
+
+    if not order_ids:
+        return []
+
+    try:
+        pay_res = (
+            supabase.table("payments")
+            .select(
+                "id, order_id, wompi_link_id, checkout_url, status, created_at"
+            )
+            .eq("tenant_id", tenant_id)
+            .in_("order_id", order_ids)
+            .eq("status", "pending")
+            .gte("created_at", cutoff)
+            .execute()
+        )
+        active = pay_res.data or []
+    except Exception as exc:
+        logger.warning(
+            "[purge_contact][guard] payments lookup falló: %s — sin bloqueo",
+            exc,
+        )
+        return []
+
+    return [
+        {
+            "payment_id": p.get("id"),
+            "order_id": p.get("order_id"),
+            "wompi_link_id": p.get("wompi_link_id"),
+            "checkout_url": p.get("checkout_url"),
+            "created_at": p.get("created_at"),
+        }
+        for p in active
+    ]
+
+
 def purge_contact_completely(
     supabase, tenant_id: str, contact_id: str,
+    *,
+    skip_wompi_guard: bool = False,
 ) -> dict:
     """Borra el contact + TODOS sus recursos en cascade.
 
@@ -192,6 +293,23 @@ def purge_contact_completely(
     """
     if not tenant_id or not contact_id:
         raise ValueError("tenant_id y contact_id son requeridos")
+
+    # Sem 7 F2 cierre 2026-05-21 — Capa A: guard pre-purge Wompi.
+    # Si hay payment link activo (TTL no expirado), bloquear con detail.
+    # `skip_wompi_guard=True` solo en flujos admin que SABEN qué hacen
+    # (ej. cleanup post-incidente).
+    if not skip_wompi_guard:
+        active = _check_active_wompi_payment_links(supabase, tenant_id, contact_id)
+        if active:
+            raise PurgeBlockedError(
+                reason=(
+                    f"El contacto tiene {len(active)} link(s) de pago Wompi activo(s) "
+                    f"(creado(s) hace <{_WOMPI_PAYMENT_LINK_TTL_MINUTES} min). "
+                    "Wompi NO permite invalidar links existentes; espera a que "
+                    "expire(n) o cancela la orden manualmente primero."
+                ),
+                pending_payments=active,
+            )
 
     summary: dict = {
         "tenant_id": tenant_id,
