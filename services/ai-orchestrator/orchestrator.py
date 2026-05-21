@@ -8790,54 +8790,9 @@ async def build_and_run_orchestration(
             except Exception as _r15_err:
                 logger.warning("[ORCH] R-15: error refetch contacto para READY_FOR_SUMMARY: %s", _r15_err)
 
-        if display_state == "NEEDS_CONSENT":
-            # Rev. 103 — si el carrier acaba de defaultearse a Económica
-            # porque el cliente dijo "sigamos"/"continuemos" tras una
-            # cotización multi-opción (sin elegir explícitamente), prepender
-            # un ack de carrier para que el cliente vea qué se eligió. Sin
-            # esto, el bot saltaba a consent silenciosamente — feedback UAT
-            # s9: "el chat no confirmó cuál tipo de envío y supuso económico".
-            consent_text = CONSENT_QUESTION_TEMPLATE
-            _content_norm = _normalize_text(content or "")
-            _continue_intent = {
-                "sigamos", "continuemos", "continuar", "continua", "continúa",
-                "procedamos", "compra", "comprar", "avancemos", "sigue",
-            }
-            _user_picked_carrier_explicitly = any(
-                t in _content_norm for t in (
-                    "economica", "rapida", "deprisa", "servientrega",
-                    "coordinadora", "tcc", "dhl", "fedex", "interrapidisimo",
-                    "mensajeros", "urbanos",
-                )
-            )
-            if (
-                not _user_picked_carrier_explicitly
-                and any(t in _content_norm.split() for t in _continue_intent)
-            ):
-                _carrier_name = _extract_shipping_carrier_from_history(
-                    history_for_prompt or []
-                )
-                _shipping_cents = _extract_shipping_cost_from_history(
-                    history_for_prompt or []
-                ) or 0
-                if _carrier_name and _shipping_cents > 0:
-                    _carrier_ack = (
-                        f"Listo, voy con la opción *Económica* "
-                        f"({_carrier_name}) por *{_format_cop(_shipping_cents)}*.\n\n"
-                    )
-                    consent_text = _carrier_ack + consent_text
-            await _send_outbound_text(
-                supabase=supabase,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-                text=consent_text,
-            )
-            _mark_message_processing(
-                supabase,
-                message_id,
-                processing_status=PROCESSING_STATUS_PROCESSED,
-            )
-            return
+        # Sem 1.3 refactor (ADR-0017): bypass legacy NEEDS_CONSENT migrado a
+        # `fsm/handlers/needs_consent.py`. Se invoca vía dispatch unificado
+        # más abajo.
 
         if display_state == "READY_FOR_SUMMARY" and _is_affirmative_confirmation(content):
             await _send_outbound_text(
@@ -9191,6 +9146,7 @@ async def build_and_run_orchestration(
             import fsm.handlers.awaiting_carrier_selection  # noqa: F401
             import fsm.handlers.ready_for_summary  # noqa: F401
             import fsm.handlers.ready_for_summary_correction  # noqa: F401
+            import fsm.handlers.needs_consent  # noqa: F401
             from fsm.handlers import dispatch as _handler_dispatch, TurnInput
 
             # Cargar cart actual para el TurnInput (handlers que lo

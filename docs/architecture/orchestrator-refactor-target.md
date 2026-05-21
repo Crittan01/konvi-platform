@@ -478,30 +478,50 @@ Documento vivo. Actualizar al cierre de cada semana con métricas reales.
 | `8efcf19` | 2026-05-21 | Doc + ADR-0017 | 10,262 | 2,184 |
 | `554cd35` | 2026-05-21 | Sem 1.1: base + dispatcher + 2 handlers | 10,229 | 2,201 (+17) |
 | `b1097a2` | 2026-05-21 | Sem 1.2: READY_FOR_SUMMARY + correction | 10,215 | 2,209 (+8) |
-| (pendiente Sem 1.3+) | — | NEEDS_CONSENT + handlers restantes | — | — |
+| `fbfe9fc` | 2026-05-21 | Doc target update Sem 1 progreso | 10,215 | 2,209 |
+| (próximo Sem 1.3) | 2026-05-21 | NEEDS_CONSENT + cierre Sem 1 | **10,171** | **2,212** (+3) |
 
-### Handlers migrados a `fsm/handlers/` (4 de ~12 objetivo Sem 1)
+### Handlers migrados a `fsm/handlers/` (Sem 1 COMPLETA — 5 handlers)
 
-- ✅ `needs_shipping_city.py` — bypass commit 18a3a5d (cart vacío→variante, armado→ciudad).
-- ✅ `awaiting_carrier_selection.py` — bypass commit 18a3a5d (recordatorio Económica/Rápida).
-- ✅ `ready_for_summary.py` — bypass legacy `[BYPASS] READY_FOR_SUMMARY → resumen determinístico`.
-- ✅ `ready_for_summary_correction.py` — bypass legacy `GAP-1 corrección de datos`.
+- ✅ `needs_shipping_city.py` (93 LOC) — bypass commit 18a3a5d (cart vacío→variante, armado→ciudad).
+- ✅ `awaiting_carrier_selection.py` (71 LOC) — bypass commit 18a3a5d (recordatorio Económica/Rápida).
+- ✅ `ready_for_summary.py` (152 LOC) — bypass legacy `[BYPASS] READY_FOR_SUMMARY → resumen determinístico`.
+- ✅ `ready_for_summary_correction.py` (82 LOC) — bypass legacy `GAP-1 corrección de datos`.
+- ✅ `needs_consent.py` (85 LOC) — bypass legacy `NEEDS_CONSENT` con carrier-default ack.
 
-### Bypasses restantes a migrar (Sem 1.3+)
+### Bypasses que se migran en Sem 3 (OutputValidator Layer)
 
-- ⏳ `NEEDS_CONSENT` bypass (línea 8693 legacy).
-- ⏳ `shipping_phone update` bypass (línea 8943+) — complejo, posiblemente Sem 3.
-- ⏳ Anti-hallu cart-add bypass (línea ~9930) — posiblemente Sem 3 (OutputValidator Layer).
-- ⏳ Anti-hallu payment_link bypass (línea ~9890) — Sem 3.
+- ⏳ `shipping_phone update` bypass (post-LLM, persiste DB + reload + rerender).
+- ⏳ Anti-hallu cart-add invariant (validación post-LLM).
+- ⏳ Anti-hallu payment_link invariant (validación post-LLM).
+- ⏳ Resumen-before-link invariant (validación post-LLM).
 
-### Estado del refactor (snapshot)
+Estos son **invariantes post-LLM**, no bypasses pre-LLM. Por su naturaleza
+estructural distinta, se consolidan en `outbound/invariants.py` (Sem 3), no
+en `fsm/handlers/` (que es solo para flow pre-LLM determinístico).
+
+### Estado del refactor al cierre Sem 1
 
 - **Branch**: `phase-1-orchestrator-refactor` (separada de `phase-0-pre-prod`).
-- **orchestrator.py LOC**: 10,262 → **10,215** (-47, -0.5%).
-- **Tests verde**: 2,184 → **2,209** (+25).
-- **Bypasses migrados**: 4 de los 13 dispersos legacy.
-- **Funciones top-level orchestrator**: 124 (sin cambio aún; reducción esperada al borrar helpers que solo usa el monolito en Sem 7+).
-- **Zero regresión verificable**: handlers tienen guards 100% equivalentes a bypasses legacy. Comportamiento externo del bot idéntico.
+- **orchestrator.py LOC**: 10,262 → **10,171** (-91, -0.9%).
+- **Tests verde**: 2,184 → **2,212** (+28).
+- **Bypasses pre-LLM migrados**: 5 de 9 (los 4 restantes son post-LLM, Sem 3).
+- **Zero regresión verificable**:
+  - Handlers tienen guards 100% equivalentes a bypasses legacy.
+  - Comportamiento externo del bot idéntico (cubierto por 2,212 tests).
+  - Smoke load orchestrator.py confirma sin errores de importación.
+- **Reducción modesta de LOC vs ganancia estructural grande**: -91 LOC es engañoso por sí solo. El valor real es:
+  - Lógica de cada bypass aislada en su propio archivo (≤152 LOC c/u).
+  - Tests específicos por handler (no globales).
+  - Guards inline ahora son responsabilidad del handler, no del monolito.
+  - Dispatcher con priority-ordering documentado y testeable.
+  - Cada futuro bug/feature toca UN handler, no el monolito completo.
+
+### Pendiente para Sem 1 (defer a Sem 1.4 si hay tiempo)
+
+- **Limpieza profunda de imports/helpers ahora unused**: cuando todos los bypasses estén migrados Y los handlers no usen late-imports al orchestrator, podremos borrar helpers que solo usaba el monolito. Esto vendría al cierre Sem 7-8 cuando los helpers se muden a sus propios módulos.
+
+- **Smoke UAT real con stack local**: founder reinicia `make -C /home/ansible/commerce-ops-local restart` y prueba conversación nueva. Verifica que el flujo end-to-end con dispatcher real sigue produciendo el mismo comportamiento que el monolito legacy. Sin esto, el cierre Sem 1 está incompleto (solo tests sintéticos verifican zero-regression; UAT confirma a nivel sistémico).
 
 ### Decisiones de diseño confirmadas durante Sem 1
 
