@@ -103,6 +103,58 @@ SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
+def _round_robin_dequeue_by_tenant(
+    pending: list[dict], max_total: int,
+) -> list[dict]:
+    """Reordena pending messages round-robin por `tenant_id` para fairness.
+
+    Sem 7 F2 cierre 2026-05-21 — pregunta arquitectónica founder UAT:
+    "Esta pensando para encolamiento de mensajes... entre tenants?".
+
+    ANTES: el worker tomaba `limit(10) order(created_at)` global → FIFO
+    estricto. Si tenant A tenía 100 msgs y tenant B tenía 1, el msg de
+    B esperaba hasta que A se vaciara (en práctica: 10 ciclos de poll
+    a 3s = 30s de latencia para B). Fairness ROTA.
+
+    AHORA: round-robin entre tenants disponibles. Cada vuelta agrega 1
+    mensaje del FIFO interno de cada tenant. Con tenants A(100) y B(1)
+    → output: [A1, B1, A2, A3, A4, ...] — B no espera, intercala.
+
+    Si solo hay 1 tenant activo (caso KAIU hoy), comportamiento idéntico
+    al legacy (FIFO de ese tenant).
+
+    Args:
+        pending: lista de mensajes ya ordenada por created_at asc.
+        max_total: cap de mensajes a devolver.
+
+    Returns:
+        Lista de hasta `max_total` mensajes intercalados por tenant.
+    """
+    if not pending:
+        return []
+    # Preservar orden FIFO dentro de cada tenant (pending viene asc por
+    # created_at).
+    by_tenant: dict[str, list[dict]] = {}
+    tenant_order: list[str] = []  # mantiene orden de primer-visto
+    for msg in pending:
+        tid = str(msg.get("tenant_id") or "")
+        if tid not in by_tenant:
+            by_tenant[tid] = []
+            tenant_order.append(tid)
+        by_tenant[tid].append(msg)
+
+    out: list[dict] = []
+    while len(out) < max_total and any(by_tenant[tid] for tid in tenant_order):
+        for tid in tenant_order:
+            queue = by_tenant[tid]
+            if not queue:
+                continue
+            out.append(queue.pop(0))
+            if len(out) >= max_total:
+                break
+    return out
+
+
 class OrchestratorWorker:
     """
     Worker de polling que detecta mensajes entrantes no procesados
@@ -279,19 +331,31 @@ class OrchestratorWorker:
         input al LLM. Evita que el último mensaje (típicamente "Hola"
         o follow-up corto) domine el contexto y haga al bot perder el
         flujo previo.
+
+        Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (pregunta arquitectónica):
+        Encolamiento por tenant — fairness round-robin. ANTES: FIFO global
+        ordenado por created_at, top 10. Si tenant A tiene 100 msgs y tenant
+        B tiene 1, B esperaba 10 ciclos de poll (~30s) para ser procesado
+        porque A monopolizaba la cola.
+        AHORA: traer ventana mayor (50 mensajes top-FIFO), aplicar round-robin
+        por tenant_id para que cada tenant reciba al menos 1 turn por ciclo
+        cuando tenga mensajes pendientes. Reordena los 10 finales que se
+        procesarán este ciclo. Con N=1 tenant activo el comportamiento es
+        idéntico al legacy (FIFO).
         """
-        # Selección de mensajes pendientes — hasta 10 por ciclo para no saturar
+        # Selección amplia (50) para muestrear varios tenants; luego
+        # round-robin filtra a 10 procesables.
         result = (
             self.supabase.table("messages")
             .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
             .eq("direction", "inbound")
             .eq("processing_status", "pending")
             .order("created_at", desc=False)
-            .limit(10)
+            .limit(50)
             .execute()
         )
 
-        pending = result.data or []
+        pending = _round_robin_dequeue_by_tenant(result.data or [], max_total=10)
         if not pending:
             return
         self._metrics["inbound_seen"] += len(pending)
