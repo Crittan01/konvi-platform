@@ -104,7 +104,7 @@ def generate_with_cascade(
     fallback_model: Optional[str] = None,
     max_retries: Optional[int] = None,
     fallback_after: Optional[int] = None,
-    sleep_fn: Callable[[float], None] = time.sleep,
+    sleep_fn: Optional[Callable[[float], None]] = None,
 ) -> CascadeResult:
     """Invoca `invoke_fn(model_name)` con cascada y backoff.
 
@@ -130,6 +130,10 @@ def generate_with_cascade(
     switch_at = fallback_after if fallback_after is not None else _cfg_int(
         "GEMINI_FALLBACK_AFTER", DEFAULT_FALLBACK_AFTER,
     )
+    # Resolver sleep_fn en runtime (no en def-time) para que `patch(
+    # 'llm_invoke.time.sleep')` funcione en tests sin tener que pasar
+    # sleep_fn explícito por cada caller.
+    actual_sleep = sleep_fn if sleep_fn is not None else time.sleep
 
     last_exc: Optional[BaseException] = None
     for attempt in range(1, total + 1):
@@ -155,7 +159,7 @@ def generate_with_cascade(
                 raise
             if attempt < total:
                 sleep_for = _backoff_seconds(attempt)
-                sleep_fn(sleep_for)
+                actual_sleep(sleep_for)
 
     # Todos los intentos fallaron con errores transitorios → degradar.
     err_str = str(last_exc) if last_exc else "unknown"

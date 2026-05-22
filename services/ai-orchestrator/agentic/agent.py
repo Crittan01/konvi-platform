@@ -266,8 +266,22 @@ async def _gemini_generate_async(
     tools_config: list,
     temperature: float,
 ):
-    """Wrapper async sobre client.models.generate_content."""
+    """Wrapper async sobre client.models.generate_content con cascada.
+
+    Rev. 106 — envuelve la invocación en `generate_with_cascade` de
+    `llm_invoke.py` (Rev. 80, ADR-0001). Garantiza:
+      • 4 intentos en `model` (primary) con backoff exponencial 1-16s.
+      • 4 intentos en `GEMINI_FALLBACK_MODEL` (default gemini-2.5-flash-lite)
+        si el primary mantiene 503/429.
+      • Errores no-transitorios (bug schema/prompt) se re-lanzan inmediato.
+      • Si TODOS los intentos transitorios fallan → raise
+        `gemini_cascade_exhausted` para que el dispatcher caiga a legacy
+        (que tiene su propia cascada como segunda red de seguridad).
+
+    Previo a rev. 106: 1 intento, sin retry, 503 colapsaba directamente.
+    """
     from google.genai import types as genai_types
+    from llm_invoke import generate_with_cascade
 
     # Convertir messages al formato Content de Gemini.
     contents = [
@@ -282,18 +296,39 @@ async def _gemini_generate_async(
         temperature=temperature,
         tools=tools_config,
     )
-    # generate_content es sync; envolverlo con run_in_executor para no
-    # bloquear el event loop del worker.
-    import asyncio
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: client.models.generate_content(
-            model=model,
+
+    def _invoke_with_model(model_name: str):
+        """Closure que `generate_with_cascade` invoca por modelo."""
+        return client.models.generate_content(
+            model=model_name,
             contents=contents,
             config=config,
+        )
+
+    import asyncio
+    loop = asyncio.get_running_loop()
+    cascade_result = await loop.run_in_executor(
+        None,
+        lambda: generate_with_cascade(
+            _invoke_with_model,
+            primary_model=model,
         ),
     )
+
+    if cascade_result.degraded:
+        # Cascada agotada (flash + flash-lite ambos 503 sostenido).
+        # Raise para que el caller del loop convierta en error → dispatcher
+        # cae a legacy (defensa en profundidad: legacy tiene cascada propia).
+        raise RuntimeError(
+            f"gemini_cascade_exhausted after {cascade_result.attempts} attempts: "
+            f"{cascade_result.last_error or 'unknown'}"
+        )
+
+    logger.info(
+        "[AGENTIC_CASCADE] model_used=%s attempts=%d",
+        cascade_result.model_used, cascade_result.attempts,
+    )
+    return cascade_result.response
 
 
 def _part_from_dict(part_dict: dict):
