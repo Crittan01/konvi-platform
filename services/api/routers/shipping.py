@@ -259,6 +259,31 @@ class QuoteRequest(BaseModel):
 
 # ─── Helper ──────────────────────────────────────────────────────────────────
 
+def _get_active_shipping_provider(tenant_id: str, supabase: Client) -> str:
+    """Resuelve `active_provider` del tenant. Default 'envia' (preserva
+    comportamiento legacy si no hay row en tenant_shipping_provider_config).
+
+    Rev. 107 M.5/Cotizador: routing multi-provider sin fallback automático
+    (ADR-0019).
+    """
+    try:
+        cfg = (
+            supabase.table("tenant_shipping_provider_config")
+            .select("active_provider")
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        if cfg and cfg.data:
+            return (cfg.data.get("active_provider") or "envia").strip().lower()
+    except Exception as exc:
+        logger.warning(
+            "No pude leer active_provider tenant=%s — default envia: %s",
+            tenant_id, exc,
+        )
+    return "envia"
+
+
 def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
     """
     Obtiene las credenciales de Envia del tenant desde tenant_integrations.
@@ -285,6 +310,142 @@ def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
 
     sandbox = creds.get("sandbox", False)
     return EnviaClient(api_token=api_token, sandbox=sandbox)
+
+
+# ─── Aveonline routing helper (Rev. 107 M.x — Cotizador Console) ─────────
+
+
+async def _quote_via_aveonline(
+    tenant_id: str,
+    supabase: Client,
+    req: "QuoteRequest",
+) -> dict:
+    """Branch del endpoint /quote para tenants con active_provider='aveonline'.
+
+    Retorna el MISMO response shape que el flow Envia (rates + highlights +
+    shipment_id) para preservar compat con el frontend Cotizador del Console.
+    """
+    from integrations.aveonline_client import (
+        AveonlineClient,
+        AveonlineAuthError,
+        AveonlineNoCarriersError,
+        AveonlinePackageLimitError,
+        AveonlinePermanentError,
+        AveonlineTransientError,
+        to_aveonline_city_format,
+    )
+
+    # Convertir direcciones a formato Aveonline (uppercase city+state).
+    origin_canonical = to_aveonline_city_format(
+        req.origin.city or "", req.origin.state or "",
+    )
+    dest_canonical = to_aveonline_city_format(
+        req.destination.city or "", req.destination.state or "",
+    )
+    if not origin_canonical or not dest_canonical:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No pude convertir origin/destination al formato Aveonline. "
+                "Faltan city o state. Usa formato: city='Bogotá', state='Cundinamarca'."
+            ),
+        )
+
+    # Agregar peso/dim de todos los parcels (Aveonline cotiza por paquete único).
+    total_weight = sum(float(p.weight or 0) for p in req.parcels)
+    max_length = max((float(p.length or 0) for p in req.parcels), default=10)
+    max_width = max((float(p.width or 0) for p in req.parcels), default=10)
+    total_height = sum(float(p.height or 0) for p in req.parcels)
+    total_units = sum(int(p.amount or 1) for p in req.parcels) or 1
+    declared_total = sum(int(p.declaredValueCop or 0) for p in req.parcels) or 50000
+    first_content = (req.parcels[0].content if req.parcels else "Producto") or "Producto"
+
+    client = AveonlineClient(tenant_id, supabase)
+    try:
+        result = await client.quote(
+            origin={"city_canonical": origin_canonical, "city": req.origin.city},
+            destination={"city_canonical": dest_canonical, "city": req.destination.city},
+            package={
+                "weight_kg": total_weight or 1.0,
+                "length_cm": max_length,
+                "width_cm": max_width,
+                "height_cm": total_height or 10,
+                "declared_value_cop": declared_total,
+                "units": total_units,
+                "product_name": first_content,
+                "cod_enabled": False,
+            },
+        )
+    except AveonlineAuthError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Aveonline no autenticado: {exc}. Reconecta en /dashboard/integrations/aveonline.",
+        )
+    except AveonlineNoCarriersError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sin carriers Aveonline para {req.destination.city}: {exc}",
+        )
+    except AveonlinePackageLimitError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Paquete excede límites Aveonline: {exc}",
+        )
+    except AveonlineTransientError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Aveonline temporalmente no disponible: {exc}",
+        )
+    except AveonlinePermanentError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Aveonline error: {exc}",
+        )
+
+    # Mapear QuoteOption → shape `normalized_rates` Envia-compat.
+    # El frontend lee: rate.carrier, rate.service, rate.total_price,
+    # rate.currency, rate.delivery_estimate, rate.rate_id, rate.id.
+    rates = []
+    for opt in result.options:
+        rates.append({
+            "rate_id": opt.rate_id,
+            "id": opt.rate_id,  # compat alias
+            "carrier": opt.carrier_name,
+            "service": opt.service_level,
+            "total_price": opt.price_cents / 100,
+            "currency": "COP",
+            "delivery_estimate": (
+                f"{opt.eta_days} días" if opt.eta_days else "consultar"
+            ),
+            "delivery_days": opt.eta_days,
+            "provider": "aveonline",  # marker audit
+        })
+
+    # Persistir shipment row (mismo patrón Envia para que /history funcione).
+    shipment_id = None
+    try:
+        shipment_result = supabase.table("shipments").insert({
+            "tenant_id": tenant_id,
+            "status": "quoted",
+            "provider": "aveonline",
+            "origin_address": req.origin.model_dump(exclude_none=True),
+            "destination_address": req.destination.model_dump(exclude_none=True),
+            "parcels": [p.model_dump() for p in req.parcels],
+            "rates_snapshot": rates,
+        }).execute()
+        if shipment_result.data:
+            shipment_id = shipment_result.data[0]["id"]
+    except Exception as exc:
+        logger.warning(
+            "[shipping.quote.aveonline] persist shipment falló: %s", exc,
+        )
+
+    return {
+        "shipment_id": shipment_id,
+        "rates": rates,
+        "highlights": _build_rate_highlights(rates),
+        "provider": "aveonline",
+    }
 
 
 def _require_envia_phase2() -> None:
@@ -521,6 +682,23 @@ async def quote_shipment(
                 headers={"Idempotency-Replayed": "true"},
             )
 
+        # Rev. 107 — Cotizador Console respeta active_provider del tenant.
+        # Si Aveonline, branch dedicada (formato body y response distinto a
+        # Envia pero el shape final que retornamos es el mismo para que el
+        # frontend no necesite cambios).
+        active_provider = _get_active_shipping_provider(tenant_id, supabase)
+        if active_provider == "aveonline":
+            response_body = await _quote_via_aveonline(tenant_id, supabase, req)
+            finalize_idempotency(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                session=idem_session,
+                status_code=201,
+                body=response_body,
+            )
+            return response_body
+
+        # Default: provider='envia' (flow legacy completo a continuación).
         client = _get_envia_client(tenant_id, supabase)
 
         # Normalización mínima de país

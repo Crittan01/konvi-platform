@@ -36,6 +36,7 @@ import hashlib
 import json
 import logging
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -68,6 +69,40 @@ JWT_REFRESH_BUFFER_SECONDS = 600
 
 # Cache idempotency local cotización (replica plugin oficial 60s).
 QUOTE_CACHE_TTL_SECONDS = 60
+
+
+# ─── Helpers de geo (formato Aveonline) ────────────────────────────────────
+
+
+def _strip_accents(text: str) -> str:
+    """Remueve tildes (e.g. 'Bogotá' → 'Bogota')."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", str(text or ""))
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def to_aveonline_city_format(city: str, state: str) -> str:
+    """Convierte (city, state) → 'CITY(STATE)' uppercase sin tildes.
+
+    Formato canónico Aveonline (dossier §10.3). Ejemplos:
+      ('Bogotá', 'Cundinamarca') → 'BOGOTA(CUNDINAMARCA)'
+      ('Bogotá D.C.', 'Bogotá D.C.') → 'BOGOTA(CUNDINAMARCA)' (caso especial)
+      ('Medellín', 'Antioquia') → 'MEDELLIN(ANTIOQUIA)'
+
+    Retorna string vacío si falta city o state.
+    """
+    norm_city = _strip_accents(city).upper().strip()
+    norm_state = _strip_accents(state).upper().strip()
+    # Limpiar "D.C." / "D. C." que Aveonline NO usa.
+    norm_city = norm_city.replace(" D.C.", "").replace(" D. C.", "").strip()
+    if norm_city == "BOGOTA" and norm_state in (
+        "BOGOTA", "BOGOTA D.C.", "BOGOTA DC", "",
+    ):
+        norm_state = "CUNDINAMARCA"
+    if not norm_city or not norm_state:
+        return ""
+    return f"{norm_city}({norm_state})"
 
 
 # ─── Excepciones tipadas ──────────────────────────────────────────────────
