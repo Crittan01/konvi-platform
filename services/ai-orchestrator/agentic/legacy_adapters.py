@@ -22,43 +22,15 @@ sin fallback automático — ADR-0019).
 from __future__ import annotations
 
 import logging
-import unicodedata
 from typing import Any, Optional
 
+# Rev. 107 — helper `to_aveonline_city_format` movido a aveonline_client.py
+# para que ambos servicios (api + orchestrator) lo usen sin cross-service
+# import path. Re-export como `_to_aveonline_city_format` para compat
+# backward con tests existentes.
+from integrations.aveonline_client import to_aveonline_city_format as _to_aveonline_city_format  # noqa: F401
+
 logger = logging.getLogger(__name__)
-
-
-# ─── Helpers compartidos shipping ──────────────────────────────────────────
-
-
-def _strip_accents(text: str) -> str:
-    """Remueve tildes (e.g. 'Bogotá' → 'Bogota')."""
-    return "".join(
-        c for c in unicodedata.normalize("NFD", text)
-        if unicodedata.category(c) != "Mn"
-    )
-
-
-def _to_aveonline_city_format(city: str, state: str) -> str:
-    """Convierte (city, state) → 'CITY(STATE)' uppercase sin tildes.
-
-    Formato canónico Aveonline (dossier §10.3). Ejemplos:
-      ('Bogotá', 'Cundinamarca') → 'BOGOTA(CUNDINAMARCA)'
-      ('Bogotá D.C.', 'Bogotá D.C.') → 'BOGOTA(CUNDINAMARCA)' (caso especial)
-      ('Medellín', 'Antioquia') → 'MEDELLIN(ANTIOQUIA)'
-    """
-    # Caso especial: Bogotá D.C. — Aveonline usa "(CUNDINAMARCA)" como state.
-    norm_city = _strip_accents(str(city or "")).upper().strip()
-    norm_state = _strip_accents(str(state or "")).upper().strip()
-    # Limpiar "D.C." / "D. C." que Aveonline NO usa.
-    norm_city = norm_city.replace(" D.C.", "").replace(" D. C.", "").strip()
-    if norm_city == "BOGOTA" and (
-        norm_state in ("BOGOTA", "BOGOTA D.C.", "BOGOTA DC", "")
-    ):
-        norm_state = "CUNDINAMARCA"
-    if not norm_city or not norm_state:
-        return ""
-    return f"{norm_city}({norm_state})"
 
 
 # ─── Shipping quote ────────────────────────────────────────────────────────
