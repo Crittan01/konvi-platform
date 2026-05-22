@@ -103,12 +103,25 @@ class Tool(Protocol):
         ...
 
 
-def tool_failure(error_message: str, code: str = "TOOL_ERROR") -> ToolResult:
-    """Helper para retornar un fallo estructurado al LLM."""
-    return ToolResult(
-        success=False,
-        data={"error": error_message, "code": code},
-    )
+def tool_failure(
+    error_message: str,
+    code: str = "TOOL_ERROR",
+    extra: Optional[dict] = None,
+) -> ToolResult:
+    """Helper para retornar un fallo estructurado al LLM.
+
+    Args:
+        error_message: mensaje legible que el LLM ve y puede usar para
+            componer outbound al cliente.
+        code: código corto para programmatic match (e.g. CONSENT_REQUIRED).
+        extra: campos adicionales mergeados en data — útil para devolver
+            estado contextual al LLM (e.g. available_options para que
+            no invente rate_ids).
+    """
+    data = {"error": error_message, "code": code}
+    if extra:
+        data.update(extra)
+    return ToolResult(success=False, data=data)
 
 
 def tool_success(data: dict, audit: Optional[dict] = None) -> ToolResult:
