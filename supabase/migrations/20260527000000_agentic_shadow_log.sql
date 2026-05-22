@@ -39,7 +39,7 @@ DROP POLICY IF EXISTS agentic_shadow_log_tenant_isolation ON public.agentic_shad
 CREATE POLICY agentic_shadow_log_tenant_isolation
   ON public.agentic_shadow_log
   FOR SELECT
-  USING (tenant_id = public.current_tenant_id());
+  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 
 -- service_role bypass via standard pattern (no policy = service_role
 -- accede vía RLS=off por config Supabase).
