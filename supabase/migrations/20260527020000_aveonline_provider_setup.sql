@@ -50,23 +50,15 @@ ALTER TABLE public.tenant_shipping_provider_config ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tspc_select_own_tenant
     ON public.tenant_shipping_provider_config
     FOR SELECT
-    USING (
-        tenant_id IN (
-            SELECT tu.tenant_id FROM public.tenant_users tu
-            WHERE tu.user_id = auth.uid()
-        )
-    );
+    USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 
+-- Patrón canónico del repo: usa session GUC `app.current_tenant_id` seteado
+-- por el API gateway via tenant_scope dependency. Coherente con migraciones
+-- 20260413150000_claims, 20260510090000_cart_events, 20260514110000_*, etc.
 CREATE POLICY tspc_modify_own_tenant
     ON public.tenant_shipping_provider_config
     FOR ALL
-    USING (
-        tenant_id IN (
-            SELECT tu.tenant_id FROM public.tenant_users tu
-            WHERE tu.user_id = auth.uid()
-              AND tu.role IN ('owner', 'manager')
-        )
-    );
+    USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 
 -- Trigger updated_at automático.
 CREATE OR REPLACE FUNCTION public.tenant_shipping_provider_config_set_updated_at()
