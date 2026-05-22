@@ -139,6 +139,8 @@ async def run_agentic_turn(
     tools_config = [genai_types.Tool(function_declarations=tool_declarations)]
 
     # Loop multi-turn de tool calling.
+    # Tracking de recovery empty_output (1 retry max por turn).
+    empty_recovery_attempt = 0
     for turn_idx in range(MAX_TOOL_TURNS):
         try:
             response = await _gemini_generate_async(
@@ -161,6 +163,40 @@ async def run_agentic_turn(
         # Extraer parts (text + function_calls) del response.
         function_calls = _extract_function_calls(response)
         text_part = _extract_text(response)
+
+        # Manejo activo empty_output (rev. 107): si Gemini retorna response
+        # sin tools y sin texto, detectar finish_reason y aplicar strategy
+        # de recovery por finishReason en vez de raise. Cierra la deuda
+        # arquitectónica de la primera versión que trataba esto como excepción.
+        if not function_calls and not text_part:
+            finish_reason = _extract_finish_reason(response)
+            degraded_text, should_retry, retry_history_limit = (
+                _recovery_strategy_for_finish_reason(
+                    finish_reason, empty_recovery_attempt,
+                )
+            )
+            logger.info(
+                "[AGENTIC_EMPTY_OUTPUT] conv=... finish_reason=%s "
+                "attempt=%d strategy=%s",
+                finish_reason or "UNKNOWN",
+                empty_recovery_attempt,
+                "retry" if should_retry else "degraded",
+            )
+
+            if should_retry:
+                empty_recovery_attempt += 1
+                # Reducir history para retry (estrategia depende del finish_reason).
+                if retry_history_limit > 0 and len(messages) > retry_history_limit:
+                    # Preservar el último user message + los N más recientes.
+                    messages = messages[-retry_history_limit:]
+                # Re-loop con history ajustado (vuelve al try).
+                continue
+
+            # No retry — usar degraded text como outbound.
+            outbound_text = degraded_text
+            truncated = True
+            truncated_reason = f"empty_output:{finish_reason or 'UNKNOWN'}"
+            break
 
         if not function_calls:
             # LLM emite texto final → outbound.
@@ -380,6 +416,95 @@ def _extract_text(response: Any) -> str:
             if text:
                 pieces.append(text)
     return "\n".join(pieces).strip()
+
+
+def _extract_finish_reason(response: Any) -> str:
+    """Extrae el `finish_reason` del primer candidate del response.
+
+    Valores típicos Gemini: 'STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION',
+    'OTHER', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'MALFORMED_FUNCTION_CALL'.
+    Retorna '' si no se puede determinar.
+    """
+    if not response or not response.candidates:
+        return ""
+    candidate = response.candidates[0]
+    fr = getattr(candidate, "finish_reason", None)
+    if fr is None:
+        return ""
+    # `finish_reason` puede ser enum o int — normalizar a string.
+    name = getattr(fr, "name", None)
+    if name:
+        return str(name).upper()
+    return str(fr).upper()
+
+
+# Strategies de recovery para empty_output según finish_reason.
+# Cada strategy retorna (outbound_text, should_retry, retry_history_limit).
+# Si should_retry=True, el caller re-invoca Gemini con history limitado.
+# Si False, retorna outbound_text directo como degraded response al cliente.
+
+def _recovery_strategy_for_finish_reason(
+    finish_reason: str,
+    attempt: int,
+) -> tuple[str, bool, int]:
+    """Decide cómo recuperar de un empty_output según finish_reason.
+
+    Args:
+        finish_reason: valor canónico Gemini (e.g. 'MAX_TOKENS', 'SAFETY').
+        attempt: 0 = primer empty_output, 1+ = post-retry.
+
+    Returns:
+        (outbound_text, should_retry, retry_history_limit)
+        • should_retry=True → el caller invoca Gemini de nuevo con
+          history limitado a `retry_history_limit` (0 = todo).
+        • outbound_text = mensaje degraded determinístico al cliente
+          si la strategy decide no reintentar (o ya agotó retry).
+    """
+    # Solo 1 retry por turn — evita loops infinitos.
+    can_retry = attempt < 1
+
+    if finish_reason == "MAX_TOKENS" and can_retry:
+        # Response truncada — retry con history reducido a últimos 5 turns.
+        return ("", True, 5)
+
+    if finish_reason == "RECITATION" and can_retry:
+        # Detectó copia literal del catalog — retry sin tools para forzar
+        # respuesta paraphraseada por el LLM en lugar de tool-call.
+        return ("", True, 10)
+
+    if finish_reason == "SAFETY":
+        # Bloqueado por filtros de seguridad. NO retry — mismo input
+        # produce mismo bloqueo. Escalación implícita: mensaje cordial
+        # + el operador puede ver el caso en logs/review.
+        return (
+            "Disculpa, no puedo responder a ese mensaje. "
+            "Si es una consulta sobre nuestros productos, "
+            "reformúlamela y con gusto te ayudo.",
+            False,
+            0,
+        )
+
+    if finish_reason in ("BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
+        # Contenido bloqueado por políticas Gemini — mismo tratamiento safety.
+        return (
+            "Lo siento, no puedo procesar ese mensaje. "
+            "¿Podrías reformularlo?",
+            False,
+            0,
+        )
+
+    if finish_reason == "MALFORMED_FUNCTION_CALL" and can_retry:
+        # El LLM generó tool call con args inválidos. Retry forzando
+        # respuesta textual (history reducido para evitar repetir patrón).
+        return ("", True, 5)
+
+    # STOP con parts vacío, OTHER, o desconocido — degraded cordial.
+    return (
+        "Disculpa, tuve un inconveniente procesando tu mensaje. "
+        "¿Podrías repetírmelo, por favor?",
+        False,
+        0,
+    )
 
 
 def _to_gemini_schema(pydantic_schema: dict) -> dict:
