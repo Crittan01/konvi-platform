@@ -593,10 +593,19 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                           Entrega: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </p>
                       )}
-                      {/* Breakdown costos Aveonline (si disponible) */}
+                      {/* Breakdown costos Aveonline (si disponible).
+                          stopPropagation: el div padre tiene onClick que
+                          selecciona el rate; sin esto el click en "Ver
+                          desglose" caería en el card y NO expandiría. */}
                       {(rate.freight_total_cop != null || rate.handling_cop != null) && (
-                        <details className="mt-1.5 text-xs">
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                        <details
+                          className="mt-1.5 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <summary
+                            className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors select-none"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             Ver desglose
                           </summary>
                           <dl className="mt-1.5 space-y-0.5 pl-2 border-l-2 border-border">
