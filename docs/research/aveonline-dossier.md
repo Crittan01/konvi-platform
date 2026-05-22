@@ -1414,20 +1414,72 @@ Esta recomendación se ejecuta detalladamente en **§22 Plan de migración**.
 
 **Estrategia**: **adapter pluggable + strangler-fig pattern** — mismo `agentic/tools/shipping.py` interface, dos implementaciones backend.
 
-### 22.1 Fases de migración (8 días-dev, ~2 semanas calendario)
+### 22.1 Fases de migración (10.25 días-dev, ~2.5 semanas calendario)
+
+> **Revisión 2026-05-22 (post-WARN 2 founder UAT)**: el plan original
+> de 8d **subestimó** el onboarding tenant. La auth Aveonline requiere
+> `usuario+clave` per-tenant (§2.1 v1.0 dossier) que debe ingresarse
+> en la UI antes de poder cotizar. Se agregan fases O.1-O.5 cubriendo
+> esquema + UI + server actions + Vault + identity registry (siguiendo
+> patrón ya establecido para Envia/Wompi/WhatsApp/MeLi).
+
+#### 22.1.a Fases de runtime (RT) — cliente HTTP + adapters + UI selector
 
 | # | Fase | Esfuerzo | Pre-requisito | Tests + UAT |
 |---|---|---|---|---|
-| M.1 | Crear `services/api/lib/clients/aveonline_client.py` con métodos `quote`, `generate_label`, `track`, `cancel`, `schedule_pickup` + `cartaporte=1` boomerang | 2d | F.2 IntegrationClient base | unit + sandbox |
+| M.1 | Crear `services/api/lib/clients/aveonline_client.py` con métodos `quote`, `generate_label`, `track`, `cancel`, `schedule_pickup` + `cartaporte=1` boomerang + **`_refresh_jwt()` lee Vault + cachea TTL 12h** | 2d | F.2 IntegrationClient base, O.4 | unit + sandbox |
 | M.2 | Probe E2E sandbox: replicar `packages/db/scripts/probe-aveonline.mjs` en pytest con cuenta DEMO `demointegracion` | 0.5d | M.1 | scenarios paridad |
 | M.3 | Implementar `agentic/legacy_adapters.py::quote_shipping_for_cart_aveonline` (espejo del Envia adapter actual) | 1d | M.1+M.2 | unit |
 | M.4 | Implementar `select_carrier_for_cart_aveonline` + `generate_payment_link_for_cart_aveonline` (Wompi no cambia, solo el shipping precedente) | 0.5d | M.3 | unit |
 | M.5 | Refactor `agentic/tools/shipping.py::QuoteShippingTool.execute` → detectar `tenant_integrations.meta.shipping_provider` y rutear: `'aveonline'` → adapter Aveonline, `'envia'` (default) → adapter Envia | 1d | M.4 | unit + integration |
 | M.6 | Capabilities matrix per-tenant: nueva tabla `tenant_shipping_provider_config` con `{tenant_id, primary_provider, fallback_provider, enabled_carriers[], cod_enabled, insurance_strategy}` | 1d | F.3 capabilities table | unit |
 | M.7 | UI Tenant Console → Settings → Despachos: selector "Provider principal" (Aveonline / Envia / Aveonline+Envia fallback) + lista carriers habilitados | 1.5d | M.6 | UI smoke |
-| M.8 | UAT dual-mode S31-S33 reescritos para Aveonline (idempotency, webhook, polling) + nuevo S43 COD Aveonline | 0.5d | M.1-M.7 | UAT |
+| M.8 | UAT dual-mode S31-S33 reescritos para Aveonline (idempotency, webhook, polling) + nuevo S43 COD Aveonline | 0.5d | M.1-M.7, O.* | UAT |
 
-**Total: 8 días-dev**.
+**Subtotal runtime: 8 días-dev**.
+
+#### 22.1.b Fases de onboarding (O) — credenciales tenant + Vault + UI integración
+
+Auth Aveonline v1.0 requiere `usuario+clave` per-tenant (dossier §2.1).
+NO se puede invocar `autenticarusuario.php` sin credenciales válidas
+del tenant. El patrón replicado del repo existente (Envia/Wompi/WhatsApp/
+MeLi) — UI integración → server action → POST auth → persist + Vault:
+
+| # | Fase | Esfuerzo | Pre-requisito | Tests + UAT |
+|---|---|---|---|---|
+| O.1 | Schema: extender constraint `provider` en `tenant_integrations` para incluir `'aveonline'`. RPC helper `get_aveonline_credentials(tenant_id)` que lee Vault (espejo `get_envia_api_key`). | 0.5d | migración Vault `20260426020000_*` | unit |
+| O.2 | UI `apps/web/app/dashboard/(settings-group)/integrations/aveonline/page.tsx` (estructura clonada de Envia): tabs **Setup**, **Carriers**, **Capacidades**, **Tracking**. Setup tab tiene form con campos: usuario, password (input type=password), versión auth (v1.0 / v2.0 selector, default v1.0), `tiempoToken` (advanced — default `100000`). | 1d | O.1 | UI smoke |
+| O.3 | Server action `connectAveonline(formData)`: (a) valida campos, (b) hace POST de prueba a `autenticarusuario.php` con esas credenciales, (c) si `status=ok` extrae `idempresa` + `token` + `asesorlogistico`, (d) persiste `tenant_integrations` row con `provider='aveonline'`, `status='connected'`, `meta={empresa_id, usuario, asesorlogistico, nombreasesor, jwt_token, jwt_expires_at, tiempoToken, auth_version}`, (e) password va a Vault con key `aveonline_password_<tenant_id>`. Si auth falla → status='error' + razón. | 0.5d | O.1, O.2 | unit + UI smoke |
+| O.4 | `AveonlineClient._refresh_jwt(tenant_id)`: lee Vault → invoca `autenticarusuario.php` → cachea JWT in-memory + persiste en `tenant_integrations.meta.jwt_token + jwt_expires_at`. Auto-refresh si `expires_at < now + 10min` (buffer). TTL configurable según versión: v1.0=`tiempoToken` (default 100000s ≈ 27h), v2.0=12h fijo. | (incluido en M.1) | O.1, O.3 | unit |
+| O.5 | Migración `tenant_provider_identity` aceptar `provider='aveonline'` (constraint update) — registra `empresa_id` como `provider_internal_id` para mapping cross-tenant. | 0.25d | migración `20260514100000_*` | unit |
+
+**Subtotal onboarding: 2.25 días-dev**.
+
+#### 22.1.c Total revisado
+
+**8d (RT) + 2.25d (O) = 10.25 días-dev** (~2.5 semanas calendario).
+
+#### 22.1.d Orden de ejecución sugerido
+
+```
+Semana 1:
+  Lun: O.1 schema + RPC helper                          (0.5d)
+  Lun-Mar: O.2 UI Aveonline (clonando estructura Envia) (1d)
+  Mié: O.3 server action connectAveonline               (0.5d)
+  Mié: O.5 tenant_provider_identity                     (0.25d)
+  Jue-Vie: M.1 AveonlineClient (incluye O.4 refresh JWT) + M.2 probe DEMO (2.5d)
+
+Semana 2:
+  Lun: M.3 quote adapter (1d)
+  Mar: M.4 select_carrier + payment adapter (0.5d) + M.5 routing in QuoteShippingTool (1d)
+  Mié: M.6 capabilities matrix + M.7 UI selector provider (1.5d)
+  Jue-Vie: M.8 UAT dual-mode + bug fixing + ADR-0019 marcar ACTIVO (1d)
+```
+
+**Validación humana obligatoria pre-cutover** (dossier §25.5):
+- H1 SLA contractual Aveonline (bloqueante).
+- H8 revisión legal DPA (bloqueante).
+- H9 contrato firmado per-tenant piloto (bloqueante por tenant).
 
 ### 22.2 Cambios de código concretos
 
