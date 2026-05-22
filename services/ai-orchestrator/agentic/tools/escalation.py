@@ -38,16 +38,38 @@ class EscalateToHumanTool:
     args_schema = EscalateToHumanArgs
 
     async def execute(self, args: EscalateToHumanArgs, ctx: ToolContext) -> ToolResult:
+        # `conversations` schema NO tiene columna escalation_reason — solo
+        # `status`. La razón se persiste en `messages.payload` o cart_events
+        # como audit (preserva el motivo sin requerir migration).
         try:
             ctx.supabase.table("conversations").update({
                 "status": "human_takeover",
-                "escalation_reason": args.reason,
             }).eq("id", ctx.conversation_id).eq("tenant_id", ctx.tenant_id).execute()
         except Exception as exc:
             return tool_failure(
                 f"Error marcando escalación: {exc}",
                 code="ESCALATION_WRITE_ERROR",
             )
+
+        # Persistir razón de escalación como evento append-only en messages
+        # (content_type='escalation_audit'). Forensics-grade sin migration.
+        try:
+            ctx.supabase.table("messages").insert({
+                "conversation_id": ctx.conversation_id,
+                "tenant_id": ctx.tenant_id,
+                "direction": "outbound",
+                "content_type": "escalation_audit",
+                "content": "",
+                "payload": {
+                    "reason": args.reason,
+                    "source": "agentic_tool",
+                },
+                "processed": True,
+                "processing_status": "processed",
+            }).execute()
+        except Exception:
+            # Audit log NO bloquea escalación — el status ya está cambiado.
+            pass
 
         # Notificar via Telegram (best-effort, no blocking).
         try:
