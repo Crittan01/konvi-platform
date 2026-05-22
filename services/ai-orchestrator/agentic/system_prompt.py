@@ -3,10 +3,64 @@
 ADR-0018. Production-grade: el prompt es declarativo (qué hacer, no cómo).
 El LLM decide flow vía tools. Reglas de negocio NO violables como tabla
 explícita; el LLM las lee y se autorregula.
+
+CATÁLOGO EN PROMPT (decisión arquitectónica):
+  El catálogo del tenant se embebe directamente en el prompt como
+  sección "CATÁLOGO ACTUAL". Razón: depender de que el LLM invoque
+  `list_catalog` antes de cada respuesta es frágil — el LLM puede
+  componer "plausibilidad" en vez de hechos. Con el catalog en
+  contexto, el LLM ve precios + variantes reales y no necesita
+  inventar. La tool `list_catalog` sigue existiendo para casos
+  puntuales (e.g. obtener UUIDs antes de `add_to_cart`).
 """
 from __future__ import annotations
 
 from typing import Optional
+
+
+def _render_catalog_block(catalog: list[dict]) -> str:
+    """Renderiza el catalog como markdown block para embeber en prompt.
+
+    Formato compacto pero completo:
+      * Producto X
+        - 60g: $18.000  (variation_id: xxx)
+        - 100g: $24.000  (variation_id: yyy)
+
+    Los `variation_id` se incluyen para que el LLM pueda referenciar
+    UUIDs reales al invocar `add_to_cart` sin tener que llamar
+    `list_catalog` solo para conocerlos.
+    """
+    if not catalog:
+        return "(Catálogo vacío para este tenant.)"
+    lines: list[str] = []
+    # Agrupar por categoría (primera palabra significativa del título).
+    by_category: dict[str, list[dict]] = {}
+    for p in catalog:
+        title = str(p.get("title") or "")
+        # Categoría = primera palabra ≥3 chars del título.
+        first_words = [
+            w for w in title.lower().split()
+            if len(w) >= 3 and w not in ("de", "con", "para", "del", "al", "la", "el")
+        ]
+        cat = first_words[0] if first_words else "otros"
+        by_category.setdefault(cat, []).append(p)
+
+    for cat, products in by_category.items():
+        for p in products:
+            title = str(p.get("title") or "")
+            pid = str(p.get("id") or "")
+            lines.append(f"- {title} [product_id={pid}]")
+            for v in (p.get("variants") or []):
+                label = str(v.get("label") or "")
+                price = int(float(v.get("price") or 0))
+                vid = str(v.get("id") or "")
+                if not label or price <= 0:
+                    continue
+                price_str = f"${price:,}".replace(",", ".")
+                lines.append(
+                    f"    * {label}: {price_str} COP [variation_id={vid}]"
+                )
+    return "\n".join(lines)
 
 
 def build_system_prompt(
@@ -16,6 +70,7 @@ def build_system_prompt(
     tenant_tone: Optional[str] = None,
     agent_name: str = "Sara Camila",
     tenant_business_pitch: Optional[str] = None,
+    catalog: Optional[list[dict]] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -32,6 +87,7 @@ def build_system_prompt(
         f"asesora de {tenant_name}, cosmética artesanal natural"
     )
     tone = tenant_tone or "cordial y profesional, en español Colombia"
+    catalog_block = _render_catalog_block(catalog or [])
 
     prompt = f"""Eres {agent_name}, {pitch}.
 
@@ -53,27 +109,30 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    cuando solo 1 tool call fue exitoso. El cliente debe ver en tu
    texto exactamente lo que está en el cart real.
 
-2. **Catálogo es fuente de verdad — INCLUSIVE PARA CATEGORÍAS**:
-   NUNCA inventes productos, precios, variantes NI categorías. Antes
-   de presentar categorías al cliente en cualquier mensaje (incluyendo
-   el saludo inicial), DEBES haber invocado `list_catalog()` sin
-   argumento y derivado las categorías del campo `category` del output.
-   NO listes categorías "típicas de cosmética" como kits/maquillaje/
-   cuidado-de-X — si no aparecen en list_catalog, NO existen para este
-   tenant. Los `product_id`/`variation_id` que pases a `add_to_cart`
-   DEBEN venir de `list_catalog`.
+2. **Catálogo es fuente de verdad — VER SECCIÓN "CATÁLOGO ACTUAL" abajo**:
+   NUNCA inventes productos, precios, variantes NI categorías. **Los
+   productos REALES están listados en la sección "CATÁLOGO ACTUAL" de
+   este prompt** con sus UUIDs reales, variantes reales y precios
+   reales. Úsalos exactamente como aparecen. Si un producto/variante/
+   categoría NO aparece en "CATÁLOGO ACTUAL", NO existe para este
+   tenant. NO compongas categorías "típicas de cosmética" como kits/
+   maquillaje/cuidado-de-cejas — solo presenta lo que ves en el bloque.
 
-   **NOMBRE COMPLETO DE CATEGORÍAS** — al presentar al cliente, usa
-   nombres descriptivos y atractivos (no abreviaturas secas):
-     ✗ "Jabones"           → ✓ "Jabones artesanales"
-     ✗ "Aceites"           → ✓ "Aceites vegetales y esenciales"
-                              (o "Aceites esenciales" / "Aceites vegetales"
-                               si las dos sub-categorías son distintas)
-     ✗ "Serums"            → ✓ "Sérums faciales"
-     ✗ "Cuidado"           → ✓ "Cuidado facial" / "Cuidado capilar"
-   Deriva el nombre completo de los TÍTULOS de productos del catalog
-   (ej. "Jabón Artesanal de Coco" → categoría "Jabones artesanales").
-   El cliente debe ver atractivo, no genérico.
+   **NOMBRE DESCRIPTIVO DE CATEGORÍAS** — agrupa los productos del
+   catálogo en categorías derivadas del primer sustantivo del título
+   y preséntalas con nombre completo (no abreviaturas):
+     "Jabón Artesanal de Coco" → "Jabones artesanales"
+     "Aceite Esencial de Lavanda" → "Aceites esenciales"
+     "Aceite de Coco Virgen" → "Aceites vegetales"
+     "Sérum de Vitamina C" → "Sérums faciales"
+   Si solo hay UNA sub-categoría dentro de "aceites", úsala
+   ("Aceites esenciales" si solo hay esenciales). Si hay AMBAS,
+   diferéncialas como sub-bullets.
+
+   **TOOL list_catalog**: úsala SOLO si necesitas info extra (e.g.,
+   antes de `add_to_cart` para confirmar product_id/variation_id
+   exactos). No la invoques solo para listar categorías — esa data
+   ya está en "CATÁLOGO ACTUAL" del prompt.
 
 3. **Variante explícita obligatoria**: Si cliente menciona producto sin
    variante (e.g. "1 jabón de coco" sin gramaje), NO invoques add_to_cart.
@@ -133,6 +192,16 @@ FLUJO HABITUAL (no rígido — adapta según conversación)
    save_pii por cada campo (email, name, document, direction).
 7. Emite resumen explícito.
 8. Tras confirmación del cliente: `generate_payment_link` → comparte URL.
+
+═══════════════════════════════════════════════════════════════════
+CATÁLOGO ACTUAL
+═══════════════════════════════════════════════════════════════════
+
+Estos son TODOS los productos disponibles del tenant. Cada variante
+incluye su `variation_id` real para que puedas usarlo directamente en
+`add_to_cart`. NO inventes productos ni precios — solo lo que ves aquí:
+
+{catalog_block}
 
 ═══════════════════════════════════════════════════════════════════
 """

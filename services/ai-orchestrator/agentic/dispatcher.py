@@ -186,6 +186,7 @@ async def _run_agentic_full(
     # System prompt (con tenant config — Fase 0 usa default).
     system_prompt = build_system_prompt(
         tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
+        catalog=catalog,
     )
 
     # Ejecutar agente.
@@ -334,6 +335,7 @@ async def _run_agentic_shadow(
 
     system_prompt = build_system_prompt(
         tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
+        catalog=catalog,
     )
 
     started_at = time.monotonic()

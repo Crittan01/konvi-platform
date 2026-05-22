@@ -113,10 +113,16 @@ _CATALOG_KAIU = [
 ]
 
 
-_SYSTEM_PROMPT = build_system_prompt(
-    tenant_name="KAIU Living Natural",
-    agent_name="Sara Camila",
-)
+def _make_system_prompt() -> str:
+    """Build system prompt con catalog embebido (ADR-0018 cap. 1 anti-hallu)."""
+    return build_system_prompt(
+        tenant_name="KAIU Living Natural",
+        agent_name="Sara Camila",
+        catalog=_CATALOG_KAIU,
+    )
+
+
+_SYSTEM_PROMPT = _make_system_prompt()
 
 
 class _FakeChain:
@@ -194,10 +200,14 @@ class GoldenConversationsE2ETests(unittest.TestCase):
 
     # ─── G1: Catálogo query ────────────────────────────────────────────
 
-    def test_g1_catalogo_query_invoca_list_catalog_sin_alucinar(self):
+    def test_g1_catalogo_query_presenta_productos_reales_sin_inventar(self):
         """Cliente: '¿qué jabones tienen?'
-        Expected: LLM invoca `list_catalog(category='jabon')` y presenta
-        los 3 jabones del fixture con precios reales (no inventa)."""
+        Expected: LLM presenta jabones REALES del catalog (no inventa).
+
+        Post-ADR-0018-cap1: el catalog está embebido en system_prompt,
+        así que el LLM puede responder sin invocar list_catalog. Lo
+        crítico es que los productos del outbound coincidan con el
+        catalog real."""
         result = self._run_turn(
             inbound="¿Qué jabones tienen?",
             history=[
@@ -205,24 +215,22 @@ class GoldenConversationsE2ETests(unittest.TestCase):
                 {"direction": "outbound", "content": "Hola, soy Sara Camila. ¿En qué te ayudo?"},
             ],
         )
-        # Verificar tool call.
-        list_calls = [
-            c for c in result.tool_call_log if c["tool"] == "list_catalog"
-        ]
-        self.assertGreaterEqual(
-            len(list_calls), 1,
-            f"Esperaba list_catalog. tool_calls={result.tool_call_log}",
-        )
-        # Verificar que NO inventó productos (debe mencionar al menos
-        # un jabón real del fixture).
         text_lower = result.outbound_text.lower()
+        # Debe mencionar al menos 2 jabones reales del catalog.
         real_products = {"coco", "lavanda", "avena"}
         mentioned = sum(1 for p in real_products if p in text_lower)
         self.assertGreaterEqual(
-            mentioned, 1,
-            f"Outbound debe mencionar productos reales del catalog. "
-            f"outbound={result.outbound_text!r}",
+            mentioned, 2,
+            f"Outbound debe mencionar productos reales. outbound={result.outbound_text!r}",
         )
+        # Productos NO existentes en catalog NO deben aparecer.
+        invented = {"kits", "maquillaje", "cuidado capilar", "labios"}
+        for inv in invented:
+            self.assertNotIn(
+                inv, text_lower,
+                f"Outbound NO debe mencionar '{inv}' (no está en catalog). "
+                f"outbound={result.outbound_text!r}",
+            )
 
     # ─── G3: add_to_cart sin variante → NO ejecuta tool ────────────────
 
