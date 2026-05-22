@@ -1,0 +1,153 @@
+"""Tools de shipping agentic — quote_shipping + select_carrier.
+
+ADR-0018. Production-grade: reusa `shipping_quote_tool.py` legacy
+(Envia lifecycle preservado). El LLM no toca Envia API directo.
+
+Comportamiento:
+  • quote_shipping(city) → consulta Envia, retorna opciones Económica/Rápida.
+  • select_carrier(rate_id) → persiste elección en cart.shipping_meta.
+  • Side-effects: cart_events shipping_quoted + carrier_selected.
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
+from agentic.tools.registry import register_tool
+
+
+# ─── quote_shipping ────────────────────────────────────────────────────────
+
+
+class QuoteShippingArgs(BaseModel):
+    city: str = Field(
+        ...,
+        min_length=2,
+        max_length=80,
+        description=(
+            "Ciudad de entrega (e.g. 'Bogotá', 'Medellín'). El tool normaliza "
+            "a forma canónica internamente. Si no resuelve la ciudad, retorna "
+            "error que pide reformular."
+        ),
+    )
+
+
+class QuoteShippingTool:
+    name = "quote_shipping"
+    description = (
+        "Cotiza envío para el cart actual a la ciudad indicada. Retorna "
+        "lista de opciones (típicamente Económica + Rápida) con carrier, "
+        "precio_cop, eta_days, y rate_id. ÚSALO solo cuando el cart tenga "
+        "al menos 1 item con variante. Después de invocar este tool, "
+        "presenta las opciones al cliente y espera su elección antes de "
+        "llamar select_carrier."
+    )
+    args_schema = QuoteShippingArgs
+
+    async def execute(self, args: QuoteShippingArgs, ctx: ToolContext) -> ToolResult:
+        from agentic.legacy_adapters import quote_shipping_for_cart
+
+        result = await quote_shipping_for_cart(
+            ctx.supabase,
+            conversation_id=ctx.conversation_id,
+            tenant_id=ctx.tenant_id,
+            contact_id=ctx.contact_id,
+            city_query=args.city,
+        )
+        if not result.get("ok"):
+            return tool_failure(
+                result.get("error", "Error cotizando envío."),
+                code=result.get("code", "QUOTE_ERROR"),
+            )
+
+        options_out = []
+        for opt in result["options"]:
+            options_out.append({
+                "rate_id": opt["rate_id"],
+                "carrier": opt["carrier"],
+                "service_level": opt["service_level"],
+                "price_cop": int(opt["price_cents"] // 100),
+                "eta_date": opt["eta_date"],
+            })
+
+        # Cachear options en ctx.extras para que select_carrier las recupere
+        # sin reconsultar Envia (preserva idempotency rate_id legacy).
+        if hasattr(ctx, "extras") and isinstance(ctx.extras, dict):
+            ctx.extras["_last_quote_options"] = result["options"]
+
+        return tool_success({
+            "city_normalized": result["city_normalized"],
+            "options": options_out,
+            "note": (
+                "Presenta estas opciones al cliente con precios y ETAs. "
+                "Cuando elija, invoca select_carrier(rate_id)."
+            ),
+        })
+
+
+# ─── select_carrier ────────────────────────────────────────────────────────
+
+
+class SelectCarrierArgs(BaseModel):
+    rate_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="rate_id de la opción elegida por el cliente (desde quote_shipping).",
+    )
+
+
+class SelectCarrierTool:
+    name = "select_carrier"
+    description = (
+        "Persiste la elección de carrier del cliente en el cart. Side-effect: "
+        "cart.shipping_meta actualizada + cart_event(carrier_selected). "
+        "Después de invocar esto, el cart tiene shipping_cop calculado y "
+        "está listo para resumen + payment_link (si PII completa)."
+    )
+    args_schema = SelectCarrierArgs
+
+    async def execute(self, args: SelectCarrierArgs, ctx: ToolContext) -> ToolResult:
+        from agentic.legacy_adapters import select_carrier_for_cart
+
+        # Recuperar rate_data cacheada por el turn anterior de quote_shipping.
+        cached_options = (
+            (ctx.extras or {}).get("_last_quote_options")
+            if hasattr(ctx, "extras") else None
+        ) or []
+        rate_data = next(
+            (o for o in cached_options if o.get("rate_id") == args.rate_id),
+            None,
+        )
+        if not rate_data:
+            return tool_failure(
+                f"rate_id '{args.rate_id}' no está en las opciones cotizadas "
+                f"esta sesión. Vuelve a llamar quote_shipping(city).",
+                code="RATE_ID_NOT_CACHED",
+            )
+
+        result = await select_carrier_for_cart(
+            ctx.supabase,
+            conversation_id=ctx.conversation_id,
+            tenant_id=ctx.tenant_id,
+            rate_id=args.rate_id,
+            rate_data=rate_data,
+        )
+        if not result.get("ok"):
+            return tool_failure(
+                result.get("error", "Error seleccionando carrier."),
+                code=result.get("code", "SELECT_ERROR"),
+            )
+
+        return tool_success({
+            "carrier": result["carrier"],
+            "service_level": result["service_level"],
+            "shipping_cop": int(result["shipping_cents"]) // 100,
+            "total_cop": int(result["total_cents"]) // 100,
+        })
+
+
+register_tool(QuoteShippingTool())
+register_tool(SelectCarrierTool())
