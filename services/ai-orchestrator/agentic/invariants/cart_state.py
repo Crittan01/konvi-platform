@@ -49,9 +49,65 @@ def _cart_write_executed(tool_call_log: list[dict]) -> bool:
     return False
 
 
+def _count_successful_cart_writes(tool_call_log: list[dict]) -> int:
+    """Cuenta cuántos add_to_cart/update/remove ejecutaron con éxito."""
+    write_tools = {
+        "add_to_cart", "update_cart_item_quantity", "remove_cart_item",
+    }
+    count = 0
+    for call in tool_call_log:
+        if call.get("tool") not in write_tools:
+            continue
+        if "error" not in (call.get("result") or {}):
+            count += 1
+    return count
+
+
+def _count_items_affirmed_in_text(text: str) -> int:
+    """Estimación de cuántos items distintos el LLM afirma en el outbound.
+
+    Patrón típico WhatsApp del bot:
+      * 1x Producto A...
+      * 2x Producto B...
+      • 1 Jabón de Coco...
+      • 1 *Producto C*: $24.000
+
+    Heurística: cuenta bullets que mencionan precio o cantidad+producto.
+    NO es 100% precisa — es una señal para el invariant de mismatch.
+    """
+    if not text:
+        return 0
+    lines = text.split("\n")
+    # Bullet lines con "$" (precio) O con "Nx " al inicio.
+    count = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Bullet markers comunes: *, •, -, "•"
+        if not (stripped.startswith("*") or stripped.startswith("•")
+                or stripped.startswith("-")):
+            continue
+        # Heurística doble: línea con producto+cantidad o producto+precio.
+        if "$" in stripped or re.search(r"\b\d+\s*x?\b", stripped):
+            count += 1
+    return count
+
+
 class CartStateInvariant:
-    """Si LLM afirma cambio de cart, ese cambio debe haber pasado por
-    un tool de write del cart en este turn."""
+    """Doble defensa contra mismatch texto-vs-cart:
+
+    Caso A — LLM afirma cambio pero NO corrió tool de write:
+      "Listo, agregué Coco" sin `add_to_cart` exitoso → REWRITE.
+
+    Caso B — LLM lista N items pero solo M < N add_to_cart exitosos:
+      "He agregado: Coco 100g + Lavanda 150g" pero solo 1 add_to_cart
+      succeeded → la afirmación es PARCIALMENTE falsa. REWRITE para
+      que el cliente vea el cart real sin ambigüedad.
+
+    El caso B emerge de bugs runtime donde el LLM compone el mensaje
+    final SIN re-verificar resultados de cada tool individual.
+    """
 
     name = "cart_state_coherence"
 
@@ -70,23 +126,46 @@ class CartStateInvariant:
                 outcome=InvariantOutcome.OK,
                 invariant_name=self.name,
             )
-        if _cart_write_executed(tool_call_log):
-            return InvariantResult(
-                outcome=InvariantOutcome.OK,
-                invariant_name=self.name,
-                reason="cart write executed, LLM afirmación es válida",
+
+        # Caso A: afirmación sin ningún tool de write exitoso.
+        if not _cart_write_executed(tool_call_log):
+            replacement = (
+                "Para procesar tu pedido necesito que me confirmes el producto "
+                "y la presentación exacta. ¿Cuál te gustaría llevar?"
             )
-        # LLM afirma cambio pero NO corrió tool de write.
-        replacement = (
-            "Para procesar tu pedido necesito que me confirmes el producto "
-            "y la presentación exacta. ¿Cuál te gustaría llevar?"
-        )
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    "Caso A: LLM afirmó cambio de cart sin ningún tool "
+                    "de write exitoso — rewrite a prompt determinístico."
+                ),
+            )
+
+        # Caso B: items afirmados > items efectivamente agregados.
+        items_affirmed = _count_items_affirmed_in_text(candidate_text)
+        items_added = _count_successful_cart_writes(tool_call_log)
+        if items_affirmed > items_added and items_affirmed >= 2:
+            # El bot listó más items de los que realmente agregó.
+            # Reescribir a un prompt honesto que evita ambigüedad.
+            replacement = (
+                f"Logré agregar {items_added} item(s) al carrito. "
+                "Hubo un inconveniente con el otro item. ¿Podrías "
+                "repetir cuál te interesa y en qué presentación?"
+            )
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    f"Caso B: items_affirmed={items_affirmed} pero "
+                    f"items_added={items_added} — mismatch parcial."
+                ),
+            )
+
         return InvariantResult(
-            outcome=InvariantOutcome.REWRITE,
+            outcome=InvariantOutcome.OK,
             invariant_name=self.name,
-            replacement_text=replacement,
-            reason=(
-                "LLM afirmó cambio de cart sin tool de write — rewrite "
-                "a prompt determinístico (anti-hallu)"
-            ),
+            reason="cart write executed coherente con afirmación",
         )
