@@ -80,10 +80,27 @@ async def quote_shipping_for_cart(
         }
 
     # Estimar paquete desde el cart.
-    package = _estimate_package_from_cart_if_available(
-        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+    # `_estimate_package_from_cart_if_available` retorna PackageEstimateDecision
+    # con .package (Optional[PackageEstimate]) — NO el PackageEstimate directo.
+    # Argumentos en orden positional: (supabase, tenant_id, conversation_id).
+    package_decision = _estimate_package_from_cart_if_available(
+        supabase, tenant_id, conversation_id,
     )
+    package = package_decision.package if package_decision else None
     if not package:
+        ambiguous = (
+            package_decision.ambiguous_product_titles
+            if package_decision else []
+        )
+        if ambiguous:
+            return {
+                "ok": False,
+                "error": (
+                    f"No pude resolver dimensiones para: "
+                    f"{', '.join(ambiguous[:3])}. Confirma productos exactos."
+                ),
+                "code": "AMBIGUOUS_PRODUCTS",
+            }
         return {
             "ok": False,
             "error": "No pude estimar el paquete (cart vacío o productos sin dimensiones).",

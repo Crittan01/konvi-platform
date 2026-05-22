@@ -159,7 +159,7 @@ async def _run_agentic_full(
     from agentic.system_prompt import build_system_prompt
     from agentic.invariants import (
         apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
-        InvariantOutcome,
+        NoDecorativeEmojiInvariant, InvariantOutcome,
     )
 
     # Cargar context (catalog, contact, history) — reusa helpers legacy.
@@ -207,9 +207,15 @@ async def _run_agentic_full(
         # Agentic falló — raise para que el dispatcher caiga a legacy.
         raise RuntimeError(f"agentic_failed: {result.error or 'empty_output'}")
 
-    # Aplicar invariants Python (anti-hallu).
+    # Aplicar invariants Python (anti-hallu + style guards).
+    # Orden importa: cart_state + consent primero (semánticos), no_emoji
+    # último (cosmético — strip sobre el texto final si pasó los anteriores).
     invariant_result = await apply_invariants(
-        [CartStateInvariant(), ConsentRequiredInvariant()],
+        [
+            CartStateInvariant(),
+            ConsentRequiredInvariant(),
+            NoDecorativeEmojiInvariant(),
+        ],
         candidate_text=result.outbound_text,
         tenant_id=tenant_id,
         conversation_id=conversation_id,
