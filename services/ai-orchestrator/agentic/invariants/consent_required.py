@@ -30,10 +30,16 @@ def _llm_affirms_pii_saved(text: str) -> bool:
     return any(p.search(text) for p in _PII_AFFIRMATIVE_PATTERNS)
 
 
+_SAVE_TOOLS = {
+    "save_email", "save_name", "save_document",
+    "save_address", "save_shipping_phone",
+}
+
+
 def _save_pii_failed_by_consent(tool_call_log: list[dict]) -> bool:
-    """True si en este turn save_pii falló con code='CONSENT_REQUIRED'."""
+    """True si en este turn algún save_* falló con code='CONSENT_REQUIRED'."""
     for call in tool_call_log:
-        if call.get("tool") != "save_pii":
+        if call.get("tool") not in _SAVE_TOOLS:
             continue
         result = call.get("result") or {}
         if result.get("code") == "CONSENT_REQUIRED":

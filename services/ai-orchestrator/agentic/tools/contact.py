@@ -165,127 +165,264 @@ class RecordConsentTool:
 # ─── save_pii (write, GATED por consent) ───────────────────────────────────
 
 
-class SavePIIArgs(BaseModel):
-    field: Literal["email", "name", "document", "direction", "shipping_phone"] = Field(
-        ...,
-        description=(
-            "Campo a guardar. 'document' requiere ambos type + number. "
-            "'direction' es objeto JSON con street/city/state/building_type/etc."
-        ),
-    )
-    value: dict | str = Field(
-        ...,
-        description=(
-            "Valor a guardar. Para email/name/shipping_phone: string. "
-            "Para document: {'type': 'CC', 'number': '1234567890'}. "
-            "Para direction: dict con campos de dirección."
-        ),
+# ─── save_* tools (1 tool por campo PII — schemas rígidos Gemini-friendly) ─
+
+
+async def _verify_consent_or_fail(ctx: ToolContext) -> Optional[ToolResult]:
+    """Helper compartido: verifica consent antes de cualquier save_*.
+    Retorna ToolResult de fallo si no hay consent, None si OK."""
+    if not ctx.contact_id:
+        return tool_failure("No hay contact_id.", code="NO_CONTACT")
+    try:
+        res = (
+            ctx.supabase.table("contacts")
+            .select("consent_given")
+            .eq("id", ctx.contact_id)
+            .single()
+            .execute()
+        )
+        consent_given = bool((res.data or {}).get("consent_given"))
+    except Exception as exc:
+        return tool_failure(
+            f"Error verificando consent: {exc}",
+            code="CONSENT_CHECK_ERROR",
+        )
+    if not consent_given:
+        return tool_failure(
+            "consent_given=False. Invoca record_consent(given=True) ANTES de "
+            "guardar PII. Habeas Data Ley 1581 obliga.",
+            code="CONSENT_REQUIRED",
+        )
+    return None
+
+
+async def _write_contact_update(
+    ctx: ToolContext, update_data: dict, field_name: str,
+) -> ToolResult:
+    """Helper compartido: aplica el update al contact + audit log."""
+    try:
+        ctx.supabase.table("contacts").update(update_data).eq(
+            "id", ctx.contact_id,
+        ).eq("tenant_id", ctx.tenant_id).execute()
+    except Exception as exc:
+        return tool_failure(
+            f"Error guardando {field_name}: {exc}",
+            code="PII_WRITE_ERROR",
+        )
+    return tool_success({
+        "field": field_name,
+        "saved": True,
+    }, audit={"operation": "save_pii", "field": field_name})
+
+
+# ─── save_email ────────────────────────────────────────────────────────────
+
+
+class SaveEmailArgs(BaseModel):
+    value: str = Field(
+        ..., min_length=5, max_length=120,
+        description="Email del cliente (ej. cliente@ejemplo.com).",
     )
 
     @field_validator("value")
     @classmethod
-    def _validate_shape(cls, v, info):
-        field = info.data.get("field")
-        if field == "document":
-            if not isinstance(v, dict) or "type" not in v or "number" not in v:
-                raise ValueError(
-                    "document requiere {'type': ..., 'number': ...}"
-                )
-            if v["type"] not in _DOC_TYPE_VALID:
-                raise ValueError(f"type debe ser uno de {sorted(_DOC_TYPE_VALID)}")
-        elif field == "email":
-            if not isinstance(v, str) or not _EMAIL_REGEX.match(v):
-                raise ValueError("email mal formado")
-        elif field in {"name", "shipping_phone"}:
-            if not isinstance(v, str) or not v.strip():
-                raise ValueError(f"{field} no puede estar vacío")
-        elif field == "direction":
-            if not isinstance(v, dict):
-                raise ValueError("direction debe ser dict")
-        return v
+    def _email_regex(cls, v):
+        if not _EMAIL_REGEX.match(v):
+            raise ValueError("email mal formado")
+        return v.strip().lower()
 
 
-class SavePIITool:
-    name = "save_pii"
+class SaveEmailTool:
+    name = "save_email"
     description = (
-        "Guarda un campo PII del cliente (email/name/document/direction/"
-        "shipping_phone). REQUIERE consent_given=True (verificado por el "
-        "tool — falla si no). Para document pasa "
-        "{'type': 'CC', 'number': '...'}. Para direction pasa dict con "
-        "street, city, building_type, etc."
+        "Guarda el email del cliente. REQUIERE consent_given=True. "
+        "Valida formato email antes de persistir."
     )
-    args_schema = SavePIIArgs
+    args_schema = SaveEmailArgs
 
-    async def execute(self, args: SavePIIArgs, ctx: ToolContext) -> ToolResult:
-        if not ctx.contact_id:
+    async def execute(self, args: SaveEmailArgs, ctx: ToolContext) -> ToolResult:
+        consent_fail = await _verify_consent_or_fail(ctx)
+        if consent_fail:
+            return consent_fail
+        return await _write_contact_update(ctx, {"email": args.value}, "email")
+
+
+# ─── save_name ─────────────────────────────────────────────────────────────
+
+
+class SaveNameArgs(BaseModel):
+    value: str = Field(
+        ..., min_length=2, max_length=120,
+        description="Nombre completo del cliente.",
+    )
+
+
+class SaveNameTool:
+    name = "save_name"
+    description = (
+        "Guarda el nombre completo del cliente. REQUIERE consent_given=True."
+    )
+    args_schema = SaveNameArgs
+
+    async def execute(self, args: SaveNameArgs, ctx: ToolContext) -> ToolResult:
+        consent_fail = await _verify_consent_or_fail(ctx)
+        if consent_fail:
+            return consent_fail
+        name_clean = " ".join(args.value.split())
+        return await _write_contact_update(ctx, {"name": name_clean}, "name")
+
+
+# ─── save_document ─────────────────────────────────────────────────────────
+
+
+class SaveDocumentArgs(BaseModel):
+    doc_type: Literal["CC", "CE", "NIT", "PP", "TI", "OTHER"] = Field(
+        ...,
+        description="Tipo de documento (CC, CE, NIT, PP, TI, OTHER).",
+    )
+    doc_number: str = Field(
+        ..., min_length=4, max_length=20,
+        description="Número del documento (solo dígitos).",
+    )
+
+    @field_validator("doc_number")
+    @classmethod
+    def _doc_digits(cls, v):
+        clean = re.sub(r"\D", "", v)
+        if len(clean) < 4:
+            raise ValueError("doc_number debe tener al menos 4 dígitos")
+        return clean
+
+
+class SaveDocumentTool:
+    name = "save_document"
+    description = (
+        "Guarda el documento de identidad (tipo + número). REQUIERE "
+        "consent_given=True. Tipos válidos: CC (Cédula Ciudadanía), CE "
+        "(Cédula Extranjería), NIT, PP (Pasaporte), TI (Tarjeta Identidad)."
+    )
+    args_schema = SaveDocumentArgs
+
+    async def execute(self, args: SaveDocumentArgs, ctx: ToolContext) -> ToolResult:
+        consent_fail = await _verify_consent_or_fail(ctx)
+        if consent_fail:
+            return consent_fail
+        return await _write_contact_update(ctx, {
+            "document_type": args.doc_type,
+            "document_number": args.doc_number,
+        }, "document")
+
+
+# ─── save_address ──────────────────────────────────────────────────────────
+
+
+class SaveAddressArgs(BaseModel):
+    street: str = Field(
+        ..., min_length=3, max_length=200,
+        description="Calle y número (ej. 'Calle 36A # 6-87').",
+    )
+    city: str = Field(
+        ..., min_length=2, max_length=80,
+        description="Ciudad (ej. 'Bogotá', 'Medellín').",
+    )
+    building_type: Literal["casa", "edificio", "conjunto", "oficina"] = Field(
+        ..., description="Tipo de vivienda.",
+    )
+    apartment: Optional[str] = Field(
+        default=None, max_length=40,
+        description="Apto/oficina (opcional). Requerido si building_type ∈ {edificio,conjunto,oficina}.",
+    )
+    tower: Optional[str] = Field(
+        default=None, max_length=40,
+        description="Torre/bloque (opcional, solo conjunto).",
+    )
+    floor: Optional[str] = Field(
+        default=None, max_length=10,
+        description="Piso (opcional).",
+    )
+    neighborhood: Optional[str] = Field(
+        default=None, max_length=80,
+        description="Barrio (opcional pero recomendado).",
+    )
+    reference: Optional[str] = Field(
+        default=None, max_length=200,
+        description="Punto de referencia opcional.",
+    )
+
+
+class SaveAddressTool:
+    name = "save_address"
+    description = (
+        "Guarda la dirección de envío del cliente. REQUIERE "
+        "consent_given=True. Validar: building_type=casa NO necesita "
+        "apartment; building_type ∈ {edificio,conjunto,oficina} requieren "
+        "apartment."
+    )
+    args_schema = SaveAddressArgs
+
+    async def execute(self, args: SaveAddressArgs, ctx: ToolContext) -> ToolResult:
+        consent_fail = await _verify_consent_or_fail(ctx)
+        if consent_fail:
+            return consent_fail
+        address = {
+            "street": args.street,
+            "city": args.city,
+            "building_type": args.building_type,
+        }
+        if args.apartment:
+            address["apartment"] = args.apartment
+        if args.tower:
+            address["tower"] = args.tower
+        if args.floor:
+            address["floor"] = args.floor
+        if args.neighborhood:
+            address["neighborhood"] = args.neighborhood
+        if args.reference:
+            address["reference"] = args.reference
+        return await _write_contact_update(ctx, {"address": address}, "address")
+
+
+# ─── save_shipping_phone ───────────────────────────────────────────────────
+
+
+class SaveShippingPhoneArgs(BaseModel):
+    value: str = Field(
+        ..., min_length=10, max_length=20,
+        description=(
+            "Teléfono alterno de envío (mín 10 dígitos colombianos). "
+            "Se normaliza a formato +57XXXXXXXXXX."
+        ),
+    )
+
+
+class SaveShippingPhoneTool:
+    name = "save_shipping_phone"
+    description = (
+        "Guarda un teléfono alterno para coordinar entrega (cliente da "
+        "número distinto al de WhatsApp). REQUIERE consent_given=True."
+    )
+    args_schema = SaveShippingPhoneArgs
+
+    async def execute(self, args: SaveShippingPhoneArgs, ctx: ToolContext) -> ToolResult:
+        consent_fail = await _verify_consent_or_fail(ctx)
+        if consent_fail:
+            return consent_fail
+        digits = re.sub(r"\D", "", args.value)
+        if len(digits) < 10:
             return tool_failure(
-                "No hay contact_id.", code="NO_CONTACT",
+                "shipping_phone debe tener al menos 10 dígitos.",
+                code="INVALID_PHONE",
             )
-        # Gate Habeas Data: consent OBLIGATORIO antes de PII.
-        try:
-            res = (
-                ctx.supabase.table("contacts")
-                .select("consent_given")
-                .eq("id", ctx.contact_id)
-                .single()
-                .execute()
-            )
-            consent_given = bool((res.data or {}).get("consent_given"))
-        except Exception as exc:
-            return tool_failure(
-                f"Error verificando consent: {exc}", code="CONSENT_CHECK_ERROR",
-            )
-        if not consent_given:
-            return tool_failure(
-                "consent_given=False. Invoca record_consent(given=True) ANTES "
-                "de save_pii. Habeas Data Ley 1581 obliga.",
-                code="CONSENT_REQUIRED",
-            )
-
-        # Mapeo field → columna(s) DB.
-        update: dict = {}
-        if args.field == "email":
-            update["email"] = str(args.value).strip().lower()
-        elif args.field == "name":
-            update["name"] = " ".join(str(args.value).split())
-        elif args.field == "document":
-            update["document_type"] = args.value["type"]
-            update["document_number"] = re.sub(r"\D", "", str(args.value["number"]))
-        elif args.field == "direction":
-            update["address"] = args.value
-        elif args.field == "shipping_phone":
-            digits = re.sub(r"\D", "", str(args.value))
-            if len(digits) >= 10:
-                update["shipping_phone"] = f"+57{digits[-10:]}"
-            else:
-                return tool_failure(
-                    "shipping_phone debe tener al menos 10 dígitos.",
-                    code="INVALID_PHONE",
-                )
-
-        try:
-            ctx.supabase.table("contacts").update(update).eq(
-                "id", ctx.contact_id,
-            ).eq("tenant_id", ctx.tenant_id).execute()
-        except Exception as exc:
-            return tool_failure(
-                f"Error guardando PII: {exc}", code="PII_WRITE_ERROR",
-            )
-
-        return tool_success({
-            "field": args.field,
-            "saved": True,
-            "note": (
-                "PII guardado. Llama get_contact_info() si quieres verificar "
-                "qué falta para is_known_customer."
-            ),
-        }, audit={
-            "operation": "save_pii",
-            "field": args.field,
-        })
+        return await _write_contact_update(
+            ctx, {"shipping_phone": f"+57{digits[-10:]}"}, "shipping_phone",
+        )
 
 
-# Auto-registro.
+# Auto-registro de todos.
 register_tool(GetContactInfoTool())
 register_tool(RecordConsentTool())
-register_tool(SavePIITool())
+register_tool(SaveEmailTool())
+register_tool(SaveNameTool())
+register_tool(SaveDocumentTool())
+register_tool(SaveAddressTool())
+register_tool(SaveShippingPhoneTool())
