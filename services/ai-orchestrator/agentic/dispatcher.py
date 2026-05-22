@@ -33,16 +33,23 @@ AGENTIC_SHADOW_TIMEOUT_S = float(os.getenv("AGENTIC_SHADOW_TIMEOUT_S", "30"))
 
 
 async def is_tenant_agentic_enabled(supabase: Any, tenant_id: str) -> bool:
-    """Lee `tenant_integrations.meta.agentic_enabled` del tenant.
+    """Lee `tenant_integrations.meta.agentic_enabled` del row dedicado
+    `provider='agentic'` del tenant.
 
-    Default False si la columna no existe o el flag no está seteado
-    (preserva backward compat — sin migration, comportamiento legacy).
+    Default False si el row no existe (preserva backward compat — sin
+    activación explícita, comportamiento legacy).
+
+    Diseño: usamos un row dedicado por provider='agentic' (consistente
+    con el patrón whatsapp/wompi/envia/meli existente) en lugar de
+    mezclar el flag en meta de otro provider. Esto evita race
+    conditions en updates concurrentes a meta de otros providers.
     """
     try:
         res = (
             supabase.table("tenant_integrations")
             .select("meta")
             .eq("tenant_id", tenant_id)
+            .eq("provider", "agentic")
             .limit(1)
             .execute()
         )

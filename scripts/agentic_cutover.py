@@ -64,12 +64,14 @@ def _get_supabase():
     return create_client(url, key)
 
 
-def _read_current_meta(sb, tenant_id: str) -> dict:
-    """Lee tenant_integrations.meta del tenant (puede no existir todavía)."""
+def _read_agentic_row(sb, tenant_id: str) -> dict:
+    """Lee la fila tenant_integrations con provider='agentic' (dedicada
+    al flag agentic_enabled). Si no existe, retorna `_row_exists=False`."""
     res = (
         sb.table("tenant_integrations")
         .select("id, meta")
         .eq("tenant_id", tenant_id)
+        .eq("provider", "agentic")
         .limit(1)
         .execute()
     )
@@ -84,18 +86,20 @@ def _read_current_meta(sb, tenant_id: str) -> dict:
 
 
 def _update_meta(sb, tenant_id: str, new_meta: dict) -> None:
-    current = _read_current_meta(sb, tenant_id)
+    """Upsert del row provider='agentic' con meta merged."""
+    current = _read_agentic_row(sb, tenant_id)
     if current["_row_exists"]:
         merged = {**(current["meta"] or {}), **new_meta}
         sb.table("tenant_integrations").update({"meta": merged}).eq(
             "id", current["_row_id"]
         ).execute()
     else:
-        # Crear row mínimo para el tenant.
+        # Crear row dedicado provider='agentic'.
         sb.table("tenant_integrations").insert({
             "tenant_id": tenant_id,
-            "integration_type": "agentic_config",
-            "status": "active",
+            "provider": "agentic",
+            "status": "connected",
+            "credentials": {},
             "meta": new_meta,
         }).execute()
 
