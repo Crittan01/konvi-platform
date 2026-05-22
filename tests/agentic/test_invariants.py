@@ -90,6 +90,46 @@ class CartStateInvariantTests(unittest.TestCase):
         ))
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
 
+    # ── Caso B: mismatch parcial (founder UAT conv 91f25b3f) ──────────
+
+    def test_llm_lista_2_items_pero_solo_1_add_to_cart_rewrite(self):
+        """Caso runtime founder: LLM dijo "He agregado: 1 Coco 100g
+        + 1 Lavanda 150g" pero solo 1 add_to_cart exitoso → REWRITE."""
+        text = (
+            "Perfecto! He agregado a tu carrito:\n"
+            "*   1 *Jabón Artesanal de Coco* de 100g por *$24.000*\n"
+            "*   1 *Jabón Artesanal de Lavanda* de 150g por *$32.000*\n"
+            "Hay algo más?"
+        )
+        result = _run(self.inv.validate(
+            candidate_text=text,
+            tool_call_log=[
+                {"tool": "add_to_cart",
+                 "result": {"added": {"product_id": "p-coco"}}},
+                # Segundo add_to_cart falló (no aparece).
+            ],
+            **self.base_kwargs,
+        ))
+        self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("1 item", result.replacement_text)
+
+    def test_llm_lista_2_items_y_2_add_to_cart_exitosos_ok(self):
+        """2 items afirmados + 2 add_to_cart exitosos → coherente, OK."""
+        text = (
+            "Listo! Agregué a tu carrito:\n"
+            "*   1 Coco 100g: *$24.000*\n"
+            "*   1 Lavanda 150g: *$32.000*\n"
+        )
+        result = _run(self.inv.validate(
+            candidate_text=text,
+            tool_call_log=[
+                {"tool": "add_to_cart", "result": {"added": {"product_id": "p-coco"}}},
+                {"tool": "add_to_cart", "result": {"added": {"product_id": "p-lav"}}},
+            ],
+            **self.base_kwargs,
+        ))
+        self.assertEqual(result.outcome, InvariantOutcome.OK)
+
 
 class ConsentRequiredInvariantTests(unittest.TestCase):
     """Si save_pii falló por consent, LLM no debe afirmar haber guardado."""

@@ -235,6 +235,19 @@ async def _run_agentic_full(
         processing_status=PROCESSING_STATUS_PROCESSED,
     )
 
+    # Audit log estructurado del tool_call_log completo (production-grade
+    # observability — sin esto los bugs runtime son ciegos).
+    for idx, call in enumerate(result.tool_call_log):
+        result_data = call.get("result") or {}
+        is_failure = "error" in result_data
+        log_fn = logger.warning if is_failure else logger.info
+        log_fn(
+            "[AGENTIC_TOOL] conv=%s call[%d]=%s success=%s result=%s",
+            conversation_id[:8], idx, call.get("tool"),
+            not is_failure,
+            json.dumps(result_data, default=str)[:300],
+        )
+
     logger.info(
         "[AGENTIC_FULL] conv=%s tools=%d elapsed=%.2fs invariant=%s",
         conversation_id[:8], result.tool_calls_executed, elapsed,
