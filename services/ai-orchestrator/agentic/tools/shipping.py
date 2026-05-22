@@ -112,20 +112,67 @@ class SelectCarrierTool:
     async def execute(self, args: SelectCarrierArgs, ctx: ToolContext) -> ToolResult:
         from agentic.legacy_adapters import select_carrier_for_cart
 
-        # Recuperar rate_data cacheada por el turn anterior de quote_shipping.
-        cached_options = (
-            (ctx.extras or {}).get("_last_quote_options")
-            if hasattr(ctx, "extras") else None
-        ) or []
-        rate_data = next(
-            (o for o in cached_options if o.get("rate_id") == args.rate_id),
-            None,
-        )
+        # Resolver rate_data en 2 capas (DB-first, ctx.extras fallback):
+        #   1. cart.shipping_meta.quoted_options (canónico, sobrevive turns
+        #      y cross-path legacy↔agentic).
+        #   2. ctx.extras["_last_quote_options"] (memoria del mismo turn).
+        # Plan A.0.2: DB-first sobre history-memory.
+        rate_data = None
+        all_options: list[dict] = []
+        try:
+            cart_row = (
+                ctx.supabase.table("conversation_carts")
+                .select("shipping_meta")
+                .eq("conversation_id", ctx.conversation_id)
+                .eq("tenant_id", ctx.tenant_id)
+                .eq("status", "active")
+                .maybe_single()
+                .execute()
+            )
+            shipping_meta = (
+                (cart_row.data or {}).get("shipping_meta") or {}
+                if cart_row else {}
+            )
+            db_options = shipping_meta.get("quoted_options") or []
+            if isinstance(db_options, list):
+                all_options.extend(db_options)
+                rate_data = next(
+                    (o for o in db_options if o.get("rate_id") == args.rate_id),
+                    None,
+                )
+        except Exception:
+            pass
+
         if not rate_data:
+            cached_options = (
+                (ctx.extras or {}).get("_last_quote_options")
+                if hasattr(ctx, "extras") else None
+            ) or []
+            all_options.extend(cached_options)
+            rate_data = next(
+                (o for o in cached_options if o.get("rate_id") == args.rate_id),
+                None,
+            )
+
+        if not rate_data:
+            # Listar rate_ids reales disponibles para que el LLM NO invente
+            # — debe llamar quote_shipping(city) o pedir al cliente que repita.
+            available_summary = [
+                {
+                    "rate_id": o.get("rate_id"),
+                    "carrier": o.get("carrier"),
+                    "service_level": o.get("service_level"),
+                }
+                for o in all_options[:4]
+            ]
             return tool_failure(
-                f"rate_id '{args.rate_id}' no está en las opciones cotizadas "
-                f"esta sesión. Vuelve a llamar quote_shipping(city).",
-                code="RATE_ID_NOT_CACHED",
+                f"rate_id '{args.rate_id}' no existe. "
+                f"Opciones reales disponibles: {available_summary or 'ninguna'}. "
+                f"Si el cliente eligió por nombre (e.g. 'Económica'), "
+                f"usa el rate_id correspondiente de la lista. Si la lista "
+                f"está vacía, llama quote_shipping(city) primero.",
+                code="RATE_ID_NOT_FOUND",
+                extra={"available_options": available_summary},
             )
 
         result = await select_carrier_for_cart(

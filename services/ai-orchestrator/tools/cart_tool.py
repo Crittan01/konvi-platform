@@ -700,6 +700,86 @@ def set_shipping_meta(
     }
 
 
+def set_quoted_options(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    options: list[dict],
+) -> dict:
+    """Persiste en cart.shipping_meta.quoted_options el array completo de
+    opciones cotizadas (rate_id + carrier + service + price + eta).
+
+    Rev. 106 — fix bug `RATE_ID_NOT_CACHED` (conv 2eb3bb48, 2026-05-22):
+    el cache de opciones vivía solo en ctx.extras (memoria volátil que se
+    resetea cada turn). Cuando el legacy cotizaba (fallback) y el agentic
+    intentaba seleccionar carrier en turn siguiente, no tenía rate_ids.
+
+    DB-first (Plan A.0.2): ambos paths (legacy + agentic) leen del mismo
+    lugar canónico. No toca carrier/service/cents — solo añade las opciones
+    disponibles para que `select_carrier` pueda resolverlas.
+
+    Args:
+        options: lista de dicts {rate_id, carrier, service_level,
+            price_cents, eta_date, currency}.
+
+    Returns:
+        dict snapshot del shipping_meta actualizado.
+    """
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta")
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        raise RuntimeError(f"set_quoted_options: cart {cart_id} no encontrado")
+
+    existing_meta = cur.data[0].get("shipping_meta") or {}
+    # Sanitizar opciones — solo persistir campos canónicos.
+    sanitized = []
+    for opt in options or []:
+        if not isinstance(opt, dict):
+            continue
+        rid = str(opt.get("rate_id") or opt.get("id") or "").strip()
+        if not rid:
+            continue
+        sanitized.append({
+            "rate_id": rid,
+            "carrier": str(opt.get("carrier") or "").strip(),
+            "service_level": str(
+                opt.get("service_level") or opt.get("service") or ""
+            ).strip(),
+            "price_cents": int(opt.get("price_cents") or 0),
+            "eta_date": str(opt.get("eta_date") or opt.get("eta") or "").strip(),
+            "currency": str(opt.get("currency") or "COP").strip(),
+        })
+    if not sanitized:
+        logger.warning(
+            "[CART] set_quoted_options: array vacío post-sanitize cart=%s",
+            cart_id[:8],
+        )
+        return {"id": cart_id, "shipping_meta": existing_meta}
+
+    new_meta = dict(existing_meta)
+    new_meta["quoted_options"] = sanitized
+    (
+        supabase.table("conversation_carts")
+        .update({"shipping_meta": new_meta})
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    logger.info(
+        "[CART] quoted_options persisted cart=%s n=%d rate_ids=%s",
+        cart_id[:8], len(sanitized),
+        [o["rate_id"][:8] for o in sanitized[:3]],
+    )
+    return {"id": cart_id, "shipping_meta": new_meta}
+
+
 def set_shipping_city(
     supabase: Client,
     *,

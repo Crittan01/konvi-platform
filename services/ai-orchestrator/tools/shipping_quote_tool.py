@@ -1987,6 +1987,58 @@ async def handle_shipping_quote_if_applicable(
                 response_text="No llegaron tarifas disponibles en este momento. Intentemos nuevamente en unos minutos.",
                 requires_human=True,
             )
+
+        # Persistir quoted_options en cart.shipping_meta para que el
+        # `select_carrier` (agentic) pueda resolver el rate_id real cuando
+        # el cliente elija "Económica"/"Rápida" en el siguiente turn.
+        # Rev. 106 — fix RATE_ID_NOT_CACHED (conv 2eb3bb48). DB-first
+        # Plan A.0.2: cross-path legacy↔agentic comparten misma fuente.
+        try:
+            from tools.cart_tool import (
+                get_cart_with_items, set_quoted_options,
+            )
+            cart_row = get_cart_with_items(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            )
+            if cart_row and cart_row.get("id"):
+                opts_to_persist: list[dict] = []
+                seen_rate_ids: set[str] = set()
+                for label_key, rate in (("cheapest", highlights.get("cheapest")),
+                                        ("fastest",  highlights.get("fastest"))):
+                    if not isinstance(rate, dict):
+                        continue
+                    rid = str(rate.get("rate_id") or rate.get("id") or "").strip()
+                    if not rid or rid in seen_rate_ids:
+                        continue
+                    seen_rate_ids.add(rid)
+                    total_raw = rate.get("total_price") or rate.get("total") or 0
+                    try:
+                        price_cents = int(float(total_raw) * 100)
+                    except (TypeError, ValueError):
+                        price_cents = 0
+                    opts_to_persist.append({
+                        "rate_id": rid,
+                        "carrier": str(rate.get("carrier") or ""),
+                        "service_level": str(rate.get("service") or ""),
+                        "price_cents": price_cents,
+                        "eta_date": str(
+                            rate.get("delivery_estimate")
+                            or rate.get("eta") or ""
+                        ),
+                        "currency": str(rate.get("currency") or "COP"),
+                    })
+                if opts_to_persist:
+                    set_quoted_options(
+                        supabase,
+                        cart_id=cart_row["id"],
+                        tenant_id=tenant_id,
+                        options=opts_to_persist,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "[SHIPPING_QUOTE] persist quoted_options falló: %s", exc,
+            )
+
         return ShippingQuoteResult(handled=True, response_text=message)
     except Exception as exc:
         logger.error("Error en shipping_quote_tool tenant=%s: %s", tenant_id, exc, exc_info=True)

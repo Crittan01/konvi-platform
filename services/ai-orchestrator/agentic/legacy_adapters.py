@@ -143,6 +143,28 @@ async def quote_shipping_for_cart(
             "code": "NO_CARRIERS",
         }
 
+    # Persistir quoted_options en DB (fix RATE_ID_NOT_CACHED — DB-first
+    # Plan A.0.2). El cart_id se resuelve desde conversation_id+tenant_id.
+    try:
+        from tools.cart_tool import get_cart_with_items, set_quoted_options
+        cart_row = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+        if cart_row and cart_row.get("id"):
+            set_quoted_options(
+                supabase,
+                cart_id=cart_row["id"],
+                tenant_id=tenant_id,
+                options=options,
+            )
+    except Exception as exc:
+        # Fallo persistencia NO bloquea cotización al cliente — el LLM
+        # puede mostrar opciones; si select_carrier falla por not-cached,
+        # se cotizará de nuevo. Pero loggear para visibility.
+        logger.warning(
+            "[agentic.shipping] persist quoted_options falló: %s", exc,
+        )
+
     return {
         "ok": True,
         "options": options,
