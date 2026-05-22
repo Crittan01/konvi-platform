@@ -164,21 +164,57 @@ export default async function AveonlinePanelPage({
       }
     }
 
-    // Persistir password en Vault.
+    // Persistir password en Vault — IDEMPOTENT.
+    //
+    // Rev. 107 fix bug "duplicate key value violates unique constraint
+    // secrets_name_idx": al reconectar un tenant que YA tenía credenciales,
+    // el secret name en vault.secrets ya existe (UNIQUE). Solución: leer la
+    // row actual de tenant_integrations; si existe `password_secret_id`,
+    // hacer UPDATE del secret. Si no, CREATE.
     const vaultName = `${m.tenant_id}/aveonline/password`
-    const { data: secretId, error: secretErr } = await sb.rpc(
-      'pgsec_create_secret',
-      {
+    let secretId: string | null = null
+
+    const { data: existingRow } = await sb
+      .from('tenant_integrations')
+      .select('credentials')
+      .eq('tenant_id', m.tenant_id)
+      .eq('provider', 'aveonline')
+      .maybeSingle()
+
+    const existingSecretId =
+      (existingRow?.credentials as { password_secret_id?: string } | null)
+        ?.password_secret_id ?? null
+
+    if (existingSecretId) {
+      // Reconexión — actualizar secret existente (mismo UUID, mismo name).
+      const { error: updErr } = await sb.rpc('pgsec_update_secret', {
+        p_id: existingSecretId,
         p_secret: password,
-        p_name: vaultName,
-        p_description: 'Aveonline password v1.0 auth',
-      },
-    )
-    if (secretErr || !secretId) {
-      return {
-        ok: false,
-        error: `Vault error: ${secretErr?.message || 'no secret_id retornado'}`,
+      })
+      if (updErr) {
+        return {
+          ok: false,
+          error: `Vault update error: ${updErr.message}`,
+        }
       }
+      secretId = existingSecretId
+    } else {
+      // Primera conexión — crear secret nuevo.
+      const { data: newSecretId, error: createErr } = await sb.rpc(
+        'pgsec_create_secret',
+        {
+          p_secret: password,
+          p_name: vaultName,
+          p_description: 'Aveonline password v1.0 auth',
+        },
+      )
+      if (createErr || !newSecretId) {
+        return {
+          ok: false,
+          error: `Vault create error: ${createErr?.message || 'no secret_id retornado'}`,
+        }
+      }
+      secretId = newSecretId
     }
 
     // Calcular jwt_expires_at desde tiempoToken (segundos).
