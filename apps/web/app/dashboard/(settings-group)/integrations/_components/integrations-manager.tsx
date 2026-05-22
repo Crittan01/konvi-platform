@@ -26,6 +26,8 @@ interface Props {
   templatesTotal?: number
   enviaInt: Integration
   enviaConnected: boolean
+  aveonlineInt: Integration
+  aveonlineConnected: boolean
   meliInt: Integration
   meliConnected: boolean
   wompiInt: Integration
@@ -69,7 +71,7 @@ const TABS: { key: Category; label: string }[] = [
 ]
 
 // WhatsApp, Envia, MercadoLibre, Wompi, Telegram
-const TOTAL_CONNECTORS = 5
+const TOTAL_CONNECTORS = 6
 
 const COMING_SOON = [
   { name: 'Shopify', category: 'canal' as Category },
@@ -110,7 +112,8 @@ function MetaPill({ label, value, className }: { label: string; value: string; c
 export function IntegrationsManager(props: Props) {
   const {
     waInt, waConnected, templatesApproved, templatesTotal,
-    enviaInt, enviaConnected, meliInt, meliConnected,
+    enviaInt, enviaConnected, aveonlineInt, aveonlineConnected,
+    meliInt, meliConnected,
     wompiInt, wompiConnected,
     tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam,
@@ -165,12 +168,13 @@ export function IntegrationsManager(props: Props) {
   const cardCategories: Record<string, Category> = {
     whatsapp: 'canal',
     envia: 'logistica',
+    aveonline: 'logistica',
     mercadolibre: 'marketplace',
     wompi: 'pagos',
     telegram: 'notificaciones',
   }
 
-  const allCards = ['whatsapp', 'envia', 'mercadolibre', 'wompi', 'telegram']
+  const allCards = ['whatsapp', 'envia', 'aveonline', 'mercadolibre', 'wompi', 'telegram']
   const visibleCards = activeFilter === 'todas'
     ? allCards
     : allCards.filter(c => cardCategories[c] === activeFilter)
@@ -512,6 +516,80 @@ export function IntegrationsManager(props: Props) {
                       </form>
                     </>
                   )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Aveonline ─────────────────────────────────────────────────────── */}
+        {/*
+          Provider alternativo a Envia (ADR-0019). Tarjeta minimal: status +
+          link a panel completo /integrations/aveonline donde está el form
+          de auth inline. NO duplica form aquí — mantiene UI lean.
+        */}
+        {visibleCards.includes('aveonline') && (
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-500/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${aveonlineConnected ? 'border-cyan-500/20 bg-cyan-500/5' : 'border-border bg-muted/20'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-cyan-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm">Aveonline</p>
+                    <p className="text-[11px] text-muted-foreground truncate">Shipping (alt. Envia)</p>
+                  </div>
+                </div>
+                <StatusBadge connected={aveonlineConnected} colorClass="bg-cyan-500/15 text-cyan-400 border-cyan-500/30" />
+              </div>
+            </div>
+            <div className="px-4 py-3.5 space-y-3 flex-1">
+              <p className="text-xs text-muted-foreground">Cotiza envíos multi-carrier en Colombia con COD nativo (Ecart Pay). Alternativa a Envia — un solo provider activo per tenant.</p>
+              {aveonlineConnected ? (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetaPill
+                      label="Empresa"
+                      value={String(aveonlineInt.meta?.empresa_id ?? '—')}
+                    />
+                    <MetaPill
+                      label="Auth"
+                      value={String(aveonlineInt.meta?.auth_version ?? 'v1.0')}
+                    />
+                  </div>
+                  <a
+                    href="/dashboard/integrations/aveonline"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
+                </div>
+              ) : isOwner ? (
+                <div className="space-y-2.5">
+                  <a
+                    href="/dashboard/integrations/aveonline"
+                    className="flex items-center justify-between rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-medium text-cyan-400 hover:bg-cyan-500/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Plug className="h-3 w-3" />
+                      Conectar cuenta Aveonline
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
+                  <p className="text-[11px] text-muted-foreground">
+                    Cuenta DEMO disponible para pruebas: <span className="font-mono">demointegracion</span> / <span className="font-mono">demointegra2021</span>
+                  </p>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>

@@ -112,12 +112,12 @@ export default function AveonlineSetup({
 
             <details className="text-sm">
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
-                Opciones avanzadas
+                Opciones avanzadas <span className="text-xs text-muted-foreground/70">(usuario técnico — valores por defecto funcionan)</span>
               </summary>
-              <div className="mt-3 grid gap-4 sm:grid-cols-2 pl-2 border-l-2 border-border">
+              <div className="mt-3 space-y-5 pl-3 border-l-2 border-border">
                 <div className="space-y-1.5">
                   <label htmlFor="auth_version" className="text-sm font-medium text-foreground">
-                    Versión de autenticación
+                    Versión de autenticación de Aveonline
                   </label>
                   <select
                     id="auth_version"
@@ -125,13 +125,19 @@ export default function AveonlineSetup({
                     defaultValue="v1.0"
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   >
-                    <option value="v1.0">v1.0 (legacy, vigente)</option>
-                    <option value="v2.0">v2.0 (JWT 12h)</option>
+                    <option value="v1.0">v1.0 — legacy, vigente (recomendado)</option>
+                    <option value="v2.0">v2.0 — JWT 12h (más reciente)</option>
                   </select>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Aveonline ofrece varias versiones de auth coexistentes. La <strong>v1.0</strong> (legacy)
+                    es la más usada y permite extender la duración del JWT vía <code className="font-mono text-[11px]">tiempoToken</code>.
+                    La <strong>v2.0</strong> usa JWT con TTL fijo de 12h sin extensión. Si no estás seguro, deja v1.0.
+                  </p>
                 </div>
+
                 <div className="space-y-1.5">
                   <label htmlFor="tiempo_token" className="text-sm font-medium text-foreground">
-                    tiempoToken (segundos, v1.0)
+                    Duración del token JWT (segundos)
                   </label>
                   <input
                     id="tiempo_token"
@@ -142,6 +148,13 @@ export default function AveonlineSetup({
                     defaultValue="100000"
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Cuánto dura el JWT antes de expirar y necesitar re-autenticar.
+                    Valores comunes: <code className="font-mono text-[11px]">3600</code> (1h, mínimo),{' '}
+                    <code className="font-mono text-[11px]">100000</code> (~27h, default),{' '}
+                    <code className="font-mono text-[11px]">31536000</code> (1 año, máximo, usado por plugin
+                    WooCommerce oficial). Solo aplica a v1.0; v2.0 ignora este campo.
+                  </p>
                 </div>
               </div>
             </details>

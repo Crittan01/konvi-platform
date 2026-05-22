@@ -205,8 +205,14 @@ export default async function AveonlinePanelPage({
             auth_version: authVersion,
           },
           meta: {
+            // Campos NO-sensibles, safe para mostrar en hub UI sin
+            // exponer jwt_token / password_secret_id.
             connected_at: new Date().toISOString(),
             connected_by: u?.email,
+            empresa_id: String(empresaId),
+            auth_version: authVersion,
+            razon_social: razonSocial ?? '',
+            nombre_asesor: nombreAsesor ?? '',
           },
         },
         { onConflict: 'tenant_id,provider' },

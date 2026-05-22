@@ -56,24 +56,26 @@ export default async function IntegrationsPage({
     templatesApproved = tplRows.filter(t => t.status === 'APPROVED').length
   }
 
-  const providers = ['envia', 'mercadolibre', 'whatsapp', 'wompi']
+  const providers = ['envia', 'aveonline', 'mercadolibre', 'whatsapp', 'wompi']
   const fullList: Integration[] = providers.map(p =>
     integrations.find(i => i.provider === p) ?? { provider: p, status: 'disconnected', meta: {} }
   )
 
-  const enviaInt  = fullList.find(i => i.provider === 'envia')!
-  const meliInt   = fullList.find(i => i.provider === 'mercadolibre')!
-  const waInt     = fullList.find(i => i.provider === 'whatsapp')!
-  const wompiInt  = fullList.find(i => i.provider === 'wompi')!
-  const tgConfig  = notifications.find(n => n.channel === 'telegram')
+  const enviaInt      = fullList.find(i => i.provider === 'envia')!
+  const aveonlineInt  = fullList.find(i => i.provider === 'aveonline')!
+  const meliInt       = fullList.find(i => i.provider === 'mercadolibre')!
+  const waInt         = fullList.find(i => i.provider === 'whatsapp')!
+  const wompiInt      = fullList.find(i => i.provider === 'wompi')!
+  const tgConfig      = notifications.find(n => n.channel === 'telegram')
 
   const enviaConnected = enviaInt.status === 'connected'
+  const aveonlineConnected = aveonlineInt.status === 'connected'
   const meliConnected  = meliInt.status === 'connected'
   const waConnected    = waInt.status === 'connected'
   const wompiConnected = wompiInt.status === 'connected'
   // bot_token_secret_id (vault) o bot_token (texto plano legacy) indican que el token está configurado
   const tgConnected    = !!(tgConfig?.enabled && (tgConfig?.config?.bot_token_secret_id || tgConfig?.config?.bot_token) && tgConfig?.config?.chat_id)
-  const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
+  const connectedCount = [enviaConnected, aveonlineConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
 
   // ── Server Actions ────────────────────────────────────────────────────────
 
@@ -489,6 +491,8 @@ export default async function IntegrationsPage({
       waConnected={waConnected}
       enviaInt={enviaInt}
       enviaConnected={enviaConnected}
+      aveonlineInt={aveonlineInt}
+      aveonlineConnected={aveonlineConnected}
       meliInt={meliInt}
       meliConnected={meliConnected}
       wompiInt={wompiInt}
