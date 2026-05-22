@@ -133,16 +133,29 @@ class RecordConsentTool:
                 code="NO_CONTACT",
             )
         try:
+            # 1. Actualizar flag en contacts (lo que la UI muestra como OK).
             ctx.supabase.table("contacts").update({
                 "consent_given": args.given,
             }).eq("id", ctx.contact_id).eq("tenant_id", ctx.tenant_id).execute()
-            # Audit log Habeas Data (inmutable).
+            # 2. Audit log Habeas Data (inmutable, schema canónico migración
+            #    20260502010000_consent_audit_log.sql).
+            # Schema real:
+            #   • `event` IN ('granted','revoked','rectified','export_request',
+            #                 'portability','pii_access') — NO 'consent_given' bool.
+            #   • `source` IN ('whatsapp','tenant_console','api','system') — NO
+            #     'agentic_tool'. El agentic atiende WhatsApp → source='whatsapp'.
+            #   • `evidence` JSONB libre para guardar contexto (consent_text,
+            #     tool name, etc.).
             ctx.supabase.table("consent_audit_log").insert({
                 "tenant_id": ctx.tenant_id,
                 "contact_id": ctx.contact_id,
-                "consent_given": args.given,
-                "consent_text": args.consent_text,
-                "source": "agentic_tool",
+                "event": "granted" if args.given else "revoked",
+                "source": "whatsapp",
+                "conversation_id": ctx.conversation_id,
+                "evidence": {
+                    "consent_text": args.consent_text or "",
+                    "tool": "agentic.record_consent",
+                },
             }).execute()
         except Exception as exc:
             return tool_failure(
