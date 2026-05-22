@@ -176,8 +176,11 @@ async def _run_agentic_full(
     catalog = get_tenant_catalog(supabase, tenant_id)
     history = await _get_conversation_history(supabase, conversation_id)
     customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
-    contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone) if customer_phone else None
-    contact_id = (contact or {}).get("id")
+    # `_fetch_contact_for_phone` retorna tuple (contact_id, contact_record).
+    if customer_phone:
+        contact_id, contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone)
+    else:
+        contact_id, contact = None, {}
 
     # System prompt (con tenant config — Fase 0 usa default).
     system_prompt = build_system_prompt(
@@ -304,7 +307,10 @@ async def _run_agentic_shadow(
     catalog = get_tenant_catalog(supabase, tenant_id)
     history = await _get_conversation_history(supabase, conversation_id)
     customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
-    contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone) if customer_phone else None
+    if customer_phone:
+        contact_id, contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone)
+    else:
+        contact_id, contact = None, {}
 
     system_prompt = build_system_prompt(
         tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
@@ -314,7 +320,7 @@ async def _run_agentic_shadow(
     result = await run_agentic_turn(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
-        contact_id=(contact or {}).get("id"),
+        contact_id=contact_id,
         inbound_text=content,
         contact_record=contact or {},
         catalog=catalog,
