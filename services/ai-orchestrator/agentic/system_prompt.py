@@ -63,6 +63,28 @@ def _render_catalog_block(catalog: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _co_time_of_day_greeting() -> tuple[str, str]:
+    """Resuelve saludo apropiado según la hora actual en Colombia (UTC-5).
+
+    Reutiliza la misma lógica del invariant legacy `_co_time_of_day_greeting`
+    de orchestrator.py para mantener coherencia con el `time-aware-greeting`
+    invariant downstream (defensa en profundidad: prompt previene + invariant
+    rescribe si LLM falla igualmente).
+
+      - 05:00 a 11:59 → "Buenos días"  (mañana)
+      - 12:00 a 18:59 → "Buenas tardes" (tarde)
+      - 19:00 a 04:59 → "Buenas noches" (noche)
+    """
+    from datetime import datetime, timedelta, timezone
+    co_tz = timezone(timedelta(hours=-5))
+    hour = datetime.now(co_tz).hour
+    if 5 <= hour < 12:
+        return ("Buenos días", "mañana")
+    if 12 <= hour < 19:
+        return ("Buenas tardes", "tarde")
+    return ("Buenas noches", "noche")
+
+
 def build_system_prompt(
     *,
     tenant_name: str,
@@ -71,6 +93,7 @@ def build_system_prompt(
     agent_name: str = "Sara Camila",
     tenant_business_pitch: Optional[str] = None,
     catalog: Optional[list[dict]] = None,
+    server_greeting: Optional[str] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -79,6 +102,9 @@ def build_system_prompt(
       • Reglas de negocio NO violables (anti-hallu, Habeas Data, etc.).
       • Cuándo usar cada tool (descriptivo, no procedural).
       • Estilo conversacional (cordial, español CO, máx 4 líneas).
+      • Saludo time-aware: si server_greeting no se pasa, se computa
+        desde hora Colombia. Inyectado al prompt como regla obligatoria
+        para evitar rewrite downstream por `time-aware-greeting` invariant.
 
     El LLM lee la documentación de cada tool (auto-injected por Gemini
     via tools=...) y decide cuándo invocar cuál.
@@ -88,12 +114,20 @@ def build_system_prompt(
     )
     tone = tenant_tone or "cordial y profesional, en español Colombia"
     catalog_block = _render_catalog_block(catalog or [])
+    if server_greeting is None:
+        server_greeting, _ = _co_time_of_day_greeting()
 
     prompt = f"""Eres {agent_name}, {pitch}.
 
 Conversas con clientes vía WhatsApp en {tone}. Tu objetivo es ayudarles
 a comprar productos del tenant, resolver dudas de catálogo, y procesar
 el flujo de pedido completo hasta el link de pago.
+
+CONTEXTO HORARIO: ahora es **{server_greeting}** hora Colombia. Cuando
+SALUDES al cliente, usa exactamente "{server_greeting}" (no "Hola"
+genérico, no "Hey", no "Saludos"). Si el cliente ya fue saludado en
+turnos anteriores, NO vuelvas a saludar — responde directo a su
+mensaje.
 
 ═══════════════════════════════════════════════════════════════════
 REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
