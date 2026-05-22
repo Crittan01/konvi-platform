@@ -205,6 +205,79 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.data["code"], "RATE_ID_NOT_FOUND")
 
+    def test_fuzzy_match_normaliza_separadores_underscore_vs_espacio(self):
+        """Caso runtime founder (conv 146fe9ec, 2026-05-22 23:26):
+        LLM pasó 'rate_coordinadora_mercantil' (con underscores) pero
+        carrier real es 'COORDINADORA MERCANTIL' (con espacio). Mi fuzzy
+        match v1 falló por mismatch de separadores. Fix v2: normalizar
+        ambos lados (colapsar espacios/guiones/underscores) antes de
+        comparar substring.
+        """
+        options_in_db = [
+            {"rate_id": "1009", "carrier": "COORDINADORA MERCANTIL",
+             "service_level": "Mensajeria", "price_cents": 1593000},
+            {"rate_id": "29", "carrier": "ENVIA",
+             "service_level": "Mensajeria", "price_cents": 1650000},
+        ]
+        sb = _mock_supabase_with_quoted_options(options_in_db)
+
+        import agentic.legacy_adapters as la
+        original = la.select_carrier_for_cart
+        captured = {}
+
+        async def fake_select(supabase, **kw):
+            captured["rate_id"] = kw["rate_id"]
+            captured["carrier"] = kw["rate_data"]["carrier"]
+            return {"ok": True, "carrier": kw["rate_data"]["carrier"],
+                    "service_level": "M", "shipping_cents": 1593000,
+                    "total_cents": 1593000}
+
+        la.select_carrier_for_cart = fake_select
+        try:
+            from unittest.mock import MagicMock
+            ctx = ToolContext(
+                tenant_id="t", conversation_id="c", contact_id="ct",
+                supabase=sb, extras={}, logger=MagicMock(),
+            )
+            args = self.tool.args_schema(rate_id="rate_coordinadora_mercantil")
+            result = _run(self.tool.execute(args, ctx))
+        finally:
+            la.select_carrier_for_cart = original
+
+        self.assertTrue(result.success,
+                        f"Fuzzy con separadores normalizados debe matchear: {result.data}")
+        self.assertEqual(captured["carrier"], "COORDINADORA MERCANTIL")
+        self.assertEqual(captured["rate_id"], "1009")
+
+    def test_fuzzy_match_normaliza_guiones(self):
+        """Variante: 'rate-tcc-sa' debe matchear 'TCC SA'."""
+        options_in_db = [
+            {"rate_id": "1010", "carrier": "TCC SA",
+             "service_level": "Mensajeria", "price_cents": 1860000},
+        ]
+        sb = _mock_supabase_with_quoted_options(options_in_db)
+
+        import agentic.legacy_adapters as la
+        original = la.select_carrier_for_cart
+
+        async def fake_select(supabase, **kw):
+            return {"ok": True, "carrier": "TCC SA", "service_level": "M",
+                    "shipping_cents": 1860000, "total_cents": 1860000}
+
+        la.select_carrier_for_cart = fake_select
+        try:
+            from unittest.mock import MagicMock
+            ctx = ToolContext(
+                tenant_id="t", conversation_id="c", contact_id="ct",
+                supabase=sb, extras={}, logger=MagicMock(),
+            )
+            args = self.tool.args_schema(rate_id="rate-tcc-sa")
+            result = _run(self.tool.execute(args, ctx))
+        finally:
+            la.select_carrier_for_cart = original
+
+        self.assertTrue(result.success)
+
     def test_fuzzy_match_case_insensitive(self):
         """Match debe ser case-insensitive: rate_id='ENVIA' y carrier='envia'."""
         options_in_db = [
