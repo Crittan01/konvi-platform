@@ -4,18 +4,172 @@ ADR-0018. Production-grade: reusa `shipping_quote_tool.py` legacy
 (Envia lifecycle preservado). El LLM no toca Envia API directo.
 
 Comportamiento:
-  • quote_shipping(city) → consulta Envia, retorna opciones Económica/Rápida.
+  • quote_shipping(city) → consulta provider activo (Envia/Aveonline),
+    retorna opciones cotizadas.
   • select_carrier(rate_id) → persiste elección en cart.shipping_meta.
   • Side-effects: cart_events shipping_quoted + carrier_selected.
 """
 from __future__ import annotations
 
+import logging
+import re
+from dataclasses import dataclass
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
+
+logger = logging.getLogger(__name__)
+
+
+# ─── Resolver rate_id con tolerancia a variaciones del LLM ─────────────────
+
+
+@dataclass(frozen=True)
+class FuzzyMatchResult:
+    """Resultado de resolver un rate_id contra las opciones disponibles.
+
+    Attrs:
+        rate_data: la opción matched, o None si no hay match aceptable.
+        match_type: 'exact' | 'case_insensitive' | 'fuzzy_normalized' | 'none'.
+        confidence: 0.0–1.0. Mayor = más probabilidad de ser el carrier deseado.
+            Calculado como min(len_carrier_norm, len_requested_norm) /
+            max(len_carrier_norm, len_requested_norm) post-normalización.
+            Score 1.0 = strings idénticos post-normalize.
+    """
+    rate_data: Optional[dict]
+    match_type: str
+    confidence: float
+
+
+_SEPARATOR_RE = re.compile(r"[\s\-_]+")
+
+
+def _normalize_for_match(s: str) -> str:
+    """Normaliza string para fuzzy matching de identifiers.
+
+    Reglas:
+      • lowercase.
+      • colapsa secuencias de espacios/guiones/underscores (cualquier
+        combinación → vacío).
+
+    Justificación: el LLM tiende a slugify identifiers ('coordinadora_
+    mercantil', 'rate-tcc-sa') mientras los carrier names canónicos
+    tienen ESPACIOS ('COORDINADORA MERCANTIL', 'TCC SA'). Sin normalizar,
+    el matching substring falla por inconsistencia de separadores.
+    """
+    return _SEPARATOR_RE.sub("", str(s).lower())
+
+
+# Longitud mínima de carrier_norm para considerarlo "identificable" cuando
+# el LLM agrega texto extra alrededor. Carriers con ≥ 4 chars normalizados
+# (e.g. 'envia', 'tccsa') son lo suficientemente específicos para evitar
+# false positives. Carriers más cortos requieren scoring estricto.
+_CARRIER_MIN_IDENTIFIABLE_LEN = 4
+
+# Confidence boost cuando el carrier_norm está EMBEBIDO en requested_norm
+# (LLM agregó palabras alrededor del carrier real). Caso típico:
+# requested='envia_medellin_rate_id' contiene carrier='envia' completo.
+# Sin el boost, el length-ratio rechazaría matches válidos por noise del LLM.
+_EMBEDDED_CARRIER_BOOST = 0.7
+
+# Umbral mínimo absoluto. Solo se aplica cuando NO hay embed-boost
+# (i.e. requested ⊂ carrier — LLM truncó el carrier real).
+_FUZZY_MIN_CONFIDENCE = 0.3
+
+
+def _resolve_rate_id_fuzzy(
+    requested_rate_id: str,
+    options: list[dict],
+) -> FuzzyMatchResult:
+    """Resuelve un rate_id contra opciones cotizadas con tolerancia a
+    variaciones del LLM.
+
+    Strategy en cascada (primer hit con confianza suficiente gana):
+      1. Exact match `rate_id` case-sensitive → confidence=1.0.
+      2. Exact match `rate_id` case-insensitive → confidence=0.95.
+      3. Fuzzy match contra `carrier` name normalizado, **scoring por
+         length-ratio** para resolver ambigüedad determinísticamente.
+         Si hay múltiples candidatos (ej. carriers con nombres
+         relacionados como 'ENVIA' vs 'ENVIA EXPRESS'), gana el de
+         mayor confidence. Si tie, gana el primero (orden de cotización
+         del provider).
+
+    El scoring length-ratio resuelve ambigüedad sin invertir prioridades:
+      • LLM dice 'envia' (norm len=5):
+          - vs 'envia' carrier (len=5):    5/5  = 1.00 ← gana
+          - vs 'enviaexpress' (len=12):    5/12 = 0.42
+      • LLM dice 'envia_express' (norm 'enviaexpress' len=12):
+          - vs 'envia' (len=5):            5/12 = 0.42
+          - vs 'enviaexpress' (len=12):  12/12 = 1.00 ← gana
+      • LLM dice 'rate_coordinadora_mercantil' (norm len=27):
+          - vs 'coordinadoramercantil' (len=21): 21/27 = 0.78 ← gana
+          - vs 'envia' (len=5):                 no substring → descartado
+
+    Args:
+        requested_rate_id: el string que el LLM pasó (cualquier formato).
+        options: lista de dicts con keys {rate_id, carrier, ...}.
+
+    Returns:
+        FuzzyMatchResult — rate_data=None si no hay match con confidence
+        ≥ _FUZZY_MIN_CONFIDENCE.
+    """
+    if not options or not requested_rate_id:
+        return FuzzyMatchResult(None, "none", 0.0)
+
+    # 1. Exact match case-sensitive.
+    for opt in options:
+        if opt.get("rate_id") == requested_rate_id:
+            return FuzzyMatchResult(opt, "exact", 1.0)
+
+    # 2. Case-insensitive exact match en rate_id.
+    requested_lower = requested_rate_id.lower()
+    for opt in options:
+        if str(opt.get("rate_id", "")).lower() == requested_lower:
+            return FuzzyMatchResult(opt, "case_insensitive", 0.95)
+
+    # 3. Fuzzy match normalizado contra carrier name + scoring length-ratio.
+    requested_norm = _normalize_for_match(requested_rate_id)
+    if not requested_norm:
+        return FuzzyMatchResult(None, "none", 0.0)
+
+    candidates: list[tuple[dict, float]] = []
+    for opt in options:
+        carrier_norm = _normalize_for_match(opt.get("carrier", ""))
+        if not carrier_norm:
+            continue
+        # Length-ratio base (puro overlap).
+        shorter = min(len(carrier_norm), len(requested_norm))
+        longer = max(len(carrier_norm), len(requested_norm))
+        ratio = shorter / longer if longer > 0 else 0.0
+
+        # Direction 1: carrier_norm ⊂ requested_norm — LLM agregó palabras
+        # alrededor del carrier real (e.g. 'envia' embedded en
+        # 'envia_medellin_rate_id'). Si el carrier es lo suficientemente
+        # identificable (≥4 chars), boostamos confidence — el LLM nombró
+        # el carrier explícitamente, solo agregó ruido alrededor.
+        if (carrier_norm in requested_norm
+                and len(carrier_norm) >= _CARRIER_MIN_IDENTIFIABLE_LEN):
+            confidence = max(_EMBEDDED_CARRIER_BOOST, ratio)
+            candidates.append((opt, confidence))
+            continue
+
+        # Direction 2: requested_norm ⊂ carrier_norm — LLM truncó el
+        # carrier real (e.g. 'envia' vs carrier='ENVIA EXPRESS'). Aquí
+        # la ambigüedad es legítima (ENVIA vs ENVIA EXPRESS): usamos
+        # scoring estricto con threshold para evitar matches débiles.
+        if requested_norm in carrier_norm and ratio >= _FUZZY_MIN_CONFIDENCE:
+            candidates.append((opt, ratio))
+
+    if not candidates:
+        return FuzzyMatchResult(None, "none", 0.0)
+
+    # Mayor confidence gana. En tie, primer hit (orden cotización provider).
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    best_opt, best_confidence = candidates[0]
+    return FuzzyMatchResult(best_opt, "fuzzy_normalized", best_confidence)
 
 
 # ─── quote_shipping ────────────────────────────────────────────────────────
@@ -198,43 +352,27 @@ class SelectCarrierTool:
                 None,
             )
 
-        # Rev. 107 — fuzzy match resiliente al LLM inventando rate_ids.
-        # Cuando el LLM falla en pasar el rate_id exacto (e.g. inventa
-        # 'envia_medellin_rate_id', 'rate_coordinadora_mercantil', un UUID
-        # aleatorio) pero el nombre del carrier es identificable, matcheamos
-        # por nombre con normalización de separadores.
-        #
-        # Normalización necesaria: el LLM usa `_` / `-` separadores en
-        # rate_ids inventados, pero los carrier names reales tienen ESPACIOS
-        # (e.g. "COORDINADORA MERCANTIL"). Sin normalizar, 'coordinadora
-        # mercantil' NO matchea 'rate_coordinadora_mercantil'. Solución:
-        # colapsar TODOS los separadores (espacios, guiones, underscores)
-        # antes de comparar substring.
+        # Rev. 107 — Fuzzy match resiliente al LLM (extracted helper).
+        # El LLM tiende a inventar rate_ids cuando no recuerda el literal
+        # del tool_response previo. Resolvemos por carrier name con
+        # normalización + scoring length-ratio para garantizar match
+        # determinístico ante carriers con nombres relacionados (e.g.
+        # 'ENVIA' vs 'ENVIA EXPRESS').
         if not rate_data and all_options:
-            import re as _re
-            def _normalize(s: str) -> str:
-                return _re.sub(r"[\s\-_]+", "", str(s).lower())
-
-            requested_norm = _normalize(args.rate_id)
-            for opt in all_options:
-                carrier_norm = _normalize(opt.get("carrier", ""))
-                if not carrier_norm:
-                    continue
-                # Match si carrier normalizado aparece en requested o viceversa.
-                # Ejemplos cubiertos:
-                #   • 'rate_coordinadora_mercantil' → 'ratecoordinadoramercantil'
-                #     carrier 'COORDINADORA MERCANTIL' → 'coordinadoramercantil'
-                #     'coordinadoramercantil' in 'ratecoordinadoramercantil' = True ✓
-                #   • 'envia_medellin_rate_id' → 'enviamedellinrateid'
-                #     carrier 'ENVIA' → 'envia'
-                #     'envia' in 'enviamedellinrateid' = True ✓
-                if carrier_norm in requested_norm or requested_norm in carrier_norm:
-                    rate_data = opt
-                    ctx.logger.info(
-                        "[agentic.select_carrier] fuzzy match: rate_id='%s' → %s (real rate_id=%s)",
-                        args.rate_id, opt.get("carrier"), opt.get("rate_id"),
-                    ) if ctx.logger else None
-                    break
+            match_result = _resolve_rate_id_fuzzy(args.rate_id, all_options)
+            if match_result.rate_data is not None:
+                rate_data = match_result.rate_data
+                # Logging estructurado para observability.
+                _log = ctx.logger or logger
+                _log.info(
+                    "[agentic.select_carrier.fuzzy] requested=%r "
+                    "matched_to=%r real_rate_id=%r match_type=%s confidence=%.2f",
+                    args.rate_id,
+                    rate_data.get("carrier"),
+                    rate_data.get("rate_id"),
+                    match_result.match_type,
+                    match_result.confidence,
+                )
 
         if not rate_data:
             # Listar rate_ids reales disponibles para que el LLM NO invente
