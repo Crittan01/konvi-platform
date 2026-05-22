@@ -1,4 +1,4 @@
-# ADR-0019 — Pivote a Aveonline como provider primario de shipping (Envia como fallback)
+# ADR-0019 — Aveonline como provider de shipping alternativo a Envia (1 activo per-tenant, sin fallback automático)
 
 **Estado:** PROPUESTO (pre-implementación rev. 107).
 **Fecha:** 2026-05-21.
@@ -22,7 +22,18 @@ Score consolidado (dossier §21.6): **Aveonline 8.0/10 vs Envia 7.0/10**.
 
 ## Decisión
 
-Pivotar a Aveonline como provider primario de shipping en rev. 107, **manteniendo Envia como fallback técnico** detrás de feature flag per-tenant. Estrategia: **strangler-fig adapter pluggable** dentro de `agentic/legacy_adapters.py` — el tool `QuoteShippingTool` no cambia su interface, el adapter routea según `tenant_shipping_provider_config.primary_provider`.
+Ofrecer Aveonline como **provider alternativo a Envia** en rev. 107. **Cada tenant elige UN provider activo** (Envia O Aveonline, no ambos simultáneos). **Sin fallback automático cross-provider**.
+
+**Razones para descartar fallback automático** (revisión 2026-05-22 post-pregunta founder):
+
+1. **Doble onboarding**: fallback automático requiere que el tenant haya configurado AMBOS providers (cuenta + contrato + plan mensual en cada uno). En la práctica los tenants se casan con 1 provider por acuerdos comerciales.
+2. **Doble Vault + JWT cache**: complejidad de credenciales sin valor proporcional.
+3. **Guías mixtas operacionalmente caóticas**: cotizar con Aveonline + generar label con Envia (mid-flow fallback) deja guía con tracking ID Envia + reglas COD Aveonline. Imposible reconciliar en panel del tenant.
+4. **Comisiones COD distintas**: Aveonline 2.40% via Ecart Pay vs Envia (pendiente confirmar). Tenant no entiende cuánto recibió.
+5. **El bot ya maneja fallos honestamente**: T12 conv `c627da91` (UAT 2026-05-22) mostró que cuando Envia falló, el LLM compuso *"No me fue posible cotizar... ¿intento más tarde o con un asesor?"*. No inventó, no escaló impulsivo. La cascada Gemini (commit `fbe92cd`) + manejo honesto del bot cubren transitorios sin necesidad de fallback cross-provider.
+6. **Resiliencia ya está en cascada del MODELO** (flash → flash-lite con 4+4 retries y backoff), no en cascada del PROVIDER. La cascada del modelo es donde tiene sentido — son recursos compartidos del mismo vendor con misma API. La cascada de providers de carrier sería accidentalmente mezclar acuerdos comerciales distintos.
+
+**Estrategia técnica**: **adapter pluggable + selector único per-tenant** dentro de `agentic/legacy_adapters.py` — el tool `QuoteShippingTool` no cambia su interface, el adapter lee `tenant_shipping_provider_config.active_provider` (single enum, no array) y routea al adapter correspondiente.
 
 ### Lo que CAMBIA (rev. 107)
 
@@ -30,8 +41,9 @@ Pivotar a Aveonline como provider primario de shipping en rev. 107, **manteniend
 
 - Nuevo cliente `services/api/lib/clients/aveonline_client.py` (auth v1.0 + cotización + label + tracking + cancel + pickup + boomerang RMA).
 - Adapter `quote_shipping_for_cart_aveonline` espejo del Envia adapter actual.
-- Routing dinámico en `QuoteShippingTool.execute` por `tenant_shipping_provider_config.primary_provider`.
-- Nueva tabla `tenant_shipping_provider_config` (migración Supabase) con `primary_provider`, `fallback_provider`, `enabled_carriers[]`, `cod_enabled`, `insurance_strategy`.
+- Routing dinámico en `QuoteShippingTool.execute` por `tenant_shipping_provider_config.active_provider` (single enum, NO array de fallback).
+- Nueva tabla `tenant_shipping_provider_config` (migración Supabase) con `active_provider ENUM('envia','aveonline')`, `enabled_carriers[]`, `cod_enabled`, `insurance_strategy`. **Single provider activo per tenant**.
+- UI Settings → Despachos con selector único radio. Cambio confirma con dialog "Cotizaciones futuras irán al nuevo provider. Guías legacy en {anterior} siguen rastreándose ahí read-only."
 
 **B. Onboarding tenant (UI + auth + Vault)** — **revisión 2026-05-22 post-WARN founder UAT**:
 
@@ -49,13 +61,24 @@ La auth Aveonline v1.0 (dossier §2.1) requiere `usuario+clave` per-tenant. NO s
 - Vault setup migración base: `20260426020000_vault_setup_and_migration.sql`.
 - Identity registry migración base: `20260514100000_tenant_provider_identity.sql`.
 
-### Esfuerzo revisado
+### Esfuerzo revisado (2 iteraciones)
 
-- Runtime (M.1-M.8): **8 días-dev**.
-- Onboarding (O.1-O.5): **2.25 días-dev**.
-- **Total: 10.25 días-dev** (~2.5 semanas calendario).
+| Versión | Runtime | Onboarding | Total |
+|---|---|---|---|
+| Plan inicial (pre-sesión) | 8d (M.1-M.8 con fallback) | — | **8d** |
+| Mid-sesión (post-WARN 2) | 8d | 2.25d (O.1-O.5) | **10.25d** |
+| **Final (post-pregunta 2 providers)** | **6d** (sin fallback complexity) | **2.25d** | **~7d** |
 
-El plan original mencionó 8d pero subestimó O.1-O.5. La revisión 2026-05-22 corrige esto sin inventar — siguiendo el patrón del repo para los 5 providers ya integrados.
+La simplificación (1 provider activo per-tenant, sin fallback automático) elimina:
+- Columna `fallback_provider` (no necesaria).
+- Métricas `fallback_to_envia_rate` (no aplica).
+- Routing condicional dual en `QuoteShippingTool.execute`.
+- Tests de paridad cross-provider mid-flow.
+- Documentación operacional de "qué provider generó qué guía cuando fallback disparó".
+
+Sin perder resiliencia: la cascada Gemini agentic (commit `fbe92cd`) + manejo honesto del bot ante fallos del provider (validado en T12 conv `c627da91`) cubren los transitorios.
+
+El plan original mencionó 8d pero subestimó O.1-O.5. La revisión 2026-05-22 corrige sin inventar — siguiendo el patrón del repo para los 5 providers ya integrados (Wompi/Envia/WhatsApp/MeLi/Telegram).
 
 ### Lo que NO cambia
 
