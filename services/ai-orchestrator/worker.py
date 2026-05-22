@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
+from agentic.dispatcher import dispatch_message as _agentic_dispatch_message
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
 from whatsapp_sender import (
@@ -400,15 +401,12 @@ class OrchestratorWorker:
                     )
                     continue
 
-                # Rev. 75 — V2 cancelado, llamada directa al orquestador único.
-                # Razón: V2 modular era experimento de 22h (commit b153054)
-                # con dependencias cruzadas hacia el monolito V1 maduro
-                # (22 días + 37 commits + fixes rev. 70-73). Quedarse con
-                # ambos era deuda incremental sin payoff claro. Cuando se
-                # quiera modularidad, se refactoriza V1 orgánicamente sobre
-                # código probado.
-                await build_and_run_orchestration(
-                    supabase=self.supabase,
+                # ADR-0018 Fase B+C: dispatcher decide legacy/agentic/shadow
+                # según flags (tenant_integrations.meta.agentic_enabled +
+                # AGENTIC_SHADOW_ENABLED env). Sin flags activos →
+                # comportamiento legacy idéntico al pre-refactor.
+                await _agentic_dispatch_message(
+                    self.supabase,
                     message_id=msg["id"],
                     tenant_id=msg["tenant_id"],
                     conversation_id=msg["conversation_id"],
