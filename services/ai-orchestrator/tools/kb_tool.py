@@ -111,66 +111,36 @@ def _missing_category_marker(category: str) -> dict:
 import os
 from google import genai
 
+# Rev. 106 — refactor a wrapper unificado `llm_embed.embed_with_cascade`
+# (cobertura transitorios + cache LRU + versionado). Master vive en
+# `services/ai-orchestrator/llm_embed.py` con copia byte-equal en
+# `services/api/lib/llm_embed.py` (test paridad valida coherencia).
+from llm_embed import embed_with_cascade, EmbedResult  # noqa: E402
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
-GEMINI_EMBEDDING_FALLBACK_MODEL = os.getenv(
-    "GEMINI_EMBEDDING_FALLBACK_MODEL",
-    "text-embedding-004",
-)
-
-
-def _embedding_models() -> list[str]:
-    models = [GEMINI_EMBEDDING_MODEL]
-    fallback = GEMINI_EMBEDDING_FALLBACK_MODEL.strip()
-    if fallback and fallback not in models:
-        models.append(fallback)
-    return models
-
-
-def _is_model_unavailable_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return (
-        "not found" in text
-        or "404" in text
-        or "not supported" in text
-        or "unsupported" in text
-    )
 
 
 def _embed_query_vector(client: genai.Client, query: str) -> list[float]:
-    last_error: Exception | None = None
-    for model_name in _embedding_models():
-        try:
-            embed_resp = client.models.embed_content(
-                model=model_name,
-                contents=query,
-            )
-            embeddings = getattr(embed_resp, "embeddings", None) or []
-            if not embeddings:
-                raise ValueError("Embedding sin datos.")
-            values = getattr(embeddings[0], "values", None)
-            if not values:
-                raise ValueError("Embedding vector vacío.")
-            if model_name != GEMINI_EMBEDDING_MODEL:
-                logger.info(
-                    "Embedding KB usando modelo fallback: %s (primario=%s)",
-                    model_name,
-                    GEMINI_EMBEDDING_MODEL,
-                )
-            return values
-        except Exception as exc:  # pragma: no cover - variación de errores SDK/API
-            last_error = exc
-            if _is_model_unavailable_error(exc):
-                logger.warning(
-                    "Modelo de embeddings no disponible (%s). Reintentando con fallback.",
-                    model_name,
-                )
-                continue
-            raise
+    """Embed un query con cascada + cache + retries.
 
-    raise RuntimeError(
-        f"No fue posible generar embeddings con modelos {_embedding_models()}"
-    ) from last_error
+    Comportamiento:
+      • Cache hit → retorna directo.
+      • 4 intentos primary (gemini-embedding-001) con backoff 1-8s.
+      • 3 intentos fallback (text-embedding-004) con backoff hasta 16s.
+      • "Model unavailable" salta inmediato al fallback (no consume retries).
+      • Errores no-transitorios (400 schema) se re-lanzan.
+      • Si todo falla → raise RuntimeError("embed_cascade_exhausted").
+
+    Pre-rev. 106 esta función no tenía retries transitorios — 503/429
+    fallaba al primer intento. Ver `llm_embed.py` para detalle.
+    """
+    result: EmbedResult = embed_with_cascade(client, query)
+    if result.degraded or not result.values:
+        raise RuntimeError(
+            f"embed_cascade_exhausted after {result.attempts} attempts: "
+            f"{result.last_error or 'unknown'}"
+        )
+    return result.values
 
 async def get_tenant_kb_rag(supabase: Client, tenant_id: str, query: str) -> list[dict]:
     """Retorna los documentos KB para inyectar al system prompt.
