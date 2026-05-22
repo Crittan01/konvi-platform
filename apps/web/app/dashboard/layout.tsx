@@ -57,14 +57,17 @@ export default async function DashboardLayout({
   let meliBadge = 0
   let planCode = 'enterprise'
   const planCapabilities: Record<string, boolean> = {}
-  const integrations = { whatsapp: false, envia: false, mercadolibre: false }
+  // Rev. 107 — `shipping` es abstracción multi-provider: true si CUALQUIER
+  // provider shipping (envia | aveonline) está connected. Habilita el
+  // módulo Cotizador del sidebar independiente del provider activo.
+  const integrations = { whatsapp: false, shipping: false, mercadolibre: false }
 
   if (tenantId) {
     const [tenantRes, inboxRes, meliRes, integRes, subRes] = await Promise.all([
       supabase.from('tenants').select('name, logo_url').eq('id', tenantId).single(),
       supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover'),
       supabase.from('marketplace_listings').select('status').eq('tenant_id', tenantId).eq('provider', 'mercadolibre'),
-      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'envia', 'mercadolibre']),
+      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'envia', 'aveonline', 'mercadolibre']),
       supabase.from('tenant_subscriptions').select('plan_code').eq('tenant_id', tenantId).maybeSingle(),
     ])
 
@@ -78,7 +81,8 @@ export default async function DashboardLayout({
       const provider  = (row as { provider?: string }).provider
       const connected = (row as { status?: string }).status === 'connected'
       if (provider === 'whatsapp')     integrations.whatsapp     = connected
-      if (provider === 'envia')        integrations.envia        = connected
+      if (provider === 'envia')        integrations.shipping     ||= connected
+      if (provider === 'aveonline')    integrations.shipping     ||= connected
       if (provider === 'mercadolibre') integrations.mercadolibre = connected
     }
 
