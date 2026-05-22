@@ -38,25 +38,26 @@ class RecoveryStrategyTests(unittest.TestCase):
         """Solo 1 retry permitido — al 2do empty con MAX_TOKENS, degraded."""
         text, retry, _ = _recovery_strategy_for_finish_reason("MAX_TOKENS", 1)
         self.assertFalse(retry)
-        self.assertTrue(text)  # tiene contenido degraded
-        # Cae a strategy default ('STOP/OTHER' degraded genérico).
-        self.assertIn("repetírmelo", text.lower())
+        self.assertTrue(text)  # tiene contenido degraded natural.
+        # Mensaje natural (no "procesando tu mensaje" robótico).
+        self.assertIn("repites", text.lower())
 
     def test_recitation_attempt0_retry_history_10(self):
         text, retry, limit = _recovery_strategy_for_finish_reason("RECITATION", 0)
         self.assertTrue(retry)
         self.assertEqual(limit, 10)
 
-    def test_safety_nunca_retry_mensaje_cordial(self):
-        """SAFETY siempre degraded — retry no resuelve (mismo input → mismo block)."""
+    def test_safety_nunca_retry_mensaje_natural(self):
+        """SAFETY siempre degraded — retry no resuelve (mismo input → mismo block).
+        Mensaje natural, no robótico."""
         text, retry, _ = _recovery_strategy_for_finish_reason("SAFETY", 0)
         self.assertFalse(retry)
-        self.assertIn("no puedo responder", text.lower())
+        self.assertIn("cuéntame de otra forma", text.lower())
 
     def test_blocklist_degraded(self):
         text, retry, _ = _recovery_strategy_for_finish_reason("BLOCKLIST", 0)
         self.assertFalse(retry)
-        self.assertIn("reformularlo", text.lower())
+        self.assertIn("de otra forma", text.lower())
 
     def test_prohibited_content_degraded(self):
         text, retry, _ = _recovery_strategy_for_finish_reason("PROHIBITED_CONTENT", 0)
@@ -78,7 +79,9 @@ class RecoveryStrategyTests(unittest.TestCase):
     def test_stop_con_parts_vacio_degraded_generico(self):
         text, retry, _ = _recovery_strategy_for_finish_reason("STOP", 0)
         self.assertFalse(retry)
-        self.assertIn("repetírmelo", text.lower())
+        # Mensaje natural sin "procesando tu mensaje".
+        self.assertIn("repites", text.lower())
+        self.assertNotIn("procesando", text.lower())
 
     def test_unknown_finish_reason_degraded(self):
         text, retry, _ = _recovery_strategy_for_finish_reason("", 0)

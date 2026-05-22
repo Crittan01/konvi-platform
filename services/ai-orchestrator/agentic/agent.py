@@ -474,21 +474,17 @@ def _recovery_strategy_for_finish_reason(
 
     if finish_reason == "SAFETY":
         # Bloqueado por filtros de seguridad. NO retry — mismo input
-        # produce mismo bloqueo. Escalación implícita: mensaje cordial
-        # + el operador puede ver el caso en logs/review.
+        # produce mismo bloqueo. Mensaje natural sin tono robótico.
         return (
-            "Disculpa, no puedo responder a ese mensaje. "
-            "Si es una consulta sobre nuestros productos, "
-            "reformúlamela y con gusto te ayudo.",
+            "Mejor cuéntame de otra forma, ¿qué necesitas?",
             False,
             0,
         )
 
     if finish_reason in ("BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
-        # Contenido bloqueado por políticas Gemini — mismo tratamiento safety.
+        # Contenido bloqueado por políticas Gemini — natural pero claro.
         return (
-            "Lo siento, no puedo procesar ese mensaje. "
-            "¿Podrías reformularlo?",
+            "Disculpa, ¿me lo dices de otra forma?",
             False,
             0,
         )
@@ -498,10 +494,9 @@ def _recovery_strategy_for_finish_reason(
         # respuesta textual (history reducido para evitar repetir patrón).
         return ("", True, 5)
 
-    # STOP con parts vacío, OTHER, o desconocido — degraded cordial.
+    # STOP con parts vacío, OTHER, o desconocido — natural, no robótico.
     return (
-        "Disculpa, tuve un inconveniente procesando tu mensaje. "
-        "¿Podrías repetírmelo, por favor?",
+        "Ay, se me cruzó algo. ¿Me lo repites?",
         False,
         0,
     )
