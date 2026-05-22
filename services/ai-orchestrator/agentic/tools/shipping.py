@@ -198,6 +198,29 @@ class SelectCarrierTool:
                 None,
             )
 
+        # Rev. 107 — fuzzy match resiliente al LLM inventando rate_ids.
+        # Cuando el LLM falla en pasar el rate_id exacto (e.g. inventa
+        # 'envia_medellin_rate_id' o un UUID aleatorio) pero el nombre del
+        # carrier es identificable en el string, matcheamos por nombre.
+        # Resuelve el problema de raíz (LLM no es confiable con IDs
+        # literales) en vez de depender solo del recovery activo.
+        if not rate_data and all_options:
+            requested_lower = args.rate_id.lower()
+            for opt in all_options:
+                carrier_lower = str(opt.get("carrier", "")).lower()
+                if not carrier_lower:
+                    continue
+                # Match si el nombre del carrier aparece en el rate_id (sub-
+                # string) o viceversa (e.g. requested='envia_medellin' contiene
+                # 'envia'; carrier='ENVIA' contiene rate_id='envia').
+                if carrier_lower in requested_lower or requested_lower in carrier_lower:
+                    rate_data = opt
+                    ctx.logger.info(
+                        "[agentic.select_carrier] fuzzy match: rate_id='%s' → %s (real rate_id=%s)",
+                        args.rate_id, opt.get("carrier"), opt.get("rate_id"),
+                    ) if ctx.logger else None
+                    break
+
         if not rate_data:
             # Listar rate_ids reales disponibles para que el LLM NO invente
             # — debe llamar quote_shipping(city) o pedir al cliente que repita.
@@ -210,7 +233,8 @@ class SelectCarrierTool:
                 for o in all_options[:4]
             ]
             return tool_failure(
-                f"rate_id '{args.rate_id}' no existe. "
+                f"rate_id '{args.rate_id}' no existe y no encontré match "
+                f"por nombre de carrier. "
                 f"Opciones reales disponibles: {available_summary or 'ninguna'}. "
                 f"Si el cliente eligió por nombre (e.g. 'Económica'), "
                 f"usa el rate_id correspondiente de la lista. Si la lista "
@@ -219,11 +243,15 @@ class SelectCarrierTool:
                 extra={"available_options": available_summary},
             )
 
+        # Si el match fue fuzzy, usar el rate_id real del rate_data (no el
+        # que el LLM pasó) para que el adapter persista el correcto.
+        effective_rate_id = str(rate_data.get("rate_id") or args.rate_id)
+
         result = await select_carrier_for_cart(
             ctx.supabase,
             conversation_id=ctx.conversation_id,
             tenant_id=ctx.tenant_id,
-            rate_id=args.rate_id,
+            rate_id=effective_rate_id,
             rate_data=rate_data,
         )
         if not result.get("ok"):

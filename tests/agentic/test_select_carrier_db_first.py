@@ -138,6 +138,102 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
             "envia-coordinadora-eco",
         )
 
+    def test_fuzzy_match_carrier_name_resuelve_rate_id_inventado(self):
+        """Caso runtime founder (conv 73e26cbe): LLM inventó rate_id
+        'd02fca25-e7cc-4214-b006-214376b63cfe' (UUID random) cuando el
+        cliente dijo 'Por transportadora Envia'. Fuzzy match por carrier
+        name debe resolverlo a rate_id='29' (ENVIA real)."""
+        options_in_db = [
+            {"rate_id": "1009", "carrier": "COORDINADORA MERCANTIL",
+             "service_level": "Mensajeria", "price_cents": 1593000},
+            {"rate_id": "29", "carrier": "ENVIA",
+             "service_level": "Mensajeria", "price_cents": 1650000},
+            {"rate_id": "33", "carrier": "SERVIENTREGA",
+             "service_level": "Mensajeria", "price_cents": 1795000},
+        ]
+        sb = _mock_supabase_with_quoted_options(options_in_db)
+
+        import agentic.legacy_adapters as la
+        original = la.select_carrier_for_cart
+        captured = {}
+
+        async def fake_select(supabase, **kw):
+            captured["rate_id"] = kw["rate_id"]
+            captured["carrier"] = kw["rate_data"]["carrier"]
+            return {
+                "ok": True, "carrier": kw["rate_data"]["carrier"],
+                "service_level": kw["rate_data"]["service_level"],
+                "shipping_cents": kw["rate_data"]["price_cents"],
+                "total_cents": kw["rate_data"]["price_cents"] + 100000,
+            }
+
+        la.select_carrier_for_cart = fake_select
+        try:
+            from unittest.mock import MagicMock
+            ctx = ToolContext(
+                tenant_id="t", conversation_id="c", contact_id="ct",
+                supabase=sb, extras={}, logger=MagicMock(),
+            )
+            # LLM inventó nombre que contiene 'envia'.
+            args = self.tool.args_schema(rate_id="envia_medellin_rate_id")
+            result = _run(self.tool.execute(args, ctx))
+        finally:
+            la.select_carrier_for_cart = original
+
+        self.assertTrue(result.success,
+                        f"Fuzzy match debe resolver: {result.data}")
+        # Match correcto: ENVIA con rate_id real '29'.
+        self.assertEqual(captured["carrier"], "ENVIA")
+        self.assertEqual(captured["rate_id"], "29")
+
+    def test_fuzzy_match_no_matchea_si_carrier_distinto(self):
+        """Si LLM inventa rate_id sin match por carrier (e.g. 'fedex-ground'
+        y solo hay Coordinadora) → seguir devolviendo RATE_ID_NOT_FOUND."""
+        options_in_db = [
+            {"rate_id": "1009", "carrier": "COORDINADORA MERCANTIL",
+             "service_level": "Mensajeria", "price_cents": 1593000},
+        ]
+        sb = _mock_supabase_with_quoted_options(options_in_db)
+        from unittest.mock import MagicMock
+        ctx = ToolContext(
+            tenant_id="t", conversation_id="c", contact_id="ct",
+            supabase=sb, extras={}, logger=MagicMock(),
+        )
+        args = self.tool.args_schema(rate_id="fedex-ground")
+        result = _run(self.tool.execute(args, ctx))
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.data["code"], "RATE_ID_NOT_FOUND")
+
+    def test_fuzzy_match_case_insensitive(self):
+        """Match debe ser case-insensitive: rate_id='ENVIA' y carrier='envia'."""
+        options_in_db = [
+            {"rate_id": "29", "carrier": "envia",  # lowercase carrier
+             "service_level": "Mensajeria", "price_cents": 1650000},
+        ]
+        sb = _mock_supabase_with_quoted_options(options_in_db)
+
+        import agentic.legacy_adapters as la
+        original = la.select_carrier_for_cart
+
+        async def fake_select(supabase, **kw):
+            return {"ok": True, "carrier": "envia", "service_level": "M",
+                    "shipping_cents": 1650000, "total_cents": 1650000}
+
+        la.select_carrier_for_cart = fake_select
+        try:
+            from unittest.mock import MagicMock
+            ctx = ToolContext(
+                tenant_id="t", conversation_id="c", contact_id="ct",
+                supabase=sb, extras={}, logger=MagicMock(),
+            )
+            args = self.tool.args_schema(rate_id="ENVIA")  # uppercase rate_id
+            result = _run(self.tool.execute(args, ctx))
+        finally:
+            la.select_carrier_for_cart = original
+
+        self.assertTrue(result.success)
+
     def test_no_options_en_db_ni_ctx_devuelve_not_found(self):
         """Sin options en DB ni ctx → error con lista vacía."""
         sb = _mock_supabase_with_quoted_options([])
