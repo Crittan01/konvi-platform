@@ -137,13 +137,40 @@ class AveonlinePackageLimitError(AveonlineError):
 
 @dataclass
 class QuoteOption:
-    """Una opción de cotización retornada por cotizarDoble."""
-    rate_id: str            # id interno aveonline (idtransportadora)
-    carrier_name: str       # e.g. "Coordinadora Mercantil"
-    service_level: str      # e.g. "estandar" / "expreso"
-    price_cents: int        # total COP * 100
-    eta_days: Optional[int] # días estimados de entrega
-    raw: dict               # response cruda por carrier (para audit)
+    """Una opción de cotización retornada por cotizarDoble.
+
+    Campos extendidos rev. 107 — todo el subset útil del response Aveonline
+    §3.6 dossier. Permite que UI muestre logo, breakdown de costos, peso
+    volumétrico, COD support, etc.
+    """
+    rate_id: str                       # codTransportadora
+    carrier_name: str                  # nombreTransportadora
+    service_level: str                 # tipoEnvio (e.g. "Mensajeria")
+    price_cents: int                   # total COP * 100
+    eta_days: Optional[int]            # diasentrega
+    # Identidad visual.
+    logo_url: Optional[str] = None     # logoTransportadora
+    logo_url_alt: Optional[str] = None # logoTransportadora2
+    # Trayecto.
+    route_code: Optional[str] = None   # codigoTrayecto
+    route_type: Optional[str] = None   # trayecto (e.g. "nacional")
+    # Paquete validado por Aveonline.
+    weight_real_kg: Optional[float] = None        # kilos
+    weight_volumetric_kg: Optional[float] = None  # pesovolumen
+    units: Optional[int] = None                   # unidades
+    declared_value_cop: Optional[int] = None      # valoracion
+    valuation_percent: Optional[float] = None     # porcentajeValoracion
+    # Breakdown costos (todos en cents para coherencia).
+    freight_per_kg_cents: Optional[int] = None    # fletexkilo
+    freight_per_unit_cents: Optional[int] = None  # fletexunidad
+    freight_total_cents: Optional[int] = None     # fletetotal
+    handling_cents: Optional[int] = None          # costoManejo
+    cod_extras_cents: Optional[int] = None        # valorOtrosRecaudos
+    subtotal_cents: Optional[int] = None          # valorTotal (pre-COD)
+    # COD support.
+    cod_supported: bool = False                   # contraentrega
+    # Raw response audit.
+    raw: dict = None
 
 
 @dataclass
@@ -482,6 +509,26 @@ class AveonlineClient:
                 continue
             if price_cents <= 0:
                 continue
+            # Parseo defensivo — Aveonline puede devolver strings donde
+            # esperamos números (dossier §3.6 nota).
+            def _to_int_cents_or_none(v):
+                try:
+                    return int(float(v) * 100) if v not in (None, "", "000") else None
+                except (TypeError, ValueError):
+                    return None
+
+            def _to_float_or_none(v):
+                try:
+                    return float(v) if v not in (None, "", "000") else None
+                except (TypeError, ValueError):
+                    return None
+
+            def _to_int_or_none(v):
+                try:
+                    return int(float(v)) if v not in (None, "", "000") else None
+                except (TypeError, ValueError):
+                    return None
+
             options.append(QuoteOption(
                 rate_id=str(
                     row.get("codTransportadora")
@@ -502,6 +549,27 @@ class AveonlineClient:
                 ),
                 price_cents=price_cents,
                 eta_days=self._parse_eta(row),
+                # Identidad visual.
+                logo_url=row.get("logoTransportadora") or None,
+                logo_url_alt=row.get("logoTransportadora2") or None,
+                # Trayecto.
+                route_code=str(row.get("codigoTrayecto") or "") or None,
+                route_type=str(row.get("trayecto") or "") or None,
+                # Paquete.
+                weight_real_kg=_to_float_or_none(row.get("kilos")),
+                weight_volumetric_kg=_to_float_or_none(row.get("pesovolumen")),
+                units=_to_int_or_none(row.get("unidades")),
+                declared_value_cop=_to_int_or_none(row.get("valoracion")),
+                valuation_percent=_to_float_or_none(row.get("porcentajeValoracion")),
+                # Breakdown costos (multiplico por 100 porque vienen en COP enteros).
+                freight_per_kg_cents=_to_int_cents_or_none(row.get("fletexkilo")),
+                freight_per_unit_cents=_to_int_cents_or_none(row.get("fletexunidad")),
+                freight_total_cents=_to_int_cents_or_none(row.get("fletetotal")),
+                handling_cents=_to_int_cents_or_none(row.get("costoManejo")),
+                cod_extras_cents=_to_int_cents_or_none(row.get("valorOtrosRecaudos")),
+                subtotal_cents=_to_int_cents_or_none(row.get("valorTotal")),
+                # COD.
+                cod_supported=bool(row.get("contraentrega", False)),
                 raw=row,
             ))
 

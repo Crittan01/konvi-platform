@@ -402,14 +402,16 @@ async def _quote_via_aveonline(
             detail=f"Aveonline error: {exc}",
         )
 
-    # Mapear QuoteOption → shape `normalized_rates` Envia-compat.
+    # Mapear QuoteOption → shape `normalized_rates` Envia-compat + campos
+    # extra Aveonline (rev. 107: logo, breakdown, COD, peso volumétrico).
     # El frontend lee: rate.carrier, rate.service, rate.total_price,
-    # rate.currency, rate.delivery_estimate, rate.rate_id, rate.id.
+    # rate.currency, rate.delivery_estimate, rate.rate_id, rate.id + nuevos.
     rates = []
     for opt in result.options:
         rates.append({
+            # Campos canónicos (compat Envia legacy frontend).
             "rate_id": opt.rate_id,
-            "id": opt.rate_id,  # compat alias
+            "id": opt.rate_id,
             "carrier": opt.carrier_name,
             "service": opt.service_level,
             "total_price": opt.price_cents / 100,
@@ -418,7 +420,31 @@ async def _quote_via_aveonline(
                 f"{opt.eta_days} días" if opt.eta_days else "consultar"
             ),
             "delivery_days": opt.eta_days,
-            "provider": "aveonline",  # marker audit
+            "provider": "aveonline",
+            # Campos extendidos Aveonline (rev. 107) — el frontend puede
+            # mostrarlos si los reconoce; si no, se ignoran sin romper compat.
+            "carrier_logo_url": opt.logo_url,
+            "carrier_logo_url_alt": opt.logo_url_alt,
+            "route_code": opt.route_code,
+            "route_type": opt.route_type,
+            "weight_real_kg": opt.weight_real_kg,
+            "weight_volumetric_kg": opt.weight_volumetric_kg,
+            "units": opt.units,
+            "declared_value_cop": opt.declared_value_cop,
+            "valuation_percent": opt.valuation_percent,
+            "freight_total_cop": (
+                opt.freight_total_cents / 100 if opt.freight_total_cents else None
+            ),
+            "handling_cop": (
+                opt.handling_cents / 100 if opt.handling_cents else None
+            ),
+            "cod_extras_cop": (
+                opt.cod_extras_cents / 100 if opt.cod_extras_cents else None
+            ),
+            "subtotal_cop": (
+                opt.subtotal_cents / 100 if opt.subtotal_cents else None
+            ),
+            "cod_supported": opt.cod_supported,
         })
 
     # Persistir shipment row (mismo patrón Envia para que /history funcione).
