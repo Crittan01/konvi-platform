@@ -76,7 +76,7 @@ def resolve_display_state(
       contact_record: contact dict (puede ser None/vacío).
       buying_intent: True si el cliente expresó intent de compra.
       shipping_quoted: True si shipping_quote_tool ya cotizó (history) O
-        si hay orden DB pendiente con shipping_amount > 0 (caller debe
+        si hay orden DB pendiente con shipping_cost > 0 (caller debe
         agregar esa fuente de verdad — ver `_resolve_display_state` wrapper).
       carrier_selected: True si el cliente eligió carrier (history) O si
         hay orden DB pendiente con carrier persistido (idem).

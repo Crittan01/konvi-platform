@@ -8720,23 +8720,26 @@ async def build_and_run_orchestration(
         #   1. History reciente (`shipping_quoted` de _has_shipping_quoted_in_conversation).
         #   2. DB carrier_selected_db (carrier persistido en cart).
         #   3. DB orders.pending_payment — si existe orden creada con
-        #      shipping_amount > 0, AMBAS condiciones (shipping_quoted +
+        #      shipping_cost > 0, AMBAS condiciones (shipping_quoted +
         #      carrier_selected) son TRUE por definición: la orden no se
         #      pudo crear sin esos pasos.
         # Caso runtime descubierto: cliente conocido retoma orden pendiente
         # ("Tengo carrito pendiente?"). History nuevo no muestra cotización
         # pero la orden DB ya la tiene → FSM caía en NEEDS_SHIPPING_CITY,
         # bypass payment_link no disparaba, LLM alucinaba "te genero el link".
+        # Rev. 107 fix: la columna canónica de orders es `shipping_cost`
+        # (DECIMAL), no `shipping_amount`. Bug silente del legacy que
+        # devolvía HTTP 400 sin afectar UX pero impedía esta verificación.
         if contact_id and not (shipping_quoted and _carrier_selected_db):
             try:
                 _po_check = (
                     supabase.table("orders")
-                    .select("id, shipping_amount, status")
+                    .select("id, shipping_cost, status")
                     .eq("tenant_id", tenant_id)
                     .eq("contact_id", contact_id)
                     .eq("conversation_id", conversation_id)
                     .eq("status", "pending_payment")
-                    .gt("shipping_amount", 0)
+                    .gt("shipping_cost", 0)
                     .limit(1)
                     .execute()
                 )
