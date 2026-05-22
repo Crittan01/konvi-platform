@@ -163,6 +163,11 @@ class _FakeSupabase:
 
 
 @unittest.skipUnless(GEMINI_KEY, SKIP_REASON)
+@unittest.skipUnless(
+    os.getenv("RUN_E2E") == "1",
+    "E2E real con Gemini — flaky por dependencia externa (503 durante saturación). "
+    "Correr explícito con `RUN_E2E=1 pytest tests/agentic/test_golden_conversations.py`.",
+)
 class GoldenConversationsE2ETests(unittest.TestCase):
     """Cada test corre 1 turn agentic con Gemini real. Valida comportamiento
     behavioral (tool calls + outbound text)."""
@@ -338,6 +343,10 @@ class GoldenConversationsE2ETests(unittest.TestCase):
 
 
 @unittest.skipUnless(GEMINI_KEY, SKIP_REASON)
+@unittest.skipUnless(
+    os.getenv("RUN_E2E") == "1",
+    "E2E real con Gemini — correr con RUN_E2E=1.",
+)
 class GoldenInvariantValidationTests(unittest.TestCase):
     """Verifica que invariants Python se aplicarían correctamente al output
     del agente real (sin requerir DB real)."""

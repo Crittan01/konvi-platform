@@ -42,6 +42,15 @@ ignore = [
 "services/ai-orchestrator/orchestrator.py" = ["F401"]
 "services/ai-orchestrator/outbound/validator.py" = ["F401"]
 
+[tool.pytest.ini_options]
+# Filtros para suite limpia (0 warnings):
+#   • PydanticDeprecatedSince212 viene del paquete EXTERNO `google.genai.types`
+#     (línea 9906). Nuestro código NO usa el patrón deprecated. Se resolverá
+#     cuando Google publique versión google-genai con Pydantic V3-compat.
+filterwarnings = [
+    "ignore::pydantic.PydanticDeprecatedSince212",
+]
+
 [tool.coverage.run]
 source = ["services"]
 branch = false
