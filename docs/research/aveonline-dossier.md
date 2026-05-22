@@ -1408,20 +1408,33 @@ Esta recomendación se ejecuta detalladamente en **§22 Plan de migración**.
 
 ## 22. Plan de migración Envia → Aveonline (rev. 106 → rev. 107)
 
-**Objetivo**: reemplazar Envia como provider primario en el agentic shipping tool con Aveonline, **preservando** cart-as-SoT, idempotency lifecycle (ADR-0011), invariantes (consent + resumen-before-link), y dejando Envia como fallback feature-flag detrás de cada tenant.
+**Objetivo**: ofrecer **Aveonline como provider de shipping alternativo a Envia** en el agentic shipping tool. **Cada tenant elige UN provider activo** (Envia O Aveonline, NO ambos). Sin fallback automático cross-provider — la complejidad operacional (doble onboarding, doble Vault, guías mixtas, comisiones COD distintas) no se justifica.
 
-**Branch**: `feat/rev107-aveonline-primary` (no commit a `phase-1-orchestrator-refactor` ni `develop` hasta cierre tests + UAT + ADR).
+Si Aveonline tiene 503 transitorio → la cascada Gemini ya cubre la respuesta del bot (mensaje honesto al cliente), igual que pasa hoy con Envia.
 
-**Estrategia**: **adapter pluggable + strangler-fig pattern** — mismo `agentic/tools/shipping.py` interface, dos implementaciones backend.
+**Preservado**: cart-as-SoT, idempotency lifecycle (ADR-0011), invariantes (consent + resumen-before-link).
 
-### 22.1 Fases de migración (10.25 días-dev, ~2.5 semanas calendario)
+**Branch**: `feat/rev107-aveonline-provider` (no commit a `phase-1-orchestrator-refactor` ni `develop` hasta cierre tests + UAT + ADR).
 
-> **Revisión 2026-05-22 (post-WARN 2 founder UAT)**: el plan original
-> de 8d **subestimó** el onboarding tenant. La auth Aveonline requiere
-> `usuario+clave` per-tenant (§2.1 v1.0 dossier) que debe ingresarse
-> en la UI antes de poder cotizar. Se agregan fases O.1-O.5 cubriendo
-> esquema + UI + server actions + Vault + identity registry (siguiendo
-> patrón ya establecido para Envia/Wompi/WhatsApp/MeLi).
+**Estrategia**: **adapter pluggable + provider selector per-tenant** — mismo `agentic/tools/shipping.py` interface, el adapter routea según `tenant_shipping_provider_config.active_provider` (single enum, no array).
+
+> **Revisión 2026-05-22 (post-pregunta founder)**: el plan original
+> propuso "primary + fallback". Análisis arquitectónico evidenció que
+> fallback automático cross-provider tiene costos operativos altos
+> (doble cuenta, doble facturación, guías mixtas) sin valor proporcional
+> (la cascada Gemini + manejo honesto del bot ya cubren transitorios).
+> **Decisión: 1 provider activo per-tenant**. Switcher en UI cuando
+> tenant decida migrar (guías legacy en provider anterior siguen
+> rastreándose read-only).
+
+### 22.1 Fases de migración (~7 días-dev, ~1.5 semanas calendario)
+
+> **Revisión 2026-05-22 final**: el plan original (8d) subestimó
+> onboarding tenant. Mid-sesión se agregaron O.1-O.5 (2.25d → 10.25d).
+> Tras pregunta arquitectónica del founder sobre "2 providers activos",
+> se simplificó a **1 provider activo per-tenant sin fallback automático**.
+> Eso elimina toda la complejidad de routing dual (`fallback_provider`
+> column, métricas cross-provider, etc.) y baja el total a **~7d**.
 
 #### 22.1.a Fases de runtime (RT) — cliente HTTP + adapters + UI selector
 
@@ -1431,12 +1444,12 @@ Esta recomendación se ejecuta detalladamente en **§22 Plan de migración**.
 | M.2 | Probe E2E sandbox: replicar `packages/db/scripts/probe-aveonline.mjs` en pytest con cuenta DEMO `demointegracion` | 0.5d | M.1 | scenarios paridad |
 | M.3 | Implementar `agentic/legacy_adapters.py::quote_shipping_for_cart_aveonline` (espejo del Envia adapter actual) | 1d | M.1+M.2 | unit |
 | M.4 | Implementar `select_carrier_for_cart_aveonline` + `generate_payment_link_for_cart_aveonline` (Wompi no cambia, solo el shipping precedente) | 0.5d | M.3 | unit |
-| M.5 | Refactor `agentic/tools/shipping.py::QuoteShippingTool.execute` → detectar `tenant_integrations.meta.shipping_provider` y rutear: `'aveonline'` → adapter Aveonline, `'envia'` (default) → adapter Envia | 1d | M.4 | unit + integration |
-| M.6 | Capabilities matrix per-tenant: nueva tabla `tenant_shipping_provider_config` con `{tenant_id, primary_provider, fallback_provider, enabled_carriers[], cod_enabled, insurance_strategy}` | 1d | F.3 capabilities table | unit |
-| M.7 | UI Tenant Console → Settings → Despachos: selector "Provider principal" (Aveonline / Envia / Aveonline+Envia fallback) + lista carriers habilitados | 1.5d | M.6 | UI smoke |
+| M.5 | Refactor `agentic/tools/shipping.py::QuoteShippingTool.execute` → leer `tenant_shipping_provider_config.active_provider` y rutear al adapter correspondiente (Envia o Aveonline). **Sin fallback cross-provider**. Si el provider activo falla → mensaje honesto al cliente (mismo patrón que vimos en T12 conv c627da91). | 0.5d | M.4 | unit + integration |
+| M.6 | Tabla `tenant_shipping_provider_config` con `{tenant_id, active_provider ENUM('envia','aveonline'), enabled_carriers[], cod_enabled, insurance_strategy}`. **Single enum, no array de providers**. Default per tenant existente: `'envia'` (preserva comportamiento actual). | 0.5d | F.3 capabilities table | unit |
+| M.7 | UI Tenant Console → Settings → Despachos: selector único "Provider activo" (radio Envia ↔ Aveonline). Cambio confirma con dialog "Las cotizaciones futuras irán al nuevo provider. Las guías legacy en {provider anterior} siguen rastreándose ahí". Lista de carriers habilitados según provider activo. | 1d | M.6 | UI smoke |
 | M.8 | UAT dual-mode S31-S33 reescritos para Aveonline (idempotency, webhook, polling) + nuevo S43 COD Aveonline | 0.5d | M.1-M.7, O.* | UAT |
 
-**Subtotal runtime: 8 días-dev**.
+**Subtotal runtime: 6 días-dev** (vs 8d del plan con fallback).
 
 #### 22.1.b Fases de onboarding (O) — credenciales tenant + Vault + UI integración
 
@@ -1457,23 +1470,23 @@ MeLi) — UI integración → server action → POST auth → persist + Vault:
 
 #### 22.1.c Total revisado
 
-**8d (RT) + 2.25d (O) = 10.25 días-dev** (~2.5 semanas calendario).
+**6d (RT) + 2.25d (O) − 1.25d (eliminado fallback dual) = ~7 días-dev** (~1.5 semanas calendario).
 
 #### 22.1.d Orden de ejecución sugerido
 
 ```
 Semana 1:
-  Lun: O.1 schema + RPC helper                          (0.5d)
+  Lun:     O.1 schema + RPC helper                      (0.5d)
   Lun-Mar: O.2 UI Aveonline (clonando estructura Envia) (1d)
-  Mié: O.3 server action connectAveonline               (0.5d)
-  Mié: O.5 tenant_provider_identity                     (0.25d)
+  Mié:     O.3 server action connectAveonline           (0.5d)
+  Mié:     O.5 tenant_provider_identity                 (0.25d)
   Jue-Vie: M.1 AveonlineClient (incluye O.4 refresh JWT) + M.2 probe DEMO (2.5d)
 
 Semana 2:
-  Lun: M.3 quote adapter (1d)
-  Mar: M.4 select_carrier + payment adapter (0.5d) + M.5 routing in QuoteShippingTool (1d)
-  Mié: M.6 capabilities matrix + M.7 UI selector provider (1.5d)
-  Jue-Vie: M.8 UAT dual-mode + bug fixing + ADR-0019 marcar ACTIVO (1d)
+  Lun:     M.3 quote adapter (1d)
+  Mar:     M.4 select_carrier + payment adapter (0.5d) + M.5 routing (0.5d)
+  Mié:     M.6 active_provider table (0.5d) + M.7 UI selector single (1d)
+  Jue:     M.8 UAT dual-mode + bug fixing + ADR-0019 marcar ACTIVO (0.5d)
 ```
 
 **Validación humana obligatoria pre-cutover** (dossier §25.5):
