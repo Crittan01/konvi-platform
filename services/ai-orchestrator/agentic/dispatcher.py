@@ -173,7 +173,8 @@ async def _run_agentic_full(
     )
     from tools.catalog_tool import get_tenant_catalog
 
-    catalog = get_tenant_catalog(supabase, tenant_id)
+    # get_tenant_catalog es async — debe awaitearse.
+    catalog = await get_tenant_catalog(supabase, tenant_id)
     history = await _get_conversation_history(supabase, conversation_id)
     customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
     # `_fetch_contact_for_phone` retorna tuple (contact_id, contact_record).
@@ -304,7 +305,7 @@ async def _run_agentic_shadow(
     )
     from tools.catalog_tool import get_tenant_catalog
 
-    catalog = get_tenant_catalog(supabase, tenant_id)
+    catalog = await get_tenant_catalog(supabase, tenant_id)
     history = await _get_conversation_history(supabase, conversation_id)
     customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
     if customer_phone:
