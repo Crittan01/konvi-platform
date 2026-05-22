@@ -4,11 +4,19 @@ Embeddings helper — Gemini para Knowledge Base.
 Rev. 72 — el cálculo de embeddings se mueve del frontend al backend (cierra
 drift D3: GEMINI_API_KEY ya no se expone al cliente).
 
-NOTA sobre duplicación con `services/ai-orchestrator/tools/kb_tool.py`:
+Rev. 106 — refactor a wrapper unificado `lib.llm_embed.embed_with_cascade`.
+Antes vivía lógica duplicada de ~30 líneas (espejo del orchestrator). Ahora
+ambos servicios usan archivos byte-equal `llm_embed.py` con cobertura full
+de transitorios + cache LRU + versionado. Master vive en `services/ai-
+orchestrator/llm_embed.py`, copia idéntica en `services/api/lib/llm_embed.py`
+(test cross-service valida hash idéntico).
+
+NOTA sobre duplicación:
 - ai-orchestrator y api son procesos separados con `requirements.txt` propios.
 - No comparten código en runtime (no hay package común instalado en ambos).
-- Por eso esta función vive aquí también — duplicación deliberada de ~30 líneas.
-- AMBAS deben mantenerse coherentes: misma lista de modelos, mismo dim 3072.
+- Solución actual: 2 archivos byte-equal + test de paridad.
+- Solución futura: extraer a `packages/python-shared/` cuando se consolide
+  infra de packages compartidos (post Sem 12 plan K).
 """
 import os
 import logging
@@ -16,40 +24,33 @@ from typing import Optional
 
 from google import genai
 
+from lib.llm_embed import (
+    embed_with_cascade,
+    EmbedResult,
+    get_embedding_model_version,  # noqa: F401 — usado por API endpoints
+)
+
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
-GEMINI_EMBEDDING_FALLBACK_MODEL = os.getenv(
-    "GEMINI_EMBEDDING_FALLBACK_MODEL",
-    "text-embedding-004",
-)
-EMBEDDING_DIM = 3072
-
-
-def _embedding_models() -> list[str]:
-    models = [GEMINI_EMBEDDING_MODEL]
-    fallback = GEMINI_EMBEDDING_FALLBACK_MODEL.strip()
-    if fallback and fallback not in models:
-        models.append(fallback)
-    return models
-
-
-def _is_model_unavailable_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return (
-        "not found" in text
-        or "404" in text
-        or "not supported" in text
-        or "unsupported" in text
-    )
 
 
 def embed_text(text: str) -> Optional[list[float]]:
-    """Genera embedding de un texto usando Gemini. Retorna None si no fue posible.
+    """Genera embedding de un texto con cascada + cache + retries.
 
-    Reusa el patrón de `kb_tool._embed_query_vector` (orchestrator) — duplicación
-    deliberada por separación de servicios."""
+    Comportamiento (rev. 106):
+      • Cache hit → retorna directo (LRU 256/5min).
+      • 4 intentos primary (gemini-embedding-001) con backoff 1-8s.
+      • 3 intentos fallback (text-embedding-004) con backoff hasta 16s.
+      • "Model unavailable" salta inmediato al fallback.
+      • Errores no-transitorios (400 schema) se re-lanzan (no None).
+      • Si cascada agotada → retorna None + log error.
+
+    Retorna None solo si:
+      • GEMINI_API_KEY no configurada.
+      • Texto vacío.
+      • Cascada agotada (TODOS los modelos+intentos fallaron transitorio).
+    """
     if not GEMINI_API_KEY:
         logger.warning("[KB-EMBED] GEMINI_API_KEY no configurada en el API service")
         return None
@@ -57,33 +58,21 @@ def embed_text(text: str) -> Optional[list[float]]:
         return None
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    last_error: Optional[Exception] = None
-    for model_name in _embedding_models():
-        try:
-            embed_resp = client.models.embed_content(
-                model=model_name,
-                contents=text,
-            )
-            embeddings = getattr(embed_resp, "embeddings", None) or []
-            if not embeddings:
-                continue
-            values = getattr(embeddings[0], "values", None)
-            if not values:
-                continue
-            if model_name != GEMINI_EMBEDDING_MODEL:
-                logger.info("[KB-EMBED] usando modelo fallback: %s", model_name)
-            return values
-        except Exception as exc:
-            last_error = exc
-            if _is_model_unavailable_error(exc):
-                logger.warning("[KB-EMBED] modelo %s no disponible: %s", model_name, exc)
-                continue
-            logger.warning("[KB-EMBED] embedding falló (%s): %s", model_name, exc)
-            return None
+    try:
+        result: EmbedResult = embed_with_cascade(client, text)
+    except Exception as exc:
+        # Errores no-transitorios (400 schema, bug de prompt) — log y retornar None
+        # para preservar contrato pre-rev. 106 (callers esperan Optional[list]).
+        logger.warning("[KB-EMBED] embedding falló non-transient: %s", exc)
+        return None
 
-    if last_error:
-        logger.warning("[KB-EMBED] todos los modelos fallaron: %s", last_error)
-    return None
+    if result.degraded or not result.values:
+        logger.warning(
+            "[KB-EMBED] cascada agotada tras %d intentos: %s",
+            result.attempts, result.last_error,
+        )
+        return None
+    return result.values
 
 
 def embed_kb_document(title: str, content: str) -> Optional[list[float]]:
