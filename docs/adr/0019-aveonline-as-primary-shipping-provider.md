@@ -26,11 +26,36 @@ Pivotar a Aveonline como provider primario de shipping en rev. 107, **manteniend
 
 ### Lo que CAMBIA (rev. 107)
 
+**A. Runtime (cliente HTTP + adapters)**:
+
 - Nuevo cliente `services/api/lib/clients/aveonline_client.py` (auth v1.0 + cotización + label + tracking + cancel + pickup + boomerang RMA).
 - Adapter `quote_shipping_for_cart_aveonline` espejo del Envia adapter actual.
 - Routing dinámico en `QuoteShippingTool.execute` por `tenant_shipping_provider_config.primary_provider`.
 - Nueva tabla `tenant_shipping_provider_config` (migración Supabase) con `primary_provider`, `fallback_provider`, `enabled_carriers[]`, `cod_enabled`, `insurance_strategy`.
-- UI Tenant Console → Settings → Despachos con selector provider per-tenant.
+
+**B. Onboarding tenant (UI + auth + Vault)** — **revisión 2026-05-22 post-WARN founder UAT**:
+
+La auth Aveonline v1.0 (dossier §2.1) requiere `usuario+clave` per-tenant. NO se puede cotizar sin credenciales del tenant. Esto NO era un "detalle de implementación" sino una fase explícita del plan. Se agregan O.1-O.5:
+
+- **O.1** Schema: extender constraint `provider` en `tenant_integrations` para `'aveonline'` + RPC helper `get_aveonline_credentials(tenant_id)` (espejo `get_envia_api_key`).
+- **O.2** UI `apps/web/app/dashboard/(settings-group)/integrations/aveonline/page.tsx` con tabs **Setup** (form usuario+password+versión auth+tiempoToken) + **Carriers** + **Capacidades** + **Tracking** — clon estructural del de Envia.
+- **O.3** Server action `connectAveonline(formData)`: POST de prueba a `autenticarusuario.php`, si `status=ok` persiste `empresa_id + jwt_token + jwt_expires_at + meta` en `tenant_integrations`, password → Vault (`aveonline_password_<tenant_id>`).
+- **O.4** `AveonlineClient._refresh_jwt(tenant_id)` lee Vault, invoca auth endpoint, cachea JWT con TTL según `tiempoToken` (v1.0) o 12h fijo (v2.0). Auto-refresh con buffer 10min antes de expirar.
+- **O.5** Migración `tenant_provider_identity` aceptar `provider='aveonline'` registrando `empresa_id` como `provider_internal_id`.
+
+**C. Patrón replicado del repo existente** — no inventar nada:
+
+- Wompi, Envia, WhatsApp, MercadoLibre y Telegram ya tienen este flujo (UI + server action + Vault + tenant_integrations + tenant_provider_identity).
+- Vault setup migración base: `20260426020000_vault_setup_and_migration.sql`.
+- Identity registry migración base: `20260514100000_tenant_provider_identity.sql`.
+
+### Esfuerzo revisado
+
+- Runtime (M.1-M.8): **8 días-dev**.
+- Onboarding (O.1-O.5): **2.25 días-dev**.
+- **Total: 10.25 días-dev** (~2.5 semanas calendario).
+
+El plan original mencionó 8d pero subestimó O.1-O.5. La revisión 2026-05-22 corrige esto sin inventar — siguiendo el patrón del repo para los 5 providers ya integrados.
 
 ### Lo que NO cambia
 
