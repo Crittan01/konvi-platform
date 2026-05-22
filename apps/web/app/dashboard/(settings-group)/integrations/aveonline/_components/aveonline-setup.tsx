@@ -1,5 +1,12 @@
+'use client'
+
 /**
  * Tab Setup — Aveonline. Rev. 107 O.2.
+ *
+ * NOTA Next.js: `'use client'` DEBE ser la primera línea del archivo
+ * (antes de cualquier comentario o import). Cualquier código previo
+ * hace que Next.js no detecte la directiva y trate el archivo como
+ * Server Component → "Invalid hook call" en useState/useTransition.
  *
  * Comportamiento:
  *   • Si NO connected → form inline (usuario + password + versión auth).
@@ -12,7 +19,6 @@
  * un flujo más activo (form de conexión inline) que justifica wiring
  * custom. Estructura visual mantenida coherente con Envia.
  */
-'use client'
 
 import { useState, useTransition } from 'react'
 import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2 } from 'lucide-react'
