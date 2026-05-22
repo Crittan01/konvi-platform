@@ -204,9 +204,28 @@ async def _run_agentic_full(
     )
     elapsed = time.monotonic() - started_at
 
-    if result.error or not result.outbound_text:
-        # Agentic falló — raise para que el dispatcher caiga a legacy.
-        raise RuntimeError(f"agentic_failed: {result.error or 'empty_output'}")
+    # Rev. 107: manejo activo de empty_output en agent.py — si el agentic
+    # produce outbound_text (incluso degraded), confiamos en él. Solo si
+    # `result.error` está set (excepción real Gemini) o outbound vacío SIN
+    # error (escenario inesperado) caemos a legacy.
+    if result.error and not result.outbound_text:
+        # Excepción real Gemini (network/api error) — ahí sí ERROR + fallback.
+        raise RuntimeError(f"agentic_failed: {result.error}")
+    if not result.outbound_text:
+        # Escenario inesperado (no error, no texto). Loggear y fallback.
+        logger.warning(
+            "[AGENTIC_DISPATCH] empty outbound sin error tenant=%s conv=%s "
+            "truncated=%s reason=%s — fallback a legacy",
+            tenant_id, conversation_id, result.truncated, result.truncated_reason,
+        )
+        raise RuntimeError("agentic_failed: empty_output_unexpected")
+    if result.truncated and result.truncated_reason and \
+            result.truncated_reason.startswith("empty_output:"):
+        # Recovery se activó (degraded text al cliente). Log INFO honesto.
+        logger.info(
+            "[AGENTIC_RECOVERY] conv=%s reason=%s → degraded response enviada",
+            conversation_id, result.truncated_reason,
+        )
 
     # Aplicar invariants Python (anti-hallu + style + flow guards).
     # Orden importa:
