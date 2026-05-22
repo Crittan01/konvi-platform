@@ -200,20 +200,35 @@ class SelectCarrierTool:
 
         # Rev. 107 — fuzzy match resiliente al LLM inventando rate_ids.
         # Cuando el LLM falla en pasar el rate_id exacto (e.g. inventa
-        # 'envia_medellin_rate_id' o un UUID aleatorio) pero el nombre del
-        # carrier es identificable en el string, matcheamos por nombre.
-        # Resuelve el problema de raíz (LLM no es confiable con IDs
-        # literales) en vez de depender solo del recovery activo.
+        # 'envia_medellin_rate_id', 'rate_coordinadora_mercantil', un UUID
+        # aleatorio) pero el nombre del carrier es identificable, matcheamos
+        # por nombre con normalización de separadores.
+        #
+        # Normalización necesaria: el LLM usa `_` / `-` separadores en
+        # rate_ids inventados, pero los carrier names reales tienen ESPACIOS
+        # (e.g. "COORDINADORA MERCANTIL"). Sin normalizar, 'coordinadora
+        # mercantil' NO matchea 'rate_coordinadora_mercantil'. Solución:
+        # colapsar TODOS los separadores (espacios, guiones, underscores)
+        # antes de comparar substring.
         if not rate_data and all_options:
-            requested_lower = args.rate_id.lower()
+            import re as _re
+            def _normalize(s: str) -> str:
+                return _re.sub(r"[\s\-_]+", "", str(s).lower())
+
+            requested_norm = _normalize(args.rate_id)
             for opt in all_options:
-                carrier_lower = str(opt.get("carrier", "")).lower()
-                if not carrier_lower:
+                carrier_norm = _normalize(opt.get("carrier", ""))
+                if not carrier_norm:
                     continue
-                # Match si el nombre del carrier aparece en el rate_id (sub-
-                # string) o viceversa (e.g. requested='envia_medellin' contiene
-                # 'envia'; carrier='ENVIA' contiene rate_id='envia').
-                if carrier_lower in requested_lower or requested_lower in carrier_lower:
+                # Match si carrier normalizado aparece en requested o viceversa.
+                # Ejemplos cubiertos:
+                #   • 'rate_coordinadora_mercantil' → 'ratecoordinadoramercantil'
+                #     carrier 'COORDINADORA MERCANTIL' → 'coordinadoramercantil'
+                #     'coordinadoramercantil' in 'ratecoordinadoramercantil' = True ✓
+                #   • 'envia_medellin_rate_id' → 'enviamedellinrateid'
+                #     carrier 'ENVIA' → 'envia'
+                #     'envia' in 'enviamedellinrateid' = True ✓
+                if carrier_norm in requested_norm or requested_norm in carrier_norm:
                     rate_data = opt
                     ctx.logger.info(
                         "[agentic.select_carrier] fuzzy match: rate_id='%s' → %s (real rate_id=%s)",
