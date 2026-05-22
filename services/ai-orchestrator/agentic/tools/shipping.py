@@ -47,15 +47,59 @@ class QuoteShippingTool:
     args_schema = QuoteShippingArgs
 
     async def execute(self, args: QuoteShippingArgs, ctx: ToolContext) -> ToolResult:
-        from agentic.legacy_adapters import quote_shipping_for_cart
+        """Routing por tenant_shipping_provider_config.active_provider.
 
-        result = await quote_shipping_for_cart(
-            ctx.supabase,
-            conversation_id=ctx.conversation_id,
-            tenant_id=ctx.tenant_id,
-            contact_id=ctx.contact_id,
-            city_query=args.city,
+        Rev. 107 M.5 — soporta multi-provider (Envia O Aveonline,
+        sin fallback automático per ADR-0019).
+        """
+        from agentic.legacy_adapters import (
+            quote_shipping_for_cart,
+            quote_shipping_for_cart_aveonline,
         )
+
+        # Resolver provider activo del tenant. Si no hay row de config,
+        # defaultea a 'envia' (preserva comportamiento legacy).
+        active_provider = "envia"
+        try:
+            cfg_res = (
+                ctx.supabase.table("tenant_shipping_provider_config")
+                .select("active_provider")
+                .eq("tenant_id", ctx.tenant_id)
+                .maybe_single()
+                .execute()
+            )
+            if cfg_res and cfg_res.data:
+                active_provider = (
+                    cfg_res.data.get("active_provider") or "envia"
+                ).strip().lower()
+        except Exception as exc:
+            ctx.logger.warning(
+                "[agentic.shipping] no pude leer active_provider, default envia: %s",
+                exc,
+            ) if ctx.logger else None
+
+        ctx.logger.info(
+            "[agentic.shipping] tenant=%s provider=%s city=%s",
+            ctx.tenant_id[:8], active_provider, args.city,
+        ) if ctx.logger else None
+
+        if active_provider == "aveonline":
+            result = await quote_shipping_for_cart_aveonline(
+                ctx.supabase,
+                conversation_id=ctx.conversation_id,
+                tenant_id=ctx.tenant_id,
+                contact_id=ctx.contact_id,
+                city_query=args.city,
+            )
+        else:
+            # Default + 'envia' explícito.
+            result = await quote_shipping_for_cart(
+                ctx.supabase,
+                conversation_id=ctx.conversation_id,
+                tenant_id=ctx.tenant_id,
+                contact_id=ctx.contact_id,
+                city_query=args.city,
+            )
         if not result.get("ok"):
             return tool_failure(
                 result.get("error", "Error cotizando envío."),
