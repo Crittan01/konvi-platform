@@ -104,10 +104,12 @@ class ConsentRequiredInvariantTests(unittest.TestCase):
         }
 
     def test_llm_afirma_guardado_pero_consent_failed_rewrite(self):
+        """Ahora save_pii está separado en save_email/save_name/etc.
+        El invariant chequea cualquiera de los save_*."""
         result = _run(self.inv.validate(
             candidate_text="Guardé tus datos correctamente.",
             tool_call_log=[{
-                "tool": "save_pii",
+                "tool": "save_email",
                 "result": {"error": "consent required", "code": "CONSENT_REQUIRED"},
             }],
             **self.base_kwargs,
@@ -115,11 +117,11 @@ class ConsentRequiredInvariantTests(unittest.TestCase):
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
         self.assertIn("autorización", result.replacement_text.lower())
 
-    def test_llm_afirma_guardado_con_save_pii_exitoso_ok(self):
+    def test_llm_afirma_guardado_con_save_email_exitoso_ok(self):
         result = _run(self.inv.validate(
             candidate_text="Listo, guardé tu email crittan01@gmail.com.",
             tool_call_log=[{
-                "tool": "save_pii",
+                "tool": "save_email",
                 "result": {"field": "email", "saved": True},
             }],
             **self.base_kwargs,

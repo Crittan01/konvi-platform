@@ -18,7 +18,11 @@ from agentic.tools.base import ToolContext
 from agentic.tools.escalation import EscalateToHumanTool, EscalateToHumanArgs
 from agentic.tools.contact import (
     RecordConsentTool, RecordConsentArgs,
-    SavePIITool, SavePIIArgs,
+    SaveEmailTool, SaveEmailArgs,
+    SaveNameTool, SaveNameArgs,
+    SaveDocumentTool, SaveDocumentArgs,
+    SaveAddressTool, SaveAddressArgs,
+    SaveShippingPhoneTool, SaveShippingPhoneArgs,
 )
 
 
@@ -86,60 +90,86 @@ class RecordConsentToolTests(unittest.TestCase):
         self.assertEqual(result.data["code"], "NO_CONTACT")
 
 
-class SavePIIToolTests(unittest.TestCase):
+class SavePIIToolsTests(unittest.TestCase):
+    """Tests de los 5 save_* tools (1 por campo PII)."""
 
-    def test_falla_si_consent_no_dado(self):
-        """Habeas Data: save_pii REQUIERE consent_given=True en DB."""
+    def _ctx(self, consent: bool):
         sb = _FakeSupabase()
-        sb.set_table("contacts", returns={"consent_given": False})
-        ctx = ToolContext(
+        sb.set_table("contacts", returns={"consent_given": consent})
+        return ToolContext(
             tenant_id="t", conversation_id="c", contact_id="ct",
             supabase=sb,
         )
-        tool = SavePIITool()
-        result = _run(tool.execute(
-            SavePIIArgs(field="email", value="x@y.com"),
-            ctx,
+
+    def test_save_email_falla_si_consent_no_dado(self):
+        result = _run(SaveEmailTool().execute(
+            SaveEmailArgs(value="cliente@ejemplo.com"),
+            self._ctx(consent=False),
         ))
         self.assertFalse(result.success)
         self.assertEqual(result.data["code"], "CONSENT_REQUIRED")
 
-    def test_guarda_email_con_consent(self):
-        sb = _FakeSupabase()
-        sb.set_table("contacts", returns={"consent_given": True})
-        ctx = ToolContext(
-            tenant_id="t", conversation_id="c", contact_id="ct",
-            supabase=sb,
-        )
-        tool = SavePIITool()
-        result = _run(tool.execute(
-            SavePIIArgs(field="email", value="cliente@ejemplo.com"),
-            ctx,
+    def test_save_email_guarda_con_consent(self):
+        result = _run(SaveEmailTool().execute(
+            SaveEmailArgs(value="cliente@ejemplo.com"),
+            self._ctx(consent=True),
         ))
         self.assertTrue(result.success)
         self.assertEqual(result.data["field"], "email")
 
-    def test_validation_email_mal_formado_rechaza(self):
+    def test_save_email_validation_rechaza_invalido(self):
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):
-            SavePIIArgs(field="email", value="no-es-email")
+            SaveEmailArgs(value="no-es-email")
 
-    def test_validation_document_requiere_type_number(self):
+    def test_save_document_requiere_type_y_number(self):
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):
-            SavePIIArgs(field="document", value="solo string")
+            SaveDocumentArgs(doc_type="CC")  # falta doc_number
+        with self.assertRaises(ValidationError):
+            SaveDocumentArgs(doc_type="INVALID", doc_number="123456")
 
-    def test_document_valido_estructura_dict(self):
-        args = SavePIIArgs(
-            field="document",
-            value={"type": "CC", "number": "1032414179"},
-        )
-        self.assertEqual(args.value["type"], "CC")
+    def test_save_document_guarda_con_consent(self):
+        result = _run(SaveDocumentTool().execute(
+            SaveDocumentArgs(doc_type="CC", doc_number="1032414179"),
+            self._ctx(consent=True),
+        ))
+        self.assertTrue(result.success)
+        self.assertEqual(result.data["field"], "document")
 
-    def test_document_type_invalido_rechaza(self):
+    def test_save_address_requiere_building_type(self):
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):
-            SavePIIArgs(field="document", value={"type": "INVALID", "number": "123"})
+            SaveAddressArgs(
+                street="Cl 36",
+                city="Bogotá",
+                building_type="INVALID",
+            )
+
+    def test_save_address_guarda_con_consent(self):
+        result = _run(SaveAddressTool().execute(
+            SaveAddressArgs(
+                street="Cl 36A # 6-87",
+                city="Bogotá",
+                building_type="oficina",
+                apartment="301",
+                floor="3",
+            ),
+            self._ctx(consent=True),
+        ))
+        self.assertTrue(result.success)
+
+    def test_save_shipping_phone_validation(self):
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            SaveShippingPhoneArgs(value="123")  # < 10 chars
+
+    def test_save_name_guarda_con_consent(self):
+        result = _run(SaveNameTool().execute(
+            SaveNameArgs(value="Cristian Camilo Garzon"),
+            self._ctx(consent=True),
+        ))
+        self.assertTrue(result.success)
 
 
 class EscalateToHumanToolTests(unittest.TestCase):
