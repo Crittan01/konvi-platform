@@ -169,7 +169,7 @@ class SelectCarrierTool:
                 .select("shipping_meta")
                 .eq("conversation_id", ctx.conversation_id)
                 .eq("tenant_id", ctx.tenant_id)
-                .eq("status", "active")
+                .eq("status", "open")  # status canónico cart_tool.py
                 .maybe_single()
                 .execute()
             )

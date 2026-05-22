@@ -117,7 +117,7 @@ def _read_cart_state(supabase: Any, *, conversation_id: str, tenant_id: str) -> 
             .select("id, shipping_cents, contact_id")
             .eq("conversation_id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .eq("status", "active")
+            .eq("status", "open")  # status canónico cart_tool.py
             .maybe_single()
             .execute()
         )
