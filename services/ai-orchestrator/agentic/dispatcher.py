@@ -82,11 +82,23 @@ async def dispatch_message(
     NO retorna nada — el outbound se envía dentro del path elegido.
 
     Comportamiento:
+      0. Si conv.status ∈ {human_takeover, closed} → SKIP (gate previo
+         a cualquier path). El operador tomó la conversación o ya cerró
+         — el bot debe permanecer en silencio total.
       1. Si tenant.agentic_enabled=True → agentic FULL (envía outbound).
       2. Elif AGENTIC_SHADOW_ENABLED=True → legacy responde al cliente +
          agentic shadow corre en paralelo y loggea silenciosamente.
       3. Else → solo legacy.
     """
+    # Gate de conversation status — rev. 107 cierre runtime KAIU 2026-05-23.
+    # El bot legacy ya tenía este gate en orchestrator.py:6754, pero el
+    # agentic dispatcher saltaba al `_run_agentic_full` SIN verificar.
+    # Resultado: bot respondía a mensajes en conv human_takeover/closed
+    # sobre-escribiendo la intervención del operador.
+    if _should_skip_for_conv_status(supabase, conversation_id):
+        _mark_message_skipped(supabase, message_id)
+        return
+
     agentic_enabled = await is_tenant_agentic_enabled(supabase, tenant_id)
 
     if agentic_enabled:
@@ -487,4 +499,58 @@ def _persist_turn_audit(
         logger.warning(
             "[AGENTIC_AUDIT] persist falló mode=%s conv=%s: %s",
             mode, conversation_id[:8], exc,
+        )
+
+
+# ─── Gate de conversation status (Rev. 107) ────────────────────────────────
+
+
+_SKIP_STATUSES = frozenset({"human_takeover", "closed"})
+
+
+def _should_skip_for_conv_status(supabase: Any, conversation_id: str) -> bool:
+    """True si la conv está en estado donde el bot NO debe responder.
+
+    El operador tomó la conversación (human_takeover) o ya está cerrada.
+    Best-effort lectura — si falla, NO skipea (default: dejar pasar para
+    que el legacy aplique su propio gate como segunda defensa).
+    """
+    try:
+        res = (
+            supabase.table("conversations")
+            .select("status")
+            .eq("id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return False
+        status = (rows[0].get("status") or "").lower()
+        return status in _SKIP_STATUSES
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_DISPATCH] error leyendo conv status %s: %s — default no-skip",
+            conversation_id[:8], exc,
+        )
+        return False
+
+
+def _mark_message_skipped(supabase: Any, message_id: str) -> None:
+    """Marca el message como skipped por status conv. Mismo behavior que
+    el path legacy (orchestrator.py SKIP_REASON_HUMAN_TAKEOVER)."""
+    try:
+        supabase.table("messages").update({
+            "processing_status": "skipped",
+            "skip_reason": "human_takeover_or_closed",
+            "processed": True,
+        }).eq("id", message_id).execute()
+        logger.info(
+            "[AGENTIC_DISPATCH] msg=%s skipped (conv status no-bot)",
+            message_id[:8],
+        )
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_DISPATCH] error marcando msg=%s skipped: %s",
+            message_id[:8], exc,
         )
