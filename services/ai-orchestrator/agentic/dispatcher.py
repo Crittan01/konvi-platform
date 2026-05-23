@@ -176,6 +176,7 @@ async def _run_agentic_full(
     from agentic.invariants import (
         apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
+        PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
     )
@@ -260,6 +261,7 @@ async def _run_agentic_full(
             CartStateInvariant(),
             ConsentRequiredInvariant(),
             SummaryCoherenceInvariant(),
+            PIICoherenceInvariant(),
             PostToolCoherenceInvariant(),
             PassiveClosingInvariant(),
             NoDecorativeEmojiInvariant(),
