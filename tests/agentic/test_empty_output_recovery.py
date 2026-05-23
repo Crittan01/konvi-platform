@@ -76,10 +76,21 @@ class RecoveryStrategyTests(unittest.TestCase):
         self.assertTrue(retry)
         self.assertEqual(limit, 5)
 
-    def test_stop_con_parts_vacio_degraded_generico(self):
-        text, retry, _ = _recovery_strategy_for_finish_reason("STOP", 0)
+    def test_stop_attempt0_retry_history_5_rev107(self):
+        """Rev. 107: STOP+empty hace 1 retry con history reducido a 5 turns
+        antes de degraded. Causa raíz reproducida con conv KAIU bde83d84 y
+        phone 573999999999 — saturación prompt+tools hace que Gemini cierre
+        con STOP sin emitir parts. Retry con history reducido suele
+        resolverlo. Si tras retry sigue empty, ahí sí degraded."""
+        text, retry, limit = _recovery_strategy_for_finish_reason("STOP", 0)
+        self.assertEqual(text, "")
+        self.assertTrue(retry)
+        self.assertEqual(limit, 5)
+
+    def test_stop_attempt1_ya_agotado_degraded(self):
+        """Tras retry, si sigue STOP empty, degraded natural."""
+        text, retry, _ = _recovery_strategy_for_finish_reason("STOP", 1)
         self.assertFalse(retry)
-        # Mensaje natural sin "procesando tu mensaje".
         self.assertIn("repites", text.lower())
         self.assertNotIn("procesando", text.lower())
 
