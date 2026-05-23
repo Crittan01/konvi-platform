@@ -246,6 +246,25 @@ def _process_wompi_event(payload: dict) -> None:
     except Exception as e:
         logger.warning("[WOMPI][EMAIL] envío post-pago falló order=%s err=%s", order_id, e)
 
+    # ── 8. Generación guía Aveonline post-pago (best-effort) ──────────────────
+    # Rev. 107 founder feedback: tras pago confirmado, el sistema debe
+    # generar guía de envío automáticamente. Basado en dossier sec 4
+    # `tipo=generarGuia2`. simulate=True por default (no factura) — el
+    # tenant puede setear AVEONLINE_GENERATE_REAL_GUIDES=true para guías
+    # reales. Best-effort: si falla, NO bloquea — operador puede generar
+    # manual desde Inbox.
+    try:
+        _generate_shipping_guide(
+            supabase=supabase,
+            order_id=order_id,
+            tenant_id=tenant_id,
+        )
+    except Exception as e:
+        logger.warning(
+            "[WOMPI][AVEONLINE] generación guía falló order=%s err=%s",
+            order_id, e,
+        )
+
     # ── 8. Marcar el evento como procesado (audit trail). Si falla este UPDATE
     # no es crítico — el dedup ya bloqueó duplicados al inicio.
     if event_uid:
@@ -781,6 +800,221 @@ def _send_payment_confirmation_email(
             )
     except Exception as exc:
         logger.warning("[WOMPI][EMAIL] httpx err: %s", exc)
+
+
+# ─── Guía Aveonline post-pago (Rev. 107) ──────────────────────────────────────
+
+def _generate_shipping_guide(
+    supabase, *, order_id: str, tenant_id: str,
+) -> None:
+    """Genera guía Aveonline tras pago APPROVED (best-effort).
+
+    Solo aplica si el tenant tiene `tenant_shipping_provider_config.
+    active_provider='aveonline'`. Si está en 'envia' o cualquier otro,
+    skip (los demás providers tienen su propia mecánica).
+
+    simulate=True por default → NO factura. Tenant setea
+    AVEONLINE_GENERATE_REAL_GUIDES=true (env) cuando esté listo.
+
+    Best-effort: si falla, log warning + persiste row pending en
+    shipments para que operador genere manual desde Inbox.
+    """
+    # 1. Provider check.
+    try:
+        cfg = (
+            supabase.table("tenant_shipping_provider_config")
+            .select("active_provider")
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        provider = ((cfg.data or {}).get("active_provider") or "").lower()
+    except Exception:
+        provider = ""
+
+    if provider != "aveonline":
+        logger.info(
+            "[WOMPI][AVEONLINE] tenant=%s provider=%s — skip guía (no aveonline)",
+            tenant_id, provider or "none",
+        )
+        return
+
+    # 2. Cargar order + contact + tenant shipping_origin + shipping_meta.
+    try:
+        order_res = (
+            supabase.table("orders")
+            .select(
+                "id, total_amount, shipping_cost, contact_id, "
+                "contacts(name, email, phone, shipping_phone, "
+                "document_type, document_number, address)"
+            )
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        order = order_res.data or {}
+    except Exception as exc:
+        logger.warning("[WOMPI][AVEONLINE] no pude leer order: %s", exc)
+        return
+
+    contact = order.get("contacts") or {}
+    if not contact.get("name") or not contact.get("phone"):
+        logger.info(
+            "[WOMPI][AVEONLINE] order=%s contact incompleto — skip guía",
+            order_id[:8],
+        )
+        return
+
+    addr = contact.get("address") or {}
+    if not addr.get("city") or not addr.get("street"):
+        logger.info(
+            "[WOMPI][AVEONLINE] order=%s sin dirección — skip guía",
+            order_id[:8],
+        )
+        return
+
+    # 3. Tenant shipping_origin (sender).
+    try:
+        ten = (
+            supabase.table("tenants")
+            .select("name, shipping_origin, telefono_contacto, email_contacto, nit")
+            .eq("id", tenant_id).single().execute()
+        )
+        tenant = ten.data or {}
+    except Exception:
+        tenant = {}
+
+    origin = tenant.get("shipping_origin") or {}
+    if not origin.get("city") or not origin.get("street"):
+        logger.warning(
+            "[WOMPI][AVEONLINE] tenant=%s sin shipping_origin completo — skip",
+            tenant_id[:8],
+        )
+        return
+
+    # 4. Cart shipping_meta → idtransportador (rate_id).
+    try:
+        cart = (
+            supabase.table("conversation_carts")
+            .select("shipping_meta")
+            .eq("tenant_id", tenant_id)
+            .order("updated_at", desc=True).limit(1).execute()
+        )
+        sm = ((cart.data or [{}])[0]).get("shipping_meta") or {}
+    except Exception:
+        sm = {}
+
+    carrier_rate_id = sm.get("rate_id") or ""
+    if not carrier_rate_id:
+        logger.warning(
+            "[WOMPI][AVEONLINE] order=%s sin carrier rate_id — skip",
+            order_id[:8],
+        )
+        return
+
+    # 5. Construir payload + invocar generate_guide.
+    import asyncio
+    try:
+        from integrations.aveonline_client import AveonlineClient
+
+        cli = AveonlineClient(tenant_id, supabase)
+
+        addr_full = " ".join(filter(None, [
+            addr.get("street"),
+            f"apto {addr['apartment']}" if addr.get("apartment") else None,
+            addr.get("building_type") or None,
+            f"torre {addr['tower']}" if addr.get("tower") else None,
+        ]))
+
+        sender = {
+            "nit": tenant.get("nit") or "",
+            "nombre": (origin.get("name") or tenant.get("name") or "")[:80],
+            "direccion": origin.get("street") or "",
+            "barrio": "",
+            "telefono": tenant.get("telefono_contacto") or origin.get("phone") or "",
+            "celular": tenant.get("telefono_contacto") or origin.get("phone") or "",
+            "email": tenant.get("email_contacto") or "",
+        }
+        recipient = {
+            "doc": contact.get("document_number") or "",
+            "nombre": contact.get("name") or "",
+            "direccion": addr_full or addr.get("street") or "",
+            "barrio": addr.get("neighborhood") or "",
+            "telefono": (contact.get("shipping_phone") or contact.get("phone") or "").lstrip("+"),
+            "celular": (contact.get("shipping_phone") or contact.get("phone") or "").lstrip("+"),
+            "email": contact.get("email") or "",
+        }
+        package = {
+            "weight_kg": 0.5,  # default conservador (KAIU son productos pequeños)
+            "length_cm": 15, "width_cm": 10, "height_cm": 5,
+            "declared_value_cop": int(float(order.get("total_amount") or 0)),
+            "units": 1,
+            "content": "Productos cosmética artesanal",
+        }
+        simulate = os.getenv("AVEONLINE_GENERATE_REAL_GUIDES", "false").lower() != "true"
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(cli.generate_guide(
+                origin={"dane": origin.get("dane_code") or "", "city": origin.get("city") or ""},
+                destination={"dane": "", "city": addr.get("city")},
+                package=package,
+                carrier={"idtransportador": carrier_rate_id},
+                sender=sender,
+                recipient=recipient,
+                simulate=simulate,
+            ))
+        finally:
+            loop.close()
+    except Exception as exc:
+        logger.warning(
+            "[WOMPI][AVEONLINE] generate_guide error order=%s: %s",
+            order_id[:8], exc,
+        )
+        return
+
+    if not result.get("ok"):
+        logger.warning(
+            "[WOMPI][AVEONLINE] guía no generada order=%s code=%s err=%s",
+            order_id[:8], result.get("code"), result.get("error"),
+        )
+        # Persistir shipment row "pending" para que operador intervenga.
+        try:
+            supabase.table("shipments").insert({
+                "tenant_id": tenant_id,
+                "order_id": order_id,
+                "carrier": "aveonline",
+                "status": "pending_generation",
+                "quote_response": {
+                    "error": result.get("error"),
+                    "code": result.get("code"),
+                    "simulated": simulate,
+                },
+            }).execute()
+        except Exception:
+            pass
+        return
+
+    # 6. Persistir shipment con tracking real.
+    try:
+        supabase.table("shipments").insert({
+            "tenant_id": tenant_id,
+            "order_id": order_id,
+            "carrier": result.get("carrier_name") or "aveonline",
+            "status": "labeled" if not simulate else "simulated",
+            "tracking_number": result.get("tracking_number"),
+            "tracking_url": result.get("tracking_url"),
+            "label_url": result.get("label_url"),
+        }).execute()
+        logger.info(
+            "[WOMPI][AVEONLINE] guía %s order=%s tracking=%s "
+            "(simulate=%s)",
+            "SIMULADA" if simulate else "REAL",
+            order_id[:8], result.get("tracking_number"), simulate,
+        )
+    except Exception as exc:
+        logger.warning("[WOMPI][AVEONLINE] persist shipment err: %s", exc)
 
 
 def _fmt_cop(value: int) -> str:

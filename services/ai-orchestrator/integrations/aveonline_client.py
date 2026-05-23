@@ -645,3 +645,161 @@ class AveonlineClient:
             except (TypeError, ValueError):
                 continue
         return None
+
+    # ─── Generación de guía nacional (Rev. 107) ─────────────────────────────
+
+    async def generate_guide(
+        self,
+        *,
+        origin: dict,
+        destination: dict,
+        package: dict,
+        carrier: dict,
+        sender: dict,
+        recipient: dict,
+        simulate: bool = True,
+    ) -> dict:
+        """Genera guía nacional vía `tipo=generarGuia2`.
+
+        Doc dossier sec 4 (verbatim del plugin WooCommerce + doc oficial).
+
+        Args:
+            origin: {"dane": str, "city": str}
+            destination: {"dane": str, "city": str}
+            package: {weight_kg, length_cm, width_cm, height_cm,
+                      declared_value_cop, units, content}
+            carrier: {"idtransportador": str, "service_level": str}
+                Identificador transportadora (codTransportadora del quote).
+            sender: {"nit", "nombre", "direccion", "barrio", "telefono",
+                     "celular", "email"}
+            recipient: {"doc", "nombre", "direccion", "barrio", "telefono",
+                        "celular", "email"}
+            simulate: True → `bloquegenerarguia="0"` (NO factura, retorna
+                guía dummy). False → genera guía REAL facturable.
+
+        Returns:
+            dict canónico:
+              {
+                "ok": True,
+                "tracking_number": str,
+                "label_url": str,
+                "tracking_url": str,
+                "raw": <full response>,
+              }
+            o {"ok": False, "error": str, "code": str}.
+
+        Raises:
+            AveonlineAuthError, AveonlineTransientError,
+            AveonlinePermanentError.
+
+        Rev. 107: implementación inicial con simulate=True por default —
+        modo seguro. Tenant cambia a simulate=False cuando esté listo
+        para guías reales. Idempotency NO implementada en este endpoint
+        Aveonline (dossier confirma) — caller debe deduplicar a nivel
+        DB (constraint UNIQUE order_id en shipments).
+        """
+        jwt = await self._get_valid_jwt()
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+        idagente = creds.get("idagente") or creds.get("asesor_logistico") or ""
+
+        declared = max(10000, int(package.get("declared_value_cop") or 10000))
+        weight_kg = float(package.get("weight_kg") or 0.5)
+        units = int(package.get("units") or 1)
+
+        producto_item = {
+            "alto": int(package.get("height_cm") or 5),
+            "largo": int(package.get("length_cm") or 15),
+            "ancho": int(package.get("width_cm") or 10),
+            "peso": weight_kg,
+            "unidades": units,
+            "nombre": str(package.get("content") or "Pedido"),
+            "valorDeclarado": declared,
+        }
+
+        body = {
+            "tipo": "generarGuia2",
+            "token": jwt,
+            "idempresa": empresa_id,
+            "codigo": "",  # password resuelto via vault, no necesario aquí
+            "dsclavex": "",
+            "plugin": "konvi-saas",
+            "origen": str(origin.get("dane") or origin.get("city") or ""),
+            "dsdirre": str(sender.get("direccion") or ""),
+            "dsbarrioo": str(sender.get("barrio") or ""),
+            "dsnitre": str(sender.get("nit") or ""),
+            "dstelre": str(sender.get("telefono") or ""),
+            "dscelularre": str(sender.get("celular") or ""),
+            "dscorreopre": str(sender.get("email") or ""),
+            "dsnombre": str(sender.get("nombre") or ""),
+            "destino": str(destination.get("dane") or destination.get("city") or ""),
+            "IdTipoEntrega": "1",  # 1=domicilio (default), 2=oficina
+            "dsdir": str(recipient.get("direccion") or ""),
+            "dsbarrio": str(recipient.get("barrio") or ""),
+            "dsnit": str(recipient.get("doc") or ""),
+            "dsnombrecompleto": str(recipient.get("nombre") or ""),
+            "dscorreop": str(recipient.get("email") or ""),
+            "dstel": str(recipient.get("telefono") or ""),
+            "dscelular": str(recipient.get("celular") or ""),
+            "idtransportador": str(carrier.get("idtransportador") or ""),
+            "idagente": idagente,
+            "unidades": units,
+            "productos": [producto_item],
+            "dscontenido": str(package.get("content") or "Pedido"),
+            "dscom": "",
+            "valorrecaudo": 0,
+            "contraentrega": 0,
+            "idasumecosto": 1,  # tenant asume costo
+            "bloquegenerarguia": "0" if simulate else "1",
+            "relacion_envios": "1",
+            "enviarcorreos": "1",  # Aveonline notifica al destinatario
+            "cartaporte": "0",
+            "valorMinimo": 1,
+            "numeroFactura": "",
+            "numeroBolsa": "",
+            "dsfecha_vencimiento": "",
+            "dsfecha_cita": "",
+            "dscodigo_cita": "",
+            "dsvalor_pedido": str(declared),
+            "envioGratis": 0,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(AVEONLINE_NAL_URL, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as exc:
+            raise AveonlineTransientError(f"generate_guide HTTP error: {exc}")
+        except Exception as exc:
+            raise AveonlinePermanentError(f"generate_guide error: {exc}")
+
+        # Schema response (dossier sec 4.3):
+        #   {status: "ok"|"error", message, resultado: {guia: {codigo, mensaje,
+        #     numguia, rutaguia, rotulo, rutasticker, transportadora, ...}}}
+        if data.get("status") != "ok":
+            return {
+                "ok": False,
+                "error": data.get("message") or "generate_guide failed",
+                "code": "AVEONLINE_GUIDE_ERROR",
+                "raw": data,
+            }
+
+        guia = (data.get("resultado") or {}).get("guia") or {}
+        if guia.get("codigo") and str(guia["codigo"]) != "0":
+            return {
+                "ok": False,
+                "error": guia.get("mensaje") or "guia code error",
+                "code": f"AVEONLINE_GUIDE_CODE_{guia.get('codigo')}",
+                "raw": data,
+            }
+
+        return {
+            "ok": True,
+            "tracking_number": str(guia.get("numguia") or ""),
+            "label_url": str(guia.get("rutasticker") or guia.get("rutaguia") or ""),
+            "tracking_url": str(guia.get("rutaguia") or guia.get("rutasticker") or ""),
+            "carrier_name": str(guia.get("transportadora") or ""),
+            "simulated": simulate is True,
+            "raw": data,
+        }
