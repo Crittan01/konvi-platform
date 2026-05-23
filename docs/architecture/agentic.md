@@ -159,6 +159,8 @@ Append-only por turno. Persiste: `inbound_text`, `agentic_outbound`, `tool_calls
 
 ## 7. Deudas arquitectónicas cerradas (rev. 107)
 
+### 7.1 — Sesión inicial cierre deudas conocidas
+
 | # | Deuda | Cierre |
 |---|---|---|
 | #1 | Split `legacy_adapters.py` (591 LOC) → package por dominio | commit `2bb7a54` |
@@ -168,4 +170,23 @@ Append-only por turno. Persiste: `inbound_text`, `agentic_outbound`, `tool_calls
 | #6 | Mensajes degraded centralizados (voz "Sara Camila") | `degraded_messages.py` |
 | #8 | Doc arquitectónico consolidado | este archivo |
 
-Deudas pendientes (post rev. 107): consolidación `packages/python-shared/` para eliminar duplicación byte-equal cross-service.
+### 7.2 — Sesión validación live KAIU (deudas emergentes)
+
+Conducción real con phone 573125835649 reveló 5 bugs arquitectónicos
+no contemplados — cada uno cerrado con fix + tests, no parches.
+
+| # | Bug runtime | Causa raíz | Cierre |
+|---|---|---|---|
+| LIVE-1 | `agentic_shadow_log` vacío en cutover | `_run_agentic_full` solo loggeaba a stdout; logs rotan. | Helper `_persist_turn_audit()` único + migración ADD columns (mode, finish_reason, invariant_outcome, final_text...). Commit `8e577d3`. |
+| LIVE-2 | DEGRADED_GENERIC ante input claro | `STOP+empty` retornaba degraded inmediato sin retry. | Strategy actualizada: STOP attempt=0 → retry con history=5. Commit `a4b373c`. |
+| LIVE-3 | LLM dice "ya los agrego" sin ejecutar `add_to_cart` | `CartStateInvariant` regex `agregu[eé]` solo cubría pretérito. | Regex ampliado a presente/gerundio/futuro + plural ("quedaron agregados"). Commit `e691786`. |
+| LIVE-4 | Bot inventa resumen con producto/total fantasma | No había invariant que cross-valide outbound vs cart real DB. | Nuevo `SummaryCoherenceInvariant`: parsea Total + carga `get_cart_with_items()` + REWRITE con resumen canónico si mismatch. Commit `41c8a14`. |
+| LIVE-5 | `save_name(value='Cristian GarzónCristian Garzón')` (duplicado) | `_get_conversation_history()` ya incluía el inbound recién persistido; agent.py lo re-añadía → Gemini ve mismo texto 2 veces y concatena. | Helper puro `_build_gemini_messages()` dedupea último-user-del-history vs `inbound_text`. Commit `41c8a14`. |
+
+**Patrón común**: la **trazabilidad universal** (LIVE-1) habilitó detectar los otros 4 bugs en runtime real. Sin esa pieza, los bugs eran invisibles entre rotaciones de log.
+
+### 7.3 — Deudas pendientes (post rev. 107)
+
+- Consolidación `packages/python-shared/` para eliminar duplicación byte-equal cross-service.
+- Polling cycle del orchestrator legacy reintenta procesamiento completo al fallar send (debería reintentar solo send) — pollutea logs + ejecuta agentic múltiples veces.
+- Cola pgmq `whatsapp_outbound` retiene mensajes fallidos a allowlist Meta hasta agotar max_retries internos. Falta dead-letter queue.
