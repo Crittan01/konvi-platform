@@ -30,6 +30,13 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from agentic.degraded_messages import (
+    DEGRADED_BLOCKLIST,
+    DEGRADED_GENERIC,
+    DEGRADED_MAX_TOOL_CALLS,
+    DEGRADED_MAX_TOOL_TURNS,
+    DEGRADED_SAFETY,
+)
 from agentic.tools.base import ToolContext
 from agentic.tools.registry import all_tools, get_tool, gemini_function_schemas
 
@@ -242,11 +249,7 @@ async def run_agentic_turn(
         if total_tool_calls + len(function_calls) > MAX_TOTAL_TOOL_CALLS:
             truncated = True
             truncated_reason = f"max_tool_calls_exceeded({MAX_TOTAL_TOOL_CALLS})"
-            outbound_text = (
-                text_part
-                or "Disculpa, hubo una complicación procesando tu solicitud. "
-                "¿Podrías reformular tu pregunta?"
-            )
+            outbound_text = text_part or DEGRADED_MAX_TOOL_CALLS
             break
 
         # Append el response del LLM a la conversación (con tool_calls).
@@ -311,10 +314,7 @@ async def run_agentic_turn(
     else:
         truncated = True
         truncated_reason = f"max_tool_turns_exceeded({MAX_TOOL_TURNS})"
-        outbound_text = (
-            "Disculpa, no pude completar tu solicitud en este momento. "
-            "Un asesor te contactará en breve."
-        )
+        outbound_text = DEGRADED_MAX_TOOL_TURNS
 
     return AgenticTurnResult(
         outbound_text=outbound_text,
@@ -509,32 +509,20 @@ def _recovery_strategy_for_finish_reason(
 
     if finish_reason == "SAFETY":
         # Bloqueado por filtros de seguridad. NO retry — mismo input
-        # produce mismo bloqueo. Mensaje natural sin tono robótico.
-        return (
-            "Mejor cuéntame de otra forma, ¿qué necesitas?",
-            False,
-            0,
-        )
+        # produce mismo bloqueo.
+        return (DEGRADED_SAFETY, False, 0)
 
     if finish_reason in ("BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
-        # Contenido bloqueado por políticas Gemini — natural pero claro.
-        return (
-            "Disculpa, ¿me lo dices de otra forma?",
-            False,
-            0,
-        )
+        # Contenido bloqueado por políticas Gemini.
+        return (DEGRADED_BLOCKLIST, False, 0)
 
     if finish_reason == "MALFORMED_FUNCTION_CALL" and can_retry:
         # El LLM generó tool call con args inválidos. Retry forzando
         # respuesta textual (history reducido para evitar repetir patrón).
         return ("", True, 5)
 
-    # STOP con parts vacío, OTHER, o desconocido — natural, no robótico.
-    return (
-        "Ay, se me cruzó algo. ¿Me lo repites?",
-        False,
-        0,
-    )
+    # STOP con parts vacío, OTHER, o desconocido.
+    return (DEGRADED_GENERIC, False, 0)
 
 
 def _to_gemini_schema(pydantic_schema: dict) -> dict:

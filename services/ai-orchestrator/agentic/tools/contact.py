@@ -67,12 +67,23 @@ class GetContactInfoTool:
             )
 
         # Audit log: PII access (Habeas Data Ley 1581).
+        # Schema canónico pii_access_log:
+        #   • `accessed_by` TEXT — etiqueta del actor (no FK). NO 'actor'.
+        #   • `actor_user_id` UUID — FK auth.users si fue un humano (null aquí).
+        #   • `fields_accessed` JSONB — lista de campos leídos.
+        #   • `purpose` TEXT.
+        # NO existe columna `action`. La descripción de la acción va en
+        # `accessed_by` + `fields_accessed`.
         try:
             ctx.supabase.table("pii_access_log").insert({
                 "tenant_id": ctx.tenant_id,
                 "contact_id": ctx.contact_id,
-                "actor": "agentic_tool",
-                "action": "read_contact_info",
+                "accessed_by": "agentic_tool:get_contact_info",
+                "fields_accessed": [
+                    "name", "email", "phone", "shipping_phone",
+                    "document_type", "document_number", "address",
+                    "consent_given",
+                ],
                 "purpose": "agentic_flow",
             }).execute()
         except Exception:
