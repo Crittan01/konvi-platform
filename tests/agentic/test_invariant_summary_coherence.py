@@ -73,7 +73,7 @@ class SummaryCoherenceTests(unittest.TestCase):
         self.assertEqual(r.outcome, InvariantOutcome.OK)
 
     def test_outbound_resumen_pero_sin_precios_ok(self):
-        """Si solo hay palabra 'Total' pero no precios, no es resumen real."""
+        """'Total perfecto' sin $ no dispara — el regex exige precio."""
         from agentic.invariants.base import InvariantOutcome
         r = _run(self.inv.validate(
             candidate_text="Total perfecto. Confirmas?",
@@ -81,6 +81,29 @@ class SummaryCoherenceTests(unittest.TestCase):
             **self.base,
         ))
         self.assertEqual(r.outcome, InvariantOutcome.OK)
+
+    def test_resumen_real_runtime_kaiu_total_mismatch(self):
+        """Texto EXACTO observado en conv 8f96520e KAIU 2026-05-23 — bot
+        dijo $162.950 pero cart real era $159.950. Items sin precio por línea
+        (solo presentaciones) + Total con asteriscos. Antes del fix de regex
+        este caso NO disparaba el detector."""
+        from agentic.invariants.base import InvariantOutcome
+        text_bug = (
+            "Perfecto, Cristian! Ya tengo tu dirección registrada.\n\n"
+            "📋 *Resumen de tu pedido:*\n\n"
+            "* 2 *Jabones Artesanales de Coco* (60g y 150g)\n"
+            "* 1 *Sérum de Ácido Hialurónico* (30ml)\n"
+            "* Envío a Medellín por *SERVIENTREGA* (3 días)\n\n"
+            "*Total a pagar: $162.950 COP*\n\n"
+            "Confirmas el pedido para generar el link de pago seguro?"
+        )
+        with patch("tools.cart_tool.get_cart_with_items") as mock_get:
+            mock_get.return_value = _fake_cart(15995000, items_count=3)  # real $159.950
+            r = _run(self.inv.validate(
+                candidate_text=text_bug, tool_call_log=[], **self.base,
+            ))
+        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("159.950", r.replacement_text)
 
     def test_resumen_con_total_correcto_ok(self):
         from agentic.invariants.base import InvariantOutcome

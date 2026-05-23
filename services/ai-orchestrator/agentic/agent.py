@@ -110,19 +110,7 @@ async def run_agentic_turn(
     )
 
     # Construir messages para Gemini.
-    # Incluimos history como contexto + el inbound actual.
-    messages: list[dict] = []
-    for msg in (history or []):
-        direction = str(msg.get("direction") or "").lower()
-        content = str(msg.get("content") or "").strip()
-        if not content:
-            continue
-        if direction == "inbound":
-            messages.append({"role": "user", "parts": [{"text": content}]})
-        elif direction == "outbound":
-            messages.append({"role": "model", "parts": [{"text": content}]})
-    # Inbound actual.
-    messages.append({"role": "user", "parts": [{"text": inbound_text}]})
+    messages = _build_gemini_messages(history, inbound_text)
 
     # Llamar Gemini con tools.
     tool_call_log: list[dict] = []
@@ -341,6 +329,48 @@ async def run_agentic_turn(
 
 
 # ─── Helpers internos ─────────────────────────────────────────────────────
+
+
+def _build_gemini_messages(
+    history: Optional[list],
+    inbound_text: str,
+) -> list[dict]:
+    """Construye el array `messages` para Gemini desde history + inbound.
+
+    Rev. 107: bug runtime KAIU conv 8f96520e — `save_name(value='Cristian
+    GarzónCristian Garzón')`. Causa: el dispatcher carga history desde DB
+    DESPUÉS de que el inbound nuevo ya fue persistido. El history ya
+    contiene el inbound actual como último user message; al re-añadirlo
+    al final, Gemini ve el mismo texto 2 veces consecutivas y compone
+    args concatenados (rompe TODO tool con `value` de texto libre:
+    save_name, save_email, consent_text, save_address...).
+
+    Fix: dedupe — si el último inbound del history coincide (case+strip)
+    con `inbound_text`, omitirlo. Función pura testeable.
+    """
+    history_list = list(history or [])
+    if history_list:
+        last = history_list[-1]
+        last_is_same_inbound = (
+            str(last.get("direction") or "").lower() == "inbound"
+            and str(last.get("content") or "").strip()
+            == (inbound_text or "").strip()
+        )
+        if last_is_same_inbound:
+            history_list = history_list[:-1]
+
+    messages: list[dict] = []
+    for msg in history_list:
+        direction = str(msg.get("direction") or "").lower()
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        if direction == "inbound":
+            messages.append({"role": "user", "parts": [{"text": content}]})
+        elif direction == "outbound":
+            messages.append({"role": "model", "parts": [{"text": content}]})
+    messages.append({"role": "user", "parts": [{"text": inbound_text}]})
+    return messages
 
 
 async def _gemini_generate_async(
