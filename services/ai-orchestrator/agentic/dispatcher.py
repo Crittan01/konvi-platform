@@ -162,7 +162,8 @@ async def _run_agentic_full(
     from agentic.invariants import (
         apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
-        SummaryCoherenceInvariant, InvariantOutcome,
+        PostToolCoherenceInvariant, SummaryCoherenceInvariant,
+        InvariantOutcome,
     )
 
     # Cargar context (catalog, contact, history) — reusa helpers legacy.
@@ -245,6 +246,7 @@ async def _run_agentic_full(
             CartStateInvariant(),
             ConsentRequiredInvariant(),
             SummaryCoherenceInvariant(),
+            PostToolCoherenceInvariant(),
             PassiveClosingInvariant(),
             NoDecorativeEmojiInvariant(),
         ],
