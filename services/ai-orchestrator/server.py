@@ -58,6 +58,41 @@ def status():
     return JSONResponse(content=payload)
 
 
+@app.get("/agentic/metrics")
+def agentic_metrics(tenant_id: str | None = None, since_hours: int = 24):
+    """Métricas del agentic — ratio success/truncated/errored, latencias, tools.
+
+    Lee `agentic_shadow_log` y agrega en la ventana indicada. Pensado para
+    monitoreo operativo + diagnóstico de regresiones del LLM.
+
+    Query params:
+      • tenant_id (opcional): filtra por tenant.
+      • since_hours (default 24): ventana hacia atrás.
+    """
+    from agentic.observability import compute_agentic_metrics
+    from supabase import create_client
+
+    url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "supabase creds not configured"},
+        )
+    try:
+        sb = create_client(url, key)
+        data = compute_agentic_metrics(
+            sb, tenant_id=tenant_id, since_hours=since_hours,
+        )
+        return JSONResponse(content=data)
+    except Exception as exc:
+        logger.warning("[AGENTIC_METRICS] err: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(exc)},
+        )
+
+
 # ─── Worker thread ─────────────────────────────────────────────────────────────
 def _run_worker_thread():
     """
