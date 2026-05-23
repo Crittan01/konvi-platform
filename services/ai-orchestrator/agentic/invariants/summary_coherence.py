@@ -52,11 +52,12 @@ _SUMMARY_KEYWORDS = re.compile(
 )
 # Pattern de precio COP: $18.000 o $18,000 o 18000.
 _PRICE_PATTERN = re.compile(r"\$\s*[\d.,]+(?:\s*COP)?", re.IGNORECASE)
-# "Total: $159.950" | "Total a pagar: $159.950 COP" | "*Total: $159.950*".
-# Tolerante a "a pagar", "final", "del pedido", asterisks, separadores.
+# "Total: $159.950" | "Total a pagar: $159.950 COP" | "*Total:* *$159.950 COP*"
+# | "*Total:* $159.950".  Tolerante a "a pagar", "final", "del pedido",
+# múltiples asteriscos de markdown (bold WhatsApp), separadores miles.
 _TOTAL_PATTERN = re.compile(
-    r"\*?\s*\btotal\b\s*(?:a\s+pagar|final|del\s+pedido)?\s*[:]?\s*"
-    r"\*?\s*\$?\s*([\d.,]+)\s*\*?\s*(?:COP)?",
+    r"\**\s*\btotal\b\s*(?:a\s+pagar|final|del\s+pedido)?\s*[:]?\s*"
+    r"[\*\s]*\$?\s*([\d.,]+)\s*\**\s*(?:COP)?",
     re.IGNORECASE,
 )
 
