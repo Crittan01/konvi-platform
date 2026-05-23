@@ -39,8 +39,16 @@ class RecoveryStrategyTests(unittest.TestCase):
         text, retry, _ = _recovery_strategy_for_finish_reason("MAX_TOKENS", 1)
         self.assertFalse(retry)
         self.assertTrue(text)  # tiene contenido degraded natural.
-        # Mensaje natural (no "procesando tu mensaje" robótico).
-        self.assertIn("repites", text.lower())
+        # Rev. 107: mensaje natural sin delatar bot. "Déjame revisar con
+        # mi equipo" + silent escalation. NO debe contener jerga técnica.
+        self.assertNotIn("procesando", text.lower())
+        self.assertNotIn("error", text.lower())
+        # Debe indicar acción (revisar/momento) sin pedir reformular.
+        lower = text.lower()
+        self.assertTrue(
+            "revisar" in lower or "momento" in lower or "equipo" in lower,
+            f"esperaba mensaje natural de espera: {text!r}",
+        )
 
     def test_recitation_attempt0_retry_history_10(self):
         text, retry, limit = _recovery_strategy_for_finish_reason("RECITATION", 0)
@@ -88,11 +96,18 @@ class RecoveryStrategyTests(unittest.TestCase):
         self.assertEqual(limit, 5)
 
     def test_stop_attempt1_ya_agotado_degraded(self):
-        """Tras retry, si sigue STOP empty, degraded natural."""
+        """Tras retry, si sigue STOP empty, degraded natural + sin jerga.
+        Rev. 107: mensaje pivot a "déjame revisar" + silent escalation
+        (sin pedir reformular, sin "se me cruzó algo")."""
         text, retry, _ = _recovery_strategy_for_finish_reason("STOP", 1)
         self.assertFalse(retry)
-        self.assertIn("repites", text.lower())
         self.assertNotIn("procesando", text.lower())
+        self.assertNotIn("se me cruzó", text.lower())
+        lower = text.lower()
+        self.assertTrue(
+            "revisar" in lower or "momento" in lower or "equipo" in lower,
+            f"esperaba mensaje natural de espera: {text!r}",
+        )
 
     def test_unknown_finish_reason_degraded(self):
         text, retry, _ = _recovery_strategy_for_finish_reason("", 0)

@@ -70,6 +70,13 @@ class AgenticTurnResult:
     total_tokens: int = 0
     error: Optional[str] = None
     finish_reason: Optional[str] = None
+    # Rev. 107 founder feedback: cuando el agentic agota todas las recoveries
+    # (retry history-5 + text-only retry) y aun así no logra outbound útil,
+    # marcar este flag para que el dispatcher escale silenciosamente al
+    # equipo (status=human_takeover). Evita que el cliente perciba al bot
+    # como "mudo" o "atorado". Mensaje natural ("ya te respondo") +
+    # operador toma el control en el Inbox.
+    requires_silent_escalation: bool = False
 
 
 async def run_agentic_turn(
@@ -281,10 +288,26 @@ async def run_agentic_turn(
                     )
 
             # No retry — usar degraded text como outbound.
+            # Marcar requires_silent_escalation si agotamos recoveries STOP.
+            # El dispatcher debe escalar conv a human_takeover para que un
+            # especialista intervenga ANTES de que el cliente perciba el
+            # bot "atorado".
             outbound_text = degraded_text
             truncated = True
             truncated_reason = f"empty_output:{finish_reason or 'UNKNOWN'}"
-            break
+            requires_silent_escalation_flag = (
+                finish_reason in ("STOP", "OTHER", "")
+                and empty_recovery_attempt >= 1
+            )
+            return AgenticTurnResult(
+                outbound_text=outbound_text,
+                tool_calls_executed=total_tool_calls,
+                tool_call_log=tool_call_log,
+                truncated=truncated,
+                truncated_reason=truncated_reason,
+                finish_reason=last_finish_reason,
+                requires_silent_escalation=requires_silent_escalation_flag,
+            )
 
         if not function_calls:
             # LLM emite texto final → outbound.
