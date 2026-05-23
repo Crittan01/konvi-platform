@@ -236,6 +236,50 @@ async def run_agentic_turn(
                 # Re-loop con history ajustado (vuelve al try).
                 continue
 
+            # Rev. 107 — último intento antes de degraded: text-only sin
+            # tools_config. Causa raíz observada (caso "sérums" KAIU 2026-
+            # 05-23): system_prompt 13k + 16 tools + categoría con tilde
+            # → Gemini "no decide" qué tool llamar y retorna empty. Sin
+            # tools en el config, el modelo está forzado a emitir texto.
+            # Si emite, mejor que degraded; si sigue empty, ahí sí degraded.
+            if empty_recovery_attempt >= 1 and finish_reason == "STOP":
+                logger.info(
+                    "[AGENTIC_EMPTY_OUTPUT] conv=%s última oportunidad: "
+                    "retry sin tools (text-only)",
+                    conversation_id,
+                )
+                try:
+                    fallback_response = await _gemini_generate_async(
+                        client,
+                        model=AGENTIC_MODEL,
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        tools_config=None,  # ← key: sin tools
+                        temperature=AGENTIC_TEMPERATURE,
+                    )
+                    fallback_text = _extract_text(fallback_response) or ""
+                    last_finish_reason = (
+                        _extract_finish_reason(fallback_response)
+                        or last_finish_reason
+                    )
+                    if fallback_text.strip():
+                        outbound_text = fallback_text
+                        # Marcar como "recovered" — no degraded.
+                        truncated = True
+                        truncated_reason = (
+                            f"recovered_text_only_from:{finish_reason or 'STOP'}"
+                        )
+                        logger.info(
+                            "[AGENTIC_EMPTY_OUTPUT] conv=%s text-only retry OK "
+                            "(chars=%d)",
+                            conversation_id, len(fallback_text),
+                        )
+                        break
+                except Exception as fb_exc:
+                    logger.warning(
+                        "[AGENTIC] text-only fallback falló: %s", fb_exc,
+                    )
+
             # No retry — usar degraded text como outbound.
             outbound_text = degraded_text
             truncated = True
