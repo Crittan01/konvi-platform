@@ -7,7 +7,6 @@ canónica de create_order + create_link.
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
 
@@ -31,7 +30,6 @@ async def generate_payment_link_for_cart(
       o ok=False + error + code (failure con razón explícita).
     """
     from tools.cart_tool import get_cart_with_items
-    from tools.payment_link_tool import _build_api_auth_token
 
     cart = get_cart_with_items(
         supabase, conversation_id=conversation_id, tenant_id=tenant_id,
@@ -75,36 +73,26 @@ async def generate_payment_link_for_cart(
             "missing_fields": missing,
         }
 
-    auth_token = _build_api_auth_token(tenant_id)
-    if not auth_token:
-        return {
-            "ok": False, "error": "No pude obtener auth token.",
-            "code": "AUTH_ERROR",
-        }
-
-    # Delegar al endpoint interno del API service que ya tiene la lógica
-    # canónica de create_order + create_payment_link (ADR-0011 §6.1-§6.4.4).
+    # Rev. 107: refactor — invocar in-process la función canónica
+    # `handle_payment_link_if_applicable` del legacy (mismo runtime
+    # ai-orchestrator). Evita el round-trip HTTP a la API y reusa toda
+    # la lógica (idempotencia + retry Wompi + cart_events emit). El
+    # endpoint REST `POST /api/v1/orders/create_payment_link` que el
+    # adapter llamaba originalmente NO existe — el path real es 2-pasos
+    # `POST /api/v1/orders/` + `POST /{id}/payment-link`. Llamar directo
+    # a la función Python evita re-implementar ese protocolo en HTTP.
     try:
-        import httpx
-        api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{api_base}/api/v1/orders/create_payment_link",
-                json={
-                    "conversation_id": conversation_id,
-                    "tenant_id": tenant_id,
-                    "contact_id": contact_id,
-                },
-                headers={"Authorization": f"Bearer {auth_token}"},
-                timeout=30.0,
-            )
-        if response.status_code != 200:
-            return {
-                "ok": False,
-                "error": f"API error {response.status_code}: {response.text[:200]}",
-                "code": "PAYMENT_API_ERROR",
-            }
-        data = response.json()
+        from tools.payment_link_tool import handle_payment_link_if_applicable
+        result = await handle_payment_link_if_applicable(
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            conversation_id=conversation_id,
+            contact_name=contact.get("name"),
+            total_in_cents=int(cart.get("total_cents") or 0),
+            shipping_cost_cents=int(cart.get("shipping_cents") or 0),
+            notes=None,
+            supabase=supabase,
+        )
     except Exception as exc:
         return {
             "ok": False,
@@ -112,10 +100,19 @@ async def generate_payment_link_for_cart(
             "code": "PAYMENT_ERROR",
         }
 
+    if not result or not getattr(result, "checkout_url", None):
+        return {
+            "ok": False,
+            "error": "No se pudo generar el link de pago (Wompi/cart).",
+            "code": "PAYMENT_LINK_UNAVAILABLE",
+        }
+
     return {
         "ok": True,
-        "checkout_url": data.get("checkout_url"),
-        "order_id": data.get("order_id"),
-        "order_code": data.get("order_code"),
-        "amount_cents": data.get("amount_in_cents"),
+        "checkout_url": result.checkout_url,
+        "order_id": getattr(result, "order_id", None),
+        "amount_cents": int(getattr(result, "amount_in_cents", 0))
+            or int(cart.get("total_cents") or 0),
+        "expires_at": getattr(result, "expires_at", None),
+        "message": getattr(result, "response_text", None),
     }
