@@ -161,7 +161,8 @@ async def _run_agentic_full(
     from agentic.system_prompt import build_system_prompt
     from agentic.invariants import (
         apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
-        NoDecorativeEmojiInvariant, PassiveClosingInvariant, InvariantOutcome,
+        NoDecorativeEmojiInvariant, PassiveClosingInvariant,
+        SummaryCoherenceInvariant, InvariantOutcome,
     )
 
     # Cargar context (catalog, contact, history) — reusa helpers legacy.
@@ -236,12 +237,14 @@ async def _run_agentic_full(
     # Aplicar invariants Python (anti-hallu + style + flow guards).
     # Orden importa:
     #   1. cart_state + consent (semánticos: anti-hallu de cart/PII)
-    #   2. passive_closing (semántico: rewrite cierre pasivo → CTA por estado)
-    #   3. no_emoji (cosmético: strip sobre el texto final)
+    #   2. summary_coherence (semántico: total/items vs cart real DB)
+    #   3. passive_closing (semántico: rewrite cierre pasivo → CTA por estado)
+    #   4. no_emoji (cosmético: strip sobre el texto final)
     invariant_result = await apply_invariants(
         [
             CartStateInvariant(),
             ConsentRequiredInvariant(),
+            SummaryCoherenceInvariant(),
             PassiveClosingInvariant(),
             NoDecorativeEmojiInvariant(),
         ],
