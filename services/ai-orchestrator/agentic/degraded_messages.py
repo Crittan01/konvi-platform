@@ -26,9 +26,17 @@ DEGRADED_SAFETY = "Mejor cuéntame de otra forma, ¿qué necesitas?"
 # políticas. Mensaje claro pero sin culpar al cliente.
 DEGRADED_BLOCKLIST = "Disculpa, ¿me lo dices de otra forma?"
 
-# STOP/OTHER/UNKNOWN: el LLM "se confundió" momentáneamente. Pedir repetir
-# es la respuesta más natural y sin tono robótico.
-DEGRADED_GENERIC = "Ay, se me cruzó algo. ¿Me lo repites?"
+# STOP/OTHER/UNKNOWN sin recovery: el LLM falló empty en TODOS los intentos
+# (retry history-reducido + retry text-only). Rev. 107 founder feedback:
+# evitar el "Ay, se me cruzó algo" delator de bot. Emitir mensaje natural
+# de "ya te respondo" + escalation silenciosa para que un especialista
+# del equipo intervenga sin que el cliente perciba el fallo del bot.
+# El dispatcher detecta `requires_silent_escalation=True` en el result y
+# marca conv.status=human_takeover automáticamente.
+DEGRADED_GENERIC = (
+    "Déjame revisar bien tu solicitud con mi equipo. "
+    "Te respondo en un momento, no me demoro."
+)
 
 
 # ─── Loop limits (agent.py main loop) ────────────────────────────────────

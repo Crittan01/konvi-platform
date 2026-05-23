@@ -289,6 +289,42 @@ async def _run_agentic_full(
         processing_status=PROCESSING_STATUS_PROCESSED,
     )
 
+    # Rev. 107 founder feedback: si el agente agotó recoveries y produjo
+    # mensaje degraded ("déjame revisar con mi equipo"), escalar
+    # silenciosamente para que un especialista del equipo intervenga.
+    # Evita el patrón "bot mudo" — el cliente percibe que algo se está
+    # gestionando con humanos, no que el bot falló.
+    if getattr(result, "requires_silent_escalation", False):
+        try:
+            supabase.table("conversations").update({
+                "status": "human_takeover",
+            }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            logger.info(
+                "[AGENTIC_DISPATCH] silent_escalation conv=%s reason=%s — "
+                "operador debe intervenir",
+                conversation_id[:8],
+                result.truncated_reason,
+            )
+            # Best-effort notificación al operador.
+            try:
+                from telegram_notifications import notify_escalation_async
+                await notify_escalation_async(
+                    supabase,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    reason=(
+                        f"silent_escalation: agentic agotó recoveries "
+                        f"({result.truncated_reason})"
+                    ),
+                )
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.warning(
+                "[AGENTIC_DISPATCH] silent_escalation falló conv=%s: %s",
+                conversation_id[:8], exc,
+            )
+
     # Audit log estructurado del tool_call_log completo (production-grade
     # observability — sin esto los bugs runtime son ciegos).
     for idx, call in enumerate(result.tool_call_log):
