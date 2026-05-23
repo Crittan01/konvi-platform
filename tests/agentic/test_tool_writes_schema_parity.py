@@ -60,19 +60,59 @@ def _load_env_if_available() -> bool:
 _DB_AVAILABLE = _load_env_if_available()
 
 
+_SCHEMA_PROBE_MARKER = "__test_schema_probe__"
+
+
 def _get_real_columns(table: str) -> set[str]:
-    """Lee columnas reales de la tabla via SELECT * LIMIT 1."""
+    """Lee columnas reales de la tabla.
+
+    Estrategia:
+      1. SELECT * LIMIT 1 — si hay datos, leer keys del primer row.
+      2. Si vacía, intentar un probe-insert con campos canónicos por tabla,
+         leer las keys del row recién insertado y borrarlo. Confinado al
+         test (que ya requiere creds prod).
+
+    Retorna None si no se puede determinar el schema (test se skipea).
+    """
     from supabase import create_client
     sb = create_client(
         os.environ["SUPABASE_URL"],
         os.environ["SUPABASE_SERVICE_ROLE_KEY"],
     )
     res = sb.table(table).select("*").limit(1).execute()
-    if not res.data:
-        # Tabla vacía — intentar leer schema desde information_schema via RPC.
-        # Si no hay forma, retorna None para skipear el test.
+    if res.data:
+        return set(res.data[0].keys())
+    # Tabla vacía — probe insert + delete. Para tablas con FK a tenants
+    # y conversations, buscamos IDs reales de la DB para que el probe
+    # sea aceptado por el constraint.
+    if table == "agentic_shadow_log":
+        try:
+            conv = (
+                sb.table("conversations")
+                .select("id, tenant_id")
+                .limit(1).execute()
+            )
+            if not conv.data:
+                return None
+            probe_row = {
+                "tenant_id": conv.data[0]["tenant_id"],
+                "conversation_id": conv.data[0]["id"],
+                "inbound_text": _SCHEMA_PROBE_MARKER,
+            }
+        except Exception:
+            return None
+    else:
         return None
-    return set(res.data[0].keys())
+    try:
+        inserted = sb.table(table).insert(probe_row).execute()
+        if not inserted.data:
+            return None
+        cols = set(inserted.data[0].keys())
+        # Cleanup probe.
+        sb.table(table).delete().eq("inbound_text", _SCHEMA_PROBE_MARKER).execute()
+        return cols
+    except Exception:
+        return None
 
 
 class _SupabaseWriteCapture:
@@ -155,6 +195,7 @@ class ToolWritesSchemaParityTests(unittest.TestCase):
             "contacts",
             "conversations",
             "messages",
+            "agentic_shadow_log",
         ]
         for t in tables:
             cls.real_schemas[t] = _get_real_columns(t)
@@ -283,6 +324,61 @@ class ToolWritesSchemaParityTests(unittest.TestCase):
             self._assert_keys_subset(
                 "contacts", upd, "save_email.update(contacts)",
             )
+
+    def test_persist_turn_audit_keys_match_schema(self):
+        """Rev. 107: _persist_turn_audit (shadow + cutover) debe escribir
+        keys que existan en agentic_shadow_log. Bug detectado en KAIU
+        2026-05-23 (conv bde83d84): la tabla quedó vacía aunque hubo turns
+        agentic porque dispatcher solo escribía en shadow (no cutover).
+        Este test valida que tras la migración 20260528, ambos modes
+        escriben con shape compatible."""
+        from agentic.dispatcher import _persist_turn_audit
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class _FakeResult:
+            outbound_text: str = "test"
+            tool_calls_executed: int = 1
+            tool_call_log: list = field(default_factory=list)
+            truncated: bool = False
+            truncated_reason: str | None = None
+            error: str | None = None
+            finish_reason: str | None = "STOP"
+
+        sb = _SupabaseWriteCapture()
+        for mode in ("shadow", "cutover"):
+            _persist_turn_audit(
+                sb,
+                mode=mode,
+                message_id="msg-1",
+                tenant_id="00000000-0000-0000-0000-000000000001",
+                conversation_id="00000000-0000-0000-0000-000000000002",
+                inbound_text="hola",
+                result=_FakeResult(),
+                elapsed_s=1.2,
+                final_text="hola back" if mode == "cutover" else None,
+                invariant_outcome="OK" if mode == "cutover" else None,
+                invariant_name=None,
+                system_prompt_chars=500,
+                history_turns=3,
+            )
+        # 2 inserts capturados (uno por mode).
+        captured = sb.captured_inserts.get("agentic_shadow_log", [])
+        self.assertEqual(
+            len(captured), 2,
+            f"esperaba 2 inserts (shadow+cutover), encontró {len(captured)}",
+        )
+        for ins in captured:
+            self._assert_keys_subset(
+                "agentic_shadow_log", ins,
+                f"_persist_turn_audit(mode={ins.get('mode')})",
+            )
+        # Validar que las columnas críticas de trazabilidad están presentes.
+        modes_inserted = {ins["mode"] for ins in captured}
+        self.assertEqual(modes_inserted, {"shadow", "cutover"})
+        for ins in captured:
+            self.assertIn("finish_reason", ins)
+            self.assertEqual(ins["finish_reason"], "STOP")
 
     def test_get_contact_info_keys_match_schema(self):
         """GetContactInfoTool escribe pii_access_log.insert (audit Habeas Data)."""

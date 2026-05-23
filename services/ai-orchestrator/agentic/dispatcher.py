@@ -12,8 +12,10 @@ ADR-0018 Fase B + C. Punto único donde el worker decide:
 Production-grade:
   • Errores del agentic NUNCA afectan al cliente (legacy responde igual).
   • Shadow mode timeout = 30s (no bloquea polling cycle).
-  • Audit log completo en `agentic_shadow_log` (Fase B) o en
-    `messages.metadata.agentic_audit` (Fase C).
+  • Audit log completo: TODO turn agentic (shadow + cutover) se persiste
+    en `agentic_shadow_log` con `mode='shadow'|'cutover'` (rev. 107 cierre
+    arquitectónico — antes cutover solo emitía a stdout y los logs rotaban).
+    Helper único: `_persist_turn_audit()`.
 """
 from __future__ import annotations
 
@@ -203,6 +205,10 @@ async def _run_agentic_full(
         system_prompt=system_prompt,
     )
     elapsed = time.monotonic() - started_at
+    # Snapshot pre-invariants — usado para persistir audit incluso si el
+    # flow termina temprano (degraded text sin invariants completos).
+    system_prompt_chars = len(system_prompt or "")
+    history_turns = len(history or [])
 
     # Rev. 107: manejo activo de empty_output en agent.py — si el agentic
     # produce outbound_text (incluso degraded), confiamos en él. Solo si
@@ -278,9 +284,30 @@ async def _run_agentic_full(
         )
 
     logger.info(
-        "[AGENTIC_FULL] conv=%s tools=%d elapsed=%.2fs invariant=%s",
+        "[AGENTIC_FULL] conv=%s tools=%d elapsed=%.2fs invariant=%s finish=%s",
         conversation_id[:8], result.tool_calls_executed, elapsed,
-        invariant_result.invariant_name,
+        invariant_result.invariant_name, result.finish_reason,
+    )
+
+    # Persistir audit DESPUÉS de enviar outbound (rev. 107 cierre arquitectónico).
+    # Aunque el send falle abajo, el audit habrá sido escrito — más útil
+    # tener registro de "intentamos enviar X" que no tener nada.
+    _persist_turn_audit(
+        supabase,
+        mode="cutover",
+        message_id=message_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        inbound_text=content,
+        result=result,
+        elapsed_s=elapsed,
+        final_text=final_text,
+        invariant_outcome=invariant_result.outcome.value
+        if hasattr(invariant_result.outcome, "value")
+        else str(invariant_result.outcome),
+        invariant_name=invariant_result.invariant_name,
+        system_prompt_chars=system_prompt_chars,
+        history_turns=history_turns,
     )
 
 
@@ -374,13 +401,67 @@ async def _run_agentic_shadow(
     )
     elapsed_s = time.monotonic() - started_at
 
-    # Persistir el log (best-effort, NO bloquea).
+    _persist_turn_audit(
+        supabase,
+        mode="shadow",
+        message_id=message_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        inbound_text=content,
+        result=result,
+        elapsed_s=elapsed_s,
+        final_text=None,                # shadow no envía outbound → no hay final post-invariant
+        invariant_outcome=None,
+        invariant_name=None,
+        system_prompt_chars=len(system_prompt or ""),
+        history_turns=len(history or []),
+    )
+
+    logger.info(
+        "[AGENTIC_SHADOW] conv=%s tools=%d elapsed=%.2fs truncated=%s finish=%s",
+        conversation_id[:8], result.tool_calls_executed, elapsed_s,
+        result.truncated, result.finish_reason,
+    )
+
+
+# ─── Persistencia universal de audit (rev. 107) ────────────────────────────
+
+
+def _persist_turn_audit(
+    supabase: Any,
+    *,
+    mode: str,                          # 'shadow' | 'cutover'
+    message_id: Optional[str],
+    tenant_id: str,
+    conversation_id: str,
+    inbound_text: str,
+    result: Any,                        # AgenticTurnResult
+    elapsed_s: float,
+    final_text: Optional[str],
+    invariant_outcome: Optional[str],
+    invariant_name: Optional[str],
+    system_prompt_chars: Optional[int],
+    history_turns: Optional[int],
+) -> None:
+    """Persiste el audit del turn en `agentic_shadow_log`.
+
+    Best-effort: si falla, loggea WARNING pero NO afecta al cliente. La
+    pérdida de un audit es preferible a interrumpir el flow de respuesta.
+
+    `mode`:
+      • 'shadow' → legacy responde al cliente, agentic loggea silencioso.
+      • 'cutover' → agentic respondió al cliente (Fase C).
+
+    Captura `finish_reason` desde `result.finish_reason` (rev. 107) lo que
+    permite diagnosticar empty_output sin depender de logs stdout.
+    """
     try:
-        supabase.table("agentic_shadow_log").insert({
+        row = {
             "tenant_id": tenant_id,
             "conversation_id": conversation_id,
             "message_id": message_id,
-            "inbound_text": content[:500],
+            "mode": mode,
+            "inbound_text": (inbound_text or "")[:500],
             "agentic_outbound": (result.outbound_text or "")[:2000],
             "tool_calls_executed": result.tool_calls_executed,
             "tool_call_log": json.dumps(result.tool_call_log[:30]),
@@ -388,15 +469,16 @@ async def _run_agentic_shadow(
             "truncated_reason": result.truncated_reason,
             "error": result.error,
             "elapsed_seconds": round(elapsed_s, 3),
-        }).execute()
+            "finish_reason": result.finish_reason,
+            "invariant_outcome": invariant_outcome,
+            "invariant_name": invariant_name,
+            "final_text": (final_text or "")[:2000] if final_text else None,
+            "system_prompt_chars": system_prompt_chars,
+            "history_turns": history_turns,
+        }
+        supabase.table("agentic_shadow_log").insert(row).execute()
     except Exception as exc:
         logger.warning(
-            "[AGENTIC_SHADOW] persist falló conv=%s: %s",
-            conversation_id[:8], exc,
+            "[AGENTIC_AUDIT] persist falló mode=%s conv=%s: %s",
+            mode, conversation_id[:8], exc,
         )
-
-    logger.info(
-        "[AGENTIC_SHADOW] conv=%s tools=%d elapsed=%.2fs truncated=%s",
-        conversation_id[:8], result.tool_calls_executed, elapsed_s,
-        result.truncated,
-    )
