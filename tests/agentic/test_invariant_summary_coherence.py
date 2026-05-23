@@ -153,6 +153,29 @@ class SummaryCoherenceTests(unittest.TestCase):
             ))
         self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
 
+    def test_skip_si_get_recent_orders_se_uso(self):
+        """Rev. 107: si el LLM consultó get_recent_orders exitosamente,
+        el outbound puede mencionar totals históricos. NO validar contra
+        cart actual (caso runtime KAIU: bot reportó pedido confirmed
+        histórico y el invariant lo reescribía como falso positivo)."""
+        from agentic.invariants.base import InvariantOutcome
+        text = (
+            "Tu pedido *#07624CE1* (total $177.950 COP, *SERVIENTREGA*) "
+            "está confirmado y en preparación."
+        )
+        r = _run(self.inv.validate(
+            candidate_text=text,
+            tool_call_log=[
+                {"tool": "get_recent_orders",
+                 "result": {"orders": [{"order_short": "07624CE1",
+                                        "status": "confirmed",
+                                        "total_cop": 177950}]}},
+            ],
+            **self.base,
+        ))
+        self.assertEqual(r.outcome, InvariantOutcome.OK)
+        self.assertIn("histórico", r.reason)
+
     def test_cart_unreadable_excepcion_ok_best_effort(self):
         """Si get_cart_with_items lanza, NO bloqueamos al cliente — OK."""
         from agentic.invariants.base import InvariantOutcome

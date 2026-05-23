@@ -154,6 +154,22 @@ class SummaryCoherenceInvariant:
                 invariant_name=self.name,
             )
 
+        # Rev. 107 — skip si el LLM consultó historial (`get_recent_orders`)
+        # exitosamente en el mismo turn. En ese caso el "Total" del outbound
+        # refiere a una orden HISTÓRICA, no al cart actual — validarlo contra
+        # `get_cart_with_items` produce falso positivo (caso runtime KAIU
+        # 2026-05-23: bot informó "Tu pedido #07624CE1 confirmado total
+        # $177.950" desde get_recent_orders y el invariant lo reescribió
+        # incorrectamente como "no tengo pedido").
+        for call in (tool_call_log or []):
+            if call.get("tool") == "get_recent_orders":
+                if "error" not in (call.get("result") or {}):
+                    return InvariantResult(
+                        outcome=InvariantOutcome.OK,
+                        invariant_name=self.name,
+                        reason="LLM reportó pedido histórico vía get_recent_orders",
+                    )
+
         # Cargar cart real.
         try:
             from tools.cart_tool import get_cart_with_items
