@@ -34,9 +34,13 @@ DEGRADED_GENERIC = "Ay, se me cruzó algo. ¿Me lo repites?"
 # ─── Loop limits (agent.py main loop) ────────────────────────────────────
 
 # Max tool turns excedido: el agente entró en loop con tools sin
-# converger a una respuesta. Escala a humano porque reformular no resuelve.
+# converger a una respuesta. Escala porque reformular no resuelve.
+# Rev. 107: usar "especialista" (no "asesor humano") — el cliente NO
+# debería percibir que está hablando con un bot. "Asesor humano" lo
+# delata implícitamente. "Especialista" sugiere equipo profesional
+# atrás, igual de natural en voz colombiana.
 DEGRADED_MAX_TOOL_TURNS = (
-    "Voy a pedirle a un asesor que continúe contigo desde aquí. "
+    "Voy a pedirle a un especialista que continúe contigo desde aquí. "
     "En un momento te contactan."
 )
 

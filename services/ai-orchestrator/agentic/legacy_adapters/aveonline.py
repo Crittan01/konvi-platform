@@ -158,7 +158,7 @@ async def quote_shipping_for_cart_aveonline(
             "ok": False,
             "error": (
                 f"Aveonline no tiene transportadoras disponibles para envío a "
-                f"{destination.get('city')}. Inténtalo más tarde o pide un asesor."
+                f"{destination.get('city')}. Inténtalo más tarde o pide un especialista."
             ),
             "code": "AVEONLINE_NO_CARRIERS",
         }
@@ -167,7 +167,7 @@ async def quote_shipping_for_cart_aveonline(
             "ok": False,
             "error": (
                 "El paquete excede el peso o dimensiones máximas de los carriers "
-                "Aveonline. Divídelo o consulta a un asesor."
+                "Aveonline. Divídelo o consulta a un especialista."
             ),
             "code": "AVEONLINE_PACKAGE_LIMIT",
         }
