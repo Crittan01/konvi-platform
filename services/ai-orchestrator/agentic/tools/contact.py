@@ -276,15 +276,43 @@ class SaveEmailTool:
 
 class SaveNameArgs(BaseModel):
     value: str = Field(
-        ..., min_length=2, max_length=120,
-        description="Nombre completo del cliente.",
+        ..., min_length=4, max_length=120,
+        description=(
+            "Nombre completo del cliente (mínimo 2 palabras, solo letras "
+            "y espacios, capitalizado)."
+        ),
     )
+
+    @field_validator("value")
+    @classmethod
+    def _name_format(cls, v):
+        # Rev. 107 founder standards: solo texto + capitalizado + min 2 palabras.
+        cleaned = " ".join((v or "").split())  # colapsar espacios.
+        if not cleaned:
+            raise ValueError("nombre vacío")
+        # Solo letras (ASCII + acentos español) + espacios.
+        if not re.match(r"^[A-Za-zÁÉÍÓÚÑáéíóúñ\s]+$", cleaned):
+            raise ValueError(
+                "nombre debe contener solo letras (sin números/símbolos)"
+            )
+        # Mínimo 2 palabras (nombre + apellido).
+        words = cleaned.split()
+        if len(words) < 2:
+            raise ValueError(
+                "nombre completo requiere mínimo 2 palabras "
+                "(ej. 'Cristian Garzón', no solo 'Cristian')"
+            )
+        # Capitalizar cada palabra.
+        return " ".join(w.capitalize() for w in words)
 
 
 class SaveNameTool:
     name = "save_name"
     description = (
-        "Guarda el nombre completo del cliente. REQUIERE consent_given=True."
+        "Guarda el nombre COMPLETO del cliente (mín 2 palabras: nombre + "
+        "apellido). REQUIERE consent_given=True. Si el cliente solo da "
+        "un nombre (ej. 'Cristian'), el tool fallará — pídele apellido. "
+        "Solo letras y espacios, no números ni símbolos."
     )
     args_schema = SaveNameArgs
 
@@ -292,8 +320,7 @@ class SaveNameTool:
         consent_fail = await _verify_consent_or_fail(ctx)
         if consent_fail:
             return consent_fail
-        name_clean = " ".join(args.value.split())
-        return await _write_contact_update(ctx, {"name": name_clean}, "name")
+        return await _write_contact_update(ctx, {"name": args.value}, "name")
 
 
 # ─── save_document ─────────────────────────────────────────────────────────
@@ -413,17 +440,41 @@ class SaveShippingPhoneArgs(BaseModel):
     value: str = Field(
         ..., min_length=10, max_length=20,
         description=(
-            "Teléfono alterno de envío (mín 10 dígitos colombianos). "
-            "Se normaliza a formato +57XXXXXXXXXX."
+            "Celular colombiano: exactamente 10 dígitos comenzando con 3. "
+            "Se normaliza a +57XXXXXXXXXX."
         ),
     )
+
+    @field_validator("value")
+    @classmethod
+    def _phone_co_format(cls, v):
+        # Rev. 107 founder standards: 10 dígitos, comienza con 3.
+        digits = re.sub(r"\D", "", v or "")
+        if not digits:
+            raise ValueError("celular requiere dígitos")
+        # Permitir input con +57 prefijado.
+        if digits.startswith("57") and len(digits) == 12:
+            digits = digits[2:]
+        if len(digits) != 10:
+            raise ValueError(
+                f"celular debe tener exactamente 10 dígitos "
+                f"(recibí {len(digits)}: '{v}')"
+            )
+        if not digits.startswith("3"):
+            raise ValueError(
+                f"celular colombiano debe comenzar con 3 "
+                f"(recibí '{digits[0]}')"
+            )
+        return digits
 
 
 class SaveShippingPhoneTool:
     name = "save_shipping_phone"
     description = (
-        "Guarda un teléfono alterno para coordinar entrega (cliente da "
-        "número distinto al de WhatsApp). REQUIERE consent_given=True."
+        "Guarda un celular alterno para coordinar entrega (distinto al de "
+        "WhatsApp). REQUIERE consent_given=True. Validación Colombia: "
+        "exactamente 10 dígitos, debe comenzar con 3. Se persiste como "
+        "+57XXXXXXXXXX."
     )
     args_schema = SaveShippingPhoneArgs
 
@@ -431,14 +482,9 @@ class SaveShippingPhoneTool:
         consent_fail = await _verify_consent_or_fail(ctx)
         if consent_fail:
             return consent_fail
-        digits = re.sub(r"\D", "", args.value)
-        if len(digits) < 10:
-            return tool_failure(
-                "shipping_phone debe tener al menos 10 dígitos.",
-                code="INVALID_PHONE",
-            )
+        # value ya validado y normalizado por el field_validator.
         return await _write_contact_update(
-            ctx, {"shipping_phone": f"+57{digits[-10:]}"}, "shipping_phone",
+            ctx, {"shipping_phone": f"+57{args.value}"}, "shipping_phone",
         )
 
 
