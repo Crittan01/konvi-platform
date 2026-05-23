@@ -1,7 +1,14 @@
-"""Tool de escalation a humano.
+"""Tool de escalation a especialista (handover a operador humano).
 
 ADR-0018. Production-grade: marca conversation.status='human_takeover'
 y notifica al operador vía Telegram si está configurado.
+
+Naming convention (rev. 107 — founder UX):
+  • Internamente: 'human_takeover', 'escalate_to_human' — sin cambio
+    para preservar compat con orchestrator legacy + DB schema.
+  • De cara al cliente: SIEMPRE "especialista", nunca "asesor humano".
+    El cliente NO debe percibir explícitamente que está hablando con
+    un bot. "Asesor humano" delata, "especialista" suena natural.
 """
 from __future__ import annotations
 
