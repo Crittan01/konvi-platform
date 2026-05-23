@@ -16,6 +16,7 @@ from agentic.invariants.cart_state import CartStateInvariant
 from agentic.invariants.consent_required import ConsentRequiredInvariant
 from agentic.invariants.no_emoji import NoDecorativeEmojiInvariant
 from agentic.invariants.passive_closing import PassiveClosingInvariant
+from agentic.invariants.summary_coherence import SummaryCoherenceInvariant
 
 __all__ = [
     "InvariantOutcome",
@@ -26,4 +27,5 @@ __all__ = [
     "ConsentRequiredInvariant",
     "NoDecorativeEmojiInvariant",
     "PassiveClosingInvariant",
+    "SummaryCoherenceInvariant",
 ]
