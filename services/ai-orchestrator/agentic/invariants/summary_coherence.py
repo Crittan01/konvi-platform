@@ -40,27 +40,44 @@ from agentic.invariants.base import (
 
 
 # Detector heurístico de resumen.
+# Cubre frases observadas en runtime: "Resumen", "Total:", "Total a pagar:",
+# "Total final", "coordinamos", "generamos link", "link de pago".
 _SUMMARY_KEYWORDS = re.compile(
-    r"\b(resumen|total\s*[:|]|coordinamos|generamos\s+(?:el\s+)?link)\b",
+    r"(?:\bresumen\b"
+    r"|\btotal\b\s*(?:a\s+pagar|final|del\s+pedido)?\s*[:|]?"
+    r"|coordinamos"
+    r"|link\s+de\s+pago"
+    r"|generamos\s+(?:el\s+)?link)",
     re.IGNORECASE,
 )
 # Pattern de precio COP: $18.000 o $18,000 o 18000.
 _PRICE_PATTERN = re.compile(r"\$\s*[\d.,]+(?:\s*COP)?", re.IGNORECASE)
-# "Total: $159.950" o "Total $159.950 COP".
+# "Total: $159.950" | "Total a pagar: $159.950 COP" | "*Total: $159.950*".
+# Tolerante a "a pagar", "final", "del pedido", asterisks, separadores.
 _TOTAL_PATTERN = re.compile(
-    r"\btotal\s*[:]?\s*\*?\s*\$?\s*([\d.,]+)\s*\*?\s*(?:COP)?",
+    r"\*?\s*\btotal\b\s*(?:a\s+pagar|final|del\s+pedido)?\s*[:]?\s*"
+    r"\*?\s*\$?\s*([\d.,]+)\s*\*?\s*(?:COP)?",
     re.IGNORECASE,
 )
 
 
 def _looks_like_summary(text: str) -> bool:
-    """True si el outbound parece un resumen de pedido (heurística)."""
+    """True si el outbound parece un resumen de pedido (heurística).
+
+    Disparadores (cualquiera dispara):
+      A. Contiene la palabra 'Resumen' (signal explícito del LLM).
+      B. Contiene "Total" + al menos 1 precio (afirma monto a pagar).
+
+    Esta heurística es deliberadamente amplia: si dispara falso positivo,
+    el invariant sigue OK al no encontrar mismatch — pero NUNCA debe dejar
+    pasar un resumen mintiendo (bug runtime KAIU conv 8f96520e con bot
+    diciendo solo el Total sin precios por línea).
+    """
     if not text:
         return False
-    if not _SUMMARY_KEYWORDS.search(text):
-        return False
-    # Al menos 2 precios para considerar que está enumerando algo.
-    return len(_PRICE_PATTERN.findall(text)) >= 2
+    has_resumen_word = bool(re.search(r"\bresumen\b", text, re.IGNORECASE))
+    has_total_with_price = bool(_TOTAL_PATTERN.search(text))
+    return has_resumen_word or has_total_with_price
 
 
 def _extract_total_cop(text: str) -> Optional[int]:
