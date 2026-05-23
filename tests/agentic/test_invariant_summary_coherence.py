@@ -174,22 +174,22 @@ class ExtractTotalTests(unittest.TestCase):
 
     def test_extract_total_various_formats(self):
         from agentic.invariants.summary_coherence import _extract_total_cop
-        cases = [
-            ("Total: $159.950 COP", 159950),
-            ("Total: *$159.950*", 159950),
-            ("* *Total: $159.950*", 159950),
-            ("Total $48.000", 48000),
-            ("subtotal $100.000 total $250.000", 250000),  # último wins
-            ("no hay total aquí", None),
-        ]
-        # Nota: el regex captura el PRIMER match. "subtotal $100.000 total $250.000"
-        # extraerá 100000 si matchea 'subtotal' primero. Ajustar test acorde.
-        from agentic.invariants.summary_coherence import _extract_total_cop
-        # Validar los casos limpios.
+        # Casos representativos observados en runtime.
         self.assertEqual(_extract_total_cop("Total: $159.950 COP"), 159950)
         self.assertEqual(_extract_total_cop("Total: *$159.950*"), 159950)
         self.assertEqual(_extract_total_cop("Total $48.000"), 48000)
+        self.assertEqual(_extract_total_cop("Total a pagar: $162.950 COP"), 162950)
         self.assertIsNone(_extract_total_cop("no hay total aquí"))
+
+    def test_extract_total_markdown_bold_separado(self):
+        """Bug runtime KAIU turno 12: '*Total:* *$160.000 COP*' con asteriscos
+        markdown separando 'Total:' del precio. Antes del fix el regex sólo
+        toleraba 1 asterisco continuo, fallaba con esta forma."""
+        from agentic.invariants.summary_coherence import _extract_total_cop
+        self.assertEqual(
+            _extract_total_cop("*Total:* *$160.000 COP*"), 160000,
+        )
+        self.assertEqual(_extract_total_cop("* *Total:* $48.000"), 48000)
 
 
 if __name__ == "__main__":
