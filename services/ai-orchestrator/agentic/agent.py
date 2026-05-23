@@ -536,7 +536,17 @@ def _recovery_strategy_for_finish_reason(
         # respuesta textual (history reducido para evitar repetir patrón).
         return ("", True, 5)
 
-    # STOP con parts vacío, OTHER, o desconocido.
+    # STOP con parts vacío: Gemini cerró el response sin emitir texto ni
+    # function_call. Causa raíz observada (conv KAIU bde83d84 y phone
+    # 573999999999 turno 2): system_prompt+history saturados con
+    # ≥16 tools registrados → el modelo "renuncia" sin payload.
+    # Estrategia rev. 107: 1 retry con history reducido a los últimos
+    # 5 turns (suficiente contexto para respuesta natural sin saturar).
+    # Si tras retry sigue empty, ahí sí degraded.
+    if finish_reason == "STOP" and can_retry:
+        return ("", True, 5)
+
+    # OTHER / UNKNOWN — sin más info, degraded inmediato.
     return (DEGRADED_GENERIC, False, 0)
 
 
