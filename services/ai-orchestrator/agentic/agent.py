@@ -170,14 +170,49 @@ async def run_agentic_turn(
         # arquitectónica de la primera versión que trataba esto como excepción.
         if not function_calls and not text_part:
             finish_reason = _extract_finish_reason(response)
+
+            # Instrumentación rev. 107: log estructurado del contexto cuando
+            # Gemini retorna empty. Captura las variables que probable-
+            # mente correlacionan con la causa raíz (prompt saturation,
+            # tool count alto, history demasiado largo) para diagnosticar
+            # patrones SIN heurísticas ciegas. No altera comportamiento.
+            try:
+                tools_count = sum(
+                    len(getattr(t, "function_declarations", []) or [])
+                    for t in (tools_config or [])
+                )
+                msgs_chars = sum(
+                    len(str(m.get("parts") or "")) for m in messages
+                )
+                last_user_chars = 0
+                for m in reversed(messages):
+                    if m.get("role") == "user":
+                        last_user_chars = len(str(m.get("parts") or ""))
+                        break
+                logger.warning(
+                    "[AGENTIC_EMPTY_OUTPUT_DIAG] conv=%s tenant=%s "
+                    "finish_reason=%s history_turns=%d tools_count=%d "
+                    "msgs_chars=%d last_user_chars=%d system_prompt_chars=%d "
+                    "recovery_attempt=%d tool_calls_so_far=%d",
+                    conversation_id, tenant_id,
+                    finish_reason or "UNKNOWN",
+                    len(messages), tools_count, msgs_chars, last_user_chars,
+                    len(system_prompt or ""),
+                    empty_recovery_attempt, total_tool_calls,
+                )
+            except Exception as _diag_exc:
+                # Diagnostics NO bloquea el flujo de recovery.
+                logger.debug("[AGENTIC_EMPTY_OUTPUT_DIAG] log falló: %s", _diag_exc)
+
             degraded_text, should_retry, retry_history_limit = (
                 _recovery_strategy_for_finish_reason(
                     finish_reason, empty_recovery_attempt,
                 )
             )
             logger.info(
-                "[AGENTIC_EMPTY_OUTPUT] conv=... finish_reason=%s "
+                "[AGENTIC_EMPTY_OUTPUT] conv=%s finish_reason=%s "
                 "attempt=%d strategy=%s",
+                conversation_id,
                 finish_reason or "UNKNOWN",
                 empty_recovery_attempt,
                 "retry" if should_retry else "degraded",
