@@ -21,8 +21,13 @@ from agentic.invariants.base import (
 )
 
 
-# Whitelist de emojis estructurales (preservar).
-_ALLOWED_EMOJIS = {"📋"}
+# Whitelist de emojis estructurales (preservar). Sincronizado con
+# system_prompt sección ESTILO — rev. 107 founder feedback de formato
+# WhatsApp más rico (faq.whatsapp.com/539178204879377):
+#   • 📋 = marcador inicio del *Resumen* de pedido.
+#   • 🚚 = marcador *Envío* o *Seguimiento*.
+#   • ✅ = marcador *Pago confirmado* (post-Wompi APPROVED).
+_ALLOWED_EMOJIS = {"📋", "🚚", "✅"}
 
 # Rango Unicode amplio de emojis decorativos.
 # Cubre: emoticons (1F600-1F64F), symbols (2600-27BF, 2B00-2BFF),
