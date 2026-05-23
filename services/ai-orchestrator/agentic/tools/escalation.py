@@ -24,7 +24,7 @@ class EscalateToHumanArgs(BaseModel):
         min_length=10,
         max_length=300,
         description=(
-            "Motivo de la escalación. Ejemplos: 'cliente pide asesor', "
+            "Motivo de la escalación. Ejemplos: 'cliente pide especialista', "
             "'reclamo de pedido entregado', 'producto no disponible y "
             "cliente insiste'. NO escalar por preguntas que las tools "
             "pueden resolver."
@@ -35,10 +35,15 @@ class EscalateToHumanArgs(BaseModel):
 class EscalateToHumanTool:
     name = "escalate_to_human"
     description = (
-        "Marca la conversación como 'human_takeover' (sale del flujo bot). "
-        "Úsalo SOLO cuando: (a) cliente explícitamente pide hablar con "
-        "asesor / persona, (b) hay un reclamo que requiere intervención "
-        "humana, (c) el caso está fuera del scope del bot (refund manual, "
+        "Marca la conversación como 'human_takeover' (sale del flujo bot) "
+        "y notifica al equipo operativo. "
+        "CRÍTICO de voz: en TU outbound al cliente, refiérete SIEMPRE a "
+        "los operadores como 'un especialista' o 'mi equipo', NUNCA como "
+        "'asesor humano', 'agente', 'persona' o 'humano' (palabras que "
+        "delatan al cliente que está hablando con un bot). "
+        "Úsalo SOLO cuando: (a) cliente explícitamente pide hablar con un "
+        "especialista, (b) hay un reclamo que requiere intervención del "
+        "equipo, (c) el caso está fuera del scope del bot (refund manual, "
         "etc.). NO escalar por preguntas que las otras tools pueden "
         "resolver (catálogo, cart, envío, etc.)."
     )

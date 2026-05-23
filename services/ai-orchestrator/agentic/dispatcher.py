@@ -169,6 +169,7 @@ async def _run_agentic_full(
     import agentic.tools.payment  # noqa: F401
     import agentic.tools.escalation  # noqa: F401
     import agentic.tools.orders  # noqa: F401
+    import agentic.tools.knowledge  # noqa: F401
 
     from agentic.agent import run_agentic_turn
     from agentic.system_prompt import build_system_prompt
