@@ -232,6 +232,20 @@ def _process_wompi_event(payload: dict) -> None:
     else:
         logger.info("[WOMPI] sin_conversation_id order=%s — sin notificación WhatsApp", order_id)
 
+    # ── 7.5. Notificar al cliente vía email (Resend, best-effort) ─────────────
+    # Rev. 107 propuesta UX founder: cliente vía WhatsApp tiene mayor
+    # tranquilidad si además recibe email con detalle persistente del
+    # pedido (WhatsApp puede borrarse; email queda como soporte). Best-
+    # effort — si falla, no afecta confirmación pago ya hecha.
+    try:
+        _send_payment_confirmation_email(
+            supabase=supabase,
+            order_id=order_id,
+            tenant_id=tenant_id,
+        )
+    except Exception as e:
+        logger.warning("[WOMPI][EMAIL] envío post-pago falló order=%s err=%s", order_id, e)
+
     # ── 8. Marcar el evento como procesado (audit trail). Si falla este UPDATE
     # no es crítico — el dedup ya bloqueó duplicados al inicio.
     if event_uid:
@@ -634,3 +648,208 @@ def _notify_client_payment_approved(
         {"p_message": queue_payload, "p_delay": 0},
     ).execute()
     logger.info("[WOMPI] Notificación de pago encolada para conv %s", conversation_id)
+
+
+# ─── Email post-pago al cliente (Rev. 107) ────────────────────────────────────
+
+def _send_payment_confirmation_email(
+    supabase, *, order_id: str, tenant_id: str,
+) -> None:
+    """Envía email al cliente con el detalle del pedido pagado.
+
+    Best-effort: si falla por cualquier razón (RESEND_API_KEY ausente,
+    contact sin email, network) NO bloquea el flow del webhook. El
+    WhatsApp ya fue enviado en el paso 7.
+
+    Lee Supabase de forma sync (httpx.Client) — `_process_wompi_event`
+    es BackgroundTask sync. Evitamos asyncio.run() para mantener
+    consistencia con el resto del handler.
+    """
+    api_key = os.getenv("RESEND_API_KEY", "")
+    if not api_key:
+        logger.info("[WOMPI][EMAIL] RESEND_API_KEY no configurada — skip")
+        return
+
+    # 1. Order + contact via JOIN.
+    try:
+        order_res = (
+            supabase.table("orders")
+            .select(
+                "id, total_amount, shipping_cost, contact_id, "
+                "contacts(name, email)"
+            )
+            .eq("id", order_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        order = order_res.data or {}
+    except Exception as exc:
+        logger.warning("[WOMPI][EMAIL] error leyendo order: %s", exc)
+        return
+
+    contact = order.get("contacts") or {}
+    email = (contact.get("email") or "").strip()
+    if not email:
+        logger.info(
+            "[WOMPI][EMAIL] contact sin email order=%s — skip", order_id[:8],
+        )
+        return
+
+    name = contact.get("name") or "cliente"
+    total = int(float(order.get("total_amount") or 0))
+    shipping = int(float(order.get("shipping_cost") or 0))
+    subtotal = max(0, total - shipping)
+    order_short = order_id.split("-")[0].upper()
+
+    # 2. Order items para desglose.
+    try:
+        items_res = (
+            supabase.table("order_items")
+            .select("title, quantity, unit_price")
+            .eq("order_id", order_id)
+            .execute()
+        )
+        items = items_res.data or []
+    except Exception:
+        items = []
+
+    # 3. Tenant name.
+    tenant_name = ""
+    try:
+        ten_res = (
+            supabase.table("tenants")
+            .select("name").eq("id", tenant_id).single().execute()
+        )
+        tenant_name = (ten_res.data or {}).get("name") or ""
+    except Exception:
+        pass
+
+    # 4. Carrier desde shipments (si existe).
+    carrier = ""
+    try:
+        sh_res = (
+            supabase.table("shipments")
+            .select("carrier")
+            .eq("order_id", order_id)
+            .limit(1).execute()
+        )
+        carrier = ((sh_res.data or [{}])[0]).get("carrier") or ""
+    except Exception:
+        pass
+
+    html = _compose_payment_email_html(
+        customer_name=name,
+        order_short=order_short,
+        items=items,
+        subtotal=subtotal,
+        shipping=shipping,
+        total=total,
+        carrier=carrier,
+        tenant_name=tenant_name,
+    )
+    subject = f"Confirmación pedido #{order_short} — {tenant_name or 'tu compra'}"
+
+    from_email = os.getenv(
+        "RESEND_FROM_EMAIL", "Konvi <noreply@commerce-ops.local>",
+    )
+    import httpx
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": from_email,
+                    "to": [email],
+                    "subject": subject,
+                    "html": html,
+                },
+            )
+        if resp.status_code in (200, 202):
+            logger.info(
+                "[WOMPI][EMAIL] enviado a=%s order=%s",
+                email, order_id[:8],
+            )
+        else:
+            logger.warning(
+                "[WOMPI][EMAIL] resend status=%s body=%s",
+                resp.status_code, resp.text[:200],
+            )
+    except Exception as exc:
+        logger.warning("[WOMPI][EMAIL] httpx err: %s", exc)
+
+
+def _fmt_cop(value: int) -> str:
+    """Formato COP estilo WhatsApp del bot: $18.000 (punto miles)."""
+    return f"${value:,.0f}".replace(",", ".")
+
+
+def _compose_payment_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    items: list,
+    subtotal: int,
+    shipping: int,
+    total: int,
+    carrier: str,
+    tenant_name: str,
+) -> str:
+    """HTML inline-styled (compatibilidad clientes email)."""
+    rows = []
+    for it in items:
+        qty = int(it.get("quantity") or 1)
+        title = str(it.get("title") or "Producto")
+        unit_price = int(float(it.get("unit_price") or 0))
+        line_total = unit_price * qty
+        rows.append(
+            f'<tr>'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f0f0f0">'
+            f'{qty}× {title}</td>'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f0f0f0;'
+            f'text-align:right">{_fmt_cop(line_total)} COP</td>'
+            f'</tr>'
+        )
+    items_html = "".join(rows) or '<tr><td colspan="2">(sin detalle de items)</td></tr>'
+    ship_label = f"Envío ({carrier})" if carrier else "Envío"
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+  <h2 style="margin:0 0 8px;font-size:22px">Pago confirmado, {customer_name}</h2>
+  <p style="margin:0 0 16px;color:#5a6772">
+    Gracias por tu compra en <strong>{tenant_name or 'nuestra tienda'}</strong>.
+    Aquí tienes el detalle de tu pedido <strong>#{order_short}</strong>.
+  </p>
+
+  <table style="width:100%;border-collapse:collapse;margin:16px 0">
+    <thead>
+      <tr><th style="text-align:left;padding:8px 0;border-bottom:2px solid #2c3e50">Producto</th>
+          <th style="text-align:right;padding:8px 0;border-bottom:2px solid #2c3e50">Total</th></tr>
+    </thead>
+    <tbody>{items_html}</tbody>
+    <tfoot>
+      <tr><td style="padding:8px 0">Subtotal</td>
+          <td style="text-align:right">{_fmt_cop(subtotal)} COP</td></tr>
+      <tr><td style="padding:4px 0">{ship_label}</td>
+          <td style="text-align:right">{_fmt_cop(shipping)} COP</td></tr>
+      <tr><td style="padding:12px 0;font-weight:bold;border-top:2px solid #2c3e50">Total</td>
+          <td style="text-align:right;padding:12px 0;font-weight:bold;border-top:2px solid #2c3e50">
+            {_fmt_cop(total)} COP</td></tr>
+    </tfoot>
+  </table>
+
+  <p style="margin:24px 0 8px;color:#5a6772">
+    Tu pedido ya está en preparación. Te avisaremos cuando despache con
+    tu número de guía.
+  </p>
+
+  <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
+    Recibiste este email porque pagaste un pedido. Si no fuiste tú,
+    contacta al vendedor inmediatamente.
+  </p>
+</div>
+</body></html>"""
