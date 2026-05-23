@@ -107,13 +107,30 @@ def _build_canonical_summary(cart: dict, shipping_meta: dict) -> str:
         prod = it.get("product") or {}
         title = prod.get("title") or prod.get("name") or "Producto"
         var = it.get("variation") or {}
-        label = (var.get("attributes") or {}).get("size") or it.get("variant_label") or ""
+        # Etiqueta de variante: aceptar keys multi-format de KAIU.
+        attrs = var.get("attributes") or {}
+        label = ""
+        for k in ("Presentación", "presentacion", "size", "Volumen", "volumen", "label"):
+            v = attrs.get(k)
+            if v:
+                label = str(v)
+                break
+        if not label:
+            label = it.get("variant_label") or ""
         qty = it.get("quantity") or 1
-        unit = (it.get("unit_price_cents") or 0) // 100
-        subtotal = (it.get("subtotal_cents") or unit * qty) // 100
+        # Rev. 107 bug fix: división doble. `unit_price_cents` está en CENTS,
+        # `subtotal_cents` también — convertir UNA sola vez a COP. Antes
+        # `(unit * qty) // 100` aplicaba //100 sobre un valor ya en COP
+        # produciendo $180 en lugar de $18.000 (caso runtime KAIU 2026-05-23).
+        unit_cop = (it.get("unit_price_cents") or 0) // 100
+        subtotal_cents = it.get("subtotal_cents")
+        if subtotal_cents:
+            line_cop = int(subtotal_cents) // 100
+        else:
+            line_cop = unit_cop * qty
         suffix = f" de {label}" if label else ""
         lines.append(
-            f"* {qty} *{title}*{suffix}: *${subtotal:,.0f} COP*".replace(",", "."),
+            f"* {qty} *{title}*{suffix}: *${line_cop:,.0f} COP*".replace(",", "."),
         )
     subtotal_cop = (cart.get("subtotal_cents") or 0) // 100
     shipping_cop = (cart.get("shipping_cents") or 0) // 100
