@@ -290,10 +290,22 @@ class QuoteShippingTool:
 
 class SelectCarrierArgs(BaseModel):
     rate_id: str = Field(
-        ...,
-        min_length=1,
+        default="",
         max_length=200,
-        description="rate_id de la opción elegida por el cliente (desde quote_shipping).",
+        description=(
+            "rate_id literal de la opción elegida por el cliente "
+            "(viene del response de quote_shipping). Si NO recuerdas el "
+            "rate_id exacto, deja este vacío y usa `carrier_name`."
+        ),
+    )
+    carrier_name: str = Field(
+        default="",
+        max_length=200,
+        description=(
+            "Nombre del carrier elegido (e.g. 'Coordinadora', 'Servientrega'). "
+            "Úsalo cuando NO recuerdes el rate_id exacto pero sí el nombre. "
+            "El tool hará fuzzy match contra las opciones cotizadas."
+        ),
     )
 
 
@@ -303,12 +315,25 @@ class SelectCarrierTool:
         "Persiste la elección de carrier del cliente en el cart. Side-effect: "
         "cart.shipping_meta actualizada + cart_event(carrier_selected). "
         "Después de invocar esto, el cart tiene shipping_cop calculado y "
-        "está listo para resumen + payment_link (si PII completa)."
+        "está listo para resumen + payment_link (si PII completa). "
+        "PREFIERE pasar `rate_id` exacto del response de quote_shipping. "
+        "Si NO lo recuerdas, usa `carrier_name` (e.g. 'Servientrega') y el "
+        "tool resolverá por matching automático contra las opciones reales."
     )
     args_schema = SelectCarrierArgs
 
     async def execute(self, args: SelectCarrierArgs, ctx: ToolContext) -> ToolResult:
         from agentic.legacy_adapters import select_carrier_for_cart
+
+        # Args validation: al menos uno de rate_id o carrier_name debe venir.
+        rate_id_raw = (args.rate_id or "").strip()
+        carrier_name_raw = (args.carrier_name or "").strip()
+        if not rate_id_raw and not carrier_name_raw:
+            return tool_failure(
+                "Falta el carrier. Pasa rate_id literal del quote_shipping "
+                "o carrier_name (e.g. 'Servientrega').",
+                code="MISSING_CARRIER_ARG",
+            )
 
         # Resolver rate_data en 2 capas (DB-first, ctx.extras fallback):
         #   1. cart.shipping_meta.quoted_options (canónico, sobrevive turns
@@ -334,21 +359,22 @@ class SelectCarrierTool:
             db_options = shipping_meta.get("quoted_options") or []
             if isinstance(db_options, list):
                 all_options.extend(db_options)
-                rate_data = next(
-                    (o for o in db_options if o.get("rate_id") == args.rate_id),
-                    None,
-                )
+                if rate_id_raw:
+                    rate_data = next(
+                        (o for o in db_options if o.get("rate_id") == rate_id_raw),
+                        None,
+                    )
         except Exception:
             pass
 
-        if not rate_data:
+        if not rate_data and rate_id_raw:
             cached_options = (
                 (ctx.extras or {}).get("_last_quote_options")
                 if hasattr(ctx, "extras") else None
             ) or []
             all_options.extend(cached_options)
             rate_data = next(
-                (o for o in cached_options if o.get("rate_id") == args.rate_id),
+                (o for o in cached_options if o.get("rate_id") == rate_id_raw),
                 None,
             )
 
@@ -356,23 +382,30 @@ class SelectCarrierTool:
         # El LLM tiende a inventar rate_ids cuando no recuerda el literal
         # del tool_response previo. Resolvemos por carrier name con
         # normalización + scoring length-ratio para garantizar match
-        # determinístico ante carriers con nombres relacionados (e.g.
-        # 'ENVIA' vs 'ENVIA EXPRESS').
+        # determinístico ante carriers con nombres relacionados.
+        # Estrategia (rev. 107):
+        #   • Si vino `carrier_name` explícito, úsalo (prioridad alta).
+        #   • Si no, intentar fuzzy con el `rate_id_raw` (puede ser un
+        #     nombre disfrazado de rate_id).
         if not rate_data and all_options:
-            match_result = _resolve_rate_id_fuzzy(args.rate_id, all_options)
-            if match_result.rate_data is not None:
-                rate_data = match_result.rate_data
-                # Logging estructurado para observability.
-                _log = ctx.logger or logger
-                _log.info(
-                    "[agentic.select_carrier.fuzzy] requested=%r "
-                    "matched_to=%r real_rate_id=%r match_type=%s confidence=%.2f",
-                    args.rate_id,
-                    rate_data.get("carrier"),
-                    rate_data.get("rate_id"),
-                    match_result.match_type,
-                    match_result.confidence,
-                )
+            # Probar primero con carrier_name si vino, después con rate_id.
+            for candidate in (carrier_name_raw, rate_id_raw):
+                if not candidate:
+                    continue
+                match_result = _resolve_rate_id_fuzzy(candidate, all_options)
+                if match_result.rate_data is not None:
+                    rate_data = match_result.rate_data
+                    _log = ctx.logger or logger
+                    _log.info(
+                        "[agentic.select_carrier.fuzzy] requested=%r "
+                        "matched_to=%r real_rate_id=%r match_type=%s confidence=%.2f",
+                        candidate,
+                        rate_data.get("carrier"),
+                        rate_data.get("rate_id"),
+                        match_result.match_type,
+                        match_result.confidence,
+                    )
+                    break
 
         if not rate_data:
             # Listar rate_ids reales disponibles para que el LLM NO invente

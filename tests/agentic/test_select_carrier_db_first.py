@@ -357,6 +357,67 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
 
         self.assertTrue(result.success, f"Falló: {result.data}")
 
+    def test_carrier_name_only_resuelve_sin_rate_id_rev107(self):
+        """Rev. 107: el LLM puede pasar SOLO `carrier_name` cuando no
+        recuerda el rate_id exacto. Caso runtime KAIU 2026-05-23:
+        cliente 'Coordinadora me parece bien' → LLM mandó rate_id='12345'
+        (placeholder inventado). Con carrier_name explícito, el fuzzy
+        matcher resuelve sin error."""
+        options_in_db = [
+            {
+                "rate_id": "1009",
+                "carrier": "COORDINADORA MERCANTIL",
+                "service_level": "Mensajeria",
+                "price_cents": 753000,
+            },
+            {
+                "rate_id": "29",
+                "carrier": "ENVIA",
+                "service_level": "Mensajeria",
+                "price_cents": 900000,
+            },
+        ]
+        sb = _mock_supabase_with_quoted_options(options_in_db)
+
+        from agentic import legacy_adapters as la
+        original = la.select_carrier_for_cart
+
+        async def fake_select(supabase, **kw):
+            return {
+                "ok": True, "carrier": "Coordinadora Mercantil",
+                "service_level": "Mensajeria",
+                "shipping_cents": 753000, "total_cents": 853000,
+            }
+
+        la.select_carrier_for_cart = fake_select
+        try:
+            ctx = ToolContext(
+                tenant_id="t", conversation_id="c", contact_id="ct",
+                supabase=sb, extras={},
+            )
+            # rate_id vacío + carrier_name → debe resolver por fuzzy.
+            args = self.tool.args_schema(rate_id="", carrier_name="Coordinadora")
+            result = _run(self.tool.execute(args, ctx))
+        finally:
+            la.select_carrier_for_cart = original
+
+        self.assertTrue(result.success, f"Falló: {result.data}")
+        self.assertIn("Coordinadora", result.data["carrier"])
+
+    def test_missing_both_rate_id_y_carrier_name_falla(self):
+        """Si LLM no pasa ni rate_id ni carrier_name → error explícito."""
+        sb = _mock_supabase_with_quoted_options([
+            {"rate_id": "1009", "carrier": "COORDINADORA", "price_cents": 753000},
+        ])
+        ctx = ToolContext(
+            tenant_id="t", conversation_id="c", contact_id="ct",
+            supabase=sb, extras={},
+        )
+        args = self.tool.args_schema(rate_id="", carrier_name="")
+        result = _run(self.tool.execute(args, ctx))
+        self.assertFalse(result.success)
+        self.assertEqual(result.data["code"], "MISSING_CARRIER_ARG")
+
 
 if __name__ == "__main__":
     unittest.main()
