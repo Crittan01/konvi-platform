@@ -90,6 +90,30 @@ class CartStateInvariantTests(unittest.TestCase):
         ))
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
 
+    def test_presente_agrego_sin_tool_rewrite_rev107(self):
+        """Bug runtime KAIU conv bde83d84 (2026-05-23): LLM dijo "ya los
+        agrego a tu pedido" (presente, no pretérito) con tool_calls=0. El
+        patrón original `agregu[eé]` solo cubría pretérito → bug pasaba.
+        Cobertura ampliada en rev. 107 — esta familia debe detectarse."""
+        cases = [
+            "Claro, ya los agrego a tu pedido.",
+            "Estoy agregando los items al carrito",
+            "Te agrego el sérum de 30ml",
+            "Añado el jabón de coco",
+            "Sumo la presentación de 150g",
+            "Quedaron agregados al pedido",
+        ]
+        for text in cases:
+            result = _run(self.inv.validate(
+                candidate_text=text,
+                tool_call_log=[],
+                **self.base_kwargs,
+            ))
+            self.assertEqual(
+                result.outcome, InvariantOutcome.REWRITE,
+                f"DEBE detectar afirmación: {text!r}",
+            )
+
     # ── Caso B: mismatch parcial (founder UAT conv 91f25b3f) ──────────
 
     def test_llm_lista_2_items_pero_solo_1_add_to_cart_rewrite(self):

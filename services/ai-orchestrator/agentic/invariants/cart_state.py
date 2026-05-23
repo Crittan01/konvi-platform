@@ -19,11 +19,37 @@ from agentic.invariants.base import (
 
 
 # Patrones que el LLM puede usar para afirmar cart-state.
+# Cobertura amplia de conjugaciones (rev. 107 — bug runtime KAIU conv
+# bde83d84: bot dijo "ya los agrego a tu pedido" con tool_calls=0 y el
+# patrón original `agregu[eé]` solo cubría pretérito, dejaba pasar
+# presente/gerundio/futuro). Lista basada en formas conjugadas reales
+# observadas en outbounds del LLM, no en raíces ambiguas.
 _AFFIRMATIVE_CART_PATTERNS = (
-    re.compile(r"\b(agregu[eé]|a[nñ]ad[ií]|sumar|sum[eé])\b", re.IGNORECASE),
+    # agregar: agrego, agregas, agrega, agregamos, agregué, agregó,
+    # agregando, agregaré, agregaste — TODAS las conjugaciones útiles.
+    re.compile(
+        r"\bagreg(?:o|as|a|amos|an|u[eé]|[oó]|ando|ar[eé]|aste)\b",
+        re.IGNORECASE,
+    ),
+    # añadir: añado, añades, añade, añadí, añadió, añadiendo, etc.
+    re.compile(
+        r"\ba[nñ]ad(?:o|es|e|imos|en|[ií]|i[oó]|iendo|ir[eé])\b",
+        re.IGNORECASE,
+    ),
+    # sumar: sumo, sumas, suma, sumé, sumó, sumamos, sumando.
+    re.compile(
+        r"\bsum(?:o|as|a|amos|an|[eé]|[oó]|ando|ar[eé])\b",
+        re.IGNORECASE,
+    ),
+    # Frases de cierre clásicas que confirman cart state.
     re.compile(r"\blisto[,.\s]\s*(?:\d+\s*x?\s*)", re.IGNORECASE),
-    re.compile(r"\bagregado\s+a\s+tu\s+carrito\b", re.IGNORECASE),
+    re.compile(r"\bagregado\s+a\s+tu\s+(?:carrito|pedido|orden)\b", re.IGNORECASE),
     re.compile(r"\bte\s+vend[oa]\b", re.IGNORECASE),
+    # "Quedó/Queda/Quedan/Quedaron" agregado/sumado.
+    re.compile(
+        r"\bqued(?:o|a|an|[oó]|aron)\s+(?:agregad|sumad|a[nñ]adid)[oa]s?\b",
+        re.IGNORECASE,
+    ),
 )
 
 
