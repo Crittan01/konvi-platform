@@ -974,6 +974,31 @@ def _generate_shipping_guide(
         )
         return
 
+    # Origin/destination address dicts para satisfacer NOT NULL constraint.
+    origin_addr_jsonb = {
+        "city": origin.get("city"),
+        "street": origin.get("street"),
+        "dane_code": origin.get("dane_code"),
+        "phone": tenant.get("telefono_contacto") or origin.get("phone"),
+        "name": origin.get("name") or tenant.get("name"),
+    }
+    destination_addr_jsonb = {
+        "city": addr.get("city"),
+        "street": addr.get("street"),
+        "apartment": addr.get("apartment"),
+        "tower": addr.get("tower"),
+        "building_type": addr.get("building_type"),
+        "neighborhood": addr.get("neighborhood"),
+    }
+    # Schema shipments requiere `parcels` NOT NULL (JSONB lista paquetes).
+    parcels_jsonb = [{
+        "weight_kg": 0.5,
+        "length_cm": 15, "width_cm": 10, "height_cm": 5,
+        "declared_value_cop": int(float(order.get("total_amount") or 0)),
+        "units": 1,
+        "content": "Productos cosmética artesanal",
+    }]
+
     if not result.get("ok"):
         logger.warning(
             "[WOMPI][AVEONLINE] guía no generada order=%s code=%s err=%s",
@@ -986,14 +1011,19 @@ def _generate_shipping_guide(
                 "order_id": order_id,
                 "carrier": "aveonline",
                 "status": "pending_generation",
+                "origin_address": origin_addr_jsonb,
+                "destination_address": destination_addr_jsonb,
+                "parcels": parcels_jsonb,
                 "quote_response": {
                     "error": result.get("error"),
                     "code": result.get("code"),
                     "simulated": simulate,
                 },
             }).execute()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "[WOMPI][AVEONLINE] persist pending shipment falló: %s", exc,
+            )
         return
 
     # 6. Persistir shipment con tracking real.
@@ -1006,6 +1036,9 @@ def _generate_shipping_guide(
             "tracking_number": result.get("tracking_number"),
             "tracking_url": result.get("tracking_url"),
             "label_url": result.get("label_url"),
+            "origin_address": origin_addr_jsonb,
+            "destination_address": destination_addr_jsonb,
+            "parcels": parcels_jsonb,
         }).execute()
         logger.info(
             "[WOMPI][AVEONLINE] guía %s order=%s tracking=%s "

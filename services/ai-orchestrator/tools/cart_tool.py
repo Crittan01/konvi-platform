@@ -631,10 +631,13 @@ def set_shipping_meta(
     detecta selección post-quote, y luego enriquecerla si shipping_quote_tool
     corre con datos completos. El total siempre se recalcula coherente.
     """
-    # Leer subtotal actual para recomputar total.
+    # Leer subtotal + shipping_meta actual para preservar quoted_options
+    # y demás campos extendidos (rev. 107: bug runtime KAIU 94b0078c —
+    # set_shipping_meta sobrescribía shipping_meta perdiendo quoted_options,
+    # rompiendo el fuzzy match de select_carrier en re-selecciones).
     cur = (
         supabase.table("conversation_carts")
-        .select("subtotal_cents")
+        .select("subtotal_cents, shipping_meta")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -644,8 +647,12 @@ def set_shipping_meta(
         raise RuntimeError(f"set_shipping_meta: cart {cart_id} no encontrado")
     subtotal = int(cur.data[0].get("subtotal_cents") or 0)
     new_total = subtotal + int(shipping_cents)
+    existing_meta = cur.data[0].get("shipping_meta") or {}
 
+    # Merge: actualizar campos canónicos del carrier seleccionado +
+    # preservar quoted_options (lista de opciones cotizadas para re-select).
     shipping_meta = {
+        **existing_meta,
         "carrier": carrier,
         "service_level": service_level,
         "rate_id": rate_id,
