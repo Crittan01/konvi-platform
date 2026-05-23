@@ -115,21 +115,54 @@ class GetRecentOrdersTool:
 
         # Enriquecer cada order con items count + shipment info.
         order_ids = [o["id"] for o in orders]
-        items_by_order: dict[str, int] = {}
+        items_by_order: dict[str, list[dict]] = {}
+        items_count_by_order: dict[str, int] = {}
         try:
             items_res = (
                 ctx.supabase.table("order_items")
-                .select("order_id, quantity")
+                .select(
+                    "order_id, title, quantity, unit_price, variation_id",
+                )
                 .in_("order_id", order_ids)
                 .execute()
             )
+            # Variant attributes para detalle de presentación.
+            var_ids = list({
+                it["variation_id"] for it in (items_res.data or [])
+                if it.get("variation_id")
+            })
+            var_lookup: dict[str, dict] = {}
+            if var_ids:
+                try:
+                    vres = (
+                        ctx.supabase.table("product_variations")
+                        .select("id, attributes")
+                        .in_("id", var_ids)
+                        .execute()
+                    )
+                    var_lookup = {v["id"]: (v.get("attributes") or {}) for v in (vres.data or [])}
+                except Exception:
+                    pass
             for it in (items_res.data or []):
                 oid = it["order_id"]
-                items_by_order[oid] = items_by_order.get(oid, 0) + int(
-                    it.get("quantity") or 0,
+                attrs = var_lookup.get(it.get("variation_id") or "", {})
+                # Etiqueta de presentación (60g, 30ml, etc.).
+                label = None
+                for k in ("Presentación", "presentacion", "size", "Volumen", "volumen"):
+                    if k in attrs and attrs[k]:
+                        label = str(attrs[k])
+                        break
+                items_by_order.setdefault(oid, []).append({
+                    "title": it.get("title") or "Producto",
+                    "quantity": int(it.get("quantity") or 0),
+                    "unit_price_cop": int(float(it.get("unit_price") or 0)),
+                    "variant_label": label,
+                })
+                items_count_by_order[oid] = (
+                    items_count_by_order.get(oid, 0) + int(it.get("quantity") or 0)
                 )
         except Exception:
-            # items count es enrichment, no bloquea respuesta.
+            # items detail es enrichment, no bloquea respuesta.
             pass
 
         ships_by_order: dict[str, dict] = {}
@@ -153,14 +186,19 @@ class GetRecentOrdersTool:
         out = []
         for o in orders:
             oid = o["id"]
+            total_cop = int(float(o.get("total_amount") or 0))
+            shipping_cop = int(float(o.get("shipping_cost") or 0))
+            subtotal_cop = max(0, total_cop - shipping_cop)
             row = {
                 "order_id": oid,
                 "order_short": oid.split("-")[0].upper(),
                 "status": o["status"],
-                "total_cop": int(float(o.get("total_amount") or 0)),
-                "shipping_cost_cop": int(float(o.get("shipping_cost") or 0)),
+                "total_cop": total_cop,
+                "subtotal_cop": subtotal_cop,
+                "shipping_cost_cop": shipping_cop,
                 "created_at": o["created_at"],
-                "items_count": items_by_order.get(oid, 0),
+                "items_count": items_count_by_order.get(oid, 0),
+                "items": items_by_order.get(oid, []),  # detalle producto
             }
             ship = ships_by_order.get(oid)
             if ship:
@@ -171,8 +209,10 @@ class GetRecentOrdersTool:
             "orders": out,
             "orders_count": len(out),
             "note": (
-                "Resume al cliente con order_short + status + total + carrier "
-                "si aplica. NO inventes datos faltantes."
+                "Para resumen organizado: enumera items con qty + título + "
+                "presentación (variant_label) + precio. Después subtotal, "
+                "envío con carrier, total. Si hay tracking_number, inclúyelo. "
+                "NO inventes datos faltantes."
             ),
         })
 

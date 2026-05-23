@@ -81,6 +81,33 @@ async def generate_payment_link_for_cart(
     # adapter llamaba originalmente NO existe — el path real es 2-pasos
     # `POST /api/v1/orders/` + `POST /{id}/payment-link`. Llamar directo
     # a la función Python evita re-implementar ese protocolo en HTTP.
+    # Rev. 107: construir verified_ctx con items detallados del cart
+    # para que `handle_payment_link_if_applicable` persista order_items
+    # reales (title + variation_id + unit_price). Sin esto cae al fallback
+    # genérico "Pedido vía WhatsApp" qty=1, perdiendo el desglose por
+    # variante (bug runtime detectado conducción KAIU — `get_recent_orders`
+    # devolvía un solo item placeholder en lugar de los 4 reales).
+    verified_items: list[dict] = []
+    for it in (cart.get("items") or []):
+        prod = it.get("product") or {}
+        var = it.get("variation") or {}
+        title = prod.get("title") or prod.get("name") or "Producto"
+        # variant_label desde attributes (matching naming KAIU: Presentación/Volumen).
+        attrs = var.get("attributes") or {}
+        variant_label = None
+        for k in ("Presentación", "presentacion", "size", "Volumen", "volumen", "label"):
+            if k in attrs and attrs[k]:
+                variant_label = str(attrs[k])
+                break
+        verified_items.append({
+            "title": title,
+            "variant_label": variant_label,
+            "quantity": int(it.get("quantity") or 1),
+            "unit_price_cents": int(it.get("unit_price_cents") or 0),
+            "product_id": it.get("product_id"),
+            "variation_id": it.get("variation_id"),
+        })
+
     try:
         from tools.payment_link_tool import handle_payment_link_if_applicable
         result = await handle_payment_link_if_applicable(
@@ -92,6 +119,7 @@ async def generate_payment_link_for_cart(
             shipping_cost_cents=int(cart.get("shipping_cents") or 0),
             notes=None,
             supabase=supabase,
+            verified_ctx={"items": verified_items} if verified_items else None,
         )
     except Exception as exc:
         return {

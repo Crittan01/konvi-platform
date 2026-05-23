@@ -20,12 +20,13 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-def _make_sb_chain(orders, items=None, ships=None):
-    """Mock supabase chain-aware. Las 3 tablas (orders/order_items/shipments)
-    se diferencian por el nombre que recibe .table()."""
+def _make_sb_chain(orders, items=None, ships=None, variations=None):
+    """Mock supabase chain-aware. 4 tablas (orders/order_items/shipments/
+    product_variations) se diferencian por el nombre que recibe .table()."""
     sb = MagicMock()
     items = items or []
     ships = ships or []
+    variations = variations or []
 
     def _table(name):
         chain = MagicMock()
@@ -41,6 +42,8 @@ def _make_sb_chain(orders, items=None, ships=None):
             chain.execute.return_value = MagicMock(data=items)
         elif name == "shipments":
             chain.execute.return_value = MagicMock(data=ships)
+        elif name == "product_variations":
+            chain.execute.return_value = MagicMock(data=variations)
         else:
             chain.execute.return_value = MagicMock(data=[])
         return chain
@@ -82,7 +85,8 @@ class GetRecentOrdersTests(unittest.TestCase):
         self.assertEqual(r.data["orders"], [])
         self.assertIn("pedido nuevo", r.data["note"].lower())
 
-    def test_orders_confirmed_con_shipment(self):
+    def test_orders_confirmed_con_shipment_detalle(self):
+        """Orden con detalle completo de items + presentación + tracking."""
         sb = _make_sb_chain(
             orders=[
                 {"id": "07624ce1-ac9d-433e-8be8-8f5bf51b0ee5",
@@ -91,23 +95,39 @@ class GetRecentOrdersTests(unittest.TestCase):
                  "updated_at": "2026-05-23T13:40:21Z", "notes": None},
             ],
             items=[
-                {"order_id": "07624ce1-ac9d-433e-8be8-8f5bf51b0ee5", "quantity": 1},
-                {"order_id": "07624ce1-ac9d-433e-8be8-8f5bf51b0ee5", "quantity": 1},
+                {"order_id": "07624ce1-ac9d-433e-8be8-8f5bf51b0ee5",
+                 "title": "Jabón Artesanal de Coco", "quantity": 1,
+                 "unit_price": 18000, "variation_id": "v-coco-60"},
+                {"order_id": "07624ce1-ac9d-433e-8be8-8f5bf51b0ee5",
+                 "title": "Sérum de Ácido Hialurónico", "quantity": 1,
+                 "unit_price": 92000, "variation_id": "v-serum-30"},
             ],
             ships=[
                 {"order_id": "07624ce1-ac9d-433e-8be8-8f5bf51b0ee5",
                  "status": "labeled", "carrier": "SERVIENTREGA",
                  "tracking_number": "TRACK123", "tracking_url": "https://..."},
             ],
+            variations=[
+                {"id": "v-coco-60", "attributes": {"Presentación": "60g"}},
+                {"id": "v-serum-30", "attributes": {"Volumen": "30ml"}},
+            ],
         )
         r = _run(self.tool.execute(self.tool.args_schema(), self.ctx_factory(sb)))
         self.assertTrue(r.success)
-        self.assertEqual(len(r.data["orders"]), 1)
         o = r.data["orders"][0]
         self.assertEqual(o["order_short"], "07624CE1")
         self.assertEqual(o["status"], "confirmed")
         self.assertEqual(o["total_cop"], 177950)
+        self.assertEqual(o["subtotal_cop"], 160000)
+        self.assertEqual(o["shipping_cost_cop"], 17950)
         self.assertEqual(o["items_count"], 2)
+        # Items detallados con variant_label.
+        self.assertEqual(len(o["items"]), 2)
+        titles = [i["title"] for i in o["items"]]
+        labels = [i["variant_label"] for i in o["items"]]
+        self.assertIn("Jabón Artesanal de Coco", titles)
+        self.assertIn("60g", labels)
+        self.assertIn("30ml", labels)
         self.assertEqual(o["shipment"]["tracking_number"], "TRACK123")
 
     def test_orders_cancelled(self):
