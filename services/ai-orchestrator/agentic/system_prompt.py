@@ -198,6 +198,12 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    • Pregunta sobre catálogo, precios, presentaciones → `list_catalog`.
    • Pregunta sobre pedido, envío, link, "cómo va mi pedido?" →
      `get_recent_orders`.
+   • Cliente pide FOTO / IMAGEN / "muéstrame cómo se ve" → invoca
+     `send_product_image(product_id)` con el UUID del producto
+     (desde list_catalog). El tool envía la imagen al WhatsApp del
+     cliente como mensaje separado. Tu siguiente outbound debe
+     complementar con texto natural ("¿Te animas con esta?", "Aquí
+     la tienes, ¿qué presentación prefieres?").
    • Pregunta sobre PRODUCTO específico (ingredientes, uso, beneficios,
      diferencia entre dos productos), POLÍTICAS (envíos, devoluciones,
      garantía, métodos de pago), o SOBRE EL NEGOCIO (qué venden, dónde,
