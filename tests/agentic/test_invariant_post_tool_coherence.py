@@ -75,7 +75,10 @@ class PostToolCoherenceTests(unittest.TestCase):
         # Replacement debe conservar el link.
         self.assertIn("test_sj9wWb", r.replacement_text)
 
-    def test_add_to_cart_con_pregunta_proceder_rewrite(self):
+    def test_add_to_cart_con_pregunta_no_dispara_rev107(self):
+        """Rev. 107: el invariant ya NO dispara con writes intermedios
+        (add_to_cart, save_*, select_carrier). Esas son next-step
+        preguntas legítimas, no redundancia post-acción terminal."""
         from agentic.invariants.base import InvariantOutcome
         text = (
             "Agregué 1 Coco 60g al pedido. ¿Procedemos con el envío?"
@@ -85,9 +88,7 @@ class PostToolCoherenceTests(unittest.TestCase):
             tool_call_log=[{"tool": "add_to_cart", "result": {"added": True}}],
             **self.base,
         ))
-        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
-        self.assertNotIn("Procedemos", r.replacement_text)
-        self.assertIn("Agregué", r.replacement_text)
+        self.assertEqual(r.outcome, InvariantOutcome.OK)
 
     def test_write_tool_fallo_no_rewrite(self):
         """Si el write tool FALLÓ, la pregunta puede ser legítima — OK."""
@@ -112,6 +113,41 @@ class PostToolCoherenceTests(unittest.TestCase):
         ))
         # "¿Quieres algo más?" no match con nuestros patrones de confirmación.
         self.assertEqual(r.outcome, InvariantOutcome.OK)
+
+    def test_save_email_seguido_de_confirmas_pedido_es_legitimo(self):
+        """Tras save_email, "¿confirmas el pedido?" es legítimo next-step.
+        El invariant rev. 107 ya NO dispara para save_* writes intermedios."""
+        from agentic.invariants.base import InvariantOutcome
+        text = (
+            "Listo, guardé tu correo.\n\n📋 Resumen: ...\n"
+            "Confirmas el pedido para generar el link de pago?"
+        )
+        r = _run(self.inv.validate(
+            candidate_text=text,
+            tool_call_log=[{"tool": "save_email", "result": {"saved": True}}],
+            **self.base,
+        ))
+        self.assertEqual(r.outcome, InvariantOutcome.OK)
+
+    def test_confirmas_el_pedido_es_redundante_rewrite(self):
+        """'Confirmas EL pedido' tras generate_payment_link → redundante."""
+        from agentic.invariants.base import InvariantOutcome
+        casos_redundantes = [
+            "Listo, aquí tu link.\n\nConfirmas el pedido?",
+            "Genial. Confirmas los datos correctos?",
+            "Link generado. Confirmas la dirección registrada?",
+        ]
+        for text in casos_redundantes:
+            r = _run(self.inv.validate(
+                candidate_text=text,
+                tool_call_log=[{"tool": "generate_payment_link",
+                                "result": {"checkout_url": "x"}}],
+                **self.base,
+            ))
+            self.assertEqual(
+                r.outcome, InvariantOutcome.REWRITE,
+                f"DEBE rewrite: {text!r}",
+            )
 
 
 if __name__ == "__main__":

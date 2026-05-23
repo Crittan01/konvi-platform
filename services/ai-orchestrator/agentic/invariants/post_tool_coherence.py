@@ -36,24 +36,47 @@ from agentic.invariants.base import (
 )
 
 
-# Tools de write cuya ejecución hace que cualquier pregunta de
-# confirmación pre-acción sea incoherente.
+# Tools de write donde una pregunta de confirmación post-acción es
+# REDUNDANTE — el flow ya terminó:
+#   • generate_payment_link → ya generó link, "¿confirmas el pedido?"
+#     sobra (el cliente confirma pagando el link).
+#   • escalate_to_human → ya escaló, "¿confirmas escalar?" no aplica.
+#
+# Para los demás writes (add_to_cart, save_*, select_carrier,
+# record_consent) la pregunta siguiente suele ser legítima next step
+# del flow (e.g. "guardé tu nombre. ¿Confirmas tu email?" es válido —
+# save_name no implica que el pedido está completo).
+# Rev. 107 — bug runtime KAIU ff228be7: el invariant cortaba preguntas
+# legítimas post-save_email; ahora SOLO dispara con write tools terminales.
 _WRITE_TOOLS = {
-    "add_to_cart", "update_cart_item_quantity", "remove_cart_item",
     "generate_payment_link",
-    "record_consent",
-    "save_name", "save_email", "save_document", "save_address",
-    "save_shipping_phone",
-    "select_carrier",
+    "escalate_to_human",
 }
 
-# Patrones de pregunta de confirmación pre-acción.
+# Patrones de pregunta de confirmación pre-acción (REDUNDANTE — la
+# acción ya se ejecutó). Rev. 107 refinado:
+#   • "Confirmas EL pedido / LOS datos / EL envío" — confirma acción ya
+#     hecha → REDUNDANTE, quitar.
+#   • "Confirmas TU nombre / TU email / TU dirección" — pide al cliente
+#     DECLARAR su data → LEGÍTIMO, NO quitar (es next step del flow).
+# La distinción es artículo definido (el/los/la) vs posesivo (tu/su).
 _CONFIRMATION_QUESTION_PATTERNS = (
-    re.compile(r"\bconfirmas?\b[^?]*\?", re.IGNORECASE),
+    # "Confirmas EL pedido / LOS datos / LA dirección / EL link / etc."
+    # — la acción ya pasó, NO necesita confirmación del cliente.
+    re.compile(
+        r"\bconfirmas?\b\s+(?:que\s+)?(?:el|los|la|las)\s+"
+        r"(?:pedido|datos|env[ií]o|carrito|orden|direcci[oó]n|link|"
+        r"items?|productos?|presentaci[oó]n|elecci[oó]n)\b[^?]*\?",
+        re.IGNORECASE,
+    ),
+    # "¿Procedemos / procedo / a proceder?" — bot ya procedió.
     re.compile(r"\bproced(?:o|emos|er)\b[^?]*\?", re.IGNORECASE),
+    # "¿Genero el link?" — bot ya lo generó.
     re.compile(r"\bgenero(?:\s+el)?\s+link\b[^?]*\?", re.IGNORECASE),
+    # "¿Estás de acuerdo / estamos de acuerdo?" sobre acción ya hecha.
     re.compile(r"\b(?:est[aá]s?|estamos)\s+de\s+acuerdo\b[^?]*\?", re.IGNORECASE),
-    re.compile(r"\b(?:te\s+parece|de\s+acuerdo)\b[^?]*\?", re.IGNORECASE),
+    # "¿Te parece bien?" post-acción.
+    re.compile(r"\bte\s+parece\b[^?]*\?", re.IGNORECASE),
 )
 
 
