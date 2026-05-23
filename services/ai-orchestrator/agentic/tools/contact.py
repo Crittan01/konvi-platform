@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
@@ -143,20 +143,58 @@ class RecordConsentTool:
                 "No hay contact_id para registrar consent.",
                 code="NO_CONTACT",
             )
+
+        # Rev. 107 founder feedback (Habeas Data Ley 1581 Art. 8):
+        # cuando el cliente REVOCA consent, debemos NO SOLO marcar el flag
+        # — debemos también ANONIMIZAR los datos PII y cerrar el flujo de
+        # compra. El titular tiene derecho a supresión efectiva (no solo
+        # marcar "no autorizado").
         try:
-            # 1. Actualizar flag en contacts (lo que la UI muestra como OK).
-            ctx.supabase.table("contacts").update({
-                "consent_given": args.given,
-            }).eq("id", ctx.contact_id).eq("tenant_id", ctx.tenant_id).execute()
-            # 2. Audit log Habeas Data (inmutable, schema canónico migración
-            #    20260502010000_consent_audit_log.sql).
-            # Schema real:
-            #   • `event` IN ('granted','revoked','rectified','export_request',
-            #                 'portability','pii_access') — NO 'consent_given' bool.
-            #   • `source` IN ('whatsapp','tenant_console','api','system') — NO
-            #     'agentic_tool'. El agentic atiende WhatsApp → source='whatsapp'.
-            #   • `evidence` JSONB libre para guardar contexto (consent_text,
-            #     tool name, etc.).
+            if args.given:
+                # GRANTED: solo flip flag (preserva datos si existían).
+                ctx.supabase.table("contacts").update({
+                    "consent_given": True,
+                }).eq("id", ctx.contact_id).eq("tenant_id", ctx.tenant_id).execute()
+            else:
+                # REVOKED: anonimizar campos PII (Habeas Data Ley 1581
+                # Art. 8 + Art. 15). Esquema alineado con
+                # services/api/routers/contacts.py:416 (revocación legacy)
+                # + extensión rev. 107: shipping_phone también se borra
+                # (es PII no incluida en el legacy). `phone` se preserva
+                # para match WhatsApp inbound futuro.
+                from datetime import datetime, timezone
+                now_iso = datetime.now(timezone.utc).isoformat()
+                ctx.supabase.table("contacts").update({
+                    "consent_given": False,
+                    "consent_revoked_at": now_iso,
+                    "consent_revoked_reason": (
+                        "Revocación solicitada por el titular vía WhatsApp"
+                    ),
+                    "name": None,
+                    "email": None,
+                    "address": None,
+                    "notes": None,
+                    "document_type": None,
+                    "document_number": None,
+                    "shipping_phone": None,
+                }).eq("id", ctx.contact_id).eq("tenant_id", ctx.tenant_id).execute()
+
+                # Cerrar conv activa (gentle exit) — el cliente NO continúa
+                # un flow de compra tras revocar (no podemos guardar pedido
+                # sin PII). Conv puede reabrirse en futuro si pide.
+                try:
+                    ctx.supabase.table("conversations").update({
+                        "status": "closed",
+                    }).eq("id", ctx.conversation_id).eq("tenant_id", ctx.tenant_id).execute()
+                except Exception:
+                    pass  # status no crítico para Habeas Data.
+
+            # Audit log Habeas Data (inmutable, schema canónico migración
+            # 20260502010000_consent_audit_log.sql). Schema:
+            #   • event IN ('granted','revoked','rectified','export_request',
+            #               'portability','pii_access').
+            #   • source IN ('whatsapp','tenant_console','api','system').
+            #   • evidence JSONB libre.
             ctx.supabase.table("consent_audit_log").insert({
                 "tenant_id": ctx.tenant_id,
                 "contact_id": ctx.contact_id,
@@ -166,6 +204,7 @@ class RecordConsentTool:
                 "evidence": {
                     "consent_text": args.consent_text or "",
                     "tool": "agentic.record_consent",
+                    "data_purged": (not args.given),
                 },
             }).execute()
         except Exception as exc:
@@ -174,15 +213,28 @@ class RecordConsentTool:
                 code="CONSENT_WRITE_ERROR",
             )
 
+        if args.given:
+            note = (
+                "Consent registrado en audit log. Ya puedes invocar save_pii."
+            )
+        else:
+            note = (
+                "REVOCATION procesada. Datos PII anonimizados (Habeas Data "
+                "Ley 1581 Art. 8). Conversación cerrada. Despídete del "
+                "cliente con un mensaje cordial: confirma que sus datos "
+                "fueron eliminados y agradece su confianza. NO continúes "
+                "con flow de compra — el cliente NO autorizó."
+            )
+
         return tool_success({
             "consent_given": args.given,
-            "note": (
-                "Consent registrado en audit log. Si given=True, ya puedes "
-                "invocar save_pii."
-            ),
+            "data_purged": (not args.given),
+            "conversation_closed": (not args.given),
+            "note": note,
         }, audit={
             "operation": "record_consent",
             "given": args.given,
+            "data_purged": (not args.given),
         })
 
 
@@ -333,24 +385,83 @@ class SaveDocumentArgs(BaseModel):
     )
     doc_number: str = Field(
         ..., min_length=4, max_length=20,
-        description="Número del documento (solo dígitos).",
+        description=(
+            "Número del documento. Formato por tipo: CC/CE/TI/NIT = solo "
+            "dígitos. PP = alfanumérico. OTHER = libre."
+        ),
     )
 
-    @field_validator("doc_number")
-    @classmethod
-    def _doc_digits(cls, v):
-        clean = re.sub(r"\D", "", v)
-        if len(clean) < 4:
-            raise ValueError("doc_number debe tener al menos 4 dígitos")
-        return clean
+    @model_validator(mode="after")
+    def _doc_format_by_type(self):
+        # Rev. 107 founder standards: concordancia tipo↔formato Colombia.
+        raw = self.doc_number or ""
+        # Strip separadores comunes (puntos, espacios, guiones).
+        clean = re.sub(r"[\s.\-]", "", raw)
+
+        if self.doc_type == "CC":
+            # Cédula Ciudadanía: solo dígitos, 6-10 (rango normal Colombia).
+            if not clean.isdigit():
+                raise ValueError(
+                    "CC debe contener solo dígitos (no letras ni símbolos)"
+                )
+            if not (6 <= len(clean) <= 10):
+                raise ValueError(
+                    f"CC requiere 6-10 dígitos (recibí {len(clean)})"
+                )
+        elif self.doc_type == "CE":
+            # Cédula Extranjería: solo dígitos, 6-7 típicos.
+            if not clean.isdigit():
+                raise ValueError("CE debe contener solo dígitos")
+            if not (5 <= len(clean) <= 8):
+                raise ValueError(
+                    f"CE requiere 5-8 dígitos (recibí {len(clean)})"
+                )
+        elif self.doc_type == "TI":
+            # Tarjeta Identidad: solo dígitos, 10-11.
+            if not clean.isdigit():
+                raise ValueError("TI debe contener solo dígitos")
+            if not (10 <= len(clean) <= 11):
+                raise ValueError(
+                    f"TI requiere 10-11 dígitos (recibí {len(clean)})"
+                )
+        elif self.doc_type == "NIT":
+            # NIT: 8-12 dígitos (con o sin DV separado por -).
+            if not clean.isdigit():
+                raise ValueError(
+                    "NIT debe contener solo dígitos (DV se ignora si va con guion)"
+                )
+            if not (8 <= len(clean) <= 12):
+                raise ValueError(
+                    f"NIT requiere 8-12 dígitos (recibí {len(clean)})"
+                )
+        elif self.doc_type == "PP":
+            # Pasaporte: alfanumérico 6-15.
+            if not re.match(r"^[A-Za-z0-9]+$", clean):
+                raise ValueError(
+                    "PP debe ser alfanumérico (letras y números)"
+                )
+            if not (6 <= len(clean) <= 15):
+                raise ValueError(
+                    f"PP requiere 6-15 caracteres (recibí {len(clean)})"
+                )
+            clean = clean.upper()  # Pasaportes en mayúscula por convención.
+        # OTHER: cualquier alfanumérico 4-20 (mínimo controlado por
+        # min_length del field).
+
+        self.doc_number = clean
+        return self
 
 
 class SaveDocumentTool:
     name = "save_document"
     description = (
         "Guarda el documento de identidad (tipo + número). REQUIERE "
-        "consent_given=True. Tipos válidos: CC (Cédula Ciudadanía), CE "
-        "(Cédula Extranjería), NIT, PP (Pasaporte), TI (Tarjeta Identidad)."
+        "consent_given=True. Tipos válidos: CC (Cédula Ciudadanía: 6-10 "
+        "dígitos), CE (Cédula Extranjería: 5-8 dígitos), NIT (8-12 dígitos), "
+        "PP (Pasaporte: alfanumérico 6-15), TI (Tarjeta Identidad: 10-11 "
+        "dígitos), OTHER. El tool VALIDA concordancia tipo↔formato; si el "
+        "número no calza con el tipo, retorna error y debes preguntar al "
+        "cliente."
     )
     args_schema = SaveDocumentArgs
 
