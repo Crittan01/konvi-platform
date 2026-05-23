@@ -48,17 +48,17 @@ class ObservabilityTests(unittest.TestCase):
         rows = [
             # 3 success
             {"truncated": False, "error": None, "tool_calls_executed": 2,
-             "tool_call_log": json.dumps([{"name": "cart_add"}, {"name": "summary"}]),
+             "tool_call_log": json.dumps([{"tool": "cart_add"}, {"tool": "summary"}]),
              "elapsed_seconds": 1.2},
             {"truncated": False, "error": None, "tool_calls_executed": 1,
-             "tool_call_log": json.dumps([{"name": "summary"}]),
+             "tool_call_log": json.dumps([{"tool": "summary"}]),
              "elapsed_seconds": 0.8},
             {"truncated": False, "error": None, "tool_calls_executed": 0,
              "tool_call_log": None, "elapsed_seconds": 0.5},
             # 2 truncated
             {"truncated": True, "truncated_reason": "max_tool_turns_exceeded(8)",
              "error": None, "tool_calls_executed": 8,
-             "tool_call_log": json.dumps([{"name": "cart_add"} for _ in range(8)]),
+             "tool_call_log": json.dumps([{"tool": "cart_add"} for _ in range(8)]),
              "elapsed_seconds": 12.5},
             {"truncated": True, "truncated_reason": "max_tool_calls_exceeded(20)",
              "error": None, "tool_calls_executed": 20,
@@ -112,6 +112,44 @@ class ObservabilityTests(unittest.TestCase):
         result = compute_agentic_metrics(_fake_supabase(rows))
         self.assertEqual(result["outcomes"]["counts"]["success"], 1)
         self.assertEqual(result["tool_usage"]["by_name"], {})
+
+    def test_trazabilidad_universal_mode_finish_reason_invariant(self):
+        """Rev. 107: valida agregaciones por mode + finish_reason + invariant."""
+        from agentic.observability import compute_agentic_metrics
+        rows = [
+            # 2 shadow OK
+            {"mode": "shadow", "truncated": False, "error": None,
+             "tool_calls_executed": 1, "tool_call_log": None,
+             "elapsed_seconds": 1.0, "finish_reason": "STOP",
+             "invariant_outcome": None},
+            {"mode": "shadow", "truncated": False, "error": None,
+             "tool_calls_executed": 1, "tool_call_log": None,
+             "elapsed_seconds": 1.5, "finish_reason": "STOP",
+             "invariant_outcome": None},
+            # 3 cutover — 1 OK, 1 rewrite invariant, 1 empty_output
+            {"mode": "cutover", "truncated": False, "error": None,
+             "tool_calls_executed": 2, "tool_call_log": None,
+             "elapsed_seconds": 2.0, "finish_reason": "STOP",
+             "invariant_outcome": "OK"},
+            {"mode": "cutover", "truncated": False, "error": None,
+             "tool_calls_executed": 1, "tool_call_log": None,
+             "elapsed_seconds": 1.2, "finish_reason": "STOP",
+             "invariant_outcome": "REWRITE"},
+            {"mode": "cutover", "truncated": True,
+             "truncated_reason": "empty_output:UNKNOWN",
+             "error": None, "tool_calls_executed": 0,
+             "tool_call_log": None, "elapsed_seconds": 0.5,
+             "finish_reason": "OTHER", "invariant_outcome": None},
+        ]
+        result = compute_agentic_metrics(_fake_supabase(rows))
+
+        # Distribución por mode
+        self.assertEqual(result["by_mode"], {"shadow": 2, "cutover": 3})
+        # finish_reason aggregation
+        self.assertEqual(result["finish_reasons"]["STOP"], 4)
+        self.assertEqual(result["finish_reasons"]["OTHER"], 1)
+        # invariant_outcome aggregation (solo entries con valor no-null)
+        self.assertEqual(result["invariant_outcomes"], {"OK": 1, "REWRITE": 1})
 
 
 if __name__ == "__main__":

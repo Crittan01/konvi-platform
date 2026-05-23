@@ -75,8 +75,9 @@ def compute_agentic_metrics(
     query = (
         supabase.table("agentic_shadow_log")
         .select(
-            "tenant_id, truncated, truncated_reason, error, "
-            "tool_calls_executed, tool_call_log, elapsed_seconds, created_at",
+            "tenant_id, mode, truncated, truncated_reason, error, "
+            "tool_calls_executed, tool_call_log, elapsed_seconds, "
+            "finish_reason, invariant_outcome, invariant_name, created_at",
         )
         .gte("created_at", since_iso)
         .limit(limit)
@@ -88,6 +89,9 @@ def compute_agentic_metrics(
     row_count = len(rows)
     success = truncated = errored = 0
     truncated_reasons: dict[str, int] = {}
+    finish_reasons: dict[str, int] = {}
+    invariant_outcomes: dict[str, int] = {}
+    by_mode: dict[str, int] = {}
     total_tool_calls = 0
     by_tool_name: dict[str, int] = {}
     latencies: list[float] = []
@@ -103,6 +107,16 @@ def compute_agentic_metrics(
         else:
             success += 1
 
+        # Distribuciones de trazabilidad (rev. 107).
+        mode = r.get("mode") or "shadow"
+        by_mode[mode] = by_mode.get(mode, 0) + 1
+        fr = r.get("finish_reason")
+        if fr:
+            finish_reasons[fr] = finish_reasons.get(fr, 0) + 1
+        invo = r.get("invariant_outcome")
+        if invo:
+            invariant_outcomes[invo] = invariant_outcomes.get(invo, 0) + 1
+
         total_tool_calls += int(r.get("tool_calls_executed") or 0)
         elapsed = r.get("elapsed_seconds")
         if elapsed is not None:
@@ -117,7 +131,10 @@ def compute_agentic_metrics(
             try:
                 parsed = json.loads(raw_log) if isinstance(raw_log, str) else raw_log
                 for entry in parsed if isinstance(parsed, list) else []:
-                    name = (entry or {}).get("name")
+                    # `tool_call_log` rev. 107: cada entry usa key `tool`
+                    # (no `name`). El shape histórico de la tabla puede tener
+                    # `name`; aceptamos ambos para compat.
+                    name = (entry or {}).get("tool") or (entry or {}).get("name")
                     if name:
                         by_tool_name[name] = by_tool_name.get(name, 0) + 1
             except (json.JSONDecodeError, TypeError):
@@ -138,6 +155,7 @@ def compute_agentic_metrics(
             "row_count": row_count,
             "tenant_id": tenant_id,
         },
+        "by_mode": by_mode,
         "outcomes": {
             "success_rate": _rate(success),
             "truncated_rate": _rate(truncated),
@@ -149,6 +167,8 @@ def compute_agentic_metrics(
             },
         },
         "truncated_reasons": truncated_reasons,
+        "finish_reasons": finish_reasons,
+        "invariant_outcomes": invariant_outcomes,
         "tool_usage": {
             "total_calls": total_tool_calls,
             "avg_calls_per_turn": round(total_tool_calls / row_count, 3)

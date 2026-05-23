@@ -56,6 +56,11 @@ class AgenticTurnResult:
 
     Inmutable después de construir (frozen=False solo para append a
     `tool_call_log` durante el loop). Caller debe tratarlo como solo-lectura.
+
+    Campos de trazabilidad (rev. 107 cierre arquitectónico):
+      • `finish_reason`: último valor reportado por Gemini ("STOP",
+        "MAX_TOKENS", "SAFETY", etc.). None si el turn cerró por tool-call
+        path sin pasar por evaluación de finish_reason vacío.
     """
     outbound_text: str
     tool_calls_executed: int = 0
@@ -64,6 +69,7 @@ class AgenticTurnResult:
     truncated_reason: Optional[str] = None
     total_tokens: int = 0
     error: Optional[str] = None
+    finish_reason: Optional[str] = None
 
 
 async def run_agentic_turn(
@@ -124,6 +130,11 @@ async def run_agentic_turn(
     outbound_text = ""
     truncated = False
     truncated_reason: Optional[str] = None
+    # Trazabilidad rev. 107: capturar finish_reason del último response
+    # del LLM en TODOS los paths (texto, tool, empty). Se persiste en
+    # agentic_turn_audit para diagnosticar runtime sin depender de logs
+    # stdout (que rotan).
+    last_finish_reason: Optional[str] = None
 
     try:
         from google import genai
@@ -165,18 +176,21 @@ async def run_agentic_turn(
                 tool_calls_executed=total_tool_calls,
                 tool_call_log=tool_call_log,
                 error=f"gemini_error: {exc}",
+                finish_reason=last_finish_reason,
             )
 
         # Extraer parts (text + function_calls) del response.
         function_calls = _extract_function_calls(response)
         text_part = _extract_text(response)
+        # Capturar finish_reason de TODOS los responses (texto/tool/empty).
+        last_finish_reason = _extract_finish_reason(response) or last_finish_reason
 
         # Manejo activo empty_output (rev. 107): si Gemini retorna response
         # sin tools y sin texto, detectar finish_reason y aplicar strategy
         # de recovery por finishReason en vez de raise. Cierra la deuda
         # arquitectónica de la primera versión que trataba esto como excepción.
         if not function_calls and not text_part:
-            finish_reason = _extract_finish_reason(response)
+            finish_reason = last_finish_reason
 
             # Instrumentación rev. 107: log estructurado del contexto cuando
             # Gemini retorna empty. Captura las variables que probable-
@@ -322,6 +336,7 @@ async def run_agentic_turn(
         tool_call_log=tool_call_log,
         truncated=truncated,
         truncated_reason=truncated_reason,
+        finish_reason=last_finish_reason,
     )
 
 
