@@ -85,6 +85,53 @@ def _co_time_of_day_greeting() -> tuple[str, str]:
     return ("Buenas noches", "noche")
 
 
+def _render_contact_block(contact_record: Optional[dict]) -> str:
+    """Renderiza CONTEXTO_CLIENTE inline al system_prompt.
+
+    Permite que el LLM detecte cliente conocido SIN tener que invocar
+    `get_contact_info` (que añade latencia + tool_call). Si el contact
+    tiene PII completa, el bot saluda personalizado de entrada (Patrón A).
+
+    Rev. 107 founder feedback: bot no detectaba cliente conocido en
+    saludo simple ('Hola') porque LLM no invocaba tool. Inyectar el
+    bloque pre-computado resuelve el caso del saludo + flow conocido.
+    """
+    if not contact_record:
+        return (
+            "**CONTEXTO_CLIENTE**: cliente NUEVO (no hay PII previa en DB).\n"
+            "Aplica el Patrón B o C del FLUJO HABITUAL según número de "
+            "categorías del catálogo."
+        )
+    name = (contact_record.get("name") or "").strip()
+    consent = bool(contact_record.get("consent_given"))
+    has_email = bool(contact_record.get("email"))
+    has_doc = bool(contact_record.get("document_number"))
+    has_address = bool(contact_record.get("address"))
+    is_known = consent and name and has_email and has_doc and has_address
+    if is_known:
+        return (
+            f"**CONTEXTO_CLIENTE**: cliente CONOCIDO (PII completa pre-existente):\n"
+            f"  • Nombre: {name}\n"
+            f"  • Email: {contact_record.get('email')}\n"
+            f"  • Documento: {contact_record.get('document_type')} "
+            f"{contact_record.get('document_number')}\n"
+            f"  • Dirección: ver `contact.address` (city, street, etc.)\n"
+            f"  • Consent: ACTIVO (Habeas Data Ley 1581).\n\n"
+            f"Aplica Patrón A del FLUJO HABITUAL — saluda con nombre real "
+            f"y NO le pidas PII de nuevo. NO presentes catálogo de categorías "
+            f"al saludar (asume que conoce). Si el cliente pide un producto, "
+            f"el flow va directo a add_to_cart + cotización + carrier + "
+            f"resumen con sus datos ya guardados."
+        )
+    # Cliente parcial (some PII pero falta consent o datos clave).
+    return (
+        f"**CONTEXTO_CLIENTE**: cliente con contact existente pero PII "
+        f"INCOMPLETA (consent={consent}, name={bool(name)}, "
+        f"email={has_email}, doc={has_doc}, address={has_address}).\n"
+        f"Trata como NUEVO para flow PII — pide consent y datos faltantes."
+    )
+
+
 def build_system_prompt(
     *,
     tenant_name: str,
@@ -94,6 +141,7 @@ def build_system_prompt(
     tenant_business_pitch: Optional[str] = None,
     catalog: Optional[list[dict]] = None,
     server_greeting: Optional[str] = None,
+    contact_record: Optional[dict] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -114,6 +162,7 @@ def build_system_prompt(
     )
     tone = tenant_tone or "cordial y profesional, en español Colombia"
     catalog_block = _render_catalog_block(catalog or [])
+    contact_block = _render_contact_block(contact_record)
     if server_greeting is None:
         server_greeting, _ = _co_time_of_day_greeting()
 
@@ -128,6 +177,8 @@ SALUDES al cliente, usa exactamente "{server_greeting}" (no "Hola"
 genérico, no "Hey", no "Saludos"). Si el cliente ya fue saludado en
 turnos anteriores, NO vuelvas a saludar — responde directo a su
 mensaje.
+
+{contact_block}
 
 ═══════════════════════════════════════════════════════════════════
 REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
@@ -340,25 +391,48 @@ ESTILO
 FLUJO HABITUAL (no rígido — adapta según conversación)
 ═══════════════════════════════════════════════════════════════════
 
-1. **SALUDO conciso + ESCUCHA activa** — NO recites todas las categorías
-   de entrada. El cliente humano se siente abrumado con un "menú" en el
-   primer mensaje. En su lugar, saludo breve + invita a expresar
-   necesidad:
+1. **SALUDO adaptativo según contexto** — el saludo NO es una plantilla
+   única; el LLM elige el formato según 3 factores:
+     (a) cliente nuevo vs conocido (`get_contact_info.is_known_customer`),
+     (b) número de categorías del tenant (cuenta en bloque CATÁLOGO),
+     (c) si el cliente ya expresó intención clara en su primer mensaje.
 
-   Ejemplo correcto (saludo cliente nuevo — sustituye <SALUDO> por el
-   greeting CO time-aware que se indica en CONTEXTO HORARIO arriba):
-     "<SALUDO>. Soy {agent_name} de *{tenant_name}*. Cuéntame qué
-      necesitas hoy y te ayudo."
-
-   Ejemplo correcto (saludo cliente conocido — `get_contact_info.
-   is_known_customer=True`):
+   **Patrón A — Cliente CONOCIDO** (PII existe + consent=True):
      "<SALUDO>, <nombre>. Qué bueno verte de nuevo en *{tenant_name}*.
       En qué te ayudo hoy?"
+   NO recites catálogo — asume que el cliente conoce.
 
-   SOLO presenta categorías si el cliente pregunta explícitamente "¿qué
-   venden?" o muestra que no sabe qué buscar ("no sé qué llevar",
-   "muéstrame qué tienes", "qué me recomiendas"). Para clientes
-   específicos ("dame 2 jabones de coco") salta directo al flujo.
+   **Patrón B — Cliente NUEVO + tenant CON 2-6 categorías** (caso
+   típico tenant pequeño como KAIU): presenta categorías con
+   DESCRIPCIÓN BREVE de 1 línea cada una. Da contexto al cliente
+   para elegir sin tener que preguntar.
+     "<SALUDO>. Soy {agent_name} de *{tenant_name}*. Te cuento lo
+      que tenemos para ofrecerte:
+
+      * *Aceites vegetales*: Ideales para hidratación piel y cabello.
+      * *Aceites esenciales*: Para aromaterapia y beneficios específicos.
+      * *Jabones artesanales*: Limpieza natural para tu piel.
+      * *Sérums faciales*: Concentrados para cuidado avanzado del rostro.
+      * *Kits*: Combinaciones perfectas para iniciar tu rutina.
+
+      Qué te gustaría explorar?"
+
+   **Patrón C — Cliente NUEVO + tenant CON >6 categorías** (escala):
+   NO recites todas (mensaje abrumador en móvil). Saludo conciso +
+   agrupa o invita a expresar:
+     "<SALUDO>. Soy {agent_name} de *{tenant_name}*. Tenemos productos
+      para [grupo amplio: ej. 'cuidado personal natural']. Cuéntame qué
+      buscas y te ayudo a elegir."
+
+   **Patrón D — Cliente con intención clara desde inicio** ("dame 2
+   jabones de coco", "muéstrame los sérums"): SALTA el saludo-menu y
+   ve directo al flujo. Confirma con: "<SALUDO>, <nombre o vacío>.
+   Claro, te ayudo con..." + ejecuta tools relevantes.
+
+   **DESCRIPCIONES de categorías**: derivadas del catálogo. NO inventes
+   beneficios fuera del bloque CATÁLOGO + KB. Si el tenant no tiene
+   descripción de una categoría, omítela o usa frase neutral
+   ("Productos de cuidado natural").
 
 2. Cliente pide categoría / "qué venden" → `list_catalog(category)` →
    presenta opciones con bullets + precios.
