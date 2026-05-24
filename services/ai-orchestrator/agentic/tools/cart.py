@@ -143,9 +143,9 @@ class AddToCartTool:
                 f"del tenant. Llama list_catalog para ver UUIDs válidos.",
                 code="INVALID_PRODUCT_ID",
             )
+        variants = product.get("variants") or []
         variant = next(
-            (v for v in (product.get("variants") or [])
-             if str(v.get("id")) == args.variation_id),
+            (v for v in variants if str(v.get("id")) == args.variation_id),
             None,
         )
         if not variant:
@@ -155,6 +155,57 @@ class AddToCartTool:
                 f"variantes válidas.",
                 code="INVALID_VARIATION_ID",
             )
+
+        # Rev. 107 fix runtime KAIU 2026-05-24 conv fd48aa57: bot eligió
+        # variante 30ml del Sérum Vit C sin que el cliente especificara
+        # (existían 15ml + 30ml). Inadmisible — la primera regla del LLM
+        # es NUNCA adivinar variantes con múltiples opciones.
+        #
+        # Guardrail: si el producto tiene >1 variantes Y el cliente NO
+        # mencionó el `variant_label` en los últimos 3 inbounds del
+        # history, rechazar con error explícito. El LLM debe entonces
+        # llamar list_catalog y preguntar al cliente.
+        if len(variants) > 1:
+            recent_inbounds = (ctx.extras or {}).get(
+                "recent_inbound_texts", [],
+            )
+            haystack = " ".join(
+                (s or "").lower() for s in recent_inbounds
+            )
+            variant_label = str(variant.get("label") or "").lower().strip()
+            other_labels = [
+                str(v.get("label") or "").lower().strip()
+                for v in variants if str(v.get("id")) != args.variation_id
+            ]
+            # ¿El cliente mencionó EXPLÍCITAMENTE este variant_label?
+            mentioned_this = variant_label and variant_label in haystack
+            # ¿Mencionó alguna otra variante? (señal de que sabe que hay
+            # opciones y eligió otra). Si no mencionó NINGUNA, el LLM
+            # está adivinando.
+            mentioned_any = mentioned_this or any(
+                lbl and lbl in haystack for lbl in other_labels
+            )
+            if not mentioned_any:
+                labels_pretty = ", ".join(
+                    str(v.get("label") or "?") for v in variants
+                )
+                return tool_failure(
+                    f"El producto '{product.get('title')}' tiene varias "
+                    f"presentaciones ({labels_pretty}) y el cliente NO "
+                    f"especificó cuál. NUNCA agregues una variante asumida. "
+                    f"Llama `list_catalog` para presentar las opciones y "
+                    f"pregúntale al cliente cuál prefiere.",
+                    code="VARIANT_NOT_SPECIFIED",
+                    extra={
+                        "product_id": args.product_id,
+                        "product_title": str(product.get("title")),
+                        "available_variants": [
+                            {"id": str(v.get("id")),
+                             "label": str(v.get("label") or "")}
+                            for v in variants
+                        ],
+                    },
+                )
         unit_price = float(variant.get("price") or 0)
         if unit_price <= 0:
             return tool_failure(
