@@ -103,6 +103,67 @@ export default async function AveonlinePanelPage({
     return result
   }
 
+  // ─── Server Action: saveAveonlineIdagente ────────────────────────────────
+  //
+  // `idagente` (ID del punto de despacho / agencia de envío) es REQUERIDO
+  // por el endpoint `generarGuia2` de AveCRM — sin él Aveonline rechaza
+  // la generación con error 999 "El nombre del remitente no existe.
+  // Valide el Idagente" (dossier §3.5).
+  //
+  // Hoy `aveonline_client.py` lo lee de `credentials.idagente`. Esta acción
+  // permite al owner configurarlo desde la UI sin necesidad de SQL manual.
+
+  async function saveAveonlineIdagente(
+    formData: FormData,
+  ): Promise<{ ok: boolean; error?: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos.' }
+    }
+
+    const idagenteRaw = ((formData.get('idagente') as string) || '').trim()
+    // Validación: numérico (Aveonline usa IDs enteros), 1-10 dígitos.
+    if (idagenteRaw && !/^\d{1,10}$/.test(idagenteRaw)) {
+      return {
+        ok: false,
+        error: 'ID Agente debe ser numérico (1-10 dígitos).',
+      }
+    }
+
+    const { data: existing, error: readErr } = await sb
+      .from('tenant_integrations')
+      .select('credentials, meta')
+      .eq('tenant_id', m.tenant_id)
+      .eq('provider', 'aveonline')
+      .maybeSingle()
+    if (readErr) return { ok: false, error: `Error DB: ${readErr.message}` }
+    if (!existing) {
+      return {
+        ok: false,
+        error: 'Aveonline no está conectado. Conecta primero la cuenta.',
+      }
+    }
+
+    const creds = (existing.credentials ?? {}) as Record<string, unknown>
+    const meta = (existing.meta ?? {}) as Record<string, unknown>
+
+    const { error: updErr } = await sb
+      .from('tenant_integrations')
+      .update({
+        credentials: { ...creds, idagente: idagenteRaw || null },
+        meta: { ...meta, idagente: idagenteRaw || null },
+      })
+      .eq('tenant_id', m.tenant_id)
+      .eq('provider', 'aveonline')
+
+    if (updErr) return { ok: false, error: `Error: ${updErr.message}` }
+    revalidatePath('/dashboard/integrations/aveonline')
+    return { ok: true }
+  }
+
   // ─── Lookup data ──────────────────────────────────────────────────────────
 
   let integration: {
@@ -162,6 +223,7 @@ export default async function AveonlinePanelPage({
           credentials={integration?.credentials ?? {}}
           connectAction={connectAveonline}
           disconnectAction={disconnectAveonline}
+          saveIdagenteAction={saveAveonlineIdagente}
         />
       )}
 
