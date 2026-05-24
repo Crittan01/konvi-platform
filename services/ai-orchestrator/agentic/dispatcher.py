@@ -203,10 +203,30 @@ async def _run_agentic_full(
     else:
         contact_id, contact = None, {}
 
-    # System prompt (con tenant config — Fase 0 usa default).
+    # System prompt — Rev. 107 fix: leer tenant.name real desde DB
+    # (antes default "el negocio" → bot decía "Bienvenida a Sara Camila,
+    # cosmética artesanal natural" usando agent_name como tenant name).
+    tenant_name = "el negocio"
+    tenant_pitch = None
+    tenant_tone = None
+    try:
+        ten_row = (
+            supabase.table("tenants")
+            .select("name, business_pitch, tono_comunicacion")
+            .eq("id", tenant_id).single().execute()
+        )
+        td = ten_row.data or {}
+        tenant_name = td.get("name") or tenant_name
+        tenant_pitch = td.get("business_pitch") or None
+        tenant_tone = td.get("tono_comunicacion") or None
+    except Exception:
+        pass
+
     system_prompt = build_system_prompt(
-        tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
+        tenant_name=tenant_name,
         catalog=catalog,
+        tenant_pitch=tenant_pitch,
+        tenant_tone=tenant_tone,
     )
 
     # Ejecutar agente.
