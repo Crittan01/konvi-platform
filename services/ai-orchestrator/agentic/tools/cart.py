@@ -168,7 +168,15 @@ class AddToCartTool:
         # mencionó el `variant_label` en los últimos 3 inbounds del
         # history, rechazar con error explícito. El LLM debe entonces
         # llamar list_catalog y preguntar al cliente.
-        if len(variants) > 1:
+        #
+        # Rev. 107 2026-05-24 fix runtime conv ce2c6bdb: cuando el call
+        # viene de un pre-LLM resolver determinístico (que YA verificó
+        # contexto via último bot question, e.g. "Dame el de 30" tras
+        # bot ofrecer "15ml/30ml"), el guardrail bloquea injustamente.
+        # Skip si `ctx.extras["bypass_variant_guard"] = True`. Los resolvers
+        # determinísticos son responsables de verificar contexto antes.
+        bypass_guard = bool((ctx.extras or {}).get("bypass_variant_guard"))
+        if len(variants) > 1 and not bypass_guard:
             recent_inbounds = (ctx.extras or {}).get(
                 "recent_inbound_texts", [],
             )
