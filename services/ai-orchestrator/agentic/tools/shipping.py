@@ -23,6 +23,14 @@ from agentic.tools.registry import register_tool
 
 logger = logging.getLogger(__name__)
 
+# Rev. 107 founder decision 2026-05-24: Envia INHABILITADO en plataforma.
+# Si un tenant tiene `tenant_shipping_provider_config.active_provider='envia'`,
+# `quote_shipping` retorna error explícito ENVIA_DISABLED en lugar de
+# invocar Envia. Para re-habilitar: cambiar a False + remover guard +
+# config tenant migra a 'aveonline'. Mantener legacy code path en
+# `legacy_adapters/envia.py` por si Envia retorna en el futuro.
+_ENVIA_DISABLED = True
+
 
 # ─── Resolver rate_id con tolerancia a variaciones del LLM ─────────────────
 
@@ -205,15 +213,22 @@ class QuoteShippingTool:
 
         Rev. 107 M.5 — soporta multi-provider (Envia O Aveonline,
         sin fallback automático per ADR-0019).
+
+        Rev. 107 founder 2026-05-24: **Envia INHABILITADO**. Default
+        provider es `aveonline`. Si un tenant tiene `active_provider=
+        'envia'` configurado, el tool retorna error explícito en lugar
+        de invocar Envia silenciosamente. Para re-habilitar Envia,
+        cambiar `_ENVIA_DISABLED=False` en este módulo + decisión
+        explícita del founder.
         """
         from agentic.legacy_adapters import (
             quote_shipping_for_cart,
             quote_shipping_for_cart_aveonline,
         )
 
-        # Resolver provider activo del tenant. Si no hay row de config,
-        # defaultea a 'envia' (preserva comportamiento legacy).
-        active_provider = "envia"
+        # Resolver provider activo del tenant. Default Aveonline
+        # (Envia inhabilitado rev. 107 — founder decision 2026-05-24).
+        active_provider = "aveonline"
         try:
             cfg_res = (
                 ctx.supabase.table("tenant_shipping_provider_config")
@@ -224,11 +239,11 @@ class QuoteShippingTool:
             )
             if cfg_res and cfg_res.data:
                 active_provider = (
-                    cfg_res.data.get("active_provider") or "envia"
+                    cfg_res.data.get("active_provider") or "aveonline"
                 ).strip().lower()
         except Exception as exc:
             ctx.logger.warning(
-                "[agentic.shipping] no pude leer active_provider, default envia: %s",
+                "[agentic.shipping] no pude leer active_provider, default aveonline: %s",
                 exc,
             ) if ctx.logger else None
 
@@ -236,6 +251,15 @@ class QuoteShippingTool:
             "[agentic.shipping] tenant=%s provider=%s city=%s",
             ctx.tenant_id[:8], active_provider, args.city,
         ) if ctx.logger else None
+
+        # Guard rev. 107: Envia inhabilitado por decisión operativa.
+        if active_provider == "envia" and _ENVIA_DISABLED:
+            return tool_failure(
+                "Envia está inhabilitado en esta plataforma. Configura "
+                "Aveonline como provider de envío para este tenant desde "
+                "el panel de integraciones.",
+                code="ENVIA_DISABLED",
+            )
 
         if active_provider == "aveonline":
             result = await quote_shipping_for_cart_aveonline(
@@ -246,7 +270,7 @@ class QuoteShippingTool:
                 city_query=args.city,
             )
         else:
-            # Default + 'envia' explícito.
+            # Path Envia (cuando _ENVIA_DISABLED=False y tenant tiene envia).
             result = await quote_shipping_for_cart(
                 ctx.supabase,
                 conversation_id=ctx.conversation_id,

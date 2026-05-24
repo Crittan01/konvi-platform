@@ -56,17 +56,21 @@ class QuoteShippingRoutingTests(unittest.TestCase):
             supabase=sb, extras={}, logger=MagicMock(),
         )
 
-    def test_active_provider_envia_invoca_adapter_envia(self):
-        """active_provider='envia' → quote_shipping_for_cart (legacy)."""
+    def test_active_provider_envia_retorna_envia_disabled(self):
+        """Rev. 107 founder 2026-05-24: Envia INHABILITADO en plataforma.
+
+        Si un tenant tiene active_provider='envia' configurado, el tool
+        DEBE retornar error explícito ENVIA_DISABLED y NO invocar el
+        adapter Envia silenciosamente (no fallback, sin "errores blandos").
+        """
         sb = _mock_supabase_with_provider("envia")
         import agentic.legacy_adapters as la
 
-        # Stub ambos adapters; verificar cuál se llama.
         called = {"envia": False, "aveonline": False}
 
         async def fake_envia(sb, **kw):
             called["envia"] = True
-            return {"ok": True, "options": [{"rate_id": "envia-1", "carrier": "Envia", "service_level": "estandar", "price_cents": 15000, "eta_date": "3d"}], "city_normalized": "Bogotá"}
+            return {"ok": True, "options": []}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
@@ -77,9 +81,11 @@ class QuoteShippingRoutingTests(unittest.TestCase):
             args = self.tool.args_schema(city="Bogotá")
             result = _run(self.tool.execute(args, self._make_ctx(sb)))
 
-        self.assertTrue(called["envia"])
+        # Ningún adapter invocado: guard cortó antes.
+        self.assertFalse(called["envia"])
         self.assertFalse(called["aveonline"])
-        self.assertTrue(result.success)
+        self.assertFalse(result.success)
+        self.assertEqual(result.data.get("code"), "ENVIA_DISABLED")
 
     def test_active_provider_aveonline_invoca_adapter_aveonline(self):
         """active_provider='aveonline' → quote_shipping_for_cart_aveonline."""
@@ -117,8 +123,10 @@ class QuoteShippingRoutingTests(unittest.TestCase):
         self.assertEqual(len(result.data["options"]), 1)
         self.assertEqual(result.data["options"][0]["carrier"], "COORDINADORA")
 
-    def test_sin_config_default_envia(self):
-        """Sin row en tenant_shipping_provider_config → default 'envia'."""
+    def test_sin_config_default_aveonline(self):
+        """Rev. 107 founder 2026-05-24: sin row en
+        tenant_shipping_provider_config → default 'aveonline' (era 'envia',
+        pero Envia quedó inhabilitado)."""
         sb = _mock_supabase_with_provider(None)  # No row.
         import agentic.legacy_adapters as la
 
@@ -126,22 +134,35 @@ class QuoteShippingRoutingTests(unittest.TestCase):
 
         async def fake_envia(sb, **kw):
             called["envia"] = True
-            return {"ok": True, "options": [{"rate_id": "x", "carrier": "Envia", "service_level": "estandar", "price_cents": 15000, "eta_date": "3d"}], "city_normalized": "Bogotá"}
+            return {"ok": True, "options": []}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
-            return {"ok": True, "options": []}
+            return {
+                "ok": True,
+                "options": [{
+                    "rate_id": "ave-1", "carrier": "SERVIENTREGA",
+                    "service_level": "Mensajeria",
+                    "price_cents": 1500000, "eta_date": "3d",
+                }],
+                "city_normalized": "Bogotá",
+                "destination": {"city": "Bogotá"},
+                "provider": "aveonline",
+            }
 
         with patch.object(la, "quote_shipping_for_cart", fake_envia), \
              patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
             args = self.tool.args_schema(city="Bogotá")
             _run(self.tool.execute(args, self._make_ctx(sb)))
 
-        self.assertTrue(called["envia"])
-        self.assertFalse(called["aveonline"])
+        self.assertFalse(called["envia"])
+        self.assertTrue(called["aveonline"])
 
-    def test_db_falla_default_envia(self):
-        """Si DB query falla, defaultea a 'envia' sin propagar excepción."""
+    def test_db_falla_default_aveonline(self):
+        """Si DB query falla, defaultea a 'aveonline' sin propagar excepción.
+
+        Rev. 107 founder 2026-05-24: default cambió de 'envia' a
+        'aveonline' (Envia inhabilitado en plataforma)."""
         sb = MagicMock()
         sb.table.side_effect = Exception("DB unreachable")
         import agentic.legacy_adapters as la
@@ -150,20 +171,30 @@ class QuoteShippingRoutingTests(unittest.TestCase):
 
         async def fake_envia(sb, **kw):
             called["envia"] = True
-            return {"ok": True, "options": [{"rate_id": "x", "carrier": "Envia", "service_level": "estandar", "price_cents": 15000, "eta_date": "3d"}], "city_normalized": "Bogotá"}
+            return {"ok": True, "options": []}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
-            return {"ok": True, "options": []}
+            return {
+                "ok": True,
+                "options": [{
+                    "rate_id": "ave-1", "carrier": "SERVIENTREGA",
+                    "service_level": "Mensajeria",
+                    "price_cents": 1500000, "eta_date": "3d",
+                }],
+                "city_normalized": "Bogotá",
+                "destination": {"city": "Bogotá"},
+                "provider": "aveonline",
+            }
 
         with patch.object(la, "quote_shipping_for_cart", fake_envia), \
              patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
             args = self.tool.args_schema(city="Bogotá")
             _run(self.tool.execute(args, self._make_ctx(sb)))
 
-        # Fallback graceful: Envia, no propaga la excepción de DB.
-        self.assertTrue(called["envia"])
-        self.assertFalse(called["aveonline"])
+        # Fallback graceful: Aveonline, no propaga la excepción de DB.
+        self.assertFalse(called["envia"])
+        self.assertTrue(called["aveonline"])
 
 
 class CityFormatHelperTests(unittest.TestCase):
