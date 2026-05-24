@@ -32,15 +32,30 @@ from typing import Any, Optional
 # Regex para detectar respuesta corta de variante del cliente:
 #   "15ml" / "30 ml" / "100g" / "150 gramos" / "el de 30" / "30ml por favor"
 _INBOUND_VARIANT_PATTERNS = (
+    # "15ml" / "el de 30ml" / "30 ml por favor"
     re.compile(
-        r"^\s*(?:el\s+de\s+|los?\s+de\s+|la\s+de\s+)?"
+        r"^\s*(?:el\s+de\s+|los?\s+de\s+|la\s+de\s+|"
+        r"dame\s+(?:el\s+de\s+)?|quiero\s+(?:el\s+de\s+)?|"
+        r"prefiero\s+(?:el\s+de\s+)?)?"
         r"(\d+(?:[.,]\d+)?)\s*"
         r"(ml|gr?|g|gramos?|kg|kilogramos?|oz|onzas?|l|lts?|litros?)"
-        r"\s*(?:por\s+favor|porfa|por\s+favorcito)?\s*[.!?]*\s*$",
+        r"\s*(?:por\s+favor|porfa|por\s+favorcito|entonces)?\s*[.!?]*\s*$",
         re.IGNORECASE,
     ),
-    # Variante de "Solo número" en contextos donde es obvio (e.g. "30").
-    # NO lo cubrimos por ahora — demasiado ambiguo sin lookup.
+)
+
+# Pattern para "solo número" — válido SOLO cuando el bot acaba de
+# presentar variantes con UN tipo único de unidad (e.g., todas en ml).
+# Rev. 107 fix runtime KAIU 2026-05-24: cliente dijo "Dame el de 30
+# entonces" tras bot presentar 15ml/30ml. Resolver no detectaba porque
+# regex requería unidad explícita.
+_INBOUND_NUMBER_ONLY_PATTERN = re.compile(
+    r"^\s*(?:el\s+de\s+|los?\s+de\s+|la\s+de\s+|"
+    r"dame\s+(?:el\s+de\s+)?|quiero\s+(?:el\s+de\s+)?|"
+    r"prefiero\s+(?:el\s+de\s+)?|me\s+gusta\s+(?:el\s+de\s+)?)?"
+    r"(\d+(?:[.,]\d+)?)"
+    r"\s*(?:por\s+favor|porfa|entonces|gracias)?\s*[.!?]*\s*$",
+    re.IGNORECASE,
 )
 
 
@@ -74,17 +89,64 @@ def _normalize_variant(value: str, unit: str) -> str:
     return f"{value}{unit_lower}"
 
 
-def _extract_client_variant(inbound_text: str) -> Optional[str]:
+def _extract_client_variant(
+    inbound_text: str,
+    *,
+    fallback_unit: Optional[str] = None,
+) -> Optional[str]:
     """Si el inbound es respuesta-de-variante única, retorna 'Xml'/'Xg' normalizado.
     Sino retorna None.
+
+    `fallback_unit` (opcional, rev. 107 fix runtime 2026-05-24): si el
+    cliente responde solo con número ("Dame el de 30") sin unidad,
+    intentamos completar con la unidad común del último outbound del
+    bot (e.g., bot presentó "15ml/30ml" → fallback_unit="ml"). Sin esto
+    el resolver fallaba para respuestas naturales como "30" o "el de 30".
     """
     text = (inbound_text or "").strip()
     if not text or len(text) > 50:
         return None
+    # Primero intentar con unidad explícita.
     for pat in _INBOUND_VARIANT_PATTERNS:
         m = pat.match(text)
         if m:
             return _normalize_variant(m.group(1), m.group(2))
+    # Fallback: número-only matchea Y bot presentó variantes con misma unidad.
+    if fallback_unit:
+        m = _INBOUND_NUMBER_ONLY_PATTERN.match(text)
+        if m:
+            return _normalize_variant(m.group(1), fallback_unit)
+    return None
+
+
+# Detecta la unidad COMÚN entre las variantes ofrecidas por el bot
+# (e.g. "15ml por $X o 30ml por $Y" → "ml"). Solo retorna unidad si
+# todas las variantes detectadas comparten misma unidad.
+_BOT_VARIANT_UNIT_RE = re.compile(
+    r"\b\d+(?:[.,]\d+)?\s*(ml|gr?|g|gramos?|kg|oz|l|lts?)",
+    re.IGNORECASE,
+)
+
+
+def _detect_common_variant_unit(outbound_text: str) -> Optional[str]:
+    """Retorna la unidad común si el bot ofreció variantes con SOLO una unidad."""
+    if not outbound_text:
+        return None
+    units_found = set()
+    for m in _BOT_VARIANT_UNIT_RE.finditer(outbound_text):
+        u = m.group(1).lower()
+        # Normalizar a singular ml/g/kg/oz/l.
+        if u in ("gr", "gramos", "gramo"):
+            u = "g"
+        elif u in ("kilogramos", "kilogramo"):
+            u = "kg"
+        elif u in ("onzas", "onza"):
+            u = "oz"
+        elif u in ("litros", "litro", "lts", "lt"):
+            u = "l"
+        units_found.add(u)
+    if len(units_found) == 1:
+        return units_found.pop()
     return None
 
 
@@ -93,8 +155,15 @@ def _extract_client_variant(inbound_text: str) -> Optional[str]:
 #    * 30ml por $85.000 COP
 #    * 15ml por $52.000 COP"
 _BOT_OFFERED_VARIANTS_PATTERN = re.compile(
-    r"\b(?:para\s+(?:el|la|los|las|tu)|del?)\s+\*?([A-ZÁÉÍÓÚÑa-záéíóúñ][^*\n.]{2,60}?)\*?[,.:]?\s+"
-    r"(?:tenemos|prefieres|cuál|qu[eé]\s+presentaci[oó]n)",
+    # Cubre 3 variantes comunes en español:
+    #   • "Para el *Producto X*, tenemos..."
+    #   • "El *Producto X* lo/la tenemos en..."
+    #   • "Del *Producto X* tenemos..."
+    r"\b(?:para\s+(?:el|la|los|las|tu)|del?|el|la|los|las)\s+\*?"
+    r"([A-ZÁÉÍÓÚÑa-záéíóúñ][^*\n.]{2,60}?)"
+    r"\*?[,.:]?\s+"
+    r"(?:(?:lo|la|los|las)\s+tenemos|tenemos|prefieres|cuál|"
+    r"qu[eé]\s+presentaci[oó]n)",
     re.IGNORECASE,
 )
 
@@ -206,12 +275,8 @@ def try_resolve_variant_continuation(
         "unit_price_cop": float,
       } si match único, None si no aplica.
     """
-    # 1. ¿Inbound del cliente es respuesta corta de variante?
-    client_variant = _extract_client_variant(inbound_text)
-    if not client_variant:
-        return None
-
     # 2. ¿El último outbound del bot presentó variantes?
+    #    (Necesitamos esto ANTES para extraer la unidad común como fallback.)
     last_bot_outbound = None
     for msg in reversed(history or []):
         if (msg.get("direction") or "").lower() == "outbound":
@@ -222,12 +287,23 @@ def try_resolve_variant_continuation(
     if not _bot_outbound_contains_variant_options(last_bot_outbound):
         return None
 
-    # 3. ¿Qué producto se discute?
+    # 3. ¿Inbound del cliente es respuesta corta de variante?
+    #    Si dijo solo número (e.g. "30" o "Dame el de 30"), usamos la unidad
+    #    común del último outbound del bot como fallback (e.g. "ml" si las
+    #    opciones eran "15ml/30ml").
+    fallback_unit = _detect_common_variant_unit(last_bot_outbound)
+    client_variant = _extract_client_variant(
+        inbound_text, fallback_unit=fallback_unit,
+    )
+    if not client_variant:
+        return None
+
+    # 4. ¿Qué producto se discute?
     product_hint = _extract_product_from_bot_question(last_bot_outbound)
     if not product_hint:
         return None
 
-    # 4. Resolver en catalog.
+    # 5. Resolver en catalog.
     product = _find_product_in_catalog(product_hint, catalog)
     if not product:
         return None

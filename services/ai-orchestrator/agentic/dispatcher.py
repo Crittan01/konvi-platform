@@ -263,7 +263,7 @@ async def _run_agentic_full(
             supabase=supabase,
             catalog_cache=catalog,
             logger=logger,
-            extras={"recent_inbound_texts": [content]},
+            extras={"recent_inbound_texts": [content], "bypass_variant_guard": True},
         )
         all_added = True
         added_results = []
@@ -379,7 +379,7 @@ async def _run_agentic_full(
             supabase=supabase,
             catalog_cache=catalog,
             logger=logger,
-            extras={"recent_inbound_texts": [content]},
+            extras={"recent_inbound_texts": [content], "bypass_variant_guard": True},
         )
         try:
             tool_result = await tool.execute(args, ctx)
