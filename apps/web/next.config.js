@@ -153,6 +153,14 @@ const nextConfig = {
 
   images: {
     remotePatterns,
+    // Rev. 107 fix runtime KAIU 2026-05-24 web.log:
+    // placehold.co retorna content-type=image/svg+xml (legítimo, su API
+    // genera SVG dinámico). Next.js Image bloquea SVG por defecto (riesgo
+    // XSS si fuente no confiable). placehold.co está en remotePatterns
+    // (whitelisted hostname) → safe para nuestro caso. CSP estricta
+    // adicional para defensa en profundidad.
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
 
   async headers() {
