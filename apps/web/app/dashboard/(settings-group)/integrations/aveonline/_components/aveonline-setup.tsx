@@ -20,8 +20,18 @@
  * custom. Estructura visual mantenida coherente con Envia.
  */
 
-import { useState, useTransition } from 'react'
-import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2, Truck } from 'lucide-react'
+import { useEffect, useState, useTransition } from 'react'
+import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2, Truck, Loader2, RefreshCw } from 'lucide-react'
+
+type AveonlineAgent = {
+  id: string
+  nombre: string
+  direccion: string
+  idciudad: string
+  telefono: string
+  email: string
+  principal: boolean
+}
 
 type Props = {
   connected: boolean
@@ -79,6 +89,44 @@ export default function AveonlineSetup({
       }
     })
   }
+
+  // Galería de agentes desde Aveonline live — se carga al montar cuando connected.
+  const [agents, setAgents] = useState<AveonlineAgent[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentsError, setAgentsError] = useState<string | null>(null)
+
+  const fetchAgents = async () => {
+    setAgentsLoading(true)
+    setAgentsError(null)
+    try {
+      const resp = await fetch('/api/integrations/aveonline/agents', {
+        method: 'GET',
+        credentials: 'include',
+      })
+      if (!resp.ok) {
+        const body = await resp.text()
+        throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`)
+      }
+      const body = await resp.json() as {
+        agents: AveonlineAgent[]
+        warning?: string
+        current_idagente?: string | null
+      }
+      setAgents(body.agents || [])
+      if (body.warning) setAgentsError(body.warning)
+    } catch (err) {
+      setAgentsError(err instanceof Error ? err.message : 'Error consultando Aveonline')
+    } finally {
+      setAgentsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (connected) {
+      void fetchAgents()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected])
 
   if (!connected) {
     return (
@@ -291,7 +339,89 @@ export default function AveonlineSetup({
         <p className="text-sm text-muted-foreground leading-relaxed">
           Aveonline asigna un <strong className="text-foreground font-medium">ID
           numérico al punto de despacho/agencia</strong> con el que se generan
-          las guías. Lo encuentras en{' '}
+          las guías. Selecciona el agente que quieres usar como remitente
+          por defecto:
+        </p>
+
+        {/* Loading galería de agentes */}
+        {agentsLoading && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Consultando agentes desde Aveonline…
+          </div>
+        )}
+        {agentsError && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p>Error consultando agentes: {agentsError}</p>
+              <button
+                type="button"
+                onClick={fetchAgents}
+                className="mt-1 inline-flex items-center gap-1 text-xs text-foreground underline"
+              >
+                <RefreshCw className="h-3 w-3" /> Reintentar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!agentsLoading && !agentsError && agents.length === 0 && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-300">
+            No hay agentes registrados en tu cuenta Aveonline. Pídele a tu
+            asesor logístico que active al menos uno desde el panel
+            Aveonline → Configuración → Agentes.
+          </div>
+        )}
+
+        {!agentsLoading && agents.length > 0 && (
+          <form action={handleSaveIdagente} className="space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="idagente" className="text-sm font-medium text-foreground">
+                  Agente seleccionado
+                </label>
+                <button
+                  type="button"
+                  onClick={fetchAgents}
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  title="Refrescar lista desde Aveonline"
+                >
+                  <RefreshCw className="h-3 w-3" /> Refrescar
+                </button>
+              </div>
+              <select
+                id="idagente"
+                name="idagente"
+                defaultValue={idagente ?? agents.find(a => a.principal)?.id ?? ''}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— sin asignar —</option>
+                {agents.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.principal ? '★ ' : ''}{a.nombre} · ID {a.id} · {a.idciudad}
+                    {a.direccion ? ` · ${a.direccion}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                {agents.length} agente{agents.length !== 1 ? 's' : ''} disponible
+                {agents.length !== 1 ? 's' : ''} · ★ = principal de la cuenta
+              </p>
+            </div>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isPending ? 'Guardando…' : 'Guardar selección'}
+            </button>
+          </form>
+        )}
+
+        <p className="text-xs text-muted-foreground border-t border-border pt-2">
+          La lista viene en vivo desde tu cuenta Aveonline. Si agregas un
+          nuevo agente en{' '}
           <a
             href="https://app.aveonline.co"
             target="_blank"
@@ -300,32 +430,8 @@ export default function AveonlineSetup({
           >
             app.aveonline.co
           </a>
-          {' '}→ Configuración → Agentes/Puntos de despacho. Tu asesor logístico también puede confirmártelo.
+          {' '}→ Configuración → Agentes, presiona &quot;Refrescar&quot; para verlo aquí.
         </p>
-        <form action={handleSaveIdagente} className="flex items-end gap-3">
-          <div className="flex-1 space-y-1.5">
-            <label htmlFor="idagente" className="text-sm font-medium text-foreground">
-              ID Agente (numérico)
-            </label>
-            <input
-              id="idagente"
-              name="idagente"
-              type="text"
-              inputMode="numeric"
-              pattern="\d{1,10}"
-              defaultValue={idagente ?? ''}
-              placeholder="ej. 12345"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={isPending}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shrink-0"
-          >
-            {isPending ? 'Guardando…' : 'Guardar'}
-          </button>
-        </form>
       </div>
 
       {/* Credenciales / Vault */}
