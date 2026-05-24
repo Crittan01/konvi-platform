@@ -14,6 +14,7 @@ from agentic.invariants.base import (
 )
 from agentic.invariants.cart_state import CartStateInvariant
 from agentic.invariants.consent_required import ConsentRequiredInvariant
+from agentic.invariants.empty_promise import EmptyPromiseInvariant
 from agentic.invariants.no_emoji import NoDecorativeEmojiInvariant
 from agentic.invariants.passive_closing import PassiveClosingInvariant
 from agentic.invariants.pii_coherence import PIICoherenceInvariant
@@ -27,6 +28,7 @@ __all__ = [
     "apply_invariants",
     "CartStateInvariant",
     "ConsentRequiredInvariant",
+    "EmptyPromiseInvariant",
     "NoDecorativeEmojiInvariant",
     "PassiveClosingInvariant",
     "PIICoherenceInvariant",

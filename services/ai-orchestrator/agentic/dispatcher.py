@@ -176,6 +176,7 @@ async def _run_agentic_full(
     from agentic.system_prompt import build_system_prompt
     from agentic.invariants import (
         apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
+        EmptyPromiseInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
         PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
@@ -285,6 +286,7 @@ async def _run_agentic_full(
             SummaryCoherenceInvariant(),
             PIICoherenceInvariant(),
             PostToolCoherenceInvariant(),
+            EmptyPromiseInvariant(),
             PassiveClosingInvariant(),
             NoDecorativeEmojiInvariant(),
         ],
