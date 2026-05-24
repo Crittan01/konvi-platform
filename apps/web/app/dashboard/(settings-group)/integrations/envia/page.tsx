@@ -222,6 +222,24 @@ export default async function EnviaPanelPage({
         metaLine={metaLine}
       />
 
+      {/* Banner rev. 107 — Envia inhabilitado en plataforma. */}
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300 flex items-start gap-3">
+        <span className="text-base leading-none">⚠️</span>
+        <div className="space-y-1">
+          <p className="font-medium text-amber-300">
+            Envia está inhabilitado en esta plataforma
+          </p>
+          <p className="text-xs text-amber-200/80 leading-relaxed">
+            Las cotizaciones y guías generadas vía Envia se rechazan en runtime. Configura{' '}
+            <a href="/dashboard/integrations/aveonline" className="underline font-medium">
+              Aveonline
+            </a>
+            {' '}como provider activo — cubre los mismos carriers en Colombia con COD nativo.
+            Si tu cuenta Envia sigue conectada, puedes desconectarla desde la tab Setup.
+          </p>
+        </div>
+      </div>
+
       <PanelTabs
         basePath="/dashboard/integrations/envia"
         tabs={TABS}

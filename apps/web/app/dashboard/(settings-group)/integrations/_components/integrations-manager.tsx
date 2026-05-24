@@ -446,25 +446,40 @@ export function IntegrationsManager(props: Props) {
           </div>
         )}
 
-        {/* ── Envia ─────────────────────────────────────────────────────────── */}
+        {/* ── Envia (INHABILITADO rev. 107 — founder decision 2026-05-24) ───── */}
+        {/*
+          Backend: agentic/tools/shipping.py rechaza active_provider="envia"
+          con ENVIA_DISABLED. UI debe reflejar esto: nada de form de conexión
+          nuevo. Si tenant tiene Envia conectado de antes, se permite
+          desconectar para limpiar estado. CTA principal apunta a Aveonline.
+        */}
         {visibleCards.includes('envia') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${enviaConnected ? 'border-orange-500/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${enviaConnected ? 'border-orange-500/20 bg-orange-500/5' : 'border-border bg-muted/20'}`}>
+          <div className="rounded-xl border bg-card overflow-hidden flex flex-col border-border opacity-90">
+            <div className="px-4 py-3.5 border-b border-border bg-muted/30">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-orange-500/15 border border-orange-500/20 flex items-center justify-center shrink-0">
-                    <Package className="h-4 w-4 text-orange-400" />
+                  <div className="h-9 w-9 rounded-xl bg-muted border border-border flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm">Envia</p>
-                    <p className="text-[11px] text-muted-foreground truncate">Shipping & Logistics</p>
+                    <p className="font-semibold text-sm text-muted-foreground">Envia</p>
+                    <p className="text-[11px] text-muted-foreground/70 truncate">Shipping & Logistics</p>
                   </div>
                 </div>
-                <StatusBadge connected={enviaConnected} colorClass="bg-orange-500/15 text-orange-400 border-orange-500/30" />
+                <div className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
+                  <AlertCircle className="h-3 w-3" />
+                  Inhabilitado
+                </div>
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
-              <p className="text-xs text-muted-foreground">Cotiza envíos, genera etiquetas y haz tracking con múltiples carriers.</p>
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                <p className="text-[11px] text-amber-400 leading-relaxed">
+                  Envia está <strong className="font-semibold">inhabilitado en esta plataforma</strong>. Usa
+                  {' '}<strong className="font-semibold">Aveonline</strong> como provider de envío — cubre los
+                  mismos carriers en Colombia con COD nativo.
+                </p>
+              </div>
               {enviaConnected ? (
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-2">
@@ -472,78 +487,33 @@ export function IntegrationsManager(props: Props) {
                     <MetaPill
                       label="Entorno"
                       value={enviaInt.meta?.environment === 'sandbox' ? 'Sandbox' : 'Producción'}
-                      className={enviaInt.meta?.environment === 'sandbox' ? 'text-amber-400' : 'text-emerald-400'}
                     />
                   </div>
-                  <a
-                    href="/dashboard/integrations/envia"
-                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Settings2 className="h-3 w-3" />
-                      Gestionar panel completo
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
-                      →
-                    </span>
-                  </a>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Tu cuenta sigue conectada por compatibilidad histórica, pero las cotizaciones
+                    se rechazan en runtime. Desconecta para limpiar el estado.
+                  </p>
                   {isOwner && (
-                    <div className="flex gap-2">
-                      <form action={testEnvia} className="flex-1">
-                        <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
-                          className="w-full h-8 text-xs gap-1.5">
-                          <SendHorizonal className="h-3 w-3" /> Probar
-                        </SubmitButton>
-                      </form>
-                      <DisconnectIntegrationButton
-                        provider="envia" providerLabel="Envia"
-                        action={disconnectEnvia}
-                        className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                      />
-                    </div>
+                    <DisconnectIntegrationButton
+                      provider="envia" providerLabel="Envia"
+                      action={disconnectEnvia}
+                      className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                    />
                   )}
                 </div>
-              ) : isOwner ? (
-                <div className="space-y-3">
-                  <div className="flex justify-end">
-                    <ConfigToggle open={!!open.envia} onToggle={() => toggle('envia')} />
-                  </div>
-                  {open.envia && (
-                    <>
-                      <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Pasos de configuración</p>
-                        <div className="space-y-2">
-                          <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Ve a <span className="font-mono text-foreground">ship.envia.com</span> (producción) o <span className="font-mono text-foreground">shipping-test.envia.com</span> (sandbox) → inicia sesión.
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              <strong className="text-foreground font-medium">Desarrolladores → Acceso a API</strong> → genera un nuevo acceso → copia el token.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <form action={saveEnviaKey} className="space-y-2.5">
-                        <div className="space-y-1">
-                          <Label className="text-xs">API Token de Envia</Label>
-                          <Input type="password" name="api_token" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required autoComplete="off" className="h-8 text-xs font-mono" />
-                        </div>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" name="sandbox" className="h-3.5 w-3.5 rounded" />
-                          <span className="text-xs text-muted-foreground">Usar entorno sandbox (pruebas)</span>
-                        </label>
-                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs">Conectar Envia</SubmitButton>
-                      </form>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
-              )}
+              ) : null}
+              <a
+                href="/dashboard/integrations#aveonline"
+                className="flex items-center justify-between rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-medium text-cyan-400 hover:bg-cyan-500/10 transition-colors group"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Package className="h-3 w-3" />
+                  Configurar Aveonline
+                </span>
+                <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                  →
+                </span>
+              </a>
             </div>
           </div>
         )}
