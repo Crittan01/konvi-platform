@@ -445,6 +445,135 @@ async def _run_agentic_full(
                 "add_to_cart falló: %s — caemos a Gemini",
                 getattr(tool_result, "data", None),
             )
+
+    # PRE-LLM #3: shipping intent. Si cart tiene items + cliente
+    # menciona ciudad colombiana inequívoca → quote_shipping directo.
+    # Bug runtime UAT E2 2026-05-24: Gemini fallaba STOP+empty para
+    # "envíalo a Medellín" → EmptyPromise rewrite a CTA genérico.
+    from agentic.shipping_resolver import try_resolve_shipping_intent
+    # Cart has items?
+    cart_has_items = False
+    try:
+        cart_row = (
+            supabase.table("conversation_carts")
+            .select("id")
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .eq("status", "open")
+            .limit(1).execute()
+        )
+        if cart_row.data:
+            items_row = (
+                supabase.table("conversation_cart_items")
+                .select("id", count="exact", head=True)
+                .eq("cart_id", cart_row.data[0]["id"])
+                .execute()
+            )
+            cart_has_items = bool(getattr(items_row, "count", 0) or 0)
+    except Exception:
+        cart_has_items = False
+
+    shipping_match = try_resolve_shipping_intent(
+        inbound_text=content,
+        cart_has_items=cart_has_items,
+    )
+    if shipping_match:
+        logger.info(
+            "[AGENTIC_PRE_LLM] conv=%s shipping_intent matched city=%s "
+            "— bypaseando Gemini",
+            conversation_id, shipping_match["city"],
+        )
+        from agentic.tools.shipping import QuoteShippingTool, QuoteShippingArgs
+        from agentic.tools.base import ToolContext
+        ship_tool = QuoteShippingTool()
+        ship_args = QuoteShippingArgs(city=shipping_match["city"])
+        ship_ctx = ToolContext(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            contact_id=contact_id,
+            supabase=supabase,
+            catalog_cache=catalog,
+            logger=logger,
+            extras={"recent_inbound_texts": [content]},
+        )
+        try:
+            ship_result = await ship_tool.execute(ship_args, ship_ctx)
+        except Exception as exc:
+            logger.warning(
+                "[AGENTIC_PRE_LLM] shipping_intent quote_shipping raise: %s",
+                exc,
+            )
+            ship_result = None
+
+        if ship_result and ship_result.success:
+            opts = (ship_result.data or {}).get("options") or []
+            if opts:
+                # Compose outbound natural.
+                customer_name = (contact or {}).get("name") if contact else None
+                if customer_name and " " in customer_name:
+                    customer_name = customer_name.split(" ", 1)[0]
+                greeting = f"Perfecto, {customer_name}. " if customer_name else "Perfecto. "
+                city_show = (ship_result.data or {}).get(
+                    "destination", {}
+                ).get("city") or shipping_match["city"]
+                bullets = []
+                for o in opts:
+                    price = int(o.get("price_cop") or 0)
+                    price_str = f"${price:,}".replace(",", ".")
+                    eta = o.get("eta_date") or ""
+                    eta_str = f" (entrega en {eta})" if eta else ""
+                    bullets.append(
+                        f"* *{o.get('carrier')}* — *{price_str} COP*{eta_str}"
+                    )
+                outbound = (
+                    f"{greeting}Tenemos estas opciones de envío a "
+                    f"*{city_show}*:\n\n"
+                    + "\n".join(bullets)
+                    + "\n\nCuál prefieres?"
+                )
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=outbound,
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+                from agentic.agent import AgenticTurnResult
+                synthetic_result = AgenticTurnResult(
+                    outbound_text=outbound,
+                    tool_calls_executed=1,
+                    tool_call_log=[{
+                        "tool": "quote_shipping",
+                        "args": {"city": shipping_match["city"]},
+                        "result": ship_result.data,
+                    }],
+                    finish_reason="DETERMINISTIC_RESOLVER",
+                )
+                _persist_turn_audit(
+                    supabase=supabase,
+                    mode="cutover",
+                    message_id=message_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    inbound_text=content,
+                    result=synthetic_result,
+                    elapsed_s=0.0,
+                    final_text=outbound,
+                    invariant_outcome="ok",
+                    invariant_name="shipping_intent_bypass",
+                    system_prompt_chars=0,
+                    history_turns=len(history or []),
+                )
+                return
+        else:
+            logger.warning(
+                "[AGENTIC_PRE_LLM] shipping_intent matched pero "
+                "quote_shipping falló: %s — caemos a Gemini",
+                getattr(ship_result, "data", None),
+            )
     # ─── /pre-LLM resolver ───
 
     # Ejecutar agente.
