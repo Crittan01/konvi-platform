@@ -25,6 +25,10 @@ import PanelHeader from '../_components/panel-header'
 import PanelTabs, { TabDef } from '../_components/panel-tabs'
 import ComingSoon from '../_components/coming-soon'
 import AveonlineSetup from './_components/aveonline-setup'
+import {
+  connectAveonline as connectAveonlineCore,
+  disconnectAveonline as disconnectAveonlineCore,
+} from '@/lib/aveonline-actions'
 
 export const metadata = {
   title: 'Aveonline — Integraciones',
@@ -38,10 +42,6 @@ const TABS: TabDef[] = [
   { id: 'tracking',     label: 'Tracking',    Icon: Radar,       comingSoon: true },
 ]
 const VALID_TABS = new Set(TABS.map(t => t.id))
-
-// Endpoint oficial v1.0 documentado en dossier §2.1.
-const AVEONLINE_AUTH_URL =
-  'https://app.aveonline.co/api/comunes/v1.0/autenticarusuario.php'
 
 export default async function AveonlinePanelPage({
   searchParams,
@@ -59,11 +59,8 @@ export default async function AveonlinePanelPage({
 
   // ─── Server Action: connectAveonline ─────────────────────────────────────
   // O.3 — POST de prueba a autenticarusuario.php con credenciales del tenant.
-  // Si status=ok extrae empresa_id + token + asesor y persiste:
-  //   • tenant_integrations row con status='connected', credentials
-  //     enriquecidas + JWT cacheado.
-  //   • password → Vault via pgsec_create_secret (RPC en migración
-  //     20260426020000_vault_setup_*).
+  // Lógica core extraída a `lib/aveonline-actions.ts` para compartir con
+  // el hub `/dashboard/integrations`.
 
   async function connectAveonline(
     formData: FormData,
@@ -76,192 +73,16 @@ export default async function AveonlinePanelPage({
       return { ok: false, error: 'Sin permisos para conectar integraciones.' }
     }
 
-    const usuario = ((formData.get('usuario') as string) || '').trim()
-    const password = ((formData.get('password') as string) || '').trim()
-    const authVersion =
-      ((formData.get('auth_version') as string) || 'v1.0').trim()
     const tiempoTokenRaw =
       ((formData.get('tiempo_token') as string) || '100000').trim()
-
-    if (!usuario || usuario.length < 3) {
-      return { ok: false, error: 'Usuario requerido (mínimo 3 caracteres).' }
-    }
-    if (!password || password.length < 4) {
-      return { ok: false, error: 'Password requerida (mínimo 4 caracteres).' }
-    }
-    if (!['v1.0', 'v2.0'].includes(authVersion)) {
-      return { ok: false, error: 'Versión de auth inválida (use v1.0 o v2.0).' }
-    }
-    const tiempoToken = Math.max(
-      3600, Math.min(31536000, parseInt(tiempoTokenRaw, 10) || 100000),
-    )
-
-    // POST de prueba a Aveonline para validar credenciales reales antes
-    // de persistir nada. Dossier §2.1 v1.0 — el body canónico.
-    let aveResp: {
-      status?: string
-      message?: string
-      token?: string
-      cuentas?: Array<{
-        usuarios?: Array<{
-          id?: number
-          documento?: string
-          nombre?: string
-          razon?: string
-          asesorlogistico?: string
-          nombreasesor?: string
-        }>
-      }>
-    } = {}
-    try {
-      const resp = await fetch(AVEONLINE_AUTH_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tipo: 'auth',
-          usuario,
-          clave: password,
-          acceso: 'ecommerce',
-          tiempoToken,
-        }),
-      })
-      if (!resp.ok) {
-        return {
-          ok: false,
-          error: `Aveonline retornó HTTP ${resp.status}. Revisa tu cuenta.`,
-        }
-      }
-      aveResp = await resp.json()
-    } catch (e) {
-      return {
-        ok: false,
-        error: `No pudimos conectar con Aveonline: ${
-          e instanceof Error ? e.message : 'error de red'
-        }`,
-      }
-    }
-
-    if (aveResp.status !== 'ok' || !aveResp.token) {
-      return {
-        ok: false,
-        error: `Aveonline rechazó las credenciales: ${
-          aveResp.message || 'usuario o clave incorrectos'
-        }`,
-      }
-    }
-
-    // Extraer empresa_id + datos asesor desde la respuesta.
-    const usuarioData = aveResp.cuentas?.[0]?.usuarios?.[0] ?? {}
-    const empresaId = usuarioData.id ?? null
-    const asesorLogistico = usuarioData.asesorlogistico ?? null
-    const nombreAsesor = usuarioData.nombreasesor ?? null
-    const razonSocial = usuarioData.razon ?? null
-
-    if (!empresaId) {
-      return {
-        ok: false,
-        error: 'Aveonline no retornó empresa_id válido. Contacta soporte.',
-      }
-    }
-
-    // Persistir password en Vault — IDEMPOTENT.
-    //
-    // Rev. 107 fix bug "duplicate key value violates unique constraint
-    // secrets_name_idx": al reconectar un tenant que YA tenía credenciales,
-    // el secret name en vault.secrets ya existe (UNIQUE). Solución: leer la
-    // row actual de tenant_integrations; si existe `password_secret_id`,
-    // hacer UPDATE del secret. Si no, CREATE.
-    const vaultName = `${m.tenant_id}/aveonline/password`
-    let secretId: string | null = null
-
-    const { data: existingRow } = await sb
-      .from('tenant_integrations')
-      .select('credentials')
-      .eq('tenant_id', m.tenant_id)
-      .eq('provider', 'aveonline')
-      .maybeSingle()
-
-    const existingSecretId =
-      (existingRow?.credentials as { password_secret_id?: string } | null)
-        ?.password_secret_id ?? null
-
-    if (existingSecretId) {
-      // Reconexión — actualizar secret existente (mismo UUID, mismo name).
-      const { error: updErr } = await sb.rpc('pgsec_update_secret', {
-        p_id: existingSecretId,
-        p_secret: password,
-      })
-      if (updErr) {
-        return {
-          ok: false,
-          error: `Vault update error: ${updErr.message}`,
-        }
-      }
-      secretId = existingSecretId
-    } else {
-      // Primera conexión — crear secret nuevo.
-      const { data: newSecretId, error: createErr } = await sb.rpc(
-        'pgsec_create_secret',
-        {
-          p_secret: password,
-          p_name: vaultName,
-          p_description: 'Aveonline password v1.0 auth',
-        },
-      )
-      if (createErr || !newSecretId) {
-        return {
-          ok: false,
-          error: `Vault create error: ${createErr?.message || 'no secret_id retornado'}`,
-        }
-      }
-      secretId = newSecretId
-    }
-
-    // Calcular jwt_expires_at desde tiempoToken (segundos).
-    const expiresAt = new Date(Date.now() + tiempoToken * 1000).toISOString()
-
-    // Upsert tenant_integrations.
-    const { error: upsertErr } = await sb
-      .from('tenant_integrations')
-      .upsert(
-        {
-          tenant_id: m.tenant_id,
-          provider: 'aveonline',
-          status: 'connected',
-          credentials: {
-            usuario,
-            password_secret_id: secretId,
-            empresa_id: empresaId,
-            asesor_logistico: asesorLogistico,
-            nombre_asesor: nombreAsesor,
-            razon_social: razonSocial,
-            jwt_token: aveResp.token,
-            jwt_expires_at: expiresAt,
-            tiempo_token: tiempoToken,
-            auth_version: authVersion,
-          },
-          meta: {
-            // Campos NO-sensibles, safe para mostrar en hub UI sin
-            // exponer jwt_token / password_secret_id.
-            connected_at: new Date().toISOString(),
-            connected_by: u?.email,
-            empresa_id: String(empresaId),
-            auth_version: authVersion,
-            razon_social: razonSocial ?? '',
-            nombre_asesor: nombreAsesor ?? '',
-          },
-        },
-        { onConflict: 'tenant_id,provider' },
-      )
-    if (upsertErr) {
-      return {
-        ok: false,
-        error: `Error guardando integración: ${upsertErr.message}`,
-      }
-    }
-
-    revalidatePath('/dashboard/integrations/aveonline')
-    return { ok: true }
+    const result = await connectAveonlineCore(sb, m.tenant_id, u?.email, {
+      usuario: (formData.get('usuario') as string) || '',
+      password: (formData.get('password') as string) || '',
+      authVersion: (formData.get('auth_version') as string) || 'v1.0',
+      tiempoToken: parseInt(tiempoTokenRaw, 10) || 100000,
+    })
+    if (result.ok) revalidatePath('/dashboard/integrations/aveonline')
+    return result
   }
 
   // ─── Server Action: disconnectAveonline ──────────────────────────────────
@@ -277,19 +98,9 @@ export default async function AveonlinePanelPage({
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
       return { ok: false, error: 'Sin permisos.' }
     }
-
-    // Marcar status=disconnected (no borrar row para preservar audit).
-    // El password sigue en Vault — limpieza manual si tenant lo solicita
-    // (Habeas Data SAR endpoint cubre eso).
-    const { error } = await sb
-      .from('tenant_integrations')
-      .update({ status: 'disconnected' })
-      .eq('tenant_id', m.tenant_id)
-      .eq('provider', 'aveonline')
-
-    if (error) return { ok: false, error: `Error: ${error.message}` }
-    revalidatePath('/dashboard/integrations/aveonline')
-    return { ok: true }
+    const result = await disconnectAveonlineCore(sb, m.tenant_id)
+    if (result.ok) revalidatePath('/dashboard/integrations/aveonline')
+    return result
   }
 
   // ─── Lookup data ──────────────────────────────────────────────────────────

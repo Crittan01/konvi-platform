@@ -45,8 +45,13 @@ interface Props {
   waMsg?: string
   enviaTest?: string
   enviaMsg?: string
+  aveTest?: string
+  aveMsg?: string
   saveEnviaKey: (fd: FormData) => Promise<void>
   disconnectEnvia: () => Promise<void>
+  saveAveonline: (fd: FormData) => Promise<void>
+  disconnectAveonline: () => Promise<void>
+  testAveonline: () => Promise<void>
   // (Sem 7 F2 cierre) Envia carriers + capabilities movidos al panel
   // dedicado /integrations/envia (tabs Carriers + Capacidades).
   disconnectMeli: () => Promise<void>
@@ -118,7 +123,9 @@ export function IntegrationsManager(props: Props) {
     tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam,
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
+    aveTest, aveMsg,
     saveEnviaKey, disconnectEnvia,
+    saveAveonline, disconnectAveonline, testAveonline,
     disconnectMeli,
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
@@ -131,11 +138,11 @@ export function IntegrationsManager(props: Props) {
 
   // Limpiar params de test/conexión de la URL después de 4 segundos
   useEffect(() => {
-    const hasResult = waTest || enviaTest || tgTest || connectedParam
+    const hasResult = waTest || enviaTest || aveTest || tgTest || connectedParam
     if (!hasResult) return
     const t = setTimeout(() => router.replace(pathname), 4000)
     return () => clearTimeout(t)
-  }, [waTest, enviaTest, tgTest, connectedParam, router, pathname])
+  }, [waTest, enviaTest, aveTest, tgTest, connectedParam, router, pathname])
 
   const [activeFilter, setActiveFilter] = useState<Category>('todas')
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -264,6 +271,23 @@ export function IntegrationsManager(props: Props) {
           <div>
             <p className="font-medium">Error al probar Envia</p>
             {enviaMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(enviaMsg)}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Banners Aveonline test/connect */}
+      {aveTest === 'success' && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Aveonline verificado — credenciales válidas. El bot puede cotizar con tus carriers asignados.
+        </div>
+      )}
+      {aveTest === 'error' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Error al conectar/probar Aveonline</p>
+            {aveMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(aveMsg)}</p>}
           </div>
         </div>
       )}
@@ -526,9 +550,11 @@ export function IntegrationsManager(props: Props) {
 
         {/* ── Aveonline ─────────────────────────────────────────────────────── */}
         {/*
-          Provider alternativo a Envia (ADR-0019). Tarjeta minimal: status +
-          link a panel completo /integrations/aveonline donde está el form
-          de auth inline. NO duplica form aquí — mantiene UI lean.
+          Provider alternativo a Envia (ADR-0019). Tarjeta paritaria con
+          Envia/Wompi/WhatsApp: cuando connected muestra meta + acciones
+          Probar/Desconectar. Cuando disconnected expone form inline con
+          usuario + password. Config avanzada (auth_version, tiempo_token)
+          vive en /integrations/aveonline.
         */}
         {visibleCards.includes('aveonline') && (
           <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-500/30' : 'border-border'}`}>
@@ -540,14 +566,14 @@ export function IntegrationsManager(props: Props) {
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">Aveonline</p>
-                    <p className="text-[11px] text-muted-foreground truncate">Shipping (alt. Envia)</p>
+                    <p className="text-[11px] text-muted-foreground truncate">Shipping multi-carrier Colombia</p>
                   </div>
                 </div>
                 <StatusBadge connected={aveonlineConnected} colorClass="bg-cyan-500/15 text-cyan-400 border-cyan-500/30" />
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
-              <p className="text-xs text-muted-foreground">Cotiza envíos multi-carrier en Colombia con COD nativo (Ecart Pay). Alternativa a Envia — un solo provider activo per tenant.</p>
+              <p className="text-xs text-muted-foreground">Cotiza envíos multi-carrier en Colombia con COD nativo (Ecart Pay).</p>
               {aveonlineConnected ? (
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-2">
@@ -560,6 +586,12 @@ export function IntegrationsManager(props: Props) {
                       value={String(aveonlineInt.meta?.auth_version ?? 'v1.0')}
                     />
                   </div>
+                  {aveonlineInt.meta?.nombre_asesor && (
+                    <MetaPill
+                      label="Asesor logístico"
+                      value={String(aveonlineInt.meta.nombre_asesor)}
+                    />
+                  )}
                   <a
                     href="/dashboard/integrations/aveonline"
                     className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
@@ -572,24 +604,76 @@ export function IntegrationsManager(props: Props) {
                       →
                     </span>
                   </a>
+                  {(isOwner || canWrite) && (
+                    <div className="flex gap-2">
+                      <form action={testAveonline} className="flex-1">
+                        <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
+                          className="w-full h-8 text-xs gap-1.5">
+                          <SendHorizonal className="h-3 w-3" /> Probar
+                        </SubmitButton>
+                      </form>
+                      <DisconnectIntegrationButton
+                        provider="aveonline" providerLabel="Aveonline"
+                        action={disconnectAveonline}
+                        className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      />
+                    </div>
+                  )}
                 </div>
-              ) : isOwner ? (
-                <div className="space-y-2.5">
-                  <a
-                    href="/dashboard/integrations/aveonline"
-                    className="flex items-center justify-between rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-medium text-cyan-400 hover:bg-cyan-500/10 transition-colors group"
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Plug className="h-3 w-3" />
-                      Conectar cuenta Aveonline
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
-                      →
-                    </span>
-                  </a>
-                  <p className="text-[11px] text-muted-foreground">
-                    Cuenta DEMO disponible para pruebas: <span className="font-mono">demointegracion</span> / <span className="font-mono">demointegra2021</span>
-                  </p>
+              ) : isOwner || canWrite ? (
+                <div className="space-y-3">
+                  <div className="flex justify-end">
+                    <ConfigToggle open={!!open.aveonline} onToggle={() => toggle('aveonline')} />
+                  </div>
+                  {open.aveonline && (
+                    <>
+                      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Pasos de configuración</p>
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              Ingresa el <strong className="text-foreground font-medium">usuario y password</strong> de tu cuenta Aveonline (la misma que usas en <span className="font-mono text-foreground">app.aveonline.co</span>).
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              Validamos contra <span className="font-mono text-[10px] text-foreground">autenticarusuario.php</span> antes de guardar. El password se almacena cifrado en Supabase Vault.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              ¿No tienes cuenta? Cuenta DEMO: <span className="font-mono text-foreground">demointegracion</span> / <span className="font-mono text-foreground">demointegra2021</span>.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <form action={saveAveonline} className="space-y-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Usuario</Label>
+                          <Input name="usuario" required minLength={3} placeholder="mi-empresa-ecommerce" autoComplete="username" className="h-8 text-xs font-mono" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Password</Label>
+                          <Input type="password" name="password" required minLength={4} placeholder="••••••••" autoComplete="current-password" className="h-8 text-xs font-mono" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Versión de auth</Label>
+                          <select name="auth_version" defaultValue="v1.0"
+                            className="w-full h-8 rounded-md border border-input bg-background text-xs px-2 text-foreground">
+                            <option value="v1.0">v1.0 — legacy (recomendado)</option>
+                            <option value="v2.0">v2.0 — JWT 12h fijo</option>
+                          </select>
+                        </div>
+                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!"
+                          className="w-full h-8 text-xs gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white">
+                          <Package className="h-3.5 w-3.5" /> Conectar Aveonline
+                        </SubmitButton>
+                      </form>
+                    </>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">Solo el Administrador puede configurar esta integración.</p>
