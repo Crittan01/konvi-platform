@@ -867,10 +867,15 @@ def _generate_shipping_guide(
         return
 
     addr = contact.get("address") or {}
-    if not addr.get("city") or not addr.get("street"):
+    # Bug runtime KAIU 2026-05-24: schema mismatch — contacts.address usa
+    # `line1` (canónico), tenants.shipping_origin usa `street`. Aquí
+    # tomamos `line1` con fallback a `street` para tolerar ambos.
+    addr_street = addr.get("line1") or addr.get("street") or ""
+    if not addr.get("city") or not addr_street:
         logger.info(
-            "[WOMPI][AVEONLINE] order=%s sin dirección — skip guía",
-            order_id[:8],
+            "[WOMPI][AVEONLINE] order=%s sin dirección — skip guía "
+            "(addr keys=%s)",
+            order_id[:8], list(addr.keys()),
         )
         return
 
@@ -925,7 +930,7 @@ def _generate_shipping_guide(
         cli = AveonlineClient(tenant_id, supabase)
 
         addr_full = " ".join(filter(None, [
-            addr.get("street"),
+            addr_street,
             f"apto {addr['apartment']}" if addr.get("apartment") else None,
             addr.get("building_type") or None,
             f"torre {addr['tower']}" if addr.get("tower") else None,
@@ -958,11 +963,30 @@ def _generate_shipping_guide(
         }
         simulate = os.getenv("AVEONLINE_GENERATE_REAL_GUIDES", "false").lower() != "true"
 
+        # Bug runtime KAIU 2026-05-24: Aveonline rechaza city raw
+        # ("Bogotá D.C." → "No se pudo generar la guia."). Requiere
+        # formato canónico "BOGOTA(CUNDINAMARCA)". Aplicamos el mismo
+        # normalizador del cotizador para coherencia origin/destination.
+        from integrations.aveonline_client import to_aveonline_city_format
+
+        origin_city_norm = to_aveonline_city_format(
+            origin.get("city") or "", origin.get("state") or "",
+        )
+        dest_city_norm = to_aveonline_city_format(
+            addr.get("city") or "", addr.get("state") or "",
+        )
+
         loop = asyncio.new_event_loop()
         try:
             result = loop.run_until_complete(cli.generate_guide(
-                origin={"dane": origin.get("dane_code") or "", "city": origin.get("city") or ""},
-                destination={"dane": "", "city": addr.get("city")},
+                origin={
+                    "dane": origin.get("dane_code") or "",
+                    "city": origin_city_norm or origin.get("city") or "",
+                },
+                destination={
+                    "dane": "",
+                    "city": dest_city_norm or addr.get("city") or "",
+                },
                 package=package,
                 carrier={"idtransportador": carrier_rate_id},
                 sender=sender,
