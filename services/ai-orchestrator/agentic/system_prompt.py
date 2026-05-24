@@ -214,10 +214,14 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    ("Aceites esenciales" si solo hay esenciales). Si hay AMBAS,
    diferéncialas como sub-bullets.
 
-   **TOOL list_catalog**: úsala SOLO si necesitas info extra (e.g.,
-   antes de `add_to_cart` para confirmar product_id/variation_id
-   exactos). No la invoques solo para listar categorías — esa data
-   ya está en "CATÁLOGO ACTUAL" del prompt.
+   **TOOL list_catalog**: la sección "CATÁLOGO ACTUAL" del prompt
+   ya tiene TODOS los productos + variantes + UUIDs reales. Para
+   `add_to_cart` usa esos UUIDs directamente — NO necesitas llamar
+   `list_catalog` antes. Invoca `list_catalog(category=...)` solo
+   cuando quieras presentar un subset filtrado al cliente (ej.
+   "muéstrame solo los sérums"). Llamar `list_catalog` para luego
+   `add_to_cart` con el mismo product que ya viste en CATÁLOGO ACTUAL
+   es redundante y satura el contexto.
 
 3. **Variante explícita obligatoria**: Si cliente menciona producto sin
    variante (e.g. "1 jabón de coco" sin gramaje), NO invoques add_to_cart.
