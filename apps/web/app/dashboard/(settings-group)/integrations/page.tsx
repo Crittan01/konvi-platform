@@ -2,6 +2,11 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { IntegrationsManager } from './_components/integrations-manager'
+import {
+  connectAveonline as connectAveonlineCore,
+  disconnectAveonline as disconnectAveonlineCore,
+  testAveonline as testAveonlineCore,
+} from '@/lib/aveonline-actions'
 
 export const metadata = {
   title: 'Integraciones — Configuración',
@@ -19,6 +24,7 @@ export default async function IntegrationsPage({
     tg_test?: string; tg_msg?: string
     wa_test?: string; wa_msg?: string
     envia_test?: string; envia_msg?: string
+    ave_test?: string; ave_msg?: string
   }
 }) {
   const supabase = createClient()
@@ -483,6 +489,55 @@ export default async function IntegrationsPage({
     revalidatePath('/dashboard/integrations')
   }
 
+  // ── Aveonline (rev. 107 — hub paridad con resto de cards) ─────────────────
+  // Lógica core en lib/aveonline-actions.ts. Estos wrappers solo agregan
+  // verificación de permisos + redirect con flags ave_test/ave_msg.
+
+  async function saveAveonline(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const result = await connectAveonlineCore(sb, m.tenant_id, u?.email, {
+      usuario: (formData.get('usuario') as string) || '',
+      password: (formData.get('password') as string) || '',
+      authVersion: (formData.get('auth_version') as string) || 'v1.0',
+      tiempoToken: 100000,
+    })
+    revalidatePath('/dashboard/integrations')
+    if (!result.ok) {
+      redirect(
+        `/dashboard/integrations?ave_test=error&ave_msg=${encodeURIComponent(result.error ?? 'Error desconocido')}`,
+      )
+    }
+  }
+
+  async function disconnectAveonline() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    await disconnectAveonlineCore(sb, m.tenant_id)
+    revalidatePath('/dashboard/integrations')
+  }
+
+  async function testAveonline() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const result = await testAveonlineCore(sb, m.tenant_id)
+    if (!result.ok) {
+      redirect(
+        `/dashboard/integrations?ave_test=error&ave_msg=${encodeURIComponent(result.error ?? 'Error desconocido')}`,
+      )
+    }
+    redirect('/dashboard/integrations?ave_test=success')
+  }
+
   return (
     <IntegrationsManager
       waInt={waInt}
@@ -510,8 +565,13 @@ export default async function IntegrationsPage({
       waMsg={searchParams.wa_msg}
       enviaTest={searchParams.envia_test}
       enviaMsg={searchParams.envia_msg}
+      aveTest={searchParams.ave_test}
+      aveMsg={searchParams.ave_msg}
       saveEnviaKey={saveEnviaKey}
       disconnectEnvia={disconnectEnvia}
+      saveAveonline={saveAveonline}
+      disconnectAveonline={disconnectAveonline}
+      testAveonline={testAveonline}
       disconnectMeli={disconnectMeli}
       saveWompi={saveWompi}
       disconnectWompi={disconnectWompi}
