@@ -50,10 +50,13 @@ class ListCatalogTool:
 
     name = "list_catalog"
     description = (
-        "Lista los productos disponibles del tenant con sus variantes "
-        "(presentaciones) y precios. Úsalo ANTES de cualquier "
-        "`add_to_cart` para conocer los UUIDs válidos de product/variant. "
-        "Filtra opcionalmente por categoría (jabón, aceite, sérum)."
+        "Lista productos del tenant con variantes y precios. NOTA: "
+        "la sección CATÁLOGO ACTUAL del system prompt ya tiene el "
+        "catálogo completo embebido con UUIDs reales — úsalo de ahí "
+        "directamente para `add_to_cart`. Invoca `list_catalog` solo "
+        "cuando necesites filtrar por categoría específica (ej. "
+        "'sérum', 'jabón') para presentar al cliente un subset "
+        "organizado."
     )
     args_schema = ListCatalogArgs
 

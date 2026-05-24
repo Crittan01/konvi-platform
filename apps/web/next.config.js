@@ -65,6 +65,15 @@ const remotePatterns = [
     protocol: 'https',
     hostname: 'mlstatic.com',
   },
+  // Rev. 107 fix runtime KAIU 2026-05-24: 16 productos KAIU poblados con
+  // cover_image_url apuntando a placehold.co (placeholders profesionales
+  // HTTPS) por defecto cuando tenant no sube imágenes reales. Sin esto,
+  // next/image rechaza con "hostname not configured" → render falla en
+  // /dashboard/catalog. Founder reportó en web.log.
+  {
+    protocol: 'https',
+    hostname: 'placehold.co',
+  },
 ]
 if (supabaseStorageHost) {
   remotePatterns.unshift({

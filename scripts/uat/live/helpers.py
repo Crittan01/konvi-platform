@@ -167,7 +167,7 @@ def reset_known_customer(
     SB.table("contacts").update({
         "consent_given": True,
         "consent_given_at": "2026-05-01T00:00:00Z",
-        "consent_source": "whatsapp_inbound",
+        "consent_source": "whatsapp",
         "name": name,
         "email": email,
         "document_type": document_type,

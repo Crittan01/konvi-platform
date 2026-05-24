@@ -119,13 +119,16 @@ class AddToCartTool:
 
     name = "add_to_cart"
     description = (
-        "Agrega un producto con variante específica al carrito. ANTES de "
-        "invocar este tool, DEBES haber llamado `list_catalog` y obtenido "
-        "el `product_id` Y `variation_id` exactos. Si el cliente no "
-        "especificó variante (e.g. solo dijo 'jabón de coco' sin gramaje), "
-        "NO invoques este tool — pregúntale la variante primero. "
-        "Si emites este tool, el item queda en el carrito; reflejá eso "
-        "honestamente en tu respuesta al cliente."
+        "Agrega un producto con variante específica al carrito. Usa "
+        "`product_id` + `variation_id` literales de la sección "
+        "CATÁLOGO ACTUAL del system prompt — esos UUIDs están "
+        "embebidos para que NO necesites llamar `list_catalog` cada "
+        "vez. NO inventes UUIDs; si un producto no aparece en "
+        "CATÁLOGO ACTUAL, NO existe. Si el cliente no especificó "
+        "variante (e.g. solo dijo 'jabón de coco' sin gramaje), NO "
+        "invoques este tool — pregúntale la variante primero. "
+        "Si emites este tool, el item queda en el carrito; reflejá "
+        "eso honestamente en tu respuesta al cliente."
     )
     args_schema = AddToCartArgs
 
