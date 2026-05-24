@@ -424,3 +424,186 @@ async def disconnect_meli(
         "status": "disconnected", "credentials": {}, "meta": {},
     }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
     logger.info("MeLi desconectado para tenant %s", tenant_id)
+
+
+# ─── Aveonline guide dry-run (UAT aislado, NO en producción flow) ────────────
+
+
+class AveonlineGuideDryRunReq(BaseModel):
+    """Request del endpoint UAT — `POST /aveonline/guide-dry-run`.
+
+    Test aislado de `AveonlineClient.generate_guide()` con una orden real
+    del tenant sin pasar por wompi_webhook hooks. Útil para:
+      • Certificar body canónico vs dossier sec 4.
+      • Identificar errores específicos (idagente missing, transportador
+        inválido, etc.) sin acoplar a flow conversación.
+      • Una vez certificado standalone, integrar a wompi_webhook con
+        confianza.
+
+    simulate=True por default — Aveonline NO factura. Pone
+    `bloquegenerarguia="0"` y retorna guía dummy con shape canónico.
+    Para guía real facturable: simulate=False (riesgo: factura asociada).
+    """
+    order_id: str = Field(..., min_length=8, max_length=64)
+    simulate: bool = Field(
+        default=True,
+        description="True=NO factura (bloquegenerarguia=0). False=guía real.",
+    )
+
+
+@router.post("/aveonline/guide-dry-run")
+async def aveonline_guide_dry_run(
+    req: AveonlineGuideDryRunReq,
+    tenant_id: str = Depends(get_current_tenant),
+    role: str = Depends(get_current_role),
+    supabase: Client = Depends(get_service_client),
+):
+    """UAT aislado de generate_guide. Solo `owner` puede invocar.
+
+    Lee order + contact del tenant, construye payload canónico, invoca
+    `AveonlineClient.generate_guide()`, retorna response detallado +
+    diagnostics. NO persiste nada en `shipments` (es dry-run pure).
+    """
+    if role != "owner":
+        raise HTTPException(403, "Solo el owner puede ejecutar dry-run")
+
+    # 1. Cargar order + contact.
+    order_res = (
+        supabase.table("orders")
+        .select(
+            "id, total_amount, shipping_cost, notes, contact_id, "
+            "contacts(name, email, phone, shipping_phone, "
+            "document_type, document_number, address)"
+        )
+        .eq("id", req.order_id)
+        .eq("tenant_id", tenant_id)
+        .maybe_single()
+        .execute()
+    )
+    order = (order_res.data if order_res else None) or {}
+    if not order.get("id"):
+        raise HTTPException(404, f"Order {req.order_id[:8]} no encontrada")
+    contact = order.get("contacts") or {}
+    if not contact.get("name") or not contact.get("phone"):
+        raise HTTPException(
+            422,
+            "Order tiene contact incompleto (falta name o phone). "
+            "Aveonline rechazará la guía con error -9 o -12.",
+        )
+    address = contact.get("address") or {}
+
+    # 2. Cargar shipping_meta del cart (carrier seleccionado).
+    cart_res = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta")
+        .eq("tenant_id", tenant_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    cart = (cart_res.data or [{}])[0]
+    shipping_meta = cart.get("shipping_meta") or {}
+    rate_id = shipping_meta.get("rate_id")
+    carrier_name = shipping_meta.get("carrier") or ""
+    if not rate_id:
+        return {
+            "ok": False,
+            "error": "Cart no tiene rate_id (carrier) seleccionado. "
+                     "Necesitas correr quote_shipping + select_carrier antes.",
+            "code": "NO_CARRIER_SELECTED",
+            "diagnostics": {
+                "order_id": req.order_id,
+                "shipping_meta": shipping_meta,
+            },
+        }
+
+    # 3. Cargar tenant shipping origin.
+    tenant_res = (
+        supabase.table("tenants")
+        .select(
+            "name, shipping_origin_city, shipping_origin_state, "
+            "shipping_origin_dane, shipping_origin_address, "
+            "shipping_origin_nit, shipping_origin_phone, "
+            "shipping_origin_email, idagente"
+        )
+        .eq("id", tenant_id).single().execute()
+    )
+    tenant = tenant_res.data or {}
+
+    # 4. Construir payload canónico.
+    from integrations.aveonline_client import (
+        AveonlineClient, AveonlineAuthError,
+        AveonlineTransientError, AveonlinePermanentError,
+    )
+    client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
+
+    origin = {
+        "dane": str(tenant.get("shipping_origin_dane") or ""),
+        "city": str(tenant.get("shipping_origin_city") or ""),
+    }
+    destination = {
+        "dane": "",  # caller no tiene DANE destino — uso city
+        "city": str(address.get("city") or ""),
+    }
+    # Peso/dimensiones por default si la order no los tiene.
+    package = {
+        "weight_kg": 0.5,
+        "length_cm": 15,
+        "width_cm": 10,
+        "height_cm": 5,
+        "declared_value_cop": int(order.get("total_amount") or 50000),
+        "units": 1,
+        "content": "Productos KAIU — dry-run",
+    }
+    carrier_payload = {
+        "idtransportador": str(rate_id),
+        "service_level": str(shipping_meta.get("service_level") or ""),
+    }
+    sender = {
+        "nit": str(tenant.get("shipping_origin_nit") or ""),
+        "nombre": str(tenant.get("name") or ""),
+        "direccion": str(tenant.get("shipping_origin_address") or ""),
+        "barrio": "",
+        "telefono": str(tenant.get("shipping_origin_phone") or ""),
+        "celular": str(tenant.get("shipping_origin_phone") or ""),
+        "email": str(tenant.get("shipping_origin_email") or ""),
+    }
+    recipient = {
+        "doc": str(contact.get("document_number") or ""),
+        "nombre": str(contact.get("name") or ""),
+        "direccion": str(address.get("line1") or ""),
+        "barrio": "",
+        "telefono": str(contact.get("shipping_phone") or contact.get("phone") or ""),
+        "celular": str(contact.get("shipping_phone") or contact.get("phone") or ""),
+        "email": str(contact.get("email") or ""),
+    }
+
+    # 5. Invocar generate_guide.
+    try:
+        result = await client.generate_guide(
+            origin=origin, destination=destination,
+            package=package, carrier=carrier_payload,
+            sender=sender, recipient=recipient,
+            simulate=req.simulate,
+        )
+    except AveonlineAuthError as exc:
+        return {"ok": False, "error": str(exc), "code": "AUTH_ERROR"}
+    except AveonlineTransientError as exc:
+        return {"ok": False, "error": str(exc), "code": "TRANSIENT_ERROR"}
+    except AveonlinePermanentError as exc:
+        return {"ok": False, "error": str(exc), "code": "PERMANENT_ERROR"}
+
+    # 6. Retornar response + diagnostics.
+    return {
+        "ok": bool(result.get("ok")),
+        "result": result,
+        "diagnostics": {
+            "tenant_idagente": tenant.get("idagente"),
+            "carrier_selected": carrier_name,
+            "rate_id": rate_id,
+            "origin": origin,
+            "destination": destination,
+            "simulate": req.simulate,
+            "warning_idagente_missing": not tenant.get("idagente"),
+        },
+    }
