@@ -232,36 +232,73 @@ def _process_wompi_event(payload: dict) -> None:
     else:
         logger.info("[WOMPI] sin_conversation_id order=%s — sin notificación WhatsApp", order_id)
 
-    # ── 7.5. Generación guía Aveonline post-pago (best-effort) ────────────────
-    # IMPORTANTE: este paso va ANTES del email (paso 7.6) para que el
-    # email pueda incluir tracking_number + URL guía + carrier. Si guía
-    # falla, email aún se envía pero sin sección tracking.
+    # ── 7.5. Email Etapa 1: "Pago recibido" (Resend, best-effort) ─────────────
+    # Inmediato — desglose pedido + total. SIN tracking (guía aún no
+    # generada). Founder UX 2026-05-24: separar pago de envío en 2 emails
+    # estilo Amazon/MercadoLibre. Mejor UX si Aveonline falla — cliente
+    # igual tiene confirmación pago.
+    try:
+        _send_payment_confirmation_email(
+            supabase=supabase, order_id=order_id, tenant_id=tenant_id,
+            template_mode="payment_confirmed",
+        )
+    except Exception as e:
+        logger.warning(
+            "[WOMPI][EMAIL] payment_confirmed falló order=%s err=%s",
+            order_id, e,
+        )
+
+    # ── 7.6. Generación guía Aveonline (best-effort, ~10-15s) ─────────────────
     # simulate=True por default — tenant setea AVEONLINE_GENERATE_REAL_GUIDES
     # =true para guías facturables reales.
+    guide_ok = False
     try:
-        _generate_shipping_guide(
-            supabase=supabase,
-            order_id=order_id,
-            tenant_id=tenant_id,
-        )
+        guide_ok = _generate_shipping_guide(
+            supabase=supabase, order_id=order_id, tenant_id=tenant_id,
+        ) is True
     except Exception as e:
         logger.warning(
             "[WOMPI][AVEONLINE] generación guía falló order=%s err=%s",
             order_id, e,
         )
 
-    # ── 7.6. Email post-pago al cliente (Resend, best-effort) ─────────────────
-    # Si la guía paso 7.5 se generó, el email incluye sección tracking
-    # con tracking_number + carrier + URL PDF guía. Si falló, email se
-    # envía igual con desglose pedido (cliente percibe pago OK).
-    try:
-        _send_payment_confirmation_email(
-            supabase=supabase,
-            order_id=order_id,
-            tenant_id=tenant_id,
-        )
-    except Exception as e:
-        logger.warning("[WOMPI][EMAIL] envío post-pago falló order=%s err=%s", order_id, e)
+    # ── 7.7. Etapa 2 (solo si guía OK): Email + WhatsApp "Envío en camino" ────
+    # Si Aveonline rechazó la guía → cliente solo recibe email/WA pago
+    # confirmado (etapa 1). El operador puede generar manual desde Inbox.
+    if guide_ok:
+        try:
+            _send_payment_confirmation_email(
+                supabase=supabase, order_id=order_id, tenant_id=tenant_id,
+                template_mode="shipment_dispatched",
+            )
+        except Exception as e:
+            logger.warning(
+                "[WOMPI][EMAIL] shipment_dispatched falló order=%s err=%s",
+                order_id, e,
+            )
+        # Notif WhatsApp con tracking — lee shipment row recién creado.
+        try:
+            sh_res = (
+                supabase.table("shipments")
+                .select("carrier, tracking_number, tracking_url")
+                .eq("order_id", order_id).limit(1).execute()
+            )
+            sh_row = (sh_res.data or [{}])[0]
+            if conversation_id and sh_row.get("tracking_number"):
+                _notify_client_shipment_dispatched(
+                    supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    order_id=order_id,
+                    carrier=sh_row.get("carrier") or "",
+                    tracking_number=sh_row.get("tracking_number") or "",
+                    tracking_url=sh_row.get("tracking_url") or "",
+                )
+        except Exception as e:
+            logger.warning(
+                "[WOMPI_WA_SHIPPED] notif envío en camino falló "
+                "order=%s err=%s", order_id, e,
+            )
 
     # ── 8. Marcar el evento como procesado (audit trail). Si falla este UPDATE
     # no es crítico — el dedup ya bloqueó duplicados al inicio.
@@ -608,17 +645,13 @@ def _confirm_order(supabase, order_id: str, tenant_id: str) -> None:
     _decrement_stock_on_confirm(supabase, order_id, tenant_id)
 
 
-def _notify_client_payment_approved(
-    supabase, *, conversation_id: str, tenant_id: str, order_id: str
+def _enqueue_whatsapp_outbound(
+    supabase, *, conversation_id: str, tenant_id: str, text: str,
+    log_tag: str,
 ) -> None:
-    short_id = order_id[:8].upper()
-    text = (
-        f"*¡Pago confirmado!*\n\n"
-        f"Tu pedido *#{short_id}* está registrado y en preparación. "
-        f"Pronto te enviamos información de tu envío. ¡Gracias por tu compra!"
-    )
-
-    # Persistir mensaje outbound
+    """Encola un outbound WhatsApp + persiste en messages. Helper común
+    para los 2 mensajes post-pago (pago confirmado + envío despachado).
+    """
     msg_insert = supabase.table("messages").insert({
         "conversation_id": conversation_id,
         "tenant_id": tenant_id,
@@ -628,28 +661,22 @@ def _notify_client_payment_approved(
         "processed": False,
         "processing_status": "pending",
     }).execute()
-
-    if not (msg_insert.data):
-        logger.warning("[WOMPI] No se pudo persistir mensaje outbound para conv %s", conversation_id)
+    if not msg_insert.data:
+        logger.warning("[%s] no_persisted_outbound conv=%s", log_tag, conversation_id)
         return
-
     new_msg = msg_insert.data[0]
-
-    # Obtener customer_phone de la conversación
     conv_res = (
         supabase.table("conversations")
         .select("customer_phone")
         .eq("id", conversation_id)
         .eq("tenant_id", tenant_id)
-        .limit(1)
-        .execute()
+        .limit(1).execute()
     )
     conv = (conv_res.data or [{}])[0]
     customer_phone = conv.get("customer_phone", "")
     if not customer_phone:
-        logger.warning("[WOMPI] Sin customer_phone para conv %s — skip outbound", conversation_id)
+        logger.warning("[%s] sin_customer_phone conv=%s", log_tag, conversation_id)
         return
-
     queue_payload = {
         "event_type": "whatsapp.outbound.send",
         "tenant_id": tenant_id,
@@ -664,19 +691,76 @@ def _notify_client_payment_approved(
         "enqueue_whatsapp_outbound_message",
         {"p_message": queue_payload, "p_delay": 0},
     ).execute()
-    logger.info("[WOMPI] Notificación de pago encolada para conv %s", conversation_id)
+    logger.info("[%s] outbound encolado conv=%s", log_tag, conversation_id)
+
+
+def _notify_client_payment_approved(
+    supabase, *, conversation_id: str, tenant_id: str, order_id: str
+) -> None:
+    """Etapa 1: pago APPROVED — confirmación inmediata sin tracking."""
+    short_id = order_id[:8].upper()
+    text = (
+        f"*¡Pago confirmado!* ✅\n\n"
+        f"Tu pedido *#{short_id}* está registrado. "
+        f"Estamos preparando tu guía de envío — te aviso aquí mismo "
+        f"cuando tu envío salga con el número de rastreo. "
+        f"¡Gracias por tu compra!"
+    )
+    _enqueue_whatsapp_outbound(
+        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        text=text, log_tag="WOMPI_WA_PAID",
+    )
+
+
+def _notify_client_shipment_dispatched(
+    supabase, *, conversation_id: str, tenant_id: str, order_id: str,
+    carrier: str, tracking_number: str, tracking_url: str,
+    eta: str = "",
+) -> None:
+    """Etapa 2: guía Aveonline generada — confirma envío + tracking real.
+
+    Mensaje natural separado del de pago. Cliente recibe primero
+    "Pago confirmado" inmediato, después este cuando la guía esté lista
+    (~14s en promedio). Mantiene momentum + transparencia.
+    """
+    short_id = order_id[:8].upper()
+    eta_str = f" (entrega estimada: {eta})" if eta else ""
+    carrier_str = (carrier or "tu transportadora").strip()
+    tracking_line = (
+        f"\n\n🔍 *Rastrea tu envío*:\n{tracking_url}"
+        if tracking_url else ""
+    )
+    text = (
+        f"📦 *Tu envío está en camino*\n\n"
+        f"Pedido *#{short_id}* salió con *{carrier_str}*{eta_str}.\n"
+        f"Guía: `{tracking_number}`"
+        f"{tracking_line}"
+    )
+    _enqueue_whatsapp_outbound(
+        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        text=text, log_tag="WOMPI_WA_SHIPPED",
+    )
 
 
 # ─── Email post-pago al cliente (Rev. 107) ────────────────────────────────────
 
 def _send_payment_confirmation_email(
     supabase, *, order_id: str, tenant_id: str,
+    template_mode: str = "payment_confirmed",
 ) -> None:
     """Envía email al cliente con el detalle del pedido pagado.
 
     Best-effort: si falla por cualquier razón (RESEND_API_KEY ausente,
-    contact sin email, network) NO bloquea el flow del webhook. El
-    WhatsApp ya fue enviado en el paso 7.
+    contact sin email, network) NO bloquea el flow del webhook.
+
+    `template_mode`:
+      • "payment_confirmed" (etapa 1, post-Wompi APPROVED): email
+        "Pago recibido" con desglose pedido + total. SIN tracking
+        (aún no hay guía). Subject: "Pago recibido #{ID}".
+      • "shipment_dispatched" (etapa 2, post-guía Aveonline OK): email
+        "Tu envío está en camino" con tracking + carrier + botones
+        rastrear/descargar guía. Subject: "Tu envío está en camino
+        #{ID}".
 
     Lee Supabase de forma sync (httpx.Client) — `_process_wompi_event`
     es BackgroundTask sync. Evitamos asyncio.run() para mantener
@@ -764,21 +848,37 @@ def _send_payment_confirmation_email(
     except Exception:
         pass
 
-    html = _compose_payment_email_html(
-        customer_name=name,
-        order_short=order_short,
-        items=items,
-        subtotal=subtotal,
-        shipping=shipping,
-        total=total,
-        carrier=carrier,
-        tenant_name=tenant_name,
-        tracking_number=tracking_number,
-        tracking_url=tracking_url,
-        label_url=label_url,
-        shipment_status=shipment_status,
-    )
-    subject = f"Confirmación pedido #{order_short} — {tenant_name or 'tu compra'}"
+    # Si modo "payment_confirmed" no incluimos tracking aunque exista
+    # (el flow está orquestado para enviar pago primero, despacho después).
+    if template_mode == "payment_confirmed":
+        html = _compose_payment_email_html(
+            customer_name=name, order_short=order_short, items=items,
+            subtotal=subtotal, shipping=shipping, total=total,
+            carrier=carrier, tenant_name=tenant_name,
+            # NO tracking en etapa 1 — guía aún no generada.
+            tracking_number="", tracking_url="", label_url="",
+            shipment_status="",
+        )
+        subject = f"Pago recibido — Pedido #{order_short}"
+    elif template_mode == "shipment_dispatched":
+        html = _compose_shipment_dispatched_email_html(
+            customer_name=name, order_short=order_short, items=items,
+            subtotal=subtotal, shipping=shipping, total=total,
+            carrier=carrier, tenant_name=tenant_name,
+            tracking_number=tracking_number, tracking_url=tracking_url,
+            label_url=label_url, shipment_status=shipment_status,
+        )
+        subject = f"📦 Tu envío está en camino — Pedido #{order_short}"
+    else:
+        # Default fallback: comportamiento previo (email único con todo).
+        html = _compose_payment_email_html(
+            customer_name=name, order_short=order_short, items=items,
+            subtotal=subtotal, shipping=shipping, total=total,
+            carrier=carrier, tenant_name=tenant_name,
+            tracking_number=tracking_number, tracking_url=tracking_url,
+            label_url=label_url, shipment_status=shipment_status,
+        )
+        subject = f"Confirmación pedido #{order_short} — {tenant_name or 'tu compra'}"
 
     from_email = os.getenv(
         "RESEND_FROM_EMAIL", "Konvi <noreply@commerce-ops.local>",
@@ -817,7 +917,7 @@ def _send_payment_confirmation_email(
 
 def _generate_shipping_guide(
     supabase, *, order_id: str, tenant_id: str,
-) -> None:
+) -> bool:
     """Genera guía Aveonline tras pago APPROVED (best-effort).
 
     Solo aplica si el tenant tiene `tenant_shipping_provider_config.
@@ -829,6 +929,12 @@ def _generate_shipping_guide(
 
     Best-effort: si falla, log warning + persiste row pending en
     shipments para que operador genere manual desde Inbox.
+
+    Returns:
+        True si guía generó OK + shipment persistido con tracking_number
+        (caller dispara etapa 2: email "envío en camino" + WA tracking).
+        False si skip (provider != aveonline / contact incompleto /
+        Aveonline rechazó). Caller no dispara etapa 2.
     """
     # 1. Provider check.
     try:
@@ -848,7 +954,7 @@ def _generate_shipping_guide(
             "[WOMPI][AVEONLINE] tenant=%s provider=%s — skip guía (no aveonline)",
             tenant_id, provider or "none",
         )
-        return
+        return False
 
     # 2. Cargar order + contact + tenant shipping_origin + shipping_meta.
     try:
@@ -867,7 +973,7 @@ def _generate_shipping_guide(
         order = order_res.data or {}
     except Exception as exc:
         logger.warning("[WOMPI][AVEONLINE] no pude leer order: %s", exc)
-        return
+        return False
 
     contact = order.get("contacts") or {}
     if not contact.get("name") or not contact.get("phone"):
@@ -875,7 +981,7 @@ def _generate_shipping_guide(
             "[WOMPI][AVEONLINE] order=%s contact incompleto — skip guía",
             order_id[:8],
         )
-        return
+        return False
 
     addr = contact.get("address") or {}
     # Bug runtime KAIU 2026-05-24: schema mismatch — contacts.address usa
@@ -888,7 +994,7 @@ def _generate_shipping_guide(
             "(addr keys=%s)",
             order_id[:8], list(addr.keys()),
         )
-        return
+        return False
 
     # 3. Tenant shipping_origin (sender).
     try:
@@ -907,7 +1013,7 @@ def _generate_shipping_guide(
             "[WOMPI][AVEONLINE] tenant=%s sin shipping_origin completo — skip",
             tenant_id[:8],
         )
-        return
+        return False
 
     # 4. Cart shipping_meta → idtransportador (rate_id).
     try:
@@ -931,7 +1037,7 @@ def _generate_shipping_guide(
             "[WOMPI][AVEONLINE] order=%s sin carrier rate_id — skip",
             order_id[:8],
         )
-        return
+        return False
 
     # 5. Construir payload + invocar generate_guide.
     import asyncio
@@ -1011,7 +1117,7 @@ def _generate_shipping_guide(
             "[WOMPI][AVEONLINE] generate_guide error order=%s: %s",
             order_id[:8], exc,
         )
-        return
+        return False
 
     # Origin/destination address dicts para satisfacer NOT NULL constraint.
     origin_addr_jsonb = {
@@ -1065,7 +1171,7 @@ def _generate_shipping_guide(
             logger.warning(
                 "[WOMPI][AVEONLINE] persist pending shipment falló: %s", exc,
             )
-        return
+        return False
 
     # 6. Persistir shipment con tracking real.
     try:
@@ -1093,6 +1199,8 @@ def _generate_shipping_guide(
         )
     except Exception as exc:
         logger.warning("[WOMPI][AVEONLINE] persist shipment err: %s", exc)
+        return False
+    return True
 
 
 def _fmt_cop(value: int) -> str:
@@ -1211,6 +1319,90 @@ def _compose_payment_email_html(
   <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
     Recibiste este email porque pagaste un pedido. Si no fuiste tú,
     contacta al vendedor inmediatamente.
+  </p>
+</div>
+</body></html>"""
+
+
+def _compose_shipment_dispatched_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    items: list,
+    subtotal: int,
+    shipping: int,
+    total: int,
+    carrier: str,
+    tenant_name: str,
+    tracking_number: str,
+    tracking_url: str,
+    label_url: str,
+    shipment_status: str,
+) -> str:
+    """Email etapa 2: "Tu envío está en camino".
+
+    Foco del mensaje: tracking + carrier + acciones (rastrear/descargar).
+    Recordatorio resumido del pedido al final (no es lo principal —
+    el cliente ya tuvo el email 1 "Pago recibido" con desglose).
+    """
+    is_simulated = (shipment_status or "").lower() == "simulated"
+    sim_tag = (
+        ' <span style="background:#fff3cd;color:#856404;padding:2px 8px;'
+        'border-radius:4px;font-size:11px;font-weight:600">SIMULADA</span>'
+        if is_simulated else ""
+    )
+    carrier_str = (carrier or "tu transportadora").strip()
+    track_btn = (
+        f'<a href="{tracking_url}" style="display:inline-block;background:#2c3e50;'
+        f'color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none;'
+        f'font-weight:600;margin-right:8px;margin-bottom:8px">🚚 Rastrear envío</a>'
+        if tracking_url else ""
+    )
+    label_btn = (
+        f'<a href="{label_url}" style="display:inline-block;background:#fff;'
+        f'color:#2c3e50;padding:12px 22px;border-radius:6px;text-decoration:none;'
+        f'font-weight:600;border:1px solid #2c3e50;margin-bottom:8px">📄 Descargar guía PDF</a>'
+        if label_url else ""
+    )
+    # Resumen compacto del pedido (recordatorio).
+    rows = []
+    for it in items:
+        qty = int(it.get("quantity") or 1)
+        title = str(it.get("title") or "Producto")
+        rows.append(
+            f'<li style="margin:4px 0;color:#5a6772">{qty}× {title}</li>'
+        )
+    items_html = "".join(rows) or "<li>(sin detalle)</li>"
+
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+  <h2 style="margin:0 0 8px;font-size:22px">📦 Tu envío está en camino, {customer_name}{sim_tag}</h2>
+  <p style="margin:0 0 16px;color:#5a6772">
+    Tu pedido <strong>#{order_short}</strong> en <strong>{tenant_name or 'nuestra tienda'}</strong>
+    ya tiene guía generada. ¡Pronto lo recibes!
+  </p>
+
+  <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin:24px 0">
+    <p style="margin:0 0 8px;font-size:14px"><strong>Transportadora:</strong> {carrier_str}</p>
+    <p style="margin:0 0 16px;font-size:14px"><strong>Número de guía:</strong>
+      <span style="font-family:monospace;background:#fff;padding:3px 8px;
+            border-radius:4px;border:1px solid #e8eef2;font-size:15px">{tracking_number}</span>
+    </p>
+    {track_btn}{label_btn}
+  </div>
+
+  <p style="margin:24px 0 8px;color:#5a6772;font-size:13px">
+    <strong>Resumen del pedido:</strong>
+  </p>
+  <ul style="margin:0;padding-left:20px;font-size:13px">{items_html}</ul>
+  <p style="margin:8px 0 0;color:#9aa4ad;font-size:12px">
+    Total pagado: <strong>{_fmt_cop(total)} COP</strong> (envío {_fmt_cop(shipping)} COP incluido)
+  </p>
+
+  <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
+    Cualquier inquietud sobre tu envío, responde a este email o contáctanos
+    por WhatsApp. ¡Gracias por tu compra!
   </p>
 </div>
 </body></html>"""
