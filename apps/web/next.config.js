@@ -66,13 +66,22 @@ const remotePatterns = [
     hostname: 'mlstatic.com',
   },
   // Rev. 107 fix runtime KAIU 2026-05-24: 16 productos KAIU poblados con
-  // cover_image_url apuntando a placehold.co (placeholders profesionales
-  // HTTPS) por defecto cuando tenant no sube imágenes reales. Sin esto,
-  // next/image rechaza con "hostname not configured" → render falla en
-  // /dashboard/catalog. Founder reportó en web.log.
+  // cover_image_url apuntando a placeholders HTTPS por defecto cuando
+  // tenant no sube imágenes reales.
+  //
+  // placehold.co retorna SVG sin XML prolog → Next.js detectContentType()
+  // no lo reconoce (espera bytes mágicos `<?xml`) → rechaza con "isn't a
+  // valid image" aunque dangerouslyAllowSVG=true (bug detección Next.js).
+  //
+  // dummyimage.com retorna PNG real → pasa por el optimizer sin problema.
+  // Mantenemos placehold.co como host whitelisted para compat retro.
   {
     protocol: 'https',
     hostname: 'placehold.co',
+  },
+  {
+    protocol: 'https',
+    hostname: 'dummyimage.com',
   },
 ]
 if (supabaseStorageHost) {
