@@ -21,17 +21,18 @@
  */
 
 import { useState, useTransition } from 'react'
-import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2, Truck } from 'lucide-react'
 
 type Props = {
   connected: boolean
   credentials: Record<string, unknown>
   connectAction: (formData: FormData) => Promise<{ ok: boolean; error?: string }>
   disconnectAction: () => Promise<{ ok: boolean; error?: string }>
+  saveIdagenteAction: (formData: FormData) => Promise<{ ok: boolean; error?: string }>
 }
 
 export default function AveonlineSetup({
-  connected, credentials, connectAction, disconnectAction,
+  connected, credentials, connectAction, disconnectAction, saveIdagenteAction,
 }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -62,6 +63,19 @@ export default function AveonlineSetup({
         setSuccess('Aveonline desconectado.')
       } else {
         setError(result.error ?? 'Error al desconectar')
+      }
+    })
+  }
+
+  const handleSaveIdagente = (formData: FormData) => {
+    setError(null)
+    setSuccess(null)
+    startTransition(async () => {
+      const result = await saveIdagenteAction(formData)
+      if (result.ok) {
+        setSuccess('ID Agente guardado. Las próximas guías Aveonline lo incluirán.')
+      } else {
+        setError(result.error ?? 'Error al guardar ID Agente.')
       }
     })
   }
@@ -217,6 +231,7 @@ export default function AveonlineSetup({
   const authVersion = credentials.auth_version as string | undefined
   const jwtExpiresAt = credentials.jwt_expires_at as string | undefined
   const passwordSecretId = credentials.password_secret_id as string | undefined
+  const idagente = credentials.idagente as string | undefined
 
   return (
     <div className="space-y-5">
@@ -249,6 +264,68 @@ export default function AveonlineSetup({
           Aveonline no opera portal de tickets — contacto por email + WhatsApp business
           (+57 305 420 21 25, L-V 8-5 hora Colombia).
         </p>
+      </div>
+
+      {/* ID Agente — REQUERIDO para generación de guías (§3.5 dossier) */}
+      <div className={`rounded-lg border p-5 space-y-3 ${
+        idagente ? 'border-border bg-card' : 'border-amber-500/30 bg-amber-500/5'
+      }`}>
+        <div className="flex items-center gap-2 text-foreground">
+          <Truck className="h-5 w-5 text-muted-foreground" />
+          <h3 className="font-semibold">ID Agente — Punto de despacho</h3>
+        </div>
+        {!idagente && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="space-y-0.5">
+              <p className="font-medium">ID Agente NO configurado</p>
+              <p className="text-xs text-amber-200/80 leading-relaxed">
+                Sin este ID, Aveonline rechazará la generación automática de guías
+                con error{' '}
+                <code className="font-mono text-[11px] bg-amber-500/10 px-1 rounded">999</code>{' '}
+                tras el pago. Configúralo abajo para destrabar las guías post-pago.
+              </p>
+            </div>
+          </div>
+        )}
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Aveonline asigna un <strong className="text-foreground font-medium">ID
+          numérico al punto de despacho/agencia</strong> con el que se generan
+          las guías. Lo encuentras en{' '}
+          <a
+            href="https://app.aveonline.co"
+            target="_blank"
+            rel="noreferrer"
+            className="underline text-foreground"
+          >
+            app.aveonline.co
+          </a>
+          {' '}→ Configuración → Agentes/Puntos de despacho. Tu asesor logístico también puede confirmártelo.
+        </p>
+        <form action={handleSaveIdagente} className="flex items-end gap-3">
+          <div className="flex-1 space-y-1.5">
+            <label htmlFor="idagente" className="text-sm font-medium text-foreground">
+              ID Agente (numérico)
+            </label>
+            <input
+              id="idagente"
+              name="idagente"
+              type="text"
+              inputMode="numeric"
+              pattern="\d{1,10}"
+              defaultValue={idagente ?? ''}
+              placeholder="ej. 12345"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isPending}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shrink-0"
+          >
+            {isPending ? 'Guardando…' : 'Guardar'}
+          </button>
+        </form>
       </div>
 
       {/* Credenciales / Vault */}
