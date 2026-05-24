@@ -426,6 +426,92 @@ async def disconnect_meli(
     logger.info("MeLi desconectado para tenant %s", tenant_id)
 
 
+# ─── Aveonline: listar agentes del tenant ────────────────────────────────────
+
+
+@router.get("/aveonline/agents")
+async def list_aveonline_agents(
+    tenant_id: str = Depends(get_current_tenant),
+    role: str = Depends(get_current_role),
+    supabase: Client = Depends(get_service_client),
+):
+    """Lista los agentes (puntos de despacho) registrados en la cuenta
+    Aveonline del tenant.
+
+    Endpoint Aveonline:
+      `POST https://app.aveonline.co/api/comunes/v1.0/agentes.php`
+      body: `{tipo: 'listarAgentesPorEmpresaAuth', token, idempresa}`
+
+    UX: tenant elige un agente del dropdown (en lugar de buscar el ID
+    manualmente en el panel Aveonline). El `principal: 'SI'` se sugiere
+    por default. Se persiste en `tenant_integrations.credentials.idagente`.
+
+    Permite a `owner` y `manager` — config operacional, no destructiva.
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(403, "Solo owner/manager pueden ver agentes")
+
+    from integrations.aveonline_client import AveonlineClient
+    import httpx
+
+    client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
+    try:
+        jwt = await client._get_valid_jwt()
+        creds = await client._load_credentials()
+    except Exception as exc:
+        raise HTTPException(
+            502,
+            f"No se pudo autenticar con Aveonline: {exc}. "
+            f"Verifica que la integración esté conectada.",
+        )
+
+    empresa_id = creds.get("empresa_id")
+    if not empresa_id:
+        raise HTTPException(422, "Aveonline no retornó empresa_id en auth")
+
+    body = {
+        "tipo": "listarAgentesPorEmpresaAuth",
+        "token": jwt,
+        "idempresa": empresa_id,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            resp = await c.post(
+                "https://app.aveonline.co/api/comunes/v1.0/agentes.php",
+                json=body,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Aveonline HTTP error: {exc}")
+
+    if data.get("status") != "ok":
+        return {
+            "agents": [],
+            "warning": data.get("message") or "sin agentes",
+        }
+
+    agents_raw = data.get("agentes") or []
+    agents = [
+        {
+            "id": str(a.get("id") or ""),
+            "nombre": str(a.get("nombre") or ""),
+            "direccion": str(a.get("direccion") or ""),
+            "idciudad": str(a.get("idciudad") or ""),
+            "telefono": str(a.get("telefono") or ""),
+            "email": str(a.get("email") or ""),
+            "principal": (a.get("principal") or "").upper() in ("S", "SI"),
+        }
+        for a in agents_raw
+        if a.get("id")
+    ]
+    agents.sort(key=lambda x: (not x["principal"], x["nombre"]))
+    return {
+        "agents": agents,
+        "current_idagente": creds.get("idagente") or None,
+    }
+
+
 # ─── Aveonline guide dry-run (UAT aislado, NO en producción flow) ────────────
 
 
