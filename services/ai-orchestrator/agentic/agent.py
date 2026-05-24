@@ -106,6 +106,18 @@ async def run_agentic_turn(
       AgenticTurnResult con outbound_text + audit del tool_call_log.
       Caller decide si enviar el outbound (cutover) o loggear (shadow).
     """
+    # Rev. 107 fix runtime KAIU 2026-05-24: pasamos al ctx el inbound
+    # actual + los 2 últimos inbounds previos del history para que el
+    # AddToCartTool pueda verificar que la variante que el LLM intenta
+    # agregar fue realmente mencionada por el cliente (anti-asunción).
+    _recent_inbounds = [inbound_text]
+    for h in reversed(history or []):
+        if len(_recent_inbounds) >= 3:
+            break
+        role = (h.get("role") if isinstance(h, dict) else None)
+        content = (h.get("content") if isinstance(h, dict) else None)
+        if role == "user" and isinstance(content, str):
+            _recent_inbounds.append(content)
     ctx = ToolContext(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -113,7 +125,7 @@ async def run_agentic_turn(
         supabase=supabase,
         catalog_cache=catalog,
         logger=logger,
-        extras={},
+        extras={"recent_inbound_texts": _recent_inbounds},
     )
 
     # Construir messages para Gemini.

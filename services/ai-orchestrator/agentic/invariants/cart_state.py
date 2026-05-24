@@ -164,6 +164,48 @@ def _count_items_affirmed_in_text(text: str) -> int:
     return count
 
 
+def _case_a_replacement(inbound_text: str, candidate_text: str) -> str:
+    """Construye el rewrite para Case A según contexto.
+
+    Rev. 107 fix runtime KAIU 2026-05-24 conv a0c361a9 turn 3: cliente
+    dijo "15ml", bot dijo "Agregué 15ml" con tools=0. El replacement
+    genérico ("confirma producto y presentación") descontextualiza —
+    el cliente acaba de aportar la variante.
+
+    Estrategia:
+      • Detectar si el inbound_text contiene un variant_label típico
+        (Xml, Xg, X kg, etc.) o un número simple — eso indica que el
+        cliente acaba de aportar la variante/cantidad solicitada.
+      • Si sí → replacement honesto: "Tuve un problema técnico
+        agregando Xml. ¿Lo intento de nuevo?" — invita al cliente a
+        repetir la palabra disparadora en el siguiente turn.
+      • Si no → replacement genérico (cliente no aportó info clara).
+    """
+    inbound = (inbound_text or "").strip()
+    # Patrón: número + unidad (ml, g, gramos, kg, oz, L).
+    m = re.search(r"\b(\d+(?:[.,]\d+)?)\s*(ml|gr?|g|gramos?|kg|oz|l|lts?)\b",
+                  inbound, re.IGNORECASE)
+    if m:
+        variant_hint = f"{m.group(1)}{m.group(2).lower()}"
+        return (
+            f"Tuve un problema técnico agregando la presentación de "
+            f"{variant_hint}. ¿Me confirmas de nuevo cuál te interesa "
+            f"para procesarlo correctamente?"
+        )
+    # Inbound corto sin patrón claro — quizás un número solo o nombre suelto.
+    if len(inbound) <= 25:
+        return (
+            "Tuve un problema técnico procesando tu última respuesta. "
+            "¿Me confirmas el producto y la presentación para agregarlo "
+            "al carrito?"
+        )
+    # Inbound largo / sin pista — replacement genérico canónico.
+    return (
+        "Para procesar tu pedido necesito que me confirmes el producto "
+        "y la presentación exacta. ¿Cuál te gustaría llevar?"
+    )
+
+
 class CartStateInvariant:
     """Doble defensa contra mismatch texto-vs-cart:
 
@@ -190,6 +232,7 @@ class CartStateInvariant:
         contact_id: Optional[str],
         supabase: Any,
         tool_call_log: list[dict],
+        inbound_text: str = "",
     ) -> InvariantResult:
         if not _llm_affirms_cart_change(candidate_text):
             return InvariantResult(
@@ -199,10 +242,7 @@ class CartStateInvariant:
 
         # Caso A: afirmación sin ningún tool de write exitoso.
         if not _cart_write_executed(tool_call_log):
-            replacement = (
-                "Para procesar tu pedido necesito que me confirmes el producto "
-                "y la presentación exacta. ¿Cuál te gustaría llevar?"
-            )
+            replacement = _case_a_replacement(inbound_text, candidate_text)
             return InvariantResult(
                 outcome=InvariantOutcome.REWRITE,
                 invariant_name=self.name,

@@ -64,14 +64,22 @@ async def apply_invariants(
     contact_id: Optional[str],
     supabase: Any,
     tool_call_log: list[dict],
+    inbound_text: str = "",
 ) -> InvariantResult:
     """Pipeline de invariants. Corre en orden; primer REWRITE/BLOCK gana.
 
     Si NINGÚN invariant interviene → outcome=OK con candidate_text intacto.
+
+    `inbound_text` (opcional, rev. 107) es el último mensaje del cliente —
+    algunos invariants lo usan para componer replacements contextuales.
     """
+    import inspect
     for inv in invariants:
         try:
-            result = await inv.validate(
+            # Backward compat: solo pasamos inbound_text a los invariants
+            # que lo aceptan en su signature.
+            sig = inspect.signature(inv.validate)
+            kwargs = dict(
                 candidate_text=candidate_text,
                 tenant_id=tenant_id,
                 conversation_id=conversation_id,
@@ -79,6 +87,9 @@ async def apply_invariants(
                 supabase=supabase,
                 tool_call_log=tool_call_log,
             )
+            if "inbound_text" in sig.parameters:
+                kwargs["inbound_text"] = inbound_text
+            result = await inv.validate(**kwargs)
         except Exception as exc:
             # Invariant roto NO bloquea outbound (degradación graceful).
             # Pero loggeamos para diagnóstico.

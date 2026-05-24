@@ -279,8 +279,18 @@ async def _run_agentic_full(
     #   2. summary_coherence (semántico: total/items vs cart real DB)
     #   3. passive_closing (semántico: rewrite cierre pasivo → CTA por estado)
     #   4. no_emoji (cosmético: strip sobre el texto final)
-    invariant_result = await apply_invariants(
-        [
+    #
+    # IMPORTANTE rev. 107 (2026-05-24): si el agente activó
+    # `requires_silent_escalation`, el `outbound_text` es el mensaje
+    # degraded determinístico ("déjame revisar con mi equipo") — NO un
+    # output del LLM normal. Los invariants semánticos (cart_state,
+    # empty_promise, passive_closing) podrían rewritearlo y sabotear la
+    # escalación silenciosa. Solo aplicamos cosméticos (no_emoji).
+    is_silent_escalation = getattr(result, "requires_silent_escalation", False)
+    if is_silent_escalation:
+        invariant_set = [NoDecorativeEmojiInvariant()]
+    else:
+        invariant_set = [
             CartStateInvariant(),
             ConsentRequiredInvariant(),
             SummaryCoherenceInvariant(),
@@ -289,13 +299,16 @@ async def _run_agentic_full(
             EmptyPromiseInvariant(),
             PassiveClosingInvariant(),
             NoDecorativeEmojiInvariant(),
-        ],
+        ]
+    invariant_result = await apply_invariants(
+        invariant_set,
         candidate_text=result.outbound_text,
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         contact_id=contact_id,
         supabase=supabase,
         tool_call_log=result.tool_call_log,
+        inbound_text=content,
     )
     final_text = (
         invariant_result.replacement_text
