@@ -20,6 +20,8 @@ type FileEntry = {
   name: string
   size: number
   url: string
+  createdAt: string | null
+  usedByProduct: string | null  // título del producto que tiene cover_image_url=url, si alguno
 }
 
 interface Props {
@@ -40,11 +42,27 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
     setError(null)
     try {
       const supabase = createClient()
+      // 1) Listar archivos en Storage.
       const { data, error: listErr } = await supabase
         .storage
         .from('tenant-media')
         .list(tenantId, { limit: 200, sortBy: { column: 'created_at', order: 'desc' } })
       if (listErr) throw new Error(listErr.message)
+
+      // 2) Cargar productos del tenant para mapear cover_image_url → título.
+      //    Reverse lookup: ¿qué producto, si alguno, usa cada archivo?
+      const { data: prodData, error: prodErr } = await supabase
+        .from('products')
+        .select('title, cover_image_url')
+        .eq('tenant_id', tenantId)
+        .not('cover_image_url', 'is', null)
+      if (prodErr) throw new Error(prodErr.message)
+      const urlToProduct = new Map<string, string>()
+      for (const p of (prodData || [])) {
+        if (p.cover_image_url && p.title) {
+          urlToProduct.set(p.cover_image_url, p.title)
+        }
+      }
 
       const entries: FileEntry[] = (data || [])
         .filter(f => {
@@ -63,7 +81,20 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
             name: f.name,
             size: (f as { metadata?: { size?: number } })?.metadata?.size ?? 0,
             url: publicUrlData.publicUrl,
+            createdAt: (f as { created_at?: string | null })?.created_at ?? null,
+            usedByProduct: urlToProduct.get(publicUrlData.publicUrl) ?? null,
           }
+        })
+        // Ordenamiento: huérfanas primero (más útil para el founder
+        // reasignándolas), luego en uso. Dentro de cada grupo, más
+        // recientes primero (created_at desc).
+        .sort((a, b) => {
+          const aOrphan = a.usedByProduct ? 1 : 0
+          const bOrphan = b.usedByProduct ? 1 : 0
+          if (aOrphan !== bOrphan) return aOrphan - bOrphan
+          const aTs = a.createdAt ? Date.parse(a.createdAt) : 0
+          const bTs = b.createdAt ? Date.parse(b.createdAt) : 0
+          return bTs - aTs
         })
       setFiles(entries)
     } catch (err) {
@@ -163,56 +194,82 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
               {files.map(f => {
                 const isDeleting = deletingName === f.name
+                const sizeKB = Math.round(f.size / 1024)
+                const dateStr = f.createdAt
+                  ? new Date(f.createdAt).toLocaleDateString('es-CO', {
+                      day: '2-digit', month: 'short', year: 'numeric',
+                    })
+                  : ''
                 return (
                   <div
                     key={f.name}
-                    className="group relative aspect-square rounded-lg overflow-hidden border-2 border-border hover:border-primary transition-colors bg-muted/20"
+                    className={`group relative rounded-lg overflow-hidden border-2 transition-colors bg-card flex flex-col ${
+                      f.usedByProduct
+                        ? 'border-emerald-500/40 hover:border-emerald-500/70'
+                        : 'border-border hover:border-primary'
+                    }`}
                   >
-                    {/* Click para seleccionar (cubre toda la imagen). */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isDeleting) return
-                        onSelect(f.url)
-                        onClose()
-                      }}
-                      disabled={isDeleting}
-                      className="absolute inset-0 w-full h-full"
-                      title={`Seleccionar — ${f.name} · ${Math.round(f.size / 1024)} KB`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={f.url}
-                        alt={f.name}
-                        className="absolute inset-0 w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                      {isDeleting && (
-                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                          <Loader2 className="h-6 w-6 text-white animate-spin" />
+                    {/* Thumbnail con click para seleccionar */}
+                    <div className="relative aspect-square bg-muted/20">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isDeleting) return
+                          onSelect(f.url)
+                          onClose()
+                        }}
+                        disabled={isDeleting}
+                        className="absolute inset-0 w-full h-full"
+                        title={`Seleccionar — ${f.name}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={f.url}
+                          alt={f.name}
+                          className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                        {isDeleting && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                            <Loader2 className="h-6 w-6 text-white animate-spin" />
+                          </div>
+                        )}
+                      </button>
+
+                      {/* Botón borrar — esquina superior derecha */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(f.name)
+                        }}
+                        disabled={isDeleting}
+                        className="absolute top-1.5 right-1.5 z-10 h-7 w-7 rounded-md bg-black/60 hover:bg-destructive border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                        title="Borrar de Storage"
+                        aria-label="Borrar"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+
+                      {/* Badge "en uso por" — siempre visible (esquina sup izq) */}
+                      {f.usedByProduct && (
+                        <div
+                          className="absolute top-1.5 left-1.5 z-10 inline-flex items-center gap-1 max-w-[calc(100%-50px)] px-1.5 py-0.5 rounded-md bg-emerald-500/95 text-white text-[10px] font-medium shadow-sm"
+                          title={`En uso por: ${f.usedByProduct}`}
+                        >
+                          <span className="truncate">{f.usedByProduct}</span>
                         </div>
                       )}
-                    </button>
+                    </div>
 
-                    {/* Botón borrar (encima de la imagen, esquina superior derecha) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDelete(f.name)
-                      }}
-                      disabled={isDeleting}
-                      className="absolute top-1.5 right-1.5 z-10 h-7 w-7 rounded-md bg-black/60 hover:bg-destructive border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
-                      title="Borrar de Storage"
-                      aria-label="Borrar"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-
-                    {/* Tamaño abajo (en hover) */}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-[10px] text-white truncate">
-                        {Math.round(f.size / 1024)} KB
+                    {/* Metadata visible siempre debajo del thumbnail */}
+                    <div className="px-2 py-1.5 border-t border-border/50 bg-muted/10">
+                      <p className="text-[10px] font-mono text-foreground truncate" title={f.name}>
+                        {f.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground flex items-center justify-between mt-0.5">
+                        <span>{sizeKB} KB</span>
+                        {dateStr && <span className="text-muted-foreground/70">{dateStr}</span>}
                       </p>
                     </div>
                   </div>
@@ -223,9 +280,18 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-border text-[11px] text-muted-foreground">
-          {files.length > 0 && (
-            <span>{files.length} imágenes · click para asignar al producto</span>
+        <div className="px-5 py-3 border-t border-border text-[11px] text-muted-foreground flex items-center justify-between gap-3">
+          {files.length > 0 ? (
+            <>
+              <span>
+                <span className="font-medium text-foreground">{files.length}</span> imágenes ·
+                {' '}<span className="text-amber-600">{files.filter(f => !f.usedByProduct).length} sin asignar</span> ·
+                {' '}<span className="text-emerald-600">{files.filter(f => f.usedByProduct).length} en uso</span>
+              </span>
+              <span>Click para asignar · hover → 🗑 para borrar</span>
+            </>
+          ) : (
+            <span>&nbsp;</span>
           )}
         </div>
       </div>
