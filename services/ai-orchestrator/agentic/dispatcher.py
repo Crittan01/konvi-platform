@@ -227,6 +227,7 @@ async def _run_agentic_full(
         catalog=catalog,
         tenant_pitch=tenant_pitch,
         tenant_tone=tenant_tone,
+        contact_record=contact or {},
     )
 
     # Ejecutar agente.
