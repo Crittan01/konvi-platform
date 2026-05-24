@@ -89,32 +89,76 @@ def _count_successful_cart_writes(tool_call_log: list[dict]) -> int:
     return count
 
 
+_CART_AFFIRMATION_ANCHORS = (
+    re.compile(r"\b(?:ya\s+)?(?:agregu[eé]|sum[eé]|a[nñ]ad[ií])\b", re.IGNORECASE),
+    re.compile(r"\bhe\s+agregado\b", re.IGNORECASE),
+    re.compile(r"\btu\s+(?:carrito|pedido|orden)\s+(?:incluye|contiene|tiene|actual)\b", re.IGNORECASE),
+    re.compile(r"\b(?:pedido|carrito)\s+actual[:\s]", re.IGNORECASE),
+    re.compile(r"\blisto[,.]?\s*\d", re.IGNORECASE),
+    re.compile(r"\bqued(?:ó|aron)\s+(?:agregad|sumad)", re.IGNORECASE),
+)
+
+_VARIANT_PRESENTATION_ANCHORS = (
+    re.compile(r"\bpresentacion(?:es)?\b", re.IGNORECASE),
+    re.compile(r"\bcu[aá]l\s+(?:te|presentaci[oó]n)", re.IGNORECASE),
+    re.compile(r"\btenemos\s+est[ao]s?\b", re.IGNORECASE),
+    re.compile(r"\bopciones?\s+disponibles?", re.IGNORECASE),
+)
+
+
 def _count_items_affirmed_in_text(text: str) -> int:
-    """Estimación de cuántos items distintos el LLM afirma en el outbound.
+    """Cuenta bullets que el LLM AFIRMA como items en cart real.
 
-    Patrón típico WhatsApp del bot:
-      * 1x Producto A...
-      * 2x Producto B...
-      • 1 Jabón de Coco...
-      • 1 *Producto C*: $24.000
+    Rev. 107 fix runtime KAIU 2026-05-24: el conteo previo era una
+    heurística simple ("bullet con $ o cantidad = item"), pero generaba
+    falso positivo cuando el bot lista VARIANTES disponibles de un
+    producto que el cliente aún no eligió. Ej:
 
-    Heurística: cuenta bullets que mencionan precio o cantidad+producto.
-    NO es 100% precisa — es una señal para el invariant de mismatch.
+        "Perfecto, agregué 2 *Jabones Coco* 100g a tu carrito.
+         Para el *Sérum de Vitamina C* tenemos estas presentaciones:
+         * 15ml: $52.000
+         * 30ml: $85.000
+         Cuál te gustaría?"
+
+    El bot YA agregó solo 1 item (jabón); los 2 bullets siguientes son
+    OPCIONES presentadas, no items afirmados. La heurística vieja contaba
+    2 → Case B disparaba REWRITE incorrecto.
+
+    Algoritmo nuevo:
+      1. Localizar líneas-ancla que afirman cart-write ("ya agregué",
+         "tu pedido incluye", etc.). Si NO hay ancla → return 0 (no es
+         un mensaje afirmativo de cart).
+      2. Localizar líneas-ancla de presentación de variantes
+         ("presentaciones", "cuál te gustaría", "opciones disponibles").
+      3. Solo contar bullets que aparezcan ENTRE una ancla cart-write y
+         (la siguiente ancla de presentación de variantes O el final
+         del texto, lo que ocurra primero).
     """
     if not text:
         return 0
     lines = text.split("\n")
-    # Bullet lines con "$" (precio) O con "Nx " al inicio.
+
+    cart_anchor_idx = None
+    variant_anchor_idx = None
+    for i, line in enumerate(lines):
+        if cart_anchor_idx is None and any(p.search(line) for p in _CART_AFFIRMATION_ANCHORS):
+            cart_anchor_idx = i
+        elif cart_anchor_idx is not None and variant_anchor_idx is None \
+                and any(p.search(line) for p in _VARIANT_PRESENTATION_ANCHORS):
+            variant_anchor_idx = i
+
+    if cart_anchor_idx is None:
+        return 0  # Ninguna afirmación de cart-write → bullets son opciones.
+
+    end_idx = variant_anchor_idx if variant_anchor_idx is not None else len(lines)
     count = 0
-    for line in lines:
+    for line in lines[cart_anchor_idx:end_idx]:
         stripped = line.strip()
         if not stripped:
             continue
-        # Bullet markers comunes: *, •, -, "•"
         if not (stripped.startswith("*") or stripped.startswith("•")
                 or stripped.startswith("-")):
             continue
-        # Heurística doble: línea con producto+cantidad o producto+precio.
         if "$" in stripped or re.search(r"\b\d+\s*x?\b", stripped):
             count += 1
     return count

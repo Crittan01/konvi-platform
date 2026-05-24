@@ -184,6 +184,49 @@ class CartStateInvariantTests(unittest.TestCase):
         ))
         self.assertEqual(result.outcome, InvariantOutcome.OK)
 
+    def test_llm_agrega_1_item_y_presenta_variantes_de_otro_ok_rev107(self):
+        """Bug runtime KAIU 2026-05-24 conv 0866367c: cliente pidió "2 jabones
+        coco 100g y 1 sérum vit C". Bot agregó OK los jabones (1 add_to_cart
+        qty=2) y para sérum vit C llamó list_catalog para mostrar variantes
+        (porque cliente no especificó ml). Outbound:
+
+            "Perfecto, agregué 2 *Jabones Coco* 100g a tu carrito.
+             Para el *Sérum de Vitamina C* tenemos estas presentaciones:
+             * 15ml: $52.000
+             * 30ml: $85.000
+             Cuál te gustaría?"
+
+        Heurística vieja contaba 2 bullets con $ → items_affirmed=2 vs
+        cart_real=1 → REWRITE incorrecto "Logré agregar 1 item, hubo
+        inconveniente con el otro". UX devastadora. Fix: el conteo solo
+        cuenta bullets ENTRE ancla cart-write y ancla presentación-variante."""
+        text = (
+            "Perfecto, Cristian. Ya agregué 2 *Jabones Artesanales de Coco* "
+            "de 100g a tu carrito.\n\n"
+            "Para el *Sérum de Vitamina C*, tenemos estas presentaciones:\n\n"
+            "* 15ml: *$52.000 COP*\n"
+            "* 30ml: *$85.000 COP*\n\n"
+            "Cuál te gustaría?"
+        )
+        kwargs = dict(self.base_kwargs)
+        # Cart real tiene 1 item (los jabones, qty=2 = 1 fila distinta).
+        kwargs["supabase"] = self._sb_with_cart_items_count(1)
+        result = _run(self.inv.validate(
+            candidate_text=text,
+            tool_call_log=[
+                {"tool": "add_to_cart",
+                 "result": {"added": {"product_id": "p-coco-100g",
+                                       "quantity": 2}}},
+                {"tool": "list_catalog",
+                 "result": {"count": 3, "products": []}},
+            ],
+            **kwargs,
+        ))
+        # Bot fue coherente: solo 1 item afirmado en cart, los 2 bullets
+        # son OPCIONES de variante presentadas. Invariant NO debe rewritear.
+        self.assertEqual(result.outcome, InvariantOutcome.OK,
+                         f"Falso positivo Case B: {result.replacement_text}")
+
     def test_llm_lista_3_items_total_cart_y_solo_1_add_this_turn_ok_rev107(self):
         """Bug runtime 2026-05-23 cliente CONOCIDO: bot listó cart total
         (3 items acumulados) tras 1 add_to_cart this turn. Antes Case B
