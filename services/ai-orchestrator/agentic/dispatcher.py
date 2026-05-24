@@ -231,6 +231,109 @@ async def _run_agentic_full(
         contact_record=contact or {},
     )
 
+    # ── Pre-LLM resolver determinístico: variant selection continuation ──
+    # Rev. 107 fix runtime founder 2026-05-24 conv 8c845cc0: bot preguntó
+    # "15ml o 30ml?", cliente respondió "15ml". Gemini fallaba con
+    # STOP+empty (saturación SDK 19 tools × 20K chars prompt × history).
+    # Cuando el contexto es 100% determinístico (bot ofreció variantes,
+    # cliente respondió variante), bypaseamos Gemini y resolvemos directo.
+    # NO es parche — es el mismo patrón ya usado por `image_send_tool`,
+    # `shipping_quote_tool`, `order_status_tool` en flow legacy V1.
+    from agentic.variant_continuation import try_resolve_variant_continuation
+    variant_match = try_resolve_variant_continuation(
+        inbound_text=content,
+        history=history,
+        catalog=catalog,
+    )
+    if variant_match:
+        logger.info(
+            "[AGENTIC_PRE_LLM] conv=%s variant_continuation matched: "
+            "product=%s variant=%s — bypaseando Gemini",
+            conversation_id, variant_match["product_title"],
+            variant_match["variant_label"],
+        )
+        from agentic.tools.cart import AddToCartTool, AddToCartArgs
+        from agentic.tools.base import ToolContext
+        tool = AddToCartTool()
+        args = AddToCartArgs(
+            product_id=variant_match["product_id"],
+            variation_id=variant_match["variation_id"],
+            quantity=1,
+        )
+        ctx = ToolContext(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            contact_id=contact_id,
+            supabase=supabase,
+            catalog_cache=catalog,
+            logger=logger,
+            extras={"recent_inbound_texts": [content]},
+        )
+        try:
+            tool_result = await tool.execute(args, ctx)
+        except Exception as exc:
+            logger.warning(
+                "[AGENTIC_PRE_LLM] variant_continuation add_to_cart falló: %s",
+                exc,
+            )
+            tool_result = None
+
+        if tool_result and tool_result.success:
+            # Componer respuesta natural sin LLM.
+            price_str = f"${int(variant_match['unit_price_cop']):,}".replace(
+                ",", ".",
+            )
+            outbound = (
+                f"Listo, agregué 1 *{variant_match['product_title']}* de "
+                f"{variant_match['variant_label']} por *{price_str} COP* "
+                f"a tu carrito.\n\n"
+                f"Sumamos algo más al pedido o ya coordinamos el envío? "
+                f"Dime a qué ciudad lo enviamos."
+            )
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=outbound,
+            )
+            _mark_message_processing(
+                supabase, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            _persist_turn_audit(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                inbound_text=content,
+                outbound_text=outbound,
+                tool_call_log=[{
+                    "tool": "add_to_cart",
+                    "args": args.model_dump(),
+                    "result": tool_result.data,
+                }],
+                tool_calls_executed=1,
+                elapsed_seconds=time.monotonic() - time.monotonic(),
+                truncated=False,
+                truncated_reason=None,
+                error=None,
+                finish_reason="DETERMINISTIC_RESOLVER",
+                invariant_outcome="ok",
+                invariant_name="variant_continuation_bypass",
+                final_text=outbound,
+                system_prompt_chars=0,  # no LLM call
+                history_turns=len(history or []),
+                mode="cutover",
+            )
+            return  # turn handled — no LLM needed.
+        else:
+            logger.warning(
+                "[AGENTIC_PRE_LLM] variant_continuation matched pero "
+                "add_to_cart falló: %s — caemos a Gemini",
+                getattr(tool_result, "data", None),
+            )
+    # ─── /pre-LLM resolver ───
+
     # Ejecutar agente.
     started_at = time.monotonic()
     result = await run_agentic_turn(

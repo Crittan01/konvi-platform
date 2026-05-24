@@ -48,14 +48,10 @@ class CartStateInvariantTests(unittest.TestCase):
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
         self.assertIn("presentación", result.replacement_text.lower())
 
-    def test_case_a_replacement_contextual_con_variante_inbound(self):
-        """Rev. 107 fix runtime KAIU conv a0c361a9 turn 3: cliente dijo
-        '15ml', bot afirmó 'agregué 15ml' con tools=0. Replacement vacío
-        ('confirma producto y presentación') desconecta del contexto —
-        el cliente acaba de aportar la variante.
-
-        Fix: si inbound_text contiene Xml/Xg, el rewrite reconoce el
-        problema técnico y pide repetir esa variante específicamente."""
+    def test_case_a_replacement_natural_sin_jerga_tecnica(self):
+        """Rev. 107 founder feedback 2026-05-24: el replacement NUNCA debe
+        usar "problema técnico" — delata sistema. El cliente percibe
+        solo una pregunta natural que mantiene el momentum comercial."""
         result = _run(self.inv.validate(
             candidate_text="Perfecto, agregué 1 Sérum 15ml a tu carrito.",
             tool_call_log=[],
@@ -63,9 +59,12 @@ class CartStateInvariantTests(unittest.TestCase):
             **self.base_kwargs,
         ))
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
-        # El replacement debe mencionar la variante específica del cliente.
-        self.assertIn("15ml", result.replacement_text)
-        self.assertIn("problema", result.replacement_text.lower())
+        # PROHIBIDO: jerga técnica que delate bot.
+        self.assertNotIn("problema técnico", result.replacement_text.lower())
+        self.assertNotIn("error", result.replacement_text.lower())
+        self.assertNotIn("procesar", result.replacement_text.lower())
+        # OBLIGATORIO: invitar a continuar con CTA al carrito.
+        self.assertIn("carrito", result.replacement_text.lower())
 
     def test_llm_afirma_agregue_con_add_to_cart_exitoso_ok(self):
         result = _run(self.inv.validate(

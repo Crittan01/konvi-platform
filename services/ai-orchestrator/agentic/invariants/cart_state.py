@@ -165,44 +165,21 @@ def _count_items_affirmed_in_text(text: str) -> int:
 
 
 def _case_a_replacement(inbound_text: str, candidate_text: str) -> str:
-    """Construye el rewrite para Case A según contexto.
+    """Construye el rewrite para Case A — NUNCA delatar sistema.
 
-    Rev. 107 fix runtime KAIU 2026-05-24 conv a0c361a9 turn 3: cliente
-    dijo "15ml", bot dijo "Agregué 15ml" con tools=0. El replacement
-    genérico ("confirma producto y presentación") descontextualiza —
-    el cliente acaba de aportar la variante.
+    Rev. 107 founder feedback 2026-05-24: NUNCA usar "problema técnico"
+    ni jerga que delate el bot. El cliente solo debe ver una pregunta
+    natural que mantenga el momentum comercial.
 
-    Estrategia:
-      • Detectar si el inbound_text contiene un variant_label típico
-        (Xml, Xg, X kg, etc.) o un número simple — eso indica que el
-        cliente acaba de aportar la variante/cantidad solicitada.
-      • Si sí → replacement honesto: "Tuve un problema técnico
-        agregando Xml. ¿Lo intento de nuevo?" — invita al cliente a
-        repetir la palabra disparadora en el siguiente turn.
-      • Si no → replacement genérico (cliente no aportó info clara).
+    El parámetro `inbound_text` se mantiene en signature por compat
+    futura — variantes específicas del replacement se podrían usar
+    si hay heurística clara, pero por ahora SIEMPRE el mismo mensaje
+    natural y honesto (no inventa una "razón técnica").
     """
-    inbound = (inbound_text or "").strip()
-    # Patrón: número + unidad (ml, g, gramos, kg, oz, L).
-    m = re.search(r"\b(\d+(?:[.,]\d+)?)\s*(ml|gr?|g|gramos?|kg|oz|l|lts?)\b",
-                  inbound, re.IGNORECASE)
-    if m:
-        variant_hint = f"{m.group(1)}{m.group(2).lower()}"
-        return (
-            f"Tuve un problema técnico agregando la presentación de "
-            f"{variant_hint}. ¿Me confirmas de nuevo cuál te interesa "
-            f"para procesarlo correctamente?"
-        )
-    # Inbound corto sin patrón claro — quizás un número solo o nombre suelto.
-    if len(inbound) <= 25:
-        return (
-            "Tuve un problema técnico procesando tu última respuesta. "
-            "¿Me confirmas el producto y la presentación para agregarlo "
-            "al carrito?"
-        )
-    # Inbound largo / sin pista — replacement genérico canónico.
+    # Replacement único, natural, sin jerga, sin delatar bot.
     return (
-        "Para procesar tu pedido necesito que me confirmes el producto "
-        "y la presentación exacta. ¿Cuál te gustaría llevar?"
+        "Cuéntame de nuevo qué producto y presentación quieres y te "
+        "lo agrego al carrito enseguida."
     )
 
 
