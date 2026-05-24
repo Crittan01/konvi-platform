@@ -114,44 +114,100 @@ class CartStateInvariantTests(unittest.TestCase):
                 f"DEBE detectar afirmación: {text!r}",
             )
 
-    # ── Caso B: mismatch parcial (founder UAT conv 91f25b3f) ──────────
+    # ── Caso B: mismatch real vs cart en DB (rev. 107 refactor) ──────────
+    # Comparamos items afirmados en outbound vs ITEMS EN CART REAL,
+    # no vs add_to_cart THIS TURN. Esto elimina falso positivo cuando
+    # el bot lista cart total tras agregar 1 item nuevo (caso runtime
+    # cliente conocido KAIU 1da84e70 2026-05-23).
 
-    def test_llm_lista_2_items_pero_solo_1_add_to_cart_rewrite(self):
-        """Caso runtime founder: LLM dijo "He agregado: 1 Coco 100g
-        + 1 Lavanda 150g" pero solo 1 add_to_cart exitoso → REWRITE."""
+    def _sb_with_cart_items_count(self, n: int):
+        """Mock supabase que retorna `n` items en cart_items para
+        invariant Case B refactorizado."""
+        from unittest.mock import MagicMock
+        sb = MagicMock()
+        def _table(name):
+            chain = MagicMock()
+            chain.select.return_value = chain
+            chain.eq.return_value = chain
+            chain.limit.return_value = chain
+            if name == "conversation_carts":
+                chain.execute.return_value = MagicMock(data=[{"id": "cart-1"}])
+            elif name == "conversation_cart_items":
+                chain.execute.return_value = MagicMock(
+                    data=[{"id": f"i{i}"} for i in range(n)],
+                )
+            else:
+                chain.execute.return_value = MagicMock(data=[])
+            return chain
+        sb.table.side_effect = _table
+        return sb
+
+    def test_llm_lista_3_items_pero_cart_real_tiene_1_rewrite(self):
+        """Caso founder UAT conv 91f25b3f: bot lista 3 items pero el
+        cart real tiene solo 1 → REWRITE (caso B real)."""
         text = (
             "Perfecto! He agregado a tu carrito:\n"
             "*   1 *Jabón Artesanal de Coco* de 100g por *$24.000*\n"
             "*   1 *Jabón Artesanal de Lavanda* de 150g por *$32.000*\n"
+            "*   1 *Sérum* de 30ml por *$92.000*\n"
             "Hay algo más?"
         )
+        kwargs = dict(self.base_kwargs)
+        kwargs["supabase"] = self._sb_with_cart_items_count(1)
         result = _run(self.inv.validate(
             candidate_text=text,
             tool_call_log=[
                 {"tool": "add_to_cart",
                  "result": {"added": {"product_id": "p-coco"}}},
-                # Segundo add_to_cart falló (no aparece).
             ],
-            **self.base_kwargs,
+            **kwargs,
         ))
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
         self.assertIn("1 item", result.replacement_text)
 
-    def test_llm_lista_2_items_y_2_add_to_cart_exitosos_ok(self):
-        """2 items afirmados + 2 add_to_cart exitosos → coherente, OK."""
+    def test_llm_lista_2_items_y_cart_real_tiene_2_ok(self):
+        """2 items afirmados + cart real 2 → coherente, OK."""
         text = (
             "Listo! Agregué a tu carrito:\n"
             "*   1 Coco 100g: *$24.000*\n"
             "*   1 Lavanda 150g: *$32.000*\n"
         )
+        kwargs = dict(self.base_kwargs)
+        kwargs["supabase"] = self._sb_with_cart_items_count(2)
         result = _run(self.inv.validate(
             candidate_text=text,
             tool_call_log=[
                 {"tool": "add_to_cart", "result": {"added": {"product_id": "p-coco"}}},
                 {"tool": "add_to_cart", "result": {"added": {"product_id": "p-lav"}}},
             ],
-            **self.base_kwargs,
+            **kwargs,
         ))
+        self.assertEqual(result.outcome, InvariantOutcome.OK)
+
+    def test_llm_lista_3_items_total_cart_y_solo_1_add_this_turn_ok_rev107(self):
+        """Bug runtime 2026-05-23 cliente CONOCIDO: bot listó cart total
+        (3 items acumulados) tras 1 add_to_cart this turn. Antes Case B
+        rewriteaba falso positivo. Ahora con cart real check pasa OK."""
+        text = (
+            "Perfecto, he agregado 1 *Sérum Hialurónico* de 15ml a tu carrito.\n\n"
+            "*Tu pedido actual incluye:*\n"
+            "* 2 *Coco* 100g: *$48.000*\n"
+            "* 1 *Lavanda* 150g: *$32.000*\n"
+            "* 1 *Sérum* 15ml: *$58.000*\n"
+        )
+        kwargs = dict(self.base_kwargs)
+        # Cart real tiene 3 items (cumulative tras este add).
+        kwargs["supabase"] = self._sb_with_cart_items_count(3)
+        result = _run(self.inv.validate(
+            candidate_text=text,
+            tool_call_log=[
+                # Solo 1 add_to_cart this turn (el Sérum nuevo).
+                {"tool": "add_to_cart", "result": {"added": {"product_id": "p-serum"}}},
+            ],
+            **kwargs,
+        ))
+        # PRE-fix: REWRITE (3 afirmados > 1 added).
+        # POST-fix: OK (3 afirmados == 3 cart real).
         self.assertEqual(result.outcome, InvariantOutcome.OK)
 
 

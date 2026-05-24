@@ -906,6 +906,10 @@ def _generate_shipping_guide(
         sm = {}
 
     carrier_rate_id = sm.get("rate_id") or ""
+    # Rev. 107 — persistir carrier_name real (SERVIENTREGA/ENVIA/etc.)
+    # en lugar del provider name ("aveonline"). El cliente espera ver
+    # "Envío SERVIENTREGA $7.530" en resumen post-pago, no "aveonline".
+    selected_carrier_name = (sm.get("carrier") or "").strip()
     if not carrier_rate_id:
         logger.warning(
             "[WOMPI][AVEONLINE] order=%s sin carrier rate_id — skip",
@@ -1009,7 +1013,9 @@ def _generate_shipping_guide(
             supabase.table("shipments").insert({
                 "tenant_id": tenant_id,
                 "order_id": order_id,
-                "carrier": "aveonline",
+                # Rev. 107: persistir carrier_name real del cart si existe
+                # (SERVIENTREGA/ENVIA/etc.), fallback "aveonline" provider.
+                "carrier": selected_carrier_name or "aveonline",
                 "status": "pending_generation",
                 "origin_address": origin_addr_jsonb,
                 "destination_address": destination_addr_jsonb,
@@ -1031,7 +1037,11 @@ def _generate_shipping_guide(
         supabase.table("shipments").insert({
             "tenant_id": tenant_id,
             "order_id": order_id,
-            "carrier": result.get("carrier_name") or "aveonline",
+            # Prioridad: carrier name del response Aveonline (más
+            # canónico) > carrier del cart > provider name fallback.
+            "carrier": (
+                result.get("carrier_name") or selected_carrier_name or "aveonline"
+            ),
             "status": "labeled" if not simulate else "simulated",
             "tracking_number": result.get("tracking_number"),
             "tracking_url": result.get("tracking_url"),

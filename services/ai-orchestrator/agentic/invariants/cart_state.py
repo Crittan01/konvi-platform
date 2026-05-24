@@ -169,29 +169,66 @@ class CartStateInvariant:
                 ),
             )
 
-        # Caso B: items afirmados > items efectivamente agregados.
+        # Caso B (rev. 107 refactor): items afirmados > items en CART REAL.
+        # Antes comparábamos contra add_to_cart EXITOSOS THIS TURN, lo
+        # cual generaba falso positivo cuando el bot lista cart total
+        # (acumulado) tras agregar 1 item nuevo: outbound mostraba 3 items
+        # pero solo 1 add_to_cart corrió este turn → REWRITE incorrecto.
+        # Fix: cargar cart REAL desde DB y comparar contra items_in_cart_total.
+        # Sólo si bot lista MÁS items de los que cart real tiene → REWRITE.
         items_affirmed = _count_items_affirmed_in_text(candidate_text)
-        items_added = _count_successful_cart_writes(tool_call_log)
-        if items_affirmed > items_added and items_affirmed >= 2:
-            # El bot listó más items de los que realmente agregó.
-            # Reescribir a un prompt honesto que evita ambigüedad.
-            replacement = (
-                f"Logré agregar {items_added} item(s) al carrito. "
-                "Hubo un inconveniente con el otro item. ¿Podrías "
-                "repetir cuál te interesa y en qué presentación?"
+        if items_affirmed >= 2:
+            cart_items_count = await _get_cart_items_count(
+                supabase, conversation_id, tenant_id,
             )
-            return InvariantResult(
-                outcome=InvariantOutcome.REWRITE,
-                invariant_name=self.name,
-                replacement_text=replacement,
-                reason=(
-                    f"Caso B: items_affirmed={items_affirmed} pero "
-                    f"items_added={items_added} — mismatch parcial."
-                ),
-            )
+            if cart_items_count is not None and items_affirmed > cart_items_count:
+                items_added_this_turn = _count_successful_cart_writes(tool_call_log)
+                replacement = (
+                    f"Logré agregar {items_added_this_turn} item(s) al "
+                    "carrito. Hubo un inconveniente con el otro item. "
+                    "¿Podrías repetir cuál te interesa y en qué presentación?"
+                )
+                return InvariantResult(
+                    outcome=InvariantOutcome.REWRITE,
+                    invariant_name=self.name,
+                    replacement_text=replacement,
+                    reason=(
+                        f"Caso B: items_affirmed={items_affirmed} pero "
+                        f"cart real tiene {cart_items_count} — mismatch real."
+                    ),
+                )
 
         return InvariantResult(
             outcome=InvariantOutcome.OK,
             invariant_name=self.name,
             reason="cart write executed coherente con afirmación",
         )
+
+
+async def _get_cart_items_count(
+    supabase: Any, conversation_id: str, tenant_id: str,
+) -> Optional[int]:
+    """Cuenta items distintos en el cart real (DB). Returns None si falla
+    (best-effort — el invariant degrada a OK para no bloquear cliente)."""
+    try:
+        cart_row = (
+            supabase.table("conversation_carts")
+            .select("id")
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .eq("status", "open")
+            .limit(1)
+            .execute()
+        )
+        if not cart_row.data:
+            return 0  # No hay cart abierto → 0 items.
+        cart_id = cart_row.data[0]["id"]
+        items_res = (
+            supabase.table("conversation_cart_items")
+            .select("id")
+            .eq("cart_id", cart_id)
+            .execute()
+        )
+        return len(items_res.data or [])
+    except Exception:
+        return None
