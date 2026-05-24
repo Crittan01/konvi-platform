@@ -239,6 +239,118 @@ async def _run_agentic_full(
     # cliente respondió variante), bypaseamos Gemini y resolvemos directo.
     # NO es parche — es el mismo patrón ya usado por `image_send_tool`,
     # `shipping_quote_tool`, `order_status_tool` en flow legacy V1.
+
+    # PRE-LLM #1: purchase intent multi-producto. Casos típicos cliente:
+    #   "Necesito 3 jabones coco 100g y un sérum hialurónico"
+    #   "Quiero 2 aceites de almendras"
+    # Bypass Gemini cuando el inbound tiene intent claro + productos
+    # identificables. Gemini falla con STOP+empty para inbounds complejos.
+    from agentic.purchase_intent_resolver import (
+        try_resolve_purchase_intent, compose_outbound_from_resolution,
+    )
+    intent_resolution = try_resolve_purchase_intent(
+        inbound_text=content,
+        catalog=catalog,
+    )
+    if intent_resolution and (intent_resolution.get("resolved") or intent_resolution.get("ambiguous")):
+        from agentic.tools.cart import AddToCartTool, AddToCartArgs
+        from agentic.tools.base import ToolContext
+        tool = AddToCartTool()
+        ctx = ToolContext(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            contact_id=contact_id,
+            supabase=supabase,
+            catalog_cache=catalog,
+            logger=logger,
+            extras={"recent_inbound_texts": [content]},
+        )
+        all_added = True
+        added_results = []
+        for item in intent_resolution.get("resolved") or []:
+            args = AddToCartArgs(
+                product_id=item["product_id"],
+                variation_id=item["variation_id"],
+                quantity=item["qty"],
+            )
+            try:
+                res = await tool.execute(args, ctx)
+            except Exception as exc:
+                logger.warning(
+                    "[AGENTIC_PRE_LLM] purchase_intent add_to_cart raise: %s",
+                    exc,
+                )
+                all_added = False
+                break
+            added_results.append(res)
+            if not res.success:
+                all_added = False
+                break
+
+        if all_added:
+            customer_name = (contact or {}).get("name") if contact else None
+            # Solo primer nombre, más natural.
+            if customer_name and " " in customer_name:
+                customer_name = customer_name.split(" ", 1)[0]
+            outbound = compose_outbound_from_resolution(
+                intent_resolution, customer_name=customer_name,
+            )
+            logger.info(
+                "[AGENTIC_PRE_LLM] conv=%s purchase_intent resolved=%d "
+                "ambiguous=%d — bypaseando Gemini",
+                conversation_id,
+                len(intent_resolution.get("resolved") or []),
+                len(intent_resolution.get("ambiguous") or []),
+            )
+            await _send_outbound_text(
+                supabase=supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                text=outbound,
+            )
+            _mark_message_processing(
+                supabase, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            # Construir AgenticTurnResult sintético para el audit logger.
+            from agentic.agent import AgenticTurnResult
+            synthetic_result = AgenticTurnResult(
+                outbound_text=outbound,
+                tool_calls_executed=len(added_results),
+                tool_call_log=[{
+                    "tool": "add_to_cart",
+                    "args": {
+                        "product_id": it["product_id"],
+                        "variation_id": it["variation_id"],
+                        "quantity": it["qty"],
+                    },
+                    "result": r.data,
+                } for it, r in zip(intent_resolution.get("resolved") or [], added_results)],
+                finish_reason="DETERMINISTIC_RESOLVER",
+            )
+            _persist_turn_audit(
+                supabase=supabase,
+                mode="cutover",
+                message_id=message_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                inbound_text=content,
+                result=synthetic_result,
+                elapsed_s=0.0,
+                final_text=outbound,
+                invariant_outcome="ok",
+                invariant_name="purchase_intent_bypass",
+                system_prompt_chars=0,
+                history_turns=len(history or []),
+            )
+            return  # turn handled.
+        else:
+            logger.warning(
+                "[AGENTIC_PRE_LLM] purchase_intent matched pero algún "
+                "add_to_cart falló — caemos a Gemini"
+            )
+
+    # PRE-LLM #2: variant selection continuation (response corta a bot question).
     from agentic.variant_continuation import try_resolve_variant_continuation
     variant_match = try_resolve_variant_continuation(
         inbound_text=content,
@@ -300,30 +412,31 @@ async def _run_agentic_full(
                 supabase, message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
-            _persist_turn_audit(
-                supabase=supabase,
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                message_id=message_id,
-                inbound_text=content,
+            from agentic.agent import AgenticTurnResult
+            synthetic_result = AgenticTurnResult(
                 outbound_text=outbound,
+                tool_calls_executed=1,
                 tool_call_log=[{
                     "tool": "add_to_cart",
                     "args": args.model_dump(),
                     "result": tool_result.data,
                 }],
-                tool_calls_executed=1,
-                elapsed_seconds=time.monotonic() - time.monotonic(),
-                truncated=False,
-                truncated_reason=None,
-                error=None,
                 finish_reason="DETERMINISTIC_RESOLVER",
+            )
+            _persist_turn_audit(
+                supabase=supabase,
+                mode="cutover",
+                message_id=message_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                inbound_text=content,
+                result=synthetic_result,
+                elapsed_s=0.0,
+                final_text=outbound,
                 invariant_outcome="ok",
                 invariant_name="variant_continuation_bypass",
-                final_text=outbound,
-                system_prompt_chars=0,  # no LLM call
+                system_prompt_chars=0,
                 history_turns=len(history or []),
-                mode="cutover",
             )
             return  # turn handled — no LLM needed.
         else:

@@ -109,19 +109,35 @@ def _render_contact_block(contact_record: Optional[dict]) -> str:
     has_address = bool(contact_record.get("address"))
     is_known = consent and name and has_email and has_doc and has_address
     if is_known:
+        # Bug runtime KAIU 2026-05-24 conv 022f87d3 turn 5: bot puso
+        # "[Dirección de Cristian]" placeholder en el resumen porque el
+        # contact_block solo decía "ver contact.address" sin valores
+        # concretos. Fix: inyectar address.line1 + city + state literales
+        # para que el LLM pueda referenciar directamente.
+        addr = contact_record.get("address") or {}
+        addr_parts = []
+        if addr.get("line1"):
+            addr_parts.append(str(addr["line1"]))
+        if addr.get("city"):
+            addr_parts.append(str(addr["city"]))
+        if addr.get("state"):
+            addr_parts.append(str(addr["state"]))
+        addr_str = ", ".join(addr_parts) if addr_parts else "(sin dirección guardada)"
         return (
             f"**CONTEXTO_CLIENTE**: cliente CONOCIDO (PII completa pre-existente):\n"
             f"  • Nombre: {name}\n"
             f"  • Email: {contact_record.get('email')}\n"
             f"  • Documento: {contact_record.get('document_type')} "
             f"{contact_record.get('document_number')}\n"
-            f"  • Dirección: ver `contact.address` (city, street, etc.)\n"
+            f"  • Dirección: {addr_str}\n"
             f"  • Consent: ACTIVO (Habeas Data Ley 1581).\n\n"
             f"Aplica Patrón A del FLUJO HABITUAL — saluda con nombre real "
             f"y NO le pidas PII de nuevo. NO presentes catálogo de categorías "
             f"al saludar (asume que conoce). Si el cliente pide un producto, "
             f"el flow va directo a add_to_cart + cotización + carrier + "
-            f"resumen con sus datos ya guardados."
+            f"resumen con sus datos ya guardados. Cuando emitas el resumen "
+            f"final 📋, incluye SU dirección REAL literal (la de arriba) — "
+            f"NUNCA pongas placeholders tipo \"[Dirección de X]\"."
         )
     # Cliente parcial (some PII pero falta consent o datos clave).
     return (
