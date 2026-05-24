@@ -83,20 +83,20 @@ export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', l
         </button>
 
         {/* Acciones secundarias: galería + quitar */}
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1.5">
           <button
             type="button"
             onClick={() => setGalleryOpen(true)}
-            className="text-[10px] text-primary hover:text-primary/80 flex items-center gap-0.5 transition-colors"
-            title="Seleccionar de imágenes ya subidas al tenant"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-primary/40 bg-primary/5 text-[11px] font-medium text-primary hover:bg-primary/10 hover:border-primary/60 transition-colors whitespace-nowrap"
+            title="Seleccionar imagen ya subida al tenant"
           >
-            <FolderOpen className="h-3 w-3" /> Galería
+            <FolderOpen className="h-3.5 w-3.5" /> Galería
           </button>
           {url && (
             <button
               type="button"
               onClick={() => { setUrl(''); onUrlChange?.('') }}
-              className="text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-0.5 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors whitespace-nowrap"
             >
               <X className="h-3 w-3" /> Quitar
             </button>
