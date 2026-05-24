@@ -5,6 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from observability import init_sentry
+
+# Init Sentry ANTES de cargar routers (capturar errores de import también).
+init_sentry(service_name="api")
+
 from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, envia_webhook
 from dependencies.auth import get_current_tenant
 

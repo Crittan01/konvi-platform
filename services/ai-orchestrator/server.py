@@ -16,6 +16,11 @@ import os
 import sys
 import threading
 
+from observability import init_sentry
+
+# Init Sentry ANTES de imports pesados.
+init_sentry(service_name="ai-orchestrator")
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
