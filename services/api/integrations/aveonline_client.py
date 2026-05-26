@@ -803,3 +803,194 @@ class AveonlineClient:
             "simulated": simulate is True,
             "raw": data,
         }
+
+    # ─── Webhook management (Rev. 108) ─────────────────────────────────────
+    # Aveonline `crearWebhook` permite hasta 4 pares param1..param4 que viajan
+    # en cada POST hacia nuestro endpoint. Usamos `param1_name="secret"` +
+    # `param1_value=<UUID>` como pseudo-HMAC documentado (dossier §6.2).
+    # NO es HMAC criptográfico — el secret va en plaintext en el body — pero
+    # un atacante necesita la URL+secret para spoofear. Rotación trimestral
+    # vía `tenant_webhook_secrets` mitiga ventana de exposición.
+    #
+    # Referencia: https://integraciones.aveonline.co/docs/avecrm/crearWebhook/
+
+    async def create_webhook(
+        self, *, url: str, secret: str,
+        extra_params: Optional[dict] = None,
+    ) -> dict:
+        """Registra un webhook en Aveonline para esta cuenta tenant.
+
+        Args:
+            url: URL pública donde Aveonline hará POST con estados de guía.
+                Máximo 500 chars. DEBE incluir el path completo, ej.
+                `https://api.konvi.app/api/v1/webhooks/aveonline/{tenant_id}`.
+            secret: secret plaintext que Aveonline enviará en cada POST como
+                `param1_value`. Generado con `secrets.token_urlsafe(32)`,
+                bcrypt hash persistido en `tenant_webhook_secrets`. Aveonline
+                lo guarda plaintext en su lado.
+            extra_params: opcional dict de hasta 3 pares adicionales
+                (param2..param4).
+
+        Returns:
+            dict {"ok": bool, "raw": <full response>, "message": str}.
+
+        Notas implementación:
+            - Endpoint `app.aveonline.co/avestock/api/createWebhook.php`.
+            - Body: tipo='authave', empresa=<id>, url, param1_name='secret',
+              param1_value=<secret>.
+            - Si ya existe webhook con misma URL → response error
+              "Ya existe un webhook con la misma url". Caller debe primero
+              llamar `delete_webhook` y luego re-crear (idempotent rotate).
+        """
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+        if not empresa_id:
+            raise AveonlinePermanentError(
+                "Aveonline empresa_id ausente en credentials — no se puede "
+                "registrar webhook."
+            )
+
+        body: dict[str, Any] = {
+            "tipo": "authave",
+            "empresa": int(empresa_id) if str(empresa_id).isdigit() else empresa_id,
+            "url": url[:500],
+            "param1_name": "secret",
+            "param1_value": secret[:255],
+        }
+        # Permitir extra metadata (ej. tenant_id, ambiente) en param2..param4
+        # útil para debugging webhooks en logs Aveonline.
+        if extra_params:
+            for idx, (k, v) in enumerate(list(extra_params.items())[:3], start=2):
+                body[f"param{idx}_name"] = str(k)[:50]
+                body[f"param{idx}_value"] = str(v)[:255]
+
+        endpoint = "https://app.aveonline.co/avestock/api/createWebhook.php"
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:
+                resp = await client.post(endpoint, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise AveonlinePermanentError(
+                f"create_webhook HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+            )
+        except httpx.HTTPError as exc:
+            raise AveonlineTransientError(f"create_webhook network: {exc}")
+        except Exception as exc:
+            raise AveonlinePermanentError(f"create_webhook unexpected: {exc}")
+
+        # Shape variants:
+        #   Success: {success: true, messages: "Creado exitosamente"}
+        #   Conflict: {success: false, messages: "...Ya existe..."}
+        #   AuthFail: {status: "error", message: "Credenciales invalidas..."}
+        ok = bool(data.get("success"))
+        msg = data.get("messages") or data.get("message") or ""
+        return {"ok": ok, "raw": data, "message": str(msg)}
+
+    async def list_webhooks(self) -> dict:
+        """Lista los webhooks registrados para esta empresa.
+
+        Endpoint `listWebhook.php` (mismo patrón que createWebhook).
+        Útil para detectar duplicados antes de rotar.
+
+        Returns:
+            dict {"ok": bool, "raw": <full response>, "items": list}.
+        """
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+        body = {
+            "tipo": "authave",
+            "empresa": int(empresa_id) if str(empresa_id).isdigit() else empresa_id,
+        }
+        endpoint = "https://app.aveonline.co/avestock/api/listWebhook.php"
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:
+                resp = await client.post(endpoint, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            logger.warning("[AVEONLINE] list_webhooks error: %s", exc)
+            return {"ok": False, "raw": {}, "items": [], "message": str(exc)}
+
+        items = []
+        if isinstance(data.get("webhooks"), list):
+            items = data["webhooks"]
+        elif isinstance(data.get("data"), list):
+            items = data["data"]
+        return {
+            "ok": bool(data.get("success", True)),
+            "raw": data,
+            "items": items,
+            "message": data.get("messages") or data.get("message") or "",
+        }
+
+    async def delete_webhook(self, *, url: str) -> dict:
+        """Elimina un webhook registrado por URL.
+
+        Args:
+            url: URL exacta del webhook a eliminar.
+
+        Returns:
+            dict {"ok": bool, "raw": <full response>, "message": str}.
+        """
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+        body = {
+            "tipo": "authave",
+            "empresa": int(empresa_id) if str(empresa_id).isdigit() else empresa_id,
+            "url": url,
+        }
+        endpoint = "https://app.aveonline.co/avestock/api/deleteWebhook.php"
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:
+                resp = await client.post(endpoint, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            return {"ok": False, "raw": {}, "message": str(exc)}
+        ok = bool(data.get("success"))
+        return {
+            "ok": ok,
+            "raw": data,
+            "message": data.get("messages") or data.get("message") or "",
+        }
+
+    async def get_estado(self, *, tracking_number: str) -> dict:
+        """Polling de estado de guía via `obtenerEstadoAuth` (dossier §6.1).
+
+        Endpoint: `app.aveonline.co/api/nal/v1.0/guia.php`.
+        Body: tipo='obtenerEstadoAuth', token=<jwt>, id=<empresa>, guia=<num>.
+
+        Útil como respaldo del webhook cuando éste falla o se retrasa.
+
+        Returns:
+            dict {"ok": bool, "guias": list[dict], "raw": <response>}.
+            Cada item en guias tiene: estado, rutadigitalizada,
+            historicos[{estado, fechamostrar, descripcion}].
+        """
+        jwt = await self._get_valid_jwt()
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+
+        body = {
+            "tipo": "obtenerEstadoAuth",
+            "token": jwt,
+            "id": empresa_id,
+            "guia": tracking_number,
+        }
+        endpoint = "https://app.aveonline.co/api/nal/v1.0/guia.php"
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:
+                resp = await client.post(endpoint, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            return {"ok": False, "guias": [], "raw": {}, "message": str(exc)}
+
+        ok = data.get("status") == "ok"
+        return {
+            "ok": ok,
+            "guias": data.get("guias") or [],
+            "raw": data,
+            "message": data.get("message") or "",
+        }

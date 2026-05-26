@@ -262,18 +262,21 @@ def _process_wompi_event(payload: dict) -> None:
             order_id, e,
         )
 
-    # ── 7.7. Etapa 2 (solo si guía OK): Email + WhatsApp "Envío en camino" ────
-    # Si Aveonline rechazó la guía → cliente solo recibe email/WA pago
-    # confirmado (etapa 1). El operador puede generar manual desde Inbox.
+    # ── 7.7. Etapa 2 (solo si guía OK): Email + WhatsApp "Guía generada" ──────
+    # Cambio rev. 108 — el copy ya NO promete "envío en camino" porque la
+    # guía generada solo significa que Aveonline asignó tracking, no que el
+    # courier lo recogió. El estado físico real llega vía webhook Aveonline
+    # (in_transit → delivered) en etapa 3+. Si Aveonline rechazó la guía →
+    # cliente solo recibe email/WA pago confirmado (etapa 1).
     if guide_ok:
         try:
             _send_payment_confirmation_email(
                 supabase=supabase, order_id=order_id, tenant_id=tenant_id,
-                template_mode="shipment_dispatched",
+                template_mode="shipment_label_ready",
             )
         except Exception as e:
             logger.warning(
-                "[WOMPI][EMAIL] shipment_dispatched falló order=%s err=%s",
+                "[WOMPI][EMAIL] shipment_label_ready falló order=%s err=%s",
                 order_id, e,
             )
         # Notif WhatsApp con tracking — lee shipment row recién creado.
@@ -285,7 +288,9 @@ def _process_wompi_event(payload: dict) -> None:
             )
             sh_row = (sh_res.data or [{}])[0]
             if conversation_id and sh_row.get("tracking_number"):
-                _notify_client_shipment_dispatched(
+                # Etapa 2: guía generada (NO "envío en camino" — eso espera
+                # confirmación física vía webhook Aveonline EN RUTA).
+                _notify_client_shipment_label_ready(
                     supabase,
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
@@ -712,33 +717,119 @@ def _notify_client_payment_approved(
     )
 
 
-def _notify_client_shipment_dispatched(
+def _notify_client_shipment_label_ready(
     supabase, *, conversation_id: str, tenant_id: str, order_id: str,
     carrier: str, tracking_number: str, tracking_url: str,
-    eta: str = "",
 ) -> None:
-    """Etapa 2: guía Aveonline generada — confirma envío + tracking real.
+    """Etapa 2 (post-guía Aveonline): GUÍA GENERADA (admin-state).
 
-    Mensaje natural separado del de pago. Cliente recibe primero
-    "Pago confirmado" inmediato, después este cuando la guía esté lista
-    (~14s en promedio). Mantiene momentum + transparencia.
+    NO promete "envío en camino" — la guía está lista pero el envío
+    físico ocurre cuando el courier recoja + ponga EN RUTA. Esa
+    confirmación llega vía webhook Aveonline `webhookEstadosGuias`
+    en etapa 3 (in_transit → delivered).
+
+    Mensaje breve + tracking number + link rastreo. Cliente sabe que
+    el pedido está listo para despacho sin engaño sobre estado físico.
     """
     short_id = order_id[:8].upper()
-    eta_str = f" (entrega estimada: {eta})" if eta else ""
     carrier_str = (carrier or "tu transportadora").strip()
     tracking_line = (
         f"\n\n🔍 *Rastrea tu envío*:\n{tracking_url}"
         if tracking_url else ""
     )
     text = (
-        f"📦 *Tu envío está en camino*\n\n"
-        f"Pedido *#{short_id}* salió con *{carrier_str}*{eta_str}.\n"
+        f"📋 *Guía asignada*\n\n"
+        f"Tu pedido *#{short_id}* ya tiene guía con *{carrier_str}*.\n"
+        f"Número: `{tracking_number}`\n\n"
+        f"Te avisaré aquí cuando el courier recoja el paquete y vaya "
+        f"en ruta hacia ti."
+        f"{tracking_line}"
+    )
+    _enqueue_whatsapp_outbound(
+        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        text=text, log_tag="WOMPI_WA_LABEL",
+    )
+
+
+def _notify_client_shipment_in_transit(
+    supabase, *, conversation_id: str, tenant_id: str, order_id: str,
+    carrier: str, tracking_number: str, tracking_url: str,
+    raw_status: str = "",
+) -> None:
+    """Etapa 3 (post-webhook Aveonline EN RUTA): envío realmente despachado.
+
+    Solo se llama desde el webhook handler de Aveonline cuando el courier
+    confirma que el paquete salió a ruta. Garantiza verdad observable —
+    nunca decimos "en camino" sin que el courier lo haya confirmado.
+    """
+    short_id = order_id[:8].upper()
+    carrier_str = (carrier or "tu transportadora").strip()
+    status_line = f" ({raw_status})" if raw_status else ""
+    tracking_line = (
+        f"\n\n🔍 *Rastrea tu envío*:\n{tracking_url}"
+        if tracking_url else ""
+    )
+    text = (
+        f"🚚 *Tu envío salió en ruta*{status_line}\n\n"
+        f"Pedido *#{short_id}* va contigo con *{carrier_str}*.\n"
         f"Guía: `{tracking_number}`"
         f"{tracking_line}"
     )
     _enqueue_whatsapp_outbound(
         supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-        text=text, log_tag="WOMPI_WA_SHIPPED",
+        text=text, log_tag="WOMPI_WA_IN_TRANSIT",
+    )
+
+
+def _notify_client_shipment_delivered(
+    supabase, *, conversation_id: str, tenant_id: str, order_id: str,
+    carrier: str, tracking_number: str,
+) -> None:
+    """Etapa 4 (post-webhook Aveonline ENTREGADA): pedido entregado.
+
+    Mensaje de cierre + invitación a feedback. Se llama solo desde
+    aveonline_webhook cuando el courier reporta entrega.
+    """
+    short_id = order_id[:8].upper()
+    carrier_str = (carrier or "el courier").strip()
+    text = (
+        f"📬 *Tu pedido fue entregado*\n\n"
+        f"*#{short_id}* llegó vía *{carrier_str}* (guía `{tracking_number}`).\n\n"
+        f"¿Todo llegó perfecto? Cuéntame por aquí, tu opinión nos "
+        f"ayuda muchísimo. ¡Gracias por confiar en nosotros! 💛"
+    )
+    _enqueue_whatsapp_outbound(
+        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        text=text, log_tag="WOMPI_WA_DELIVERED",
+    )
+
+
+def _notify_client_shipment_exception(
+    supabase, *, conversation_id: str, tenant_id: str, order_id: str,
+    carrier: str, tracking_number: str, raw_status: str = "",
+) -> None:
+    """Etapa novedad (post-webhook Aveonline EN NOVEDAD/DEVUELTA).
+
+    Aviso al cliente — no promete solución automática (cada novedad
+    puede requerir intervención humana). Inbox alerta a operador en
+    paralelo.
+    """
+    short_id = order_id[:8].upper()
+    carrier_str = (carrier or "el courier").strip()
+    reason_line = (
+        f"\n\nMotivo reportado: *{raw_status}*"
+        if raw_status else ""
+    )
+    text = (
+        f"⚠️ *Novedad con tu envío*\n\n"
+        f"Pedido *#{short_id}* tuvo un inconveniente con *{carrier_str}* "
+        f"(guía `{tracking_number}`).{reason_line}\n\n"
+        f"Ya estamos revisando con la transportadora. Te confirmamos "
+        f"por aquí en cuanto tengamos respuesta."
+    )
+    _enqueue_whatsapp_outbound(
+        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        text=text, log_tag="WOMPI_WA_EXCEPTION",
     )
 
 
@@ -860,15 +951,37 @@ def _send_payment_confirmation_email(
             shipment_status="",
         )
         subject = f"Pago recibido — Pedido #{order_short}"
-    elif template_mode == "shipment_dispatched":
-        html = _compose_shipment_dispatched_email_html(
+    elif template_mode == "shipment_label_ready":
+        html = _compose_shipment_label_ready_email_html(
             customer_name=name, order_short=order_short, items=items,
             subtotal=subtotal, shipping=shipping, total=total,
             carrier=carrier, tenant_name=tenant_name,
             tracking_number=tracking_number, tracking_url=tracking_url,
             label_url=label_url, shipment_status=shipment_status,
         )
-        subject = f"📦 Tu envío está en camino — Pedido #{order_short}"
+        subject = f"📋 Guía generada — Pedido #{order_short}"
+    elif template_mode == "shipment_in_transit":
+        html = _compose_shipment_in_transit_email_html(
+            customer_name=name, order_short=order_short,
+            carrier=carrier, tenant_name=tenant_name,
+            tracking_number=tracking_number, tracking_url=tracking_url,
+            raw_status=shipment_status,
+        )
+        subject = f"🚚 Tu envío salió en ruta — Pedido #{order_short}"
+    elif template_mode == "shipment_delivered":
+        html = _compose_shipment_delivered_email_html(
+            customer_name=name, order_short=order_short,
+            carrier=carrier, tenant_name=tenant_name,
+            tracking_number=tracking_number,
+        )
+        subject = f"📬 Pedido entregado #{order_short}"
+    elif template_mode == "shipment_exception":
+        html = _compose_shipment_exception_email_html(
+            customer_name=name, order_short=order_short,
+            carrier=carrier, tenant_name=tenant_name,
+            tracking_number=tracking_number, raw_status=shipment_status,
+        )
+        subject = f"⚠️ Novedad con tu envío — Pedido #{order_short}"
     else:
         # Default fallback: comportamiento previo (email único con todo).
         html = _compose_payment_email_html(
@@ -1324,7 +1437,7 @@ def _compose_payment_email_html(
 </body></html>"""
 
 
-def _compose_shipment_dispatched_email_html(
+def _compose_shipment_label_ready_email_html(
     *,
     customer_name: str,
     order_short: str,
@@ -1339,11 +1452,12 @@ def _compose_shipment_dispatched_email_html(
     label_url: str,
     shipment_status: str,
 ) -> str:
-    """Email etapa 2: "Tu envío está en camino".
+    """Email etapa 2 (post-guía generada): "Guía generada — saldrá pronto".
 
-    Foco del mensaje: tracking + carrier + acciones (rastrear/descargar).
-    Recordatorio resumido del pedido al final (no es lo principal —
-    el cliente ya tuvo el email 1 "Pago recibido" con desglose).
+    Rev. 108 — el copy ya NO promete "envío en camino". La guía generada
+    solo significa que el courier asignó tracking; el despacho físico
+    ocurre cuando el courier recoja el paquete (estado EN RUTA reportado
+    vía webhook). Hasta entonces, mensaje preciso: "lista para despacho".
     """
     is_simulated = (shipment_status or "").lower() == "simulated"
     sim_tag = (
@@ -1355,7 +1469,7 @@ def _compose_shipment_dispatched_email_html(
     track_btn = (
         f'<a href="{tracking_url}" style="display:inline-block;background:#2c3e50;'
         f'color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none;'
-        f'font-weight:600;margin-right:8px;margin-bottom:8px">🚚 Rastrear envío</a>'
+        f'font-weight:600;margin-right:8px;margin-bottom:8px">🔍 Rastrear envío</a>'
         if tracking_url else ""
     )
     label_btn = (
@@ -1364,7 +1478,6 @@ def _compose_shipment_dispatched_email_html(
         f'font-weight:600;border:1px solid #2c3e50;margin-bottom:8px">📄 Descargar guía PDF</a>'
         if label_url else ""
     )
-    # Resumen compacto del pedido (recordatorio).
     rows = []
     for it in items:
         qty = int(it.get("quantity") or 1)
@@ -1377,10 +1490,11 @@ def _compose_shipment_dispatched_email_html(
     return f"""<!doctype html>
 <html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
 <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
-  <h2 style="margin:0 0 8px;font-size:22px">📦 Tu envío está en camino, {customer_name}{sim_tag}</h2>
+  <h2 style="margin:0 0 8px;font-size:22px">📋 Guía asignada, {customer_name}{sim_tag}</h2>
   <p style="margin:0 0 16px;color:#5a6772">
     Tu pedido <strong>#{order_short}</strong> en <strong>{tenant_name or 'nuestra tienda'}</strong>
-    ya tiene guía generada. ¡Pronto lo recibes!
+    ya tiene número de guía. El courier lo recogerá pronto y te avisaré
+    aquí cuando salga en ruta.
   </p>
 
   <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin:24px 0">
@@ -1401,8 +1515,123 @@ def _compose_shipment_dispatched_email_html(
   </p>
 
   <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
-    Cualquier inquietud sobre tu envío, responde a este email o contáctanos
-    por WhatsApp. ¡Gracias por tu compra!
+    Cualquier inquietud, responde a este email o escríbenos por WhatsApp.
+    ¡Gracias por tu compra!
+  </p>
+</div>
+</body></html>"""
+
+
+def _compose_shipment_in_transit_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    carrier: str,
+    tenant_name: str,
+    tracking_number: str,
+    tracking_url: str,
+    raw_status: str = "",
+) -> str:
+    """Email etapa 3 (post-webhook EN RUTA): envío físicamente despachado."""
+    carrier_str = (carrier or "el courier").strip()
+    track_btn = (
+        f'<a href="{tracking_url}" style="display:inline-block;background:#2c3e50;'
+        f'color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none;'
+        f'font-weight:600">🔍 Rastrear envío</a>'
+        if tracking_url else ""
+    )
+    status_line = (
+        f'<p style="margin:0 0 8px;color:#5a6772;font-size:13px">'
+        f'Estado actual: <strong>{raw_status}</strong></p>'
+        if raw_status else ""
+    )
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+  <h2 style="margin:0 0 8px;font-size:22px">🚚 Tu envío salió en ruta, {customer_name}</h2>
+  <p style="margin:0 0 16px;color:#5a6772">
+    Tu pedido <strong>#{order_short}</strong> de <strong>{tenant_name or 'nuestra tienda'}</strong>
+    ya está en camino con <strong>{carrier_str}</strong>.
+  </p>
+  <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin:24px 0">
+    {status_line}
+    <p style="margin:0 0 16px;font-size:14px"><strong>Guía:</strong>
+      <span style="font-family:monospace;background:#fff;padding:3px 8px;
+            border-radius:4px;border:1px solid #e8eef2;font-size:15px">{tracking_number}</span>
+    </p>
+    {track_btn}
+  </div>
+  <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
+    Te avisaré aquí mismo cuando el courier confirme la entrega.
+  </p>
+</div>
+</body></html>"""
+
+
+def _compose_shipment_delivered_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    carrier: str,
+    tenant_name: str,
+    tracking_number: str,
+) -> str:
+    """Email etapa 4 (post-webhook ENTREGADA): pedido entregado."""
+    carrier_str = (carrier or "el courier").strip()
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+  <h2 style="margin:0 0 8px;font-size:22px">📬 Pedido entregado, {customer_name}</h2>
+  <p style="margin:0 0 16px;color:#5a6772">
+    Tu pedido <strong>#{order_short}</strong> de <strong>{tenant_name or 'nuestra tienda'}</strong>
+    fue entregado vía <strong>{carrier_str}</strong> (guía <code>{tracking_number}</code>).
+  </p>
+  <p style="margin:16px 0;color:#2c3e50;font-size:15px">
+    ¿Todo llegó perfecto? Cuéntanos respondiendo a este email — tu opinión
+    nos ayuda a mejorar.
+  </p>
+  <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
+    ¡Gracias por confiar en nosotros! 💛
+  </p>
+</div>
+</body></html>"""
+
+
+def _compose_shipment_exception_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    carrier: str,
+    tenant_name: str,
+    tracking_number: str,
+    raw_status: str = "",
+) -> str:
+    """Email etapa novedad: alerta + invitación a contactar."""
+    carrier_str = (carrier or "el courier").strip()
+    reason_line = (
+        f'<p style="margin:0 0 8px;font-size:14px">'
+        f'<strong>Motivo reportado:</strong> {raw_status}</p>'
+        if raw_status else ""
+    )
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+  <h2 style="margin:0 0 8px;font-size:22px">⚠️ Novedad con tu envío, {customer_name}</h2>
+  <p style="margin:0 0 16px;color:#5a6772">
+    Tu pedido <strong>#{order_short}</strong> tuvo un inconveniente con
+    <strong>{carrier_str}</strong>.
+  </p>
+  <div style="background:#fff8e1;border-radius:8px;padding:20px;margin:24px 0;border:1px solid #ffe082">
+    {reason_line}
+    <p style="margin:0;font-size:14px"><strong>Guía:</strong>
+      <span style="font-family:monospace;background:#fff;padding:3px 8px;
+            border-radius:4px;border:1px solid #e8eef2;font-size:15px">{tracking_number}</span>
+    </p>
+  </div>
+  <p style="margin:16px 0;color:#2c3e50;font-size:14px">
+    Ya estamos revisando con la transportadora. Si tienes información
+    relevante (dirección alterna, horario disponible) responde a este
+    email o por WhatsApp para acelerar la solución.
   </p>
 </div>
 </body></html>"""

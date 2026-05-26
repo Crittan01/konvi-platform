@@ -29,7 +29,7 @@ from typing import Any, Optional
 # del API; viene transitivo).
 
 SUPPORTED_INTEGRATIONS = frozenset({
-    "envia", "wompi", "meta", "meli", "telegram",
+    "envia", "wompi", "meta", "meli", "telegram", "aveonline",
 })
 
 # Defaults (configurables vía env si se necesita en el futuro).

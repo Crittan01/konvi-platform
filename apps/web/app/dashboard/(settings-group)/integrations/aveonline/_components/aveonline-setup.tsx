@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useState, useTransition } from 'react'
-import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2, Truck, Loader2, RefreshCw } from 'lucide-react'
+import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2, Truck, Loader2, RefreshCw, Webhook, Copy, Trash2 } from 'lucide-react'
 
 type AveonlineAgent = {
   id: string
@@ -461,6 +461,9 @@ export default function AveonlineSetup({
         </p>
       </div>
 
+      {/* Webhook estados de guía (Rev. 108) */}
+      <AveonlineWebhookSection />
+
       {/* Zona de riesgo */}
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-5 space-y-3">
         <h3 className="font-semibold text-destructive">Zona de riesgo</h3>
@@ -493,6 +496,309 @@ export default function AveonlineSetup({
     </div>
   )
 }
+
+function AveonlineWebhookSection() {
+  type Status = {
+    configured: boolean
+    url: string
+    rotated_at: string | null
+    expires_at: string | null
+    has_grace_period: boolean
+    audit_log_count: number
+  }
+  const [status, setStatus] = useState<Status | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [secret, setSecret] = useState<string | null>(null)
+
+  const refresh = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const resp = await fetch('/api/integrations/aveonline/webhook', {
+        method: 'GET',
+        credentials: 'include',
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json() as Status
+      setStatus(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error consultando webhook')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void refresh() }, [])
+
+  const configure = async () => {
+    if (!confirm('Configurar webhook Aveonline ahora? Generará un secret nuevo y lo registrará en tu cuenta Aveonline automáticamente.')) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    setSecret(null)
+    try {
+      const resp = await fetch('/api/integrations/aveonline/webhook/configure', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await resp.json()
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.detail || data.aveonline_message || 'Error configurando')
+      }
+      setSecret(data.plaintext_secret as string)
+      setSuccess(
+        data.aveonline_registered
+          ? 'Webhook registrado en Aveonline correctamente.'
+          : `Secret guardado localmente. Registro Aveonline: ${data.aveonline_message || 'sin confirmación'}`,
+      )
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error configurando webhook')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const rotate = async () => {
+    if (!confirm('Rotar secret webhook? El secret actual seguirá válido 7 días (grace period) mientras Aveonline migra.')) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    setSecret(null)
+    try {
+      const resp = await fetch('/api/integrations/aveonline/webhook/rotate', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await resp.json()
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.detail || 'Error rotando')
+      }
+      setSecret(data.plaintext_secret as string)
+      setSuccess('Secret rotado. Aveonline usa automáticamente el nuevo.')
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error rotando webhook')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!confirm('Eliminar webhook? Dejaremos de recibir estados de envío en tiempo real. El tracking on-demand sigue funcionando.')) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    setSecret(null)
+    try {
+      const resp = await fetch('/api/integrations/aveonline/webhook', {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (resp.status !== 204) {
+        const data = await resp.json().catch(() => ({}))
+        throw new Error(data.detail || `HTTP ${resp.status}`)
+      }
+      setSuccess('Webhook eliminado.')
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error eliminando webhook')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setSuccess('Copiado al portapapeles.')
+    } catch {
+      setError('No se pudo copiar.')
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-foreground">
+          <Webhook className="h-5 w-5 text-muted-foreground" />
+          <h3 className="font-semibold">Webhook de estados</h3>
+        </div>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={loading || busy}
+          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Actualizar
+        </button>
+      </div>
+
+      <p className="text-sm text-muted-foreground">
+        Recibe en tiempo real cambios de estado del envío (en ruta, entregado,
+        novedad) reportados por la transportadora. Te avisamos al cliente
+        automáticamente vía WhatsApp + email solo cuando el courier confirma
+        el cambio físico — no antes.
+      </p>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Consultando estado…
+        </div>
+      )}
+
+      {!loading && status && (
+        <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="text-xs text-muted-foreground">Estado</div>
+              <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                {status.configured ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 text-green-700" />
+                    Configurado
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    Sin configurar
+                  </>
+                )}
+              </div>
+            </div>
+            {status.configured && status.has_grace_period && (
+              <span className="text-xs px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+                Rotación reciente — grace activo
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="text-xs text-muted-foreground">URL del webhook</div>
+            <div className="flex items-center gap-2">
+              <code className="font-mono text-xs px-2 py-1.5 rounded-md bg-background border border-border flex-1 truncate">
+                {status.url}
+              </code>
+              <button
+                type="button"
+                onClick={() => void copyToClipboard(status.url)}
+                className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-muted"
+                title="Copiar URL"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {status.configured && status.rotated_at && (
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <div className="text-muted-foreground">Última rotación</div>
+                <div className="text-foreground">
+                  {new Date(status.rotated_at).toLocaleString('es-CO')}
+                </div>
+              </div>
+              {status.expires_at && (
+                <div>
+                  <div className="text-muted-foreground">Recomendado rotar antes de</div>
+                  <div className="text-foreground">
+                    {new Date(status.expires_at).toLocaleDateString('es-CO')}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {secret && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-amber-900 font-medium text-sm">
+            <KeyRound className="h-4 w-4" />
+            Secret generado — guárdalo ahora
+          </div>
+          <p className="text-xs text-amber-800">
+            Este secret se muestra una sola vez. Aveonline ya lo recibió y lo
+            usará automáticamente al enviar webhooks. Solo lo necesitas si
+            quieres reconfigurar manualmente en el panel Aveonline.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="font-mono text-xs px-2 py-1.5 rounded-md bg-background border border-amber-300 flex-1 break-all">
+              {secret}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copyToClipboard(secret)}
+              className="text-amber-900 hover:bg-amber-100 p-1.5 rounded-md"
+              title="Copiar secret"
+            >
+              <Copy className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      {success && !secret && (
+        <div className="flex items-start gap-2 rounded-md border border-green-700/50 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{success}</span>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {!status?.configured ? (
+          <button
+            type="button"
+            onClick={() => void configure()}
+            disabled={busy}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {busy ? 'Configurando…' : 'Configurar webhook'}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => void rotate()}
+              disabled={busy}
+              className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50 flex items-center gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
+              Rotar secret
+            </button>
+            <button
+              type="button"
+              onClick={() => void remove()}
+              disabled={busy}
+              className="rounded-md border border-destructive/40 bg-background px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar webhook
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (

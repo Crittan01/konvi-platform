@@ -693,3 +693,254 @@ async def aveonline_guide_dry_run(
             "warning_idagente_missing": not tenant.get("idagente"),
         },
     }
+
+
+# ─── Aveonline: webhook estados de guía (Rev. 108) ───────────────────────────
+# Endpoints para configurar / rotar / consultar / eliminar el webhook
+# `webhookEstadosGuias` de Aveonline para este tenant.
+#
+# Flujo configure (primera vez):
+#   1. Backend genera UUIDv4 plaintext, lo hashea con bcrypt (F.10).
+#   2. Persiste hash en `tenant_webhook_secrets` (integration='aveonline').
+#   3. Llama `AveonlineClient.create_webhook` con URL pública + plaintext.
+#   4. Retorna URL + plaintext UNA VEZ (UI lo muestra al tenant para
+#      copiar si Aveonline lo pide después; después se descarta).
+#
+# Flujo rotate:
+#   1. Genera nuevo plaintext + nuevo hash.
+#   2. Mueve hash actual a `previous_secret_hash` con `grace_period_until`
+#      = now+7d (permite que Aveonline siga enviando con el viejo durante
+#      la migración del panel).
+#   3. Llama Aveonline `delete_webhook` (vieja URL si cambió) + `create_webhook`
+#      con nuevo plaintext.
+#   4. Retorna nuevo plaintext UNA VEZ.
+
+
+def _public_webhook_base_url() -> str:
+    """URL pública del API donde Aveonline hará POST.
+
+    En prod: `https://api.konvi.app`. En local: env var `PUBLIC_WEBHOOK_URL`
+    (ngrok). El endpoint final es:
+      `{base}/api/v1/webhooks/aveonline/{tenant_id}` (secret en body
+      como param1_value) — coherente con docstring del router.
+    """
+    base = os.getenv("PUBLIC_WEBHOOK_URL", "").rstrip("/")
+    if not base:
+        # Fallback razonable cuando PUBLIC_WEBHOOK_URL no está seteada
+        # (dev local sin ngrok). El tenant verá la URL como placeholder y
+        # puede setear env antes de prod.
+        base = "https://YOUR_PUBLIC_HOST"
+    return base
+
+
+def _build_aveonline_webhook_url(tenant_id: str) -> str:
+    """URL completa que se registra en Aveonline para este tenant."""
+    return f"{_public_webhook_base_url()}/api/v1/webhooks/aveonline/{tenant_id}"
+
+
+@router.get("/aveonline/webhook")
+async def aveonline_webhook_status(
+    tenant_id: str = Depends(get_current_tenant),
+    role: str = Depends(get_current_role),
+    supabase: Client = Depends(get_service_client),
+):
+    """Retorna estado del webhook Aveonline configurado para el tenant.
+
+    Response shape:
+      {
+        "configured": bool,
+        "url": str,
+        "rotated_at": iso8601 | None,
+        "expires_at": iso8601 | None,
+        "has_grace_period": bool,
+        "audit_log_count": int,
+      }
+
+    NO devuelve secret plaintext — eso solo se entrega al rotar/configurar.
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(403, "Solo owner/manager pueden ver webhook config")
+
+    from lib.webhook_secret_manager import get_record
+
+    record = get_record(supabase, tenant_id, "aveonline")
+    url = _build_aveonline_webhook_url(tenant_id)
+    if not record:
+        return {
+            "configured": False,
+            "url": url,
+            "rotated_at": None,
+            "expires_at": None,
+            "has_grace_period": False,
+            "audit_log_count": 0,
+        }
+    return {
+        "configured": True,
+        "url": url,
+        "rotated_at": record.rotated_at,
+        "expires_at": record.expires_at,
+        "has_grace_period": record.is_in_grace_period,
+        "audit_log_count": len(record.audit_log),
+    }
+
+
+@router.post("/aveonline/webhook/configure")
+async def aveonline_webhook_configure(
+    tenant_id: str = Depends(get_current_tenant),
+    role: str = Depends(get_current_role),
+    supabase: Client = Depends(get_service_client),
+):
+    """Configura webhook por primera vez (o lo rota si ya existía).
+
+    Pasos:
+      1. Genera secret plaintext + hash (F.10).
+      2. Persiste en `tenant_webhook_secrets`.
+      3. Intenta eliminar webhook viejo en Aveonline (si existe).
+      4. Registra webhook nuevo en Aveonline con URL + secret.
+
+    Response:
+      {
+        "ok": bool,
+        "url": str,
+        "plaintext_secret": str,   # SOLO UNA VEZ
+        "aveonline_registered": bool,
+        "aveonline_message": str,
+      }
+    """
+    if role != "owner":
+        raise HTTPException(
+            403, "Solo el owner puede configurar webhooks de integraciones",
+        )
+
+    from lib.webhook_secret_manager import rotate_secret
+
+    url = _build_aveonline_webhook_url(tenant_id)
+    rotation = rotate_secret(
+        supabase, tenant_id=tenant_id, integration="aveonline",
+        actor_id=None,  # FastAPI Depends de user no se incluyó — futuro F2.
+        reason="aveonline_webhook_configure",
+    )
+    plaintext = rotation.plaintext_secret
+
+    # Intentar registrar en Aveonline (best-effort — si falla, el secret
+    # ya quedó en DB y el tenant puede invocar registro manual).
+    aveonline_registered = False
+    aveonline_message = ""
+    try:
+        from integrations.aveonline_client import AveonlineClient
+        client = AveonlineClient(tenant_id=tenant_id, supabase=supabase)
+
+        # Defensive: borrar webhook viejo con misma URL si existe.
+        try:
+            await client.delete_webhook(url=url)
+        except Exception as exc:
+            logger.info(
+                "[AVEONLINE_WH_CFG] delete_webhook previo falló (esperable "
+                "si era primera config): %s",
+                exc,
+            )
+
+        result = await client.create_webhook(
+            url=url,
+            secret=plaintext,
+            extra_params={"tenant_id": tenant_id, "source": "konvi"},
+        )
+        aveonline_registered = bool(result.get("ok"))
+        aveonline_message = result.get("message") or ""
+        logger.info(
+            "[AVEONLINE_WH_CFG] register tenant=%s ok=%s msg=%s",
+            tenant_id, aveonline_registered, aveonline_message,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[AVEONLINE_WH_CFG] aveonline register err tenant=%s: %s",
+            tenant_id, exc,
+        )
+        aveonline_message = f"error registrando en Aveonline: {exc}"
+
+    audit_log(
+        supabase, tenant_id=tenant_id, actor_id=None,
+        action="aveonline_webhook_configured",
+        target_type="integration", target_id=tenant_id,
+        metadata={"url": url, "aveonline_ok": aveonline_registered},
+    )
+
+    return {
+        "ok": True,
+        "url": url,
+        "plaintext_secret": plaintext,
+        "aveonline_registered": aveonline_registered,
+        "aveonline_message": aveonline_message,
+        "rotated_at": rotation.record.rotated_at,
+        "expires_at": rotation.record.expires_at,
+    }
+
+
+@router.post("/aveonline/webhook/rotate")
+async def aveonline_webhook_rotate(
+    tenant_id: str = Depends(get_current_tenant),
+    role: str = Depends(get_current_role),
+    supabase: Client = Depends(get_service_client),
+):
+    """Rota secret + re-registra webhook con nuevo plaintext.
+
+    Equivalente a configure pero con audit_log explícito de rotación
+    (vs primera config). Misma response shape.
+    """
+    if role != "owner":
+        raise HTTPException(403, "Solo el owner puede rotar webhooks")
+
+    # Idéntico a configure por dentro — la distinción ocurre en
+    # rotate_secret() que detecta si la fila ya existía (= rotación).
+    return await aveonline_webhook_configure(
+        tenant_id=tenant_id, role=role, supabase=supabase,
+    )
+
+
+@router.delete("/aveonline/webhook", status_code=204)
+async def aveonline_webhook_delete(
+    tenant_id: str = Depends(get_current_tenant),
+    role: str = Depends(get_current_role),
+    supabase: Client = Depends(get_service_client),
+):
+    """Elimina webhook tanto en Aveonline como en DB local.
+
+    Útil si el tenant quiere desactivar tracking. La integración Aveonline
+    sigue activa (cotización + guías) — solo se desconecta el reporting
+    de estados.
+    """
+    if role != "owner":
+        raise HTTPException(403, "Solo el owner puede eliminar webhooks")
+
+    url = _build_aveonline_webhook_url(tenant_id)
+
+    # 1. Aveonline.
+    try:
+        from integrations.aveonline_client import AveonlineClient
+        client = AveonlineClient(tenant_id=tenant_id, supabase=supabase)
+        await client.delete_webhook(url=url)
+    except Exception as exc:
+        logger.warning(
+            "[AVEONLINE_WH_DEL] delete remoto err tenant=%s: %s",
+            tenant_id, exc,
+        )
+
+    # 2. DB local: borrar fila tenant_webhook_secrets.
+    try:
+        supabase.table("tenant_webhook_secrets").delete().eq(
+            "tenant_id", tenant_id,
+        ).eq("integration", "aveonline").execute()
+    except Exception as exc:
+        logger.warning(
+            "[AVEONLINE_WH_DEL] DB delete err tenant=%s: %s",
+            tenant_id, exc,
+        )
+        raise HTTPException(500, f"Error eliminando secret local: {exc}")
+
+    audit_log(
+        supabase, tenant_id=tenant_id, actor_id=None,
+        action="aveonline_webhook_deleted",
+        target_type="integration", target_id=tenant_id,
+        metadata={"url": url},
+    )
+    return None
