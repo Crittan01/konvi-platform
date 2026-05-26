@@ -67,6 +67,12 @@ RAW_STATE_TO_INTERNAL = {
     "EN TRÁNSITO": "in_transit",
     "EN REPARTO": "in_transit",
     "EN ENTREGA": "in_transit",
+    "EN RUTA": "in_transit",
+    "EN CAMINO": "in_transit",
+    "DESPACHADO": "in_transit",
+    "DESPACHADA": "in_transit",
+    "ENVIADO": "in_transit",
+    "ENVIADA": "in_transit",
     "RECIBIDA EN TRANSPORTADORA": "in_transit",
     # Entregada (terminal positivo).
     "ENTREGADA": "delivered",

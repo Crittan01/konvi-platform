@@ -858,11 +858,14 @@ async def aveonline_webhook_configure(
         )
         aveonline_message = f"error registrando en Aveonline: {exc}"
 
-    audit_log(
-        supabase, tenant_id=tenant_id, actor_id=None,
-        action="aveonline_webhook_configured",
-        target_type="integration", target_id=tenant_id,
-        metadata={"url": url, "aveonline_ok": aveonline_registered},
+    # Audit nota: `audit_log` en este repo es un decorador FastAPI (opt-in
+    # via @audit_log(...) sobre handlers). Para auditoría imperativa el
+    # registro queda implícito en `tenant_webhook_secrets.audit_log` JSONB
+    # via `rotate_secret()` arriba — esa fila lleva el historial de
+    # eventos (created|rotated|revoked, actor_id, reason, timestamp).
+    logger.info(
+        "[AVEONLINE_WH_CFG] tenant=%s configured url=%s aveonline_ok=%s",
+        tenant_id, url, aveonline_registered,
     )
 
     return {
@@ -937,10 +940,7 @@ async def aveonline_webhook_delete(
         )
         raise HTTPException(500, f"Error eliminando secret local: {exc}")
 
-    audit_log(
-        supabase, tenant_id=tenant_id, actor_id=None,
-        action="aveonline_webhook_deleted",
-        target_type="integration", target_id=tenant_id,
-        metadata={"url": url},
+    logger.info(
+        "[AVEONLINE_WH_DEL] tenant=%s deleted url=%s", tenant_id, url,
     )
     return None
