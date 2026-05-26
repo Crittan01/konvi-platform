@@ -404,10 +404,35 @@ async def handle_payment_link_if_applicable(
             tenant_id,
         )
 
-    # ── 2.5. Pre-validación de stock (Bug 26 — soft-check antes de generar link) ──
-    # No es soft-reserve atómica (eso requeriría tabla stock_reservations + lock),
-    # pero al menos rechaza el link si en este momento alguna variante tiene
-    # stock < quantity. Reduce el riesgo de oversell por checkout simultáneo.
+    # ── 2.5. Soft-reserve atómica (Rev. 108) ──────────────────────────────────
+    # Stripe Checkout pattern: reservamos stock ANTES de crear orden + link
+    # Wompi. Si 2 clientes piden el último item al mismo tiempo, solo el
+    # primero en llegar al rpc_stock_reserve consigue link — el segundo
+    # recibe respuesta "sin stock" sin que se haya generado checkout falso.
+    #
+    # TTL 35 min alineado con PENDING_PAYMENT_TTL_MINUTES + 5 min buffer
+    # sobre el TTL del link Wompi (30 min) — el cliente debe tener tiempo
+    # de pagar antes de que la reserva venza.
+    #
+    # Rollback: si una variation falla, liberamos las reservas previas en
+    # ese mismo loop para no dejar "trozos" reservados.
+    cart_id_for_reserve: Optional[str] = None
+    try:
+        cart_lookup = (
+            supabase.table("conversation_carts")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True)
+            .limit(1).execute()
+        )
+        if cart_lookup.data:
+            cart_id_for_reserve = cart_lookup.data[0]["id"]
+    except Exception as exc:
+        logger.warning("[PAYMENT_LINK] cart_id lookup falló conv=%s err=%s", conversation_id, exc)
+
+    reservation_ids: list[str] = []
     insufficient: list[str] = []
     for it in items_to_persist:
         var_id = it.get("variation_id")
@@ -415,17 +440,60 @@ async def handle_payment_link_if_applicable(
         if not var_id or qty_needed <= 0:
             continue
         try:
-            r = supabase.table("product_variations").select(
-                "sku, stock_quantity"
-            ).eq("id", var_id).single().execute()
-            if r.data and int(r.data.get("stock_quantity") or 0) < qty_needed:
-                sku = r.data.get("sku") or var_id[:8]
-                insufficient.append(
-                    f"{sku} (pediste {qty_needed}, hay {r.data.get('stock_quantity')})"
+            res = supabase.rpc("rpc_stock_reserve", {
+                "p_tenant_id": tenant_id,
+                "p_variation_id": var_id,
+                "p_qty": qty_needed,
+                "p_cart_id": cart_id_for_reserve,
+                "p_conversation_id": conversation_id,
+                "p_ttl_minutes": 35,
+            }).execute()
+            rows = res.data or []
+            first = rows[0] if rows else None
+            rid = first.get("reservation_id") if first else None
+            if rid:
+                reservation_ids.append(rid)
+            else:
+                logger.warning(
+                    "[PAYMENT_LINK] rpc_stock_reserve sin reservation_id var=%s rsp=%s",
+                    var_id, rows,
                 )
         except Exception as exc:
-            logger.warning("[PAYMENT_LINK] No pude validar stock variation=%s: %s", var_id, exc)
+            # Detectar insufficient_stock por message (Postgres P0001).
+            msg = str(exc).lower()
+            if "insufficient_stock" in msg or "p0001" in msg:
+                # Lookup current available para mensaje informativo.
+                try:
+                    r = supabase.table("product_variations").select(
+                        "sku, stock_quantity"
+                    ).eq("id", var_id).single().execute()
+                    sku = (r.data or {}).get("sku") or var_id[:8]
+                    have = (r.data or {}).get("stock_quantity") or 0
+                    insufficient.append(
+                        f"{sku} (pediste {qty_needed}, disponibles ~{have})"
+                    )
+                except Exception:
+                    insufficient.append(f"{var_id[:8]} (pediste {qty_needed})")
+            else:
+                logger.warning(
+                    "[PAYMENT_LINK] rpc_stock_reserve error var=%s err=%s",
+                    var_id, exc,
+                )
+                insufficient.append(f"{var_id[:8]} (error al reservar)")
+
     if insufficient:
+        # Rollback: liberar reservas creadas en este intento.
+        for rid in reservation_ids:
+            try:
+                supabase.rpc(
+                    "rpc_stock_reservation_release",
+                    {"p_reservation_id": rid},
+                ).execute()
+            except Exception as exc:
+                logger.warning(
+                    "[PAYMENT_LINK] rollback release reservation=%s falló: %s",
+                    rid, exc,
+                )
         return PaymentLinkResult(
             checkout_url="",
             order_id="",
@@ -436,6 +504,11 @@ async def handle_payment_link_if_applicable(
                 + "\n".join(f"• {x}" for x in insufficient)
                 + "\n\n¿Quieres ajustar las cantidades o ver alternativas?"
             ),
+        )
+    if reservation_ids:
+        logger.info(
+            "[PAYMENT_LINK] soft-reserve OK conv=%s cart=%s reservations=%d ttl=35min",
+            conversation_id, cart_id_for_reserve, len(reservation_ids),
         )
 
     # ── 3. Crear orden en Core API (pending_payment) ──────────────────────────

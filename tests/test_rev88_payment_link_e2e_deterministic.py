@@ -55,8 +55,17 @@ CART_BUG_LOG_VERIFIED_CTX = {
 
 
 def _supabase_with_stock(stock_per_variation: dict) -> MagicMock:
-    """Mock supabase que retorna stock_quantity per variation_id."""
+    """Mock supabase con stock + cart lookup + rpc_stock_reserve (rev. 108).
+
+    Modela las operaciones reales que `payment_link_tool` ejecuta:
+      • `table("conversation_carts").select(...).eq().eq().in_().order().limit().execute()`
+      • `table("product_variations").select(...).eq().single().execute()`
+      • `rpc("rpc_stock_reserve", {...}).execute()` → reservation_id si OK,
+        Exception con "insufficient_stock" / P0001 si stock insuficiente.
+      • `rpc("rpc_stock_reservation_release", {...}).execute()` → no-op.
+    """
     sb = MagicMock()
+
     def _table(name):
         t = MagicMock()
         if name == "product_variations":
@@ -82,8 +91,56 @@ def _supabase_with_stock(stock_per_variation: dict) -> MagicMock:
                 s.eq = _eq
                 return s
             t.select = _select
+        elif name == "conversation_carts":
+            # Chainable: select().eq().eq().in_().order().limit().execute()
+            def _select(*_a, **_k):
+                chain = MagicMock()
+                chain.eq.return_value = chain
+                chain.in_.return_value = chain
+                chain.order.return_value = chain
+                chain.limit.return_value = chain
+                res = MagicMock()
+                # No cart match → cart_id_for_reserve quedará None (OK para tests).
+                res.data = []
+                chain.execute.return_value = res
+                return chain
+            t.select = _select
         return t
+
     sb.table.side_effect = _table
+
+    def _rpc(name, params):
+        rpc_chain = MagicMock()
+        if name == "rpc_stock_reserve":
+            var_id = params.get("p_variation_id")
+            qty = params.get("p_qty", 1)
+            available = stock_per_variation.get(var_id, 100)
+            if available < qty:
+                # Postgres raise EXCEPTION sqlstate P0001 message
+                # "rpc_stock_reserve: insufficient_stock"
+                rpc_chain.execute.side_effect = Exception(
+                    f"rpc_stock_reserve: insufficient_stock "
+                    f"P0001 available={available} requested={qty}"
+                )
+            else:
+                res = MagicMock()
+                res.data = [{
+                    "reservation_id": f"res-{var_id}",
+                    "expires_at": "2026-05-25T12:35:00Z",
+                    "remaining_available": available - qty,
+                }]
+                rpc_chain.execute.return_value = res
+        elif name == "rpc_stock_reservation_release":
+            res = MagicMock()
+            res.data = None
+            rpc_chain.execute.return_value = res
+        else:
+            res = MagicMock()
+            res.data = None
+            rpc_chain.execute.return_value = res
+        return rpc_chain
+
+    sb.rpc.side_effect = _rpc
     return sb
 
 

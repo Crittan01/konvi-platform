@@ -131,9 +131,10 @@ class IntegrationValidationTests(unittest.TestCase):
         self.assertEqual(wsm._validate_integration("ENVIA"), "envia")
         self.assertEqual(wsm._validate_integration(" Wompi "), "wompi")
 
-    def test_supported_integrations_5(self):
-        self.assertEqual(len(wsm.SUPPORTED_INTEGRATIONS), 5)
-        for i in ("envia", "wompi", "meta", "meli", "telegram"):
+    def test_supported_integrations_6(self):
+        # Rev. 108 — añadido 'aveonline'.
+        self.assertEqual(len(wsm.SUPPORTED_INTEGRATIONS), 6)
+        for i in ("envia", "wompi", "meta", "meli", "telegram", "aveonline"):
             self.assertIn(i, wsm.SUPPORTED_INTEGRATIONS)
 
 

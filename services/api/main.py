@@ -10,7 +10,7 @@ from observability import init_sentry
 # Init Sentry ANTES de cargar routers (capturar errores de import también).
 init_sentry(service_name="api")
 
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, envia_webhook
+from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, envia_webhook, aveonline_webhook
 from dependencies.auth import get_current_tenant
 
 logger = logging.getLogger("api.startup")
@@ -109,6 +109,8 @@ app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
 # Rev. 105 H.2.2 Fase A — Envia webhook capture endpoint (descubrimiento empírico)
 app.include_router(envia_webhook.router, prefix="/api/v1/webhooks/envia")
+# Rev. 108 — Aveonline webhook estados de guía (dossier §6.2)
+app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline")
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
 app.include_router(claims.router, prefix="/api/v1/claims")
