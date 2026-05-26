@@ -592,17 +592,75 @@ async def handle_payment_link_if_applicable(
         carrier_part = f" con *{carrier_name}*" if carrier_name else ""
 
         _total_co = f"${int(round(total_amount)):,}".replace(",", ".")
-        response_text = (
-            f"¡Listo{name_part}! Pedido *#{short_id}* registrado para "
-            f"contraentrega{carrier_part}.\n\n"
-            f"💵 *Pagas {_total_co} COP al recibir tu paquete.*\n\n"
-            f"Estamos preparando tu envío. Te confirmo aquí mismo cuando "
-            f"esté listo con el número de guía."
-        )
+
+        # ── 3.5.1. Auto-disparo guía Aveonline (Rev. 108 Fase B parte 2) ─────
+        # Tras crear orden COD, intentamos generar la guía Aveonline
+        # inline (~10-15s). Best-effort: si falla, cliente recibe etapa 1
+        # sin tracking y operador puede generar manual desde Inbox.
+        # El response_text se adapta al resultado.
+        tracking_number = ""
+        try:
+            async with httpx.AsyncClient(timeout=40) as ship_client:
+                ship_resp = await ship_client.post(
+                    f"{API_URL}/api/v1/orders/{order_id}/generate-shipping-guide",
+                    headers=headers,
+                )
+                if ship_resp.status_code == 200:
+                    ship_data = ship_resp.json()
+                    if ship_data.get("ok"):
+                        sh = ship_data.get("shipment") or {}
+                        tracking_number = sh.get("tracking_number") or ""
+                        logger.info(
+                            "[PAYMENT_LINK] COD auto-guía OK order=%s "
+                            "tracking=%s",
+                            order_id, tracking_number,
+                        )
+                    else:
+                        logger.warning(
+                            "[PAYMENT_LINK] COD auto-guía rechazada order=%s "
+                            "msg=%s — operador puede generar manual",
+                            order_id, ship_data.get("error", "?"),
+                        )
+                else:
+                    logger.warning(
+                        "[PAYMENT_LINK] COD auto-guía http=%s order=%s — "
+                        "operador puede generar manual",
+                        ship_resp.status_code, order_id,
+                    )
+        except Exception as ship_exc:
+            logger.warning(
+                "[PAYMENT_LINK] COD auto-guía exception order=%s: %s — "
+                "operador puede generar manual",
+                order_id, ship_exc,
+            )
+
+        # Response text ADAPTADO al resultado del auto-disparo.
+        if tracking_number:
+            # Guía generada → mensaje completo con tracking.
+            # Etapa 2 (WhatsApp + email "Guía asignada") YA se disparó
+            # desde el endpoint /generate-shipping-guide, por lo que aquí
+            # solo retornamos confirmación pago COD (etapa 1).
+            response_text = (
+                f"¡Listo{name_part}! Pedido *#{short_id}* registrado para "
+                f"contraentrega{carrier_part}.\n\n"
+                f"💵 *Pagas {_total_co} COP al recibir tu paquete.*\n\n"
+                f"En un momento te mando el número de guía por aquí mismo."
+            )
+        else:
+            # Auto-guía falló → mensaje sin tracking, operador genera manual.
+            response_text = (
+                f"¡Listo{name_part}! Pedido *#{short_id}* registrado para "
+                f"contraentrega{carrier_part}.\n\n"
+                f"💵 *Pagas {_total_co} COP al recibir tu paquete.*\n\n"
+                f"Estamos preparando tu envío. Te confirmo aquí mismo "
+                f"con el número de guía apenas esté listo."
+            )
 
         logger.info(
-            "[PAYMENT_LINK] COD orden=%s tenant=%s amount=%s carrier=%s",
+            "[PAYMENT_LINK] COD orden=%s tenant=%s amount=%s carrier=%s "
+            "auto_guide=%s",
             order_id, tenant_id, total_in_cents, carrier_name or "?",
+            "ok" if tracking_number else "manual_needed",
         )
 
         # Emit cart_event para audit (similar al payment_link_created).
