@@ -747,8 +747,11 @@ class AveonlineClient:
             "productos": [producto_item],
             "dscontenido": str(package.get("content") or "Pedido"),
             "dscom": "",
-            "valorrecaudo": 0,
-            "contraentrega": 0,
+            # Rev. 108 Fase B — COD: tomar valorrecaudo + contraentrega del
+            # package si están definidos. Si NO COD, ambos quedan en 0
+            # (igual que credit Wompi flow).
+            "valorrecaudo": int(package.get("valorrecaudo") or 0),
+            "contraentrega": 1 if package.get("cod_enabled") else 0,
             "idasumecosto": 1,  # tenant asume costo
             "bloquegenerarguia": "0" if simulate else "1",
             "relacion_envios": "1",

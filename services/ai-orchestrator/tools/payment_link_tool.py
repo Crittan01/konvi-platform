@@ -511,13 +511,35 @@ async def handle_payment_link_if_applicable(
             conversation_id, cart_id_for_reserve, len(reservation_ids),
         )
 
-    # ── 3. Crear orden en Core API (pending_payment) ──────────────────────────
+    # ── 2.7. Detectar payment_method del cart (Rev. 108 Fase B) ──────────────
+    # cod_intent_resolver pre-LLM puede haber marcado cart.payment_method=cod.
+    # Si es cod, payload distinto: payment_link=false + payment_method=cod →
+    # orden creada directo confirmed sin Wompi link.
+    cart_payment_method = "credit"
+    if cart_id_for_reserve:
+        try:
+            cm_q = (
+                supabase.table("conversation_carts")
+                .select("payment_method")
+                .eq("id", cart_id_for_reserve).single().execute()
+            )
+            cart_payment_method = (
+                (cm_q.data or {}).get("payment_method") or "credit"
+            ).lower()
+        except Exception as exc:
+            logger.warning(
+                "[PAYMENT_LINK] no pude leer cart.payment_method cart=%s err=%s",
+                cart_id_for_reserve, exc,
+            )
+
+    # ── 3. Crear orden en Core API ────────────────────────────────────────────
     order_payload = {
         "contact_id": contact_id,
         "conversation_id": conversation_id,
         "shipping_cost": shipping_cost,
         "notes": order_notes,
-        "payment_link": True,  # → status=pending_payment
+        "payment_link": cart_payment_method != "cod",  # COD no requiere link
+        "payment_method": cart_payment_method,  # 'credit' | 'cod'
         "items": items_to_persist,
     }
 
@@ -539,7 +561,80 @@ async def handle_payment_link_if_applicable(
         logger.error("[PAYMENT_LINK] Core API no retornó order_id")
         return None
 
-    logger.info("[PAYMENT_LINK] Orden %s creada (pending_payment) tenant=%s", order_id, tenant_id)
+    logger.info(
+        "[PAYMENT_LINK] Orden %s creada method=%s tenant=%s",
+        order_id, cart_payment_method, tenant_id,
+    )
+
+    # ── 3.5. COD branch: orden ya está confirmed sin link Wompi ───────────────
+    # Rev. 108 Fase B. La API creó orden con status='confirmed' + consumió
+    # reservas stock (path COD en orders.py:create_order). No hay link de
+    # pago — el courier recauda al entregar. Retornamos PaymentLinkResult
+    # con response_text COD y checkout_url vacío.
+    if cart_payment_method == "cod":
+        contact_name_first = _extract_first_name(contact_name) or ""
+        name_part = f" *{contact_name_first}*" if contact_name_first else ""
+        short_id = order_id[:8].upper()
+        # Carrier name del cart (shipping_meta) para mostrar al cliente.
+        carrier_name = ""
+        try:
+            cart_meta = (
+                supabase.table("conversation_carts")
+                .select("shipping_meta")
+                .eq("id", cart_id_for_reserve).single().execute()
+            )
+            carrier_name = (
+                (cart_meta.data or {}).get("shipping_meta", {}).get("carrier")
+                or ""
+            ).strip()
+        except Exception:
+            carrier_name = ""
+        carrier_part = f" con *{carrier_name}*" if carrier_name else ""
+
+        _total_co = f"${int(round(total_amount)):,}".replace(",", ".")
+        response_text = (
+            f"¡Listo{name_part}! Pedido *#{short_id}* registrado para "
+            f"contraentrega{carrier_part}.\n\n"
+            f"💵 *Pagas {_total_co} COP al recibir tu paquete.*\n\n"
+            f"Estamos preparando tu envío. Te confirmo aquí mismo cuando "
+            f"esté listo con el número de guía."
+        )
+
+        logger.info(
+            "[PAYMENT_LINK] COD orden=%s tenant=%s amount=%s carrier=%s",
+            order_id, tenant_id, total_in_cents, carrier_name or "?",
+        )
+
+        # Emit cart_event para audit (similar al payment_link_created).
+        try:
+            from tools.cart_tool import get_cart_with_items
+            from cart.events import emit as _emit_event
+            _cart_for_evt = get_cart_with_items(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            )
+            if _cart_for_evt and _cart_for_evt.get("id"):
+                _emit_event(
+                    supabase,
+                    cart_id=_cart_for_evt["id"], tenant_id=tenant_id,
+                    event_type="cod_order_confirmed",
+                    payload={
+                        "order_id": order_id,
+                        "amount_cents": int(total_in_cents),
+                        "carrier": carrier_name,
+                    },
+                )
+        except Exception as _evt_exc:
+            logger.debug(
+                "[CART_EVENT] cod_order_confirmed emit falló: %s", _evt_exc,
+            )
+
+        return PaymentLinkResult(
+            checkout_url="",  # COD no tiene checkout
+            order_id=order_id,
+            amount_in_cents=int(total_in_cents),
+            expires_at="",
+            response_text=response_text,
+        )
 
     # ── 4. Generar link de pago Wompi ─────────────────────────────────────────
     # Rev. 103+: reintento único ante transient (Wompi sandbox a veces tarda
