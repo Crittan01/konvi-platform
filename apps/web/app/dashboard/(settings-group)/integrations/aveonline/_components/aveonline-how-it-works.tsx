@@ -89,33 +89,96 @@ const SECTIONS: Section[] = [
         </div>
 
         <div className="rounded-md bg-muted/40 p-3 text-xs space-y-2">
-          <div className="font-medium text-foreground">Plazos de liquidación (dossier §7.2)</div>
+          <div className="font-medium text-foreground">
+            Plazos de liquidación (verbatim aveonline.co/servicios-pago-contraentrega)
+          </div>
           <table className="w-full">
             <thead className="text-muted-foreground">
               <tr>
                 <th className="text-left font-normal pb-1">Carrier</th>
                 <th className="text-left font-normal pb-1">Días hábiles</th>
-                <th className="text-left font-normal pb-1">Día de pago</th>
+                <th className="text-left font-normal pb-1">Día/calendario de pago</th>
               </tr>
             </thead>
             <tbody className="text-muted-foreground">
-              <tr><td>TCC / Domina</td><td>4–6</td><td>Martes y viernes</td></tr>
-              <tr><td>Coordinadora</td><td>5–11 (contrato)</td><td>Variable</td></tr>
-              <tr><td>Servientrega</td><td>7–11</td><td>Viernes</td></tr>
-              <tr><td>Envía</td><td>7–11 (contrato 9–15)</td><td>Viernes</td></tr>
-              <tr><td>Interrapidísimo</td><td>7–11 (contrato 13–19)</td><td>Viernes</td></tr>
-              <tr><td>Saferbo</td><td>7–11</td><td>Viernes</td></tr>
+              <tr>
+                <td>TCC</td>
+                <td>4–6</td>
+                <td>Martes (corte miércoles anterior) y viernes</td>
+              </tr>
+              <tr>
+                <td>Domina</td>
+                <td>4–6</td>
+                <td>Martes y viernes</td>
+              </tr>
+              <tr>
+                <td>Coordinadora</td>
+                <td>5–11</td>
+                <td>3 veces/mes — días 15, 25 y 5 (cortes 1–10, 11–20, 21–31)</td>
+              </tr>
+              <tr>
+                <td>Servientrega</td>
+                <td>7–11</td>
+                <td>Viernes</td>
+              </tr>
+              <tr>
+                <td>Envía</td>
+                <td>7–11</td>
+                <td>Viernes</td>
+              </tr>
+              <tr>
+                <td>Interrapidísimo</td>
+                <td>7–11</td>
+                <td>Viernes</td>
+              </tr>
+              <tr>
+                <td>Saferbo</td>
+                <td>7–11</td>
+                <td>Viernes</td>
+              </tr>
             </tbody>
           </table>
+          <p className="text-[10px] text-muted-foreground/80 pt-1 border-t border-border mt-1">
+            Fuente:{' '}
+            <a
+              href="https://aveonline.co/servicios-pago-contraentrega/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline inline-flex items-center gap-0.5"
+            >
+              aveonline.co/servicios-pago-contraentrega <ExternalLink className="h-2.5 w-2.5" />
+            </a>{' '}
+            · 7 carriers confirmados oficialmente con COD.
+          </p>
+        </div>
+
+        <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1.5">
+          <div className="font-medium text-foreground">Anticipo de recaudo (servicio adicional)</div>
+          <div className="text-muted-foreground">
+            Aveonline ofrece <strong>recibir el recaudo el mismo día de la entrega</strong>
+            {' '}— costo: <strong>0.1% sobre el valor del recaudo por cada día de anticipación</strong>
+            {' '}(se cobra diariamente hasta la fecha real de pago de la guía). Aplica
+            al valor total de la guía — no se permiten anticipos parciales.
+          </div>
+          <p className="text-[10px] text-muted-foreground/80">
+            Fuente:{' '}
+            <a
+              href="https://aveonline.co/anticipo-de-recaudo/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline inline-flex items-center gap-0.5"
+            >
+              aveonline.co/anticipo-de-recaudo <ExternalLink className="h-2.5 w-2.5" />
+            </a>
+          </p>
         </div>
 
         <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1.5">
           <div className="font-medium text-foreground">Comisión Aveonline COD</div>
           <div className="text-muted-foreground">
-            Desde <strong>2.40% sobre el monto recaudado</strong>, varía por
-            carrier según tu contrato. La comisión se cobra
-            <strong> incluso si el envío se devuelve </strong>
-            (cláusula contractual).
+            La página comercial Aveonline menciona desde <strong>2.40% sobre el monto recaudado</strong>{' '}
+            con variación por carrier. <strong>No publican la tabla exacta de comisiones</strong>{' '}
+            — depende del contrato firmado con tu asesor logístico.
           </div>
         </div>
 
@@ -123,7 +186,9 @@ const SECTIONS: Section[] = [
           <div className="font-medium text-amber-900 mb-1">⚠️ Reconciliación manual</div>
           <div className="text-amber-800">
             La API de Aveonline <strong>NO expone</strong> endpoints para consultar
-            liquidaciones COD. Tendrás que revisar el panel{' '}
+            liquidaciones COD (validado web fetch directo a docs `listarEnvios`:
+            campos retornados solo incluyen tracking, sin valorRecaudo/fechaPago).
+            Revisa el panel{' '}
             <a
               href="https://app.aveonline.co/wallet"
               target="_blank"
@@ -139,11 +204,15 @@ const SECTIONS: Section[] = [
         <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1.5">
           <div className="font-medium text-foreground">Si el cliente rechaza el paquete</div>
           <div className="text-muted-foreground">
-            No hay recaudo (no cobras al cliente). Pero:
+            No hay recaudo (no cobras al cliente). Costos a considerar:
             <ul className="ml-4 mt-1 list-disc space-y-0.5">
-              <li>Aveonline cobra la comisión COD igualmente.</li>
-              <li>Tú pagas el flete devolución.</li>
-              <li><strong>Envía y Coordinadora</strong> cobran flete devolución; los demás no.</li>
+              <li>Flete original ya consumido.</li>
+              <li>Flete de devolución según contrato del carrier.</li>
+              <li>
+                Si Aveonline cobra comisión COD en la devolución es{' '}
+                <strong>materia de tu contrato</strong> (no documentado públicamente);
+                consulta con tu asesor logístico.
+              </li>
             </ul>
           </div>
         </div>
@@ -162,25 +231,30 @@ const SECTIONS: Section[] = [
           rechazo, etc.), reporta una <strong>novedad</strong>.
         </p>
         <div className="rounded-md bg-muted/40 p-3 text-xs space-y-2">
-          <div className="font-medium text-foreground">Plazos del contrato (dossier §9)</div>
+          <div className="font-medium text-foreground">Plazos típicos del contrato Aveonline</div>
           <ul className="text-muted-foreground ml-4 list-disc space-y-1">
             <li>
-              Tienes <strong>3 días hábiles</strong> para resolver una novedad.
-              Si no se resuelve → devolución automática al remitente.
+              <strong>3 días hábiles</strong> es el plazo usual para resolver
+              una novedad antes de devolución automática.
             </li>
             <li>
-              <strong>Daños/averías</strong>: reclamar dentro de <strong>16 horas</strong>
-              con evidencia fotográfica.
+              <strong>Daños/averías</strong>: reclamar dentro de las primeras
+              horas post-entrega con evidencia fotográfica.
             </li>
             <li>
-              <strong>Extravíos</strong>: reportar tras <strong>3 días sin actualización</strong> de tracking.
+              <strong>Extravíos</strong>: reportar tras varios días sin
+              actualización de tracking.
             </li>
             <li>
               Cambio de dirección post-creación: requiere PQR a{' '}
               <a href="mailto:pqr@aveonline.co" className="underline">pqr@aveonline.co</a>{' '}
-              (cobro adicional).
+              (cobro adicional según contrato).
             </li>
           </ul>
+          <p className="text-[10px] text-muted-foreground/70 pt-1 border-t border-border mt-1">
+            Los plazos exactos están en tu contrato Aveonline — confírmalos
+            con tu asesor logístico (no se publican en página comercial).
+          </p>
         </div>
         <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1.5">
           <div className="font-medium text-foreground">Qué hace Konvi automáticamente</div>
