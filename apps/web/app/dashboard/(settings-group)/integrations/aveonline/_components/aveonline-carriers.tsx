@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Truck, Loader2, AlertCircle, CheckCircle2, RefreshCw, Info,
-  ShieldCheck, Coins, Save,
+  ShieldCheck, Coins, Save, ExternalLink,
 } from 'lucide-react'
 
 type CarrierPref = {
@@ -32,121 +32,142 @@ type CarrierPref = {
   supports_cod: boolean
 }
 
-// Datos reales por carrier (verbatim dossier §7.2 + §3.10.2). Lookup
-// case-insensitive — carrier_code llega lowercase con underscores.
+// Datos por carrier — solo afirma lo VERBATIM de fuentes oficiales.
+// Fuentes con cita verificada:
+//   [A] aveonline.co/servicios-pago-contraentrega (validado 2026-05-26)
+//   [C] coordinadora.com/envios/tarifas-e-informacion-general (validado 2026-05-26)
+//   [D] dossier interno docs/research/aveonline-dossier.md §3.10.2 (peso/dim)
+// Lo que NO está en fuente pública verificable → cod='unknown' o weightMax omitido.
+// El tenant verifica con su asesor logístico (campo `officialSite` para verificar).
 type CarrierFacts = {
-  cod: 'supported' | 'unsupported' | 'unknown'
-  codLiquidation?: string
-  codPayDay?: string
-  codChargesReturn?: boolean
-  weightMax?: string
-  notes?: string
+  cod: 'supported' | 'unknown'  // ❌ 'unsupported' removido — sin fuente pública
+  codLiquidation?: string       // [A] verbatim
+  codPaySchedule?: string       // [A] verbatim
+  weightMax?: string            // [C][D] solo donde fuente oficial publica
+  declaredValueMax?: string     // [C] solo Coordinadora documenta
+  officialSite?: string         // URL para que tenant verifique con asesor
+  notes?: string                // limitaciones honestas
 }
 
+// Mapeo CODE_CANONICAL_LOWER → facts. Lookup se hace case-insensitive
+// + spaces→underscores en getFacts().
 const CARRIER_FACTS: Record<string, CarrierFacts> = {
+  // ─── COD confirmado por Aveonline COD page oficial ─────────────────────────
   tcc: {
     cod: 'supported',
     codLiquidation: '4–6 días hábiles',
-    codPayDay: 'Martes y viernes',
-    codChargesReturn: false,
-    weightMax: '5 kg mensajería / 150 kg carga',
-    notes: 'Asegurable hasta $3.511.000 COP en mensajería.',
+    codPaySchedule: 'Martes (corte miércoles anterior) y viernes',
+    weightMax: '5 kg mensajería',
+    officialSite: 'https://www.tcc.com.co/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   tcc_sa: {
     cod: 'supported',
     codLiquidation: '4–6 días hábiles',
-    codPayDay: 'Martes y viernes',
-    codChargesReturn: false,
-    weightMax: '5 kg mensajería / 150 kg carga',
-    notes: 'Asegurable hasta $3.511.000 COP en mensajería.',
+    codPaySchedule: 'Martes (corte miércoles anterior) y viernes',
+    weightMax: '5 kg mensajería',
+    officialSite: 'https://www.tcc.com.co/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   domina: {
     cod: 'supported',
     codLiquidation: '4–6 días hábiles',
-    codPayDay: 'Martes y viernes',
-    codChargesReturn: false,
+    codPaySchedule: 'Martes y viernes',
+    officialSite: 'https://www.dominapack.com/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   servientrega: {
     cod: 'supported',
     codLiquidation: '7–11 días hábiles',
-    codPayDay: 'Viernes',
-    codChargesReturn: false,
-    weightMax: '2 kg documentos / ≥3 kg mercancías',
+    codPaySchedule: 'Viernes',
+    officialSite: 'https://www.servientrega.com/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   envia: {
     cod: 'supported',
-    codLiquidation: '7–11 días (contrato 9–15)',
-    codPayDay: 'Viernes',
-    codChargesReturn: true,
-    weightMax: '1–8 kg paqueteo / 9–200 kg carga',
-    notes: '⚠️ Cobra flete devolución si paquete regresa.',
+    codLiquidation: '7–11 días hábiles',
+    codPaySchedule: 'Viernes',
+    officialSite: 'https://www.envia.co/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   interrapidisimo: {
     cod: 'supported',
-    codLiquidation: '7–11 días (contrato 13–19)',
-    codPayDay: 'Viernes',
-    codChargesReturn: false,
-    weightMax: '5 kg expresa / 6–60 kg carga',
+    codLiquidation: '7–11 días hábiles',
+    codPaySchedule: 'Viernes',
+    officialSite: 'https://www.interrapidisimo.com/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   inter_rapidisimo: {
     cod: 'supported',
-    codLiquidation: '7–11 días (contrato 13–19)',
-    codPayDay: 'Viernes',
-    codChargesReturn: false,
+    codLiquidation: '7–11 días hábiles',
+    codPaySchedule: 'Viernes',
+    officialSite: 'https://www.interrapidisimo.com/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   saferbo: {
     cod: 'supported',
     codLiquidation: '7–11 días hábiles',
-    codPayDay: 'Viernes',
-    codChargesReturn: false,
-    weightMax: '1 kg mensajería / 5–30 kg carga',
+    codPaySchedule: 'Viernes',
+    officialSite: 'https://www.thesaferbo.com/',
+    notes: 'Fuente: aveonline.co/servicios-pago-contraentrega.',
   },
   coordinadora: {
     cod: 'supported',
-    codLiquidation: '5–11 días (contrato 5–14)',
-    codPayDay: 'Variable',
-    codChargesReturn: true,
-    weightMax: '5 kg paquetes pequeños',
-    notes: '⚠️ Cobra flete devolución. Asegurable hasta $200.000 base.',
+    codLiquidation: '5–11 días hábiles',
+    codPaySchedule: '3 veces/mes — días 15, 25 y 5 (cortes 1–10, 11–20, 21–31)',
+    weightMax: '5 kg mensajería · aristas máx 50 cm (1–2 kg)',
+    declaredValueMax: '$200.000 COP en documentos',
+    officialSite: 'https://www.coordinadora.com/envios/tarifas-e-informacion-general/',
+    notes: 'Fuente: aveonline.co + coordinadora.com (validado oficial).',
   },
   coordinadora_mercantil: {
     cod: 'supported',
-    codLiquidation: '5–11 días (contrato 5–14)',
-    codPayDay: 'Variable',
-    codChargesReturn: true,
-    weightMax: '5 kg paquetes pequeños',
-    notes: '⚠️ Cobra flete devolución. Asegurable hasta $200.000 base.',
+    codLiquidation: '5–11 días hábiles',
+    codPaySchedule: '3 veces/mes — días 15, 25 y 5 (cortes 1–10, 11–20, 21–31)',
+    weightMax: '5 kg mensajería · aristas máx 50 cm (1–2 kg)',
+    declaredValueMax: '$200.000 COP en documentos',
+    officialSite: 'https://www.coordinadora.com/',
+    notes: 'Fuente: aveonline.co + coordinadora.com (validado oficial).',
   },
-  moova: {
-    cod: 'unsupported',
-    notes: 'Mensajería urbana inmediata — no recauda.',
-  },
-  mensajeros_urbanos: {
-    cod: 'unsupported',
-    notes: 'Mensajería urbana — no recauda.',
-  },
-  deprisa: {
-    cod: 'unknown',
-    weightMax: '50 kg estándar / 0.5 kg mensajería',
-    notes: 'Modalidad crédito predominante. Validar COD con contrato.',
-  },
+  // ─── COD NO documentado en Aveonline COD page oficial ──────────────────────
+  // No afirmamos NI niegamos — el tenant debe confirmar con su contrato.
   '99minutos': {
     cod: 'unknown',
-    notes: 'Mensajería same-day. Validar COD con contrato.',
+    officialSite: 'https://99minutos.com/co/',
+    notes: 'No aparece en página COD oficial Aveonline. Validar con asesor logístico si tu contrato incluye recaudo en este carrier.',
   },
   noventa9minutos: {
     cod: 'unknown',
-    notes: 'Mensajería same-day. Validar COD con contrato.',
+    officialSite: 'https://99minutos.com/co/',
+    notes: 'No aparece en página COD oficial Aveonline. Validar con asesor logístico.',
   },
   go_envios: {
     cod: 'unknown',
-    notes: 'Validar COD con contrato Aveonline.',
+    notes: 'No aparece en página COD oficial Aveonline. Validar con asesor logístico.',
+  },
+  moova: {
+    cod: 'unknown',
+    officialSite: 'https://moova.io/',
+    notes: 'Mensajería same-day urbana. No aparece en página COD oficial Aveonline. Validar con asesor.',
+  },
+  mensajeros_urbanos: {
+    cod: 'unknown',
+    officialSite: 'https://mensajerosurbanos.com/',
+    notes: 'Mensajería urbana same-day. No aparece en página COD oficial Aveonline. Validar con asesor.',
+  },
+  deprisa: {
+    cod: 'unknown',
+    officialSite: 'https://www.deprisa.com/',
+    notes: 'No aparece en página COD oficial Aveonline. Modalidad crédito predominante. Validar con asesor logístico.',
   },
 }
 
 function getFacts(code: string): CarrierFacts {
   const key = (code || '').toLowerCase().replace(/[\s-]/g, '_')
-  return CARRIER_FACTS[key] || { cod: 'unknown' }
+  return CARRIER_FACTS[key] || {
+    cod: 'unknown',
+    notes: 'Carrier no documentado en fuentes públicas Aveonline. Validar con asesor logístico antes de activar COD.',
+  }
 }
 
 export default function AveonlineCarriersSection() {
@@ -335,7 +356,7 @@ export default function AveonlineCarriersSection() {
               {prefs.map(p => {
                 const facts = getFacts(p.carrier_code)
                 const label = p.display_label || p.carrier_code
-                const codNotSupported = facts.cod === 'unsupported'
+                const codUnknown = facts.cod === 'unknown'
                 return (
                   <tr key={p.carrier_code} className="border-t border-border">
                     <td className="px-4 py-3 align-top">
@@ -356,54 +377,40 @@ export default function AveonlineCarriersSection() {
                     </td>
                     <td className="px-4 py-3 text-center align-top">
                       <label
-                        className={
-                          'inline-flex items-center cursor-pointer'
-                          + (codNotSupported ? ' opacity-40 cursor-not-allowed' : '')
-                        }
+                        className="inline-flex items-center cursor-pointer"
                         title={
-                          codNotSupported
-                            ? 'Este carrier no soporta COD (mensajería urbana sin recaudo)'
+                          codUnknown
+                            ? 'No documentado en Aveonline COD page oficial. Verifica con tu asesor antes de activar.'
                             : ''
                         }
                       >
                         <input
                           type="checkbox"
                           checked={p.supports_cod}
-                          disabled={codNotSupported}
                           onChange={() => toggleField(p.carrier_code, 'supports_cod')}
-                          className="h-4 w-4 rounded border-input"
+                          className={`h-4 w-4 rounded border-input ${codUnknown ? 'opacity-70' : ''}`}
                         />
                       </label>
                     </td>
                     <td className="px-4 py-3 align-top text-xs text-muted-foreground space-y-1">
                       {facts.cod === 'supported' && (
-                        <div className="flex flex-wrap gap-x-3 gap-y-1">
-                          <span>
+                        <div className="space-y-0.5">
+                          <div>
                             <Coins className="inline h-3 w-3 mr-0.5" />
-                            COD: {facts.codLiquidation} · {facts.codPayDay}
-                          </span>
-                          {facts.codChargesReturn !== undefined && (
-                            <span
-                              className={
-                                facts.codChargesReturn
-                                  ? 'text-amber-700'
-                                  : 'text-green-700'
-                              }
-                            >
-                              Devolución: {facts.codChargesReturn ? 'cobra flete' : 'sin cargo extra'}
-                            </span>
+                            <strong>COD:</strong> liquidación {facts.codLiquidation}
+                          </div>
+                          {facts.codPaySchedule && (
+                            <div className="ml-4">
+                              <span className="text-muted-foreground/70">Pago: </span>
+                              {facts.codPaySchedule}
+                            </div>
                           )}
                         </div>
                       )}
-                      {facts.cod === 'unsupported' && (
-                        <div className="flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3 text-amber-700" />
-                          <span>COD: no aplica</span>
-                        </div>
-                      )}
                       {facts.cod === 'unknown' && (
-                        <div className="text-muted-foreground/70 italic">
-                          COD: validar con tu contrato Aveonline
+                        <div className="text-amber-700 italic">
+                          <AlertCircle className="inline h-3 w-3 mr-0.5" />
+                          COD: <strong>no documentado oficialmente</strong> — verificar con asesor logístico
                         </div>
                       )}
                       {facts.weightMax && (
@@ -412,8 +419,25 @@ export default function AveonlineCarriersSection() {
                           Peso máx: {facts.weightMax}
                         </div>
                       )}
+                      {facts.declaredValueMax && (
+                        <div className="text-muted-foreground/80">
+                          Valor declarado máx: {facts.declaredValueMax}
+                        </div>
+                      )}
+                      {facts.officialSite && (
+                        <div>
+                          <a
+                            href={facts.officialSite}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 underline text-muted-foreground hover:text-foreground"
+                          >
+                            Sitio oficial <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
                       {facts.notes && (
-                        <div className="text-[11px]">{facts.notes}</div>
+                        <div className="text-[11px] text-muted-foreground/70">{facts.notes}</div>
                       )}
                     </td>
                   </tr>
