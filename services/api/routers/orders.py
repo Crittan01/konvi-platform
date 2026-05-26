@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.audit import audit_log
-from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.auth import get_current_tenant, get_service_client, require_write_role, get_current_role
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
@@ -72,6 +72,12 @@ class OrderCreate(BaseModel):
     # Si True, el pedido se crea en 'pending_payment' (stock reservado, no descontado).
     # El stock se descuenta definitivamente cuando el webhook de Wompi confirma el pago.
     payment_link: bool = Field(default=False)
+    # Rev. 108 Fase B — modalidad de pago. 'credit' (default, vía Wompi) o
+    # 'cod' (contraentrega, courier recauda al entregar). Si 'cod':
+    #   • No se genera link Wompi (payment_link ignorado).
+    #   • Orden se crea con status='confirmed' (consumo stock inmediato).
+    #   • Generación de guía Aveonline con contraentrega=1 ocurre downstream.
+    payment_method: str = Field(default="credit", pattern="^(credit|cod)$")
 
 
 class OrderPatch(BaseModel):
@@ -143,9 +149,15 @@ async def create_order(
 
         total = sum(item.unit_price * item.quantity for item in order.items) + order.shipping_cost
 
-        initial_status = (
-            "pending_payment" if order.payment_link else "pending"
-        )
+        # Rev. 108 Fase B — COD bypass: si payment_method='cod', orden directo
+        # confirmed (no hay pago anticipado a esperar). payment_link flag
+        # se ignora en COD.
+        if order.payment_method == "cod":
+            initial_status = "confirmed"
+        else:
+            initial_status = (
+                "pending_payment" if order.payment_link else "pending"
+            )
         order_result = supabase.table("orders").insert({
             "tenant_id": tenant_id,
             "contact_id": order.contact_id,
@@ -154,6 +166,7 @@ async def create_order(
             "total_amount": total,
             "shipping_cost": order.shipping_cost,
             "notes": order.notes,
+            "payment_method": order.payment_method,
         }).execute()
 
         if not order_result.data:
@@ -191,8 +204,23 @@ async def create_order(
 
         response_body = {**order_result.data[0], "items": items_data}
 
+        # Rev. 108 Fase B — COD: consumir stock inmediatamente (orden ya
+        # está confirmed). Reusa el mismo path que auto_confirm + Wompi
+        # APPROVED para mantener invariantes de stock.
+        if order.payment_method == "cod":
+            try:
+                _decrement_stock_on_confirm(supabase, order_id, tenant_id)
+                logger.info(
+                    "Pedido COD %s creado confirmed + stock decrementado tenant=%s",
+                    order_id, tenant_id,
+                )
+            except Exception as ce:
+                logger.error(
+                    "Error decrementando stock pedido COD %s: %s", order_id, ce,
+                )
+
         # Confirmar de inmediato si el frontend lo solicita (Inbox flow)
-        if order.auto_confirm:
+        elif order.auto_confirm:
             try:
                 (
                     supabase.table("orders")
@@ -678,3 +706,140 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
             "Error decrementando stock para pedido %s: %s",
             order_id, e
         )
+
+
+@router.post("/{order_id}/generate-shipping-guide", response_model=dict)
+async def generate_shipping_guide_endpoint(
+    order_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Genera guía Aveonline para una orden — manual desde Inbox.
+
+    Rev. 108 Fase B. Aplica especialmente para órdenes COD (que NO disparan
+    el flujo wompi_webhook → guía auto). El operador en Inbox aprieta botón
+    "Generar guía" y este endpoint:
+      1. Valida orden existe + estado confirmed/pending
+      2. Llama `_generate_shipping_guide` (reusa lógica wompi_webhook)
+      3. Si OK, dispara etapa 2 WhatsApp + email "Guía asignada"
+      4. Retorna shipment row con tracking_number + label_url
+
+    Idempotente: si ya hay shipment con tracking_number para este order_id,
+    retorna esa info sin re-generar.
+
+    Permisos: owner + manager (no operator — genera costos reales).
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            403, "Solo owner o manager pueden generar guías de envío",
+        )
+
+    # Lookup orden + payment_method
+    order_res = (
+        supabase.table("orders")
+        .select("id, status, payment_method, conversation_id, contact_id")
+        .eq("id", order_id)
+        .eq("tenant_id", tenant_id)
+        .maybe_single()
+        .execute()
+    )
+    order = order_res.data if order_res else None
+    if not order:
+        raise HTTPException(404, "Pedido no encontrado")
+
+    if order["status"] not in ("pending", "pending_payment", "confirmed"):
+        raise HTTPException(
+            422,
+            f"No se puede generar guía para pedido en estado '{order['status']}'",
+        )
+
+    # Idempotencia: ¿ya hay shipment con tracking?
+    existing = (
+        supabase.table("shipments")
+        .select("id, tracking_number, label_url, tracking_url, carrier, status")
+        .eq("order_id", order_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1).execute()
+    )
+    if existing.data:
+        row = existing.data[0]
+        if row.get("tracking_number"):
+            logger.info(
+                "[ORDERS][GEN_GUIDE] orden=%s ya tiene shipment con tracking=%s — idempotente",
+                order_id[:8], row["tracking_number"],
+            )
+            return {
+                "ok": True,
+                "idempotent": True,
+                "shipment": row,
+            }
+
+    # Invocar lógica compartida con wompi_webhook
+    from routers.wompi_webhook import (
+        _generate_shipping_guide,
+        _notify_client_shipment_label_ready,
+        _send_payment_confirmation_email,
+    )
+
+    try:
+        ok = _generate_shipping_guide(
+            supabase, order_id=order_id, tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "[ORDERS][GEN_GUIDE] _generate_shipping_guide raise order=%s: %s",
+            order_id, exc,
+        )
+        raise HTTPException(502, f"Error al llamar Aveonline: {exc}")
+
+    if not ok:
+        # Skip o fail — recuperar shipment pending si existe
+        return {
+            "ok": False,
+            "error": (
+                "No se pudo generar la guía. Revisa configuración Aveonline "
+                "(carrier, dirección destino, contrato). Detalle en logs."
+            ),
+        }
+
+    # Disparar etapa 2 notifs (igual que wompi_webhook OK path)
+    try:
+        sh = (
+            supabase.table("shipments")
+            .select("carrier, tracking_number, tracking_url")
+            .eq("order_id", order_id).limit(1).execute()
+        )
+        sh_row = (sh.data or [{}])[0]
+        conv_id = order.get("conversation_id")
+        if conv_id and sh_row.get("tracking_number"):
+            _notify_client_shipment_label_ready(
+                supabase,
+                conversation_id=conv_id,
+                tenant_id=tenant_id,
+                order_id=order_id,
+                carrier=sh_row.get("carrier") or "",
+                tracking_number=sh_row.get("tracking_number") or "",
+                tracking_url=sh_row.get("tracking_url") or "",
+            )
+        _send_payment_confirmation_email(
+            supabase=supabase, order_id=order_id, tenant_id=tenant_id,
+            template_mode="shipment_label_ready",
+        )
+    except Exception as exc:
+        logger.warning(
+            "[ORDERS][GEN_GUIDE] notifs etapa 2 fallaron order=%s: %s",
+            order_id, exc,
+        )
+
+    final = (
+        supabase.table("shipments")
+        .select("id, tracking_number, label_url, tracking_url, carrier, status")
+        .eq("order_id", order_id)
+        .limit(1).execute()
+    )
+    return {
+        "ok": True,
+        "idempotent": False,
+        "shipment": (final.data or [{}])[0],
+    }

@@ -1184,12 +1184,19 @@ def _generate_shipping_guide(
             "celular": (contact.get("shipping_phone") or contact.get("phone") or "").lstrip("+"),
             "email": contact.get("email") or "",
         }
+        # Rev. 108 Fase B — COD: si orden tiene payment_method='cod',
+        # pasar `cod_enabled=True` + `valorrecaudo=total_amount` al cliente
+        # Aveonline. El courier recauda al entregar (campo `contraentrega=1`).
+        order_total = int(float(order.get("total_amount") or 0))
+        is_cod = (order.get("payment_method") or "credit").lower() == "cod"
         package = {
             "weight_kg": 0.5,  # default conservador (KAIU son productos pequeños)
             "length_cm": 15, "width_cm": 10, "height_cm": 5,
-            "declared_value_cop": int(float(order.get("total_amount") or 0)),
+            "declared_value_cop": order_total,
             "units": 1,
             "content": "Productos cosmética artesanal",
+            "cod_enabled": is_cod,
+            "valorrecaudo": order_total if is_cod else 0,
         }
         simulate = os.getenv("AVEONLINE_GENERATE_REAL_GUIDES", "false").lower() != "true"
 

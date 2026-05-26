@@ -214,11 +214,33 @@ async def quote_shipping_for_cart_aveonline(
     # Normalización: carrier names Aveonline (ej. "SERVIENTREGA") matchean
     # con tenant_carriers.carrier_code (seed los persiste lowercase con
     # underscores: "servientrega"). Comparación case-insensitive + spacing.
-    try:
-        from lib.tenant_carriers import filter_enabled_carriers
 
-        def _to_canonical(name: str) -> str:
-            return (name or "").strip().lower().replace(" ", "_")
+    def _to_canonical(name: str) -> str:
+        return (name or "").strip().lower().replace(" ", "_")
+
+    # Detectar payment_method del cart actual (Rev. 108 Fase B).
+    # Si el cliente marcó intent COD vía cod_intent_resolver, el cart
+    # tiene payment_method='cod'. Filtramos a carriers que el tenant
+    # habilitó para COD (tenant_carriers.supports_cod=true).
+    cart_payment_method = "credit"
+    try:
+        cart_q = (
+            supabase.table("conversation_carts")
+            .select("payment_method")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True).limit(1).execute()
+        )
+        if cart_q.data:
+            cart_payment_method = (
+                cart_q.data[0].get("payment_method") or "credit"
+            ).lower()
+    except Exception:
+        cart_payment_method = "credit"
+
+    try:
+        from lib.tenant_carriers import filter_enabled_carriers, list_preferences
 
         candidates_codes = [_to_canonical(o["carrier"]) for o in options]
         allowed = set(filter_enabled_carriers(
@@ -235,6 +257,37 @@ async def quote_shipping_for_cart_aveonline(
                 "por tenant_carriers prefs tenant=%s",
                 before, len(options), tenant_id[:8],
             )
+
+        # COD filter (rev. 108 Fase B): si cart=cod, solo carriers
+        # supports_cod=true. Si tenant NO tiene preferencias → fallback
+        # open (no filtramos, asumimos todos potencial COD).
+        if cart_payment_method == "cod":
+            prefs = list_preferences(supabase, tenant_id, "aveonline")
+            if prefs:
+                cod_allowed = {
+                    p.carrier_code.lower() for p in prefs
+                    if p.enabled and p.supports_cod
+                }
+                if cod_allowed:
+                    before_cod = len(options)
+                    options = [
+                        o for o in options
+                        if _to_canonical(o["carrier"]) in cod_allowed
+                    ]
+                    logger.info(
+                        "[agentic.shipping.aveonline] COD filter %d → %d "
+                        "carriers tenant=%s",
+                        before_cod, len(options), tenant_id[:8],
+                    )
+                else:
+                    # Tenant configuró carriers pero NINGUNO con cod.
+                    logger.warning(
+                        "[agentic.shipping.aveonline] cart=cod pero "
+                        "0 carriers supports_cod tenant=%s — devolviendo "
+                        "options=[] con guía explicativa",
+                        tenant_id[:8],
+                    )
+                    options = []
     except Exception as exc:
         # Fail open: si filter falla, mejor mostrar todos que romper quote.
         logger.warning(
@@ -243,6 +296,18 @@ async def quote_shipping_for_cart_aveonline(
         )
 
     if not options:
+        if cart_payment_method == "cod":
+            return {
+                "ok": False,
+                "error": (
+                    f"Para envío a '{destination.get('city')}' con "
+                    f"pago contraentrega no tengo transportadoras "
+                    f"habilitadas en tu cuenta. ¿Prefieres pagar online "
+                    f"con tarjeta para que pueda generar el envío?"
+                ),
+                "code": "NO_COD_CARRIERS_ENABLED",
+                "payment_method": "cod",
+            }
         return {
             "ok": False,
             "error": (
@@ -277,4 +342,5 @@ async def quote_shipping_for_cart_aveonline(
         "city_normalized": destination.get("city"),
         "destination": destination,
         "provider": "aveonline",  # marker para audit
+        "payment_method": cart_payment_method,  # 'credit' o 'cod'
     }

@@ -240,6 +240,78 @@ async def _run_agentic_full(
     # NO es parche — es el mismo patrón ya usado por `image_send_tool`,
     # `shipping_quote_tool`, `order_status_tool` en flow legacy V1.
 
+    # PRE-LLM #0: COD intent marker. Rev. 108 Fase B.
+    # NO es bypass — solo marca el cart con payment_method='cod' cuando
+    # el cliente menciona explícitamente "contraentrega"/"pago al recibir".
+    # Downstream tools (shipping_quote_tool, payment_link_tool,
+    # _generate_shipping_guide) leen el flag y ramifican.
+    # Si no hay cart aún → log + continue (LLM responde info COD del prompt).
+    try:
+        from agentic.cod_intent_resolver import (
+            detect_cod_intent, detect_credit_intent,
+        )
+        cod_match = detect_cod_intent(content)
+        credit_match = detect_credit_intent(content) if not cod_match else None
+        if cod_match:
+            try:
+                cart_row = (
+                    supabase.table("conversation_carts")
+                    .select("id, payment_method")
+                    .eq("conversation_id", conversation_id)
+                    .eq("tenant_id", tenant_id)
+                    .in_("status", ["open", "checkout"])
+                    .order("created_at", desc=True).limit(1).execute()
+                )
+                if cart_row.data:
+                    cid = cart_row.data[0]["id"]
+                    cur_method = cart_row.data[0].get("payment_method", "credit")
+                    if cur_method != "cod":
+                        supabase.table("conversation_carts").update({
+                            "payment_method": "cod",
+                        }).eq("id", cid).execute()
+                        logger.info(
+                            "[AGENTIC_PRE_LLM] conv=%s cart=%s payment_method "
+                            "credit → cod (intent: %s)",
+                            conversation_id, cid[:8],
+                            cod_match.get("matched_text", "?"),
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "[AGENTIC_PRE_LLM] mark COD cart failed conv=%s: %s",
+                    conversation_id, exc,
+                )
+        elif credit_match:
+            # Cliente cambió de COD a credit explícito — revertir.
+            try:
+                cart_row = (
+                    supabase.table("conversation_carts")
+                    .select("id, payment_method")
+                    .eq("conversation_id", conversation_id)
+                    .eq("tenant_id", tenant_id)
+                    .in_("status", ["open", "checkout"])
+                    .order("created_at", desc=True).limit(1).execute()
+                )
+                if cart_row.data and cart_row.data[0].get("payment_method") == "cod":
+                    cid = cart_row.data[0]["id"]
+                    supabase.table("conversation_carts").update({
+                        "payment_method": "credit",
+                    }).eq("id", cid).execute()
+                    logger.info(
+                        "[AGENTIC_PRE_LLM] conv=%s cart=%s payment_method "
+                        "cod → credit (intent: %s)",
+                        conversation_id, cid[:8],
+                        credit_match.get("matched_text", "?"),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[AGENTIC_PRE_LLM] mark CREDIT cart failed conv=%s: %s",
+                    conversation_id, exc,
+                )
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] cod_intent_resolver crashed: %s — skip", exc,
+        )
+
     # PRE-LLM #1: purchase intent multi-producto. Casos típicos cliente:
     #   "Necesito 3 jabones coco 100g y un sérum hialurónico"
     #   "Quiero 2 aceites de almendras"

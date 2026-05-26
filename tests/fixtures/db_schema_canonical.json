@@ -307,7 +307,7 @@
       "table_name": "claims"
     },
     {
-      "column_count": 23,
+      "column_count": 26,
       "columns": [
         {
           "col": "id",
@@ -446,6 +446,24 @@
           "default": null,
           "nullable": "YES",
           "type": "text"
+        },
+        {
+          "col": "document_number_hash",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "document_number_last4",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "shipping_phone",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
         }
       ],
       "table_name": "contacts"
@@ -547,7 +565,7 @@
       "table_name": "expenses"
     },
     {
-      "column_count": 9,
+      "column_count": 10,
       "columns": [
         {
           "col": "id",
@@ -602,6 +620,12 @@
           "default": null,
           "nullable": "YES",
           "type": "USER-DEFINED"
+        },
+        {
+          "col": "embedding_model_version",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
         }
       ],
       "table_name": "kb_documents"
@@ -1027,7 +1051,7 @@
       "table_name": "order_tracking"
     },
     {
-      "column_count": 10,
+      "column_count": 12,
       "columns": [
         {
           "col": "id",
@@ -1088,6 +1112,18 @@
           "default": "0",
           "nullable": "NO",
           "type": "numeric"
+        },
+        {
+          "col": "payment_reminder_sent_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "payment_method",
+          "default": "'credit'::text",
+          "nullable": "YES",
+          "type": "text"
         }
       ],
       "table_name": "orders"
@@ -1459,7 +1495,7 @@
       "table_name": "purchase_orders"
     },
     {
-      "column_count": 19,
+      "column_count": 20,
       "columns": [
         {
           "col": "id",
@@ -1573,6 +1609,12 @@
           "col": "updated_at",
           "default": "now()",
           "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "last_polled_at",
+          "default": null,
+          "nullable": "YES",
           "type": "timestamp with time zone"
         }
       ],
@@ -1843,7 +1885,7 @@
       "table_name": "tenant_integrations"
     },
     {
-      "column_count": 22,
+      "column_count": 25,
       "columns": [
         {
           "col": "id",
@@ -1973,9 +2015,27 @@
         },
         {
           "col": "escalation_role",
-          "default": "'asesor'::text",
+          "default": "'especialista'::text",
           "nullable": "NO",
           "type": "text"
+        },
+        {
+          "col": "business_pitch",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "product_groups",
+          "default": "'[]'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
+        },
+        {
+          "col": "show_prices_in_catalog",
+          "default": "true",
+          "nullable": "NO",
+          "type": "boolean"
         }
       ],
       "table_name": "tenants"
