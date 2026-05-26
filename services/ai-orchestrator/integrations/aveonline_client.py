@@ -955,6 +955,56 @@ class AveonlineClient:
             "message": data.get("messages") or data.get("message") or "",
         }
 
+    async def list_carriers(self) -> dict:
+        """Lista las transportadoras habilitadas para esta cuenta empresa.
+
+        Endpoint: `app.aveonline.co/api/box/v1.0/transportadora.php`
+        Body: tipo='listarTransportadorasPorEmpresa', token=<jwt>, id=<empresa>.
+
+        Dossier §3.8 — verificado contra cuenta real 2026-05-21
+        (`crittan01@gmail.com` retornó: 99MINUTOS, COORDINADORA MERCANTIL,
+        ENVIA, GO ENVIOS, SERVIENTREGA, TCC SA).
+
+        Returns:
+            dict {"ok": bool, "items": [{id, text, imagen, imagen2}],
+                  "raw": <response>, "message": str}.
+        """
+        jwt = await self._get_valid_jwt()
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+
+        body = {
+            "tipo": "listarTransportadorasPorEmpresa",
+            "token": jwt,
+            "id": empresa_id,
+        }
+        endpoint = "https://app.aveonline.co/api/box/v1.0/transportadora.php"
+        try:
+            async with httpx.AsyncClient(timeout=AVEONLINE_TIMEOUT_SECONDS) as client:
+                resp = await client.post(endpoint, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            return {"ok": False, "items": [], "raw": {}, "message": str(exc)}
+
+        ok = data.get("status") == "ok"
+        items_raw = data.get("transportadoras") or []
+        items = [
+            {
+                "id": str(it.get("id") or ""),
+                "text": str(it.get("text") or "").strip(),
+                "imagen": str(it.get("imagen") or ""),
+                "imagen2": str(it.get("imagen2") or ""),
+            }
+            for it in items_raw if it.get("id")
+        ]
+        return {
+            "ok": ok,
+            "items": items,
+            "raw": data,
+            "message": data.get("message") or "",
+        }
+
     async def get_estado(self, *, tracking_number: str) -> dict:
         """Polling de estado de guía via `obtenerEstadoAuth` (dossier §6.1).
 

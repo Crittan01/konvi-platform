@@ -20,11 +20,13 @@ import {
 } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { Package, Settings, Boxes, ShieldCheck, Radar } from 'lucide-react'
+import { Package, Settings, Boxes, ShieldCheck, Radar, BookOpen } from 'lucide-react'
 import PanelHeader from '../_components/panel-header'
 import PanelTabs, { TabDef } from '../_components/panel-tabs'
 import ComingSoon from '../_components/coming-soon'
 import AveonlineSetup from './_components/aveonline-setup'
+import AveonlineCarriersSection from './_components/aveonline-carriers'
+import AveonlineHowItWorks from './_components/aveonline-how-it-works'
 import {
   connectAveonline as connectAveonlineCore,
   disconnectAveonline as disconnectAveonlineCore,
@@ -36,10 +38,11 @@ export const metadata = {
 }
 
 const TABS: TabDef[] = [
-  { id: 'setup',        label: 'Setup',       Icon: Settings },
-  { id: 'carriers',     label: 'Carriers',    Icon: Boxes,       comingSoon: true },
-  { id: 'capacidades',  label: 'Capacidades', Icon: ShieldCheck, comingSoon: true },
-  { id: 'tracking',     label: 'Tracking',    Icon: Radar,       comingSoon: true },
+  { id: 'setup',        label: 'Setup',         Icon: Settings },
+  { id: 'carriers',     label: 'Carriers',      Icon: Boxes },
+  { id: 'como-funciona',label: 'Cómo funciona', Icon: BookOpen },
+  { id: 'capacidades',  label: 'Capacidades',   Icon: ShieldCheck, comingSoon: true },
+  { id: 'tracking',     label: 'Tracking',      Icon: Radar,       comingSoon: true },
 ]
 const VALID_TABS = new Set(TABS.map(t => t.id))
 
@@ -227,13 +230,9 @@ export default async function AveonlinePanelPage({
         />
       )}
 
-      {tab === 'carriers' && (
-        <ComingSoon
-          title="Carriers — preferencias per-tenant"
-          description="Matrix de transportadoras Aveonline (Coordinadora, Servientrega, TCC, etc.) con preferencias de cotización."
-          eta="Rev. 107 M.7"
-        />
-      )}
+      {tab === 'carriers' && <AveonlineCarriersSection />}
+
+      {tab === 'como-funciona' && <AveonlineHowItWorks />}
 
       {tab === 'capacidades' && (
         <ComingSoon

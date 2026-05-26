@@ -50,6 +50,25 @@ class EnviaCarrierUpsert(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
+class AveonlineCarrierItem(BaseModel):
+    """Rev. 108 — preferencias per-tenant para carriers Aveonline.
+
+    Diferencia vs Envia: incluye `supports_cod` opt-in del tenant
+    (Aveonline tiene comisiones COD variables por carrier — dossier §7.2).
+    """
+    carrier_code: str = Field(..., min_length=1, max_length=64)
+    enabled: bool = Field(default=True)
+    display_label: Optional[str] = Field(default=None, max_length=120)
+    priority: int = Field(default=100, ge=0, le=999)
+    notes: Optional[str] = Field(default=None, max_length=500)
+    supports_cod: bool = Field(default=False)
+
+
+class AveonlineCarriersBulk(BaseModel):
+    """Bulk update — sustituye preferencias completas del tenant."""
+    items: list[AveonlineCarrierItem] = Field(default_factory=list, max_length=50)
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _mask_token(token: str) -> str:
@@ -944,3 +963,219 @@ async def aveonline_webhook_delete(
         "[AVEONLINE_WH_DEL] tenant=%s deleted url=%s", tenant_id, url,
     )
     return None
+
+
+# ─── Aveonline: carriers preferences per-tenant (Rev. 108) ───────────────────
+# Matriz tenant_carriers para provider='aveonline' — espejo del patrón Envia
+# (Sem 5 H.2.7) extendido con `supports_cod` (Aveonline tiene COD nativo y
+# tenant elige por carrier vs Envia donde COD es decisión global).
+#
+# Política UX:
+#   • Default open: tenant sin filas → todos los carriers Aveonline disponibles
+#     se ofrecen en cotización.
+#   • Seed (al conectar): poblar fila por carrier con enabled=true + cod=false
+#     (decisión comercial explícita post-onboarding).
+#   • Bulk PUT: tenant edita matrix completa en UI (más eficiente que upserts
+#     individuales — UI envía estado deseado, backend reconcilia).
+
+
+@router.get("/aveonline/carriers", response_model=list)
+async def list_aveonline_carriers(
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """Lista preferencias de carriers Aveonline del tenant."""
+    from lib.tenant_carriers import list_preferences
+    prefs = list_preferences(supabase, tenant_id, "aveonline")
+    return [
+        {
+            "carrier_code": p.carrier_code,
+            "enabled": p.enabled,
+            "display_label": p.display_label,
+            "priority": p.priority,
+            "notes": p.notes,
+            "supports_cod": p.supports_cod,
+        }
+        for p in prefs
+    ]
+
+
+@router.put("/aveonline/carriers", response_model=dict)
+async def bulk_upsert_aveonline_carriers(
+    body: AveonlineCarriersBulk,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Bulk update preferencias Aveonline — sustituye estado completo.
+
+    UI envía toda la matriz visible en una llamada. Backend hace upsert
+    de cada item (UNIQUE constraint maneja conflictos). Si el body NO
+    incluye un carrier que existía antes → ese carrier QUEDA tal cual
+    (preserva preferencia previa sin tocar — semántica patch, no replace).
+
+    Para borrar explícitamente un carrier, usa DELETE individual.
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner o manager pueden gestionar carriers.",
+        )
+    from lib.tenant_carriers import upsert_preference
+
+    updated: list[dict] = []
+    errors: list[dict] = []
+    for item in body.items:
+        try:
+            pref = upsert_preference(
+                supabase, tenant_id, "aveonline",
+                carrier_code=item.carrier_code,
+                enabled=item.enabled,
+                display_label=item.display_label,
+                priority=item.priority,
+                notes=item.notes,
+                supports_cod=item.supports_cod,
+            )
+            updated.append({
+                "carrier_code": pref.carrier_code,
+                "enabled": pref.enabled,
+                "display_label": pref.display_label,
+                "priority": pref.priority,
+                "notes": pref.notes,
+                "supports_cod": pref.supports_cod,
+            })
+        except Exception as exc:
+            logger.warning(
+                "[AVEONLINE_CARRIERS] upsert err tenant=%s code=%s: %s",
+                tenant_id, item.carrier_code, exc,
+            )
+            errors.append({
+                "carrier_code": item.carrier_code,
+                "error": str(exc),
+            })
+
+    return {"updated": updated, "errors": errors}
+
+
+@router.delete("/aveonline/carriers/{carrier_code}", status_code=204)
+async def delete_aveonline_carrier(
+    carrier_code: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Borra preferencia (vuelve a default — todos visibles)."""
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner o manager pueden gestionar carriers.",
+        )
+    code = (carrier_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="carrier_code requerido")
+    supabase.table("tenant_carriers").delete().eq(
+        "tenant_id", tenant_id,
+    ).eq("provider", "aveonline").eq("carrier_code", code).execute()
+
+
+@router.post("/aveonline/carriers/seed", response_model=dict)
+async def seed_aveonline_carriers(
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """Pobla `tenant_carriers` con los carriers que Aveonline retorna en
+    `listarTransportadorasPorEmpresa` para esta cuenta.
+
+    Llamado automáticamente al conectar Aveonline (vía connect action) y
+    expuesto también para re-sync manual desde UI si Aveonline agrega
+    carriers nuevos al contrato del tenant.
+
+    Idempotente: solo INSERTA filas nuevas (UNIQUE constraint protege
+    duplicados). NO sobreescribe `enabled`, `supports_cod`, `priority`,
+    `notes` si el carrier ya existía — preserva configuración del tenant.
+    """
+    if role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner o manager pueden re-sincronizar carriers.",
+        )
+
+    from integrations.aveonline_client import AveonlineClient
+    client = AveonlineClient(tenant_id=tenant_id, supabase=supabase)
+    try:
+        result = await client.list_carriers()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No se pudo consultar carriers Aveonline: {exc}",
+        )
+
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=result.get("message") or "Aveonline no retornó carriers",
+        )
+
+    items = result.get("items") or []
+    if not items:
+        return {"discovered": 0, "inserted": 0, "items": []}
+
+    # Lookup existentes para evitar override de preferencias.
+    existing_res = (
+        supabase.table("tenant_carriers")
+        .select("carrier_code")
+        .eq("tenant_id", tenant_id)
+        .eq("provider", "aveonline")
+        .execute()
+    )
+    existing_codes = {
+        (r.get("carrier_code") or "").lower()
+        for r in (existing_res.data or [])
+    }
+
+    inserted = 0
+    response_items: list[dict] = []
+    for it in items:
+        # Carrier code canónico: usar `text` de Aveonline (ej. "SERVIENTREGA")
+        # normalizado a lowercase para consistencia con lookups internos.
+        text = (it.get("text") or "").strip()
+        code = text.lower().replace(" ", "_") or it.get("id")
+        if not code:
+            continue
+        response_items.append({
+            "carrier_code": code,
+            "display_label": text,
+            "aveonline_id": it.get("id"),
+        })
+        if code.lower() in existing_codes:
+            continue
+        try:
+            supabase.table("tenant_carriers").insert({
+                "tenant_id": tenant_id,
+                "provider": "aveonline",
+                "carrier_code": code,
+                "enabled": True,
+                "display_label": text,
+                "priority": 100,
+                "notes": f"Aveonline ID: {it.get('id')}",
+                "supports_cod": False,  # opt-in explícito post-onboarding
+            }).execute()
+            inserted += 1
+        except Exception as exc:
+            logger.warning(
+                "[AVEONLINE_CARRIERS] seed insert err tenant=%s code=%s: %s",
+                tenant_id, code, exc,
+            )
+
+    logger.info(
+        "[AVEONLINE_CARRIERS] seed tenant=%s discovered=%d inserted=%d "
+        "existing=%d",
+        tenant_id, len(items), inserted, len(existing_codes),
+    )
+    return {
+        "discovered": len(items),
+        "inserted": inserted,
+        "preserved": len(existing_codes),
+        "items": response_items,
+    }
