@@ -222,22 +222,59 @@ async def quote_shipping_for_cart_aveonline(
     # Si el cliente marcó intent COD vía cod_intent_resolver, el cart
     # tiene payment_method='cod'. Filtramos a carriers que el tenant
     # habilitó para COD (tenant_carriers.supports_cod=true).
+    #
+    # Rev. 108 fix UAT 2026-05-26: el detector pre-LLM falla si el cart
+    # NO existe aún al recibir el inbound (caso "Hola, jabón coco, COD"
+    # en un solo mensaje — cart se crea durante el flow LLM). Como red
+    # de seguridad, re-detectamos intent COD leyendo el último mensaje
+    # inbound del cliente JUSTO ANTES de filtrar carriers. Si detecta,
+    # marcamos el cart ahora (que ya existe porque add_to_cart ya corrió).
+    cart_id_for_cod_mark = None
     cart_payment_method = "credit"
     try:
         cart_q = (
             supabase.table("conversation_carts")
-            .select("payment_method")
+            .select("id, payment_method")
             .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .in_("status", ["open", "checkout"])
             .order("created_at", desc=True).limit(1).execute()
         )
         if cart_q.data:
+            cart_id_for_cod_mark = cart_q.data[0]["id"]
             cart_payment_method = (
                 cart_q.data[0].get("payment_method") or "credit"
             ).lower()
     except Exception:
         cart_payment_method = "credit"
+
+    if cart_payment_method != "cod" and cart_id_for_cod_mark:
+        # Re-detect intent COD del último mensaje inbound.
+        try:
+            from agentic.cod_intent_resolver import detect_cod_intent
+            last_in = (
+                supabase.table("messages")
+                .select("content")
+                .eq("conversation_id", conversation_id)
+                .eq("tenant_id", tenant_id)
+                .eq("direction", "inbound")
+                .order("created_at", desc=True).limit(1).execute()
+            )
+            last_content = (last_in.data or [{}])[0].get("content") or ""
+            if detect_cod_intent(last_content):
+                supabase.table("conversation_carts").update({
+                    "payment_method": "cod",
+                }).eq("id", cart_id_for_cod_mark).execute()
+                cart_payment_method = "cod"
+                logger.info(
+                    "[agentic.shipping.aveonline] re-detect COD intent OK "
+                    "→ cart=%s marked cod (msg='%s')",
+                    cart_id_for_cod_mark[:8], last_content[:60],
+                )
+        except Exception as exc:
+            logger.warning(
+                "[agentic.shipping.aveonline] re-detect COD failed: %s", exc,
+            )
 
     try:
         from lib.tenant_carriers import filter_enabled_carriers, list_preferences

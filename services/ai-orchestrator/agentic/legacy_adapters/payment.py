@@ -128,15 +128,33 @@ async def generate_payment_link_for_cart(
             "code": "PAYMENT_ERROR",
         }
 
-    if not result or not getattr(result, "checkout_url", None):
+    # Rev. 108 Fase B — COD bypass: si el cart tiene payment_method='cod',
+    # `result.checkout_url` viene vacío INTENCIONAL (no hay link Wompi).
+    # En ese caso, success se determina por `order_id` + `response_text`
+    # presentes, no por checkout_url.
+    cart_payment_method = (cart.get("payment_method") or "credit").lower()
+    is_cod = cart_payment_method == "cod"
+
+    has_order = bool(result and getattr(result, "order_id", None))
+    has_url = bool(result and getattr(result, "checkout_url", None))
+
+    if not result or (not has_url and not is_cod):
         return {
             "ok": False,
             "error": "No se pudo generar el link de pago (Wompi/cart).",
             "code": "PAYMENT_LINK_UNAVAILABLE",
         }
 
+    if is_cod and not has_order:
+        return {
+            "ok": False,
+            "error": "Orden COD no pudo crearse.",
+            "code": "COD_ORDER_FAILED",
+        }
+
     return {
         "ok": True,
+        "payment_method": cart_payment_method,
         "checkout_url": result.checkout_url,
         "order_id": getattr(result, "order_id", None),
         "amount_cents": int(getattr(result, "amount_in_cents", 0))
