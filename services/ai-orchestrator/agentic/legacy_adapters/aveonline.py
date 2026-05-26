@@ -207,11 +207,50 @@ async def quote_shipping_for_cart_aveonline(
             "eta_date": f"{opt.eta_days}d" if opt.eta_days else "",
         })
 
+    # Rev. 108 — filtrar por preferencias tenant_carriers per-tenant.
+    # Política backward-compat (lib/tenant_carriers.py):
+    #   • Sin filas para tenant → default open (retorna todos).
+    #   • Con filas → solo enabled=true.
+    # Normalización: carrier names Aveonline (ej. "SERVIENTREGA") matchean
+    # con tenant_carriers.carrier_code (seed los persiste lowercase con
+    # underscores: "servientrega"). Comparación case-insensitive + spacing.
+    try:
+        from lib.tenant_carriers import filter_enabled_carriers
+
+        def _to_canonical(name: str) -> str:
+            return (name or "").strip().lower().replace(" ", "_")
+
+        candidates_codes = [_to_canonical(o["carrier"]) for o in options]
+        allowed = set(filter_enabled_carriers(
+            supabase, tenant_id, "aveonline", candidates_codes,
+        ))
+        before = len(options)
+        options = [
+            o for o in options
+            if _to_canonical(o["carrier"]) in allowed
+        ]
+        if before != len(options):
+            logger.info(
+                "[agentic.shipping.aveonline] filtered %d → %d carriers "
+                "por tenant_carriers prefs tenant=%s",
+                before, len(options), tenant_id[:8],
+            )
+    except Exception as exc:
+        # Fail open: si filter falla, mejor mostrar todos que romper quote.
+        logger.warning(
+            "[agentic.shipping.aveonline] filter_enabled_carriers err: %s "
+            "— fallback all carriers", exc,
+        )
+
     if not options:
         return {
             "ok": False,
-            "error": f"No hay carriers disponibles para envío a '{destination.get('city')}'.",
-            "code": "NO_CARRIERS",
+            "error": (
+                f"No hay carriers habilitados para envío a "
+                f"'{destination.get('city')}'. Revisa tu configuración "
+                f"de carriers Aveonline en Settings."
+            ),
+            "code": "NO_CARRIERS_ENABLED",
         }
 
     # Persistir quoted_options en DB (DB-first Plan A.0.2).
