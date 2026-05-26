@@ -82,7 +82,7 @@ export default async function OrdersPage({
     const [ordersRes, productsRes, contactsRes, allOrdersRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, status, total_amount, shipping_cost, notes, created_at, contacts(id, phone, name), order_items(title, quantity, unit_price)')
+        .select('id, status, total_amount, shipping_cost, notes, created_at, payment_method, contacts(id, phone, name), order_items(title, quantity, unit_price)')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(100),
@@ -157,6 +157,73 @@ export default async function OrdersPage({
     revalidatePath('/dashboard/orders')
   }
 
+  // Rev. 108 Fase B — Generar guía Aveonline manualmente desde Inbox.
+  // Aplicación principal: órdenes COD (que no disparan wompi_webhook).
+  // Owner + manager.
+  async function generateShippingGuide(
+    formData: FormData,
+  ): Promise<{ ok: boolean; message?: string; tracking?: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, message: 'Sin permisos para generar guías.' }
+    }
+    const orderId = formData.get('order_id') as string
+    if (!orderId) return { ok: false, message: 'order_id requerido' }
+
+    const { data: { session: s } } = await sb.auth.getSession()
+    const token = s?.access_token
+    if (!token) return { ok: false, message: 'Sesión expirada' }
+
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 40000)
+      const resp = await fetch(
+        `${CORE_API_URL}/api/v1/orders/${orderId}/generate-shipping-guide`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: ctrl.signal,
+        },
+      )
+      clearTimeout(timeout)
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        return {
+          ok: false,
+          message: (data as { detail?: string }).detail || `HTTP ${resp.status}`,
+        }
+      }
+      const dataTyped = data as {
+        ok?: boolean
+        idempotent?: boolean
+        shipment?: { tracking_number?: string }
+        error?: string
+      }
+      if (!dataTyped.ok) {
+        return {
+          ok: false,
+          message: dataTyped.error || 'No se pudo generar la guía.',
+        }
+      }
+      revalidatePath('/dashboard/orders')
+      return {
+        ok: true,
+        tracking: dataTyped.shipment?.tracking_number,
+        message: dataTyped.idempotent
+          ? `Guía ya existía: ${dataTyped.shipment?.tracking_number}`
+          : `Guía generada: ${dataTyped.shipment?.tracking_number}`,
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        message: err instanceof Error ? err.message : 'Error de red',
+      }
+    }
+  }
+
   // ── UI ────────────────────────────────────────────────────────────────────
   return (
     <OrdersManager
@@ -166,6 +233,7 @@ export default async function OrdersPage({
       role={role}
       canWrite={canWrite}
       updateStatusAction={updateOrderStatus}
+      generateShippingGuideAction={generateShippingGuide}
     />
   )
 }
