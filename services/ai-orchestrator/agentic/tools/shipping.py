@@ -299,10 +299,53 @@ class QuoteShippingTool:
         if hasattr(ctx, "extras") and isinstance(ctx.extras, dict):
             ctx.extras["_last_quote_options"] = result["options"]
 
+        # Rev. 108 Fase B fix UAT 2026-05-26 — auto-select_carrier cuando
+        # hay 1 sola opción. Caso típico: COD filtered (solo 1 carrier con
+        # supports_cod=true para esa ruta). El LLM tiende a NO llamar
+        # select_carrier cuando hay 1 sola opción, asumiendo que ya está
+        # seleccionada. Resultado: cart.shipping_cents=0 → resumen sin
+        # envío → generate_payment_link falla.
+        # Fix: si exactamente 1 opción, auto-persistimos antes de retornar.
+        auto_selected: dict | None = None
+        if len(options_out) == 1:
+            try:
+                from agentic.legacy_adapters import select_carrier_for_cart
+                only = result["options"][0]
+                sel_result = await select_carrier_for_cart(
+                    ctx.supabase,
+                    conversation_id=ctx.conversation_id,
+                    tenant_id=ctx.tenant_id,
+                    rate_id=only["rate_id"],
+                    rate_data=only,
+                )
+                if sel_result and sel_result.get("ok"):
+                    auto_selected = {
+                        "rate_id": only["rate_id"],
+                        "carrier": only["carrier"],
+                        "price_cop": int(only["price_cents"] // 100),
+                    }
+                    (ctx.logger or logger).info(
+                        "[QuoteShippingTool] auto-select carrier=%s (única opción)",
+                        only["carrier"],
+                    )
+                else:
+                    (ctx.logger or logger).warning(
+                        "[QuoteShippingTool] auto-select falló: %s",
+                        sel_result,
+                    )
+            except Exception as exc:
+                (ctx.logger or logger).warning(
+                    "[QuoteShippingTool] auto-select exception: %s", exc,
+                )
+
         return tool_success({
             "city_normalized": result["city_normalized"],
             "options": options_out,
+            "auto_selected": auto_selected,
             "note": (
+                "Carrier auto-seleccionado (única opción disponible). "
+                "Continúa con resumen + generate_payment_link."
+                if auto_selected else
                 "Presenta estas opciones al cliente con precios y ETAs. "
                 "Cuando elija, invoca select_carrier(rate_id)."
             ),

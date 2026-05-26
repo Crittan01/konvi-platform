@@ -289,7 +289,7 @@ def get_cart_with_items(
         supabase.table("conversation_carts")
         .select("id, status, version, subtotal_cents, shipping_cents, total_cents, "
                 "shipping_meta, requires_requote, contact_id, "
-                "coupon_id, coupon_code, discount_cents")
+                "coupon_id, coupon_code, discount_cents, payment_method")
         .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .eq("status", "open")

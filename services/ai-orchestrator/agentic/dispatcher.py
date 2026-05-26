@@ -198,6 +198,28 @@ async def _run_agentic_full(
     catalog = await get_tenant_catalog(supabase, tenant_id)
     history = await _get_conversation_history(supabase, conversation_id)
     customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
+    # Rev. 108 — auto-upsert contact si no existe (paridad con orchestrator V1
+    # línea 6833). Sin esto, record_consent + save_pii fallan con NO_CONTACT
+    # cuando un cliente nuevo escribe (o tras reset --hard).
+    # consent_given=False default — el bot pedirá consent explícito vía
+    # record_consent antes de save_pii.
+    if customer_phone:
+        try:
+            supabase.table("contacts").upsert(
+                {
+                    "tenant_id": tenant_id,
+                    "phone": customer_phone,
+                    "shipping_phone": customer_phone,
+                    "consent_given": False,
+                },
+                on_conflict="tenant_id,phone",
+                ignore_duplicates=True,
+            ).execute()
+        except Exception as exc:
+            logger.warning(
+                "[AGENTIC_DISPATCH] contact upsert falló phone=%s: %s",
+                customer_phone, exc,
+            )
     # `_fetch_contact_for_phone` retorna tuple (contact_id, contact_record).
     if customer_phone:
         contact_id, contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone)
