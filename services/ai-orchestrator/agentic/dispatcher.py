@@ -175,13 +175,12 @@ async def _run_agentic_full(
     from agentic.agent import run_agentic_turn
     from agentic.system_prompt import build_system_prompt
     from agentic.invariants import (
-        apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
+        apply_invariants,
+        CartRenderCoherenceInvariant,
+        ConsentRequiredInvariant,
         EmptyPromiseInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
-        PaymentMethodExplicitInvariant,
-        PaymentModeCoherenceInvariant,
-        CategoryCompletenessInvariant,
-        CartAddPricingInvariant,
+        PaymentCoherenceInvariant,
         PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
@@ -983,25 +982,15 @@ async def _run_agentic_full(
         invariant_set = [NoDecorativeEmojiInvariant()]
     else:
         invariant_set = [
-            CartStateInvariant(),
+            # Rev. 108 CONSOLIDADO (founder 2026-05-27) — cart render
+            # coherence: 4 cases (cart-state coherente con tool, items
+            # affirmed vs real, add_to_cart pricing, category completeness).
+            CartRenderCoherenceInvariant(),
             ConsentRequiredInvariant(),
-            # Rev. 108 (founder UAT 2026-05-27) — bot omitió 2 sérums al
-            # presentar categoría. Invariant verifica que cuando bot
-            # presenta una categoría completa, lista TODOS los productos
-            # activos. Si no, REWRITE con lista completa del catálogo.
-            CategoryCompletenessInvariant(),
-            # Rev. 108 (founder UAT 2026-05-27) — bot agrega item al cart
-            # pero olvida mostrar precio + subtotal. Invariant inyecta
-            # esos datos al outbound si add_to_cart succeeded y outbound
-            # NO menciona "$".
-            CartAddPricingInvariant(),
-            # Rev. 108 Fase B — bloquea acción de pago si modo no fue
-            # explícito del cliente. Reescribe a pregunta determinística.
-            PaymentMethodExplicitInvariant(),
-            # Rev. 108 holístico — coherencia léxica modo pago vs cart.
-            # Detecta "link de pago contra entrega" (contradicción) y
-            # rewrite a lenguaje correcto según cart.payment_method.
-            PaymentModeCoherenceInvariant(),
+            # Rev. 108 CONSOLIDADO — payment coherence: 2 cases (cliente
+            # debe especificar modo antes de pago, outbound léxico
+            # coherente con cart.payment_method).
+            PaymentCoherenceInvariant(),
             SummaryCoherenceInvariant(),
             PIICoherenceInvariant(),
             PostToolCoherenceInvariant(),

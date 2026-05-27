@@ -599,11 +599,205 @@ class SaveShippingPhoneTool:
         )
 
 
-# Auto-registro de todos.
+# ─── save_contact_field (CONSOLIDADO rev. 108 founder 2026-05-27) ─────────
+#
+# Tool único que reemplaza 5 save_* individuales. Reduce 5→1 tools en el
+# context del LLM (mitiga saturación Gemini). Dispatch interno por field
+# reutiliza los Args schemas + validators existentes — preserva 100% de
+# validación per-campo.
+
+
+class SaveContactFieldArgs(BaseModel):
+    """Args con discriminador `field` + payload por tipo.
+
+    El LLM debe pasar EL FIELD QUE SE GUARDA + los campos requeridos
+    por ese tipo. Los otros campos se ignoran (Pydantic permite extras
+    en este modelo flexible para que el LLM no se confunda).
+    """
+    field: Literal["email", "name", "document", "address", "shipping_phone"] = Field(
+        ...,
+        description=(
+            "Tipo de dato PII a guardar. Determina qué campos del payload "
+            "son requeridos: email→value(email), name→value(nombre+apellido), "
+            "document→doc_type+doc_number, address→street+city+building_type"
+            "(+apartment si edificio/conjunto/oficina), shipping_phone→value(celular 10 dig)."
+        ),
+    )
+    # Single-value fields (email, name, shipping_phone)
+    value: Optional[str] = Field(
+        default=None,
+        description="Valor para field ∈ {email, name, shipping_phone}.",
+    )
+    # Document fields
+    doc_type: Optional[Literal["CC", "CE", "NIT", "PP", "TI", "OTHER"]] = Field(
+        default=None,
+        description="Para field=document: tipo de documento.",
+    )
+    doc_number: Optional[str] = Field(
+        default=None,
+        description="Para field=document: número del documento.",
+    )
+    # Address fields
+    street: Optional[str] = Field(
+        default=None,
+        description="Para field=address: calle y número (ej. 'Calle 36A # 6-87').",
+    )
+    city: Optional[str] = Field(
+        default=None,
+        description="Para field=address: ciudad.",
+    )
+    building_type: Optional[Literal["casa", "edificio", "conjunto", "oficina"]] = Field(
+        default=None,
+        description="Para field=address: tipo de vivienda.",
+    )
+    apartment: Optional[str] = Field(
+        default=None,
+        description="Para field=address: apto (requerido si edificio/conjunto/oficina).",
+    )
+    tower: Optional[str] = Field(
+        default=None,
+        description="Para field=address: torre/bloque (opcional, solo conjunto).",
+    )
+    floor: Optional[str] = Field(
+        default=None,
+        description="Para field=address: piso (opcional).",
+    )
+    neighborhood: Optional[str] = Field(
+        default=None,
+        description="Para field=address: barrio (opcional).",
+    )
+    reference: Optional[str] = Field(
+        default=None,
+        description="Para field=address: punto de referencia (opcional).",
+    )
+
+
+class SaveContactFieldTool:
+    """Tool ÚNICO consolidado que guarda PII per-field. REQUIERE consent.
+
+    Reemplaza save_email + save_name + save_document + save_address +
+    save_shipping_phone. Misma compliance Habeas Data (gated por consent).
+    Validación per-field reusa Pydantic schemas individuales — robusta
+    como antes.
+    """
+
+    name = "save_contact_field"
+    description = (
+        "Guarda UN campo PII del cliente. REQUIERE consent_given=True. "
+        "Usa `field` para indicar qué guardas:\n"
+        "• field='email' + value='cliente@ejemplo.com'\n"
+        "• field='name' + value='Cristian García' (mín 2 palabras)\n"
+        "• field='document' + doc_type='CC' + doc_number='1020304050'\n"
+        "• field='address' + street + city + building_type "
+        "(+apartment si edificio/conjunto/oficina)\n"
+        "• field='shipping_phone' + value='3001234567' (10 dígitos, "
+        "empieza con 3)\n"
+        "Validación per-field se aplica server-side."
+    )
+    args_schema = SaveContactFieldArgs
+
+    async def execute(self, args: SaveContactFieldArgs, ctx: ToolContext) -> ToolResult:
+        # 1. Consent gate compartido.
+        consent_fail = await _verify_consent_or_fail(ctx)
+        if consent_fail:
+            return consent_fail
+
+        # 2. Dispatch interno reutilizando validators existentes.
+        try:
+            if args.field == "email":
+                if not args.value:
+                    return tool_failure(
+                        "field=email requiere `value` (email del cliente).",
+                        code="MISSING_FIELD_VALUE",
+                    )
+                # Reusa SaveEmailArgs.
+                validated = SaveEmailArgs(value=args.value)
+                return await _write_contact_update(
+                    ctx, {"email": validated.value}, "email",
+                )
+
+            if args.field == "name":
+                if not args.value:
+                    return tool_failure(
+                        "field=name requiere `value` (nombre completo).",
+                        code="MISSING_FIELD_VALUE",
+                    )
+                validated = SaveNameArgs(value=args.value)
+                return await _write_contact_update(
+                    ctx, {"name": validated.value}, "name",
+                )
+
+            if args.field == "document":
+                if not (args.doc_type and args.doc_number):
+                    return tool_failure(
+                        "field=document requiere `doc_type` + `doc_number`.",
+                        code="MISSING_FIELD_VALUE",
+                    )
+                validated = SaveDocumentArgs(
+                    doc_type=args.doc_type, doc_number=args.doc_number,
+                )
+                return await _write_contact_update(ctx, {
+                    "document_type": validated.doc_type,
+                    "document_number": validated.doc_number,
+                }, "document")
+
+            if args.field == "address":
+                if not (args.street and args.city and args.building_type):
+                    return tool_failure(
+                        "field=address requiere `street` + `city` + `building_type`.",
+                        code="MISSING_FIELD_VALUE",
+                    )
+                validated = SaveAddressArgs(
+                    street=args.street, city=args.city,
+                    building_type=args.building_type,
+                    apartment=args.apartment, tower=args.tower,
+                    floor=args.floor, neighborhood=args.neighborhood,
+                    reference=args.reference,
+                )
+                address = {
+                    "street": validated.street,
+                    "city": validated.city,
+                    "building_type": validated.building_type,
+                }
+                if validated.apartment:
+                    address["apartment"] = validated.apartment
+                if validated.tower:
+                    address["tower"] = validated.tower
+                if validated.floor:
+                    address["floor"] = validated.floor
+                if validated.neighborhood:
+                    address["neighborhood"] = validated.neighborhood
+                if validated.reference:
+                    address["reference"] = validated.reference
+                return await _write_contact_update(ctx, {"address": address}, "address")
+
+            if args.field == "shipping_phone":
+                if not args.value:
+                    return tool_failure(
+                        "field=shipping_phone requiere `value` (celular).",
+                        code="MISSING_FIELD_VALUE",
+                    )
+                validated = SaveShippingPhoneArgs(value=args.value)
+                return await _write_contact_update(
+                    ctx, {"shipping_phone": f"+57{validated.value}"},
+                    "shipping_phone",
+                )
+
+            return tool_failure(
+                f"field='{args.field}' no soportado.",
+                code="UNKNOWN_FIELD",
+            )
+        except ValueError as exc:
+            # Pydantic validation error → error claro al LLM.
+            return tool_failure(
+                f"Validación fallida para field={args.field}: {exc}",
+                code="VALIDATION_ERROR",
+            )
+
+
+# Auto-registro: get_contact + record_consent + save_contact_field UNIFICADO.
+# Los 5 save_* individuales quedan deprecated (clases preservadas para
+# back-compat de imports — NO se registran).
 register_tool(GetContactInfoTool())
 register_tool(RecordConsentTool())
-register_tool(SaveEmailTool())
-register_tool(SaveNameTool())
-register_tool(SaveDocumentTool())
-register_tool(SaveAddressTool())
-register_tool(SaveShippingPhoneTool())
+register_tool(SaveContactFieldTool())
