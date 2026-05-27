@@ -100,9 +100,23 @@ _CART_AFFIRMATION_ANCHORS = (
 
 _VARIANT_PRESENTATION_ANCHORS = (
     re.compile(r"\bpresentacion(?:es)?\b", re.IGNORECASE),
-    re.compile(r"\bcu[aá]l\s+(?:te|presentaci[oó]n)", re.IGNORECASE),
+    re.compile(r"\bcu[aá]l\s+(?:te|presentaci[oó]n|prefieres|escoges|eliges)", re.IGNORECASE),
     re.compile(r"\btenemos\s+est[ao]s?\b", re.IGNORECASE),
     re.compile(r"\bopciones?\s+disponibles?", re.IGNORECASE),
+    # Rev. 108 holístico — carrier presentation patterns. Cuando bot
+    # presenta opciones de envío post-quote_shipping, los bullets son
+    # carriers no items. Sin estos anchors, _count_items_affirmed_in_text
+    # cuenta los bullets de carriers ($price) como items → falso positivo
+    # Case B → REWRITE incorrecto "Hubo un inconveniente con el otro item".
+    re.compile(r"\bopciones?\s+de\s+env[ií]o", re.IGNORECASE),
+    re.compile(r"\bpara\s+(?:el\s+)?env[ií]o\s+a\b", re.IGNORECASE),
+    re.compile(r"\btransportador(?:a|as)\s+disponibles?", re.IGNORECASE),
+    re.compile(r"\bcarriers?\s+disponibles?", re.IGNORECASE),
+    re.compile(
+        r"\b(?:COORDINADORA|SERVIENTREGA|ENVIA|INTERRAPIDISIMO|TCC|"
+        r"DOMINA|SAFERBO|99\s?MINUTOS|GO\s?ENVIOS)\b.*\$",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 

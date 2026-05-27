@@ -3,7 +3,7 @@ import os
 import re
 import unicodedata
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types as genai_types
@@ -2028,6 +2028,8 @@ async def _send_outbound_text(
                         verified_ctx=None,
                         history=recent.data or [],
                         cart_from_db=_cart_db,
+                        supabase=supabase,
+                        tenant_id=tenant_id,
                     )
                 except Exception as _sum_exc:
                     logger.warning(
@@ -4638,6 +4640,8 @@ def _build_order_summary_text(
     catalog: Optional[list] = None,
     history: Optional[list[dict]] = None,
     cart_from_db: Optional[dict] = None,
+    supabase: Any = None,
+    tenant_id: Optional[str] = None,
 ) -> Optional[str]:
     """Resumen estructurado determinístico antes de la confirmación final.
 
@@ -4770,8 +4774,50 @@ def _build_order_summary_text(
         if address_line:
             lines.append(f"• Dirección: {address_line}")
 
+    # ── Rev. 108 holístico — texto adaptado a payment_method del cart ────
+    # Si cart_from_db.payment_method == 'cod':
+    #   • Mensaje "Pagas $X al recibir" en lugar de "link de pago"
+    #   • Warning condicional si carrier.charges_return_fee=true (dossier
+    #     §7.2: ENVIA y COORDINADORA cobran costo devolución).
+    is_cod_order = False
+    carrier_charges_return = False
+    if isinstance(cart_from_db, dict):
+        is_cod_order = (
+            (cart_from_db.get("payment_method") or "credit").lower() == "cod"
+        )
+        if is_cod_order and carrier_name and supabase is not None and tenant_id:
+            try:
+                from lib.carrier_capabilities import (
+                    get_effective_carrier_capability,
+                )
+                # carrier_name puede tener service_level concatenado;
+                # extraer primer token (ej. "SERVIENTREGA Mensajería" → "SERVIENTREGA")
+                _carrier_pure = (carrier_name.split() or [""])[0]
+                _cap = get_effective_carrier_capability(
+                    supabase,
+                    tenant_id=tenant_id,
+                    carrier_name=_carrier_pure,
+                )
+                carrier_charges_return = _cap.charges_return_fee
+            except Exception:
+                # Fallback: no warning — log silent.
+                carrier_charges_return = False
+
     lines.append("")
-    lines.append("¿Confirmas que los datos están correctos para generar tu link de pago?")
+    if is_cod_order:
+        lines.append(f"💵 Pagarás *{_format_cop(total)}* en efectivo al recibir tu pedido.")
+        if carrier_charges_return:
+            lines.append("")
+            _carrier_short = (carrier_name or "el courier").split()[0] if carrier_name else "el courier"
+            lines.append(
+                f"⚠️ *Aviso de devolución*: si rechazas el pedido al recibir, "
+                f"{_carrier_short} cobra costo de devolución (a tu cargo, "
+                f"~$5.000 estimado)."
+            )
+        lines.append("")
+        lines.append("¿Confirmas tu pedido?")
+    else:
+        lines.append("¿Confirmas que los datos están correctos para generar tu link de pago?")
     return "\n".join(lines)
 
 
@@ -8309,6 +8355,8 @@ async def build_and_run_orchestration(
                                     catalog=catalog,
                                     history=history,
                                     cart_from_db=_cart_post_qty,
+                                    supabase=supabase,
+                                    tenant_id=tenant_id,
                                 )
                                 if _summary_qty:
                                     if _qty_inv:
@@ -8589,6 +8637,8 @@ async def build_and_run_orchestration(
                             catalog=catalog,
                             history=history,
                             cart_from_db=_cart_post,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
                         )
                         if _summary_post:
                             _prefix = (
@@ -8980,6 +9030,8 @@ async def build_and_run_orchestration(
                             catalog=catalog,
                             history=history,
                             cart_from_db=None,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
                         )
                         if _summary_text:
                             await _send_outbound_text(
@@ -9104,6 +9156,8 @@ async def build_and_run_orchestration(
                                     catalog=catalog,
                                     history=history,
                                     cart_from_db=_cart_sp,
+                                    supabase=supabase,
+                                    tenant_id=tenant_id,
                                 )
                                 if _resumen_sp:
                                     # Preámbulo cordial + resumen actualizado.
@@ -9201,6 +9255,8 @@ async def build_and_run_orchestration(
                         catalog=catalog,
                         history=history,
                         cart_from_db=_cart_resumen,
+                        supabase=supabase,
+                        tenant_id=tenant_id,
                     )
                     if _resumen_text:
                         await _send_outbound_text(
@@ -9690,6 +9746,8 @@ async def build_and_run_orchestration(
                             catalog=catalog,
                             history=history,
                             cart_from_db=None,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
                         )
                         if _summary_text:
                             parsed.requires_human = False
@@ -9961,6 +10019,8 @@ async def build_and_run_orchestration(
                             catalog=catalog,
                             history=history_for_prompt,
                             cart_from_db=_cart_for_summary,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
                         )
                         if _summary:
                             parsed.response_text = _summary
@@ -10072,6 +10132,8 @@ async def build_and_run_orchestration(
                                 catalog=catalog,
                                 history=history,
                                 cart_from_db=_cart_lh,
+                                supabase=supabase,
+                                tenant_id=tenant_id,
                             )
                 if _replacement_text:
                     parsed.response_text = _replacement_text

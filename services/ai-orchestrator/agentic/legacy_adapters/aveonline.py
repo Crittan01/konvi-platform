@@ -126,10 +126,11 @@ async def quote_shipping_for_cart_aveonline(
     # puede aplicar costo distinto por gestión COD).
     cart_for_cod_check = None
     early_payment_method = "credit"
+    cart_total_cents = 0
     try:
         c_q = (
             supabase.table("conversation_carts")
-            .select("id, payment_method")
+            .select("id, payment_method, subtotal_cents, total_cents")
             .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .in_("status", ["open", "checkout"])
@@ -140,6 +141,15 @@ async def quote_shipping_for_cart_aveonline(
             early_payment_method = (
                 c_q.data[0].get("payment_method") or "credit"
             ).lower()
+            # subtotal (sin envío) — el filter de mín-recaudo COD aplica
+            # sobre el monto que el courier va a cobrar al cliente, que
+            # incluye productos + envío. Usamos subtotal+envío estimado;
+            # como aún no cotizamos, usamos subtotal como aproximación
+            # (peor caso para el filter — más conservador).
+            cart_total_cents = int(
+                c_q.data[0].get("total_cents") or
+                c_q.data[0].get("subtotal_cents") or 0
+            )
     except Exception:
         pass
 
@@ -299,36 +309,74 @@ async def quote_shipping_for_cart_aveonline(
                 before, len(options), tenant_id[:8],
             )
 
-        # COD filter (rev. 108 Fase B): si cart=cod, solo carriers
-        # supports_cod=true. Si tenant NO tiene preferencias → fallback
-        # open (no filtramos, asumimos todos potencial COD).
+        # Rev. 108 holístico — COD filter usando canonical capabilities
+        # (aveonline_carrier_capabilities + tenant_carriers.cod_override).
+        # Reemplaza el filter legacy que solo miraba tenant_carriers.supports_cod
+        # (per-tenant) — ahora la fuente de verdad es platform-level con
+        # override per-tenant opcional. Aplica TRES filtros:
+        #   1. supports_cod (canonical+override) = true
+        #   2. cart_total >= min_recaudo_for_weight (peso-aware)
+        #   3. carrier_name no rechaza recaudo por dim/peso máx
+        # NO bloqueamos por charges_return_fee — eso es warning, no filtro.
         if cart_payment_method == "cod":
-            prefs = list_preferences(supabase, tenant_id, "aveonline")
-            if prefs:
-                cod_allowed = {
-                    p.carrier_code.lower() for p in prefs
-                    if p.enabled and p.supports_cod
-                }
-                if cod_allowed:
-                    before_cod = len(options)
-                    options = [
-                        o for o in options
-                        if _to_canonical(o["carrier"]) in cod_allowed
-                    ]
+            try:
+                from lib.carrier_capabilities import (
+                    get_effective_carrier_capability,
+                )
+                # Estimar peso (default 0.5kg si package no llegó).
+                # package es PackageEstimate dataclass, no dict.
+                weight_kg = float(
+                    getattr(package, "weight_kg", None) or 0.5
+                )
+                cart_subtotal_cop = int(cart_total_cents) // 100
+
+                kept, rejected_reasons = [], []
+                for opt in options:
+                    cap = get_effective_carrier_capability(
+                        supabase,
+                        tenant_id=tenant_id,
+                        carrier_name=opt["carrier"],
+                    )
+                    if not cap.enabled_for_tenant:
+                        rejected_reasons.append(f"{cap.carrier_name}: deshabilitado por tenant")
+                        continue
+                    if not cap.supports_cod:
+                        rejected_reasons.append(f"{cap.carrier_name}: NO soporta COD (canonical)")
+                        continue
+                    # Recaudo COD = productos + envío de ESTE option (lo
+                    # que el courier le cobrará al cliente al entregar).
+                    opt_total_cop = cart_subtotal_cop + (
+                        int(opt.get("price_cents") or 0) // 100
+                    )
+                    min_req = cap.min_recaudo_for_weight(weight_kg)
+                    if min_req is not None and opt_total_cop < min_req:
+                        rejected_reasons.append(
+                            f"{cap.carrier_name}: recaudo ${opt_total_cop:,} < "
+                            f"mín ${min_req:,}"
+                        )
+                        continue
+                    if cap.max_weight_kg is not None and weight_kg > cap.max_weight_kg:
+                        rejected_reasons.append(
+                            f"{cap.carrier_name}: peso {weight_kg}kg > "
+                            f"máx {cap.max_weight_kg}kg"
+                        )
+                        continue
+                    kept.append(opt)
+
+                if rejected_reasons:
                     logger.info(
-                        "[agentic.shipping.aveonline] COD filter %d → %d "
-                        "carriers tenant=%s",
-                        before_cod, len(options), tenant_id[:8],
+                        "[agentic.shipping.aveonline] COD canonical filter "
+                        "%d → %d carriers tenant=%s rechazos: %s",
+                        len(options), len(kept), tenant_id[:8],
+                        " | ".join(rejected_reasons),
                     )
-                else:
-                    # Tenant configuró carriers pero NINGUNO con cod.
-                    logger.warning(
-                        "[agentic.shipping.aveonline] cart=cod pero "
-                        "0 carriers supports_cod tenant=%s — devolviendo "
-                        "options=[] con guía explicativa",
-                        tenant_id[:8],
-                    )
-                    options = []
+                options = kept
+            except Exception as cap_exc:
+                logger.warning(
+                    "[agentic.shipping.aveonline] COD canonical filter err: %s "
+                    "— fallback sin filter (todos los carriers retornados por Aveonline)",
+                    cap_exc,
+                )
     except Exception as exc:
         # Fail open: si filter falla, mejor mostrar todos que romper quote.
         logger.warning(

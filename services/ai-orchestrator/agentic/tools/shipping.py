@@ -461,6 +461,77 @@ class SelectCarrierTool:
                 extra={"available_options": available_summary},
             )
 
+        # Rev. 108 holístico — guardrail anti-auto-select.
+        # Si quoted_options tiene >1 carrier Y cliente NO mencionó el
+        # carrier_name elegido en últimos 3 inbounds, REJECT.
+        # Patrón espejo de cart.add_to_cart variant_guard.
+        #
+        # Bypass cuando el resolver pre-LLM determinístico lo invoca
+        # (ya verificó contexto explícito del cliente).
+        bypass_guard = bool((ctx.extras or {}).get("bypass_select_carrier_guard"))
+        if not bypass_guard and len(all_options) > 1:
+            import unicodedata
+            recent_inbounds = (ctx.extras or {}).get(
+                "recent_inbound_texts", [],
+            )
+            def _norm(s: str) -> str:
+                if not s:
+                    return ""
+                s = "".join(
+                    c for c in unicodedata.normalize("NFD", s)
+                    if unicodedata.category(c) != "Mn"
+                )
+                return s.lower()
+            haystack = " ".join(_norm(t) for t in recent_inbounds)
+            carrier_pick = _norm(str(rate_data.get("carrier") or ""))
+            # Match bidireccional + por token:
+            #   • carrier_pick completo en haystack (ej. "servientrega" in inbound)
+            #   • cualquier token ≥5 chars del carrier_pick en haystack
+            #     (ej. carrier="COORDINADORA MERCANTIL" → token "coordinadora"
+            #     matchea inbound "Coordinadora")
+            #   • inbound ≥5 chars en carrier_pick (cliente abreviado)
+            mentioned = (
+                len(carrier_pick) >= 4 and carrier_pick in haystack
+            )
+            if not mentioned:
+                # Token-level match (cliente puede nombrar solo 1 palabra
+                # del carrier_name compuesto, e.g. "Coordinadora" para
+                # "COORDINADORA MERCANTIL").
+                tokens = [t for t in carrier_pick.split() if len(t) >= 5]
+                for tok in tokens:
+                    if tok in haystack:
+                        mentioned = True
+                        break
+            if not mentioned:
+                # Reverse: inbound ≥5 chars contenido en carrier_pick.
+                inbound_tokens = [t for t in haystack.split() if len(t) >= 5]
+                for tok in inbound_tokens:
+                    if tok in carrier_pick:
+                        mentioned = True
+                        break
+            if not mentioned:
+                _log = ctx.logger or logger
+                _log.warning(
+                    "[agentic.select_carrier] guardrail: %d options pero "
+                    "cliente NO mencionó '%s' en últimos inbounds. "
+                    "REJECT auto-select. Bot debe presentar opciones.",
+                    len(all_options), rate_data.get("carrier"),
+                )
+                options_summary = [
+                    {"carrier": o.get("carrier"),
+                     "service_level": o.get("service_level"),
+                     "price_cop": (o.get("price_cents") or 0) // 100}
+                    for o in all_options[:5]
+                ]
+                return tool_failure(
+                    f"NO selecciones carrier sin que el cliente lo nombre "
+                    f"explícitamente. Hay {len(all_options)} opciones "
+                    f"cotizadas; muéstralas TODAS al cliente y pídele que "
+                    f"elija. Opciones: {options_summary}",
+                    code="CARRIER_SELECTION_NOT_EXPLICIT",
+                    extra={"available_options": options_summary},
+                )
+
         # Si el match fue fuzzy, usar el rate_id real del rate_data (no el
         # que el LLM pasó) para que el adapter persista el correcto.
         effective_rate_id = str(rate_data.get("rate_id") or args.rate_id)
