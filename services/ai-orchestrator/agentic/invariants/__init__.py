@@ -23,6 +23,7 @@ from agentic.invariants.summary_coherence import SummaryCoherenceInvariant
 from agentic.invariants.payment_method_explicit import PaymentMethodExplicitInvariant
 from agentic.invariants.payment_mode_coherence import PaymentModeCoherenceInvariant
 from agentic.invariants.category_completeness import CategoryCompletenessInvariant
+from agentic.invariants.cart_add_pricing import CartAddPricingInvariant
 
 __all__ = [
     "InvariantOutcome",
@@ -37,6 +38,7 @@ __all__ = [
     "PaymentMethodExplicitInvariant",
     "PaymentModeCoherenceInvariant",
     "CategoryCompletenessInvariant",
+    "CartAddPricingInvariant",
     "PIICoherenceInvariant",
     "PostToolCoherenceInvariant",
     "SummaryCoherenceInvariant",
