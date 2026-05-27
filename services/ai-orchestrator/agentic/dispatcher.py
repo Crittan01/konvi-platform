@@ -180,6 +180,7 @@ async def _run_agentic_full(
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
         PaymentMethodExplicitInvariant,
         PaymentModeCoherenceInvariant,
+        CategoryCompletenessInvariant,
         PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
@@ -983,6 +984,11 @@ async def _run_agentic_full(
         invariant_set = [
             CartStateInvariant(),
             ConsentRequiredInvariant(),
+            # Rev. 108 (founder UAT 2026-05-27) — bot omitió 2 sérums al
+            # presentar categoría. Invariant verifica que cuando bot
+            # presenta una categoría completa, lista TODOS los productos
+            # activos. Si no, REWRITE con lista completa del catálogo.
+            CategoryCompletenessInvariant(),
             # Rev. 108 Fase B — bloquea acción de pago si modo no fue
             # explícito del cliente. Reescribe a pregunta determinística.
             PaymentMethodExplicitInvariant(),

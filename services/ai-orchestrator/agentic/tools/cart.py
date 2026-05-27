@@ -23,9 +23,9 @@ from agentic.tools.registry import register_tool
 
 
 # Rev. 108 fix arquitectónico — el variant label en DB es "60g" pero el
-# cliente puede escribir "60 gramos", "30 ml", "1 lt", etc. La comparación
-# substring naive falla. Normalizamos ambos lados a forma canónica
-# (dígito+unidad sin espacio, unidad en forma corta).
+# cliente puede escribir "60 gramos", "30 ml", "1 lt", "quince mililitros",
+# etc. La comparación substring naive falla. Normalizamos ambos lados a
+# forma canónica (dígito+unidad sin espacio, unidad en forma corta).
 _UNIT_ALIASES = {
     "gramos": "g", "gramo": "g", "grs": "g", "gr": "g", "g": "g",
     "kilos": "kg", "kilo": "kg", "kg": "kg",
@@ -34,23 +34,56 @@ _UNIT_ALIASES = {
     "onzas": "oz", "onza": "oz", "oz": "oz",
     "unidades": "u", "unidad": "u", "und": "u", "uds": "u", "u": "u",
 }
+
+# Rev. 108 (founder UAT 2026-05-27): cliente real puede decir "quince
+# mililitros" en lugar de "15ml". Mapeo de números verbales españoles.
+# Cubrimos hasta 200 (Suficiente para productos de cosmética/peso).
+_NUMBER_WORDS_ES = {
+    "uno": "1", "un": "1", "una": "1", "dos": "2", "tres": "3",
+    "cuatro": "4", "cinco": "5", "seis": "6", "siete": "7", "ocho": "8",
+    "nueve": "9", "diez": "10", "once": "11", "doce": "12", "trece": "13",
+    "catorce": "14", "quince": "15", "dieciseis": "16", "dieciséis": "16",
+    "diecisiete": "17", "dieciocho": "18", "diecinueve": "19",
+    "veinte": "20", "veintiuno": "21", "veintidos": "22", "veintidós": "22",
+    "veinticinco": "25", "treinta": "30", "cuarenta": "40", "cincuenta": "50",
+    "sesenta": "60", "setenta": "70", "ochenta": "80", "noventa": "90",
+    "cien": "100", "ciento": "100", "doscientos": "200",
+}
+
 _UNIT_REGEX = re.compile(
     r"(\d+(?:[.,]\d+)?)\s*(" + "|".join(sorted(_UNIT_ALIASES.keys(), key=len, reverse=True)) + r")\b",
     re.IGNORECASE,
 )
 
+# Regex para palabra-número + unidad (ej. "quince mililitros").
+_NUMBER_WORD_REGEX = re.compile(
+    r"\b(" + "|".join(sorted(_NUMBER_WORDS_ES.keys(), key=len, reverse=True)) + r")\s+(" +
+    "|".join(sorted(_UNIT_ALIASES.keys(), key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
 
 def _normalize_units(text: str) -> str:
-    """Canonicaliza '60 gramos' → '60g', '30 ml' → '30ml', etc."""
+    """Canonicaliza '60 gramos' → '60g', '30 ml' → '30ml', 'quince ml' → '15ml'."""
     if not text:
         return ""
-    def _replace(m):
+    lower = text.lower()
+
+    # 1) Primero convertir palabras-número + unidad ("quince mililitros" → "15ml").
+    def _replace_word(m):
+        num = _NUMBER_WORDS_ES.get(m.group(1).lower(), m.group(1).lower())
+        unit = _UNIT_ALIASES.get(m.group(2).lower(), m.group(2).lower())
+        return f"{num}{unit}"
+    lower = _NUMBER_WORD_REGEX.sub(_replace_word, lower)
+
+    # 2) Luego dígito + unidad (con o sin espacio): "60 gramos" / "60gramos" → "60g".
+    def _replace_digit(m):
         num = m.group(1).replace(",", ".")
         if num.endswith(".0"):
             num = num[:-2]
         unit = _UNIT_ALIASES.get(m.group(2).lower(), m.group(2).lower())
         return f"{num}{unit}"
-    return _UNIT_REGEX.sub(_replace, text.lower())
+    return _UNIT_REGEX.sub(_replace_digit, lower)
 
 
 # ─── get_cart (read-only) ──────────────────────────────────────────────────
