@@ -260,10 +260,24 @@ async def _run_agentic_full(
             )
         ]
     except Exception as _cap_exc:
-        log.warning(
+        logger.warning(
             "[CARRIER_CAPS] no pude cargar canonical capabilities tenant=%s: %s — "
             "prompt sin bloque [CARRIERS]",
             tenant_id[:8], _cap_exc,
+        )
+
+    # Rev. 108 modular — cargar payment methods enabled per-tenant.
+    # Bot conoce qué métodos ofrecer ANTES de hablar con el cliente.
+    payment_methods_cfg: dict = {}
+    try:
+        from lib.tenant_payment_methods import get_tenant_payment_methods
+        payment_methods_cfg = get_tenant_payment_methods(
+            supabase, tenant_id=tenant_id,
+        ).as_dict()
+    except Exception as _pm_exc:
+        logger.warning(
+            "[PAYMENT_METHODS] no pude cargar tenant=%s: %s — prompt sin bloque",
+            tenant_id[:8], _pm_exc,
         )
 
     system_prompt = build_system_prompt(
@@ -273,6 +287,7 @@ async def _run_agentic_full(
         tenant_tone=tenant_tone,
         contact_record=contact or {},
         carriers=carriers_caps,
+        payment_methods=payment_methods_cfg,
     )
 
     # ── Pre-LLM resolver determinístico: variant selection continuation ──
@@ -283,6 +298,55 @@ async def _run_agentic_full(
     # cliente respondió variante), bypaseamos Gemini y resolvemos directo.
     # NO es parche — es el mismo patrón ya usado por `image_send_tool`,
     # `shipping_quote_tool`, `order_status_tool` en flow legacy V1.
+
+    # PRE-LLM #-0.5: Payment method AVAILABILITY (rev. 108 modular).
+    # Antes de COD/credit intent resolvers, verificar si el método que
+    # el cliente está mencionando está habilitado per-tenant.
+    # Si NO disponible → forzar cart al método AVAILABLE + marcar contexto.
+    # El LLM (con [MÉTODOS DE PAGO] block en system_prompt) compone
+    # respuesta asertiva naturalmente. Esto NO bypassea — modifica state
+    # determinísticamente y deja al LLM hacer gloss natural.
+    try:
+        from agentic.payment_method_availability_resolver import (
+            detect_unavailable_payment_method,
+        )
+        unavailable_pm = detect_unavailable_payment_method(
+            supabase, tenant_id=tenant_id, inbound_text=content,
+        )
+        if unavailable_pm:
+            logger.info(
+                "[AGENTIC_PRE_LLM] payment_method_availability conv=%s "
+                "requested=%s enabled=%s — forcing cart al método disponible",
+                conversation_id[:8],
+                unavailable_pm["requested_method"],
+                unavailable_pm["available_methods"],
+            )
+            # Forzar cart al primer método disponible (si hay).
+            available = unavailable_pm["available_methods"]
+            if available:
+                forced_method = (
+                    "credit" if "online_wompi" in available else "cod"
+                )
+                try:
+                    cart_q = (
+                        supabase.table("conversation_carts")
+                        .select("id")
+                        .eq("tenant_id", tenant_id)
+                        .eq("conversation_id", conversation_id)
+                        .in_("status", ["open", "checkout"])
+                        .order("created_at", desc=True).limit(1).execute()
+                    )
+                    if cart_q.data:
+                        supabase.table("conversation_carts").update({
+                            "payment_method": forced_method,
+                        }).eq("id", cart_q.data[0]["id"]).execute()
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] payment_method_availability crashed: %s — skip",
+            exc,
+        )
 
     # PRE-LLM #0: COD intent marker. Rev. 108 Fase B.
     # NO es bypass — solo marca el cart con payment_method='cod' cuando
@@ -296,6 +360,27 @@ async def _run_agentic_full(
         )
         cod_match = detect_cod_intent(content)
         credit_match = detect_credit_intent(content) if not cod_match else None
+
+        # Rev. 108 modular — short-circuit si tenant NO tiene COD enabled.
+        # Aunque el cliente diga "contraentrega", si el tenant configuró
+        # método=cod disabled, NO marcamos cart con 'cod' (sería falso
+        # positivo). El resolver de availability ya forzó cart=credit
+        # arriba; aquí solo confirmamos que no re-flipeamos.
+        if cod_match:
+            try:
+                from lib.tenant_payment_methods import is_method_enabled
+                if not is_method_enabled(
+                    supabase, tenant_id=tenant_id, method="cod",
+                ):
+                    logger.info(
+                        "[AGENTIC_PRE_LLM] cod_intent matched but tenant has "
+                        "method='cod' DISABLED — skip mark (resolver "
+                        "payment_method_availability ya forzó credit)"
+                    )
+                    cod_match = None  # disable downstream marking
+            except Exception:
+                pass
+
         if cod_match:
             try:
                 cart_row = (

@@ -1,16 +1,17 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
+import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor, savePaymentMethods } from './actions'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
 import {
   Settings, Truck, Building2, Globe, Clock,
-  CheckCircle2, XCircle, Sparkles, Bot,
+  CheckCircle2, XCircle, Sparkles, Bot, Wallet,
 } from 'lucide-react'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
 import StorePresenceForm from './store-presence-form'
+import PaymentMethodsForm from './payment-methods-form'
 import { DaysSelector } from './days-selector'
 
 export const metadata = {
@@ -94,6 +95,16 @@ export default async function SettingsPage() {
       .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
       .eq('id', tenantId).single()
     tenant = data as Tenant
+  }
+
+  // Rev. 108 modular — payment methods config per-tenant.
+  let paymentMethods: Array<{ method: 'cod' | 'online_wompi'; enabled: boolean; display_label?: string | null; notes?: string | null }> = []
+  if (tenantId) {
+    const { data: pmRows } = await supabase
+      .from('tenant_payment_methods')
+      .select('method, enabled, display_label, notes')
+      .eq('tenant_id', tenantId)
+    paymentMethods = (pmRows ?? []) as typeof paymentMethods
   }
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -374,6 +385,17 @@ export default async function SettingsPage() {
                 tenantName={tenant?.name ?? undefined}
                 tenantPhone={tenant?.telefono_contacto ?? undefined}
                 storeLocations={(tenant?.store_locations as Array<{name?:string;city?:string;state?:string;street?:string}>) ?? []}
+              />
+            </FormSection>
+          )}
+
+          {/* Métodos de pago — modular per-tenant (rev. 108) */}
+          {isOwner && (
+            <FormSection id="section-payment-methods" icon={Wallet} title="Métodos de pago habilitados"
+              description="Configura qué métodos de pago aceptas. El bot solo ofrecerá lo que esté habilitado aquí; rechazará asertivamente lo deshabilitado.">
+              <PaymentMethodsForm
+                initialMethods={paymentMethods}
+                action={savePaymentMethods}
               />
             </FormSection>
           )}

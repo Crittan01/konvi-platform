@@ -85,6 +85,77 @@ def _co_time_of_day_greeting() -> tuple[str, str]:
     return ("Buenas noches", "noche")
 
 
+def _render_payment_methods_block(payment_methods: Optional[dict]) -> str:
+    """Renderiza MÉTODOS DE PAGO HABILITADOS del tenant.
+
+    Rev. 108 modular (founder 2026-05-27 "totalmente modular").
+
+    Datos vienen de `lib.tenant_payment_methods.get_tenant_payment_methods`
+    (per-tenant override sobre defaults canónicos).
+
+    Bot SIEMPRE sabe qué métodos de pago puede ofrecer al cliente, NUNCA
+    sugiere uno que el tenant deshabilitó. Asertividad determinística.
+    """
+    if not payment_methods:
+        return ""
+    methods = payment_methods.get("methods") or []
+    enabled = [m for m in methods if m.get("enabled")]
+    disabled = [m for m in methods if not m.get("enabled")]
+    fallback_open = payment_methods.get("fallback_open", False)
+
+    lines = ["**MÉTODOS DE PAGO HABILITADOS PARA ESTE TENANT:**", ""]
+    if not enabled:
+        lines.append("⚠️ NINGÚN método de pago habilitado — escala a humano si cliente intenta comprar.")
+        return "\n".join(lines)
+
+    for m in enabled:
+        method_id = m.get("method", "?")
+        label = m.get("display_label") or method_id
+        if method_id == "cod":
+            lines.append(f"✓ contraentrega — {label} — courier recauda al entregar")
+        elif method_id == "online_wompi":
+            lines.append(f"✓ pago online — {label} — link Wompi (tarjeta/PSE/Nequi/transferencia)")
+        else:
+            lines.append(f"✓ {method_id} — {label}")
+
+    for m in disabled:
+        method_id = m.get("method", "?")
+        if method_id == "cod":
+            lines.append("✗ contraentrega — NO disponible para este tenant — no la ofrezcas")
+        elif method_id == "online_wompi":
+            lines.append("✗ pago online — NO disponible para este tenant — no lo ofrezcas")
+        else:
+            lines.append(f"✗ {method_id} — NO disponible")
+
+    enabled_ids = {m.get("method") for m in enabled}
+    lines.append("")
+    lines.append("**REGLAS DE PAGO CRÍTICAS:**")
+    if "cod" not in enabled_ids and "online_wompi" in enabled_ids:
+        lines.append(
+            "• Si cliente menciona 'contraentrega' / 'al recibir' → "
+            "responde asertivamente que SOLO manejas pago online y "
+            "ofrece continuar con link Wompi. NO entres a cotizar carriers "
+            "asumiendo COD."
+        )
+    elif "online_wompi" not in enabled_ids and "cod" in enabled_ids:
+        lines.append(
+            "• Si cliente menciona 'tarjeta' / 'online' / 'PSE' / 'Nequi' → "
+            "responde asertivamente que SOLO manejas contraentrega. NO "
+            "ofrezcas link de pago."
+        )
+    else:
+        lines.append(
+            "• Pregunta al cliente cuál prefiere (online o contraentrega) "
+            "antes de cotizar/cerrar."
+        )
+    if fallback_open:
+        lines.append(
+            "  (Tenant sin configuración explícita en tenant_payment_methods — "
+            "fallback open: ambos métodos enabled.)"
+        )
+    return "\n".join(lines)
+
+
 def _render_carriers_block(carriers: Optional[list]) -> str:
     """Renderiza CARRIERS HABILITADOS — capacidades COD por carrier.
 
@@ -249,6 +320,7 @@ def build_system_prompt(
     server_greeting: Optional[str] = None,
     contact_record: Optional[dict] = None,
     carriers: Optional[list[dict]] = None,
+    payment_methods: Optional[dict] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -271,6 +343,7 @@ def build_system_prompt(
     catalog_block = _render_catalog_block(catalog or [])
     contact_block = _render_contact_block(contact_record)
     carriers_block = _render_carriers_block(carriers)
+    payment_methods_block = _render_payment_methods_block(payment_methods)
     if server_greeting is None:
         server_greeting, _ = _co_time_of_day_greeting()
 
@@ -466,6 +539,12 @@ FLUJO HABITUAL (no rígido — adapta según conversación)
     • Modo COD: el tool retorna `direct_response` con el mensaje completo
       (sin URL, incluye monto a recaudar + carrier + próximos pasos).
       Emítelo TAL CUAL al cliente — no lo modifiques.
+
+═══════════════════════════════════════════════════════════════════
+MÉTODOS DE PAGO (configuración per-tenant)
+═══════════════════════════════════════════════════════════════════
+
+{payment_methods_block}
 
 ═══════════════════════════════════════════════════════════════════
 CARRIERS — CAPACIDADES POR TRANSPORTADORA (canonical Aveonline)
