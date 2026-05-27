@@ -31,8 +31,13 @@ from typing import Any, Optional
 
 
 # In-memory TTL cache (per-process).
+# Rev. 108 modular tuning (founder 2026-05-27 Opción A): TTL 30s en lugar
+# de 5min. Trade-off: ~50ms extra DB query per turn cuando cache expira,
+# pero tenant ve cambios reflejados en ≤30s (en lugar de hasta 5min).
+# Aceptable para producción: tenant raramente cambia config; cuando
+# cambia, espera ≤30s. Si demanda crece, escalar a Postgres LISTEN/NOTIFY.
 _CACHE: dict[str, tuple[float, "TenantPaymentMethodsConfig"]] = {}
-_TTL_SECONDS = 300  # 5min
+_TTL_SECONDS = 30
 
 
 # Métodos canónicos conocidos (matchean CHECK constraint del DB).
