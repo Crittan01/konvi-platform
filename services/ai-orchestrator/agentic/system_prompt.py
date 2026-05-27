@@ -157,96 +157,55 @@ def _render_payment_methods_block(payment_methods: Optional[dict]) -> str:
 
 
 def _render_carriers_block(carriers: Optional[list]) -> str:
-    """Renderiza CARRIERS HABILITADOS — capacidades COD por carrier.
+    """Renderiza CARRIERS — compacto (rev. 108 prompt size opt 2026-05-27).
 
-    Datos vienen de `lib.carrier_capabilities.get_all_capabilities_for_tenant`
-    (combina canonical platform-level + tenant overrides).
-
-    Propósito (rev. 108 holístico):
-      • Bot SIEMPRE sabe qué carriers soportan COD, mínimos de recaudo,
-        cuáles ⚠️ cobran devolución si cliente rechaza.
-      • Permite respuestas asertivas tipo "para contraentrega tengo
-        SERVIENTREGA $17k sin costo si rechazas, o ENVIA $15k pero
-        cobran ~$5k devolución".
-      • Sin esto, LLM pierde contexto y ofrece carriers que después
-        fallan en generarGuia2 (UX rota).
-
-    Formato compacto (token-eficiente).
+    Compactado para reducir saturación LLM. Detalles completos en invariants.
     """
     if not carriers:
         return ""
-    lines = ["**CARRIERS HABILITADOS Y SUS CAPACIDADES PARA COD:**", ""]
-    cod_carriers = [c for c in carriers if c.get("supports_cod") and c.get("enabled_for_tenant", True)]
-    no_cod_carriers = [c for c in carriers if not c.get("supports_cod") and c.get("enabled_for_tenant", True)]
+    cod_yes = [c for c in carriers if c.get("supports_cod") and c.get("enabled_for_tenant", True)]
+    cod_no = [c for c in carriers if not c.get("supports_cod") and c.get("enabled_for_tenant", True)]
+    charges_return = [c.get("carrier_name") for c in cod_yes if c.get("charges_return_fee")]
 
-    for c in cod_carriers:
-        name = c.get("carrier_name", "?")
+    lines = ["**CARRIERS:**"]
+    cod_names = ", ".join(c.get("carrier_name", "?") for c in cod_yes)
+    nocod_names = ", ".join(c.get("carrier_name", "?") for c in cod_no)
+    lines.append(f"✓COD: {cod_names}")
+    if cod_no:
+        lines.append(f"✗COD (solo online): {nocod_names}")
+    if charges_return:
+        lines.append(f"⚠️COBRA-DEVOLUCION en COD: {', '.join(charges_return)}")
+    # Mínimos solo si existen
+    for c in cod_yes:
         min_r = c.get("cod_min_recaudo_cop")
-        min_r_heavy = c.get("cod_min_recaudo_heavy_cop")
-        threshold = c.get("cod_weight_threshold_kg")
-        charges_ret = c.get("charges_return_fee", False)
-        liq_days = c.get("cod_liquidation_days_range") or "?"
-        liq_day = c.get("cod_liquidation_weekday") or "?"
-
-        if min_r and min_r_heavy and threshold:
-            mins = f"mín-recaudo ${min_r:,} (≤{threshold}kg) / ${min_r_heavy:,} (>{threshold}kg)".replace(",", ".")
-        elif min_r:
-            mins = f"mín-recaudo ${min_r:,}".replace(",", ".")
-        else:
-            mins = "sin-mínimo-documentado"
-
-        ret_warn = "⚠️ COBRA-DEVOLUCION" if charges_ret else "sin-costo-devolución"
-        lines.append(f"✓ {name:18s} {mins:48s} {ret_warn:25s} liquidación {liq_days}d {liq_day}")
-
-    for c in no_cod_carriers:
-        lines.append(f"✗ {c.get('carrier_name', '?'):18s} NO soporta COD — solo pago anticipado")
+        if min_r:
+            min_heavy = c.get("cod_min_recaudo_heavy_cop")
+            thr = c.get("cod_weight_threshold_kg")
+            if min_heavy and thr:
+                lines.append(f"  {c['carrier_name']}: mín-recaudo ${min_r:,} (≤{thr}kg) / ${min_heavy:,} (>{thr}kg)".replace(",", "."))
+            else:
+                lines.append(f"  {c['carrier_name']}: mín-recaudo ${min_r:,}".replace(",", "."))
 
     lines.extend([
         "",
-        "**REGLAS COD CRÍTICAS — sigue al pie de la letra, no extrapoles:**",
-        "",
-        "1. Warning de devolución — aplica SOLO en pedidos CONTRAENTREGA.",
-        "   En pago anticipado (online/Wompi) NUNCA muestres warning de",
-        "   devolución (el cliente ya pagó; rechazo es flujo refund, no este).",
-        "",
-        "   En contraentrega: incluye warning SÓLO si el carrier elegido",
-        "   tiene ⚠️COBRA-DEVOLUCION literal arriba. Si dice",
-        "   'sin-costo-devolución' → NUNCA agregues warning.",
-        "",
-        "   Carriers que SÍ requieren warning en COD: ENVIA, COORDINADORA.",
-        "   Texto exacto cuando aplique:",
-        "   '⚠️ Si rechazas el pedido al recibir, [carrier] cobra costo de",
-        "    devolución (~$5.000 a tu cargo).'",
-        "",
-        "2. Mín-recaudo: si cliente pide contraentrega Y total < mín del",
-        "   carrier, NO ofrezcas ese carrier — sugiere alternativa.",
-        "",
-        "3. Si cliente pide contraentrega Y los carriers cotizados son TODOS",
-        "   ✗NO-COD, di: 'Para esta ruta no tenemos contraentrega disponible.",
-        "   ¿Prefieres pago anticipado?'",
-        "",
-        "4. Para pago anticipado (online), TODOS los carriers disponibles",
-        "   (no aplican restricciones COD ni warning de devolución).",
-        "",
-        "**REGLA SELECCIÓN DE CARRIER:**",
-        "5. Tras `quote_shipping`, si hay >1 opciones cotizadas, NUNCA",
-        "   invoques `select_carrier` en el mismo turno. PRESENTA TODAS las",
-        "   opciones al cliente con nombre + precio + ETA, y pídele que",
-        "   elija. Solo cuando el cliente NOMBRE explícitamente uno (en su",
-        "   próximo mensaje), invocas `select_carrier`. Si hay sólo 1",
-        "   opción, también preséntala — el cliente debe confirmar.",
-        "",
-        "   Si invocaste `select_carrier` y respondió `CARRIER_SELECTION_",
-        "   NOT_EXPLICIT`, el tool te dice cuál es el problema: NO cliente",
-        "   no eligió. Tu siguiente respuesta DEBE listar las opciones del",
-        "   error.extra.available_options al cliente, NO hablar de 'items'",
-        "   o 'inconvenientes' — los items SÍ están agregados, solo falta",
-        "   que el cliente elija el carrier.",
+        "**REGLAS COD (CRÍTICAS):**",
+        "1. Warning devolución SÓLO en COD + carrier en lista ⚠️COBRA-DEVOLUCION arriba.",
+        "   Texto: '⚠️ Si rechazas el pedido, [carrier] cobra costo devolución (~$5.000).'",
+        "2. NUNCA mostrar warning en pago online.",
+        "3. Si total < mín-recaudo del carrier, NO ofrecerlo.",
+        "4. Tras quote_shipping con >1 opciones, NUNCA llames select_carrier",
+        "   sin que cliente NOMBRE el carrier explícitamente. Lista TODAS",
+        "   las opciones (carrier+precio+ETA) y pide elegir.",
+        "5. Si select_carrier responde CARRIER_SELECTION_NOT_EXPLICIT, lista",
+        "   error.extra.available_options al cliente — NO hablar de 'items'.",
     ])
     return "\n".join(lines)
 
 
-def _render_contact_block(contact_record: Optional[dict]) -> str:
+def _render_contact_block(
+    contact_record: Optional[dict],
+    tenant_name: str = "el negocio",
+) -> str:
     """Renderiza CONTEXTO_CLIENTE inline al system_prompt.
 
     Permite que el LLM detecte cliente conocido SIN tener que invocar
@@ -301,11 +260,37 @@ def _render_contact_block(contact_record: Optional[dict]) -> str:
             f"NUNCA pongas placeholders tipo \"[Dirección de X]\"."
         )
     # Cliente parcial (some PII pero falta consent o datos clave).
+    # Rev. 108 fix arquitectónico (founder UAT 2026-05-27): si el contact
+    # SOLO tiene phone (auto-creado por dispatcher al recibir primer
+    # inbound) pero CERO PII (name/email/doc/address), es efectivamente
+    # un cliente NUEVO — la fila contact es plumbing técnico, NO evidencia
+    # de relación previa. El bot debe saludar como nuevo sin frases
+    # "de nuevo" / "te he visto antes" / "cliente regular".
+    no_pii_at_all = not (name or has_email or has_doc or has_address or consent)
+    if no_pii_at_all:
+        return (
+            "**CONTEXTO_CLIENTE**: cliente NUEVO (primera interacción — "
+            "sin PII previa en DB).\n"
+            "REGLAS CRÍTICAS para este turno:\n"
+            "  • NUNCA digas 'qué bueno verte de nuevo', 'te he visto antes', "
+            "    'bienvenido nuevamente', 'gracias por volver' ni nada que "
+            "    insinúe interacción previa.\n"
+            f"  • SIEMPRE inicia con el saludo de hora (CONTEXTO HORARIO) "
+            f"seguido de bienvenida AL TENANT con su nombre LITERAL.\n"
+            f"  • Nombre del tenant LITERAL: \"{tenant_name}\". El saludo "
+            f"correcto es: 'Buenas tardes. Bienvenido/a a *{tenant_name}*.'\n"
+            f"  • NUNCA digas 'Bienvenido a Sara Camila' — Sara Camila eres "
+            f"TÚ (la asesora), NO el negocio. El negocio es \"{tenant_name}\".\n"
+            f"  • Después del saludo + bienvenida, aplica Patrón B o C del "
+            f"FLUJO HABITUAL según número de categorías del catálogo."
+        )
     return (
         f"**CONTEXTO_CLIENTE**: cliente con contact existente pero PII "
         f"INCOMPLETA (consent={consent}, name={bool(name)}, "
         f"email={has_email}, doc={has_doc}, address={has_address}).\n"
-        f"Trata como NUEVO para flow PII — pide consent y datos faltantes."
+        f"Hubo interacción previa pero faltan datos — pide consent y datos "
+        f"faltantes. Puedes saludar de forma neutral (sin 'de nuevo' ni "
+        f"'bienvenido nuevamente' si no recuerdas el nombre)."
     )
 
 
@@ -341,7 +326,7 @@ def build_system_prompt(
     )
     tone = tenant_tone or "cordial y profesional, en español Colombia"
     catalog_block = _render_catalog_block(catalog or [])
-    contact_block = _render_contact_block(contact_record)
+    contact_block = _render_contact_block(contact_record, tenant_name=tenant_name)
     carriers_block = _render_carriers_block(carriers)
     payment_methods_block = _render_payment_methods_block(payment_methods)
     if server_greeting is None:
@@ -390,6 +375,15 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    **TOOL list_catalog**: la sección CATÁLOGO ACTUAL ya tiene todos los
    productos + UUIDs. Para `add_to_cart` usa esos UUIDs directamente.
    Solo invoca `list_catalog(category)` si necesitas presentar subset.
+
+   **REGLA CRÍTICA COMPLETITUD DE CATEGORÍA** (rev. 108):
+   Cuando el cliente pida una categoría (e.g. "los sérums", "los jabones",
+   "todos los aceites"), DEBES listar TODOS los productos activos de esa
+   categoría presentes en CATÁLOGO ACTUAL. NUNCA omitas productos por
+   brevedad. NUNCA muestres "solo algunos" ni "los más populares" cuando
+   el cliente pidió ver la categoría. Lista cada producto + todas sus
+   variantes + precios. Un invariant downstream verificará y rewritirá
+   si faltan productos.
 
 3. **Variante explícita obligatoria**: Si cliente menciona producto sin
    variante (e.g. "1 jabón de coco" sin gramaje), NO invoques add_to_cart.

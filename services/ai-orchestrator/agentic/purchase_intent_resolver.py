@@ -139,6 +139,17 @@ _STOP_WORDS = {
     "al", "a", "con", "para", "y", "e",
 }
 
+# Rev. 108 (founder UAT 2026-05-27 — "jabón de chocolate" matcheó "Jabón
+# de Coco"): cuando el cliente menciona solo un nombre de categoría, el
+# matcher debe rechazar si NINGÚN otro token específico matchea. Tokens
+# de categoría NO bastan para identificar un producto único.
+_CATEGORY_TOKENS = {
+    "jabon", "jabones", "serum", "serums", "aceite", "aceites",
+    "kit", "kits", "shampoo", "champu", "crema", "cremas",
+    "esencial", "esenciales", "artesanal", "artesanales",
+    "vegetal", "vegetales", "natural", "naturales",
+}
+
 
 def _token_matches(ht: str, tt: str) -> bool:
     """Match flexible entre tokens, evitando falsos positivos con chars cortos.
@@ -198,16 +209,38 @@ def _find_product_in_catalog(
     best.sort(key=lambda x: -x[0])
     top_score = best[0][0]
     top_matches = [p for s, p in best if s == top_score]
-    if len(top_matches) == 1:
-        return top_matches[0]
-    # Empate — devolver el que tenga el título más corto (más específico).
-    top_matches.sort(key=lambda p: len(str(p.get("title") or "")))
-    if (
-        len(top_matches) >= 2
-        and len(str(top_matches[0].get("title") or ""))
-        == len(str(top_matches[1].get("title") or ""))
-    ):
-        return None  # Ambiguo real.
+
+    # Rev. 108 (founder UAT 2026-05-27) — Anti falso-positivo de categoría:
+    # si el cliente solo mencionó tokens de categoría (jabon, serum, etc)
+    # SIN ningún token específico (chocolate, lavanda, vitamina, etc),
+    # los matches son por categoría y NO identifican un producto único.
+    # NO retornar — el LLM debe pedir clarificación.
+    non_category_hint_tokens = [
+        t for t in hint_tokens if t not in _CATEGORY_TOKENS
+    ]
+    if not non_category_hint_tokens:
+        return None  # Cliente solo dijo categoría → no es match único.
+
+    # Verificar que el score venga de tokens específicos, no solo categoría.
+    # Si TODO el score viene de tokens categoría, no es match real.
+    if len(top_matches) > 1:
+        # Multiple matches con mismo score — peligroso. Solo retornar si
+        # el match incluye al menos un token NO-categoría.
+        for prod in top_matches:
+            title = _normalize(str(prod.get("title") or ""))
+            title_tokens = [
+                t for t in re.split(r"\W+", title)
+                if t and t not in _STOP_WORDS
+            ]
+            specific_matched = any(
+                _token_matches(ht, tt)
+                for ht in non_category_hint_tokens
+                for tt in title_tokens
+            )
+            if specific_matched:
+                return prod  # Solo retornar el que tiene match específico
+        return None  # Ningún top_match tiene match específico → ambiguo real
+
     return top_matches[0]
 
 
