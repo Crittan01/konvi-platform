@@ -29,8 +29,13 @@ from typing import Any, Optional
 
 
 # In-memory TTL cache (per-process).
+# Rev. 108 modular tuning (founder 2026-05-27 Opción A): TTL 30s en lugar
+# de 5min. Coherente con tenant_payment_methods — tenant cambia overrides
+# de carriers (cod_override per-carrier) y debe ver efecto rápido. Trade-off
+# performance ~50ms × turn vs UX inmediato. Si crece demanda escalar a
+# Postgres LISTEN/NOTIFY.
 _CACHE: dict[tuple, tuple[float, "CarrierCapability"]] = {}
-_TTL_SECONDS = 300  # 5min
+_TTL_SECONDS = 30
 
 
 @dataclass(frozen=True)
