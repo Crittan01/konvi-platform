@@ -179,6 +179,7 @@ async def _run_agentic_full(
         EmptyPromiseInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
         PaymentMethodExplicitInvariant,
+        PaymentModeCoherenceInvariant,
         PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
@@ -246,12 +247,32 @@ async def _run_agentic_full(
     except Exception:
         pass
 
+    # Rev. 108 holístico — cargar capacidades carrier (canonical + tenant
+    # override) para que el bot SIEMPRE sepa qué carriers soportan COD,
+    # mínimos de recaudo, devolución cobrada, etc. Bloque inyectado al
+    # system_prompt para responder asertivamente sin perder contexto.
+    carriers_caps: list[dict] = []
+    try:
+        from lib.carrier_capabilities import get_all_capabilities_for_tenant
+        carriers_caps = [
+            c.as_dict() for c in get_all_capabilities_for_tenant(
+                supabase, tenant_id=tenant_id,
+            )
+        ]
+    except Exception as _cap_exc:
+        log.warning(
+            "[CARRIER_CAPS] no pude cargar canonical capabilities tenant=%s: %s — "
+            "prompt sin bloque [CARRIERS]",
+            tenant_id[:8], _cap_exc,
+        )
+
     system_prompt = build_system_prompt(
         tenant_name=tenant_name,
         catalog=catalog,
         tenant_pitch=tenant_pitch,
         tenant_tone=tenant_tone,
         contact_record=contact or {},
+        carriers=carriers_caps,
     )
 
     # ── Pre-LLM resolver determinístico: variant selection continuation ──
@@ -880,6 +901,10 @@ async def _run_agentic_full(
             # Rev. 108 Fase B — bloquea acción de pago si modo no fue
             # explícito del cliente. Reescribe a pregunta determinística.
             PaymentMethodExplicitInvariant(),
+            # Rev. 108 holístico — coherencia léxica modo pago vs cart.
+            # Detecta "link de pago contra entrega" (contradicción) y
+            # rewrite a lenguaje correcto según cart.payment_method.
+            PaymentModeCoherenceInvariant(),
             SummaryCoherenceInvariant(),
             PIICoherenceInvariant(),
             PostToolCoherenceInvariant(),

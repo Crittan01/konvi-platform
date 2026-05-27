@@ -51,6 +51,12 @@ _CREDIT_EXPLICIT_PATTERNS = (
     re.compile(r"\b(?:tarjeta\s+de\s+credito|cr[eé]dito\b|d[eé]bito\b)", re.IGNORECASE),
     re.compile(r"\b(?:pse|nequi|bancolombia\s+transfer|wompi)\b", re.IGNORECASE),
     re.compile(r"\bpref(?:iero|erir[íi]a)\s+pag(?:o|ar)\s+(?:online|antes|ahora)\b", re.IGNORECASE),
+    # Rev. 108 holístico — cliente responde simplemente "online" / "Online"
+    # tras pregunta del bot "¿online o contra entrega?". Patrón aislado o
+    # como token suelto.
+    re.compile(r"(?:^|[^a-záéíóúñ])online([^a-záéíóúñ]|$)", re.IGNORECASE),
+    re.compile(r"\bpago\s+anticipado\b", re.IGNORECASE),
+    re.compile(r"\bpor\s+wompi\b", re.IGNORECASE),
 )
 
 
@@ -67,15 +73,18 @@ _LLM_PAYMENT_INTENT_PATTERNS = (
 # es bug: el cliente debe saber el modo ANTES porque COD puede tener costo
 # distinto (dossier §7.1, §7.3 — comisión 2.40%+ + tarifa carrier COD).
 _LLM_QUOTE_DISPLAY_PATTERNS = (
-    # 2+ líneas con bullet + carrier name + precio COP
+    # 2+ líneas con bullet + carrier name + precio (COP suffix opcional).
+    # Rev. 108 holístico — COP suffix opcional porque LLM a veces omite
+    # la unidad ("*$7.530*" sin "COP" post markdown formatting).
     re.compile(
-        r"(?:^|\n)\s*[\*•]\s+\*[A-ZÁÉÍÓÚÑ ]{3,}\*.*?\$[\d.,]+\s*COP",
+        r"(?:^|\n)\s*[\*•]\s+\*[A-ZÁÉÍÓÚÑ ]{3,}\*.*?\$[\d.,]+",
         re.MULTILINE,
     ),
-    # "opciones de envío" + lista
+    # "opciones de envío" / "estas opciones" + lista carriers
     re.compile(
-        r"opciones?\s+de\s+env[ií]o.*?(?:COORDINADORA|SERVIENTREGA|ENVIA|"
-        r"INTERRAPIDISIMO|TCC|SAFERBO)",
+        r"(?:opciones?\s+de\s+env[ií]o|estas\s+opciones|tenemos\s+est[ao]s?\b).*?"
+        r"(?:COORDINADORA|SERVIENTREGA|ENVIA|INTERRAPIDISIMO|TCC|SAFERBO|"
+        r"DOMINA|MOOVA|99\s?MINUTOS|GO\s?ENVIOS)",
         re.IGNORECASE | re.DOTALL,
     ),
 )

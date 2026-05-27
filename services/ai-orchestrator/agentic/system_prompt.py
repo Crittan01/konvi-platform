@@ -85,6 +85,96 @@ def _co_time_of_day_greeting() -> tuple[str, str]:
     return ("Buenas noches", "noche")
 
 
+def _render_carriers_block(carriers: Optional[list]) -> str:
+    """Renderiza CARRIERS HABILITADOS — capacidades COD por carrier.
+
+    Datos vienen de `lib.carrier_capabilities.get_all_capabilities_for_tenant`
+    (combina canonical platform-level + tenant overrides).
+
+    Propósito (rev. 108 holístico):
+      • Bot SIEMPRE sabe qué carriers soportan COD, mínimos de recaudo,
+        cuáles ⚠️ cobran devolución si cliente rechaza.
+      • Permite respuestas asertivas tipo "para contraentrega tengo
+        SERVIENTREGA $17k sin costo si rechazas, o ENVIA $15k pero
+        cobran ~$5k devolución".
+      • Sin esto, LLM pierde contexto y ofrece carriers que después
+        fallan en generarGuia2 (UX rota).
+
+    Formato compacto (token-eficiente).
+    """
+    if not carriers:
+        return ""
+    lines = ["**CARRIERS HABILITADOS Y SUS CAPACIDADES PARA COD:**", ""]
+    cod_carriers = [c for c in carriers if c.get("supports_cod") and c.get("enabled_for_tenant", True)]
+    no_cod_carriers = [c for c in carriers if not c.get("supports_cod") and c.get("enabled_for_tenant", True)]
+
+    for c in cod_carriers:
+        name = c.get("carrier_name", "?")
+        min_r = c.get("cod_min_recaudo_cop")
+        min_r_heavy = c.get("cod_min_recaudo_heavy_cop")
+        threshold = c.get("cod_weight_threshold_kg")
+        charges_ret = c.get("charges_return_fee", False)
+        liq_days = c.get("cod_liquidation_days_range") or "?"
+        liq_day = c.get("cod_liquidation_weekday") or "?"
+
+        if min_r and min_r_heavy and threshold:
+            mins = f"mín-recaudo ${min_r:,} (≤{threshold}kg) / ${min_r_heavy:,} (>{threshold}kg)".replace(",", ".")
+        elif min_r:
+            mins = f"mín-recaudo ${min_r:,}".replace(",", ".")
+        else:
+            mins = "sin-mínimo-documentado"
+
+        ret_warn = "⚠️ COBRA-DEVOLUCION" if charges_ret else "sin-costo-devolución"
+        lines.append(f"✓ {name:18s} {mins:48s} {ret_warn:25s} liquidación {liq_days}d {liq_day}")
+
+    for c in no_cod_carriers:
+        lines.append(f"✗ {c.get('carrier_name', '?'):18s} NO soporta COD — solo pago anticipado")
+
+    lines.extend([
+        "",
+        "**REGLAS COD CRÍTICAS — sigue al pie de la letra, no extrapoles:**",
+        "",
+        "1. Warning de devolución — aplica SOLO en pedidos CONTRAENTREGA.",
+        "   En pago anticipado (online/Wompi) NUNCA muestres warning de",
+        "   devolución (el cliente ya pagó; rechazo es flujo refund, no este).",
+        "",
+        "   En contraentrega: incluye warning SÓLO si el carrier elegido",
+        "   tiene ⚠️COBRA-DEVOLUCION literal arriba. Si dice",
+        "   'sin-costo-devolución' → NUNCA agregues warning.",
+        "",
+        "   Carriers que SÍ requieren warning en COD: ENVIA, COORDINADORA.",
+        "   Texto exacto cuando aplique:",
+        "   '⚠️ Si rechazas el pedido al recibir, [carrier] cobra costo de",
+        "    devolución (~$5.000 a tu cargo).'",
+        "",
+        "2. Mín-recaudo: si cliente pide contraentrega Y total < mín del",
+        "   carrier, NO ofrezcas ese carrier — sugiere alternativa.",
+        "",
+        "3. Si cliente pide contraentrega Y los carriers cotizados son TODOS",
+        "   ✗NO-COD, di: 'Para esta ruta no tenemos contraentrega disponible.",
+        "   ¿Prefieres pago anticipado?'",
+        "",
+        "4. Para pago anticipado (online), TODOS los carriers disponibles",
+        "   (no aplican restricciones COD ni warning de devolución).",
+        "",
+        "**REGLA SELECCIÓN DE CARRIER:**",
+        "5. Tras `quote_shipping`, si hay >1 opciones cotizadas, NUNCA",
+        "   invoques `select_carrier` en el mismo turno. PRESENTA TODAS las",
+        "   opciones al cliente con nombre + precio + ETA, y pídele que",
+        "   elija. Solo cuando el cliente NOMBRE explícitamente uno (en su",
+        "   próximo mensaje), invocas `select_carrier`. Si hay sólo 1",
+        "   opción, también preséntala — el cliente debe confirmar.",
+        "",
+        "   Si invocaste `select_carrier` y respondió `CARRIER_SELECTION_",
+        "   NOT_EXPLICIT`, el tool te dice cuál es el problema: NO cliente",
+        "   no eligió. Tu siguiente respuesta DEBE listar las opciones del",
+        "   error.extra.available_options al cliente, NO hablar de 'items'",
+        "   o 'inconvenientes' — los items SÍ están agregados, solo falta",
+        "   que el cliente elija el carrier.",
+    ])
+    return "\n".join(lines)
+
+
 def _render_contact_block(contact_record: Optional[dict]) -> str:
     """Renderiza CONTEXTO_CLIENTE inline al system_prompt.
 
@@ -158,6 +248,7 @@ def build_system_prompt(
     catalog: Optional[list[dict]] = None,
     server_greeting: Optional[str] = None,
     contact_record: Optional[dict] = None,
+    carriers: Optional[list[dict]] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -179,6 +270,7 @@ def build_system_prompt(
     tone = tenant_tone or "cordial y profesional, en español Colombia"
     catalog_block = _render_catalog_block(catalog or [])
     contact_block = _render_contact_block(contact_record)
+    carriers_block = _render_carriers_block(carriers)
     if server_greeting is None:
         server_greeting, _ = _co_time_of_day_greeting()
 
@@ -374,6 +466,12 @@ FLUJO HABITUAL (no rígido — adapta según conversación)
     • Modo COD: el tool retorna `direct_response` con el mensaje completo
       (sin URL, incluye monto a recaudar + carrier + próximos pasos).
       Emítelo TAL CUAL al cliente — no lo modifiques.
+
+═══════════════════════════════════════════════════════════════════
+CARRIERS — CAPACIDADES POR TRANSPORTADORA (canonical Aveonline)
+═══════════════════════════════════════════════════════════════════
+
+{carriers_block}
 
 ═══════════════════════════════════════════════════════════════════
 CATÁLOGO ACTUAL

@@ -208,6 +208,49 @@ class AddToCartTool:
         # Skip si `ctx.extras["bypass_variant_guard"] = True`. Los resolvers
         # determinísticos son responsables de verificar contexto antes.
         bypass_guard = bool((ctx.extras or {}).get("bypass_variant_guard"))
+
+        # Rev. 108 holístico — IDEMPOTENCIA REAL: si cart YA tiene este
+        # (product_id, variation_id), la llamada del LLM es REDUNDANTE
+        # (suele ocurrir post invariant rewrite o long history drift).
+        # NO sumar qty. Return success sin side-effect (no-op idempotente).
+        # Esto evita el bug donde LLM llama add_to_cart 3 veces y cart
+        # termina con qty=3 cuando cliente pidió 1.
+        if not bypass_guard:
+            try:
+                from tools.cart_tool import get_cart_with_items as _gc
+                _existing = _gc(
+                    ctx.supabase,
+                    conversation_id=ctx.conversation_id,
+                    tenant_id=ctx.tenant_id,
+                )
+                if _existing and _existing.get("items"):
+                    for _it in _existing.get("items") or []:
+                        if (
+                            str(_it.get("product_id")) == args.product_id
+                            and str(_it.get("variation_id")) == args.variation_id
+                        ):
+                            existing_qty = int(_it.get("quantity") or 0)
+                            requested_qty = int(args.quantity or 1)
+                            # Caso A: misma qty → no-op. Return success.
+                            if existing_qty == requested_qty:
+                                return tool_success({
+                                    "operation": "add_to_cart",
+                                    "added": None,
+                                    "idempotent": True,
+                                    "cart_id": str(_existing.get("id") or ""),
+                                    "note": (
+                                        f"Item ya está en el cart con "
+                                        f"qty={existing_qty}. No hubo cambios "
+                                        f"(idempotencia)."
+                                    ),
+                                })
+                            # Caso B: qty distinta → bypass variant guard
+                            # (la diferencia es real), permitir sumar.
+                            bypass_guard = True
+                            break
+            except Exception:
+                pass
+
         if len(variants) > 1 and not bypass_guard:
             recent_inbounds = (ctx.extras or {}).get(
                 "recent_inbound_texts", [],
