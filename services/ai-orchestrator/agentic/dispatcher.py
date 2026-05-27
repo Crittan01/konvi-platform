@@ -181,6 +181,7 @@ async def _run_agentic_full(
         PaymentMethodExplicitInvariant,
         PaymentModeCoherenceInvariant,
         CategoryCompletenessInvariant,
+        CartAddPricingInvariant,
         PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
@@ -989,6 +990,11 @@ async def _run_agentic_full(
             # presenta una categoría completa, lista TODOS los productos
             # activos. Si no, REWRITE con lista completa del catálogo.
             CategoryCompletenessInvariant(),
+            # Rev. 108 (founder UAT 2026-05-27) — bot agrega item al cart
+            # pero olvida mostrar precio + subtotal. Invariant inyecta
+            # esos datos al outbound si add_to_cart succeeded y outbound
+            # NO menciona "$".
+            CartAddPricingInvariant(),
             # Rev. 108 Fase B — bloquea acción de pago si modo no fue
             # explícito del cliente. Reescribe a pregunta determinística.
             PaymentMethodExplicitInvariant(),

@@ -48,9 +48,41 @@ _QTY_WORDS = {
     "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
 }
 
+# Rev. 108 (founder UAT B2 2026-05-27): cliente dice "quince mililitros".
+# Pre-normalizamos palabras-número a dígitos ANTES de buscar variant_unit.
+_NUMBER_WORDS_ES_VARIANT = {
+    "uno": "1", "dos": "2", "tres": "3", "cuatro": "4", "cinco": "5",
+    "seis": "6", "siete": "7", "ocho": "8", "nueve": "9", "diez": "10",
+    "once": "11", "doce": "12", "trece": "13", "catorce": "14",
+    "quince": "15", "dieciseis": "16", "dieciséis": "16",
+    "diecisiete": "17", "dieciocho": "18", "diecinueve": "19",
+    "veinte": "20", "veinticinco": "25", "treinta": "30",
+    "cuarenta": "40", "cincuenta": "50", "sesenta": "60",
+    "setenta": "70", "ochenta": "80", "noventa": "90",
+    "cien": "100", "ciento": "100", "doscientos": "200",
+}
+_NUMBER_WORD_BEFORE_UNIT_RE = re.compile(
+    r"\b(" + "|".join(sorted(_NUMBER_WORDS_ES_VARIANT.keys(), key=len, reverse=True)) +
+    r")\s+(ml|mililitros?|gr?|g|gramos?|kg|kilogramos?|oz|onzas?|l|lts?|litros?)\b",
+    re.IGNORECASE,
+)
+
+
+def _pre_normalize_number_words(text: str) -> str:
+    """Convierte 'quince mililitros' → '15 mililitros' (pre-step antes
+    de _VARIANT_UNIT_RE).
+    """
+    if not text:
+        return text
+    def _replace(m):
+        num = _NUMBER_WORDS_ES_VARIANT.get(m.group(1).lower(), m.group(1))
+        return f"{num} {m.group(2)}"
+    return _NUMBER_WORD_BEFORE_UNIT_RE.sub(_replace, text)
+
+
 # Variante: número + unidad de presentación (ml, g, gramos, kg, oz, L).
 _VARIANT_UNIT_RE = re.compile(
-    r"(\d+(?:[.,]\d+)?)\s*(ml|gr?|g|gramos?|kg|kilogramos?|oz|onzas?|l|lts?|litros?)\b",
+    r"(\d+(?:[.,]\d+)?)\s*(ml|mililitros?|gr?|g|gramos?|kg|kilogramos?|oz|onzas?|l|lts?|litros?)\b",
     re.IGNORECASE,
 )
 
@@ -70,6 +102,8 @@ def _normalize_variant_unit(value: str, unit: str) -> str:
     unit_lower = unit.lower().strip()
     if unit_lower in ("gramos", "gramo", "gr"):
         unit_lower = "g"
+    if unit_lower in ("mililitros", "mililitro"):
+        unit_lower = "ml"
     if unit_lower in ("kilogramos", "kilogramo", "kg"):
         unit_lower = "kg"
     if unit_lower in ("onzas", "onza"):
@@ -122,12 +156,14 @@ def _extract_variant_label(item: str) -> tuple[Optional[str], str]:
     """Extrae label de variante si está presente.
     Returns: (variant_label or None, item_sin_variant_substring)
     """
-    m = _VARIANT_UNIT_RE.search(item)
+    # Rev. 108: pre-normalize "quince mililitros" → "15 mililitros".
+    item_normalized = _pre_normalize_number_words(item)
+    m = _VARIANT_UNIT_RE.search(item_normalized)
     if not m:
         return (None, item)
     label = _normalize_variant_unit(m.group(1), m.group(2))
     # Remove the matched variant + opcional "de" prefix from item title.
-    item_clean = item[:m.start()] + item[m.end():]
+    item_clean = item_normalized[:m.start()] + item_normalized[m.end():]
     item_clean = re.sub(r"\s+de\s+$", "", item_clean.strip(), flags=re.IGNORECASE)
     item_clean = re.sub(r"\s+", " ", item_clean).strip(" ,.;")
     return (label, item_clean)

@@ -130,28 +130,28 @@ def _products_in_text(catalog: list[dict], text: str, match_fn) -> tuple[list[di
 
 
 def _build_replacement(category_label: str, missing: list[dict], present: list[dict]) -> str:
-    """Construye outbound determinístico con TODOS los productos de la categoría."""
+    """Construye outbound COMPACTO (rev. 108 founder UX 2026-05-27).
+
+    Formato: nombre producto + variantes (labels), SIN precios.
+    Cliente pide precios cuando le interese un producto específico.
+    Reduce saturación visual + tokens al LLM downstream.
+    """
     all_products = sorted(present + missing, key=lambda p: str(p.get("title") or ""))
-    lines = [f"Te muestro todos nuestros *{category_label}s* disponibles:", ""]
+    lines = [f"Tenemos estos *{category_label}s*:", ""]
     for p in all_products:
         title = str(p.get("title") or "Producto")
         variants = p.get("variants") or []
-        # Filtrar variantes sin precio o sin label
-        clean_variants = [
-            v for v in variants
+        clean_labels = [
+            str(v.get("label") or "")
+            for v in variants
             if v.get("label") and float(v.get("price") or 0) > 0
         ]
-        if not clean_variants:
+        if not clean_labels:
             lines.append(f"* *{title}*")
-            continue
-        lines.append(f"* *{title}*:")
-        for v in clean_variants:
-            label = str(v.get("label") or "?")
-            price = int(float(v.get("price") or 0))
-            price_str = f"${price:,}".replace(",", ".")
-            lines.append(f"  * {label}: *{price_str} COP*")
+        else:
+            lines.append(f"* *{title}* ({', '.join(clean_labels)})")
     lines.append("")
-    lines.append("¿Cuál te interesa?")
+    lines.append("¿Cuál te interesa? Te paso precios y detalles del que elijas.")
     return "\n".join(lines)
 
 
