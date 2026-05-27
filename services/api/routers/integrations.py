@@ -353,13 +353,32 @@ async def meli_oauth_callback(
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
         vault = VaultHelper(supabase)
 
-        # Leer secret_ids existentes para update-or-create
+        # Leer secret_ids existentes + meta para update-or-create
         existing = (
-            supabase.table("tenant_integrations").select("credentials")
+            supabase.table("tenant_integrations").select("credentials, meta")
             .eq("tenant_id", tenant_id).eq("provider", "mercadolibre")
             .maybe_single().execute()
         )
         existing_creds = (existing.data or {}).get("credentials", {})
+        existing_meta = (existing.data or {}).get("meta", {}) or {}
+
+        # Rev. 108 Layer C — detectar same-user reconnect.
+        # Si el usuario hizo disconnect (que persistió last_disconnected_user_id
+        # en meta) y ahora el OAuth callback retorna EL MISMO user_id, MeLi
+        # le auto-confirmó (no cambió de cuenta). Flag para que UI alerte.
+        last_disconnected_user_id = existing_meta.get("last_disconnected_user_id")
+        new_user_id = str(token_data.get("user_id", ""))
+        same_user_reconnect = bool(
+            last_disconnected_user_id
+            and new_user_id
+            and last_disconnected_user_id == new_user_id
+        )
+        if same_user_reconnect:
+            logger.info(
+                "[MELI_OAUTH] tenant=%s reconectó con MISMA cuenta MeLi user_id=%s "
+                "(post-disconnect). MeLi auto-confirmó por sesión activa.",
+                tenant_id[:8], new_user_id,
+            )
 
         at = token_data.get("access_token", "")
         rt = token_data.get("refresh_token", "")
@@ -400,7 +419,13 @@ async def meli_oauth_callback(
         logger.error("Error guardando tokens MeLi tenant %s: %s", tenant_id, e)
         return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?error=storage_failed")
 
-    return RedirectResponse(f"{FRONTEND_INTEGRATIONS_URL}?connected=mercadolibre")
+    # Rev. 108 Layer C — pasar flag al frontend si fue same-user reconnect
+    # para que UI muestre banner: "Te conectaste con la misma cuenta MeLi.
+    # Si querías cambiar, desconecta + cierra sesión MeLi + reconecta".
+    suffix = "&meli_same_user=1" if same_user_reconnect else ""
+    return RedirectResponse(
+        f"{FRONTEND_INTEGRATIONS_URL}?connected=mercadolibre{suffix}"
+    )
 
 
 @router.delete("/meli", status_code=204)
@@ -420,11 +445,12 @@ async def disconnect_meli(
         raise HTTPException(status_code=403, detail="Solo el owner puede desconectar integraciones")
 
     creds_res = (
-        supabase.table("tenant_integrations").select("credentials")
+        supabase.table("tenant_integrations").select("credentials, meta")
         .eq("tenant_id", tenant_id).eq("provider", "mercadolibre")
         .maybe_single().execute()
     )
     creds = (creds_res.data or {}).get("credentials", {})
+    meta_pre = (creds_res.data or {}).get("meta", {}) or {}
     vault = VaultHelper(supabase)
 
     # Leer access_token desde Vault para poder revocarlo en MeLi
@@ -439,10 +465,28 @@ async def disconnect_meli(
     vault.delete_secret(creds.get("access_token_secret_id"))
     vault.delete_secret(creds.get("refresh_token_secret_id"))
 
+    # Rev. 108 (founder 2026-05-27 — disconnect+reconnect auto-loguea
+    # mismo user MeLi). Layer C: persistir user_id previo en
+    # meta.last_disconnected_user_id para que el callback post-reconnect
+    # pueda detectar si el OAuth retornó el MISMO usuario y avisar al
+    # tenant si pretendía cambiar de cuenta.
+    last_user_id = (
+        meta_pre.get("user_id")
+        or meta_pre.get("seller_id")
+        or creds.get("user_id")
+        or creds.get("seller_id")
+    )
+    new_meta = {}
+    if last_user_id:
+        new_meta["last_disconnected_user_id"] = str(last_user_id)
+
     supabase.table("tenant_integrations").update({
-        "status": "disconnected", "credentials": {}, "meta": {},
+        "status": "disconnected", "credentials": {}, "meta": new_meta,
     }).eq("tenant_id", tenant_id).eq("provider", "mercadolibre").execute()
-    logger.info("MeLi desconectado para tenant %s", tenant_id)
+    logger.info(
+        "MeLi desconectado para tenant %s (last_user_id=%s persisted en meta)",
+        tenant_id, last_user_id or "—",
+    )
 
 
 # ─── Aveonline: listar agentes del tenant ────────────────────────────────────

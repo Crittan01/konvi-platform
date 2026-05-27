@@ -173,10 +173,23 @@ def validate_and_consume_oauth_state(supabase, state: str) -> Optional[str]:
     return tenant_id
 
 
-def get_auth_url(tenant_id: str, supabase) -> str:
+def get_auth_url(tenant_id: str, supabase, force_login: bool = True) -> str:
     """
     Genera la URL de autorización OAuth para redirigir al tenant.
     El state es firmado, expira y es one-time (nonce anti-replay).
+
+    Rev. 108 (founder feedback 2026-05-27 — disconnect + reconnect
+    auto-loguea al usuario anterior):
+      • `prompt=login` (OIDC-style) — best-effort: MeLi puede ignorarlo
+        si no lo soporta. Si en futuro lo respeta, ya está implementado.
+      • `auth_type=reauthenticate` (FB-style fallback) — mismo principio.
+
+    Estos params NO están documentados oficialmente por MeLi (dossier
+    §2.2 line 46-56 confirma). Append es zero-risk: si MeLi los ignora,
+    URL sigue válida. Si los respeta, fuerza pantalla de login MeLi.
+
+    Defensa complementaria en frontend (UI hint pre-connect) y backend
+    (callback detect same-user). Las 3 capas A+B+C trabajan juntas.
     """
     if not MELI_CLIENT_ID or not MELI_REDIRECT_URI or not MELI_OAUTH_STATE_SECRET:
         raise ValueError(
@@ -190,6 +203,9 @@ def get_auth_url(tenant_id: str, supabase) -> str:
         f"&redirect_uri={MELI_REDIRECT_URI}"
         f"&state={state}"
     )
+    if force_login:
+        # Layer A: best-effort force re-authentication.
+        params += "&prompt=login&auth_type=reauthenticate"
     return f"{MELI_AUTH_URL}?{params}"
 
 
