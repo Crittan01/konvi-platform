@@ -559,6 +559,7 @@ export default async function IntegrationsPage({
       canWrite={canWrite}
       connectedParam={searchParams.connected}
       errorParam={searchParams.error}
+      meliSameUser={searchParams.meli_same_user}
       tgTest={searchParams.tg_test}
       tgMsg={searchParams.tg_msg}
       waTest={searchParams.wa_test}

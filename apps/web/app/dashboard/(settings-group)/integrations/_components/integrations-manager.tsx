@@ -39,6 +39,7 @@ interface Props {
   canWrite: boolean
   connectedParam?: string
   errorParam?: string
+  meliSameUser?: string
   tgTest?: string
   tgMsg?: string
   waTest?: string
@@ -121,7 +122,7 @@ export function IntegrationsManager(props: Props) {
     meliInt, meliConnected,
     wompiInt, wompiConnected,
     tgConfig, tgConnected, connectedCount,
-    isOwner, canWrite, connectedParam, errorParam,
+    isOwner, canWrite, connectedParam, errorParam, meliSameUser,
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
     aveTest, aveMsg,
     saveEnviaKey, disconnectEnvia,
@@ -151,6 +152,22 @@ export function IntegrationsManager(props: Props) {
   const toggle = (id: string) => setOpen(p => ({ ...p, [id]: !p[id] }))
 
   const startMeliOAuth = async () => {
+    // Rev. 108 Layer B (founder 2026-05-27 — auto-loguea cuenta anterior):
+    // antes de redirigir a MeLi, confirmar con el tenant que conoce el
+    // comportamiento. Si quiere cambiar de cuenta, instruir paso explícito.
+    const confirmed = window.confirm(
+      '¿Listo para conectar Mercado Libre?\n\n' +
+      'Si tu navegador tiene una sesión activa de Mercado Libre, ' +
+      'MeLi puede conectarte automáticamente con esa cuenta. ' +
+      'Para cambiar de cuenta:\n\n' +
+      '1. Cancela este diálogo\n' +
+      '2. Cierra sesión en https://mercadolibre.com.co (ícono usuario → Salir)\n' +
+      '3. O usa una ventana de incógnito\n' +
+      '4. Vuelve aquí y haz click en "Conectar" otra vez\n\n' +
+      'Si ya cerraste sesión o es tu primera conexión, presiona "Aceptar".'
+    )
+    if (!confirmed) return
+
     setMeliStartError(null)
     setConnectingMeli(true)
     try {
@@ -204,10 +221,31 @@ export function IntegrationsManager(props: Props) {
       </div>
 
       {/* Banners */}
-      {connectedParam && (
+      {connectedParam && !meliSameUser && (
         <div className="flex items-center gap-2 p-3 rounded-xl border border-green-500/30 bg-green-500/10 text-sm text-green-400">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {connectedParam === 'mercadolibre' ? 'Mercado Libre' : connectedParam} conectado exitosamente.
+        </div>
+      )}
+      {/* Rev. 108 Layer C — banner same-user reconnect */}
+      {connectedParam === 'mercadolibre' && meliSameUser === '1' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-medium">
+              Conectado con la MISMA cuenta de Mercado Libre que tenías antes
+            </p>
+            <p className="text-xs leading-relaxed">
+              MeLi te auto-confirmó usando la sesión activa de tu navegador.
+              Si querías cambiar de cuenta:
+            </p>
+            <ol className="text-xs leading-relaxed list-decimal list-inside ml-1 mt-1">
+              <li>Desconecta Mercado Libre aquí (botón Desconectar de la tarjeta MeLi).</li>
+              <li>Sal manualmente de mercadolibre.com.co (ícono usuario → Salir).</li>
+              <li>O usa una ventana de incógnito.</li>
+              <li>Vuelve a conectar.</li>
+            </ol>
+          </div>
         </div>
       )}
       {errorParam && (
