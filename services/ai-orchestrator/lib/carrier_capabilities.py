@@ -94,8 +94,26 @@ def _normalize_name(name: str) -> str:
     return " ".join((name or "").upper().split())
 
 
-def _resolve_cod(canonical_supports_cod: bool, cod_override: Optional[str]) -> bool:
-    """Resuelve `supports_cod` efectivo: override > canonical."""
+def _resolve_cod(
+    canonical_supports_cod: bool,
+    cod_override: Optional[str],
+    tenant_cod_globally_enabled: bool = True,
+) -> bool:
+    """Resuelve `supports_cod` efectivo.
+
+    Precedencia:
+      1. Si tenant globalmente DISABLED COD (tenant_payment_methods.cod
+         enabled=false) → SIEMPRE false (gate tenant-level).
+      2. Si cod_override='force_enable' → true.
+      3. Si cod_override='force_disable' → false.
+      4. Fallback: canonical_supports_cod.
+
+    El gate tenant-level (#1) es el switch maestro modular: tenant que
+    NO quiere COD apaga 1 vez, todos los carriers quedan ✗COD sin tocar
+    overrides per-carrier.
+    """
+    if not tenant_cod_globally_enabled:
+        return False
     if cod_override == "force_enable":
         return True
     if cod_override == "force_disable":
@@ -153,6 +171,18 @@ def get_effective_carrier_capability(
     except Exception:
         tenant_row = None
 
+    # 2.5. Tenant-level COD gate (rev. 108 modular).
+    # Si el tenant globalmente NO tiene 'cod' habilitado en
+    # tenant_payment_methods, supports_cod efectivo será SIEMPRE false
+    # para cualquier carrier — un solo switch tenant-wide.
+    try:
+        from lib.tenant_payment_methods import is_method_enabled
+        tenant_cod_globally_enabled = is_method_enabled(
+            supabase, tenant_id=tenant_id, method="cod",
+        )
+    except Exception:
+        tenant_cod_globally_enabled = True  # fail-open
+
     # 3. Compose effective view.
     if canonical:
         cap = CarrierCapability(
@@ -161,6 +191,7 @@ def get_effective_carrier_capability(
             supports_cod=_resolve_cod(
                 bool(canonical.get("supports_cod", False)),
                 (tenant_row or {}).get("cod_override"),
+                tenant_cod_globally_enabled,
             ),
             cod_min_recaudo_cop=canonical.get("cod_min_recaudo_cop"),
             cod_min_recaudo_heavy_cop=canonical.get("cod_min_recaudo_heavy_cop"),

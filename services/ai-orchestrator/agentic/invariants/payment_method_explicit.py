@@ -205,21 +205,55 @@ class PaymentMethodExplicitInvariant:
             )
 
         # Cliente NO mencionó modo → BLOCK + reescribir.
-        replacement = (
-            "Antes de continuar con tu pedido, cuéntame cómo prefieres "
-            "pagar:\n\n"
-            "🏦 *Pago online* (tarjeta, PSE, Nequi o transferencia "
-            "Bancolombia) — recibes el link al confirmar.\n\n"
-            "💵 *Contra entrega* — pagas en efectivo cuando el courier "
-            "te entregue el paquete.\n\n"
-            "Cuál prefieres?"
-        )
+        # Rev. 108 modular — adapta pregunta a métodos enabled del tenant.
+        # Si tenant solo tiene 'online_wompi' → pide confirmación online
+        # sin ofrecer COD (que no maneja).
+        try:
+            from lib.tenant_payment_methods import list_enabled_methods
+            enabled = list_enabled_methods(supabase, tenant_id=tenant_id)
+        except Exception:
+            enabled = ["cod", "online_wompi"]  # fail-open
+
+        has_cod = "cod" in enabled
+        has_online = "online_wompi" in enabled
+
+        if has_cod and has_online:
+            replacement = (
+                "Antes de continuar con tu pedido, cuéntame cómo prefieres "
+                "pagar:\n\n"
+                "🏦 *Pago online* (tarjeta, PSE, Nequi o transferencia "
+                "Bancolombia) — recibes el link al confirmar.\n\n"
+                "💵 *Contra entrega* — pagas en efectivo cuando el courier "
+                "te entregue el paquete.\n\n"
+                "Cuál prefieres?"
+            )
+        elif has_online and not has_cod:
+            replacement = (
+                "Para procesar tu pedido te envío un *link de pago online* "
+                "(tarjeta, PSE, Nequi o transferencia Bancolombia). En "
+                "este momento manejamos pago anticipado únicamente.\n\n"
+                "Confirmas?"
+            )
+        elif has_cod and not has_online:
+            replacement = (
+                "Tu pedido será *contraentrega* — pagas en efectivo "
+                "cuando el courier te entregue el paquete.\n\n"
+                "Confirmas?"
+            )
+        else:
+            # Edge: tenant deshabilitó ambos (config inválida).
+            replacement = (
+                "En este momento no tenemos métodos de pago disponibles. "
+                "Te conecto con un asesor para coordinar la compra."
+            )
+
         return InvariantResult(
             outcome=InvariantOutcome.REWRITE,
             invariant_name=self.name,
             replacement_text=replacement,
             reason=(
-                "outbound implicaría acción de pago sin que el cliente "
-                "haya mencionado modo (credit/cod) explícitamente"
+                f"outbound implicaría acción de pago sin que el cliente "
+                f"haya mencionado modo explícitamente. Métodos enabled "
+                f"para tenant: {enabled}"
             ),
         )
