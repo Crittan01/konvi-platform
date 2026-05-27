@@ -767,6 +767,20 @@ class AveonlineClient:
             "envioGratis": 0,
         }
 
+        # Rev. 108 audit — log request body completo (sin JWT) para debug.
+        body_log = {k: v for k, v in body.items() if k != "token"}
+        logger.info(
+            "[AVEONLINE_GEN_GUIDE] request tenant=%s carrier=%s dest=%s "
+            "weight=%s cod=%s recaudo=%s body=%s",
+            self.tenant_id[:8],
+            body.get("idtransportador"),
+            body.get("destino"),
+            weight_kg,
+            body.get("contraentrega"),
+            body.get("valorrecaudo"),
+            json.dumps(body_log, ensure_ascii=False)[:2000],
+        )
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(AVEONLINE_NAL_URL, json=body)
@@ -776,6 +790,16 @@ class AveonlineClient:
             raise AveonlineTransientError(f"generate_guide HTTP error: {exc}")
         except Exception as exc:
             raise AveonlinePermanentError(f"generate_guide error: {exc}")
+
+        # Audit response RAW completo.
+        logger.info(
+            "[AVEONLINE_GEN_GUIDE] response tenant=%s status=%s msg=%s "
+            "raw=%s",
+            self.tenant_id[:8],
+            data.get("status"),
+            data.get("message", "")[:200],
+            json.dumps(data, ensure_ascii=False)[:1500],
+        )
 
         # Schema response (dossier sec 4.3):
         #   {status: "ok"|"error", message, resultado: {guia: {codigo, mensaje,

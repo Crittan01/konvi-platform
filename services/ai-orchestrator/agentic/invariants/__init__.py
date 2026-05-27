@@ -20,6 +20,7 @@ from agentic.invariants.passive_closing import PassiveClosingInvariant
 from agentic.invariants.pii_coherence import PIICoherenceInvariant
 from agentic.invariants.post_tool_coherence import PostToolCoherenceInvariant
 from agentic.invariants.summary_coherence import SummaryCoherenceInvariant
+from agentic.invariants.payment_method_explicit import PaymentMethodExplicitInvariant
 
 __all__ = [
     "InvariantOutcome",
@@ -31,6 +32,7 @@ __all__ = [
     "EmptyPromiseInvariant",
     "NoDecorativeEmojiInvariant",
     "PassiveClosingInvariant",
+    "PaymentMethodExplicitInvariant",
     "PIICoherenceInvariant",
     "PostToolCoherenceInvariant",
     "SummaryCoherenceInvariant",

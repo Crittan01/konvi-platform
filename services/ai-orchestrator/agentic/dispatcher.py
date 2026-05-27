@@ -178,6 +178,7 @@ async def _run_agentic_full(
         apply_invariants, CartStateInvariant, ConsentRequiredInvariant,
         EmptyPromiseInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
+        PaymentMethodExplicitInvariant,
         PIICoherenceInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
@@ -332,6 +333,69 @@ async def _run_agentic_full(
     except Exception as exc:
         logger.warning(
             "[AGENTIC_PRE_LLM] cod_intent_resolver crashed: %s — skip", exc,
+        )
+
+    # PRE-LLM #0.5: consent intent. Rev. 108 fix arquitectónico.
+    # El LLM no llama record_consent confiablemente tras "Sí acepto",
+    # causando loop infinito (no-pii-pre-consent invariant rewrites).
+    # Determinístico: si último outbound del bot pidió consent + cliente
+    # respondió afirmativo + contact existe → marca consent_given=True
+    # + audit log directo. Skip si no aplica contexto.
+    try:
+        from agentic.consent_intent_resolver import detect_consent_intent
+        # Leer último outbound del bot.
+        last_out_q = (
+            supabase.table("messages")
+            .select("content")
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .eq("direction", "outbound")
+            .order("created_at", desc=True).limit(1).execute()
+        )
+        last_bot_msg = (
+            (last_out_q.data or [{}])[0].get("content") or ""
+        )
+        consent_match = detect_consent_intent(content, last_bot_msg)
+        if consent_match and contact_id:
+            new_consent = consent_match["intent"] == "consent_granted"
+            try:
+                supabase.table("contacts").update({
+                    "consent_given": new_consent,
+                }).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
+                # Audit log Habeas Data
+                supabase.table("consent_audit_log").insert({
+                    "tenant_id": tenant_id,
+                    "contact_id": contact_id,
+                    "event": "granted" if new_consent else "revoked",
+                    "source": "whatsapp",
+                    "conversation_id": conversation_id,
+                    "evidence": {
+                        "consent_text": content[:200],
+                        "tool": "agentic.consent_intent_resolver",
+                        "matched_pattern": consent_match.get("matched_pattern"),
+                        "auto_detected": True,
+                    },
+                }).execute()
+                logger.info(
+                    "[AGENTIC_PRE_LLM] conv=%s consent_intent matched '%s' → "
+                    "contact=%s consent_given=%s",
+                    conversation_id, consent_match["intent"],
+                    contact_id[:8], new_consent,
+                )
+                # Refrescar contact_record para que el resto del flow lo vea.
+                contact = (
+                    {**contact, "consent_given": new_consent}
+                    if isinstance(contact, dict) else
+                    {"consent_given": new_consent}
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[AGENTIC_PRE_LLM] consent_intent persist falló conv=%s: %s",
+                    conversation_id, exc,
+                )
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] consent_intent_resolver crashed: %s — skip", exc,
         )
 
     # PRE-LLM #1: purchase intent multi-producto. Casos típicos cliente:
@@ -615,16 +679,46 @@ async def _run_agentic_full(
                     price = int(o.get("price_cop") or 0)
                     price_str = f"${price:,}".replace(",", ".")
                     eta = o.get("eta_date") or ""
-                    eta_str = f" (entrega en {eta})" if eta else ""
+                    eta_str = f" ({eta})" if eta else ""
                     bullets.append(
-                        f"* *{o.get('carrier')}* — *{price_str} COP*{eta_str}"
+                        f"* *{o.get('carrier')}*{eta_str}: *{price_str} COP*"
                     )
                 outbound = (
-                    f"{greeting}Tenemos estas opciones de envío a "
-                    f"*{city_show}*:\n\n"
+                    f"{greeting}Para el envío a *{city_show}*, tenemos estas opciones:\n\n"
                     + "\n".join(bullets)
                     + "\n\nCuál prefieres?"
                 )
+
+                # Rev. 108 Fase B fix arquitectónico — aplicar invariant
+                # `payment_method_explicit` EN el bypass también. Antes el
+                # bypass salteaba el pipeline de invariants, permitiendo
+                # mostrar cotización sin que cliente haya definido modo
+                # de pago. Eso oculta el costo real (COD puede diferir).
+                from agentic.invariants import (
+                    PaymentMethodExplicitInvariant, InvariantOutcome,
+                )
+                payment_inv = PaymentMethodExplicitInvariant()
+                inv_result = await payment_inv.validate(
+                    candidate_text=outbound,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    contact_id=contact_id,
+                    supabase=supabase,
+                    tool_call_log=[{
+                        "tool": "quote_shipping",
+                        "args": {"city": shipping_match["city"]},
+                        "result": ship_result.data,
+                    }],
+                    inbound_text=content,
+                )
+                if inv_result.outcome == InvariantOutcome.REWRITE:
+                    outbound = inv_result.replacement_text or outbound
+                    logger.info(
+                        "[AGENTIC_PRE_LLM] payment_method_explicit REWRITE conv=%s "
+                        "— preguntando modo de pago antes de cotizar",
+                        conversation_id,
+                    )
+
                 await _send_outbound_text(
                     supabase=supabase,
                     conversation_id=conversation_id,
@@ -732,6 +826,9 @@ async def _run_agentic_full(
         invariant_set = [
             CartStateInvariant(),
             ConsentRequiredInvariant(),
+            # Rev. 108 Fase B — bloquea acción de pago si modo no fue
+            # explícito del cliente. Reescribe a pregunta determinística.
+            PaymentMethodExplicitInvariant(),
             SummaryCoherenceInvariant(),
             PIICoherenceInvariant(),
             PostToolCoherenceInvariant(),
