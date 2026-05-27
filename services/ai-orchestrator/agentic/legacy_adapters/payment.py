@@ -138,6 +138,20 @@ async def generate_payment_link_for_cart(
     has_order = bool(result and getattr(result, "order_id", None))
     has_url = bool(result and getattr(result, "checkout_url", None))
 
+    # Rev. 108 fix arquitectónico — si stock insuficiente, el tool retornó
+    # PaymentLinkResult con order_id="" + checkout_url="" + response_text
+    # con la lista de SKUs faltantes. Propagamos ese mensaje al cliente
+    # (NO ocultamos con COD_ORDER_FAILED / PAYMENT_LINK_UNAVAILABLE genérico).
+    if result and not has_order and not has_url:
+        rtxt = (getattr(result, "response_text", "") or "")
+        if "stock" in rtxt.lower() or "sin stock" in rtxt.lower():
+            return {
+                "ok": False,
+                "error": rtxt,
+                "code": "INSUFFICIENT_STOCK",
+                "direct_response": rtxt,
+            }
+
     if not result or (not has_url and not is_cod):
         return {
             "ok": False,

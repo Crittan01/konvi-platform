@@ -13,12 +13,44 @@ Diseño:
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
+
+
+# Rev. 108 fix arquitectónico — el variant label en DB es "60g" pero el
+# cliente puede escribir "60 gramos", "30 ml", "1 lt", etc. La comparación
+# substring naive falla. Normalizamos ambos lados a forma canónica
+# (dígito+unidad sin espacio, unidad en forma corta).
+_UNIT_ALIASES = {
+    "gramos": "g", "gramo": "g", "grs": "g", "gr": "g", "g": "g",
+    "kilos": "kg", "kilo": "kg", "kg": "kg",
+    "mililitros": "ml", "mililitro": "ml", "ml": "ml",
+    "litros": "lt", "litro": "lt", "lt": "lt", "l": "lt",
+    "onzas": "oz", "onza": "oz", "oz": "oz",
+    "unidades": "u", "unidad": "u", "und": "u", "uds": "u", "u": "u",
+}
+_UNIT_REGEX = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(" + "|".join(sorted(_UNIT_ALIASES.keys(), key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_units(text: str) -> str:
+    """Canonicaliza '60 gramos' → '60g', '30 ml' → '30ml', etc."""
+    if not text:
+        return ""
+    def _replace(m):
+        num = m.group(1).replace(",", ".")
+        if num.endswith(".0"):
+            num = num[:-2]
+        unit = _UNIT_ALIASES.get(m.group(2).lower(), m.group(2).lower())
+        return f"{num}{unit}"
+    return _UNIT_REGEX.sub(_replace, text.lower())
 
 
 # ─── get_cart (read-only) ──────────────────────────────────────────────────
@@ -180,12 +212,15 @@ class AddToCartTool:
             recent_inbounds = (ctx.extras or {}).get(
                 "recent_inbound_texts", [],
             )
+            # Rev. 108 fix: normalizar unidades en ambos lados para que
+            # "60 gramos" del cliente matchee "60g" del DB label.
             haystack = " ".join(
-                (s or "").lower() for s in recent_inbounds
+                _normalize_units((s or "")) for s in recent_inbounds
             )
-            variant_label = str(variant.get("label") or "").lower().strip()
+            variant_label_raw = str(variant.get("label") or "").lower().strip()
+            variant_label = _normalize_units(variant_label_raw)
             other_labels = [
-                str(v.get("label") or "").lower().strip()
+                _normalize_units(str(v.get("label") or "").lower().strip())
                 for v in variants if str(v.get("id")) != args.variation_id
             ]
             # ¿El cliente mencionó EXPLÍCITAMENTE este variant_label?

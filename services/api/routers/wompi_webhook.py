@@ -1091,7 +1091,7 @@ async def _generate_shipping_guide_async(
         order_res = (
             supabase.table("orders")
             .select(
-                "id, total_amount, shipping_cost, contact_id, "
+                "id, total_amount, shipping_cost, contact_id, payment_method, "
                 "contacts(name, email, phone, shipping_phone, "
                 "document_type, document_number, address)"
             )

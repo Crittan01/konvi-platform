@@ -398,6 +398,57 @@ async def _run_agentic_full(
             "[AGENTIC_PRE_LLM] consent_intent_resolver crashed: %s — skip", exc,
         )
 
+    # PRE-LLM #0.7: carrier selection determinística.
+    # Rev. 108 fix arquitectónico — el LLM no llama select_carrier
+    # confiablemente cuando el cliente nombra un carrier post-quote.
+    # Resultado: cart.shipping_cents=0 → resumen sin envío. Determinístico:
+    # detecta nombre de carrier en inbound vs quoted_options del cart →
+    # llama select_carrier_for_cart inline.
+    try:
+        from agentic.carrier_select_resolver import (
+            detect_carrier_selection_intent,
+        )
+        # Reusar last_bot_msg que ya se leyó arriba (consent_intent_resolver).
+        carrier_match = detect_carrier_selection_intent(
+            supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            inbound_text=content,
+            last_bot_outbound=last_bot_msg if 'last_bot_msg' in locals() else "",
+        )
+        if carrier_match:
+            try:
+                from agentic.legacy_adapters import select_carrier_for_cart
+                sel = await select_carrier_for_cart(
+                    supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    rate_id=carrier_match["rate_id"],
+                    rate_data=carrier_match["rate_data"],
+                )
+                if sel and sel.get("ok"):
+                    logger.info(
+                        "[AGENTIC_PRE_LLM] conv=%s carrier_select detected "
+                        "'%s' → persisted (confidence=%.2f)",
+                        conversation_id,
+                        carrier_match["carrier_code"],
+                        carrier_match["confidence"],
+                    )
+                else:
+                    logger.warning(
+                        "[AGENTIC_PRE_LLM] carrier_select_for_cart failed conv=%s: %s",
+                        conversation_id, sel,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[AGENTIC_PRE_LLM] carrier_select persist falló conv=%s: %s",
+                    conversation_id, exc,
+                )
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] carrier_select_resolver crashed: %s — skip", exc,
+        )
+
     # PRE-LLM #1: purchase intent multi-producto. Casos típicos cliente:
     #   "Necesito 3 jabones coco 100g y un sérum hialurónico"
     #   "Quiero 2 aceites de almendras"
