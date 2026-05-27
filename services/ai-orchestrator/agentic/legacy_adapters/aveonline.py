@@ -119,6 +119,62 @@ async def quote_shipping_for_cart_aveonline(
             "code": "GEO_FORMAT_ERROR",
         }
 
+    # Rev. 108 Fase B — leer payment_method del cart ANTES de cotizar.
+    # Si el cart está marcado COD (vía cod_intent_resolver pre-LLM),
+    # pasamos `cod_enabled=True` a Aveonline para que la cotización
+    # refleje la tarifa real con contraentrega (dossier §7.1: el carrier
+    # puede aplicar costo distinto por gestión COD).
+    cart_for_cod_check = None
+    early_payment_method = "credit"
+    try:
+        c_q = (
+            supabase.table("conversation_carts")
+            .select("id, payment_method")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True).limit(1).execute()
+        )
+        if c_q.data:
+            cart_for_cod_check = c_q.data[0]["id"]
+            early_payment_method = (
+                c_q.data[0].get("payment_method") or "credit"
+            ).lower()
+    except Exception:
+        pass
+
+    # Re-detect intent COD del último inbound (caso "todo en un mensaje"
+    # donde cart se crea después del detector pre-LLM).
+    if early_payment_method != "cod" and cart_for_cod_check:
+        try:
+            from agentic.cod_intent_resolver import detect_cod_intent
+            last_in = (
+                supabase.table("messages")
+                .select("content")
+                .eq("conversation_id", conversation_id)
+                .eq("tenant_id", tenant_id)
+                .eq("direction", "inbound")
+                .order("created_at", desc=True).limit(1).execute()
+            )
+            last_content = (last_in.data or [{}])[0].get("content") or ""
+            if detect_cod_intent(last_content):
+                supabase.table("conversation_carts").update({
+                    "payment_method": "cod",
+                }).eq("id", cart_for_cod_check).execute()
+                early_payment_method = "cod"
+                logger.info(
+                    "[agentic.shipping.aveonline.pre-quote] re-detect COD intent OK "
+                    "→ cart=%s marked cod",
+                    cart_for_cod_check[:8],
+                )
+        except Exception as exc:
+            logger.warning(
+                "[agentic.shipping.aveonline.pre-quote] re-detect COD failed: %s",
+                exc,
+            )
+
+    quote_cod_enabled = early_payment_method == "cod"
+
     client = AveonlineClient(tenant_id, supabase)
     try:
         result = await client.quote(
@@ -140,7 +196,9 @@ async def quote_shipping_for_cart_aveonline(
                 "declared_value_cop": int(getattr(package, "declared_value", 0) or 50000),
                 "units": int(getattr(package, "quantity", 1) or 1),
                 "product_name": str(getattr(package, "product_title", "Producto") or "Producto"),
-                "cod_enabled": False,  # COD se activa más adelante en flujo (M.x)
+                # Rev. 108 Fase B — Aveonline cotizarDoble debe saber si es
+                # COD para retornar la tarifa correcta. Antes hardcoded False.
+                "cod_enabled": quote_cod_enabled,
             },
         )
     except AveonlineAuthError as exc:
@@ -218,63 +276,9 @@ async def quote_shipping_for_cart_aveonline(
     def _to_canonical(name: str) -> str:
         return (name or "").strip().lower().replace(" ", "_")
 
-    # Detectar payment_method del cart actual (Rev. 108 Fase B).
-    # Si el cliente marcó intent COD vía cod_intent_resolver, el cart
-    # tiene payment_method='cod'. Filtramos a carriers que el tenant
-    # habilitó para COD (tenant_carriers.supports_cod=true).
-    #
-    # Rev. 108 fix UAT 2026-05-26: el detector pre-LLM falla si el cart
-    # NO existe aún al recibir el inbound (caso "Hola, jabón coco, COD"
-    # en un solo mensaje — cart se crea durante el flow LLM). Como red
-    # de seguridad, re-detectamos intent COD leyendo el último mensaje
-    # inbound del cliente JUSTO ANTES de filtrar carriers. Si detecta,
-    # marcamos el cart ahora (que ya existe porque add_to_cart ya corrió).
-    cart_id_for_cod_mark = None
-    cart_payment_method = "credit"
-    try:
-        cart_q = (
-            supabase.table("conversation_carts")
-            .select("id, payment_method")
-            .eq("tenant_id", tenant_id)
-            .eq("conversation_id", conversation_id)
-            .in_("status", ["open", "checkout"])
-            .order("created_at", desc=True).limit(1).execute()
-        )
-        if cart_q.data:
-            cart_id_for_cod_mark = cart_q.data[0]["id"]
-            cart_payment_method = (
-                cart_q.data[0].get("payment_method") or "credit"
-            ).lower()
-    except Exception:
-        cart_payment_method = "credit"
-
-    if cart_payment_method != "cod" and cart_id_for_cod_mark:
-        # Re-detect intent COD del último mensaje inbound.
-        try:
-            from agentic.cod_intent_resolver import detect_cod_intent
-            last_in = (
-                supabase.table("messages")
-                .select("content")
-                .eq("conversation_id", conversation_id)
-                .eq("tenant_id", tenant_id)
-                .eq("direction", "inbound")
-                .order("created_at", desc=True).limit(1).execute()
-            )
-            last_content = (last_in.data or [{}])[0].get("content") or ""
-            if detect_cod_intent(last_content):
-                supabase.table("conversation_carts").update({
-                    "payment_method": "cod",
-                }).eq("id", cart_id_for_cod_mark).execute()
-                cart_payment_method = "cod"
-                logger.info(
-                    "[agentic.shipping.aveonline] re-detect COD intent OK "
-                    "→ cart=%s marked cod (msg='%s')",
-                    cart_id_for_cod_mark[:8], last_content[:60],
-                )
-        except Exception as exc:
-            logger.warning(
-                "[agentic.shipping.aveonline] re-detect COD failed: %s", exc,
-            )
+    # Rev. 108 Fase B — `early_payment_method` resuelto en pre-quote section.
+    # Reusamos para filter post-quote (no re-detectamos, ya está hecho).
+    cart_payment_method = early_payment_method
 
     try:
         from lib.tenant_carriers import filter_enabled_carriers, list_preferences

@@ -775,15 +775,19 @@ async def generate_shipping_guide_endpoint(
                 "shipment": row,
             }
 
-    # Invocar lógica compartida con wompi_webhook
+    # Invocar lógica compartida con wompi_webhook.
+    # Rev. 108 fix arquitectónico — usamos versión async directa
+    # (`_generate_shipping_guide_async`) porque este endpoint corre en
+    # context async FastAPI. La versión sync wrapper (asyncio.run)
+    # rompería el event loop existente.
     from routers.wompi_webhook import (
-        _generate_shipping_guide,
+        _generate_shipping_guide_async,
         _notify_client_shipment_label_ready,
         _send_payment_confirmation_email,
     )
 
     try:
-        ok = _generate_shipping_guide(
+        ok = await _generate_shipping_guide_async(
             supabase, order_id=order_id, tenant_id=tenant_id,
         )
     except Exception as exc:

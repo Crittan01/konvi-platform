@@ -1031,6 +1031,23 @@ def _send_payment_confirmation_email(
 def _generate_shipping_guide(
     supabase, *, order_id: str, tenant_id: str,
 ) -> bool:
+    """Wrapper SYNC para callers sync (wompi BackgroundTask).
+
+    Usa asyncio.run() — funciona porque BackgroundTask sync NO tiene
+    event loop activo. Para callers async (endpoint FastAPI), usar
+    `_generate_shipping_guide_async` directamente con await.
+    """
+    import asyncio as _aio
+    return _aio.run(
+        _generate_shipping_guide_async(
+            supabase, order_id=order_id, tenant_id=tenant_id,
+        )
+    )
+
+
+async def _generate_shipping_guide_async(
+    supabase, *, order_id: str, tenant_id: str,
+) -> bool:
     """Genera guía Aveonline tras pago APPROVED (best-effort).
 
     Solo aplica si el tenant tiene `tenant_shipping_provider_config.
@@ -1213,25 +1230,26 @@ def _generate_shipping_guide(
             addr.get("city") or "", addr.get("state") or "",
         )
 
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(cli.generate_guide(
-                origin={
-                    "dane": origin.get("dane_code") or "",
-                    "city": origin_city_norm or origin.get("city") or "",
-                },
-                destination={
-                    "dane": "",
-                    "city": dest_city_norm or addr.get("city") or "",
-                },
-                package=package,
-                carrier={"idtransportador": carrier_rate_id},
-                sender=sender,
-                recipient=recipient,
-                simulate=simulate,
-            ))
-        finally:
-            loop.close()
+        # Rev. 108 fix arquitectónico — ahora función async. Antes
+        # usaba asyncio.new_event_loop() + run_until_complete, lo cual
+        # fallaba ("Cannot run the event loop while another loop is
+        # running") cuando se invoca desde context async (endpoint
+        # FastAPI). Solución: función async, callers la awaitean directo.
+        result = await cli.generate_guide(
+            origin={
+                "dane": origin.get("dane_code") or "",
+                "city": origin_city_norm or origin.get("city") or "",
+            },
+            destination={
+                "dane": "",
+                "city": dest_city_norm or addr.get("city") or "",
+            },
+            package=package,
+            carrier={"idtransportador": carrier_rate_id},
+            sender=sender,
+            recipient=recipient,
+            simulate=simulate,
+        )
     except Exception as exc:
         logger.warning(
             "[WOMPI][AVEONLINE] generate_guide error order=%s: %s",
