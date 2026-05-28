@@ -925,11 +925,9 @@ async def _run_agentic_full(
 
     # ── Rev. 109 — Agentic State Machine ──
     # Resolver determinístico del estado actual del Inbox.
-    # NO afecta runtime (Day 2 lo consumirá para per-state prompts);
-    # por ahora solo se persiste en `conversations.agentic_state` para:
-    #   • Telemetría / observabilidad.
-    #   • Inbox badge UI (Day 5).
-    #   • Baseline para post-turn re-resolution.
+    # Día 1: persiste en `conversations.agentic_state` (telemetría).
+    # Día 2: construye prompt + tools subset per-state si state ≠ None.
+    _resolved_state = None  # AgenticState | None — usado abajo para per-state prompt.
     try:
         from agentic.state_machine import StateResolver
         from agentic.state_machine.resolver import build_context_from_records
@@ -975,6 +973,7 @@ async def _run_agentic_full(
             history_len=len(history or []),
         )
         _state = StateResolver().resolve(_resolution_ctx)
+        _resolved_state = _state
         _prev_state = _conv.get("agentic_state")
         if _state.value != _prev_state:
             supabase.table("conversations").update(
@@ -996,6 +995,39 @@ async def _run_agentic_full(
         )
     # ─── /state machine ───
 
+    # ── Rev. 109 Día 2 — Per-state prompt + tools subset ──
+    # Si el resolver determinó un estado, usar el mini-prompt + subset
+    # de tools. Reduce ~50-70% size del prompt + carga cognitiva LLM.
+    # Fallback al monolito si falla la composición (defensa profundidad).
+    _allowed_tools: Optional[set[str]] = None
+    if _resolved_state is not None:
+        try:
+            from agentic.prompt import build_prompt_for_state, tools_for_state
+            system_prompt = build_prompt_for_state(
+                state=_resolved_state,
+                tenant_name=tenant_name,
+                tenant_pitch=tenant_pitch,
+                tenant_tone=tenant_tone,
+                catalog=catalog,
+                contact_record=contact or {},
+                carriers=carriers_caps,
+                payment_methods=payment_methods_cfg,
+            )
+            _allowed_tools = set(tools_for_state(_resolved_state))
+            logger.info(
+                "[AGENTIC_PER_STATE] conv=%s state=%s prompt=%dch tools=%d",
+                conversation_id[:8], _resolved_state.value,
+                len(system_prompt), len(_allowed_tools),
+            )
+        except Exception as _ps_exc:
+            logger.warning(
+                "[AGENTIC_PER_STATE] build falló conv=%s state=%s: %s — "
+                "fallback a monolito",
+                conversation_id[:8], _resolved_state.value, _ps_exc,
+            )
+            _allowed_tools = None  # monolito = todas las tools
+    # ─── /per-state ───
+
     # Ejecutar agente.
     started_at = time.monotonic()
     result = await run_agentic_turn(
@@ -1008,6 +1040,7 @@ async def _run_agentic_full(
         history=history,
         supabase=supabase,
         system_prompt=system_prompt,
+        allowed_tools=_allowed_tools,
     )
     elapsed = time.monotonic() - started_at
     # Snapshot pre-invariants — usado para persistir audit incluso si el

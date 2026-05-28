@@ -90,6 +90,7 @@ async def run_agentic_turn(
     history: list,
     supabase: Any,
     system_prompt: str,
+    allowed_tools: Optional[set[str]] = None,
 ) -> AgenticTurnResult:
     """Ejecuta UN turn del agente.
 
@@ -101,6 +102,9 @@ async def run_agentic_turn(
       history: messages previos (≤25 por config).
       supabase: cliente DB.
       system_prompt: instrucciones para el LLM.
+      allowed_tools: rev. 109 — set de tool names expuestos al LLM.
+        None → todos los tools registrados (legacy/fallback). Per-state
+        subset reduce carga cognitiva del modelo.
 
     Returns:
       AgenticTurnResult con outbound_text + audit del tool_call_log.
@@ -154,14 +158,23 @@ async def run_agentic_turn(
         )
 
     # Convertir tool schemas al formato Gemini types.
+    # Rev. 109 — filtrar por allowed_tools (per-state subset). Si None,
+    # exponemos todos los tools registrados (compat legacy).
     tool_declarations = []
     for schema in gemini_function_schemas():
+        if allowed_tools is not None and schema["name"] not in allowed_tools:
+            continue
         tool_declarations.append(genai_types.FunctionDeclaration(
             name=schema["name"],
             description=schema["description"],
             parameters=_to_gemini_schema(schema["parameters"]),
         ))
     tools_config = [genai_types.Tool(function_declarations=tool_declarations)]
+    if allowed_tools is not None:
+        logger.info(
+            "[AGENTIC] per-state subset tools=%d (allowed=%d)",
+            len(tool_declarations), len(allowed_tools),
+        )
 
     # Loop multi-turn de tool calling.
     # Tracking de recovery empty_output (1 retry max por turn).
