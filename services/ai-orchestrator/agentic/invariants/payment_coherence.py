@@ -139,6 +139,49 @@ def _has_cod_language(text: str) -> bool:
 # ─── Replacement builders ──────────────────────────────────────────────────
 
 
+def _is_malformed_payment_question(text: str) -> bool:
+    """CASE C — Detecta pregunta de modo de pago con phrasing contradictorio.
+
+    Patrón observado UAT live BUG 38c: el LLM compone:
+      "Cómo prefieres pagar: *online* (tarjeta, PSE) o *pago online*
+       (efectivo al recibir el paquete)?"
+    Donde "pago online" se aplica a contraentrega, contradictorio.
+
+    Heurística:
+      • Texto pregunta por modo de pago (cómo prefieres pagar / preferencia pago).
+      • Contiene "pago online" (sustantivo) cerca de "efectivo" / "al recibir"
+        / "entrega".
+
+    Pure function, sin DB.
+    """
+    if not text or len(text) < 30:
+        return False
+    norm = text.lower()
+    # Debe parecer pregunta de modo de pago.
+    asks_payment = (
+        ("prefier" in norm and "pag" in norm)
+        or ("c[oó]mo" in norm and "pag" in norm)
+        or "modo de pago" in norm
+        or ("pagar" in norm and "?" in text)
+    )
+    if not asks_payment:
+        return False
+    # Detectar contradicción: "pago online" + términos COD.
+    has_pago_online = bool(
+        re.search(r"\bpago\s+online\b", norm)
+    )
+    has_cod_terms = bool(
+        re.search(
+            r"\b(?:efectivo|al\s+recibir|contra\s*entrega|al\s+momento\s+de"
+            r"\s+(?:recibir|entrega))\b",
+            norm,
+        )
+    )
+    if has_pago_online and has_cod_terms:
+        return True
+    return False
+
+
 def _build_explicit_question(enabled: list[str]) -> str:
     """CASE A: cliente no especificó modo → preguntar adaptado a tenant."""
     has_cod = "cod" in enabled
@@ -262,6 +305,12 @@ class PaymentCoherenceInvariant:
     CASE B — Lenguaje contradictorio con cart.payment_method:
       cart=cod + outbound "link de pago" → REWRITE a COD.
       cart=credit + outbound "contraentrega" → REWRITE a credit.
+
+    CASE C (rev. 109 BUG 38c) — Phrasing duplicado "online vs pago online":
+      LLM a veces compone la pregunta de modo de pago con "online" duplicado
+      ("online tarjeta ... o pago online efectivo") → contradicción semántica
+      (online y efectivo son opuestos). REWRITE con _build_explicit_question
+      canónico que usa "contra entrega" explícitamente.
     """
 
     name = "payment_coherence"
@@ -280,6 +329,27 @@ class PaymentCoherenceInvariant:
         if not candidate_text:
             return InvariantResult(
                 outcome=InvariantOutcome.OK, invariant_name=self.name,
+            )
+
+        # ── CASE C: Phrasing duplicado "online vs pago online" ────────
+        # Rev. 109 UAT live BUG 38c — LLM compone pregunta de modo de pago
+        # con vocabulario contradictorio: "online" (= pagar ahora) Y "pago
+        # online efectivo" (= contra entrega) en la misma oración. El
+        # cliente queda confundido. Reescribir con texto canónico.
+        if _is_malformed_payment_question(candidate_text):
+            try:
+                from lib.tenant_payment_methods import list_enabled_methods
+                enabled = list_enabled_methods(supabase, tenant_id=tenant_id)
+            except Exception:
+                enabled = ["cod", "online_wompi"]
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=_build_explicit_question(enabled),
+                reason=(
+                    "CASE C: pregunta de modo pago malformada "
+                    "(online vs pago online contradictorio)"
+                ),
             )
 
         # Leer cart actual (compartido por ambos cases).
