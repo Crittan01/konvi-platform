@@ -15,10 +15,23 @@ import { createIdempotencyKey } from '@/lib/idempotency'
 import { renderWhatsAppFormat, stripWhatsAppFormat } from '@/lib/whatsapp-format'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+// Rev. 109 — AgenticState badge en el Inbox.
+type AgenticState =
+  | 'GREETING'
+  | 'EXPLORING'
+  | 'CART_BUILDING'
+  | 'PII_COLLECTION'
+  | 'SHIPPING_QUOTE'
+  | 'CARRIER_SELECTION'
+  | 'PAYMENT'
+  | 'POST_PAYMENT'
+  | 'HUMAN_HANDOFF'
+
 interface Conversation {
   id: string
   customer_phone: string
   status: 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
+  agentic_state?: AgenticState | null  // Rev. 109 — derivado por state machine.
   created_at: string
   last_interaction_at?: string
   archived_at?: string | null
@@ -217,6 +230,44 @@ const formatPhone = (raw: string): string => {
     return `+57 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`
   return digits ? `+${digits}` : (raw || '')
 }
+// Rev. 109 — agentic_state badge UI (Day 5).
+const AGENTIC_STATE_LABELS: Record<AgenticState, string> = {
+  GREETING: 'Saludo',
+  EXPLORING: 'Explorando',
+  CART_BUILDING: 'Carrito',
+  PII_COLLECTION: 'Datos',
+  SHIPPING_QUOTE: 'Cotizando',
+  CARRIER_SELECTION: 'Transp.',
+  PAYMENT: 'Pago',
+  POST_PAYMENT: 'Post-pago',
+  HUMAN_HANDOFF: 'Humano',
+}
+const agenticStateLabel = (s: AgenticState): string =>
+  AGENTIC_STATE_LABELS[s] ?? s
+const getAgenticStateBadgeColor = (s: AgenticState): string => {
+  // Paleta neutra (no shades 300-500 fluorescentes per feedback_ui_colors).
+  switch (s) {
+    case 'GREETING':
+    case 'EXPLORING':
+      return 'bg-slate-100 text-slate-700 border-slate-200'
+    case 'CART_BUILDING':
+      return 'bg-blue-50 text-blue-700 border-blue-200'
+    case 'PII_COLLECTION':
+      return 'bg-amber-50 text-amber-700 border-amber-200'
+    case 'SHIPPING_QUOTE':
+    case 'CARRIER_SELECTION':
+      return 'bg-violet-50 text-violet-700 border-violet-200'
+    case 'PAYMENT':
+      return 'bg-orange-50 text-orange-700 border-orange-200'
+    case 'POST_PAYMENT':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    case 'HUMAN_HANDOFF':
+      return 'bg-rose-50 text-rose-700 border-rose-200'
+    default:
+      return 'bg-slate-100 text-slate-700 border-slate-200'
+  }
+}
+
 const timeAgo = (dateStr: string) => {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -421,7 +472,7 @@ export default function InboxPage() {
     // Toggle "Ver archivadas" expone las archivadas en el filtro lateral.
     let query = supabase
       .from('conversations')
-      .select('id, customer_phone, status, created_at, last_interaction_at, archived_at, messages(content, direction, created_at)')
+      .select('id, customer_phone, status, agentic_state, created_at, last_interaction_at, archived_at, messages(content, direction, created_at)')
       .order('last_interaction_at', { ascending: false })
       .limit(50)
     if (!showArchivedRef.current) {
@@ -1154,13 +1205,22 @@ export default function InboxPage() {
                       {stripWhatsAppFormat(conv.last_message.content)}
                     </p>
                   )}
-                  <div className="ml-4 mt-1">
+                  <div className="ml-4 mt-1 flex items-center gap-1.5 flex-wrap">
                     <span
                       className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${st.color}`}
                       title={st.description}
                     >
                       {st.label}
                     </span>
+                    {/* Rev. 109 — badge agentic_state (state machine determinístico). */}
+                    {conv.agentic_state && (
+                      <span
+                        className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border ${getAgenticStateBadgeColor(conv.agentic_state)}`}
+                        title={`Estado del bot: ${conv.agentic_state}`}
+                      >
+                        {agenticStateLabel(conv.agentic_state)}
+                      </span>
+                    )}
                   </div>
                 </button>
               )
