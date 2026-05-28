@@ -55,20 +55,42 @@ async def get_inbox_stats(
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
 ):
-    """Métricas básicas del inbox con contrato canónico de estados."""
+    """Métricas básicas del inbox con contrato canónico de estados.
+
+    Rev. 109 — incluye desglose por `agentic_state` (state machine) para
+    que el operador vea el funnel de la jornada del cliente.
+    """
     try:
         result = (
             supabase.table("conversations")
-            .select("status")
+            .select("status, agentic_state")
             .eq("tenant_id", tenant_id)
             .execute()
         )
         conversations = result.data or []
+
+        # Funnel agentic_state — orden de la jornada para UI dashboard.
+        _agentic_order = [
+            "GREETING", "EXPLORING", "CART_BUILDING",
+            "PII_COLLECTION", "SHIPPING_QUOTE", "CARRIER_SELECTION",
+            "PAYMENT", "POST_PAYMENT", "HUMAN_HANDOFF",
+        ]
+        agentic_counts: dict[str, int] = {s: 0 for s in _agentic_order}
+        agentic_unset = 0
+        for c in conversations:
+            state = c.get("agentic_state")
+            if state in agentic_counts:
+                agentic_counts[state] += 1
+            elif state is None:
+                agentic_unset += 1
+
         stats = {
             "total": len(conversations),
             "bot_active": sum(1 for c in conversations if c["status"] == "bot_active"),
             "human_takeover": sum(1 for c in conversations if c["status"] == "human_takeover"),
             "closed": sum(1 for c in conversations if c["status"] == "closed"),
+            "agentic_state_counts": agentic_counts,
+            "agentic_state_unset": agentic_unset,
         }
         return stats
     except Exception as e:
@@ -79,6 +101,15 @@ async def get_inbox_stats(
 @router.get("/", response_model=List[dict])
 async def list_conversations(
     status: Optional[str] = Query(default=None),
+    agentic_state: Optional[str] = Query(
+        default=None,
+        description=(
+            "Rev. 109 — filtrar por estado del state machine agentic. "
+            "Valores: GREETING, EXPLORING, CART_BUILDING, PII_COLLECTION, "
+            "SHIPPING_QUOTE, CARRIER_SELECTION, PAYMENT, POST_PAYMENT, "
+            "HUMAN_HANDOFF."
+        ),
+    ),
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     tenant_id: str = Depends(get_current_tenant),
@@ -97,7 +128,9 @@ async def list_conversations(
         query = (
             supabase.table("conversations")
             .select(
-                "id, customer_phone, status, created_at, last_interaction_at, "
+                # Rev. 109 — agentic_state expuesto para badge UI.
+                "id, customer_phone, status, agentic_state, created_at, "
+                "last_interaction_at, "
                 "messages(content, direction, created_at)"
             )
             .eq("tenant_id", tenant_id)
@@ -107,6 +140,10 @@ async def list_conversations(
         )
         if status:
             query = query.eq("status", status)
+        # Rev. 109 — filtro agentic_state (validación leve, sin ENUM hardcoded
+        # aquí para no duplicar contrato; CHECK constraint en DB ya lo enforce).
+        if agentic_state:
+            query = query.eq("agentic_state", agentic_state)
 
         result = query.execute()
 

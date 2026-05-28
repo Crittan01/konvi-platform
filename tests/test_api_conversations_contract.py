@@ -48,6 +48,7 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
             tenant_id="t-1",
             supabase=supabase,
             status=None,
+            agentic_state=None,
             limit=30,
             offset=0,
         )
@@ -55,6 +56,52 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["id"], "c-1")
         query.order.assert_called_with("last_interaction_at", desc=True)
+
+    async def test_list_conversations_filter_by_agentic_state(self):
+        """Rev. 109 — filtro nuevo por agentic_state."""
+        supabase = MagicMock()
+        query = _chain_with_data([
+            {
+                "id": "c-1",
+                "customer_phone": "573001112233",
+                "status": "bot_active",
+                "agentic_state": "PII_COLLECTION",
+                "created_at": "2026-05-27T10:00:00Z",
+                "last_interaction_at": "2026-05-27T11:00:00Z",
+                "messages": [],
+            }
+        ])
+        supabase.table.return_value = query
+        await conversations.list_conversations(
+            tenant_id="t-1",
+            supabase=supabase,
+            status=None,
+            agentic_state="PII_COLLECTION",
+            limit=30,
+            offset=0,
+        )
+        # eq() debe haberse llamado con agentic_state=PII_COLLECTION.
+        eq_calls = [c.args for c in query.eq.call_args_list]
+        self.assertIn(("agentic_state", "PII_COLLECTION"), eq_calls)
+
+    async def test_stats_includes_agentic_state_counts(self):
+        """Rev. 109 — get_inbox_stats debe retornar funnel agentic."""
+        supabase = MagicMock()
+        query = _chain_with_data([
+            {"status": "bot_active", "agentic_state": "GREETING"},
+            {"status": "bot_active", "agentic_state": "CART_BUILDING"},
+            {"status": "bot_active", "agentic_state": "PAYMENT"},
+            {"status": "bot_active", "agentic_state": None},
+        ])
+        supabase.table.return_value = query
+        stats = await conversations.get_inbox_stats(tenant_id="t-1", supabase=supabase)
+        self.assertIn("agentic_state_counts", stats)
+        counts = stats["agentic_state_counts"]
+        self.assertEqual(counts["GREETING"], 1)
+        self.assertEqual(counts["CART_BUILDING"], 1)
+        self.assertEqual(counts["PAYMENT"], 1)
+        self.assertEqual(counts["POST_PAYMENT"], 0)
+        self.assertEqual(stats["agentic_state_unset"], 1)
 
     async def test_stats_uses_canonical_status_keys(self):
         supabase = MagicMock()
