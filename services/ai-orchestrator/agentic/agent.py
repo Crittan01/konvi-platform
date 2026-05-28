@@ -312,6 +312,66 @@ async def run_agentic_turn(
                         "[AGENTIC] text-only fallback falló: %s", fb_exc,
                     )
 
+            # ── Rev. 109 Día 3 — Claude rescue ──
+            # Si llegamos aquí, Gemini Flash + text-only retry fallaron.
+            # Antes de degraded, intentamos Claude Sonnet como cross-vendor
+            # rescue (text-only, sin tools). Designed only para evitar que
+            # el cliente vea mensaje degraded — el flow agentic siguiente
+            # turn vuelve a Gemini.
+            try:
+                from llm_claude_rescue import (
+                    is_available as claude_available,
+                    invoke_claude_text_only,
+                )
+                if claude_available():
+                    # Convertir history Gemini → formato simple para Claude.
+                    claude_history = []
+                    for m in messages[:-1]:  # excluye el último user (lo pasamos aparte)
+                        parts = m.get("parts", [])
+                        text_acc = "\n".join(
+                            (p.get("text") or "") for p in parts
+                            if isinstance(p, dict) and p.get("text")
+                        ).strip()
+                        if text_acc:
+                            claude_history.append({
+                                "role": m.get("role", "user"),
+                                "content": text_acc,
+                            })
+                    last_user = messages[-1] if messages else None
+                    last_text = ""
+                    if last_user:
+                        last_text = "\n".join(
+                            (p.get("text") or "") for p in last_user.get("parts", [])
+                            if isinstance(p, dict) and p.get("text")
+                        ).strip()
+                    if last_text:
+                        rescue = invoke_claude_text_only(
+                            system_prompt=system_prompt,
+                            user_text=last_text,
+                            history=claude_history,
+                        )
+                        if rescue.text.strip():
+                            logger.info(
+                                "[AGENTIC_CLAUDE_RESCUE] conv=%s recuperado "
+                                "(model=%s len=%d)",
+                                conversation_id, rescue.model, len(rescue.text),
+                            )
+                            return AgenticTurnResult(
+                                outbound_text=rescue.text,
+                                tool_calls_executed=total_tool_calls,
+                                tool_call_log=tool_call_log,
+                                truncated=True,
+                                truncated_reason=(
+                                    f"claude_rescue_from:{finish_reason or 'STOP'}"
+                                ),
+                                finish_reason=last_finish_reason,
+                            )
+            except Exception as claude_exc:
+                logger.warning(
+                    "[AGENTIC_CLAUDE_RESCUE] falló conv=%s: %s",
+                    conversation_id, claude_exc,
+                )
+
             # No retry — usar degraded text como outbound.
             # Marcar requires_silent_escalation si agotamos recoveries STOP.
             # El dispatcher debe escalar conv a human_takeover para que un
