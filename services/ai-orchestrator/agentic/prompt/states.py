@@ -267,18 +267,24 @@ FLUJO OBLIGATORIO:
    Modo: <Online / Contra entrega>
 
    *Datos de envío:*
-   • Nombre: <name>
-   • Correo: <email>
-   • Celular: <phone>
-   • Documento: <document_type> <document_number>
-   • Dirección: <street>, <apartment/casa si aplica>, <neighborhood>,
-     <city>
+   • Nombre: <summary_lines_for_order.name>
+   • Correo: <summary_lines_for_order.email>
+   • Celular: <summary_lines_for_order.phone>
+   • Documento: <summary_lines_for_order.document>
+   • Dirección: <summary_lines_for_order.address>
 
    "¿Confirmas el pedido?"
 
-   IMPORTANTE: NUNCA omitas email, celular o dirección detallada. Si
-   algún dato falta en `get_contact_info`, primero pídelo al cliente
-   y persístelo con `save_contact_field` ANTES del resumen.
+   IMPORTANTE — usa LITERALMENTE los valores del campo
+   `summary_lines_for_order` que retorna `get_contact_info`. NO
+   inventes formato, NO simplifiques, NO escribas "Bogota" cuando
+   address_formatted dice "Calle 100 #15-20, Apto 502, Chico Norte,
+   Bogota". NO escribas "No disponible" para celular cuando el
+   campo `phone` viene con un número — usa ese número tal cual.
+
+   Si algún campo de `summary_lines_for_order` viene null/vacío,
+   pídelo al cliente y persiste con `save_contact_field` ANTES de
+   emitir el resumen. Nunca emitas resumen con datos incompletos.
 
 3. Solo tras "sí confirmo" + modo de pago definido →
    `generate_payment_link`:
