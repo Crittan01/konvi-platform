@@ -1507,18 +1507,18 @@ def _compose_payment_failed_email_html(
     si genera nuevo link). Diseño consistente con _compose_payment_email_html
     (colores tenants + tipografía).
     """
-    def _cop(v: int) -> str:
-        return f"${v // 100:,}".replace(",", ".")
-
+    # Rev. 109 fix bug founder UAT: usar _fmt_cop (NO divide /100) + 'unit_price'
+    # (no 'unit_price_cents'). order_items.unit_price y orders.total_amount /
+    # shipping_cost están en PESOS, no cents. Consistencia con
+    # _compose_payment_email_html existente.
     items_rows = "".join(
         f"""<tr>
           <td style="padding:8px 4px;color:#1f2937;border-bottom:1px solid #e5e7eb;">
-            {it.get('quantity', 1)}× {it.get('title', 'Producto')}
-            {' — ' + it.get('variant_label', '') if it.get('variant_label') else ''}
+            {int(it.get('quantity') or 1)}× {it.get('title', 'Producto')}
           </td>
           <td style="padding:8px 4px;color:#6b7280;text-align:right;
                      border-bottom:1px solid #e5e7eb;">
-            {_cop(it.get('unit_price_cents', 0))}
+            {_fmt_cop(int(float(it.get('unit_price') or 0)) * int(it.get('quantity') or 1))} COP
           </td>
         </tr>"""
         for it in (items or [])
@@ -1561,19 +1561,19 @@ def _compose_payment_failed_email_html(
     <tr>
       <td style="padding:8px 4px;color:#6b7280;">Subtotal</td>
       <td style="padding:8px 4px;color:#6b7280;text-align:right;">
-        {_cop(subtotal)}</td>
+        {_fmt_cop(subtotal)} COP</td>
     </tr>
     <tr>
       <td style="padding:8px 4px;color:#6b7280;">Envío ({carrier or '-'})</td>
       <td style="padding:8px 4px;color:#6b7280;text-align:right;">
-        {_cop(shipping)}</td>
+        {_fmt_cop(shipping)} COP</td>
     </tr>
     <tr>
       <td style="padding:12px 4px;color:#1f2937;font-weight:600;
                  border-top:2px solid #e5e7eb;">Total a pagar</td>
       <td style="padding:12px 4px;color:#1f2937;font-weight:600;
                  text-align:right;border-top:2px solid #e5e7eb;">
-        {_cop(total)}</td>
+        {_fmt_cop(total)} COP</td>
     </tr>
   </table>
 

@@ -21,18 +21,20 @@ from routers.wompi_webhook import (
 
 class PaymentFailedEmailTests(unittest.TestCase):
     def _render(self, **overrides):
+        # Rev. 109 fix: values en PESOS (no cents). Consistencia con
+        # orders.total_amount / shipping_cost / order_items.unit_price.
         defaults = dict(
             customer_name="Cristian Tobon",
             order_short="ABC12345",
             items=[
                 {"quantity": 2, "title": "Jabón Coco",
-                 "variant_label": "100g", "unit_price_cents": 2400000},
+                 "unit_price": 24000},   # $24.000 c/u
                 {"quantity": 1, "title": "Sérum Vit C",
-                 "variant_label": "15ml", "unit_price_cents": 5200000},
+                 "unit_price": 52000},   # $52.000
             ],
-            subtotal=10000000,   # $100.000
-            shipping=900000,      # $9.000
-            total=10900000,       # $109.000
+            subtotal=100000,   # $100.000
+            shipping=9000,     # $9.000
+            total=109000,      # $109.000
             carrier="SERVIENTREGA",
             tenant_name="KAIU Living Natural",
         )
@@ -67,9 +69,13 @@ class PaymentFailedEmailTests(unittest.TestCase):
     def test_includes_items(self):
         html = self._render()
         self.assertIn("Jabón Coco", html)
-        self.assertIn("100g", html)
         self.assertIn("Sérum Vit C", html)
-        self.assertIn("15ml", html)
+
+    def test_item_line_total_correct(self):
+        """2× Jabón Coco a $24.000 c/u = $48.000 line total."""
+        html = self._render()
+        self.assertIn("$48.000", html)   # 2 × 24000 = 48000
+        self.assertIn("$52.000", html)   # 1 × 52000 = 52000
 
     def test_includes_empathic_copy(self):
         """Copy NO debe culpar al cliente."""
