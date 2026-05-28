@@ -283,14 +283,18 @@ class PaymentCoherenceInvariant:
             )
 
         # Leer cart actual (compartido por ambos cases).
+        # Rev. 109 UAT live: incluye `converted` para que invariant aplique
+        # TAMBIÉN al outbound de confirmación inmediatamente post-generate_payment_link
+        # (LLM puede paraphrasear el direct_response del tool con "pago online"
+        # cuando cart=cod). Ordenamos: prioriza converted más reciente si existe.
         try:
             cart_q = (
                 supabase.table("conversation_carts")
-                .select("payment_method, total_cents, shipping_meta")
+                .select("payment_method, total_cents, shipping_meta, status")
                 .eq("tenant_id", tenant_id)
                 .eq("conversation_id", conversation_id)
-                .in_("status", ["open", "checkout"])
-                .order("created_at", desc=True).limit(1).execute()
+                .in_("status", ["open", "checkout", "converted"])
+                .order("updated_at", desc=True).limit(1).execute()
             )
             cart_row = (cart_q.data or [{}])[0]
         except Exception:

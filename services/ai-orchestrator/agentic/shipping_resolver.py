@@ -72,9 +72,12 @@ _INTENT_TO_CITY_PATTERNS = (
 
 
 # Stop-words que terminan el nombre de la ciudad cuando se encuentran.
+# Rev. 109 UAT live BUG 9: añadidos "no", "y", "pero", "sino", "mejor",
+# para interpretar negaciones "a Medellín NO Bogotá" como solo Medellín.
 _CITY_END_MARKERS = (
     "como", "por", "que", "porque", "es", "para",
     "favor", "porfa", "entonces", "gracias",
+    "no", "y", "pero", "sino", "mejor", "ya", "claro", "okay", "ok",
 )
 
 
