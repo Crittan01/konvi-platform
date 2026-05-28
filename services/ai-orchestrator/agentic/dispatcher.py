@@ -161,6 +161,55 @@ async def _run_agentic_full(
     content_type: str,
 ) -> None:
     """Cutover: agentic compone outbound y lo envía al cliente."""
+    # ── Rev. 109 Día 4 — Multimodal pipeline ──
+    # Si el inbound es audio/imagen/video, descargamos el media de Meta y
+    # pedimos a Gemini multimodal una interpretación textual. El resto del
+    # flow agentic ve el content reemplazado (transparente).
+    if content_type in {"audio", "image", "video"}:
+        try:
+            from agentic.multimodal import (
+                process_inbound_media, format_for_agentic,
+            )
+            # Cargar media_id + media_mime desde messages.meta.
+            _mrow = (
+                supabase.table("messages")
+                .select("meta")
+                .eq("id", message_id)
+                .single()
+                .execute()
+            )
+            _meta = (_mrow.data or {}).get("meta") or {}
+            _media_id = _meta.get("media_id")
+            _media_mime = _meta.get("media_mime")
+            mm_result = await process_inbound_media(
+                tenant_id=tenant_id,
+                supabase=supabase,
+                media_id=_media_id,
+                media_mime=_media_mime,
+                media_type=content_type,
+                caption=content if not content.startswith("[") else None,
+            )
+            if mm_result and mm_result.text:
+                original_content = content
+                content = format_for_agentic(mm_result, original_content)
+                logger.info(
+                    "[MULTIMODAL_DISPATCH] conv=%s type=%s replaced chars=%d→%d",
+                    conversation_id[:8], content_type,
+                    len(original_content), len(content),
+                )
+            else:
+                logger.info(
+                    "[MULTIMODAL_DISPATCH] conv=%s type=%s fallback al content "
+                    "original (procesamiento no disponible)",
+                    conversation_id[:8], content_type,
+                )
+        except Exception as mm_exc:
+            logger.warning(
+                "[MULTIMODAL_DISPATCH] conv=%s type=%s falló: %s — content original",
+                conversation_id[:8], content_type, mm_exc,
+            )
+    # ── /multimodal ──
+
     # Import los tools para que se auto-registren.
     import agentic.tools.catalog  # noqa: F401
     import agentic.tools.cart  # noqa: F401
