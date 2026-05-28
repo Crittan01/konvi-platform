@@ -619,6 +619,72 @@ async def _run_agentic_full(
             "[AGENTIC_PRE_LLM] coupon_intent crashed: %s — skip", _coup_exc,
         )
 
+    # PRE-LLM #0.45: image request (rev. 109 UAT live BUG 18). Cliente
+    # pide foto/imagen de producto → resolver determinístico envía la
+    # imagen directamente sin que el LLM decida. El image_send_tool ya
+    # existe (legacy), solo lo enganchamos al agentic dispatcher.
+    try:
+        from tools.image_send_tool import (
+            handle_image_request_if_applicable as _handle_image_request,
+        )
+        _recent_msgs = (
+            supabase.table("messages")
+            .select("direction, content, content_type, created_at")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=True).limit(10).execute().data or []
+        )
+        _img_result = await _handle_image_request(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            query_text=content,
+            recent_messages=_recent_msgs,
+        )
+        if _img_result.handled:
+            customer_phone = _get_conversation_customer_phone(
+                supabase, conversation_id,
+            )
+            if _img_result.image_link:
+                # Enviar imagen vía WhatsApp.
+                try:
+                    from whatsapp_sender import send_whatsapp_message
+                    await send_whatsapp_message(
+                        tenant_id=tenant_id,
+                        supabase=supabase,
+                        to_phone=customer_phone,
+                        media_url=_img_result.image_link,
+                        caption=_img_result.image_caption or "",
+                        media_type="image",
+                    )
+                except Exception as _img_exc:
+                    logger.warning(
+                        "[AGENTIC_PRE_LLM] image_send falló conv=%s: %s",
+                        conversation_id[:8], _img_exc,
+                    )
+            elif _img_result.response_text:
+                await _send_outbound_text(
+                    supabase=supabase, conversation_id=conversation_id,
+                    tenant_id=tenant_id, text=_img_result.response_text,
+                )
+            _mark_message_processing(
+                supabase, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            logger.info(
+                "[AGENTIC_PRE_LLM] image_request handled conv=%s link=%s",
+                conversation_id[:8], bool(_img_result.image_link),
+            )
+            _resolve_and_persist_agentic_state(
+                supabase=supabase, tenant_id=tenant_id,
+                conversation_id=conversation_id, contact=contact,
+                history=history,
+            )
+            return
+    except Exception as _img_exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] image_request crashed: %s — skip", _img_exc,
+        )
+
     # PRE-LLM #0.5: consent intent. Rev. 108 fix arquitectónico.
     # El LLM no llama record_consent confiablemente tras "Sí acepto",
     # causando loop infinito (no-pii-pre-consent invariant rewrites).
