@@ -97,6 +97,29 @@ def _extract_total_cop(text: str) -> Optional[int]:
         return None
 
 
+def _load_contact_safe(
+    supabase: Any, tenant_id: str, contact_id: Optional[str],
+) -> Optional[dict]:
+    """Carga contact best-effort para el resumen canonical. None si falla."""
+    if not contact_id:
+        return None
+    try:
+        res = (
+            supabase.table("contacts")
+            .select(
+                "name, email, phone, shipping_phone, "
+                "document_type, document_number, address",
+            )
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .limit(1).execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
 def _outbound_mentions_discount(text: str) -> bool:
     """Rev. 109 BUG 38d — True si el outbound menciona la línea descuento.
 
@@ -118,10 +141,21 @@ def _outbound_mentions_discount(text: str) -> bool:
     return bool(re.search(r"[\-]?\s*\$\s*[\d.,]+", text))
 
 
-def _build_canonical_summary(cart: dict, shipping_meta: dict) -> str:
+def _build_canonical_summary(
+    cart: dict,
+    shipping_meta: dict,
+    contact: Optional[dict] = None,
+) -> str:
     """Construye un resumen verídico desde el cart real (fallback rewrite).
 
     Format alineado con el patrón canónico del bot (estilo WhatsApp).
+
+    Rev. 109 P0 #3 — Si contact provisto, agrega bloque "Datos de envío"
+    completo (nombre + correo + celular + documento + dirección). Cumple
+    Ley 1480 Estatuto del Consumidor: el cliente DEBE ver exactamente
+    a dónde va su pedido y a quién se le entrega antes de confirmar.
+    Si shipping_meta.recipient existe (envío a tercero), distingue
+    Titular (paga) vs Receptor (recibe).
     """
     lines = ["📋 *Resumen de tu pedido:*", ""]
     for it in (cart.get("items") or []):
@@ -176,9 +210,96 @@ def _build_canonical_summary(cart: dict, shipping_meta: dict) -> str:
             f"* {disc_label}: *-${discount_cop:,.0f} COP*".replace(",", "."),
         )
     lines.append(f"* *Total: ${total_cop:,.0f} COP*".replace(",", "."))
+
+    # Rev. 109 P0 #3 — bloque PII completo (Ley 1480).
+    recipient = (shipping_meta or {}).get("recipient") or {}
+    has_recipient = bool(recipient.get("name") or recipient.get("phone"))
+
+    if contact or has_recipient:
+        lines.append("")
+        if has_recipient:
+            # Envío a tercero: distinguir TITULAR (paga) vs RECEPTOR (recibe).
+            lines.append("*Datos de envío:*")
+            if contact and contact.get("name"):
+                lines.append(f"* Paga (titular): {contact.get('name')}")
+            if contact and contact.get("email"):
+                lines.append(f"* Correo: {contact.get('email')}")
+            lines.append("")
+            lines.append("*Recibe (destinatario):*")
+            if recipient.get("name"):
+                lines.append(f"* Nombre: {recipient.get('name')}")
+            if recipient.get("phone"):
+                lines.append(f"* Celular: {recipient.get('phone')}")
+            if recipient.get("document_type") and recipient.get("document_number"):
+                lines.append(
+                    f"* Documento: {recipient.get('document_type')} "
+                    f"{recipient.get('document_number')}",
+                )
+            r_addr = recipient.get("address") or {}
+            if isinstance(r_addr, dict):
+                addr_str = _format_address_compact(r_addr)
+                if addr_str:
+                    lines.append(f"* Dirección: {addr_str}")
+        elif contact:
+            # Envío al mismo titular.
+            lines.append("*Datos de envío:*")
+            if contact.get("name"):
+                lines.append(f"* Nombre: {contact.get('name')}")
+            if contact.get("email"):
+                lines.append(f"* Correo: {contact.get('email')}")
+            phone = (
+                contact.get("shipping_phone")
+                or contact.get("phone")
+            )
+            if phone:
+                lines.append(f"* Celular: {_format_phone(phone)}")
+            if contact.get("document_type") and contact.get("document_number"):
+                lines.append(
+                    f"* Documento: {contact.get('document_type')} "
+                    f"{contact.get('document_number')}",
+                )
+            c_addr = contact.get("address") or {}
+            if isinstance(c_addr, dict):
+                addr_str = _format_address_compact(c_addr)
+                if addr_str:
+                    lines.append(f"* Dirección: {addr_str}")
+
     lines.append("")
     lines.append("Confirmas el pedido para generar el link de pago?")
     return "\n".join(lines)
+
+
+def _format_phone(raw: str) -> str:
+    """+57 312 583 5649 style si phone está en formato CO digits."""
+    digits = "".join(c for c in str(raw or "") if c.isdigit())
+    if digits.startswith("57") and len(digits) == 12:
+        rest = digits[2:]
+        return f"+57 {rest[:3]} {rest[3:6]} {rest[6:]}"
+    return str(raw)
+
+
+def _format_address_compact(addr: dict) -> str:
+    """Render compacto: 'Calle 100 #15-20, Apto 502, Chico Norte, Bogotá'."""
+    if not isinstance(addr, dict):
+        return ""
+    parts = []
+    street = (addr.get("street") or "").strip()
+    if street:
+        parts.append(street)
+    btype = (addr.get("building_type") or "").lower()
+    apt = (addr.get("apartment") or "").strip()
+    if btype in ("edificio", "conjunto", "apartamento") and apt:
+        parts.append(f"Apto {apt}")
+    floor = (addr.get("floor") or "").strip()
+    if floor and btype in ("edificio", "oficina"):
+        parts.append(f"Piso {floor}")
+    nb = (addr.get("neighborhood") or "").strip()
+    if nb:
+        parts.append(nb)
+    city = (addr.get("city") or "").strip()
+    if city:
+        parts.append(city)
+    return ", ".join(parts)
 
 
 class SummaryCoherenceInvariant:
@@ -263,6 +384,7 @@ class SummaryCoherenceInvariant:
         if affirmed_total != real_total:
             replacement = _build_canonical_summary(
                 cart, cart.get("shipping_meta") or {},
+                contact=_load_contact_safe(supabase, tenant_id, contact_id),
             )
             return InvariantResult(
                 outcome=InvariantOutcome.REWRITE,
@@ -281,6 +403,7 @@ class SummaryCoherenceInvariant:
         if discount_cents > 0 and not _outbound_mentions_discount(candidate_text):
             replacement = _build_canonical_summary(
                 cart, cart.get("shipping_meta") or {},
+                contact=_load_contact_safe(supabase, tenant_id, contact_id),
             )
             return InvariantResult(
                 outcome=InvariantOutcome.REWRITE,
