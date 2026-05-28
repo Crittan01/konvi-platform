@@ -637,7 +637,7 @@ def set_shipping_meta(
     # rompiendo el fuzzy match de select_carrier en re-selecciones).
     cur = (
         supabase.table("conversation_carts")
-        .select("subtotal_cents, shipping_meta")
+        .select("subtotal_cents, shipping_meta, discount_cents")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -646,7 +646,12 @@ def set_shipping_meta(
     if not cur.data:
         raise RuntimeError(f"set_shipping_meta: cart {cart_id} no encontrado")
     subtotal = int(cur.data[0].get("subtotal_cents") or 0)
-    new_total = subtotal + int(shipping_cents)
+    # Rev. 109 fix UAT live BUG 34 — preservar descuento de cupón ya
+    # aplicado. Sin este max(), set_shipping_meta sobrescribía total_cents
+    # ignorando discount_cents → cliente perdía el descuento al elegir
+    # carrier post-cupón.
+    discount = int(cur.data[0].get("discount_cents") or 0)
+    new_total = max(0, subtotal + int(shipping_cents) - discount)
     existing_meta = cur.data[0].get("shipping_meta") or {}
 
     # Merge: actualizar campos canónicos del carrier seleccionado +
@@ -809,7 +814,7 @@ def set_shipping_city(
     """
     cur = (
         supabase.table("conversation_carts")
-        .select("shipping_meta, subtotal_cents")
+        .select("shipping_meta, subtotal_cents, discount_cents")
         .eq("id", cart_id)
         .limit(1)
         .execute()
@@ -828,7 +833,9 @@ def set_shipping_city(
             __import__("datetime").timezone.utc
         ).isoformat(),
     }
-    new_total = int(row.get("subtotal_cents") or 0)
+    # Rev. 109 fix UAT live BUG 34 — preservar discount aplicado por cupón.
+    _disc = int(row.get("discount_cents") or 0)
+    new_total = max(0, int(row.get("subtotal_cents") or 0) - _disc)
     supabase.table("conversation_carts").update({
         "shipping_cents": 0,
         "shipping_meta": new_meta,
@@ -866,7 +873,7 @@ def invalidate_shipping(
     address en shipping_meta para que el bot no tenga que repreguntar."""
     cur = (
         supabase.table("conversation_carts")
-        .select("shipping_meta, subtotal_cents")
+        .select("shipping_meta, subtotal_cents, discount_cents")
         .eq("id", cart_id)
         .limit(1)
         .execute()
@@ -882,7 +889,9 @@ def invalidate_shipping(
         if meta.get(k)
     }
     preserved["invalidated_reason"] = reason
-    new_total = int(row.get("subtotal_cents") or 0)
+    # Rev. 109 fix UAT live BUG 34 — preservar discount aplicado.
+    _disc = int(row.get("discount_cents") or 0)
+    new_total = max(0, int(row.get("subtotal_cents") or 0) - _disc)
     supabase.table("conversation_carts").update({
         "shipping_cents": 0,
         "shipping_meta": preserved,
