@@ -138,13 +138,31 @@ def _extract_category_head(product: dict) -> str:
 
 
 def _product_matches_category(product: dict, category_norm: str) -> bool:
-    """True si la palabra-categoría está en el título del producto."""
+    """True si la palabra-categoría está en el título del producto.
+
+    Rev. 109 UAT live BUG 14: el match laxo previo requería ≥4 chars
+    en ambos lados, pero head="kit" (3 chars) vs category="kits" (4)
+    fallaba. Fix: singular/plural tolerance — quita 's'/'es' al final
+    de ambos lados y compara stems.
+    """
     head = _extract_category_head(product)
     if head == category_norm:
         return True
-    # Match laxo por prefijo ≥4 chars (cubre plurales).
-    if len(head) >= 4 and len(category_norm) >= 4:
-        if head.startswith(category_norm[:4]) or category_norm.startswith(head[:4]):
+
+    def _stem(w: str) -> str:
+        """Stem ES simple: quita 'es' o 's' al final."""
+        if w.endswith("es") and len(w) > 3:
+            return w[:-2]
+        if w.endswith("s") and len(w) > 2:
+            return w[:-1]
+        return w
+
+    if _stem(head) == _stem(category_norm):
+        return True
+
+    # Match prefijo (kit / kit-inicio, aceite / aceite-coco, etc.)
+    if len(head) >= 3 and len(category_norm) >= 3:
+        if head.startswith(_stem(category_norm)) or category_norm.startswith(_stem(head)):
             return True
     return False
 

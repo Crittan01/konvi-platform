@@ -229,7 +229,8 @@ class SectionE_CartMod(unittest.TestCase):
         self.assertIn("remove_cart_item", tools)
         self.assertIn("get_cart", tools)
 
-    def test_e4_cart_building_excluye_payment(self):
+    def test_e4_cart_building_no_payment_link_yet(self):
+        # CART_BUILDING aún no genera payment link (eso ocurre en PAYMENT).
         tools = tools_for_state(AgenticState.CART_BUILDING)
         self.assertNotIn("generate_payment_link", tools)
 
@@ -339,9 +340,13 @@ class SectionI_Payment(unittest.TestCase):
         self.assertIn("Resumen del pedido", prompt)
         self.assertIn("confirmas", prompt.lower())
 
-    def test_i4_payment_no_add_to_cart(self):
+    def test_i4_payment_includes_cart_mods_rev109_bug15(self):
+        """Rev. 109 BUG 15: PAYMENT incluye cart mods (cliente puede
+        modificar last-minute antes de generar link)."""
         tools = tools_for_state(AgenticState.PAYMENT)
-        self.assertNotIn("add_to_cart", tools)
+        self.assertIn("add_to_cart", tools)
+        self.assertIn("update_cart_item_quantity", tools)
+        self.assertIn("remove_cart_item", tools)
 
 
 # ──────────────────────────────────────────────────────────────────

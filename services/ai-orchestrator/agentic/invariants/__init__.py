@@ -28,6 +28,7 @@ from agentic.invariants.no_emoji import NoDecorativeEmojiInvariant
 from agentic.invariants.passive_closing import PassiveClosingInvariant
 from agentic.invariants.payment_coherence import PaymentCoherenceInvariant
 from agentic.invariants.pii_coherence import PIICoherenceInvariant
+from agentic.invariants.pii_save_truthfulness import PIISaveTruthfulnessInvariant
 from agentic.invariants.post_tool_coherence import PostToolCoherenceInvariant
 from agentic.invariants.summary_coherence import SummaryCoherenceInvariant
 
@@ -44,6 +45,7 @@ __all__ = [
     "PassiveClosingInvariant",
     "PaymentCoherenceInvariant",
     "PIICoherenceInvariant",
+    "PIISaveTruthfulnessInvariant",
     "PostToolCoherenceInvariant",
     "SummaryCoherenceInvariant",
 ]

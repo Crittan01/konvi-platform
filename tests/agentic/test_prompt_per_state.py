@@ -129,15 +129,21 @@ class ToolsSubsetTests(unittest.TestCase):
         tools = tools_for_state(AgenticState.PII_COLLECTION)
         self.assertIn("record_consent", tools)
         self.assertIn("save_contact_field", tools)
-        # No debe tener tools de pedido/envío en PII.
+        # Rev. 109 UAT live BUG 15: PII_COLLECTION incluye cart mods
+        # (cliente puede modificar items antes de dar PII).
+        self.assertIn("update_cart_item_quantity", tools)
+        self.assertIn("remove_cart_item", tools)
+        # NO debe tener tools de pago/envío en PII (eso es estado posterior).
         self.assertNotIn("generate_payment_link", tools)
         self.assertNotIn("quote_shipping", tools)
 
     def test_payment_has_link_tool(self):
         tools = tools_for_state(AgenticState.PAYMENT)
         self.assertIn("generate_payment_link", tools)
-        # No debe tener add_to_cart en payment (cart cerrado).
-        self.assertNotIn("add_to_cart", tools)
+        # Rev. 109 UAT live BUG 15: PAYMENT incluye add_to_cart porque
+        # cliente puede agregar item last-minute antes de generar link.
+        # El cart sigue mutable hasta orden creada.
+        self.assertIn("add_to_cart", tools)
 
     def test_post_payment_has_recent_orders(self):
         tools = tools_for_state(AgenticState.POST_PAYMENT)

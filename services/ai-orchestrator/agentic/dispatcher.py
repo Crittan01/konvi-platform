@@ -232,6 +232,7 @@ async def _run_agentic_full(
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
         PaymentCoherenceInvariant,
         PIICoherenceInvariant,
+        PIISaveTruthfulnessInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         InvariantOutcome,
     )
@@ -490,6 +491,132 @@ async def _run_agentic_full(
     except Exception as exc:
         logger.warning(
             "[AGENTIC_PRE_LLM] cod_intent_resolver crashed: %s — skip", exc,
+        )
+
+    # PRE-LLM #0.4: coupon intent (rev. 109 UAT live BUG 16). Cliente
+    # menciona código de cupón → aplicar/revocar deterministicamente.
+    # Sin esto el LLM no tiene tool para cupones → escala a humano.
+    try:
+        from lib.coupon_detector import (
+            detect_coupon_intent as _detect_coupon_intent,
+            INTENT_APPLY as _INTENT_APPLY,
+            INTENT_REMOVE as _INTENT_REMOVE,
+        )
+        from lib import coupons as _coupon_helpers
+
+        _coupon_intent = _detect_coupon_intent(content)
+        if _coupon_intent:
+            _cart_lookup = (
+                supabase.table("conversation_carts")
+                .select(
+                    "id, status, subtotal_cents, shipping_cents, "
+                    "total_cents, coupon_id, coupon_code, discount_cents"
+                )
+                .eq("tenant_id", tenant_id)
+                .eq("conversation_id", conversation_id)
+                .in_("status", ["open", "checkout"])
+                .order("created_at", desc=True).limit(1).execute()
+            )
+            _cart_rows = _cart_lookup.data or []
+            _coupon_response: Optional[str] = None
+            _coupon_event_type: Optional[str] = None
+            _coupon_event_payload: dict = {}
+            _coupon_cart_id: Optional[str] = None
+
+            if not _cart_rows:
+                if _coupon_intent.intent == _INTENT_APPLY:
+                    _coupon_response = (
+                        "Aún no tienes un pedido en curso. Cuando agregues "
+                        "productos podemos aplicar tu cupón."
+                    )
+                else:
+                    _coupon_response = "No tienes ningún cupón aplicado."
+            else:
+                _cart = _cart_rows[0]
+                _coupon_cart_id = _cart["id"]
+                if _cart["status"] == "checkout":
+                    _coupon_response = (
+                        "*El cupón debe aplicarse antes de generar el link "
+                        "de pago.*\nSi quieres usarlo, dime y cancelamos el "
+                        "link actual para rehacer el pedido."
+                    )
+                elif _coupon_intent.intent == _INTENT_REMOVE:
+                    _prev_code = _cart.get("coupon_code")
+                    _prev_id = _cart.get("coupon_id")
+                    _revoked = _coupon_helpers.revoke_coupon(
+                        supabase, tenant_id=tenant_id,
+                        cart_id=_coupon_cart_id, reason="user_removed",
+                    )
+                    if _revoked:
+                        _coupon_response = "Cupón removido."
+                        _coupon_event_type = "coupon_revoked"
+                        _coupon_event_payload = {
+                            "coupon_id": _prev_id, "code": _prev_code,
+                            "reason": "user_removed",
+                        }
+                    else:
+                        _coupon_response = "No tenías ningún cupón aplicado."
+                elif _coupon_intent.intent == _INTENT_APPLY:
+                    if not _coupon_intent.code:
+                        _coupon_response = (
+                            "No detecté el código del cupón. ¿Me lo confirmas?"
+                        )
+                    else:
+                        _result = _coupon_helpers.apply_coupon(
+                            supabase, tenant_id=tenant_id,
+                            cart_id=_coupon_cart_id, code=_coupon_intent.code,
+                        )
+                        if _result.ok:
+                            _desc_str = f"${_result.discount_cents / 100:,.0f}".replace(",", ".")
+                            _coupon_response = (
+                                f"Cupón *{_result.coupon_code}* aplicado: "
+                                f"descuento -{_desc_str} COP.\n"
+                                f"¿En qué más te puedo ayudar?"
+                            )
+                            _coupon_event_type = "coupon_applied"
+                            _coupon_event_payload = {
+                                "coupon_id": _result.coupon_id,
+                                "code": _result.coupon_code,
+                                "discount_cents": _result.discount_cents,
+                            }
+                        else:
+                            _coupon_response = _result.user_message
+
+            if _coupon_response:
+                if _coupon_event_type and _coupon_cart_id:
+                    try:
+                        supabase.table("cart_events").insert({
+                            "cart_id": _coupon_cart_id,
+                            "tenant_id": tenant_id,
+                            "event_type": _coupon_event_type,
+                            "event_payload": _coupon_event_payload,
+                            "triggered_by": "bot",
+                            "correlation_id": message_id,
+                        }).execute()
+                    except Exception:
+                        pass
+                logger.info(
+                    "[AGENTIC_PRE_LLM] coupon_intent conv=%s intent=%s code=%s",
+                    conversation_id[:8], _coupon_intent.intent,
+                    _coupon_intent.code,
+                )
+                await _send_outbound_text(
+                    supabase=supabase, conversation_id=conversation_id,
+                    tenant_id=tenant_id, text=_coupon_response,
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+                _resolve_and_persist_agentic_state(
+                    supabase=supabase, tenant_id=tenant_id,
+                    conversation_id=conversation_id, contact=contact,
+                    history=history,
+                )
+                return
+    except Exception as _coup_exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] coupon_intent crashed: %s — skip", _coup_exc,
         )
 
     # PRE-LLM #0.5: consent intent. Rev. 108 fix arquitectónico.
@@ -1148,6 +1275,8 @@ async def _run_agentic_full(
             PaymentCoherenceInvariant(),
             SummaryCoherenceInvariant(),
             PIICoherenceInvariant(),
+            # Rev. 109 UAT live BUG 19: bot afirma "guardé X" sin invocar tool.
+            PIISaveTruthfulnessInvariant(),
             PostToolCoherenceInvariant(),
             EmptyPromiseInvariant(),
             PassiveClosingInvariant(),
