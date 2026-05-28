@@ -98,6 +98,51 @@ class GetContactInfoTool:
             contact.get("address"),
         ])
 
+        # Rev. 109 fix UAT live BUG 32b — pre-formatear líneas listas para
+        # el resumen. El LLM no debe parsear el JSON `address` ni inventar
+        # detalles; las líneas vienen renderizadas, el LLM las pega tal cual.
+        addr = contact.get("address") or {}
+        address_line: Optional[str] = None
+        if isinstance(addr, dict):
+            parts: list[str] = []
+            street = str(addr.get("street") or "").strip()
+            apartment = str(addr.get("apartment") or "").strip()
+            tower = str(addr.get("tower") or "").strip()
+            floor = str(addr.get("floor") or "").strip()
+            neighborhood = str(addr.get("neighborhood") or "").strip()
+            city = str(addr.get("city") or "").strip()
+            btype = str(addr.get("building_type") or "").lower()
+            if street:
+                parts.append(street)
+            if btype in {"edificio", "apartamento"}:
+                if floor:
+                    parts.append(f"Piso {floor}")
+                if apartment:
+                    parts.append(f"Apto {apartment}")
+            elif btype == "conjunto":
+                if tower:
+                    parts.append(
+                        f"Torre {tower}" if not tower.lower().startswith("torre")
+                        else tower
+                    )
+                if apartment:
+                    parts.append(f"Apto {apartment}")
+            if neighborhood:
+                parts.append(neighborhood)
+            if city:
+                parts.append(city)
+            address_line = ", ".join(p for p in parts if p) or None
+
+        phone = contact.get("phone") or contact.get("shipping_phone")
+        phone_fmt = None
+        if phone:
+            digits = "".join(c for c in str(phone) if c.isdigit())
+            if digits.startswith("57") and len(digits) == 12:
+                rest = digits[2:]
+                phone_fmt = f"+57 {rest[:3]} {rest[3:6]} {rest[6:]}"
+            else:
+                phone_fmt = str(phone)
+
         return tool_success({
             "exists": True,
             "is_known_customer": has_all,
@@ -105,10 +150,23 @@ class GetContactInfoTool:
             "email": contact.get("email"),
             "name": contact.get("name"),
             "phone": contact.get("phone"),
+            "phone_formatted": phone_fmt,
             "shipping_phone": contact.get("shipping_phone"),
             "document_type": contact.get("document_type"),
             "document_number": contact.get("document_number"),
             "address": contact.get("address"),
+            "address_formatted": address_line,
+            # Cadena lista para pegar en el resumen del pedido (BUG 32).
+            "summary_lines_for_order": {
+                "name": contact.get("name"),
+                "email": contact.get("email"),
+                "phone": phone_fmt,
+                "document": (
+                    f"{contact.get('document_type') or ''} "
+                    f"{contact.get('document_number') or ''}"
+                ).strip() or None,
+                "address": address_line,
+            },
         })
 
 
