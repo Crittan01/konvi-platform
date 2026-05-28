@@ -97,6 +97,27 @@ def _extract_total_cop(text: str) -> Optional[int]:
         return None
 
 
+def _outbound_mentions_discount(text: str) -> bool:
+    """Rev. 109 BUG 38d — True si el outbound menciona la línea descuento.
+
+    Patrones aceptables (case insensitive):
+      • "Descuento" + "$" o "COP" o "-"
+      • "Cupón" + "$"
+      • "Rebaja" + "$"
+    """
+    if not text:
+        return False
+    norm = text.lower()
+    has_discount_label = bool(
+        re.search(r"\b(?:descuento|cup[oó]n|rebaja|promo)\b", norm)
+    )
+    if not has_discount_label:
+        return False
+    # Confirmar que está cerca de un valor monetario (no es solo mención
+    # del concepto sin línea de monto).
+    return bool(re.search(r"[\-]?\s*\$\s*[\d.,]+", text))
+
+
 def _build_canonical_summary(cart: dict, shipping_meta: dict) -> str:
     """Construye un resumen verídico desde el cart real (fallback rewrite).
 
@@ -135,6 +156,9 @@ def _build_canonical_summary(cart: dict, shipping_meta: dict) -> str:
     subtotal_cop = (cart.get("subtotal_cents") or 0) // 100
     shipping_cop = (cart.get("shipping_cents") or 0) // 100
     total_cop = (cart.get("total_cents") or 0) // 100
+    # Rev. 109 BUG 38d: incluir descuento del cupón cuando aplica.
+    discount_cop = (cart.get("discount_cents") or 0) // 100
+    coupon_code = cart.get("coupon_code") or ""
     carrier = (shipping_meta or {}).get("carrier") or ""
     city = (shipping_meta or {}).get("city") or ""
     lines.append("")
@@ -144,6 +168,13 @@ def _build_canonical_summary(cart: dict, shipping_meta: dict) -> str:
         if city:
             ship_label += f" a {city}"
         lines.append(f"* {ship_label}: *${shipping_cop:,.0f} COP*".replace(",", "."))
+    if discount_cop > 0:
+        disc_label = (
+            f"Descuento {coupon_code}" if coupon_code else "Descuento"
+        )
+        lines.append(
+            f"* {disc_label}: *-${discount_cop:,.0f} COP*".replace(",", "."),
+        )
     lines.append(f"* *Total: ${total_cop:,.0f} COP*".replace(",", "."))
     lines.append("")
     lines.append("Confirmas el pedido para generar el link de pago?")
@@ -240,6 +271,25 @@ class SummaryCoherenceInvariant:
                 reason=(
                     f"mismatch total: outbound dijo ${affirmed_total:,} "
                     f"pero cart real es ${real_total:,}"
+                ),
+            )
+
+        # Rev. 109 BUG 38d — cart tiene cupón pero outbound NO menciona
+        # línea descuento → cliente NO ve por qué su total bajó. Riesgo
+        # reclamo SIC + erosión confianza ("¿me cobraron menos por error?").
+        discount_cents = int(cart.get("discount_cents") or 0)
+        if discount_cents > 0 and not _outbound_mentions_discount(candidate_text):
+            replacement = _build_canonical_summary(
+                cart, cart.get("shipping_meta") or {},
+            )
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    f"cart con cupón aplicado (discount=${discount_cents//100:,}) "
+                    f"pero outbound omite línea Descuento — cliente no ve "
+                    f"motivo del rebaja"
                 ),
             )
 
