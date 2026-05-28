@@ -831,6 +831,91 @@ class AveonlineClient:
             "raw": data,
         }
 
+    # ─── Cancel guía (Rev. 109 — Ley 1480 cancelación) ───────────────────
+    # `cancelarGuia` documentado en dossier sec 4 (API v1.0).
+    # Endpoint: webservices.aveonline.co/cotizar/cotizar.php con
+    # tipo='cancelarGuia'. Solo aplica si la guía aún NO ha sido recogida
+    # por el courier (status: 'labeled', no 'picked_up' o posterior).
+    #
+    # Carriers que soportan según dossier: Servientrega, Coordinadora, Envia,
+    # Interrapidisimo, TCC, Domina. Verificable en runtime; si el carrier
+    # retorna error, caller debe escalar a operador manual con el courier.
+
+    async def cancel_guide(self, *, tracking_number: str) -> dict:
+        """Solicita cancelación de una guía Aveonline.
+
+        Args:
+            tracking_number: numguia retornado por generate_guide.
+
+        Returns:
+            dict {
+              "ok": True | False,
+              "tracking_number": str,
+              "message": str,        # texto del response Aveonline
+              "raw": <full response>,
+            }
+
+        Errores:
+            • AveonlineAuthError → JWT inválido / expirado.
+            • AveonlineTransientError → 5xx / timeout (retry).
+            • AveonlinePermanentError → 4xx (guía ya recogida, no existe, etc).
+
+        UX: si retorna ok=False, caller debe escalar al operador para
+        coordinar manual con el courier (llamada/notificación).
+        """
+        if not tracking_number or not str(tracking_number).strip():
+            return {
+                "ok": False,
+                "error": "tracking_number vacío",
+                "code": "MISSING_TRACKING",
+            }
+
+        jwt = await self._get_valid_jwt()
+        creds = await self._load_credentials()
+        empresa_id = creds.get("empresa_id")
+
+        body = {
+            "tipo": "cancelarGuia",
+            "token": jwt,
+            "idempresa": empresa_id,
+            "numguia": str(tracking_number).strip(),
+            "plugin": "konvi-saas",
+        }
+
+        logger.info(
+            "[AVEONLINE_CANCEL_GUIDE] tenant=%s tracking=%s",
+            self.tenant_id[:8], tracking_number,
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(AVEONLINE_NAL_URL, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as exc:
+            raise AveonlineTransientError(f"cancel_guide HTTP error: {exc}")
+        except Exception as exc:
+            raise AveonlinePermanentError(f"cancel_guide error: {exc}")
+
+        # Audit response RAW.
+        logger.info(
+            "[AVEONLINE_CANCEL_GUIDE] response tenant=%s tracking=%s data=%s",
+            self.tenant_id[:8], tracking_number,
+            json.dumps(data, ensure_ascii=False)[:1000],
+        )
+
+        # Aveonline cancelarGuia response shape esperada:
+        #   {"resultado": "exitoso"|"error", "mensaje": str, ...}
+        result = (data or {}).get("resultado", "").lower()
+        message = (data or {}).get("mensaje", "")
+        ok = result == "exitoso" or "cancelad" in message.lower()
+
+        return {
+            "ok": ok,
+            "tracking_number": str(tracking_number),
+            "message": message,
+            "raw": data,
+        }
+
     # ─── Webhook management (Rev. 108) ─────────────────────────────────────
     # Aveonline `crearWebhook` permite hasta 4 pares param1..param4 que viajan
     # en cada POST hacia nuestro endpoint. Usamos `param1_name="secret"` +

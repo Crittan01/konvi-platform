@@ -619,6 +619,210 @@ async def _run_agentic_full(
             "[AGENTIC_PRE_LLM] coupon_intent crashed: %s — skip", _coup_exc,
         )
 
+    # PRE-LLM #0.42: cancel/retracto intent (rev. 109 producción Ley 1480).
+    # Cliente solicita cancelar pedido (pre-entrega) o retractar (post-entrega).
+    # Detección + triage de escalation + invocación pipeline arquitectónico.
+    try:
+        from agentic.cancel_intent_resolver import (
+            detect_cancel_intent as _detect_cancel,
+            find_cancelable_orders_for_conversation as _find_cancelable,
+            find_order_by_short_id as _find_by_short,
+        )
+
+        _cancel_match = _detect_cancel(content)
+        if _cancel_match:
+            # Resolver order_id
+            target_order_id: Optional[str] = None
+            if _cancel_match.order_id_long:
+                target_order_id = _cancel_match.order_id_long
+            elif _cancel_match.order_id_short:
+                _found = _find_by_short(
+                    supabase, tenant_id=tenant_id,
+                    short_id=_cancel_match.order_id_short,
+                )
+                if _found:
+                    target_order_id = _found["id"]
+            else:
+                # No order_id mencionado → buscar única orden cancelable
+                _orders = _find_cancelable(
+                    supabase, tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                )
+                if len(_orders) == 1:
+                    target_order_id = _orders[0]["id"]
+                elif len(_orders) > 1:
+                    # Ambiguity → preguntar cuál
+                    _list_str = "\n".join(
+                        f"* *#{o['short_id']}* — ${o['total_amount']:,.0f} COP "
+                        f"({o['status']})".replace(",", ".")
+                        for o in _orders
+                    )
+                    _ambig_msg = (
+                        f"Tienes varios pedidos activos. ¿Cuál quieres "
+                        f"{('retractar' if _cancel_match.intent == 'retracto' else 'cancelar')}?\n\n{_list_str}"
+                    )
+                    await _send_outbound_text(
+                        supabase=supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id, text=_ambig_msg,
+                    )
+                    _mark_message_processing(
+                        supabase, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+                    _resolve_and_persist_agentic_state(
+                        supabase=supabase, tenant_id=tenant_id,
+                        conversation_id=conversation_id, contact=contact,
+                        history=history,
+                    )
+                    return
+                else:
+                    # 0 órdenes cancelables → mensaje natural
+                    _no_msg = (
+                        "No encuentro pedidos activos para cancelar en esta "
+                        "conversación. ¿Tienes el número del pedido (8 "
+                        "caracteres después del #)? También te conecto con "
+                        "un especialista si prefieres."
+                    )
+                    await _send_outbound_text(
+                        supabase=supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id, text=_no_msg,
+                    )
+                    _mark_message_processing(
+                        supabase, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+                    _resolve_and_persist_agentic_state(
+                        supabase=supabase, tenant_id=tenant_id,
+                        conversation_id=conversation_id, contact=contact,
+                        history=history,
+                    )
+                    return
+
+            if target_order_id:
+                if _cancel_match.intent == "cancel_order":
+                    # Pre-entrega cancellation pipeline.
+                    from lib.order_cancellation import (
+                        cancel_order, CancellationRequest,
+                    )
+                    _cancel_result = await cancel_order(
+                        supabase,
+                        CancellationRequest(
+                            order_id=target_order_id,
+                            tenant_id=tenant_id,
+                            actor="customer",
+                            reason_code="customer_request",
+                            reason_text=_cancel_match.reason_text,
+                            conversation_id=conversation_id,
+                        ),
+                    )
+                    await _send_outbound_text(
+                        supabase=supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_cancel_result.customer_message,
+                    )
+                    _mark_message_processing(
+                        supabase, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+
+                    # Si requiere escalación → marcar conv human_takeover
+                    if _cancel_result.requires_escalation:
+                        try:
+                            supabase.table("conversations").update({
+                                "status": "human_takeover",
+                            }).eq("id", conversation_id).eq(
+                                "tenant_id", tenant_id,
+                            ).execute()
+                        except Exception:
+                            pass
+
+                    # Notif Telegram operador si requiere acción
+                    if _cancel_result.operator_notification:
+                        try:
+                            from telegram_notifications import (
+                                notify_escalation_async,
+                            )
+                            await notify_escalation_async(
+                                supabase, tenant_id=tenant_id,
+                                conversation_id=conversation_id,
+                                reason=_cancel_result.operator_notification,
+                            )
+                        except Exception as _t_exc:
+                            logger.warning(
+                                "[CANCEL] telegram notif falló: %s", _t_exc,
+                            )
+
+                    logger.info(
+                        "[AGENTIC_PRE_LLM] cancel_order conv=%s order=%s "
+                        "status=%s escalated=%s",
+                        conversation_id[:8], target_order_id[:8],
+                        _cancel_result.status, _cancel_result.requires_escalation,
+                    )
+                    _resolve_and_persist_agentic_state(
+                        supabase=supabase, tenant_id=tenant_id,
+                        conversation_id=conversation_id, contact=contact,
+                        history=history,
+                    )
+                    return
+
+                if _cancel_match.intent == "retracto":
+                    # Post-entrega: escalación inicial al especialista. RMA
+                    # flow tiene complejidad legal (5d hábiles, validación
+                    # producto, refund 30d) que requiere humano experto.
+                    short_id = target_order_id[:8].upper()
+                    _retracto_msg = (
+                        f"Entiendo que quieres retractarte del pedido "
+                        f"*#{short_id}*.\n\n"
+                        f"Tienes ese derecho por *Ley 1480 Art. 47*: 5 días "
+                        f"hábiles desde la entrega para retractarte y "
+                        f"recibir reembolso completo.\n\n"
+                        f"Te conecto con un especialista para coordinar la "
+                        f"devolución del producto y procesar tu reembolso."
+                    )
+                    await _send_outbound_text(
+                        supabase=supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id, text=_retracto_msg,
+                    )
+                    try:
+                        supabase.table("conversations").update({
+                            "status": "human_takeover",
+                        }).eq("id", conversation_id).eq(
+                            "tenant_id", tenant_id,
+                        ).execute()
+                    except Exception:
+                        pass
+                    try:
+                        from telegram_notifications import (
+                            notify_escalation_async,
+                        )
+                        await notify_escalation_async(
+                            supabase, tenant_id=tenant_id,
+                            conversation_id=conversation_id,
+                            reason=(
+                                f"🚨 Retracto Ley 1480 — Pedido #{short_id}\n"
+                                f"Cliente: \"{_cancel_match.reason_text[:200]}\"\n"
+                                f"Acción: validar ventana 5d hábiles, generar "
+                                f"etiqueta retorno, coordinar refund "
+                                f"(30 días calendario máx Ley 1480)."
+                            ),
+                        )
+                    except Exception:
+                        pass
+                    _mark_message_processing(
+                        supabase, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+                    _resolve_and_persist_agentic_state(
+                        supabase=supabase, tenant_id=tenant_id,
+                        conversation_id=conversation_id, contact=contact,
+                        history=history,
+                    )
+                    return
+    except Exception as _can_exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] cancel_intent crashed: %s — skip", _can_exc,
+        )
+
     # PRE-LLM #0.45: image request (rev. 109 UAT live BUG 18). Cliente
     # pide foto/imagen de producto → resolver determinístico envía la
     # imagen directamente sin que el LLM decida. El image_send_tool ya

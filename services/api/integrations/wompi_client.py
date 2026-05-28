@@ -446,6 +446,123 @@ async def get_transaction(
         return data
 
 
+# ─── Rev. 109 — Wompi void (anulación pre-settlement) ───────────────────────
+#
+# POST /v1/transactions/{id}/void
+# Documentación: docs/research/wompi-dossier-2026-05-05.md sec H.3.2.
+#
+# REALIDAD CRUDA:
+#   • Wompi NO tiene API de refund pública. Solo `void`.
+#   • Void aplica SOLO a tarjetas (CARD) ANTES de settlement (~24-48h).
+#   • NEQUI, PSE, Bancolombia: NO se pueden voidear (fondos ya transferidos).
+#   • Post-settlement: refund manual dashboard Wompi o soporte Bancolombia.
+#
+# Esta función intenta el void. Si no aplica (método ≠ CARD o ventana vencida),
+# Wompi retorna 4xx — el caller debe marcar refund_pending_manual + notificar
+# operador. NO se debe insistir.
+
+
+def void_transaction_sync(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+) -> dict:
+    """Intenta anular una transacción Wompi (pre-settlement, solo CARD).
+
+    Args:
+        private_key: clave prv_* del tenant.
+        environment: 'sandbox' | 'production'.
+        transaction_id: ID Wompi de la transacción a anular.
+
+    Returns:
+        dict con respuesta Wompi:
+            {
+                "id": "01-1538687528-49201",
+                "status": "VOIDED",      # o el status actual si rechaza
+                "amount_in_cents": ...,
+                "voided_at": "...",
+            }
+
+    Raises:
+        ValueError si args inválidos.
+        httpx.HTTPStatusError si Wompi rechaza:
+          • 422 Unprocessable Entity — método ≠ CARD o post-settlement.
+          • 404 — transaction_id no existe.
+          • 401 — private_key inválida.
+        Caller debe interpretar el código:
+          • 422 → fallback refund manual (operador dashboard).
+          • 5xx → retry posible vía void_transaction_sync_with_resilience.
+    """
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id no puede ser vacío")
+
+    base_url = wompi_base_url(environment)
+    url = f"{base_url}/transactions/{transaction_id.strip()}/void"
+
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {private_key}",
+                "Content-Type": "application/json",
+            },
+            json={},  # Wompi void no requiere payload, pero acepta body vacío.
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "[WOMPI] POST /transactions/%s/void %d: %s",
+                transaction_id, response.status_code, response.text[:300],
+            )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        if not isinstance(data, dict):
+            logger.warning(
+                "[WOMPI] void %s: data no es dict: %s",
+                transaction_id, type(data).__name__,
+            )
+            return {}
+        logger.info(
+            "[WOMPI] void OK txn=%s new_status=%s",
+            transaction_id, data.get("status", "?"),
+        )
+        return data
+
+
+def is_void_eligible(payment_method_type: str, paid_at_iso: str | None) -> bool:
+    """Heurística pre-call: ¿este pago es elegible para void?
+
+    Reglas (dossier Wompi sec H.3.2):
+      • Método debe ser CARD (Visa/Mastercard/Amex).
+      • Tiempo desde captura < 24h (settlement window típico Bancolombia).
+
+    NO es garantía — Wompi puede rechazar igual si captura cerró antes.
+    Sirve como GATE PRE-CALL para evitar 422 cuando ya sabemos que no aplica.
+
+    Args:
+        payment_method_type: 'CARD' | 'NEQUI' | 'PSE' | 'BANCOLOMBIA_TRANSFER'
+        paid_at_iso: cuando se aprobó el pago (ISO 8601). None si desconocido.
+
+    Returns:
+        True si TODOS los gates pasan; False si claramente no aplica.
+    """
+    if (payment_method_type or "").upper() != "CARD":
+        return False
+    if not paid_at_iso:
+        # Sin timestamp = optimista, intentamos.
+        return True
+    try:
+        from datetime import datetime, timezone, timedelta
+        paid_at = datetime.fromisoformat(paid_at_iso.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        # Ventana conservadora 23h para no llegar al borde de settlement.
+        return (now - paid_at) < timedelta(hours=23)
+    except Exception:
+        return True  # Defensive: intentar si no podemos parsear timestamp.
+
+
 # ─── Rev. 105 Sem 4 H.3.2 — Retry + Circuit Breaker (resilience) ─────────────
 # Wrappers opt-in sobre create_payment_link / get_transaction / etc. que
 # agregan:
