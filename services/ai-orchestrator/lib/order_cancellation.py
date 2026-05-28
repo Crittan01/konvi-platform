@@ -274,16 +274,20 @@ async def cancel_order(
     # 2. Load policy
     policy = _load_policy(supabase, request.tenant_id)
 
-    # Cargar payment + shipment para triage
+    # Cargar payment + shipment para triage.
+    # Schema real `payments` NO tiene columnas dedicadas payment_method_type/paid_at;
+    # extraemos del raw_webhook (Wompi event payload) cuando aplique.
     payment_row = None
     try:
         payments = (
             supabase.table("payments")
-            .select("status, wompi_txn_id, payment_method_type, paid_at, amount_in_cents")
+            .select("status, wompi_status, wompi_txn_id, amount_in_cents, raw_webhook")
             .eq("order_id", request.order_id)
             .order("created_at", desc=True).limit(1).execute()
         ).data or []
         payment_row = payments[0] if payments else None
+        if payment_row:
+            _hydrate_payment_from_webhook(payment_row)
     except Exception:
         pass
 
@@ -291,7 +295,7 @@ async def cancel_order(
     try:
         shipments = (
             supabase.table("shipments")
-            .select("status, tracking_number, carrier, carrier_code")
+            .select("status, tracking_number, carrier, service")
             .eq("order_id", request.order_id)
             .order("created_at", desc=True).limit(1).execute()
         ).data or []
@@ -411,6 +415,24 @@ async def cancel_order(
 
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
+
+def _hydrate_payment_from_webhook(payment: dict) -> None:
+    """Extrae payment_method_type + paid_at desde raw_webhook (Wompi event).
+
+    El schema `payments` actual NO tiene columnas dedicadas. La info real está
+    en raw_webhook.data.transaction.{payment_method_type, finalized_at}.
+    Mutamos el dict in-place para que el resto del pipeline lo lea uniforme.
+    """
+    rw = payment.get("raw_webhook") or {}
+    try:
+        txn = ((rw.get("data") or {}).get("transaction") or {})
+    except Exception:
+        txn = {}
+    if not payment.get("payment_method_type"):
+        payment["payment_method_type"] = txn.get("payment_method_type") or ""
+    if not payment.get("paid_at"):
+        payment["paid_at"] = txn.get("finalized_at") or txn.get("created_at")
+
 
 def _insert_cancellation_row(
     supabase: Any, order: dict, request: CancellationRequest,
@@ -654,43 +676,63 @@ def _process_refund(
     if payment_method == "CARD" and payment.get("paid_at"):
         try:
             from integrations.wompi_client import (
-                void_transaction_sync, is_void_eligible,
+                void_transaction_sync,
+                is_void_eligible,
+                get_tenant_wompi_creds,
             )
-            eligible = is_void_eligible(payment_method, payment.get("paid_at"))
-            if eligible:
-                # Cargar credentials Wompi
-                from vault_helper import get_tenant_secret
-                try:
-                    private_key = get_tenant_secret(
-                        supabase, tenant_id=order["tenant_id"],
-                        provider="wompi", credential="private_key",
-                    )
-                    environment = get_tenant_secret(
-                        supabase, tenant_id=order["tenant_id"],
-                        provider="wompi", credential="environment",
-                    ) or "sandbox"
-                except Exception:
-                    return "wompi_dashboard_manual", "pending_manual", amount
+        except Exception as exc:
+            logger.error("[CANCEL] wompi_client import failed: %s", exc)
+            return "wompi_dashboard_manual", "pending_manual", amount
 
-                txn_id = payment.get("wompi_txn_id")
-                if not txn_id:
-                    return "wompi_dashboard_manual", "pending_manual", amount
+        if not is_void_eligible(payment_method, payment.get("paid_at")):
+            logger.info(
+                "[CANCEL] void NOT eligible (window or method) txn=%s",
+                payment.get("wompi_txn_id"),
+            )
+            return "wompi_dashboard_manual", "pending_manual", amount
 
-                try:
-                    void_resp = void_transaction_sync(
-                        private_key=private_key, environment=environment,
-                        transaction_id=txn_id,
-                    )
-                    if (void_resp.get("status") or "").upper() == "VOIDED":
-                        return "wompi_void_auto", "completed", amount
-                except Exception as exc:
-                    logger.warning(
-                        "[CANCEL] wompi void failed txn=%s: %s — escalating manual",
-                        txn_id, exc,
-                    )
-                    return "wompi_dashboard_manual", "pending_manual", amount
-        except Exception:
-            pass
+        private_key, _events_key, environment = get_tenant_wompi_creds(
+            supabase, tenant_id=order["tenant_id"],
+        )
+        if not private_key:
+            logger.warning(
+                "[CANCEL] tenant=%s sin wompi private_key — manual",
+                order["tenant_id"],
+            )
+            return "wompi_dashboard_manual", "pending_manual", amount
+
+        txn_id = payment.get("wompi_txn_id")
+        if not txn_id:
+            logger.warning("[CANCEL] payment sin wompi_txn_id — manual")
+            return "wompi_dashboard_manual", "pending_manual", amount
+
+        try:
+            void_transaction_sync(
+                private_key=private_key,
+                environment=environment or "sandbox",
+                transaction_id=txn_id,
+            )
+            # Wompi POST /void devuelve la transacción PRE-void (status=APPROVED)
+            # y procesa el void asíncrono. El paso a VOIDED llega vía webhook
+            # `transaction.updated` ~segundos después. HTTP 200 sin excepción
+            # significa que Wompi aceptó el void — marcamos completed y
+            # actualizamos wompi_status localmente para coherencia (el webhook
+            # subsecuente será idempotente).
+            try:
+                supabase.table("payments").update({
+                    "wompi_status": "VOIDED",
+                }).eq("wompi_txn_id", txn_id).execute()
+            except Exception as exc:
+                logger.warning(
+                    "[CANCEL] update payments.wompi_status=VOIDED failed: %s",
+                    exc,
+                )
+            return "wompi_void_auto", "completed", amount
+        except Exception as exc:
+            logger.warning(
+                "[CANCEL] wompi void failed txn=%s: %s — escalating manual",
+                txn_id, exc,
+            )
 
     # Default: manual refund operador
     return "wompi_dashboard_manual", "pending_manual", amount
@@ -710,6 +752,17 @@ async def _cancel_shipping(
     tracking = shipment.get("tracking_number")
     if not tracking:
         return False, "not_applicable"
+
+    # Modo simulación (sandbox sin guía real Aveonline): no hay API call que
+    # hacer, solo marcamos shipments.status='cancelled' para coherencia.
+    if status == "simulated":
+        try:
+            supabase.table("shipments").update({
+                "status": "cancelled",
+            }).eq("tracking_number", tracking).eq("tenant_id", tenant_id).execute()
+        except Exception as exc:
+            logger.warning("[CANCEL] update shipment cancelled (sim) failed: %s", exc)
+        return True, "simulated_no_api_call"
 
     try:
         from integrations.aveonline_client import AveonlineClient
