@@ -444,9 +444,11 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
         _enqueue_payment_failed_msg(supabase, conversation_id=conversation_id, tenant_id=tenant_id, order_id=order_id)
 
 
+# Rev. 109 UAT live BUG 13: emojis 😕 y 🙏 removidos. La whitelist agentic
+# permite 📋🚚✅ solamente; mantenemos coherencia cross-canal.
 _PAYMENT_FAILED_VARIANTS = [
-    "Hmm, tu pago del pedido *#{short_id}* no se completó. 😕\n\nSi quieres, te conecto con un {role} para terminar la compra juntos.",
-    "El pago del pedido *#{short_id}* no pasó esta vez. 🙏\n\nDime si prefieres que un {role} te acompañe a destrabarlo o intentarlo de nuevo.",
+    "Hmm, tu pago del pedido *#{short_id}* no se completó.\n\nSi quieres, te conecto con un {role} para terminar la compra juntos.",
+    "El pago del pedido *#{short_id}* no pasó esta vez.\n\nDime si prefieres que un {role} te acompañe a destrabarlo o intentarlo de nuevo.",
     "Tu pago del pedido *#{short_id}* quedó pendiente.\n\n¿Te gustaría que un {role} te ayude a finalizar la compra?",
 ]
 
