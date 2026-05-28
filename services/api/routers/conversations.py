@@ -378,7 +378,8 @@ async def get_conversation_context(
             cart_res = (
                 supabase.table("conversation_carts")
                 .select("id, status, subtotal_cents, shipping_cents, "
-                        "total_cents, shipping_meta, requires_requote")
+                        "total_cents, shipping_meta, requires_requote, "
+                        "discount_cents, coupon_code")
                 .eq("tenant_id", tenant_id)
                 .eq("conversation_id", conversation_id)
                 .eq("status", "open")
@@ -520,13 +521,25 @@ async def get_conversation_context(
                     ship_status = "pending"  # nunca cotizado
 
                 effective_carrier = carrier_name or last_quote_carrier or ""
-                effective_total = int(cart.get("subtotal_cents") or 0) + effective_ship
+                # Rev. 109 fix UAT live BUG 35 — preservar descuento de cupón
+                # en el total que ve el operador en Inbox. Sin esto, el panel
+                # mostraba $63.000 cuando el cliente realmente va a pagar
+                # $54.900 (BUG 34 mismo problema replicado en API context).
+                discount_cents = int(cart.get("discount_cents") or 0)
+                effective_total = max(
+                    0,
+                    int(cart.get("subtotal_cents") or 0)
+                    + effective_ship
+                    - discount_cents,
+                )
 
                 active_cart = {
                     "id": cart["id"],
                     "items": cart_items,
                     "subtotal_cents": cart.get("subtotal_cents") or 0,
                     "shipping_cents": effective_ship,
+                    "discount_cents": discount_cents,
+                    "coupon_code": cart.get("coupon_code"),
                     "total_cents": effective_total,
                     "carrier_name": effective_carrier,
                     "requires_requote": requires_rq,

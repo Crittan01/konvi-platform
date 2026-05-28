@@ -123,6 +123,8 @@ interface ActiveCart {
   items: CartItem[]
   subtotal_cents: number
   shipping_cents: number              // effective: cart o último quote del history
+  discount_cents: number              // Rev. 109 — descuento de cupón aplicado
+  coupon_code: string | null          // Rev. 109 — código cupón si aplica
   total_cents: number
   carrier_name: string
   requires_requote: boolean
@@ -1811,6 +1813,24 @@ export default function InboxPage() {
                         </div>
                       )
                     })()}
+                    {/* Rev. 109 — línea Descuento SIEMPRE visible.
+                        Coherencia con resumen del bot — operador ve el
+                        mismo desglose que vería el cliente. */}
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>
+                        Descuento
+                        {convContext.active_cart.coupon_code && (
+                          <span className="ml-1 text-[9px] uppercase tracking-wider px-1 py-px rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            {convContext.active_cart.coupon_code}
+                          </span>
+                        )}
+                      </span>
+                      <span className={convContext.active_cart.discount_cents > 0 ? 'text-emerald-700' : ''}>
+                        {convContext.active_cart.discount_cents > 0
+                          ? `-${formatMoney(convContext.active_cart.discount_cents / 100)}`
+                          : '—'}
+                      </span>
+                    </div>
                     {convContext.active_cart.total_cents > 0 && (
                       <div className="flex justify-between text-sm font-semibold pt-0.5">
                         <span>Total</span>
