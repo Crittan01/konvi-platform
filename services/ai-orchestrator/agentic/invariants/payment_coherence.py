@@ -82,6 +82,10 @@ _CREDIT_LANGUAGE_PATTERNS = (
     re.compile(r"\bwompi\b", re.IGNORECASE),
     re.compile(r"\bgenerar(?:te)?\s+(?:el\s+)?link\b", re.IGNORECASE),
     re.compile(r"\benviar(?:te)?\s+(?:el\s+)?link\b", re.IGNORECASE),
+    # Rev. 109 UAT live BUG 8 — sustantivos "pago online" / "pago en línea"
+    # (LLM Gemini paraphrasea response_text del tool COD reescribiéndolo).
+    re.compile(r"\bpago\s+(?:online|en\s+l[ií]nea|electr[oó]nico|por\s+wompi|anticipado)\b", re.IGNORECASE),
+    re.compile(r"\bregistrado\s+para\s+pago\s+(?:online|en\s+l[ií]nea)\b", re.IGNORECASE),
 )
 
 _COD_LANGUAGE_PATTERNS = (
@@ -190,6 +194,22 @@ def _build_cod_coherent_rewrite(
     if re.search(r"\blink\s+de\s+pago\b", candidate_text, re.IGNORECASE):
         return re.sub(
             r"(?:el\s+)?link\s+de\s+pago\b",
+            "pago contraentrega",
+            candidate_text, flags=re.IGNORECASE,
+        )
+
+    # Rev. 109 UAT live BUG 8: "registrado para pago online" → "registrado para contraentrega"
+    if re.search(r"\bregistrado\s+para\s+pago\s+(?:online|en\s+l[ií]nea)\b", candidate_text, re.IGNORECASE):
+        return re.sub(
+            r"\bregistrado\s+para\s+pago\s+(?:online|en\s+l[ií]nea)\b",
+            "registrado para contraentrega",
+            candidate_text, flags=re.IGNORECASE,
+        )
+
+    # Sustantivos "pago online" / "pago en línea" → "pago contraentrega"
+    if re.search(r"\bpago\s+(?:online|en\s+l[ií]nea|electr[oó]nico|por\s+wompi|anticipado)\b", candidate_text, re.IGNORECASE):
+        return re.sub(
+            r"\bpago\s+(?:online|en\s+l[ií]nea|electr[oó]nico|por\s+wompi|anticipado)\b",
             "pago contraentrega",
             candidate_text, flags=re.IGNORECASE,
         )

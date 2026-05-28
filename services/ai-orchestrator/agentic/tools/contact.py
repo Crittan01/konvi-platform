@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
@@ -613,11 +613,20 @@ class SaveContactFieldArgs(BaseModel):
     El LLM debe pasar EL FIELD QUE SE GUARDA + los campos requeridos
     por ese tipo. Los otros campos se ignoran (Pydantic permite extras
     en este modelo flexible para que el LLM no se confunda).
+
+    Rev. 109 UAT live 2026-05-27: el LLM Gemini en PAYMENT state pasaba
+    `field_name='email'` (más natural en lenguaje) en vez de `field='email'`.
+    Pydantic v2 acepta alias mediante `validation_alias` — aceptamos
+    ambos para no perder tool calls por naming gotcha.
     """
+    model_config = {"populate_by_name": True}
+
     field: Literal["email", "name", "document", "address", "shipping_phone"] = Field(
         ...,
+        validation_alias=AliasChoices("field", "field_name", "type"),
         description=(
-            "Tipo de dato PII a guardar. Determina qué campos del payload "
+            "Tipo de dato PII a guardar (alias aceptados: field, field_name, type). "
+            "Determina qué campos del payload "
             "son requeridos: email→value(email), name→value(nombre+apellido), "
             "document→doc_type+doc_number, address→street+city+building_type"
             "(+apartment si edificio/conjunto/oficina), shipping_phone→value(celular 10 dig)."

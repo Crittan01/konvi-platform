@@ -85,6 +85,18 @@ class StateResolver:
         ) or ctx.payment_status == "pending":
             return AgenticState.PAYMENT
 
+        # 3.5. Carrier seleccionado + PII + cart listos → PAYMENT (pre-link).
+        # Cliente ya eligió transportadora; siguiente acción es generate_payment_link
+        # (Wompi para credit / COD direct_response para contraentrega).
+        if (
+            ctx.cart_items_count > 0
+            and ctx.contact_has_required_pii
+            and ctx.contact_consent_given
+            and ctx.cart_has_shipping_quote
+            and ctx.cart_has_carrier_selected
+        ):
+            return AgenticState.PAYMENT
+
         # 4. Carrier ofrecido pero no elegido
         if (
             ctx.cart_items_count > 0
@@ -147,13 +159,31 @@ def build_context_from_records(
     elif isinstance(c.get("items"), list):
         items_count = len(c["items"])
 
-    has_quote = bool(c.get("shipping_quote_id") or c.get("shipping_cents"))
-    has_carrier = bool(c.get("carrier_id") or c.get("carrier_code"))
+    # Schema real: shipping_meta JSONB contiene quoted_options + carrier + rate_id.
+    # Cotización está disponible cuando hay quoted_options (pre-select_carrier) O
+    # cuando ya hay shipping_cents > 0 (post-select_carrier).
+    _meta = c.get("shipping_meta") or {}
+    has_quote = bool(
+        _meta.get("quoted_options")
+        or c.get("shipping_cents")
+        or c.get("shipping_quote_id")
+    )
+    has_carrier = bool(
+        _meta.get("carrier")
+        or c.get("carrier_id")
+        or c.get("carrier_code")
+    )
     has_link = bool(c.get("payment_link") or c.get("wompi_link_id"))
 
+    # Schema real: contact tiene `document_number` (no `document`).
+    # email opcional — document_number + address son los críticos para envío.
     has_required_pii = bool(
         contact_row.get("name")
-        and (contact_row.get("email") or contact_row.get("document"))
+        and (
+            contact_row.get("document_number")
+            or contact_row.get("document")
+            or contact_row.get("email")
+        )
         and contact_row.get("address")
     )
 
