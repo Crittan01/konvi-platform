@@ -712,6 +712,76 @@ def set_shipping_meta(
     }
 
 
+def set_shipping_recipient(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    name: str | None = None,
+    document_type: str | None = None,
+    document_number: str | None = None,
+    phone: str | None = None,
+    address: dict | None = None,
+) -> dict:
+    """Persiste destinatario alterno (regalo / envío a tercero) en
+    cart.shipping_meta.recipient_* — NO sobrescribe contact del titular.
+
+    Rev. 109 fix UAT live BUG 37 (Habeas Data Ley 1581) — cuando el
+    cliente compra para otra persona ("es para mi mamá") los datos del
+    receptor deben vivir en el cart (orden específica) NO en el contact
+    del titular WhatsApp. Sin esto, el bot sobrescribía Cristian → María
+    en contacts table → violación Habeas Data + UX rota.
+
+    Cualquier campo en None se preserva del valor anterior (parcial-merge).
+    Para borrar el recipient completo, pasar todos los campos vacíos o
+    invocar clear_shipping_recipient.
+    """
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta")
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        raise RuntimeError(f"set_shipping_recipient: cart {cart_id} no encontrado")
+    existing_meta = cur.data[0].get("shipping_meta") or {}
+    existing_recipient = existing_meta.get("recipient") or {}
+
+    new_recipient = {
+        "name": (name if name is not None
+                 else existing_recipient.get("name")),
+        "document_type": (document_type if document_type is not None
+                          else existing_recipient.get("document_type")),
+        "document_number": (document_number if document_number is not None
+                            else existing_recipient.get("document_number")),
+        "phone": (phone if phone is not None
+                  else existing_recipient.get("phone")),
+        "address": (address if address is not None
+                    else existing_recipient.get("address")),
+    }
+    new_meta = {**existing_meta, "recipient": new_recipient}
+
+    supabase.table("conversation_carts").update({
+        "shipping_meta": new_meta,
+    }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
+
+    logger.info(
+        "[CART] shipping_recipient set cart=%s name=%s doc=%s phone=%s",
+        cart_id[:8], new_recipient.get("name"),
+        new_recipient.get("document_number"),
+        new_recipient.get("phone"),
+    )
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="shipping_recipient_set",
+        payload={"recipient": new_recipient},
+    )
+    return {"cart_id": cart_id, "recipient": new_recipient}
+
+
 def set_quoted_options(
     supabase: Client,
     *,

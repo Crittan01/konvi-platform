@@ -639,8 +639,117 @@ class RemoveCartItemTool:
         })
 
 
+# ─── SetShippingRecipient — Rev. 109 BUG 37 fix Habeas Data ─────────────────
+
+
+class _AddressSchema(BaseModel):
+    city: Optional[str] = None
+    street: Optional[str] = None
+    neighborhood: Optional[str] = None
+    apartment: Optional[str] = None
+    tower: Optional[str] = None
+    floor: Optional[str] = None
+    building_type: Optional[str] = None  # casa | edificio | conjunto
+
+
+class SetShippingRecipientArgs(BaseModel):
+    name: Optional[str] = Field(
+        default=None,
+        description="Nombre completo del destinatario alterno (ej. 'María Tobon')",
+    )
+    document_type: Optional[str] = Field(
+        default=None,
+        description="Tipo documento destinatario: 'CC' | 'CE' | 'NIT' | 'TI'",
+    )
+    document_number: Optional[str] = Field(
+        default=None,
+        description="Número documento destinatario (solo dígitos)",
+    )
+    phone: Optional[str] = Field(
+        default=None,
+        description="Celular destinatario (formato +57XXXXXXXXXX o 10 dígitos)",
+    )
+    address: Optional[_AddressSchema] = Field(
+        default=None,
+        description="Dirección de envío del destinatario (NO la del titular WhatsApp)",
+    )
+
+
+class SetShippingRecipientTool:
+    """Persiste destinatario alterno cuando cliente compra para tercero.
+
+    USAR cuando el cliente diga: "es para mi mamá", "envíalo a mi
+    hermana", "se lo regalo a Juan", "para mi oficina", etc.
+
+    NUNCA usar `save_contact_field` para datos del receptor — eso
+    sobrescribiría los datos del titular WhatsApp (violación Habeas
+    Data Ley 1581). Los datos del receptor van en el CART (esta tool).
+
+    Si el cliente luego dice "ah no, mejor para mí" → invocar de nuevo
+    con name=None para limpiar, o usar contact_info como fallback.
+    """
+
+    name = "set_shipping_recipient"
+    description = (
+        "Persiste el destinatario alterno del envío (regalo o tercero) "
+        "en el carrito. NO toca el contact del titular WhatsApp. Usar "
+        "cuando el cliente diga 'es para X' / 'envíalo a X' / 'regalo "
+        "para X'. Si el cliente luego revierte, dejar name=null."
+    )
+    args_schema = SetShippingRecipientArgs
+
+    async def execute(
+        self, args: SetShippingRecipientArgs, ctx: ToolContext,
+    ) -> ToolResult:
+        try:
+            from tools.cart_tool import (
+                get_cart_with_items, set_shipping_recipient,
+            )
+            cart = get_cart_with_items(
+                ctx.supabase,
+                conversation_id=ctx.conversation_id,
+                tenant_id=ctx.tenant_id,
+            )
+        except Exception as exc:
+            return tool_failure(
+                f"No pude leer el carrito: {exc}", code="CART_READ_ERROR",
+            )
+        if not cart:
+            return tool_failure(
+                "No hay carrito activo — agrega un producto primero.",
+                code="NO_CART",
+            )
+        try:
+            result = set_shipping_recipient(
+                ctx.supabase,
+                cart_id=cart["id"],
+                tenant_id=ctx.tenant_id,
+                name=args.name,
+                document_type=args.document_type,
+                document_number=args.document_number,
+                phone=args.phone,
+                address=(
+                    args.address.model_dump(exclude_none=True)
+                    if args.address else None
+                ),
+            )
+        except Exception as exc:
+            return tool_failure(
+                f"Error guardando destinatario: {exc}",
+                code="CART_WRITE_ERROR",
+            )
+        return tool_success({
+            "recipient": result.get("recipient") or {},
+            "note": (
+                "Destinatario alterno guardado en el cart. El contact "
+                "del titular NO se modificó (Habeas Data Ley 1581)."
+            ),
+        })
+
+
 # Auto-registro.
 register_tool(GetCartTool())
 register_tool(AddToCartTool())
 register_tool(UpdateCartItemQtyTool())
+register_tool(SetShippingRecipientTool())
 register_tool(RemoveCartItemTool())
