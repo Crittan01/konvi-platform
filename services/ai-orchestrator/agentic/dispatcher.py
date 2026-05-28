@@ -463,6 +463,67 @@ async def _run_agentic_full(
             exc,
         )
 
+    # PRE-LLM #-1: Domain filter — Meta Business Policy + Ley 23/1981
+    # Colombia (ejercicio ilegal de medicina) + INVIMA (cosméticos NO son
+    # medicamentos). Rev. 109 fix UAT live BUG 36.
+    # Si el cliente pregunta consulta médica/diagnóstico O intenta comprar
+    # medicamento → bot redirige a profesional/droguería y NO procesa con
+    # LLM (LLM tendía a "recomendar productos para curar gripa" — claim
+    # médico ilegal + violación Meta Policy).
+    try:
+        from safety import (
+            detect_medical_query as _detect_medical_query,
+            detect_drug_purchase_request as _detect_drug_purchase_request,
+        )
+        _medical_hit = _detect_medical_query(content)
+        _drug_hit = _detect_drug_purchase_request(content) if not _medical_hit else False
+        if _medical_hit or _drug_hit:
+            if _medical_hit:
+                _redirect = (
+                    "Entiendo tu inquietud. Soy asistente de venta de "
+                    "productos de KAIU Living Natural — no estoy "
+                    "capacitada para dar recomendaciones médicas ni "
+                    "diagnosticar condiciones de salud.\n\n"
+                    "Para temas de salud te recomiendo consultar a un "
+                    "profesional médico o tu EPS.\n\n"
+                    "¿Te puedo ayudar con algún producto de nuestra "
+                    "tienda?"
+                )
+                _log_reason = "medical_query"
+            else:
+                _redirect = (
+                    "Lo siento, no vendemos medicamentos. Por norma de "
+                    "WhatsApp Business + regulación colombiana (INVIMA), "
+                    "los medicamentos solo pueden adquirirse en "
+                    "droguerías/farmacias autorizadas.\n\n"
+                    "¿Te puedo ayudar con algún producto de cosmética "
+                    "natural KAIU?"
+                )
+                _log_reason = "drug_purchase"
+            await _send_outbound_text(
+                supabase=supabase, conversation_id=conversation_id,
+                tenant_id=tenant_id, text=_redirect,
+            )
+            _mark_message_processing(
+                supabase, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
+            _resolve_and_persist_agentic_state(
+                supabase=supabase, tenant_id=tenant_id,
+                conversation_id=conversation_id, contact=contact,
+                history=history,
+            )
+            logger.info(
+                "[AGENTIC_PRE_LLM] domain_filter blocked conv=%s reason=%s",
+                conversation_id[:8], _log_reason,
+            )
+            return
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] domain_filter crashed: %s — fall-through LLM",
+            exc,
+        )
+
     # PRE-LLM #0: COD intent marker. Rev. 108 Fase B.
     # NO es bypass — solo marca el cart con payment_method='cod' cuando
     # el cliente menciona explícitamente "contraentrega"/"pago al recibir".
