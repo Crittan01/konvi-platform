@@ -981,20 +981,38 @@ async def _run_agentic_full(
         from agentic.state_machine import StateResolver
         from agentic.state_machine.resolver import build_context_from_records
 
-        _conv_row = (
-            supabase.table("conversations")
-            .select("status, agentic_state")
-            .eq("id", conversation_id)
-            .single()
-            .execute()
-        )
+        # Rev. 109 — SELECT defensive. Si la columna agentic_state aún no
+        # está aplicada en remote (migration pending), caemos al SELECT
+        # sin esa columna. El resolver SIGUE funcionando (per-state prompt
+        # + tools subset); solo se omite la persistencia del badge.
+        try:
+            _conv_row = (
+                supabase.table("conversations")
+                .select("status, agentic_state")
+                .eq("id", conversation_id)
+                .single()
+                .execute()
+            )
+            _has_state_column = True
+        except Exception:
+            _conv_row = (
+                supabase.table("conversations")
+                .select("status")
+                .eq("id", conversation_id)
+                .single()
+                .execute()
+            )
+            _has_state_column = False
         _conv = _conv_row.data or {}
 
         _cart_row = (
             supabase.table("conversation_carts")
             .select(
-                "id, status, payment_method, shipping_cents, carrier_code, "
-                "payment_link, wompi_link_id"
+                # Schema real (post rev. 108): shipping_meta JSONB contiene
+                # carrier, rate_id, shipping_cost_cents. NO hay columnas
+                # carrier_code / payment_link directas en el cart.
+                "id, status, payment_method, shipping_cents, shipping_meta, "
+                "converted_order_id"
             )
             .eq("conversation_id", conversation_id)
             .eq("tenant_id", tenant_id)
@@ -1005,6 +1023,10 @@ async def _run_agentic_full(
         )
         _cart = (_cart_row.data or [None])[0]
         if _cart:
+            # Derivar campos virtuales para el resolver.
+            _meta = _cart.get("shipping_meta") or {}
+            _cart["carrier_code"] = _meta.get("carrier") or None
+            _cart["payment_link"] = None  # vive en payments/orders, no aquí
             _items_count_row = (
                 supabase.table("conversation_cart_items")
                 .select("id", count="exact", head=True)
@@ -1014,6 +1036,9 @@ async def _run_agentic_full(
             _cart["items_count"] = int(
                 getattr(_items_count_row, "count", 0) or 0
             )
+            # Si cart está checkout y tiene converted_order_id → hay pago en curso.
+            if _cart.get("status") == "checkout" and _cart.get("converted_order_id"):
+                _cart["payment_link"] = "checkout"  # marker para el resolver
 
         _resolution_ctx = build_context_from_records(
             conversation=_conv,
@@ -1024,10 +1049,16 @@ async def _run_agentic_full(
         _state = StateResolver().resolve(_resolution_ctx)
         _resolved_state = _state
         _prev_state = _conv.get("agentic_state")
-        if _state.value != _prev_state:
-            supabase.table("conversations").update(
-                {"agentic_state": _state.value}
-            ).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+        if _has_state_column and _state.value != _prev_state:
+            try:
+                supabase.table("conversations").update(
+                    {"agentic_state": _state.value}
+                ).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            except Exception as _upd_exc:
+                logger.warning(
+                    "[AGENTIC_STATE] update failed conv=%s: %s — per-state sigue activo",
+                    conversation_id[:8], _upd_exc,
+                )
             logger.info(
                 "[AGENTIC_STATE] conv=%s %s→%s (cart_items=%s consent=%s)",
                 conversation_id[:8],
@@ -1035,6 +1066,12 @@ async def _run_agentic_full(
                 _state.value,
                 _resolution_ctx.cart_items_count,
                 _resolution_ctx.contact_consent_given,
+            )
+        elif not _has_state_column:
+            logger.info(
+                "[AGENTIC_STATE] conv=%s state=%s (column ausente — per-state activo "
+                "sin persistencia; aplica migration 20260604000000 para badge UI)",
+                conversation_id[:8], _state.value,
             )
     except Exception as _state_exc:
         # State machine NO debe bloquear el turno. Log y seguir.

@@ -21,18 +21,24 @@ _ESCALATE = "escalate_to_human"
 # El orden de los nombres NO importa (set), pero por convención listamos
 # primero el tool "principal" del estado.
 _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
-    # Saludo + presentación inicial — cliente puede preguntar pedido previo.
+    # Saludo + presentación inicial — cliente puede preguntar pedido previo
+    # o entrar con intención directa ("quiero 2 jabones de coco") sin pasar
+    # por exploring. add_to_cart presente para flow directo.
     AgenticState.GREETING: frozenset({
         "list_catalog",
+        "add_to_cart",
         "get_contact_info",
         "get_recent_orders",
         "kb_query",
         "send_product_image",
         _ESCALATE,
     }),
-    # Navegación catálogo, antes de empezar cart.
+    # Navegación catálogo. add_to_cart presente porque cliente puede
+    # decidir agregar sin pasar formalmente por CART_BUILDING — el
+    # add_to_cart es lo que transiciona el state, no al revés.
     AgenticState.EXPLORING: frozenset({
         "list_catalog",
+        "add_to_cart",
         "send_product_image",
         "kb_query",
         "get_contact_info",
@@ -56,23 +62,35 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "get_cart",
         _ESCALATE,
     }),
-    # Cotización envío.
+    # Cotización envío. Incluye select_carrier para cliente que dice
+    # "el más barato" / "cual recomiendas" — flujo end-to-end fluido.
     AgenticState.SHIPPING_QUOTE: frozenset({
+        "quote_shipping",
+        "select_carrier",
+        "get_cart",
+        "get_contact_info",
+        _ESCALATE,
+    }),
+    # Selección carrier + opciones de checkout. Incluye generate_payment_link
+    # porque cliente puede confirmar carrier + cerrar en 1 turn ("si confirmo").
+    AgenticState.CARRIER_SELECTION: frozenset({
+        "select_carrier",
+        "generate_payment_link",
         "quote_shipping",
         "get_cart",
         "get_contact_info",
         _ESCALATE,
     }),
-    # Selección carrier post-cotización.
-    AgenticState.CARRIER_SELECTION: frozenset({
-        "select_carrier",
-        "quote_shipping",
-        "get_cart",
-        _ESCALATE,
-    }),
-    # Generación link pago / COD.
+    # Generación link pago / COD. Incluye:
+    #  - select_carrier por si cliente cambia transportadora last-minute.
+    #  - save_contact_field para completar PII faltante (e.g., email obligatorio
+    #    para generate_payment_link en algunos tenants/modos).
+    #  - record_consent por si cliente recompletó consent recién.
     AgenticState.PAYMENT: frozenset({
         "generate_payment_link",
+        "select_carrier",
+        "save_contact_field",
+        "record_consent",
         "get_cart",
         "get_contact_info",
         _ESCALATE,

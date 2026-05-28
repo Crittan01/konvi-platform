@@ -116,9 +116,12 @@ class SectionA_Saludo(unittest.TestCase):
 
     def test_a5_greeting_excluye_payment_tools(self):
         tools = tools_for_state(AgenticState.GREETING)
-        # En saludo, NO hay generate_payment_link ni add_to_cart.
+        # En saludo NO hay generate_payment_link (eso es PAYMENT state).
+        # add_to_cart SÍ está presente — cliente con intención directa
+        # ("quiero 2 jabones coco") puede comprar sin pasar formalmente
+        # por EXPLORING (UX live UAT 2026-05-27 BUG 5).
         self.assertNotIn("generate_payment_link", tools)
-        self.assertNotIn("add_to_cart", tools)
+        self.assertIn("add_to_cart", tools)
 
 
 # ──────────────────────────────────────────────────────────────────
