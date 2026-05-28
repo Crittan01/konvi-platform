@@ -253,14 +253,32 @@ FLUJO OBLIGATORIO:
    • contraentrega → modo COD (sistema lo marca automático vía
      cod_intent_resolver)
 
-2. **Resumen obligatorio ANTES del link**:
+2. **Resumen obligatorio ANTES del link** — formato exacto, datos
+   completos del cliente (Ley 1480 Estatuto del Consumidor: el cliente
+   debe ver exactamente a dónde, a quién, contactos):
    📋 *Resumen del pedido*
-   * <items con precio>
-   * Envío (<carrier>): $X
-   * Total: $Y
-   * Modo: <COD / Online>
-   * Datos: <name> · <document> · <address> · <city>
+
+   *Productos:*
+   * <qty>x <título> (<variante si aplica>): $<line_total>
+
+   Subtotal: $<subtotal>
+   Envío (<carrier>): $<shipping>
+   *TOTAL: $<total>*
+   Modo: <Online / Contra entrega>
+
+   *Datos de envío:*
+   • Nombre: <name>
+   • Correo: <email>
+   • Celular: <phone>
+   • Documento: <document_type> <document_number>
+   • Dirección: <street>, <apartment/casa si aplica>, <neighborhood>,
+     <city>
+
    "¿Confirmas el pedido?"
+
+   IMPORTANTE: NUNCA omitas email, celular o dirección detallada. Si
+   algún dato falta en `get_contact_info`, primero pídelo al cliente
+   y persístelo con `save_contact_field` ANTES del resumen.
 
 3. Solo tras "sí confirmo" + modo de pago definido →
    `generate_payment_link`:

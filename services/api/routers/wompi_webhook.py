@@ -176,7 +176,19 @@ def _process_wompi_event(payload: dict) -> None:
 
     if txn_status != WOMPI_TXN_APPROVED:
         logger.info("[WOMPI] pago_no_aprobado txn_id=%s status=%s", txn_id, txn_status)
-        # Para DECLINED/ERROR/VOIDED: liberar reservas activas + ofrecer reintento.
+        # Rev. 109 fix UAT live BUG 33 — Si VOIDED Y la orden ya estaba
+        # cancelled (caso auto-void post-cancel pipeline), NO ofrecer retry
+        # ni liberar stock (ya se hizo). Notificar al cliente que el
+        # reembolso bancario está confirmado por Wompi.
+        if (
+            txn_status == "VOIDED" and order_id
+            and _is_post_cancel_void(supabase, order_id=order_id)
+        ):
+            _notify_client_refund_completed(
+                supabase, order_id=order_id, amount_in_cents=amount_in_cents,
+            )
+            return
+        # Para DECLINED/ERROR/VOIDED (no cancel-driven): liberar reservas + retry.
         if txn_status in WOMPI_RETRY_STATUSES and order_id:
             _release_stock_reservations_for_order(supabase, order_id=order_id, txn_status=txn_status)
             _maybe_offer_payment_retry(supabase, order_id=order_id, txn_status=txn_status)
@@ -716,6 +728,120 @@ def _enqueue_whatsapp_outbound(
     logger.info("[%s] outbound encolado conv=%s", log_tag, conversation_id)
 
 
+def _is_post_cancel_void(supabase, *, order_id: str) -> bool:
+    """True si la orden ya estaba cancelled vía pipeline (cancel_order)
+    y el void que llega ahora es la confirmación bancaria del refund.
+
+    Distingue del caso "cliente intentó pagar y declinó" (DECLINED/ERROR)
+    donde sí queremos ofrecer retry.
+    """
+    try:
+        row = (
+            supabase.table("orders")
+            .select("status, cancellation_id")
+            .eq("id", order_id).single().execute()
+        ).data
+        if not row:
+            return False
+        if (row.get("status") or "").lower() != "cancelled":
+            return False
+        # Confirmar que el cancel pipeline marcó refund_method=wompi_void_auto.
+        cid = row.get("cancellation_id")
+        if not cid:
+            return False
+        cancel_row = (
+            supabase.table("order_cancellations")
+            .select("refund_method")
+            .eq("id", cid).single().execute()
+        ).data
+        return (
+            (cancel_row or {}).get("refund_method") == "wompi_void_auto"
+        )
+    except Exception as exc:
+        logger.warning(
+            "[WOMPI] _is_post_cancel_void check failed order=%s: %s",
+            order_id, exc,
+        )
+        return False
+
+
+def _notify_client_refund_completed(
+    supabase, *, order_id: str, amount_in_cents: int,
+) -> None:
+    """Notifica al cliente que el void llegó al ciclo bancario (status=VOIDED
+    en Wompi confirmado). El reembolso aparecerá en su tarjeta en 1-2 días
+    hábiles típicos post-VOIDED.
+
+    Envía WhatsApp + email + actualiza audit refund_completed_at.
+    """
+    try:
+        order = (
+            supabase.table("orders")
+            .select("tenant_id, conversation_id, cancellation_id")
+            .eq("id", order_id).single().execute()
+        ).data
+    except Exception:
+        return
+    if not order:
+        return
+
+    tenant_id = order.get("tenant_id")
+    conversation_id = order.get("conversation_id")
+    cancellation_id = order.get("cancellation_id")
+    short_id = order_id[:8].upper()
+    amount_fmt = f"${amount_in_cents / 100:,.0f}".replace(",", ".")
+
+    # WhatsApp.
+    if conversation_id and tenant_id:
+        try:
+            text = (
+                f"✅ *Reembolso confirmado*\n\n"
+                f"Tu reembolso de *{amount_fmt} COP* del pedido "
+                f"*#{short_id}* ya fue procesado por Wompi y enviado a tu "
+                f"banco.\n\n"
+                f"El dinero aparecerá en tu tarjeta en *1-2 días hábiles* "
+                f"típicos (puede tardar más según tu banco emisor).\n\n"
+                f"Si en 7 días no lo ves, escríbenos y te ayudamos a "
+                f"rastrearlo con Wompi."
+            )
+            _enqueue_whatsapp_outbound(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                text=text, log_tag="WOMPI_WA_REFUND_DONE",
+            )
+        except Exception as exc:
+            logger.warning(
+                "[WOMPI] enqueue refund_completed WA failed order=%s: %s",
+                order_id, exc,
+            )
+
+    # Email best-effort (reusa la plantilla existente con template_mode).
+    if tenant_id:
+        try:
+            _send_payment_confirmation_email(
+                supabase=supabase, order_id=order_id, tenant_id=tenant_id,
+                template_mode="refund_completed",
+            )
+        except Exception as exc:
+            logger.warning(
+                "[WOMPI][EMAIL] refund_completed falló order=%s err=%s",
+                order_id, exc,
+            )
+
+    # Audit — marcar refund_completed_at.
+    if cancellation_id:
+        try:
+            from datetime import datetime, timezone
+            supabase.table("order_cancellations").update({
+                "refund_completed_at": datetime.now(timezone.utc).isoformat(),
+                "refund_status": "completed",
+            }).eq("id", cancellation_id).execute()
+        except Exception as exc:
+            logger.warning(
+                "[WOMPI] audit refund_completed_at update failed cid=%s: %s",
+                cancellation_id, exc,
+            )
+
+
 def _notify_client_payment_approved(
     supabase, *, conversation_id: str, tenant_id: str, order_id: str
 ) -> None:
@@ -1009,6 +1135,31 @@ def _send_payment_confirmation_email(
             tracking_number=tracking_number, raw_status=shipment_status,
         )
         subject = f"⚠️ Novedad con tu envío — Pedido #{order_short}"
+    elif template_mode == "refund_completed":
+        # Rev. 109 fix UAT live BUG 33 — confirmación cliente que el void
+        # llegó al ciclo bancario (status=VOIDED en Wompi). El dinero
+        # aparece en su tarjeta en 1-2 días hábiles típicos post-VOIDED.
+        amount_fmt = f"${total:,.0f}".replace(",", ".")
+        html = (
+            f"<!DOCTYPE html><html><body style='font-family:-apple-system,"
+            f"Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;"
+            f"padding:24px;color:#1f2937'>"
+            f"<h2 style='color:#059669'>✅ Reembolso confirmado</h2>"
+            f"<p>Hola {name},</p>"
+            f"<p>Tu reembolso de <strong>{amount_fmt} COP</strong> del "
+            f"pedido <strong>#{order_short}</strong> ya fue procesado por "
+            f"Wompi y enviado al sistema bancario.</p>"
+            f"<p>El dinero aparecerá en tu tarjeta en "
+            f"<strong>1-2 días hábiles</strong> típicos. Puede tardar más "
+            f"según tu banco emisor.</p>"
+            f"<p style='color:#6b7280;font-size:14px;margin-top:32px'>"
+            f"Si en 7 días no lo ves reflejado, escríbenos y te ayudamos "
+            f"a rastrearlo con Wompi.</p>"
+            f"<p style='color:#9ca3af;font-size:12px;margin-top:24px'>"
+            f"— {tenant_name}</p>"
+            f"</body></html>"
+        )
+        subject = f"✅ Reembolso confirmado — Pedido #{order_short}"
     else:
         # Default fallback: comportamiento previo (email único con todo).
         html = _compose_payment_email_html(
