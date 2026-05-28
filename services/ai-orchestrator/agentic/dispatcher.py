@@ -225,13 +225,13 @@ async def _emit_degraded_response_and_escalate(
 
     if is_repeat_failure:
         degraded_text = (
-            "Disculpa, sigo teniendo dificultades para entender. "
-            "Te paso con alguien del equipo que te ayuda en breve."
+            "Mmm, sigo sin entenderte bien. "
+            "Mejor te paso con alguien del equipo que te ayuda enseguida."
         )
     else:
         degraded_text = (
-            "Disculpa, no pude procesar bien tu mensaje. "
-            "¿Lo intentamos de nuevo con otras palabras?"
+            "Mmm, no te entendí del todo. "
+            "¿Me lo cuentas de otra forma?"
         )
 
     try:
