@@ -927,15 +927,59 @@ async def _run_agentic_full(
                     # flow tiene complejidad legal (5d hábiles, validación
                     # producto, refund 30d) que requiere humano experto.
                     short_id = target_order_id[:8].upper()
+                    # Rev. 109 fix UAT live BUG 40 — mensaje cauteloso. NO
+                    # prometer "reembolso completo" sin validar política tenant
+                    # (Art. 47 parágrafo excluye cosmética abierta, perecederos,
+                    # productos uso íntimo). Especialista valida exclusiones.
                     _retracto_msg = (
                         f"Entiendo que quieres retractarte del pedido "
                         f"*#{short_id}*.\n\n"
-                        f"Tienes ese derecho por *Ley 1480 Art. 47*: 5 días "
-                        f"hábiles desde la entrega para retractarte y "
-                        f"recibir reembolso completo.\n\n"
-                        f"Te conecto con un especialista para coordinar la "
-                        f"devolución del producto y procesar tu reembolso."
+                        f"La *Ley 1480 Art. 47* otorga 5 días hábiles desde "
+                        f"la entrega para retractarse. Sin embargo, su "
+                        f"*parágrafo* excluye algunas categorías "
+                        f"(productos abiertos de uso íntimo, perecederos, "
+                        f"personalizados, etc.).\n\n"
+                        f"Te conecto con un especialista para validar si tu "
+                        f"caso aplica según la política de KAIU + estado del "
+                        f"producto. Si aplica, procesamos devolución y "
+                        f"reembolso en *máximo 30 días calendario* (Art. 49)."
                     )
+                    # Rev. 109 fix UAT live BUG 39 — persistir audit row
+                    # order_cancellations para trazabilidad SIC + visibilidad
+                    # operador en panel.
+                    try:
+                        import uuid as _uuid
+                        from datetime import datetime as _dt, timezone as _tz
+                        _audit_id = str(_uuid.uuid4())
+                        supabase.table("order_cancellations").insert({
+                            "id": _audit_id,
+                            "tenant_id": tenant_id,
+                            "order_id": target_order_id,
+                            "conversation_id": conversation_id,
+                            "cancelled_by_actor": "customer",
+                            "status": "pending",
+                            "reason_code": "retracto_art_47",
+                            "reason_text": (
+                                _cancel_match.reason_text or "retracto solicitado"
+                            )[:300],
+                            "escalated_to_operator": True,
+                            "escalation_reason": "ORDER_DELIVERED",
+                            "legal_basis": "ley_1480_art_47",
+                        }).execute()
+                        supabase.table("orders").update({
+                            "cancellation_id": _audit_id,
+                        }).eq("id", target_order_id).eq(
+                            "tenant_id", tenant_id,
+                        ).execute()
+                        logger.info(
+                            "[RETRACTO] audit creado id=%s order=%s",
+                            _audit_id[:8], target_order_id[:8],
+                        )
+                    except Exception as _e:
+                        logger.warning(
+                            "[RETRACTO] audit insert falló order=%s: %s",
+                            target_order_id[:8], _e,
+                        )
                     await _send_outbound_text(
                         supabase=supabase, conversation_id=conversation_id,
                         tenant_id=tenant_id, text=_retracto_msg,
