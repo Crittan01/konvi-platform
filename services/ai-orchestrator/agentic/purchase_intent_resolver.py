@@ -438,8 +438,8 @@ def compose_outbound_from_resolution(
             items_total += line_total
             price_str = f"${line_total:,}".replace(",", ".")
             unit_str = (
-                f" ({_format_unit_price(unit_price)} c/u)"
-                if qty > 1 else ""
+                f" (${unit_price:,} c/u)".replace(",", ".")
+                if qty > 1 and unit_price > 0 else ""
             )
             bullets.append(
                 f"* {qty} *{r['title']}*{label_str} — *{price_str}*{unit_str}"
