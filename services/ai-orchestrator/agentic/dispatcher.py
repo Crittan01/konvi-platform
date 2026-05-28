@@ -225,6 +225,7 @@ async def _run_agentic_full(
     from agentic.system_prompt import build_system_prompt
     from agentic.invariants import (
         apply_invariants,
+        CanonicalCategoriesInvariant,
         CartRenderCoherenceInvariant,
         ConsentRequiredInvariant,
         EmptyPromiseInvariant,
@@ -708,6 +709,13 @@ async def _run_agentic_full(
                 system_prompt_chars=0,
                 history_turns=len(history or []),
             )
+            # Rev. 109 — actualizar agentic_state aun cuando el bypass
+            # short-circuita el LLM (badge UI stays fresh).
+            _resolve_and_persist_agentic_state(
+                supabase=supabase, tenant_id=tenant_id,
+                conversation_id=conversation_id, contact=contact,
+                history=history,
+            )
             return  # turn handled.
         else:
             logger.warning(
@@ -802,6 +810,11 @@ async def _run_agentic_full(
                 invariant_name="variant_continuation_bypass",
                 system_prompt_chars=0,
                 history_turns=len(history or []),
+            )
+            _resolve_and_persist_agentic_state(
+                supabase=supabase, tenant_id=tenant_id,
+                conversation_id=conversation_id, contact=contact,
+                history=history,
             )
             return  # turn handled — no LLM needed.
         else:
@@ -963,6 +976,11 @@ async def _run_agentic_full(
                     system_prompt_chars=0,
                     history_turns=len(history or []),
                 )
+                _resolve_and_persist_agentic_state(
+                    supabase=supabase, tenant_id=tenant_id,
+                    conversation_id=conversation_id, contact=contact,
+                    history=history,
+                )
                 return
         else:
             logger.warning(
@@ -972,113 +990,18 @@ async def _run_agentic_full(
             )
     # ─── /pre-LLM resolver ───
 
-    # ── Rev. 109 — Agentic State Machine ──
+    # ── Rev. 109 — Agentic State Machine (helper unificado) ──
     # Resolver determinístico del estado actual del Inbox.
-    # Día 1: persiste en `conversations.agentic_state` (telemetría).
-    # Día 2: construye prompt + tools subset per-state si state ≠ None.
-    _resolved_state = None  # AgenticState | None — usado abajo para per-state prompt.
-    try:
-        from agentic.state_machine import StateResolver
-        from agentic.state_machine.resolver import build_context_from_records
-
-        # Rev. 109 — SELECT defensive. Si la columna agentic_state aún no
-        # está aplicada en remote (migration pending), caemos al SELECT
-        # sin esa columna. El resolver SIGUE funcionando (per-state prompt
-        # + tools subset); solo se omite la persistencia del badge.
-        try:
-            _conv_row = (
-                supabase.table("conversations")
-                .select("status, agentic_state")
-                .eq("id", conversation_id)
-                .single()
-                .execute()
-            )
-            _has_state_column = True
-        except Exception:
-            _conv_row = (
-                supabase.table("conversations")
-                .select("status")
-                .eq("id", conversation_id)
-                .single()
-                .execute()
-            )
-            _has_state_column = False
-        _conv = _conv_row.data or {}
-
-        _cart_row = (
-            supabase.table("conversation_carts")
-            .select(
-                # Schema real (post rev. 108): shipping_meta JSONB contiene
-                # carrier, rate_id, shipping_cost_cents. NO hay columnas
-                # carrier_code / payment_link directas en el cart.
-                "id, status, payment_method, shipping_cents, shipping_meta, "
-                "converted_order_id"
-            )
-            .eq("conversation_id", conversation_id)
-            .eq("tenant_id", tenant_id)
-            .in_("status", ["open", "checkout"])
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        _cart = (_cart_row.data or [None])[0]
-        if _cart:
-            # Derivar campos virtuales para el resolver.
-            _meta = _cart.get("shipping_meta") or {}
-            _cart["carrier_code"] = _meta.get("carrier") or None
-            _cart["payment_link"] = None  # vive en payments/orders, no aquí
-            _items_count_row = (
-                supabase.table("conversation_cart_items")
-                .select("id", count="exact", head=True)
-                .eq("cart_id", _cart["id"])
-                .execute()
-            )
-            _cart["items_count"] = int(
-                getattr(_items_count_row, "count", 0) or 0
-            )
-            # Si cart está checkout y tiene converted_order_id → hay pago en curso.
-            if _cart.get("status") == "checkout" and _cart.get("converted_order_id"):
-                _cart["payment_link"] = "checkout"  # marker para el resolver
-
-        _resolution_ctx = build_context_from_records(
-            conversation=_conv,
-            cart=_cart,
-            contact=contact or {},
-            history_len=len(history or []),
-        )
-        _state = StateResolver().resolve(_resolution_ctx)
-        _resolved_state = _state
-        _prev_state = _conv.get("agentic_state")
-        if _has_state_column and _state.value != _prev_state:
-            try:
-                supabase.table("conversations").update(
-                    {"agentic_state": _state.value}
-                ).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
-            except Exception as _upd_exc:
-                logger.warning(
-                    "[AGENTIC_STATE] update failed conv=%s: %s — per-state sigue activo",
-                    conversation_id[:8], _upd_exc,
-                )
-            logger.info(
-                "[AGENTIC_STATE] conv=%s %s→%s (cart_items=%s consent=%s)",
-                conversation_id[:8],
-                _prev_state or "NULL",
-                _state.value,
-                _resolution_ctx.cart_items_count,
-                _resolution_ctx.contact_consent_given,
-            )
-        elif not _has_state_column:
-            logger.info(
-                "[AGENTIC_STATE] conv=%s state=%s (column ausente — per-state activo "
-                "sin persistencia; aplica migration 20260604000000 para badge UI)",
-                conversation_id[:8], _state.value,
-            )
-    except Exception as _state_exc:
-        # State machine NO debe bloquear el turno. Log y seguir.
-        logger.warning(
-            "[AGENTIC_STATE] resolver falló conv=%s: %s — seguimos sin badge",
-            conversation_id[:8], _state_exc,
-        )
+    # Reutilizado por: el LLM path (para per-state prompt) Y los pre-LLM
+    # bypass paths (purchase_intent / shipping_intent) para mantener
+    # `conversations.agentic_state` siempre actualizado.
+    _resolved_state = _resolve_and_persist_agentic_state(
+        supabase=supabase,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        contact=contact,
+        history=history,
+    )
     # ─── /state machine ───
 
     # ── Rev. 109 Día 2 — Per-state prompt + tools subset ──
@@ -1228,6 +1151,11 @@ async def _run_agentic_full(
             PostToolCoherenceInvariant(),
             EmptyPromiseInvariant(),
             PassiveClosingInvariant(),
+            # Rev. 109 UAT live — normaliza variaciones del LLM al naming
+            # canónico de categorías (Sérums Faciales → Sérums, Kits de
+            # Cuidado → Kits). Aplica SOLO en outbounds que listen
+            # categorías; no toca textos de cotización/pago/etc.
+            CanonicalCategoriesInvariant(),
             NoDecorativeEmojiInvariant(),
         ]
     invariant_result = await apply_invariants(
@@ -1446,6 +1374,126 @@ async def _run_agentic_shadow(
         conversation_id[:8], result.tool_calls_executed, elapsed_s,
         result.truncated, result.finish_reason,
     )
+
+
+# ─── State machine helper unificado (rev. 109) ─────────────────────────────
+
+
+def _resolve_and_persist_agentic_state(
+    *,
+    supabase: Any,
+    tenant_id: str,
+    conversation_id: str,
+    contact: Optional[dict],
+    history: Optional[list],
+) -> Optional[Any]:
+    """Resuelve + persiste el estado agentic en `conversations.agentic_state`.
+
+    Reutilizable por:
+      • El LLM path principal (per-state prompt + tools subset).
+      • Los pre-LLM bypass paths (purchase_intent / shipping_intent /
+        cod_intent) — mantiene el badge UI fresco aun cuando el LLM no
+        se invoca.
+
+    NO bloquea ningún turno si falla. Defensive a:
+      • Migration `agentic_state` column pendiente en remote (skip persist).
+      • Schema mismatches en cart (skip cart-derived rules).
+
+    Returns:
+      AgenticState resuelto o None si el resolver falla.
+    """
+    try:
+        from agentic.state_machine import StateResolver
+        from agentic.state_machine.resolver import build_context_from_records
+
+        try:
+            _conv_row = (
+                supabase.table("conversations")
+                .select("status, agentic_state")
+                .eq("id", conversation_id)
+                .single()
+                .execute()
+            )
+            _has_state_column = True
+        except Exception:
+            _conv_row = (
+                supabase.table("conversations")
+                .select("status")
+                .eq("id", conversation_id)
+                .single()
+                .execute()
+            )
+            _has_state_column = False
+        _conv = _conv_row.data or {}
+
+        _cart_row = (
+            supabase.table("conversation_carts")
+            .select(
+                "id, status, payment_method, shipping_cents, shipping_meta, "
+                "converted_order_id"
+            )
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        _cart = (_cart_row.data or [None])[0]
+        if _cart:
+            _meta = _cart.get("shipping_meta") or {}
+            _cart["carrier_code"] = _meta.get("carrier") or None
+            _cart["payment_link"] = None
+            _items_count_row = (
+                supabase.table("conversation_cart_items")
+                .select("id", count="exact", head=True)
+                .eq("cart_id", _cart["id"])
+                .execute()
+            )
+            _cart["items_count"] = int(
+                getattr(_items_count_row, "count", 0) or 0
+            )
+            if _cart.get("status") == "checkout" and _cart.get("converted_order_id"):
+                _cart["payment_link"] = "checkout"
+
+        _ctx = build_context_from_records(
+            conversation=_conv,
+            cart=_cart,
+            contact=contact or {},
+            history_len=len(history or []),
+        )
+        _state = StateResolver().resolve(_ctx)
+        _prev_state = _conv.get("agentic_state")
+        if _has_state_column and _state.value != _prev_state:
+            try:
+                supabase.table("conversations").update(
+                    {"agentic_state": _state.value}
+                ).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            except Exception as _upd_exc:
+                logger.warning(
+                    "[AGENTIC_STATE] update failed conv=%s: %s",
+                    conversation_id[:8], _upd_exc,
+                )
+            logger.info(
+                "[AGENTIC_STATE] conv=%s %s→%s (cart_items=%s consent=%s)",
+                conversation_id[:8],
+                _prev_state or "NULL",
+                _state.value,
+                _ctx.cart_items_count,
+                _ctx.contact_consent_given,
+            )
+        elif not _has_state_column:
+            logger.info(
+                "[AGENTIC_STATE] conv=%s state=%s (column ausente)",
+                conversation_id[:8], _state.value,
+            )
+        return _state
+    except Exception as _state_exc:
+        logger.warning(
+            "[AGENTIC_STATE] resolver falló conv=%s: %s",
+            conversation_id[:8], _state_exc,
+        )
+        return None
 
 
 # ─── Persistencia universal de audit (rev. 107) ────────────────────────────

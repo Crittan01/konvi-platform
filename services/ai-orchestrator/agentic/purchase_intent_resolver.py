@@ -260,8 +260,15 @@ def _find_product_in_catalog(
     # Verificar que el score venga de tokens específicos, no solo categoría.
     # Si TODO el score viene de tokens categoría, no es match real.
     if len(top_matches) > 1:
-        # Multiple matches con mismo score — peligroso. Solo retornar si
-        # el match incluye al menos un token NO-categoría.
+        # Rev. 109 UAT live BUG anáfora (2026-05-27): si "coco" matchea
+        # AMBOS Jabón Coco + Aceite Coco con mismo score y ambos tienen
+        # match específico, NO se puede elegir determinísticamente. El
+        # resolver previo retornaba el PRIMERO → causaba que "el de coco"
+        # tras listar jabones devolviera Aceite (falso positivo grave).
+        # Fix arquitectónico: si ≥2 productos comparten score Y specific
+        # match, retornar None → delegar al LLM que tiene la regla de
+        # anáfora (resuelve dentro del último listing presentado).
+        specific_match_products = []
         for prod in top_matches:
             title = _normalize(str(prod.get("title") or ""))
             title_tokens = [
@@ -274,8 +281,11 @@ def _find_product_in_catalog(
                 for tt in title_tokens
             )
             if specific_matched:
-                return prod  # Solo retornar el que tiene match específico
-        return None  # Ningún top_match tiene match específico → ambiguo real
+                specific_match_products.append(prod)
+        if len(specific_match_products) == 1:
+            return specific_match_products[0]
+        # 0 o ≥2 con specific match → ambiguo, delegar a Gemini con anáfora.
+        return None
 
     return top_matches[0]
 
