@@ -187,11 +187,13 @@ async def process_inbound_media(
         )
         return None
 
-    # Invocar Gemini multimodal.
+    # Invocar Gemini multimodal con cascade (rev. 109 fix UAT live BUG 21).
+    # Saturación Gemini Flash 503 es común — retry con Flash Lite y Pro
+    # (cross-tier multimodal) antes de fallback. Reusa llm_cascade.
     try:
         from google.genai import types as genai_types
-        # Reutilizamos el helper del orchestrator legacy si está disponible.
         from orchestrator import _get_genai_client
+        from llm_cascade import cascade_invoke
         client = _get_genai_client()
 
         part = genai_types.Part(
@@ -201,21 +203,85 @@ async def process_inbound_media(
             )
         )
         prompt = _prompt_for(media_type, caption=caption)
-        resp = client.models.generate_content(
-            model=model or _DEFAULT_MODEL,
-            contents=[prompt, part],
+
+        # Cascade multimodal: Flash → Flash Lite → Pro.
+        def _invoke_gemini_multimodal(model_name: str):
+            return client.models.generate_content(
+                model=model_name,
+                contents=[prompt, part],
+            )
+
+        tiers = (
+            [model] if model else
+            ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
         )
+        # Cascade params (rev. 109 fix UAT live founder feedback):
+        # 3 attempts × 3 tiers = hasta 9 intentos. Backoff 1s→2s→4s (max 16s).
+        # En el peor caso (cascade degraded total): ~30s wait — aceptable
+        # porque el cliente espera por su audio/imagen; mejor 30s y
+        # transcripción que 1s y "[Audio recibido]" sin contexto.
+        outcome = cascade_invoke(
+            gemini_invoker=_invoke_gemini_multimodal,
+            tiers=tiers,
+            attempts_per_tier=3,
+            # sleep_fn None → time.sleep real con backoff exponencial.
+        )
+        if outcome.degraded:
+            logger.warning(
+                "[MULTIMODAL] cascade degraded type=%s tenant=%s last_err=%s",
+                media_type, tenant_id, outcome.last_error,
+            )
+            # Rev. 109 fix UAT live: cross-vendor fallback para AUDIO
+            # cuando Gemini multimodal degraded. Whisper de OpenAI es
+            # excelente para español Colombia + soporta opus nativo.
+            # Solo aplica a audio (Whisper no maneja imagen/video).
+            if media_type == "audio":
+                try:
+                    from agentic.multimodal_whisper import (
+                        is_available as _whisper_avail,
+                        transcribe_audio as _whisper_transcribe,
+                    )
+                    if _whisper_avail():
+                        logger.info(
+                            "[MULTIMODAL] fallback Whisper para audio "
+                            "tenant=%s bytes=%d",
+                            tenant_id, len(media_bytes),
+                        )
+                        whisper_text = _whisper_transcribe(
+                            audio_bytes=media_bytes,
+                            mime_type=mime_resolved or media_mime,
+                            language="es",
+                        )
+                        if whisper_text:
+                            return MultimodalResult(
+                                text=whisper_text,
+                                media_type=media_type,
+                                mime_used=mime_resolved or media_mime,
+                            )
+                    else:
+                        logger.info(
+                            "[MULTIMODAL] Whisper no configurado "
+                            "(OPENAI_API_KEY ausente) — degraded total",
+                        )
+                except Exception as _w_exc:
+                    logger.warning(
+                        "[MULTIMODAL] Whisper fallback falló: %s",
+                        str(_w_exc)[:200],
+                    )
+            return None
+
+        resp = outcome.response
         text = (getattr(resp, "text", "") or "").strip()
         if not text:
             logger.info(
-                "[MULTIMODAL] Gemini retornó vacío type=%s tenant=%s",
-                media_type, tenant_id,
+                "[MULTIMODAL] Gemini retornó vacío type=%s tenant=%s model=%s",
+                media_type, tenant_id, outcome.model_used,
             )
             return None
         logger.info(
-            "[MULTIMODAL] type=%s tenant=%s mime=%s bytes=%d chars=%d",
+            "[MULTIMODAL] type=%s tenant=%s mime=%s bytes=%d chars=%d model=%s",
             media_type, tenant_id, mime_resolved or media_mime,
-            len(media_bytes), len(text),
+            len(media_bytes), len(text), outcome.model_used,
         )
         return MultimodalResult(
             text=text,
