@@ -1129,6 +1129,45 @@ async def _run_agentic_full(
         allowed_tools=_allowed_tools,
     )
     elapsed = time.monotonic() - started_at
+
+    # ── Rev. 109 UAT live BUG 8 — re-marcar COD post-LLM ─────────────
+    # Si el cliente expresó intent COD en este turn pero el cart no
+    # existía PRE-LLM (typical: cliente NUEVO dice "comprar X contraentrega"
+    # en 1 mensaje), el cod_intent_resolver no pudo marcar el cart. Ahora
+    # que add_to_cart YA creó el cart, lo marcamos como cod.
+    try:
+        from agentic.cod_intent_resolver import detect_cod_intent
+        if detect_cod_intent(content):
+            _cart_post = (
+                supabase.table("conversation_carts")
+                .select("id, payment_method")
+                .eq("conversation_id", conversation_id)
+                .eq("tenant_id", tenant_id)
+                .in_("status", ["open", "checkout"])
+                .order("created_at", desc=True).limit(1).execute()
+            )
+            if _cart_post.data and _cart_post.data[0].get("payment_method") != "cod":
+                # Verificar que tenant TIENE COD enabled antes de marcar.
+                try:
+                    from lib.tenant_payment_methods import is_method_enabled
+                    if is_method_enabled(supabase, tenant_id=tenant_id, method="cod"):
+                        supabase.table("conversation_carts").update({
+                            "payment_method": "cod",
+                        }).eq("id", _cart_post.data[0]["id"]).execute()
+                        logger.info(
+                            "[AGENTIC_POST_LLM] conv=%s cart=%s marked COD "
+                            "post-LLM (intent detected pre, cart created during)",
+                            conversation_id[:8], _cart_post.data[0]["id"][:8],
+                        )
+                except Exception:
+                    pass
+    except Exception as _cod_exc:
+        logger.warning(
+            "[AGENTIC_POST_LLM] cod re-mark falló conv=%s: %s",
+            conversation_id[:8], _cod_exc,
+        )
+    # ── /COD post-LLM ──
+
     # Snapshot pre-invariants — usado para persistir audit incluso si el
     # flow termina temprano (degraded text sin invariants completos).
     system_prompt_chars = len(system_prompt or "")
