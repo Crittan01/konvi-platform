@@ -5,7 +5,25 @@
 
 ---
 
-## Rev. 109 (2026-05-27 — EN CURSO) — Refactor Inbox production-grade
+## Rev. 109 (2026-05-27 — CIERRE ARQUITECTÓNICO) — Inbox production-grade refactor 10 días completado
+
+**Cierre arquitectónico**: ✅ Días 1-5 (architecture) + Días 6-10 (regression UAT A-M) cerrados en sesión.
+**Pending live UAT**: founder ejecuta dual-mode WhatsApp para certificar coherencia conversacional turn-a-turn (gate para merge a `main`).
+**Reporte cierre**: [`docs/reports/rev109_inbox_production_grade_complete.md`](../docs/reports/rev109_inbox_production_grade_complete.md).
+
+**Suite final**: 2578 PASS / 8 skip (+123 desde rev. 108). UAT regression A-M: 51/51 PASS.
+
+**Commits**:
+- `13446a3` Día 1 — State Machine skeleton (9 estados + resolver + 23 tests)
+- `8b681fa` Día 2 — Per-state agents (mini-prompts 3-5KB + tools subset 1-7 vs 19KB×15)
+- `0d394b0` Día 3 — LLM Cascade 4-tier (Gemini Flash Lite → Flash → Pro → Claude Sonnet 4)
+- `c29fa22` Día 4 — Multimodal pipeline (audio + imagen + video WhatsApp nativo)
+- `7b6350d` Día 5 — Cross-layer (Inbox badge UI + GET /conversations funnel agentic_state)
+- (siguiente) Días 6-10 — UAT regression suite + certificación
+
+---
+
+## Rev. 109 (2026-05-27 — Historia del refactor — Días 1-5)
 
 **Disparador**: founder validó UAT exhaustivo rev. 108 + identificó AGENTIC_EMPTY_OUTPUT_DIAG recurrente (Gemini Flash saturado con 15-19 tools + 17-19KB prompt). Decisión arquitectónica:
 
