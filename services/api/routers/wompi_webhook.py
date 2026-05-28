@@ -376,6 +376,21 @@ def _maybe_offer_payment_retry(supabase, *, order_id: str, txn_status: str) -> N
         return
 
     logger.info("[WOMPI] iniciando_retry order=%s txn_status=%s", order_id, txn_status)
+
+    # ── Rev. 109 BRECHA: Email DECLINED ──────────────────────────────────
+    # Cliente debe enterarse por email tan rápido como por WhatsApp que el
+    # pago no se procesó. Especialmente importante si cliente NO está mirando
+    # WhatsApp en el momento. Resend best-effort.
+    try:
+        _send_payment_confirmation_email(
+            supabase=supabase, order_id=order_id, tenant_id=tenant_id,
+            template_mode="payment_failed",
+        )
+    except Exception as e:
+        logger.warning(
+            "[WOMPI][EMAIL] payment_failed falló order=%s err=%s",
+            order_id, e,
+        )
     try:
         private_key, _, environment = get_tenant_wompi_creds(supabase, tenant_id)
         if not private_key:
@@ -953,6 +968,16 @@ def _send_payment_confirmation_email(
             shipment_status="",
         )
         subject = f"Pago recibido — Pedido #{order_short}"
+    elif template_mode == "payment_failed":
+        # Rev. 109 BRECHA email DECLINED: cliente debe saber por email +
+        # WhatsApp que su pago no se procesó. Mantenemos copy empático,
+        # sin asignar culpa, e invitamos a reintentar.
+        html = _compose_payment_failed_email_html(
+            customer_name=name, order_short=order_short, items=items,
+            subtotal=subtotal, shipping=shipping, total=total,
+            carrier=carrier, tenant_name=tenant_name,
+        )
+        subject = f"Pago no procesado — Pedido #{order_short}"
     elif template_mode == "shipment_label_ready":
         html = _compose_shipment_label_ready_email_html(
             customer_name=name, order_short=order_short, items=items,
@@ -1459,6 +1484,102 @@ def _compose_payment_email_html(
   <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
     Recibiste este email porque pagaste un pedido. Si no fuiste tú,
     contacta al vendedor inmediatamente.
+  </p>
+</div>
+</body></html>"""
+
+
+def _compose_payment_failed_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    items: list,
+    subtotal: int,
+    shipping: int,
+    total: int,
+    carrier: str,
+    tenant_name: str,
+) -> str:
+    """Rev. 109 BRECHA — email cuando Wompi rechaza pago.
+
+    Copy empático sin culpar al cliente. Invita a reintentar y aclara
+    que el pedido SIGUE reservado (stock liberado pero podrá reintentarse
+    si genera nuevo link). Diseño consistente con _compose_payment_email_html
+    (colores tenants + tipografía).
+    """
+    def _cop(v: int) -> str:
+        return f"${v // 100:,}".replace(",", ".")
+
+    items_rows = "".join(
+        f"""<tr>
+          <td style="padding:8px 4px;color:#1f2937;border-bottom:1px solid #e5e7eb;">
+            {it.get('quantity', 1)}× {it.get('title', 'Producto')}
+            {' — ' + it.get('variant_label', '') if it.get('variant_label') else ''}
+          </td>
+          <td style="padding:8px 4px;color:#6b7280;text-align:right;
+                     border-bottom:1px solid #e5e7eb;">
+            {_cop(it.get('unit_price_cents', 0))}
+          </td>
+        </tr>"""
+        for it in (items or [])
+    )
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Pago no procesado</title></head>
+<body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,
+             BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<div style="max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
+  <h1 style="color:#b45309;font-size:22px;margin:0 0 16px;">
+    Hola {customer_name},
+  </h1>
+  <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">
+    Tu pago del <strong>Pedido #{order_short}</strong> de
+    <strong>{tenant_name}</strong> no se procesó esta vez.
+  </p>
+  <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0 0 20px;">
+    Puede ser por validación bancaria, saldo insuficiente o un error
+    momentáneo. No te preocupes — tu pedido queda registrado para que
+    puedas reintentarlo sin perder los datos.
+  </p>
+
+  <div style="background:#fef3c7;padding:14px 16px;border-radius:6px;
+              border-left:3px solid #f59e0b;margin:20px 0;">
+    <strong style="color:#92400e;">¿Qué hacer ahora?</strong><br/>
+    <span style="color:#78350f;font-size:14px;">
+      Te enviaremos un nuevo link de pago por WhatsApp en unos minutos.
+      Si necesitas ayuda, responde a ese chat y un especialista de
+      nuestro equipo te asiste.
+    </span>
+  </div>
+
+  <h3 style="color:#1f2937;font-size:16px;margin:24px 0 8px;">
+    Resumen del pedido
+  </h3>
+  <table width="100%" cellspacing="0" cellpadding="0"
+         style="border-collapse:collapse;">
+    {items_rows}
+    <tr>
+      <td style="padding:8px 4px;color:#6b7280;">Subtotal</td>
+      <td style="padding:8px 4px;color:#6b7280;text-align:right;">
+        {_cop(subtotal)}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 4px;color:#6b7280;">Envío ({carrier or '-'})</td>
+      <td style="padding:8px 4px;color:#6b7280;text-align:right;">
+        {_cop(shipping)}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px 4px;color:#1f2937;font-weight:600;
+                 border-top:2px solid #e5e7eb;">Total a pagar</td>
+      <td style="padding:12px 4px;color:#1f2937;font-weight:600;
+                 text-align:right;border-top:2px solid #e5e7eb;">
+        {_cop(total)}</td>
+    </tr>
+  </table>
+
+  <p style="color:#9ca3af;font-size:12px;margin:32px 0 0;text-align:center;">
+    Este es un correo automático de <strong>{tenant_name}</strong>.<br/>
+    Para soporte, responde por WhatsApp.
   </p>
 </div>
 </body></html>"""
