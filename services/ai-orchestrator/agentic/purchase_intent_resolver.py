@@ -406,13 +406,18 @@ def compose_outbound_from_resolution(
     resolution: dict,
     *,
     customer_name: Optional[str] = None,
+    cart_subtotal_cop: Optional[int] = None,
 ) -> str:
     """Compone outbound natural en formato WhatsApp del bot tras resolver.
 
     Cubre 3 casos:
-      • Solo resolved → "Listo, agregué N, M. ¿Sumamos algo más o envío?"
+      • Solo resolved → "Listo, agregué N, M. Subtotal: $X. ¿Sumamos más?"
       • Solo ambiguous → "Para X, ¿prefieres Yml o Zml?"
       • Mix → "Agregué N. Para X, ¿prefieres Yml o Zml?"
+
+    Rev. 108 (founder UX 2026-05-27): incluye precio unitario + subtotal
+    en el path resolved (consistente con CartRenderCoherence CASE C que
+    enforce hard cuando LLM compone).
     """
     resolved = resolution.get("resolved") or []
     ambiguous = resolution.get("ambiguous") or []
@@ -421,17 +426,32 @@ def compose_outbound_from_resolution(
     parts: list[str] = []
 
     if resolved:
-        # Bullet list de items agregados.
+        # Bullet list de items agregados — CON precio unitario + line total.
         bullets = []
+        items_total = 0
         for r in resolved:
             label = r.get("label") or ""
             label_str = f" de {label}" if label else ""
+            qty = int(r.get("qty", 1))
+            unit_price = int(r.get("unit_price_cop") or 0)
+            line_total = qty * unit_price
+            items_total += line_total
+            price_str = f"${line_total:,}".replace(",", ".")
+            unit_str = (
+                f" ({_format_unit_price(unit_price)} c/u)"
+                if qty > 1 else ""
+            )
             bullets.append(
-                f"* {r['qty']} *{r['title']}*{label_str}"
+                f"* {qty} *{r['title']}*{label_str} — *{price_str}*{unit_str}"
             )
         added_text = (
             f"{greeting}Agregué a tu carrito:\n\n" + "\n".join(bullets)
         )
+        # Subtotal: prioriza cart_subtotal_cop si provisto, sino items_total.
+        sub = cart_subtotal_cop if cart_subtotal_cop is not None else items_total
+        if sub > 0:
+            sub_str = f"${sub:,}".replace(",", ".")
+            added_text += f"\n\nSubtotal: *{sub_str}*."
         parts.append(added_text)
 
     if ambiguous:
