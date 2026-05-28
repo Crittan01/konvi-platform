@@ -102,7 +102,14 @@ async def dispatch_message(
     agentic_enabled = await is_tenant_agentic_enabled(supabase, tenant_id)
 
     if agentic_enabled:
-        # Cutover: agentic responde al cliente.
+        # Cutover: agentic es la ÚNICA fuente de verdad para tenants
+        # migrados (Plan A.2 strangler-fig). NO existe fallback al legacy
+        # V1 porque sus heurísticas (TIER2 category-lock, variant_confirmation,
+        # explicit_products_in_inbound) son no-determinísticas y pueden
+        # alucinar items inexistentes en escenarios específicos.
+        # Rev. 109 UAT live BUG 38 — fix arquitectónico: si agentic crashea,
+        # responder degraded honesto + escalation a operador. Cliente recibe
+        # respuesta garantizada (no fallback a comportamiento impredecible).
         try:
             await _run_agentic_full(
                 supabase,
@@ -114,16 +121,24 @@ async def dispatch_message(
             )
             return
         except Exception as exc:
-            # Fallback a legacy si agentic crashea (defensa en producción).
             logger.error(
-                "[AGENTIC_DISPATCH] agentic full falló tenant=%s conv=%s: %s — "
-                "fallback a legacy",
+                "[AGENTIC_DISPATCH] agentic full falló tenant=%s conv=%s: "
+                "%s — degraded mode (NO fallback legacy)",
                 tenant_id, conversation_id, exc,
                 exc_info=True,
             )
-            # cae al legacy abajo.
+            await _emit_degraded_response_and_escalate(
+                supabase,
+                message_id=message_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                error=exc,
+            )
+            return
 
-    # Path legacy (default + fallback).
+    # Path legacy SOLO para tenants explícitamente NO migrados a agentic.
+    # Producción: KAIU + futuros tenants con agentic_enabled=True NUNCA
+    # llegan aquí.
     from orchestrator import build_and_run_orchestration
     await build_and_run_orchestration(
         supabase=supabase,
@@ -146,6 +161,90 @@ async def dispatch_message(
             content=content,
             content_type=content_type,
         ))
+
+
+# ─── Degraded response helper (rev. 109 BUG 38) ─────────────────────────────
+
+
+async def _emit_degraded_response_and_escalate(
+    supabase: Any,
+    *,
+    message_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    error: BaseException,
+) -> None:
+    """Mensaje degradado honesto + escalation a operador cuando agentic
+    crashea. NO usa legacy V1 (Plan A.2 strangler-fig + UAT live BUG 38).
+
+    Garantías:
+      • Cliente SIEMPRE recibe respuesta (no queda en limbo).
+      • Mensaje empático sin culpa al cliente, invita reintento.
+      • Conversación → human_takeover (operador asume control).
+      • Message marcado processed_failed para visibilidad operador.
+      • Telegram notif al operador para SLA respuesta.
+      • Audit log error con traceback para debugging.
+    """
+    from orchestrator import (
+        _send_outbound_text,
+        _mark_message_processing,
+        PROCESSING_STATUS_FAILED,
+    )
+
+    degraded_text = (
+        "Disculpa, tuve un inconveniente técnico procesando tu mensaje. "
+        "Un especialista de nuestro equipo te contactará en breve "
+        "para ayudarte personalmente."
+    )
+    try:
+        await _send_outbound_text(
+            supabase=supabase,
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            text=degraded_text,
+        )
+    except Exception as send_exc:
+        logger.error(
+            "[AGENTIC_DEGRADED] send outbound falló conv=%s: %s",
+            conversation_id, send_exc, exc_info=True,
+        )
+
+    try:
+        supabase.table("conversations").update({
+            "status": "human_takeover",
+        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+    except Exception as st_exc:
+        logger.warning(
+            "[AGENTIC_DEGRADED] status update falló conv=%s: %s",
+            conversation_id, st_exc,
+        )
+
+    try:
+        _mark_message_processing(
+            supabase, message_id,
+            processing_status=PROCESSING_STATUS_FAILED,
+        )
+    except Exception:
+        pass
+
+    try:
+        from telegram_notifications import notify_escalation_async
+        await notify_escalation_async(
+            supabase, tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            reason=(
+                f"🚨 *Agentic flow crashed*\n"
+                f"Mensaje del cliente sin procesar. Conversación pasó a "
+                f"human_takeover.\n\nError: `{str(error)[:200]}`\n\n"
+                f"Acción: revisar logs orchestrator + responder al cliente "
+                f"manualmente desde Inbox."
+            ),
+            severity="critical",
+        )
+    except Exception as tg_exc:
+        logger.warning(
+            "[AGENTIC_DEGRADED] telegram notif falló: %s", tg_exc,
+        )
 
 
 # ─── Agentic full path (cutover) ───────────────────────────────────────────

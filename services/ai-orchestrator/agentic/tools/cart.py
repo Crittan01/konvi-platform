@@ -642,36 +642,45 @@ class RemoveCartItemTool:
 # ─── SetShippingRecipient — Rev. 109 BUG 37 fix Habeas Data ─────────────────
 
 
-class _AddressSchema(BaseModel):
-    city: Optional[str] = None
-    street: Optional[str] = None
-    neighborhood: Optional[str] = None
-    apartment: Optional[str] = None
-    tower: Optional[str] = None
-    floor: Optional[str] = None
-    building_type: Optional[str] = None  # casa | edificio | conjunto
-
-
 class SetShippingRecipientArgs(BaseModel):
+    """Args para set_shipping_recipient. Campos planos (mismo patrón que
+    SaveAddressArgs) — evita schema nested que rompe Gemini FunctionDeclaration
+    (pydantic genera $ref no soportado por Google GenAI SDK)."""
     name: Optional[str] = Field(
-        default=None,
+        default=None, max_length=120,
         description="Nombre completo del destinatario alterno (ej. 'María Tobon')",
     )
     document_type: Optional[str] = Field(
-        default=None,
+        default=None, max_length=10,
         description="Tipo documento destinatario: 'CC' | 'CE' | 'NIT' | 'TI'",
     )
     document_number: Optional[str] = Field(
-        default=None,
+        default=None, max_length=20,
         description="Número documento destinatario (solo dígitos)",
     )
     phone: Optional[str] = Field(
-        default=None,
+        default=None, max_length=20,
         description="Celular destinatario (formato +57XXXXXXXXXX o 10 dígitos)",
     )
-    address: Optional[_AddressSchema] = Field(
+    address_street: Optional[str] = Field(
+        default=None, max_length=200,
+        description="Calle del destinatario (NO la del titular WhatsApp)",
+    )
+    address_city: Optional[str] = Field(
+        default=None, max_length=80,
+        description="Ciudad del destinatario",
+    )
+    address_neighborhood: Optional[str] = Field(
+        default=None, max_length=80,
+        description="Barrio del destinatario",
+    )
+    address_apartment: Optional[str] = Field(
+        default=None, max_length=40,
+        description="Apto/oficina del destinatario",
+    )
+    address_building_type: Optional[str] = Field(
         default=None,
-        description="Dirección de envío del destinatario (NO la del titular WhatsApp)",
+        description="Tipo vivienda: 'casa' | 'edificio' | 'conjunto'",
     )
 
 
@@ -719,6 +728,18 @@ class SetShippingRecipientTool:
                 "No hay carrito activo — agrega un producto primero.",
                 code="NO_CART",
             )
+        # Construir address dict desde campos planos (None si todos vacíos).
+        _addr: dict = {}
+        if args.address_street:
+            _addr["street"] = args.address_street
+        if args.address_city:
+            _addr["city"] = args.address_city
+        if args.address_neighborhood:
+            _addr["neighborhood"] = args.address_neighborhood
+        if args.address_apartment:
+            _addr["apartment"] = args.address_apartment
+        if args.address_building_type:
+            _addr["building_type"] = args.address_building_type
         try:
             result = set_shipping_recipient(
                 ctx.supabase,
@@ -728,10 +749,7 @@ class SetShippingRecipientTool:
                 document_type=args.document_type,
                 document_number=args.document_number,
                 phone=args.phone,
-                address=(
-                    args.address.model_dump(exclude_none=True)
-                    if args.address else None
-                ),
+                address=_addr if _addr else None,
             )
         except Exception as exc:
             return tool_failure(
