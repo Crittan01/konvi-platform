@@ -632,9 +632,16 @@ class SaveContactFieldArgs(BaseModel):
             "(+apartment si edificio/conjunto/oficina), shipping_phone→value(celular 10 dig)."
         ),
     )
-    # Single-value fields (email, name, shipping_phone)
+    # Single-value fields (email, name, shipping_phone).
+    # Rev. 109 UAT live BUG 17: LLM Gemini pasaba el valor con el nombre
+    # del campo semántico (email='X', name='Y', phone='Z') en vez de
+    # value='X'. Aceptamos los aliases más naturales.
     value: Optional[str] = Field(
         default=None,
+        validation_alias=AliasChoices(
+            "value", "email", "name", "phone", "shipping_phone",
+            "telefono", "celular", "correo",
+        ),
         description="Valor para field ∈ {email, name, shipping_phone}.",
     )
     # Document fields

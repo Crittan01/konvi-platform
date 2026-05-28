@@ -1,7 +1,7 @@
-"""Mapeo estado → tools permitidos (rev. 109 Día 2).
+"""Mapeo estado → tools permitidos (rev. 109).
 
 Reduce carga cognitiva del LLM: en lugar de 15 tools registradas, cada
-estado expone solo las 3-6 relevantes para su contexto.
+estado expone solo las relevantes para su contexto.
 
 Tools globales registradas (15 post-consolidación rev. 108):
   list_catalog, get_cart, add_to_cart, update_cart_item_quantity,
@@ -17,13 +17,32 @@ from agentic.state_machine.states import AgenticState
 # Tools comunes a múltiples estados (escalation siempre permitido).
 _ESCALATE = "escalate_to_human"
 
+# Rev. 109 UAT live BUG 15: cliente con cart activo puede querer modificar
+# items en CUALQUIER estado (PII_COLLECTION, SHIPPING_QUOTE, CARRIER_SELECTION,
+# PAYMENT). El cart es siempre mutable hasta la orden creada. Extraemos
+# CART_MODS para unirlo a todos los estados con cart vivo.
+# Rev. 109 UAT live BUG 18: send_product_image + kb_query también deben
+# estar disponibles en todos los estados con cart — cliente puede pedir
+# foto o info de un producto en cualquier momento del flow.
+_CART_MODS = frozenset({
+    "add_to_cart",
+    "update_cart_item_quantity",
+    "remove_cart_item",
+    "get_cart",
+    "list_catalog",        # cliente puede agregar item adicional
+    "send_product_image",  # cliente puede pedir foto en cualquier momento
+    "kb_query",            # cliente puede preguntar info de producto/política
+})
+
+
+def _with_cart_mods(*tools: str) -> frozenset[str]:
+    """Helper para construir subset estado-específico + cart mods + escalate."""
+    return frozenset(tools) | _CART_MODS | frozenset({_ESCALATE})
+
+
 # Mapeo declarativo estado → set de tool names permitidos.
-# El orden de los nombres NO importa (set), pero por convención listamos
-# primero el tool "principal" del estado.
 _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
-    # Saludo + presentación inicial — cliente puede preguntar pedido previo
-    # o entrar con intención directa ("quiero 2 jabones de coco") sin pasar
-    # por exploring. add_to_cart presente para flow directo.
+    # Saludo — cart vacío típicamente; puede saltar a buy directo.
     AgenticState.GREETING: frozenset({
         "list_catalog",
         "add_to_cart",
@@ -33,9 +52,8 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "send_product_image",
         _ESCALATE,
     }),
-    # Navegación catálogo. add_to_cart presente porque cliente puede
-    # decidir agregar sin pasar formalmente por CART_BUILDING — el
-    # add_to_cart es lo que transiciona el state, no al revés.
+    # Navegación catálogo. Cart vacío típicamente, pero el cliente puede
+    # decidir agregar — add_to_cart presente.
     AgenticState.EXPLORING: frozenset({
         "list_catalog",
         "add_to_cart",
@@ -44,58 +62,44 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "get_contact_info",
         _ESCALATE,
     }),
-    # Construcción cart — todas las ops de carrito.
-    AgenticState.CART_BUILDING: frozenset({
-        "list_catalog",
-        "add_to_cart",
-        "update_cart_item_quantity",
-        "remove_cart_item",
-        "get_cart",
+    # Construcción cart — todas las ops de carrito + foto producto.
+    AgenticState.CART_BUILDING: _with_cart_mods(
         "send_product_image",
-        _ESCALATE,
-    }),
-    # Recolección PII — solo tools de contact + consent.
-    AgenticState.PII_COLLECTION: frozenset({
+        "kb_query",
+        "get_contact_info",
+    ),
+    # Recolección PII — tools de contact + consent + cart mods (cliente
+    # puede recapacitar items antes de dar datos).
+    AgenticState.PII_COLLECTION: _with_cart_mods(
         "record_consent",
         "save_contact_field",
         "get_contact_info",
-        "get_cart",
-        _ESCALATE,
-    }),
-    # Cotización envío. Incluye select_carrier para cliente que dice
-    # "el más barato" / "cual recomiendas" — flujo end-to-end fluido.
-    AgenticState.SHIPPING_QUOTE: frozenset({
+    ),
+    # Cotización envío. Incluye select_carrier para "el más barato"
+    # + cart mods por si cliente agrega item olvidado.
+    AgenticState.SHIPPING_QUOTE: _with_cart_mods(
         "quote_shipping",
         "select_carrier",
-        "get_cart",
         "get_contact_info",
-        _ESCALATE,
-    }),
-    # Selección carrier + opciones de checkout. Incluye generate_payment_link
-    # porque cliente puede confirmar carrier + cerrar en 1 turn ("si confirmo").
-    AgenticState.CARRIER_SELECTION: frozenset({
+    ),
+    # Selección carrier + opciones de checkout.
+    AgenticState.CARRIER_SELECTION: _with_cart_mods(
         "select_carrier",
         "generate_payment_link",
         "quote_shipping",
-        "get_cart",
         "get_contact_info",
-        _ESCALATE,
-    }),
-    # Generación link pago / COD. Incluye:
-    #  - select_carrier por si cliente cambia transportadora last-minute.
-    #  - save_contact_field para completar PII faltante (e.g., email obligatorio
-    #    para generate_payment_link en algunos tenants/modos).
-    #  - record_consent por si cliente recompletó consent recién.
-    AgenticState.PAYMENT: frozenset({
+    ),
+    # Generación link pago / COD. Cliente puede cambiar carrier, agregar
+    # last-minute, completar PII, etc.
+    AgenticState.PAYMENT: _with_cart_mods(
         "generate_payment_link",
         "select_carrier",
         "save_contact_field",
         "record_consent",
-        "get_cart",
         "get_contact_info",
-        _ESCALATE,
-    }),
-    # Post-pago: tracking, status, nuevo pedido.
+    ),
+    # Post-pago: tracking, status, nuevo pedido. Cart de la orden ya está
+    # convertido — NO cart mods (la orden es inmutable post-confirm).
     AgenticState.POST_PAYMENT: frozenset({
         "get_recent_orders",
         "get_cart",
@@ -108,7 +112,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
 }
 
 
-# Set universal usado por fallback al monolito (todos los tools registrados).
+# Set universal usado por fallback al monolito.
 _ALL_TOOLS = frozenset(
     name
     for subset in _TOOLS_BY_STATE.values()
