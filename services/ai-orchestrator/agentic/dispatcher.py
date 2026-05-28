@@ -174,16 +174,19 @@ async def _emit_degraded_response_and_escalate(
     conversation_id: str,
     error: BaseException,
 ) -> None:
-    """Mensaje degradado honesto + escalation a operador cuando agentic
-    crashea. NO usa legacy V1 (Plan A.2 strangler-fig + UAT live BUG 38).
+    """Degraded path con escalation diferida (rev. 109 BUG 38 + founder UX).
 
-    Garantías:
-      • Cliente SIEMPRE recibe respuesta (no queda en limbo).
-      • Mensaje empático sin culpa al cliente, invita reintento.
-      • Conversación → human_takeover (operador asume control).
-      • Message marcado processed_failed para visibilidad operador.
-      • Telegram notif al operador para SLA respuesta.
-      • Audit log error con traceback para debugging.
+    Comportamiento:
+      • 1er fallo en la conversación (en ventana 10 min): mensaje natural
+        + invita reintento. NO escala. Cliente puede reintentar con otras
+        palabras → flow recupera transparente.
+      • 2do fallo consecutivo del mismo cliente en <10 min: ahora SÍ
+        human_takeover + Telegram notif (patrón crítico, no transitorio).
+
+    Razón: la mayoría de crashes son transitorios (saturación LLM, edge
+    case pydantic). El cliente reintenta con frase distinta y funciona.
+    Saturar al operador con cada crash transitorio es ruido. Solo escalar
+    cuando hay patrón insistente.
     """
     from orchestrator import (
         _send_outbound_text,
@@ -191,11 +194,46 @@ async def _emit_degraded_response_and_escalate(
         PROCESSING_STATUS_FAILED,
     )
 
-    degraded_text = (
-        "Disculpa, tuve un inconveniente técnico procesando tu mensaje. "
-        "Un especialista de nuestro equipo te contactará en breve "
-        "para ayudarte personalmente."
-    )
+    # Marcar este mensaje como failed primero (afecta el conteo).
+    try:
+        _mark_message_processing(
+            supabase, message_id,
+            processing_status=PROCESSING_STATUS_FAILED,
+        )
+    except Exception:
+        pass
+
+    # Contar failed previos del cliente en ventana 10 min (excluyendo el actual).
+    from datetime import datetime, timedelta, timezone
+    _since = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    failed_recent = 1  # asumimos al menos 1 (el actual) por defensa.
+    try:
+        rows = (
+            supabase.table("messages")
+            .select("id", count="exact")
+            .eq("conversation_id", conversation_id)
+            .eq("direction", "inbound")
+            .eq("processing_status", PROCESSING_STATUS_FAILED)
+            .gte("created_at", _since)
+            .execute()
+        )
+        failed_recent = int(getattr(rows, "count", None) or len(rows.data or []))
+    except Exception:
+        pass
+
+    is_repeat_failure = failed_recent >= 2
+
+    if is_repeat_failure:
+        degraded_text = (
+            "Disculpa, sigo teniendo dificultades para entender. "
+            "Te paso con alguien del equipo que te ayuda en breve."
+        )
+    else:
+        degraded_text = (
+            "Disculpa, no pude procesar bien tu mensaje. "
+            "¿Lo intentamos de nuevo con otras palabras?"
+        )
+
     try:
         await _send_outbound_text(
             supabase=supabase,
@@ -209,42 +247,40 @@ async def _emit_degraded_response_and_escalate(
             conversation_id, send_exc, exc_info=True,
         )
 
-    try:
-        supabase.table("conversations").update({
-            "status": "human_takeover",
-        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
-    except Exception as st_exc:
-        logger.warning(
-            "[AGENTIC_DEGRADED] status update falló conv=%s: %s",
-            conversation_id, st_exc,
-        )
+    if is_repeat_failure:
+        try:
+            supabase.table("conversations").update({
+                "status": "human_takeover",
+            }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+        except Exception as st_exc:
+            logger.warning(
+                "[AGENTIC_DEGRADED] status update falló conv=%s: %s",
+                conversation_id, st_exc,
+            )
+        try:
+            from telegram_notifications import notify_escalation_async
+            await notify_escalation_async(
+                supabase, tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                reason=(
+                    f"🚨 *Cliente con fallas repetidas*\n"
+                    f"{failed_recent} mensajes consecutivos sin procesar "
+                    f"en últimos 10 min.\n\nÚltimo error: "
+                    f"`{str(error)[:200]}`\n\nConversación pasó a "
+                    f"human_takeover. Acción: responder cliente + revisar "
+                    f"logs orchestrator."
+                ),
+                severity="critical",
+            )
+        except Exception as tg_exc:
+            logger.warning(
+                "[AGENTIC_DEGRADED] telegram notif falló: %s", tg_exc,
+            )
 
-    try:
-        _mark_message_processing(
-            supabase, message_id,
-            processing_status=PROCESSING_STATUS_FAILED,
-        )
-    except Exception:
-        pass
-
-    try:
-        from telegram_notifications import notify_escalation_async
-        await notify_escalation_async(
-            supabase, tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            reason=(
-                f"🚨 *Agentic flow crashed*\n"
-                f"Mensaje del cliente sin procesar. Conversación pasó a "
-                f"human_takeover.\n\nError: `{str(error)[:200]}`\n\n"
-                f"Acción: revisar logs orchestrator + responder al cliente "
-                f"manualmente desde Inbox."
-            ),
-            severity="critical",
-        )
-    except Exception as tg_exc:
-        logger.warning(
-            "[AGENTIC_DEGRADED] telegram notif falló: %s", tg_exc,
-        )
+    logger.info(
+        "[AGENTIC_DEGRADED] conv=%s failed_recent=%d repeat=%s",
+        conversation_id[:8], failed_recent, is_repeat_failure,
+    )
 
 
 # ─── Agentic full path (cutover) ───────────────────────────────────────────
