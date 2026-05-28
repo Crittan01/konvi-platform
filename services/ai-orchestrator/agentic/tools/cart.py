@@ -343,6 +343,35 @@ class AddToCartTool:
                 tenant_id=ctx.tenant_id,
                 contact_id=ctx.contact_id,
             )
+
+            # Rev. 109 Stock Reservation Hybrid — SOFT 15min al add_to_cart.
+            # Reserva ANTES de hacer add_item para evitar oversell.
+            # Si insuficiente, ABORT sin tocar cart.
+            from lib import stock_reservation as _stock_res
+            try:
+                _stock_res.reserve(
+                    ctx.supabase,
+                    tenant_id=ctx.tenant_id,
+                    variation_id=args.variation_id,
+                    qty=int(args.quantity),
+                    cart_id=cart["id"],
+                    conversation_id=ctx.conversation_id,
+                    ttl_minutes=_stock_res.TTL_CART_SOFT_MINUTES,
+                )
+            except _stock_res.InsufficientStock as exc:
+                return tool_failure(
+                    f"No hay stock suficiente para *{product.get('title')}* "
+                    f"({variant.get('label')}). Disponibles: {exc.available} "
+                    f"(pediste {exc.requested}). "
+                    f"¿Quieres ajustar la cantidad o ver otra variante?",
+                    code="INSUFFICIENT_STOCK",
+                    extra={
+                        "available": exc.available,
+                        "requested": exc.requested,
+                        "variation_id": args.variation_id,
+                    },
+                )
+
             add_payload = add_item(
                 ctx.supabase,
                 cart_id=cart["id"],
@@ -444,13 +473,64 @@ class UpdateCartItemQtyTool:
                 code="ITEM_NOT_FOUND",
             )
 
+        # Rev. 109 Stock Reservation Hybrid — ajustar reserva ANTES de cambiar
+        # qty. Modelo: release_by_cart(variation) + reserve(new_qty). Si new
+        # qty insuficiente, abort sin tocar cart.
+        from lib import stock_reservation as _stock_res
+        variation_id = str(item.get("variation_id") or "")
+        previous_qty = int(item.get("quantity") or 1)
+        if variation_id and args.new_quantity != previous_qty:
+            # Liberar reservas existentes de esta variation en este cart.
+            _stock_res.release_by_cart(
+                ctx.supabase,
+                tenant_id=ctx.tenant_id,
+                cart_id=cart["id"],
+                variation_id=variation_id,
+            )
+            # Reservar nueva qty.
+            try:
+                _stock_res.reserve(
+                    ctx.supabase,
+                    tenant_id=ctx.tenant_id,
+                    variation_id=variation_id,
+                    qty=int(args.new_quantity),
+                    cart_id=cart["id"],
+                    conversation_id=ctx.conversation_id,
+                    ttl_minutes=_stock_res.TTL_CART_SOFT_MINUTES,
+                )
+            except _stock_res.InsufficientStock as exc:
+                # Restaurar reserva al qty previo (best-effort).
+                try:
+                    _stock_res.reserve(
+                        ctx.supabase,
+                        tenant_id=ctx.tenant_id,
+                        variation_id=variation_id,
+                        qty=previous_qty,
+                        cart_id=cart["id"],
+                        conversation_id=ctx.conversation_id,
+                        ttl_minutes=_stock_res.TTL_CART_SOFT_MINUTES,
+                    )
+                except Exception:
+                    pass
+                return tool_failure(
+                    f"No hay stock suficiente para subir a {args.new_quantity} "
+                    f"unidades. Disponibles: {exc.available}. "
+                    f"¿Mantengo en {previous_qty}?",
+                    code="INSUFFICIENT_STOCK",
+                    extra={
+                        "available": exc.available,
+                        "requested": exc.requested,
+                        "variation_id": variation_id,
+                    },
+                )
+
         try:
             payload = update_item_quantity(
                 ctx.supabase,
                 cart_id=cart["id"],
                 tenant_id=ctx.tenant_id,
                 product_id=str(item.get("product_id") or ""),
-                variation_id=str(item.get("variation_id") or ""),
+                variation_id=variation_id,
                 new_quantity=args.new_quantity,
                 unit_price_cents=int(item.get("unit_price_cents") or 0),
             )
@@ -462,7 +542,7 @@ class UpdateCartItemQtyTool:
         return tool_success({
             "updated": {
                 "cart_item_id": args.cart_item_id,
-                "previous_quantity": int(item.get("quantity") or 1),
+                "previous_quantity": previous_qty,
                 "new_quantity": args.new_quantity,
             },
             "order_invalidated": (
@@ -517,18 +597,35 @@ class RemoveCartItemTool:
                 code="ITEM_NOT_FOUND",
             )
 
+        variation_id = str(item.get("variation_id") or "")
         try:
             # Legacy API toma variation_id (no cart_item_id).
             remove_item(
                 ctx.supabase,
                 cart_id=cart["id"],
                 tenant_id=ctx.tenant_id,
-                variation_id=str(item.get("variation_id") or ""),
+                variation_id=variation_id,
             )
         except Exception as exc:
             return tool_failure(
                 f"Error removiendo item: {exc}", code="CART_WRITE_ERROR",
             )
+
+        # Rev. 109 Stock Reservation Hybrid — liberar reservas de esta
+        # variation en el cart. Best-effort, no aborta si falla.
+        if variation_id:
+            try:
+                from lib import stock_reservation as _stock_res
+                released = _stock_res.release_by_cart(
+                    ctx.supabase,
+                    tenant_id=ctx.tenant_id,
+                    cart_id=cart["id"],
+                    variation_id=variation_id,
+                )
+                if released:
+                    pass  # log already done in lib
+            except Exception:
+                pass
 
         return tool_success({
             "removed": {
