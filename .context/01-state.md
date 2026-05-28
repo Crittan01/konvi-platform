@@ -1,6 +1,76 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-05-08 (rev. 106 · cierre Sem 5 Envia P1 + Cupones I.2 + GUI consistency)
+**Última actualización**: 2026-05-27 (rev. 109 · Día 1 — Agentic State Machine skeleton)
+**Branch activo**: `phase-2-agentic-rewrite` (refactor 10 días en curso).
+
+---
+
+## Rev. 109 (2026-05-27 — EN CURSO) — Refactor Inbox production-grade
+
+**Disparador**: founder validó UAT exhaustivo rev. 108 + identificó AGENTIC_EMPTY_OUTPUT_DIAG recurrente (Gemini Flash saturado con 15-19 tools + 17-19KB prompt). Decisión arquitectónica:
+
+> *"no dejar basura de codigo... refactoriza el contexto, para que no cree confusion... Inbox cerrado production-grade real... 2 tenants fijos pero debemos estar preparados para crecer 100+"*
+
+**Plan aprobado: 10 días** (`phase-2-agentic-rewrite`):
+
+| Día | Entregable | Estado |
+|---|---|---|
+| **1** | DB migration `conversations.agentic_state` + `agentic/state_machine/` skeleton + resolver determinístico + tests | ✅ DONE |
+| 2 | Per-state agents (5 modules + tools subset 3-5 por estado + mini-prompts 4-6KB) | pending |
+| 3 | LLM Factory + Cascade (Gemini Flash Lite → Flash → Pro → Claude Sonnet 4) | pending |
+| 4 | Multimodal pipeline (audio/imagen/video WhatsApp nativo) | pending |
+| 5 | Cross-layer integration (Inbox badge UI + admin endpoints + Habeas Data audit) | pending |
+| 6 | UAT BATCH 1 regression (Secciones A+B = 10 escenarios) | pending |
+| 7 | UAT BATCH 2-4 (Secciones C+D+E = 16 escenarios) | pending |
+| 8 | UAT BATCH 5-6 (Secciones F+G = 11 escenarios) | pending |
+| 9 | UAT BATCH 7-8 (Secciones H+I = 9 escenarios) | pending |
+| 10 | UAT BATCH 9-10 (Secciones J+K+L+M = 15 escenarios) + certificación | pending |
+
+**Día 1 — entregables persistidos** (commit `phase-2-agentic-rewrite`):
+
+- Migration `supabase/migrations/20260604000000_conversations_agentic_state.sql` — column + CHECK constraint + index parcial.
+- Módulo `services/ai-orchestrator/agentic/state_machine/` con:
+  - `states.py` — enum `AgenticState` (9 estados canónicos) + props `is_pre_cart/is_checkout/is_terminal`.
+  - `transitions.py` — matriz FSM declarativa + `is_valid_transition()` + `allowed_next_states()` + `transition_reason()`.
+  - `resolver.py` — `StateResolver` puro (función pura) + `ResolutionContext` dataclass + `build_context_from_records()` helper.
+- Tests: `tests/agentic/test_state_machine_resolver.py` — **23 tests PASS** (cubren las 9 reglas del resolver + transitions + state props).
+- Wiring en `dispatcher.py` — resuelve estado actual ANTES de `run_agentic_turn` y persiste en `conversations.agentic_state`. No bloquea turn si falla (telemetría only).
+- Fix hygiene consolidación: dispatcher referenciaba `PaymentMethodExplicitInvariant` (eliminado por consolidación rev. 108). Reemplazado por `PaymentCoherenceInvariant`.
+
+**Decisión LLM cascade confirmada** (rechazo DeepSeek/Qwen/Kimi/Mistral/Llama):
+- Requisito multimodal nativo (audio/imagen/video WhatsApp) descarta proveedores OSS.
+- Cascade definitiva: **Gemini Flash Lite (default) → Gemini Flash (escalado) → Gemini Pro (complejo) → Claude Sonnet 4 (rescue)**.
+
+**Estados canónicos definidos**:
+```
+GREETING → EXPLORING → CART_BUILDING → PII_COLLECTION → SHIPPING_QUOTE
+                                                              ↓
+                                          CARRIER_SELECTION → PAYMENT → POST_PAYMENT
+HUMAN_HANDOFF accesible desde cualquier estado.
+```
+
+---
+
+## Rev. 108 (2026-05-26→27) — UAT exhaustivo + consolidación arquitectónica
+
+**Branch**: `phase-2-agentic-rewrite` (rama de trabajo activa para refactor).
+
+**Cerrado en sesión 2026-05-27 previa**:
+- Secciones UAT A+B (9 escenarios) — fixes runtime: precio en bypass, FORMATO compact restaurado, "quince mililitros", anti-falso-positivo "jabón de chocolate".
+- **Consolidación 14→9 invariants**: `cart_state` + `cart_add_pricing` + `category_completeness` → `cart_render_coherence` (444 LOC vs 753). `payment_method_explicit` + `payment_mode_coherence` → `payment_coherence` (337 LOC vs 503).
+- **Consolidación 19→15 tools**: `save_email/name/document/address/shipping_phone` → `save_contact_field` (param `field` Literal).
+- **MeLi disconnect+reconnect** 3-layer defense (banner UI + `prompt=login` OAuth + detect last_disconnected_user_id).
+- **Tenant payment methods modular**: tabla `tenant_payment_methods` con CHECK CONSTRAINT, cache TTL 30s.
+- **Carrier capabilities canon**: `aveonline_carrier_capabilities` 10 carriers seeded + tenant_carriers.cod_override.
+
+**Outstanding rev. 108** (cubierto por refactor rev. 109):
+- Secciones UAT C-M (38 escenarios) — diferidos a Día 6-10 del refactor sobre arquitectura nueva (state machine + cascade + multimodal).
+
+---
+
+## Cierre rev. 106 (2026-05-08) — Sem 5 Envia P1 + Cupones I.2 + GUI consistency
+
+**Última actualización pre-refactor**: 2026-05-08 (rev. 106)
 **Fuente de verdad**: DB live (Supabase `xmelwnhhphksbpdjmbbp`) + contratos en código.
 **Migraciones SQL en `supabase/migrations/`**: history reproducible, NO spec (ver `05-doc-policy.md` rev. 72).
 **Tree funcional vigente**: `.context/00-product.md` (rev. 6).

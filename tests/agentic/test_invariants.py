@@ -14,7 +14,7 @@ sys.path.insert(
 )
 
 from agentic.invariants import (
-    CartStateInvariant,
+    CartRenderCoherenceInvariant,
     ConsentRequiredInvariant,
     apply_invariants,
     InvariantOutcome,
@@ -25,11 +25,11 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-class CartStateInvariantTests(unittest.TestCase):
+class CartRenderCoherenceInvariantTests(unittest.TestCase):
     """Si LLM afirma cambio de cart, ese tool de write DEBE haber corrido."""
 
     def setUp(self):
-        self.inv = CartStateInvariant()
+        self.inv = CartRenderCoherenceInvariant()
         self.base_kwargs = {
             "tenant_id": "t",
             "conversation_id": "c",
@@ -323,7 +323,7 @@ class ApplyInvariantsPipelineTests(unittest.TestCase):
 
     def test_pipeline_ok_si_todos_pasan(self):
         result = _run(apply_invariants(
-            [CartStateInvariant(), ConsentRequiredInvariant()],
+            [CartRenderCoherenceInvariant(), ConsentRequiredInvariant()],
             candidate_text="¿En qué te ayudo?",
             tenant_id="t",
             conversation_id="c",
@@ -335,7 +335,7 @@ class ApplyInvariantsPipelineTests(unittest.TestCase):
 
     def test_pipeline_primer_rewrite_gana(self):
         result = _run(apply_invariants(
-            [CartStateInvariant(), ConsentRequiredInvariant()],
+            [CartRenderCoherenceInvariant(), ConsentRequiredInvariant()],
             candidate_text="Listo, agregué Coco y guardé tus datos.",
             tenant_id="t",
             conversation_id="c",
@@ -345,9 +345,9 @@ class ApplyInvariantsPipelineTests(unittest.TestCase):
                 {"tool": "save_pii", "result": {"code": "CONSENT_REQUIRED"}},
             ],
         ))
-        # CartStateInvariant corre primero → atrapa la afirmación de cart.
+        # CartRenderCoherenceInvariant corre primero → atrapa la afirmación de cart.
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
-        self.assertEqual(result.invariant_name, "cart_state_coherence")
+        self.assertEqual(result.invariant_name, "cart_render_coherence")
 
     def test_pipeline_invariant_excepcion_no_colapsa(self):
         """Si un invariant lanza excepción, pipeline continúa."""
@@ -356,7 +356,7 @@ class ApplyInvariantsPipelineTests(unittest.TestCase):
             async def validate(self, **kwargs):
                 raise RuntimeError("broken")
         result = _run(apply_invariants(
-            [_BrokenInvariant(), CartStateInvariant()],
+            [_BrokenInvariant(), CartRenderCoherenceInvariant()],
             candidate_text="¿En qué te ayudo?",
             tenant_id="t",
             conversation_id="c",
@@ -364,7 +364,7 @@ class ApplyInvariantsPipelineTests(unittest.TestCase):
             supabase=None,
             tool_call_log=[],
         ))
-        # Broken se ignora; CartStateInvariant pasa → OK.
+        # Broken se ignora; CartRenderCoherenceInvariant pasa → OK.
         self.assertEqual(result.outcome, InvariantOutcome.OK)
 
 

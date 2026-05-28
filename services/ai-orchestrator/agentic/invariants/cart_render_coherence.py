@@ -383,26 +383,36 @@ class CartRenderCoherenceInvariant:
                     )
 
         # ── CASE C: add_to_cart success sin precio + subtotal ─────────
+        # Skip si en el MISMO turno el bot llamó list_catalog (mostrando
+        # variantes de OTRO producto) — el outbound mezcla contextos:
+        # "agregué X" + "para Y presentaciones $52K/$85K". CASE C no debe
+        # forzar subtotal aquí porque los precios pertenecen a variantes,
+        # no al item agregado. Coherencia: Case B ya valida items count.
         add_result = _cart_write_succeeded(tool_call_log)
         if add_result and add_result.get("added"):
-            has_price = _outbound_has_price(candidate_text)
-            has_sub = _outbound_has_subtotal(candidate_text)
-            if not (has_price and has_sub):
-                _, cart_row = await _get_cart_state(
-                    supabase, conversation_id, tenant_id,
-                )
-                if cart_row:
-                    return InvariantResult(
-                        outcome=InvariantOutcome.REWRITE,
-                        invariant_name=self.name,
-                        replacement_text=_build_pricing_replacement(
-                            add_result, cart_row, candidate_text,
-                        ),
-                        reason=(
-                            f"CASE C: add_to_cart success pero outbound "
-                            f"sin precio={not has_price} subtotal={not has_sub}"
-                        ),
+            also_listed_variants = any(
+                (call.get("tool") or "") in {"list_catalog", "send_product_image"}
+                for call in (tool_call_log or [])
+            )
+            if not also_listed_variants:
+                has_price = _outbound_has_price(candidate_text)
+                # CASE C fire condition: outbound afirma add_to_cart pero
+                # NO incluye precio alguno ($). Si ya muestra precios por
+                # línea o subtotal explícito, lo dejamos pasar (suficiente
+                # transparencia comercial).
+                if not has_price:
+                    _, cart_row = await _get_cart_state(
+                        supabase, conversation_id, tenant_id,
                     )
+                    if cart_row:
+                        return InvariantResult(
+                            outcome=InvariantOutcome.REWRITE,
+                            invariant_name=self.name,
+                            replacement_text=_build_pricing_replacement(
+                                add_result, cart_row, candidate_text,
+                            ),
+                            reason="CASE C: add_to_cart success sin precio en outbound",
+                        )
 
         # ── CASE D: categoría con productos omitidos ──────────────────
         if _outbound_presents_category_list(candidate_text):

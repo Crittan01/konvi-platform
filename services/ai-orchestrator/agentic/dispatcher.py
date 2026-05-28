@@ -848,14 +848,15 @@ async def _run_agentic_full(
                 )
 
                 # Rev. 108 Fase B fix arquitectónico — aplicar invariant
-                # `payment_method_explicit` EN el bypass también. Antes el
+                # `payment_coherence` EN el bypass también. Antes el
                 # bypass salteaba el pipeline de invariants, permitiendo
                 # mostrar cotización sin que cliente haya definido modo
                 # de pago. Eso oculta el costo real (COD puede diferir).
+                # Rev. 109: PaymentMethodExplicit consolidado en PaymentCoherence.
                 from agentic.invariants import (
-                    PaymentMethodExplicitInvariant, InvariantOutcome,
+                    PaymentCoherenceInvariant, InvariantOutcome,
                 )
-                payment_inv = PaymentMethodExplicitInvariant()
+                payment_inv = PaymentCoherenceInvariant()
                 inv_result = await payment_inv.validate(
                     candidate_text=outbound,
                     tenant_id=tenant_id,
@@ -872,7 +873,7 @@ async def _run_agentic_full(
                 if inv_result.outcome == InvariantOutcome.REWRITE:
                     outbound = inv_result.replacement_text or outbound
                     logger.info(
-                        "[AGENTIC_PRE_LLM] payment_method_explicit REWRITE conv=%s "
+                        "[AGENTIC_PRE_LLM] payment_coherence REWRITE conv=%s "
                         "— preguntando modo de pago antes de cotizar",
                         conversation_id,
                     )
@@ -921,6 +922,79 @@ async def _run_agentic_full(
                 getattr(ship_result, "data", None),
             )
     # ─── /pre-LLM resolver ───
+
+    # ── Rev. 109 — Agentic State Machine ──
+    # Resolver determinístico del estado actual del Inbox.
+    # NO afecta runtime (Day 2 lo consumirá para per-state prompts);
+    # por ahora solo se persiste en `conversations.agentic_state` para:
+    #   • Telemetría / observabilidad.
+    #   • Inbox badge UI (Day 5).
+    #   • Baseline para post-turn re-resolution.
+    try:
+        from agentic.state_machine import StateResolver
+        from agentic.state_machine.resolver import build_context_from_records
+
+        _conv_row = (
+            supabase.table("conversations")
+            .select("status, agentic_state")
+            .eq("id", conversation_id)
+            .single()
+            .execute()
+        )
+        _conv = _conv_row.data or {}
+
+        _cart_row = (
+            supabase.table("conversation_carts")
+            .select(
+                "id, status, payment_method, shipping_cents, carrier_code, "
+                "payment_link, wompi_link_id"
+            )
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        _cart = (_cart_row.data or [None])[0]
+        if _cart:
+            _items_count_row = (
+                supabase.table("conversation_cart_items")
+                .select("id", count="exact", head=True)
+                .eq("cart_id", _cart["id"])
+                .execute()
+            )
+            _cart["items_count"] = int(
+                getattr(_items_count_row, "count", 0) or 0
+            )
+
+        _resolution_ctx = build_context_from_records(
+            conversation=_conv,
+            cart=_cart,
+            contact=contact or {},
+            history_len=len(history or []),
+        )
+        _state = StateResolver().resolve(_resolution_ctx)
+        _prev_state = _conv.get("agentic_state")
+        if _state.value != _prev_state:
+            supabase.table("conversations").update(
+                {"agentic_state": _state.value}
+            ).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            logger.info(
+                "[AGENTIC_STATE] conv=%s %s→%s (cart_items=%s consent=%s)",
+                conversation_id[:8],
+                _prev_state or "NULL",
+                _state.value,
+                _resolution_ctx.cart_items_count,
+                _resolution_ctx.contact_consent_given,
+            )
+    except Exception as _state_exc:
+        # State machine NO debe bloquear el turno. Log y seguir.
+        logger.warning(
+            "[AGENTIC_STATE] resolver falló conv=%s: %s — seguimos sin badge",
+            conversation_id[:8], _state_exc,
+        )
+    # ─── /state machine ───
 
     # Ejecutar agente.
     started_at = time.monotonic()
