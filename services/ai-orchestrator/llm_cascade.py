@@ -84,7 +84,13 @@ def _is_transient(exc_or_text: Any) -> bool:
 
 
 def _backoff_seconds(attempt_in_tier: int) -> float:
-    return float(min(16, 2 ** max(0, attempt_in_tier - 1)))
+    """Backoff 1, 3, 7, 15, 31, ... (truncado a 31s).
+
+    Pattern `2^n - 1` da más espacio entre reintentos que el clásico
+    `2^(n-1)` (1, 2, 4, 8). Mejor para saturaciones reales del proveedor
+    (Gemini 503) — da tiempo a que la cola del backend se libere.
+    """
+    return float(min(31, (2 ** max(1, attempt_in_tier)) - 1))
 
 
 @dataclass

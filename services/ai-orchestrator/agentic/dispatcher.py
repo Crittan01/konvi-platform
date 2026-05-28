@@ -161,6 +161,16 @@ async def _run_agentic_full(
     content_type: str,
 ) -> None:
     """Cutover: agentic compone outbound y lo envía al cliente."""
+    # Imports early (rev. 109 fix UAT live BUG 23): el multimodal block
+    # de abajo necesita _send_outbound_text + _mark_message_processing
+    # para responder degraded honesto al cliente cuando Gemini multimodal
+    # falla. Importarlos al inicio evita NameError + silent fallthrough.
+    from orchestrator import (
+        _send_outbound_text,
+        _mark_message_processing,
+        PROCESSING_STATUS_PROCESSED,
+    )
+
     # ── Rev. 109 Día 4 — Multimodal pipeline ──
     # Si el inbound es audio/imagen/video, descargamos el media de Meta y
     # pedimos a Gemini multimodal una interpretación textual. El resto del
@@ -170,17 +180,18 @@ async def _run_agentic_full(
             from agentic.multimodal import (
                 process_inbound_media, format_for_agentic,
             )
-            # Cargar media_id + media_mime desde messages.meta.
+            # Cargar media_id + media_mime desde columnas directas
+            # (connector-whatsapp/parser.py persiste así en messages).
             _mrow = (
                 supabase.table("messages")
-                .select("meta")
+                .select("media_id, media_mime, media_url")
                 .eq("id", message_id)
                 .single()
                 .execute()
             )
-            _meta = (_mrow.data or {}).get("meta") or {}
-            _media_id = _meta.get("media_id")
-            _media_mime = _meta.get("media_mime")
+            _m = _mrow.data or {}
+            _media_id = _m.get("media_id")
+            _media_mime = _m.get("media_mime")
             mm_result = await process_inbound_media(
                 tenant_id=tenant_id,
                 supabase=supabase,
@@ -197,12 +208,64 @@ async def _run_agentic_full(
                     conversation_id[:8], content_type,
                     len(original_content), len(content),
                 )
+                # Rev. 109 fix UX founder: persistir transcripción en
+                # messages.content para que el operador del Inbox vea el
+                # TEXTO REAL del audio/imagen/video, no el placeholder
+                # "[Audio recibido]". media_id / media_url quedan intactos
+                # (audio original sigue accesible).
+                _media_label = {
+                    "audio": "🎤 Audio",
+                    "image": "📷 Imagen",
+                    "video": "🎬 Video",
+                }.get(content_type, content_type.capitalize())
+                _inbox_text = f"{_media_label}: {mm_result.text}"
+                try:
+                    supabase.table("messages").update({
+                        "content": _inbox_text,
+                    }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
+                except Exception as _upd_exc:
+                    logger.warning(
+                        "[MULTIMODAL_DISPATCH] persist transcription falló "
+                        "conv=%s: %s", conversation_id[:8], _upd_exc,
+                    )
             else:
-                logger.info(
-                    "[MULTIMODAL_DISPATCH] conv=%s type=%s fallback al content "
-                    "original (procesamiento no disponible)",
+                # Rev. 109 fix UAT live: multimodal degraded → bot DEBE
+                # informar honestamente al cliente, no responder genérico.
+                # Mensaje empático que invita a reintentar / escribir.
+                logger.warning(
+                    "[MULTIMODAL_DISPATCH] conv=%s type=%s DEGRADED → "
+                    "responde al cliente honesto, no procesar como texto",
                     conversation_id[:8], content_type,
                 )
+                _media_label = {
+                    "audio": "audio",
+                    "image": "imagen",
+                    "video": "video",
+                }.get(content_type, "media")
+                _degraded_msg = (
+                    f"Recibí tu {_media_label}, pero estoy teniendo "
+                    f"dificultades técnicas para procesarlo en este momento. "
+                    f"¿Podrías escribirme el mensaje, o intentar de nuevo "
+                    f"en unos minutos? Si prefieres, te conecto con un "
+                    f"especialista del equipo."
+                )
+                await _send_outbound_text(
+                    supabase=supabase, conversation_id=conversation_id,
+                    tenant_id=tenant_id, text=_degraded_msg,
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+                # history/contact aún no cargados en este punto — passes
+                # vacíos para state machine (igual el state resolver lee
+                # cart/conv directo de DB, no depende del history).
+                _resolve_and_persist_agentic_state(
+                    supabase=supabase, tenant_id=tenant_id,
+                    conversation_id=conversation_id, contact={},
+                    history=[],
+                )
+                return
         except Exception as mm_exc:
             logger.warning(
                 "[MULTIMODAL_DISPATCH] conv=%s type=%s falló: %s — content original",
