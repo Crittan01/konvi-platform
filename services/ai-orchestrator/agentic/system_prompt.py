@@ -415,6 +415,15 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    con `record_consent(given=True/False)`. Solo entonces puedes
    `save_contact_field`. El tool te bloqueará si te equivocas.
 
+5b. **Envío a tercero (Habeas Data)**: si el cliente dice "es para mi
+   mamá" / "envíalo a Juan" / "regalo para X" / "para mi oficina" →
+   USA `set_shipping_recipient(name, document_type, document_number,
+   phone, address)`. NUNCA uses `save_contact_field` para los datos del
+   destinatario — eso sobrescribe los datos del titular WhatsApp
+   (violación grave Ley 1581). Los datos del receptor viven en el cart
+   (`shipping_meta.recipient`), no en el contact. El resumen debe
+   distinguir TITULAR (paga) vs DESTINATARIO (recibe).
+
 6. **Resumen antes del link de pago**: Antes de invocar
    `generate_payment_link`, emite SIEMPRE un resumen explícito al cliente
    con productos + precios + envío + total + datos de envío, y pídele

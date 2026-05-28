@@ -32,6 +32,7 @@ _CART_MODS = frozenset({
     "list_catalog",        # cliente puede agregar item adicional
     "send_product_image",  # cliente puede pedir foto en cualquier momento
     "kb_query",            # cliente puede preguntar info de producto/política
+    "set_shipping_recipient",  # rev. 109 BUG 37 — receptor alterno
 })
 
 
@@ -60,6 +61,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "send_product_image",
         "kb_query",
         "get_contact_info",
+        "set_shipping_recipient",  # rev. 109 BUG 37 — receptor alterno
         _ESCALATE,
     }),
     # Construcción cart — todas las ops de carrito + foto producto.

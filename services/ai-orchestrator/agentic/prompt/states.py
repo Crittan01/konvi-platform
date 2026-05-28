@@ -276,11 +276,23 @@ FLUJO OBLIGATORIO:
    Modo: <Online / Contra entrega>
 
    *Datos de envío:*
-   • Nombre: <summary_lines_for_order.name>
-   • Correo: <summary_lines_for_order.email>
-   • Celular: <summary_lines_for_order.phone>
-   • Documento: <summary_lines_for_order.document>
-   • Dirección: <summary_lines_for_order.address>
+
+   Si cart.shipping_meta.recipient.name está poblado (envío a tercero):
+     *Paga (titular):* <summary_lines_for_order.name>
+     *Correo:* <summary_lines_for_order.email>
+
+     *Recibe (destinatario):*
+     • Nombre: <recipient.name>
+     • Celular: <recipient.phone>
+     • Documento: <recipient.document_type> <recipient.document_number>
+     • Dirección: <recipient.address>
+
+   Si NO hay recipient (envío al mismo titular):
+     • Nombre: <summary_lines_for_order.name>
+     • Correo: <summary_lines_for_order.email>
+     • Celular: <summary_lines_for_order.phone>
+     • Documento: <summary_lines_for_order.document>
+     • Dirección: <summary_lines_for_order.address>
 
    "¿Confirmas el pedido?"
 
