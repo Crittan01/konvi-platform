@@ -55,6 +55,7 @@ import { ChatEditorToolbar } from './chat-editor-toolbar'
 import { OrderMiniForm } from './order-mini-form'
 import { useConversationContext } from '../_hooks/use-conversation-context'
 import { useConversations } from '../_hooks/use-conversations'
+import { useMessages } from '../_hooks/use-messages'
 import { ContextPanel } from './context-panel'
 import { ConversationList } from './conversation-list'
 
@@ -83,8 +84,8 @@ export default function InboxManager() {
     reload: loadConversations,
     syncUrlParam,
   } = useConversations({ supabase })
-  const [messages, setMessages] = useState<Message[]>([])
-  const [messagesLoadError, setMessagesLoadError] = useState<string | null>(null)
+  // Refactor paso 9/10 2026-05-29 — messages state vive en useMessages hook.
+  // Optimistic patch a conversations.last_interaction_at via callback.
   const [takingOver, setTakingOver] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
@@ -96,10 +97,7 @@ export default function InboxManager() {
   // Modelo: 1 cliente = 1 fila visible (la conv primary del grupo). Si el
   // cliente tiene >1 sesión histórica, expand para verlas indentadas.
   const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set())
-  // F2: scroll histórico cursor-based.
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [hasMoreMessages, setHasMoreMessages] = useState(true)
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  // F2 scroll histórico cursor-based — vive en useMessages.
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'context'>('list')
   const [waConnected, setWaConnected] = useState<boolean | null>(null)
 
@@ -115,7 +113,6 @@ export default function InboxManager() {
   // creatingOrder, orderError, orderSuccess) + handlers (toggleVariation,
   // createOrder) ahora viven encapsulados en <OrderMiniForm/>.
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const replyInputRef = useRef<HTMLTextAreaElement>(null)
 
   const selectedConv = conversations.find(c => c.id === selectedId) ?? null
@@ -166,149 +163,40 @@ export default function InboxManager() {
   })
 
   // ── Cargar mensajes ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!selectedId) return
-    setHasMoreMessages(true)
-    supabase
-      .from('messages')
-      .select('id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason')
-      .eq('conversation_id', selectedId)
-      // Excluir snapshots de contexto interno (R-13) — no se renderizan al cliente.
-      .neq('content_type', 'context_snapshot')
-      // DESC para traer los 100 MÁS RECIENTES (no los 100 más antiguos)
-      // Se revierten en el then() para mostrar en orden cronológico (asc visual)
-      .order('created_at', { ascending: false })
-      .limit(100)
-      .then(({ data, error }) => {
-        if (error) {
-          setMessages([])
-          setMessagesLoadError('No se pudieron cargar los mensajes de esta conversación.')
-          return
-        }
-        setMessagesLoadError(null)
-        const fetched = (data || []).reverse()
-        setMessages(fetched)
-        // Si vinieron menos de 100, no hay más historial.
-        setHasMoreMessages(fetched.length === 100)
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId])
-
-  // ── Realtime — mensajes ────────────────────────────────────────────────────
-  const lastRealtimeAt = useRef<number>(0)
-  useEffect(() => {
-    if (!selectedId) return
-    const channel = supabase
-      .channel(`messages:${selectedId}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'messages',
-        filter: `conversation_id=eq.${selectedId}`,
-      }, (payload) => {
-        lastRealtimeAt.current = Date.now()
-        if (payload.eventType === 'INSERT') {
-          const newMsg = payload.new as Message & { content_type?: string }
-          // R-13: snapshots de contexto interno NO se renderizan al cliente.
-          if (newMsg.content_type === 'context_snapshot') return
-          // A6: dedupe por id para evitar duplicado entre realtime y polling fallback.
-          setMessages(prev =>
-            prev.some(m => m.id === newMsg.id)
-              ? prev
-              : [...prev, newMsg as Message]
-          )
-          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-          // A1: optimistic update del timestamp lateral — el trigger DB
-          // actualizará conversations.last_interaction_at, pero sin esperar al
-          // round-trip refrescamos local para que el lateral y el chat
-          // queden alineados de inmediato.
-          const ts = (payload.new as Message).created_at || new Date().toISOString()
-          setConversations(prev =>
-            prev.map(c => c.id === selectedId
-              ? { ...c, last_interaction_at: ts }
-              : c
-            ).sort((a, b) => {
-              const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
-              const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
-              return bt - at
-            })
-          )
-        } else if (payload.eventType === 'UPDATE') {
-          setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new as Message : m))
-        }
-      })
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('[Realtime] messages channel error, fallback polling activado')
-        }
-      })
-
-    // Fallback: si Realtime falla, recargar mensajes cada 5s
-    const fallbackInterval = setInterval(() => {
-      const sinceLastEvent = Date.now() - lastRealtimeAt.current
-      if (sinceLastEvent > 8000) {
-        supabase
-          .from('messages')
-          .select('id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason')
-          .eq('conversation_id', selectedId)
-          .neq('content_type', 'context_snapshot')
-          .order('created_at', { ascending: false })
-          .limit(100)
-          .then(({ data, error }) => {
-            if (error) return
-            setMessages((data || []).reverse())
-          })
-      }
-    }, 5000)
-
-    return () => {
-      clearInterval(fallbackInterval)
-      supabase.removeChannel(channel)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId])
+  // Refactor paso 9/10 2026-05-29 — carga inicial + Realtime + polling
+  // fallback de mensajes viven en useMessages. Optimistic patch a
+  // last_interaction_at via callback onMessageInserted.
+  const {
+    messages,
+    error: messagesLoadError,
+    hasMore: hasMoreMessages,
+    loadingMore,
+    loadMore: loadMoreMessages,
+    messagesContainerRef,
+    messagesEndRef,
+  } = useMessages(selectedId, {
+    supabase,
+    onMessageInserted: (convId, ts) => {
+      setConversations(prev =>
+        prev.map(c => c.id === convId
+          ? { ...c, last_interaction_at: ts }
+          : c,
+        ).sort((a, b) => {
+          const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
+          const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
+          return bt - at
+        }),
+      )
+    },
+  })
 
   // Refactor paso 7/10 2026-05-29 — Realtime conversations + polling fallback
   // viven en useConversations. El hook expone setConversations como escape
   // hatch para optimistic updates desde otros effects (realtime messages,
   // mark-as-read) que aún viven en este componente (pendiente paso 9).
 
-  // F2: cargar más mensajes históricos cuando el operador hace scroll arriba.
-  const loadMoreMessages = async () => {
-    if (!selectedId || loadingMore || !hasMoreMessages || messages.length === 0) return
-    const oldest = messages[0]
-    if (!oldest?.created_at) return
-    const container = messagesContainerRef.current
-    const prevScrollHeight = container?.scrollHeight ?? 0
-    setLoadingMore(true)
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('id, direction, content, content_type, media_url, created_at, processed, processing_status, skip_reason')
-        .eq('conversation_id', selectedId)
-        .neq('content_type', 'context_snapshot')
-        .lt('created_at', oldest.created_at)
-        .order('created_at', { ascending: false })
-        .limit(50)
-      if (error || !data) {
-        setHasMoreMessages(false)
-        return
-      }
-      const older = data.reverse()
-      if (older.length === 0) {
-        setHasMoreMessages(false)
-        return
-      }
-      setMessages(prev => [...older, ...prev])
-      // Restaurar scroll position para que el operador no pierda contexto.
-      requestAnimationFrame(() => {
-        const c = messagesContainerRef.current
-        if (c) c.scrollTop = c.scrollHeight - prevScrollHeight
-      })
-      if (older.length < 50) setHasMoreMessages(false)
-    } finally {
-      setLoadingMore(false)
-    }
-  }
+  // Refactor paso 9/10 — loadMoreMessages, hasMoreMessages, loadingMore
+  // viven en useMessages. F2 cursor-based pagination encapsulada.
 
   // ── Seleccionar conversación ───────────────────────────────────────────────
   const handleSelectConv = async (id: string) => {
