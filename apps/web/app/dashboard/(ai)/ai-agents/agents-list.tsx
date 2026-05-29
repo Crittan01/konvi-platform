@@ -29,7 +29,11 @@ interface Agent {
   strict_guardrails: boolean
   role?: string | null
   is_default?: boolean | null
+  fallback_for_roles?: string[] | null
 }
+
+const FALLBACK_ROLES_CANONICAL = ['sales', 'support', 'marketing', 'claims'] as const
+type CanonicalRole = (typeof FALLBACK_ROLES_CANONICAL)[number]
 
 interface Props {
   agents: Agent[]
@@ -66,6 +70,9 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
   const [agentName, setAgentName] = useState('')
   const [roleDescription, setRoleDescription] = useState('')
   const [strictGuardrails, setStrictGuardrails] = useState(true)
+  const [fallbackRoles, setFallbackRoles] = useState<Set<CanonicalRole>>(
+    new Set(FALLBACK_ROLES_CANONICAL),
+  )
   const [suggesting, setSuggesting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -84,6 +91,7 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     setAgentName('')
     setRoleDescription('')
     setStrictGuardrails(true)
+    setFallbackRoles(new Set(FALLBACK_ROLES_CANONICAL))
     setError(null)
     setDrawerOpen(true)
   }
@@ -95,6 +103,11 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     setAgentName(a.name)
     setRoleDescription(a.role_description)
     setStrictGuardrails(a.strict_guardrails)
+    const persisted = (a.fallback_for_roles ?? FALLBACK_ROLES_CANONICAL).filter(
+      (r): r is CanonicalRole =>
+        (FALLBACK_ROLES_CANONICAL as readonly string[]).includes(r),
+    )
+    setFallbackRoles(new Set(persisted))
     setError(null)
     setDrawerOpen(true)
   }
@@ -141,6 +154,13 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     fd.set('role', selectedRole)
     fd.set('role_description', roleDescription.trim())
     if (strictGuardrails) fd.set('strict_guardrails', 'on')
+    // Solo enviar fallback_for_roles si estamos editando el default
+    // (server action ignora para non-default igual, pero limpiamos payload).
+    if (mode === 'edit' && editing?.is_default) {
+      for (const r of fallbackRoles) {
+        fd.append('fallback_for_roles', r)
+      }
+    }
 
     startTransition(async () => {
       let result: { ok: boolean; error?: string }
@@ -375,6 +395,60 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
                 {roleDescription.length}/2500 — La IA lee la filosofía del negocio + catálogo para personalizar.
               </p>
             </div>
+
+            {mode === 'edit' && editing?.is_default && (
+              <div className="rounded-lg border border-border p-3.5 bg-muted/20 space-y-2.5">
+                <div>
+                  <Label className="text-sm">Suplir cuando NO exista agente especialista</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                    Este agente <strong>default</strong> atiende los roles marcados
+                    cuando el tenant no tiene especialista para ellos. Los roles
+                    desmarcados escalan automáticamente a un asesor humano.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  {FALLBACK_ROLES_CANONICAL.map(r => {
+                    const checked = fallbackRoles.has(r)
+                    const hasSpecialist = agents.some(
+                      a => !a.is_default && (a.role ?? '') === r,
+                    )
+                    return (
+                      <label
+                        key={r}
+                        className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-md border ${
+                          hasSpecialist
+                            ? 'border-border/30 bg-muted/10 text-muted-foreground/60'
+                            : 'border-border bg-background cursor-pointer hover:bg-muted/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={hasSpecialist || isPending}
+                          onChange={e => {
+                            const next = new Set(fallbackRoles)
+                            if (e.target.checked) next.add(r)
+                            else next.delete(r)
+                            setFallbackRoles(next)
+                          }}
+                          className="h-3.5 w-3.5 accent-primary"
+                        />
+                        <span className="font-medium">{ROLE_LABEL[r]}</span>
+                        {hasSpecialist && (
+                          <span className="text-[10px] text-muted-foreground/70 italic ml-auto">
+                            ya tiene especialista
+                          </span>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="text-[10px] text-muted-foreground/70 pt-1 italic">
+                  Marca un rol como NO cubierto si prefieres que un humano lo atienda
+                  (ej. reclamos legales). Backward-compat: todos marcados = comportamiento anterior.
+                </p>
+              </div>
+            )}
 
             <div className="flex items-center justify-between rounded-lg border border-border p-3 bg-muted/20">
               <div>
