@@ -116,6 +116,16 @@ ANTI_HIBERNATION_ENABLED = os.getenv("ANTI_HIBERNATION_ENABLED", "false").lower(
 }
 ANTI_HIBERNATION_PING_URL = os.getenv("ANTI_HIBERNATION_PING_URL", "")
 ANTI_HIBERNATION_INTERVAL_SECONDS = int(os.getenv("ANTI_HIBERNATION_INTERVAL_SECONDS", "840"))  # 14 min
+
+# Rev. 109 founder 2026-05-28 — SLA tracker para human_takeover sin
+# respuesta humana. Cierra el loop "super delicado" del escalado: si el
+# bot promete especialista y nadie responde, alerta al operador.
+HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS", "600")  # 10 min
+)
+HUMAN_TAKEOVER_SLA_HOURS = int(
+    os.getenv("HUMAN_TAKEOVER_SLA_HOURS", "2")  # threshold 2h por defecto
+)
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
@@ -199,6 +209,7 @@ class OrchestratorWorker:
         # Rev. 109 P1 #1 — Polling backup Wompi VOIDED.
         self._wompi_void_poll_enabled = WOMPI_VOID_POLL_ENABLED
         self._last_wompi_void_poll_at = 0.0
+        self._last_sla_check_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
         self._metrics = {
@@ -251,6 +262,7 @@ class OrchestratorWorker:
         await self._release_expired_pending_payment_orders()
         await self._poll_wompi_pending_voids_if_due()
         await self._anti_hibernation_ping_if_due()
+        await self._check_human_takeover_sla_if_due()
 
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
         """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente.
@@ -690,6 +702,159 @@ class OrchestratorWorker:
                     logger.debug("[PING] %s → %s", url, resp.status_code)
             except Exception as exc:
                 logger.warning("[PING] Error haciendo ping a %s: %s", url, exc)
+
+    async def _check_human_takeover_sla_if_due(self) -> None:
+        """Rev. 109 founder 2026-05-28 — SLA tracker para escalaciones.
+
+        Cierra el loop "super delicado": el bot promete especialista,
+        cambia status a human_takeover, notifica vía Telegram… pero ¿qué
+        pasa si nadie responde en X horas? El cliente queda esperando.
+
+        Este check:
+          1. Cada N min (default 10), busca convs `status='human_takeover'`.
+          2. Para cada una, identifica `escalated_at` (último audit row
+             `content_type='escalation_audit'`).
+          3. Verifica si hubo respuesta humana después (outbound text
+             post-escalación).
+          4. Si NO Y han pasado >SLA_HOURS desde escalated_at → notifica
+             Telegram al operador del tenant.
+          5. Idempotencia: inserta audit row `content_type='sla_breach_audit'`
+             para no re-alertar (append-only flag).
+
+        Esto NO requiere migration — usa la tabla `messages` existente
+        como sistema de eventos.
+        """
+        now = time.time()
+        if now - self._last_sla_check_at < max(60, HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS):
+            return
+        self._last_sla_check_at = now
+
+        sla_cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=HUMAN_TAKEOVER_SLA_HOURS)
+        ).isoformat()
+
+        try:
+            # Convs en human_takeover desde hace ≥ SLA_HOURS.
+            convs_res = (
+                self.supabase.table("conversations")
+                .select("id, tenant_id, customer_phone, last_interaction_at")
+                .eq("status", "human_takeover")
+                .lt("last_interaction_at", sla_cutoff)
+                .limit(50)
+                .execute()
+            )
+            convs = convs_res.data or []
+        except Exception as exc:
+            logger.warning("[SLA] error consultando convs takeover: %s", exc)
+            return
+
+        if not convs:
+            return
+
+        logger.info("[SLA] %d conv(s) takeover potencialmente sin respuesta", len(convs))
+
+        for conv in convs:
+            conv_id = conv.get("id")
+            tenant_id = conv.get("tenant_id")
+            customer_phone = conv.get("customer_phone") or "?"
+            if not (conv_id and tenant_id):
+                continue
+
+            try:
+                # 1. Encontrar escalated_at — último escalation_audit.
+                escalation_audit = (
+                    self.supabase.table("messages")
+                    .select("created_at")
+                    .eq("conversation_id", conv_id)
+                    .eq("content_type", "escalation_audit")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if not escalation_audit.data:
+                    # Sin audit row, no podemos calcular SLA. Skip.
+                    continue
+                escalated_at_iso = escalation_audit.data[0]["created_at"]
+
+                # 2. ¿Ya alertamos previamente esta breach?
+                breach_audit = (
+                    self.supabase.table("messages")
+                    .select("id")
+                    .eq("conversation_id", conv_id)
+                    .eq("content_type", "sla_breach_audit")
+                    .gt("created_at", escalated_at_iso)
+                    .limit(1)
+                    .execute()
+                )
+                if breach_audit.data:
+                    # Ya notificada — skip idempotencia.
+                    continue
+
+                # 3. ¿Hubo respuesta humana post-escalación?
+                # Outbound 'text' (no escalation_audit, no degraded, etc.)
+                # creado después de escalated_at = operador respondió.
+                human_response = (
+                    self.supabase.table("messages")
+                    .select("id")
+                    .eq("conversation_id", conv_id)
+                    .eq("direction", "outbound")
+                    .eq("content_type", "text")
+                    .gt("created_at", escalated_at_iso)
+                    .limit(1)
+                    .execute()
+                )
+                if human_response.data:
+                    # Operador respondió — no es breach.
+                    continue
+
+                # 4. SLA breach. Enviar notif Telegram + audit row.
+                logger.warning(
+                    "[SLA] BREACH conv=%s tenant=%s — sin respuesta humana "
+                    "hace ≥%dh desde escalación %s",
+                    conv_id[:8], tenant_id[:8], HUMAN_TAKEOVER_SLA_HOURS,
+                    escalated_at_iso,
+                )
+
+                try:
+                    from telegram_notifications import notify_escalation_async
+                    await notify_escalation_async(
+                        self.supabase,
+                        tenant_id=tenant_id,
+                        conversation_id=conv_id,
+                        reason=(
+                            f"⏰ SLA BREACH — cliente {customer_phone} sin "
+                            f"respuesta humana hace ≥{HUMAN_TAKEOVER_SLA_HOURS}h. "
+                            f"Conversación escalada el {escalated_at_iso}. "
+                            f"Por favor responder lo antes posible."
+                        ),
+                        severity="critical",
+                    )
+                except Exception as exc:
+                    logger.warning("[SLA] notify Telegram falló conv=%s: %s", conv_id, exc)
+
+                # 5. Audit row para idempotencia (no re-notificar).
+                try:
+                    self.supabase.table("messages").insert({
+                        "conversation_id": conv_id,
+                        "tenant_id": tenant_id,
+                        "direction": "outbound",
+                        "content_type": "sla_breach_audit",
+                        "content": "",
+                        "payload": {
+                            "escalated_at": escalated_at_iso,
+                            "sla_threshold_hours": HUMAN_TAKEOVER_SLA_HOURS,
+                            "notified_at": datetime.now(timezone.utc).isoformat(),
+                            "source": "worker_sla_check",
+                        },
+                        "processed": True,
+                        "processing_status": "processed",
+                    }).execute()
+                except Exception as exc:
+                    logger.warning("[SLA] audit insert falló conv=%s: %s", conv_id, exc)
+
+            except Exception as exc:
+                logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
+                continue
 
     async def _sweep_stale_messages_on_startup(self) -> None:
         """
