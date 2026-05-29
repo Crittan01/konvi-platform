@@ -1,18 +1,30 @@
 """Notificaciones Telegram a operador del tenant (escalations).
 
 Rev. 109 producción — usado por dispatcher.py + agentic/tools/escalation.py
-para alertar al operador humano cuando el bot decide escalar (cancelación
-requiere refund manual, sentiment hostil, alto monto, etc.).
++ agentic/tools/claims.py + worker.py (SLA tracker) para alertar al
+operador humano.
 
-Diseño:
-  • Lee `tenant_integrations.meta.telegram_chat_id` del tenant.
-  • POST a Bot API oficial (`https://api.telegram.org/bot{token}/sendMessage`).
-  • Reusa `_send_telegram_notification` de notifications.py para no duplicar
-    el cliente HTTP + parsing de credenciales.
-  • Append-only audit en `telegram_notifications_log` (si la tabla existe).
+Rev. 109 founder 2026-05-28 — UNIFICACIÓN de fuentes (canal único):
+  ANTES: 2 fuentes paralelas de "dónde notificar":
+    • path A — `tenant_integrations.provider='telegram'` (este archivo).
+    • path B — `notification_settings.channel='telegram'`
+      (`notifications.dispatch_human_takeover_event`).
+  Riesgo: tenant podía configurar solo path A → este código funcionaba,
+  pero el worker (path B) NO encontraba → desincronía silenciosa. Y al
+  revés: KAIU tiene solo path B → este código fallaba silent.
 
-NO duplica lógica de notifications.py — extiende con un wrapper específico
-para escalaciones de cancel/refund que recibe (tenant_id, conv_id, reason).
+  AHORA: `notification_settings` es ÚNICA fuente de verdad.
+  `notify_escalation_async` lee de `notification_settings` (mismo patrón
+  que `dispatch_human_takeover_event` en `notifications.py:286`).
+  Cero duplicación de configuración entre tablas.
+
+Compat: si tenant NO tiene rows en `notification_settings`, retorna
+False silent (sin error). Operador configura via UI Settings → Canales.
+
+NO duplica lógica de `notifications.py` — usa `_send_telegram_notification`
+del mismo módulo. Diferencia: `dispatch_human_takeover_event` consume
+eventos pgmq async; `notify_escalation_async` es invocación inline desde
+un tool (path directo + path B sigue activo en paralelo como respaldo).
 """
 from __future__ import annotations
 
@@ -32,6 +44,9 @@ async def notify_escalation_async(
 ) -> bool:
     """Envía notif Telegram al operador del tenant.
 
+    Fuente única: `notification_settings` (channel='telegram', enabled=true).
+    Resolución bot_token vía Vault (config.bot_token o token_preview).
+
     Args:
         supabase: cliente DB.
         tenant_id: para resolver bot_token + chat_id del tenant.
@@ -40,46 +55,53 @@ async def notify_escalation_async(
         severity: 'info' | 'warning' | 'critical' (afecta emoji prefijo).
 
     Returns:
-        True si Telegram aceptó el mensaje, False si fallo (creds ausentes,
-        chat_id sin configurar, error HTTP, etc.).
+        True si Telegram aceptó el mensaje, False si fallo (canal sin
+        configurar, error HTTP, etc.).
     """
     if not reason:
         return False
 
-    # Resolver chat_id + bot_token del tenant.
+    # Fuente única: notification_settings.
     try:
         res = (
-            supabase.table("tenant_integrations")
-            .select("credentials, meta, status")
+            supabase.table("notification_settings")
+            .select("channel, enabled, config")
             .eq("tenant_id", tenant_id)
-            .eq("provider", "telegram")
-            .eq("status", "connected")
-            .maybe_single()
+            .eq("enabled", True)
+            .eq("channel", "telegram")
+            .limit(1)
             .execute()
         )
     except Exception as exc:
         logger.info(
-            "[TG_ESCALATION] tenant=%s sin integración telegram conectada: %s",
+            "[TG_ESCALATION] tenant=%s lookup notification_settings falló: %s",
             tenant_id, exc,
         )
         return False
 
-    if not res or not getattr(res, "data", None):
-        return False
-
-    meta = (res.data.get("meta") or {})
-    chat_id = meta.get("chat_id") or meta.get("telegram_chat_id")
-    if not chat_id:
+    rows = getattr(res, "data", None) or []
+    if not rows:
         logger.info(
-            "[TG_ESCALATION] tenant=%s sin chat_id configurado", tenant_id,
+            "[TG_ESCALATION] tenant=%s sin canal telegram en notification_settings — "
+            "configurar en Settings → Canales",
+            tenant_id[:8] if tenant_id else "?",
         )
         return False
 
-    creds = (res.data.get("credentials") or {})
+    config_row = dict(rows[0].get("config") or {})
+    chat_id = config_row.get("chat_id") or config_row.get("telegram_chat_id")
+    if not chat_id:
+        logger.info(
+            "[TG_ESCALATION] tenant=%s notification_settings sin chat_id",
+            tenant_id[:8] if tenant_id else "?",
+        )
+        return False
+
+    # Resolver bot_token via Vault (mismo patrón que dispatch_human_takeover_event).
     try:
         from vault_helper import VaultHelper, resolve_secret
         vault = VaultHelper(supabase)
-        bot_token = resolve_secret(vault, creds, "bot_token")
+        bot_token = resolve_secret(vault, config_row, "bot_token") or ""
     except Exception as exc:
         logger.warning(
             "[TG_ESCALATION] tenant=%s no pudo resolver bot_token: %s",
@@ -87,6 +109,10 @@ async def notify_escalation_async(
         )
         return False
     if not bot_token:
+        logger.warning(
+            "[TG_ESCALATION] tenant=%s bot_token vacío post-Vault — verificar credencial",
+            tenant_id[:8] if tenant_id else "?",
+        )
         return False
 
     prefix = {
@@ -97,7 +123,11 @@ async def notify_escalation_async(
     )
     text = f"{prefix} *Escalación*\n\n{reason}{convo_suffix}"
 
-    config = {"telegram_bot_token": bot_token, "telegram_chat_id": chat_id}
+    # `_send_telegram_notification` espera keys `bot_token` y `chat_id`
+    # (NO `telegram_bot_token` / `telegram_chat_id` — bug histórico de
+    # path A pre-rev109 que silenciaba el envío). Verificado contra
+    # `notifications.py:46-79` (single source of HTTP client).
+    config = {"bot_token": bot_token, "chat_id": chat_id}
     try:
         from notifications import _send_telegram_notification
         return await _send_telegram_notification(config, text)
