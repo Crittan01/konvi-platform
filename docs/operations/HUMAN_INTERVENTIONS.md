@@ -62,3 +62,54 @@ Este documento conserva solo intervenciones activas reales.
 4. Validar flujo end-to-end con tenant piloto.
 **INSUMOS NECESARIOS**: Cuenta Meta Business verificada + dominio + política de privacidad.  
 **CRITERIO DE EXITO**: tenant conecta su canal sin intervención manual de soporte.
+
+---
+
+## IH-AGENT-01 — Regenerar prompt de agente Carolina (Reclamos) post-rev109
+
+**INTERVENCION HUMANA REQUERIDA**: Sí  
+**RESPONSABLE**: Owner del tenant (founder KAIU + cada tenant con agente claims)  
+**MOMENTO**: Recomendado ahora (post-commit `888af91`). Opcional — el invariant FakeEscalation respalda si Carolina olvida el tool.  
+**PASOS DUMMY O GUIADOS**:
+1. Abrir Tenant Console → IA y Conocimiento → Agentes IA.
+2. Click "Editar" en Carolina (agente role=claims).
+3. Click "Sugerir con IA" para regenerar `role_description` con el skeleton actualizado (que ahora instruye usar `create_claim` ANTES de escalar).
+4. Revisar el texto sugerido — debe mencionar create_claim explícitamente.
+5. Click "Guardar cambios".
+6. Repetir para cualquier OTRO agente role=claims de cualquier tenant.
+
+**INSUMOS NECESARIOS**: Tenant Console activo + sesión owner/manager.
+
+**CRITERIO DE EXITO**: Carolina (o el agente claims del tenant) tiene `role_description` que menciona create_claim y `get_claim_status`. En UAT live, Carolina invoca create_claim en lugar de escalar.
+
+**Por qué OPCIONAL**: el invariant `FakeEscalationInvariant` (rev. 109) detecta promesas de escalación sin tool real y respalda. Pero tener el prompt actualizado mejora UX (Carolina sabe el flujo correcto desde el primer turn, sin necesidad de respaldo del invariant).
+
+---
+
+## IH-NOTIF-01 — Migrar tenants legacy de `tenant_integrations.telegram` a `notification_settings`
+
+**INTERVENCION HUMANA REQUERIDA**: Sí  
+**RESPONSABLE**: Owner/DevOps  
+**MOMENTO**: D+30 post-rev109 commit `eb30a74` (~2026-06-27). Solo si hay tenants legacy con configuración en `tenant_integrations` pero NO en `notification_settings`.  
+**PASOS DUMMY O GUIADOS**:
+1. Ejecutar audit query:
+   ```sql
+   SELECT ti.tenant_id, ti.meta->>'chat_id' AS chat_id
+   FROM tenant_integrations ti
+   LEFT JOIN notification_settings ns
+     ON ns.tenant_id = ti.tenant_id AND ns.channel = 'telegram'
+   WHERE ti.provider = 'telegram'
+     AND ti.status = 'connected'
+     AND (ns.id IS NULL OR ns.enabled = false);
+   ```
+2. Para cada tenant retornado:
+   - Coordinar ventana con tenant.
+   - Upsert en `notification_settings` (channel='telegram', enabled=true, config={chat_id, bot_token_secret_id}).
+   - Verificar smoke: triggear escalación de prueba → verificar POST api.telegram.org → 200 OK.
+3. Tras verificación: ejecutar Fase 3 del ADR-0021 (DELETE rows path A) en D+60.
+
+**INSUMOS NECESARIOS**: Acceso DB Supabase + coordinación con cada tenant.
+
+**CRITERIO DE EXITO**: query audit retorna 0 rows; ADR-0021 marcado CERRADO.
+
+**Referencia**: ver `docs/adr/0021-notification-channels-unified-source.md`.
