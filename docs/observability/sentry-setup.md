@@ -2,6 +2,26 @@
 
 **Rev. 109 J.2.7.4** — Sentry tracing E2E cross-service. Cierra item del Plan K (audit 2026-05-29) ajustado de "OTEL+Grafana" a "Sentry tracing" tras feedback founder (Sentry tiene su UI propia, sin dominio nuevo, free 5k events/mo).
 
+## ⚠️ Estado activación
+
+**Sentry NO es bloqueante para producción** (clarificación founder 2026-05-29).
+
+| Componente | Estado |
+|---|---|
+| Código deployed (SDK + configs + env vars en render.yaml) | ✅ |
+| DSNs configurados en Render Dashboard | ❌ NO (espera trigger) |
+| Estado runtime SDK | `enabled: false` — falla silente sin DSN, build pasa, runtime no captura nada |
+
+**Sentry NO requiere Platform Console**: son herramientas independientes. Sentry tiene su propia UI (sentry.io), distinta de la futura Platform Console.
+
+**Triggers de activación** (cualquiera basta):
+1. Primer incidente productivo reportado por un tenant
+2. Konvi crece >5 tenants activos (debugging manual via `render logs` ya no escala)
+3. Founder decide proactivamente baseline observability antes de onboarding agresivo
+4. Compliance externo (pen testing OWASP) lo solicita para audit
+
+**Cuando se active**: ejecutar §1-4 abajo (~30 min). **NO requiere redeploy de código** — solo configurar env vars en Render Dashboard (Render hace pickup automático).
+
 ## Arquitectura
 
 ```
