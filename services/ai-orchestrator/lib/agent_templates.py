@@ -92,18 +92,35 @@ devoluciones de {tenant_name}. Atiendes garantías (Ley 1480 Art. 11),
 retracto (Art. 47), devoluciones y reembolsos.
 
 CÓMO ACTÚAS:
-• Para retracto Art. 47: valida primero la elegibilidad (5 días hábiles
-  + producto no excluido del parágrafo: cosmética abierta, software
-  descargable, perecederos, etc.).
-• Para garantía Art. 11: indaga el defecto, pide foto si aplica,
-  registra ticket.
+• Para garantía Art. 11: indaga el defecto con preguntas concretas
+  (¿qué producto?, ¿qué pasó?, ¿hace cuánto lo recibiste?), pide foto
+  si aplica, valida que sea un pedido REAL con `get_recent_orders` y
+  REGISTRA el ticket con `create_claim` ANTES de prometer nada.
+• Para retracto Art. 47: valida elegibilidad (5 días hábiles + producto
+  no excluido: cosmética abierta, software, perecederos). Si elegible,
+  REGISTRA con `create_claim` (reason="retracto Art. 47").
 • Para reembolso: cita Ley 1480 Art. 49 (30 días calendario máximo).
+  REGISTRA con `create_claim` (requested_amount si el cliente lo menciona).
+• Después de create_claim exitoso, di al cliente su número de ticket
+  EXPLÍCITAMENTE (ej. "Tu reclamo quedó registrado con ticket #42") y
+  que el equipo lo revisará en las próximas horas.
+• Si el cliente pregunta por estado de un reclamo previo, usa
+  `get_claim_status` con el # que mencione.
 • SIEMPRE empático — el cliente con reclamo ya tiene frustración.
-• SIEMPRE escala al operador humano para validación final.
+
+CUÁNDO ESCALAR (escalate_to_human):
+• Refund manual >$100.000 COP que requiere aprobación.
+• Caso complejo: producto fuera de garantía, cliente hostil, varios
+  reclamos abiertos sin resolver, casos legales (no técnicos).
+• Si create_claim falla por algún motivo técnico.
+
+NO ESCALES si simplemente registraste el ticket — eso ya alerta al
+operador automáticamente; tu trabajo es darle al cliente la
+referencia y empatía.
 
 NO inventes:
 • Plazos legales (sigue siempre Ley 1480).
-• Resoluciones (especialista decide).
+• Resoluciones (especialista decide tras revisar ticket).
 • Categorías de exclusión (lee del producto, no asumas).
 """
 
@@ -133,6 +150,11 @@ AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             "get_recent_orders",
             "kb_query",
             "send_product_image",
+            # Rev. 109 founder 2026-05-28 — sales puede crear claim si
+            # surge un reclamo en medio de un flujo de venta (cliente
+            # menciona pedido previo defectuoso). Ahorra escalación.
+            "create_claim",
+            "get_claim_status",
             "escalate_to_human",
         ],
         "fsm_states_allowed": None,  # todos los estados
@@ -144,6 +166,8 @@ AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             "get_recent_orders",
             "get_contact_info",
             "kb_query",
+            # Cliente puede preguntar "¿cómo va mi reclamo X?" en post-venta.
+            "get_claim_status",
             "escalate_to_human",
         ],
         "fsm_states_allowed": ["POST_PAYMENT", "HUMAN_HANDOFF"],
@@ -165,6 +189,10 @@ AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             "get_recent_orders",
             "get_contact_info",
             "kb_query",
+            # Rev. 109 founder 2026-05-28 — claims AHORA registra ticket
+            # via create_claim ANTES de escalar (reduce escalación al ~20%).
+            "create_claim",
+            "get_claim_status",
             "escalate_to_human",
         ],
         "fsm_states_allowed": ["POST_PAYMENT", "HUMAN_HANDOFF"],
