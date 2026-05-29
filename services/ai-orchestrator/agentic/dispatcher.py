@@ -68,6 +68,16 @@ async def is_tenant_agentic_enabled(supabase: Any, tenant_id: str) -> bool:
         return False
 
 
+try:
+    from observability import track_op as _track_op
+except Exception:
+    def _track_op(*args, **kwargs):  # noqa
+        def decorator(f):
+            return f
+        return decorator
+
+
+@_track_op("agentic.dispatch_message")
 async def dispatch_message(
     supabase: Any,
     *,
