@@ -29,7 +29,7 @@ export default async function AiAgentsPage() {
     // Rev. 109 ADR-0017 — multi-agente. order is_default desc para que
     // el primero retornado sea siempre el default cuando existan varios.
     supabase.from('ai_agents')
-      .select('id, name, role_description, strict_guardrails, role, is_default')
+      .select('id, name, role_description, strict_guardrails, role, is_default, fallback_for_roles')
       .eq('tenant_id', tenantId)
       .order('is_default', { ascending: false })
       .order('name', { ascending: true }),
@@ -190,9 +190,26 @@ export default async function AiAgentsPage() {
       }
     }
 
+    // Rev. 109 fallback_for_roles — solo aplica al default. Para non-default
+    // ignoramos (el rol del agente especialista define qué cubre).
+    const CANONICAL_ROLES = ['sales', 'support', 'marketing', 'claims'] as const
+    const rawFallbackRoles = formData.getAll('fallback_for_roles') as string[]
+    const fallbackRoles = isDefault
+      ? rawFallbackRoles.filter((r): r is (typeof CANONICAL_ROLES)[number] =>
+          (CANONICAL_ROLES as readonly string[]).includes(r),
+        )
+      : null
+
+    const updatePayload: Record<string, unknown> = {
+      name, role: finalRole, role_description, strict_guardrails,
+    }
+    if (fallbackRoles !== null) {
+      updatePayload.fallback_for_roles = fallbackRoles
+    }
+
     const { error: e1 } = await sb
       .from('ai_agents')
-      .update({ name, role: finalRole, role_description, strict_guardrails })
+      .update(updatePayload)
       .eq('id', id)
       .eq('tenant_id', m.tenant_id)
     if (e1) return { ok: false, error: e1.message }
