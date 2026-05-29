@@ -283,6 +283,61 @@ const timeAgo = (dateStr: string) => {
   if (hrs < 24) return `${hrs}h`
   return `${Math.floor(hrs / 24)}d`
 }
+
+// Rev. 109 founder 2026-05-28 — agrupación por phone.
+// Modelo arquitectónico: "1 conv perpetua per (tenant, phone)". El connector
+// reabre conversaciones cerradas (db_persistence._upsert_conversation), pero
+// drift histórico (UAT testing, ediciones manuales) puede dejar múltiples
+// rows por phone. Esta función agrupa visualmente: 1 fila per cliente,
+// expandible para ver sesiones históricas.
+//
+// Prioridad de la conv "primary" del grupo:
+//   1) status='bot_active' (activa hoy)
+//   2) status='human_takeover' (operador atendiendo)
+//   3) más reciente por last_interaction_at
+type ConvGroup = {
+  phone: string
+  primary: Conversation
+  others: Conversation[]   // sesiones históricas, ordenadas más-reciente-primero
+}
+
+const _STATUS_PRIORITY: Record<string, number> = {
+  bot_active: 0,
+  human_takeover: 1,
+  opted_out: 2,
+  closed: 3,
+}
+
+function groupConvsByPhone(convs: Conversation[]): ConvGroup[] {
+  const byPhone = new Map<string, Conversation[]>()
+  for (const c of convs) {
+    const key = c.customer_phone || '?'
+    const arr = byPhone.get(key) ?? []
+    arr.push(c)
+    byPhone.set(key, arr)
+  }
+  const groups: ConvGroup[] = []
+  for (const [phone, list] of byPhone) {
+    const sorted = [...list].sort((a, b) => {
+      // Primero por status priority (bot_active gana), luego por timestamp desc.
+      const pa = _STATUS_PRIORITY[a.status] ?? 99
+      const pb = _STATUS_PRIORITY[b.status] ?? 99
+      if (pa !== pb) return pa - pb
+      const ta = new Date(a.last_interaction_at ?? a.created_at).getTime()
+      const tb = new Date(b.last_interaction_at ?? b.created_at).getTime()
+      return tb - ta
+    })
+    const [primary, ...others] = sorted
+    groups.push({ phone, primary, others })
+  }
+  // Ordenar grupos por última actividad de su primary (más reciente primero).
+  groups.sort((a, b) => {
+    const ta = new Date(a.primary.last_interaction_at ?? a.primary.created_at).getTime()
+    const tb = new Date(b.primary.last_interaction_at ?? b.primary.created_at).getTime()
+    return tb - ta
+  })
+  return groups
+}
 const TZ_CO = 'America/Bogota'
 const formatDate = (d: string) => {
   try {
@@ -410,6 +465,10 @@ export default function InboxPage() {
   // F1: toggle para mostrar conversaciones archivadas (>90 días sin actividad).
   const [showArchived, setShowArchived] = useState(false)
   const showArchivedRef = useRef(false)
+  // Rev. 109 founder 2026-05-28 — expand-collapse de grupos por phone.
+  // Modelo: 1 cliente = 1 fila visible (la conv primary del grupo). Si el
+  // cliente tiene >1 sesión histórica, expand para verlas indentadas.
+  const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set())
   // F2: scroll histórico cursor-based.
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMoreMessages, setHasMoreMessages] = useState(true)
@@ -1151,10 +1210,20 @@ export default function InboxPage() {
             </button>
           </div>
 
-          <p className="text-xs text-muted-foreground">
-            {filteredConvs.length} conversacion{filteredConvs.length !== 1 ? 'es' : ''}
-            {showArchived && ' (incl. archivadas)'}
-          </p>
+          {(() => {
+            const groupCount = groupConvsByPhone(filteredConvs).length
+            return (
+              <p className="text-xs text-muted-foreground">
+                {groupCount} cliente{groupCount !== 1 ? 's' : ''}
+                {filteredConvs.length !== groupCount && (
+                  <span className="ml-1 opacity-70">
+                    ({filteredConvs.length} conv{filteredConvs.length !== 1 ? 's' : ''})
+                  </span>
+                )}
+                {showArchived && ' · incl. archivadas'}
+              </p>
+            )
+          })()}
         </div>
 
         {/* Lista conversaciones */}
@@ -1176,68 +1245,122 @@ export default function InboxPage() {
               <p>{search ? 'Sin resultados' : 'No hay conversaciones'}</p>
             </div>
           ) : (
-            filteredConvs.map(conv => {
-              const st = STATUS_CONFIG[conv.status]
-              const isSelected = conv.id === selectedId
-              // A2: marca de unread = último mensaje inbound posterior a last_read_at del operador.
-              const hasUnread = !!(
-                conv.last_message &&
-                conv.last_message.direction === 'inbound' &&
-                (!conv.last_read_at || conv.last_message.created_at > conv.last_read_at) &&
-                !isSelected
-              )
-              return (
-                <button
-                  key={conv.id}
-                  onClick={() => handleSelectConv(conv.id)}
-                  className={`w-full text-left p-3.5 border-b border-border transition-colors hover:bg-secondary/50 ${
-                    isSelected ? 'bg-secondary border-l-2 border-l-primary' : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className={`h-2 w-2 rounded-full flex-shrink-0 ${st.dot}`} />
-                      <span className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'}`}>
-                        {formatPhone(conv.customer_phone)}
-                      </span>
-                      {hasUnread && (
-                        <span
-                          className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"
-                          title="Mensaje sin leer"
-                        />
+            (() => {
+              // Rev. 109 founder 2026-05-28 — agrupación por phone.
+              // 1 fila per cliente (primary); sesiones extras indentadas al expand.
+              const groups = groupConvsByPhone(filteredConvs)
+
+              const renderConvRow = (
+                conv: Conversation,
+                opts: { isHistorical?: boolean } = {},
+              ) => {
+                const st = STATUS_CONFIG[conv.status]
+                const isSelected = conv.id === selectedId
+                const hasUnread = !!(
+                  conv.last_message &&
+                  conv.last_message.direction === 'inbound' &&
+                  (!conv.last_read_at || conv.last_message.created_at > conv.last_read_at) &&
+                  !isSelected
+                )
+                return (
+                  <button
+                    onClick={() => handleSelectConv(conv.id)}
+                    className={`w-full text-left p-3.5 border-b border-border transition-colors hover:bg-secondary/50 ${
+                      isSelected ? 'bg-secondary border-l-2 border-l-primary' : ''
+                    } ${opts.isHistorical ? 'pl-8 bg-secondary/20' : ''}`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full flex-shrink-0 ${st.dot}`} />
+                        <span className={`text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-medium'} ${opts.isHistorical ? 'text-muted-foreground' : ''}`}>
+                          {opts.isHistorical
+                            ? `Sesión ${timeAgo(conv.last_interaction_at ?? conv.created_at)} atrás`
+                            : formatPhone(conv.customer_phone)
+                          }
+                        </span>
+                        {hasUnread && (
+                          <span
+                            className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"
+                            title="Mensaje sin leer"
+                          />
+                        )}
+                      </div>
+                      {!opts.isHistorical && (
+                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <Clock className="h-2.5 w-2.5" />
+                          {timeAgo(conv.last_interaction_at ?? conv.created_at)}
+                        </span>
                       )}
                     </div>
-                    <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-2.5 w-2.5" />
-                      {timeAgo(conv.last_interaction_at ?? conv.created_at)}
-                    </span>
-                  </div>
-                  {conv.last_message && (
-                    <p className="text-[11px] text-muted-foreground ml-4 truncate">
-                      {conv.last_message.direction === 'outbound' ? '→ ' : ''}
-                      {stripWhatsAppFormat(conv.last_message.content)}
-                    </p>
-                  )}
-                  <div className="ml-4 mt-1 flex items-center gap-1.5 flex-wrap">
-                    <span
-                      className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${st.color}`}
-                      title={st.description}
-                    >
-                      {st.label}
-                    </span>
-                    {/* Rev. 109 — badge agentic_state (state machine determinístico). */}
-                    {conv.agentic_state && (
-                      <span
-                        className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border ${getAgenticStateBadgeColor(conv.agentic_state)}`}
-                        title={`Estado del bot: ${conv.agentic_state}`}
-                      >
-                        {agenticStateLabel(conv.agentic_state)}
-                      </span>
+                    {conv.last_message && (
+                      <p className="text-[11px] text-muted-foreground ml-4 truncate">
+                        {conv.last_message.direction === 'outbound' ? '→ ' : ''}
+                        {stripWhatsAppFormat(conv.last_message.content)}
+                      </p>
                     )}
-                  </div>
-                </button>
-              )
-            })
+                    <div className="ml-4 mt-1 flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border cursor-help ${st.color}`}
+                        title={st.description}
+                      >
+                        {st.label}
+                      </span>
+                      {conv.agentic_state && (
+                        <span
+                          className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border ${getAgenticStateBadgeColor(conv.agentic_state)}`}
+                          title={`Estado del bot: ${conv.agentic_state}`}
+                        >
+                          {agenticStateLabel(conv.agentic_state)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                )
+              }
+
+              const toggleExpand = (phone: string) => {
+                setExpandedPhones(prev => {
+                  const next = new Set(prev)
+                  if (next.has(phone)) next.delete(phone)
+                  else next.add(phone)
+                  return next
+                })
+              }
+
+              return groups.flatMap(group => {
+                const isExpanded = expandedPhones.has(group.phone)
+                const rows: React.ReactNode[] = []
+
+                // Fila del primary del grupo.
+                rows.push(
+                  <div key={`${group.phone}-primary`} className="relative">
+                    {renderConvRow(group.primary)}
+                    {group.others.length > 0 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleExpand(group.phone) }}
+                        className="absolute top-3 right-12 inline-flex items-center gap-1 h-5 px-2 text-[10px] font-semibold rounded-full border border-border bg-background hover:bg-muted/40 transition-colors"
+                        title={isExpanded ? 'Ocultar sesiones históricas' : 'Ver sesiones históricas del cliente'}
+                      >
+                        {isExpanded ? '▾' : '▸'} +{group.others.length}
+                      </button>
+                    )}
+                  </div>,
+                )
+
+                // Sesiones históricas (cuando expanded).
+                if (isExpanded && group.others.length > 0) {
+                  for (const other of group.others) {
+                    rows.push(
+                      <div key={other.id}>
+                        {renderConvRow(other, { isHistorical: true })}
+                      </div>,
+                    )
+                  }
+                }
+
+                return rows
+              })
+            })()
           )}
         </div>
       </div>
