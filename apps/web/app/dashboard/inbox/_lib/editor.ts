@@ -66,6 +66,38 @@ export function prefixLine(
   }, 0)
 }
 
+/**
+ * Inserta texto literal en la posición del cursor (o reemplaza la selección).
+ * A diferencia de `wrapSelection` no envuelve — sólo inyecta.
+ *
+ * Usado por el emoji picker para insertar el emoji clickado en el cursor
+ * sin sobreescribir lo que el operador ya escribió.
+ */
+export function insertAtCursor(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  setText: (v: string) => void,
+  text: string,
+): void {
+  const ta = ref.current
+  if (!ta) {
+    // Textarea no montado — no hay cursor donde insertar. No-op silent
+    // (el click del operador no produce efecto pero tampoco rompe).
+    return
+  }
+  const start = ta.selectionStart ?? ta.value.length
+  const end = ta.selectionEnd ?? start
+  const before = ta.value.slice(0, start)
+  const after = ta.value.slice(end)
+  const newVal = `${before}${text}${after}`
+  setText(newVal)
+  // Mover cursor justo después del texto insertado.
+  setTimeout(() => {
+    ta.focus()
+    const newPos = start + text.length
+    ta.setSelectionRange(newPos, newPos)
+  }, 0)
+}
+
 // Rev. 103 — Lista numerada: cada línea recibe un número auto-incrementado
 // arrancando en 1. Si solo hay una línea, simple `1. `.
 export function prefixLineNumbered(
