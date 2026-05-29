@@ -26,7 +26,7 @@ export default async function AiAgentsPage() {
   }
 
   const [{ data }, { data: tenant }, { data: kbStats }, { data: catalogStats }, { data: integrations }] = await Promise.all([
-    supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle(),
+    supabase.from('ai_agents').select('name, role_description, strict_guardrails, role, pitch, tone').eq('tenant_id', tenantId).maybeSingle(),
     supabase.from('tenants').select(
       'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin, nit, email_contacto, telefono_contacto'
     ).eq('id', tenantId).maybeSingle(),
@@ -88,14 +88,24 @@ export default async function AiAgentsPage() {
     const name = (formData.get('name') as string).trim() || 'Vendedor Oficial'
     const role_description = (formData.get('role_description') as string).trim() || 'Asistente de ventas.'
     const strict_guardrails = formData.get('strict_guardrails') !== null
+    // Rev. 109 backlog #2 — campos multi-vertical agnósticos.
+    const role  = ((formData.get('role')  as string) || 'sales').trim()
+    const pitch = ((formData.get('pitch') as string) || '').trim() || null
+    const tone  = ((formData.get('tone')  as string) || '').trim() || null
 
     if (role_description.length > 1500) return
+    if (pitch && pitch.length > 240) return
+    if (tone && tone.length > 120) return
 
     await sb.from('ai_agents').upsert({
       tenant_id: m.tenant_id,
       name,
       role_description,
-      strict_guardrails
+      strict_guardrails,
+      role,
+      pitch,
+      tone,
+      is_default: true,
     }, { onConflict: 'tenant_id' })
 
     revalidatePath('/dashboard/ai-agents')

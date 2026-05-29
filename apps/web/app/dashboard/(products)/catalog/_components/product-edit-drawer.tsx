@@ -209,6 +209,40 @@ export function ProductEditDrawer({
                 </div>
               </div>
               <ImageUploadBox name="cover_image_url" defaultUrl={product.cover_image_url ?? ''} tenantId={tenantId} size="lg" label="Imagen portada" />
+
+              {/* Rev. 109 backlog #1 — Retracto categories multi-tenant.
+                  Tenant marca productos excluidos del Art. 47 Ley 1480
+                  parágrafo (cosmética abierta, software descargable,
+                  perecederos, etc.). Multi-vertical agnóstico. */}
+              <div className="space-y-2 pt-3 border-t border-border/40">
+                <label className="flex items-start gap-2 text-xs font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="retracto_excluded"
+                    defaultChecked={product.retracto_excluded ?? false}
+                    className="mt-0.5 accent-primary"
+                  />
+                  <span>
+                    <span className="text-foreground">Excluir del retracto</span>
+                    <span className="block text-[10px] text-muted-foreground font-normal mt-0.5">
+                      Ley 1480 Art. 47 parágrafo (cosmética uso íntimo,
+                      software descargable, perecederos, personalizados, etc.)
+                    </span>
+                  </span>
+                </label>
+                <div className="space-y-1 pl-6">
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">
+                    Razón legal (visible al cliente si solicita retracto)
+                  </label>
+                  <Textarea
+                    name="retracto_excluded_reason"
+                    defaultValue={product.retracto_excluded_reason ?? ''}
+                    placeholder="Ej. cosmética uso íntimo (Art. 47 parágrafo)"
+                    className="min-h-[50px] text-xs resize-y"
+                  />
+                </div>
+              </div>
+
               <div className="flex justify-end pt-1">
                 <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado">Guardar información</SubmitButton>
               </div>

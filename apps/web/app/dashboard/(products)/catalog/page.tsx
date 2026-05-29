@@ -34,6 +34,7 @@ export default async function CatalogPage() {
       supabase
         .from('products')
         .select(`id, title, description, cover_image_url, platform_category_id,
+                 retracto_excluded, retracto_excluded_reason,
                  product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
@@ -41,6 +42,7 @@ export default async function CatalogPage() {
       supabase
         .from('products')
         .select(`id, title, description, cover_image_url, platform_category_id,
+                 retracto_excluded, retracto_excluded_reason,
                  product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
         .eq('status', 'inactive')
@@ -75,6 +77,10 @@ export default async function CatalogPage() {
       title:                formData.get('title') as string,
       description:          (formData.get('description') as string) || null,
       platform_category_id: (formData.get('platform_category_id') as string) || null,
+      // Rev. 109 backlog #1 — Retracto categories multi-tenant.
+      // Checkbox + textarea opcionales; null si checkbox desmarcado.
+      retracto_excluded:        formData.get('retracto_excluded') === 'on',
+      retracto_excluded_reason: (formData.get('retracto_excluded_reason') as string) || null,
     }
     const coverUrl = formData.get('cover_image_url') as string
     if (coverUrl) updates.cover_image_url = coverUrl
