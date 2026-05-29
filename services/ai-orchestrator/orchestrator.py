@@ -22,10 +22,12 @@ from conversation_contract import (
     PROCESSING_STATUS_PENDING,
     PROCESSING_STATUS_PROCESSED,
     PROCESSING_STATUS_SKIPPED,
+    CONVERSATION_STATUS_OPTED_OUT,
     SKIP_REASON_CLOSED,
     SKIP_REASON_GUARDRAIL,
     SKIP_REASON_HUMAN_TAKEOVER,
     SKIP_REASON_NON_TEXT,
+    SKIP_REASON_OPTED_OUT,
 )
 
 logger = logging.getLogger("orchestrator.core")
@@ -6814,6 +6816,23 @@ async def build_and_run_orchestration(
                 message_id,
                 processing_status=PROCESSING_STATUS_SKIPPED,
                 skip_reason=SKIP_REASON_CLOSED,
+            )
+            return
+
+        # Fix founder 2026-05-28 — opt-out EN CUALQUIER SITUACIÓN.
+        # Cliente revocó consent (Habeas Data Ley 1581 ART. 9): el bot NO
+        # debe responder ni siquiera a un mensaje no-STOP. Operador puede
+        # reactivar manual desde Inbox UI si el cliente da re-consent explícito.
+        if conversation_status == CONVERSATION_STATUS_OPTED_OUT:
+            logger.info(
+                "[ORCH] Mensaje %s omitido: conversación en opted_out "
+                "(consent revocado, Habeas Data)", message_id,
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_OPTED_OUT,
             )
             return
 

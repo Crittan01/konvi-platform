@@ -24,6 +24,7 @@ from agentic.invariants.canonical_categories import CanonicalCategoriesInvariant
 from agentic.invariants.cart_render_coherence import CartRenderCoherenceInvariant
 from agentic.invariants.consent_required import ConsentRequiredInvariant
 from agentic.invariants.empty_promise import EmptyPromiseInvariant
+from agentic.invariants.fake_escalation import FakeEscalationInvariant
 from agentic.invariants.no_emoji import NoDecorativeEmojiInvariant
 from agentic.invariants.passive_closing import PassiveClosingInvariant
 from agentic.invariants.payment_coherence import PaymentCoherenceInvariant
@@ -41,6 +42,7 @@ __all__ = [
     "CartRenderCoherenceInvariant",
     "ConsentRequiredInvariant",
     "EmptyPromiseInvariant",
+    "FakeEscalationInvariant",
     "NoDecorativeEmojiInvariant",
     "PassiveClosingInvariant",
     "PaymentCoherenceInvariant",

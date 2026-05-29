@@ -31,6 +31,7 @@ from agentic.prompt.blocks import (
     customer_section,
     carriers_section,
     payment_methods_section,
+    coupons_section,
 )
 from agentic.prompt.states import (
     greeting_prompt,
@@ -94,6 +95,18 @@ _NO_PAYMENT_METHODS_STATES = frozenset({
 })
 
 
+# Cupones solo donde el cliente puede preguntar o aplicar (founder 2026-05-28).
+# Excluye estados terminales/transaccionales puros donde mencionar promo confunde.
+_NO_COUPONS_STATES = frozenset({
+    AgenticState.PII_COLLECTION,
+    AgenticState.SHIPPING_QUOTE,
+    AgenticState.CARRIER_SELECTION,
+    AgenticState.PAYMENT,
+    AgenticState.POST_PAYMENT,
+    AgenticState.HUMAN_HANDOFF,
+})
+
+
 def build_prompt_for_state(
     *,
     state: AgenticState,
@@ -106,6 +119,7 @@ def build_prompt_for_state(
     carriers: Optional[list[dict]] = None,
     payment_methods: Optional[dict] = None,
     server_greeting: Optional[str] = None,
+    active_coupons: Optional[list[dict]] = None,
 ) -> str:
     """Construye el system prompt específico para un estado.
 
@@ -154,6 +168,10 @@ def build_prompt_for_state(
     # Métodos de pago solo en PAYMENT.
     if state not in _NO_PAYMENT_METHODS_STATES:
         parts.append(payment_methods_section(payment_methods))
+
+    # Cupones donde aplica (GREETING/EXPLORING/CART_BUILDING).
+    if state not in _NO_COUPONS_STATES:
+        parts.append(coupons_section(active_coupons))
 
     parts.append(safety_block())
     parts.append(style_block(tone))
