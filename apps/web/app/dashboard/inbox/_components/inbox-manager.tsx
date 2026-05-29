@@ -54,6 +54,7 @@ import { wrapSelection, prefixLine, prefixLineNumbered } from '../_lib/editor'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
 import { OrderMiniForm } from './order-mini-form'
 import { useConversationContext } from '../_hooks/use-conversation-context'
+import { useConversations } from '../_hooks/use-conversations'
 import { ContextPanel } from './context-panel'
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
@@ -67,14 +68,21 @@ export default function InboxManager() {
   const searchParams = useSearchParams()
 
   // --- Estado base ---
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  // selectedId no se inicializa desde useSearchParams (puede estar vacío en SSR).
-  // Se restaura en useEffect desde window.location.search (siempre disponible cliente).
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const pendingConvRestore = useRef<string | null>(null)
+  // Refactor paso 7/10 2026-05-29 — conversations + selectedId + loading +
+  // showArchived + URL sync + Realtime convs + polling fallback via hook.
+  const {
+    conversations,
+    setConversations,
+    selectedId,
+    setSelectedId,
+    loading,
+    error: conversationsLoadError,
+    showArchived,
+    setShowArchived,
+    reload: loadConversations,
+    syncUrlParam,
+  } = useConversations({ supabase })
   const [messages, setMessages] = useState<Message[]>([])
-  const [loading, setLoading] = useState(true)
-  const [conversationsLoadError, setConversationsLoadError] = useState<string | null>(null)
   const [messagesLoadError, setMessagesLoadError] = useState<string | null>(null)
   const [takingOver, setTakingOver] = useState(false)
   const [replyText, setReplyText] = useState('')
@@ -83,9 +91,6 @@ export default function InboxManager() {
   const [statusError, setStatusError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('active')
-  // F1: toggle para mostrar conversaciones archivadas (>90 días sin actividad).
-  const [showArchived, setShowArchived] = useState(false)
-  const showArchivedRef = useRef(false)
   // Rev. 109 founder 2026-05-28 — expand-collapse de grupos por phone.
   // Modelo: 1 cliente = 1 fila visible (la conv primary del grupo). Si el
   // cliente tiene >1 sesión histórica, expand para verlas indentadas.
@@ -114,27 +119,8 @@ export default function InboxManager() {
 
   const selectedConv = conversations.find(c => c.id === selectedId) ?? null
 
-  // ── Persistir conversación en URL ──────────────────────────────────────────
-  const syncUrlParam = useCallback((id: string | null) => {
-    const params = new URLSearchParams(window.location.search)
-    if (id) {
-      params.set('conv', id)
-    } else {
-      params.delete('conv')
-    }
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-  }, [router, pathname])
-
-  // ── Leer conv de la URL en cliente (antes de cargar conversaciones) ─────────
-  useEffect(() => {
-    const convId = new URLSearchParams(window.location.search).get('conv')
-    if (convId) {
-      pendingConvRestore.current = convId
-      // Si ya hay conversaciones cargadas (re-mount), restaurar directamente
-      setSelectedId(prev => prev ?? convId)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Refactor paso 7/10 2026-05-29 — syncUrlParam + restore desde URL +
+  // loadConversations + Realtime convs viven en useConversations.
 
   // ── Filtros ────────────────────────────────────────────────────────────────
   const filteredConvs = conversations.filter(c => {
@@ -153,81 +139,8 @@ export default function InboxManager() {
     return matchesSearch && matchesFilter
   })
 
-  // ── Cargar conversaciones ──────────────────────────────────────────────────
-  const loadConversations = useCallback(async () => {
-    // F1: por default solo conversaciones activas (archived_at IS NULL).
-    // Toggle "Ver archivadas" expone las archivadas en el filtro lateral.
-    let query = supabase
-      .from('conversations')
-      .select('id, customer_phone, status, agentic_state, created_at, last_interaction_at, archived_at, messages(content, direction, created_at)')
-      .order('last_interaction_at', { ascending: false })
-      .limit(50)
-    if (!showArchivedRef.current) {
-      query = query.is('archived_at', null)
-    }
-    const { data, error } = await query
-
-    if (error) {
-      setConversations([])
-      setConversationsLoadError('No se pudieron cargar las conversaciones.')
-      setLoading(false)
-      return
-    }
-
-    setConversationsLoadError(null)
-    type RawRow = Omit<Conversation, 'last_message'> & {
-      messages?: Array<{ content: string; direction: string; created_at: string }>
-    }
-    const rows = ((data ?? []) as RawRow[]).map(r => {
-      const msgs = r.messages
-      return {
-        ...r,
-        messages: undefined,
-        last_message: msgs && msgs.length > 0
-          ? msgs.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
-          : null,
-      } as Conversation
-    })
-
-    // A2: traer marcas de lectura del operador actual para badge unread.
-    if (rows.length > 0) {
-      const ids = rows.map(r => r.id)
-      const { data: readsData } = await supabase
-        .from('conversation_reads')
-        .select('conversation_id, last_read_at')
-        .in('conversation_id', ids)
-      const readsMap = new Map<string, string>()
-      ;(readsData ?? []).forEach((r: { conversation_id: string; last_read_at: string }) => {
-        readsMap.set(r.conversation_id, r.last_read_at)
-      })
-      rows.forEach(r => {
-        r.last_read_at = readsMap.get(r.id) ?? null
-      })
-    }
-    setConversations(rows)
-    setLoading(false)
-
-    // Restaurar conversación desde URL (pendingConvRestore) o seleccionar la primera
-    const urlConvId = pendingConvRestore.current
-      ?? new URLSearchParams(window.location.search).get('conv')
-    if (urlConvId && rows.some(r => r.id === urlConvId)) {
-      setSelectedId(urlConvId)
-      pendingConvRestore.current = null
-    } else {
-      // Solo auto-seleccionar si no hay ninguna conversación activa
-      setSelectedId(prev => {
-        if (prev && rows.some(r => r.id === prev)) return prev
-        if (rows.length === 0) return null
-        const preferred = rows.find(r => r.last_message) ?? rows[0]
-        syncUrlParam(preferred.id)
-        return preferred.id
-      })
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
+  // WhatsApp integration status (independiente del hook de conversations).
   useEffect(() => {
-    loadConversations()
     supabase
       .from('tenant_integrations')
       .select('status')
@@ -237,14 +150,7 @@ export default function InboxManager() {
         setWaConnected(data?.status === 'connected')
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadConversations])
-
-  // F1: refrescar lista cuando cambia el toggle de archivadas.
-  useEffect(() => {
-    showArchivedRef.current = showArchived
-    loadConversations()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showArchived])
+  }, [])
 
   // Refactor paso 5/10 2026-05-29 — Contexto del panel derecho via hook.
   // Rev. 103 patrón intacto: real-time mirror del bot (refresh silent 5s)
@@ -360,74 +266,10 @@ export default function InboxManager() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
-  // ── Realtime — conversaciones ──────────────────────────────────────────────
-  useEffect(() => {
-    const channel = supabase
-      .channel('conversations:all')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
-        // A1: optimistic update con el payload, sin re-fetch completo.
-        // El trigger DB actualiza last_interaction_at en cada INSERT a messages;
-        // ese UPDATE llega aquí con REPLICA IDENTITY FULL.
-        if (payload.eventType === 'INSERT') {
-          // Conversación nueva — inyectar al state inmediatamente con los datos
-          // del payload para evitar race contra el re-fetch (el connector hace
-          // INSERT conversations + INSERT messages en pasos separados; sin
-          // optimistic update la fila no aparece hasta que el operador
-          // refresca con F5).
-          const newConv = payload.new as Conversation
-          if (newConv?.id) {
-            setConversations(prev => {
-              if (prev.some(c => c.id === newConv.id)) return prev
-              if (!showArchivedRef.current && newConv.archived_at) return prev
-              const merged: Conversation = {
-                ...newConv,
-                last_message: null,
-                last_read_at: null,
-              }
-              return [merged, ...prev].sort((a, b) => {
-                const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
-                const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
-                return bt - at
-              })
-            })
-          }
-          // Re-fetch para llenar last_message cuando el INSERT a messages
-          // (que ocurre milisegundos después) ya esté visible.
-          loadConversations()
-          return
-        }
-        if (payload.eventType === 'UPDATE') {
-          const upd = payload.new as Partial<Conversation> & { id: string }
-          setConversations(prev =>
-            prev.map(c => c.id === upd.id ? { ...c, ...upd } : c)
-              .sort((a, b) => {
-                const at = new Date(a.last_interaction_at ?? a.created_at ?? 0).getTime()
-                const bt = new Date(b.last_interaction_at ?? b.created_at ?? 0).getTime()
-                return bt - at
-              })
-          )
-          return
-        }
-        if (payload.eventType === 'DELETE') {
-          const old = payload.old as { id: string }
-          setConversations(prev => prev.filter(c => c.id !== old.id))
-        }
-      })
-      .subscribe()
-
-    // Polling de seguridad cada 20s. Si Realtime falla por RLS,
-    // race u otros motivos, el polling recoge la conversación nueva sin
-    // requerir F5 manual. La query es liviana (50 conversaciones max).
-    const pollInterval = setInterval(() => {
-      loadConversations()
-    }, 20000)
-
-    return () => {
-      supabase.removeChannel(channel)
-      clearInterval(pollInterval)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadConversations])
+  // Refactor paso 7/10 2026-05-29 — Realtime conversations + polling fallback
+  // viven en useConversations. El hook expone setConversations como escape
+  // hatch para optimistic updates desde otros effects (realtime messages,
+  // mark-as-read) que aún viven en este componente (pendiente paso 9).
 
   // F2: cargar más mensajes históricos cuando el operador hace scroll arriba.
   const loadMoreMessages = async () => {
