@@ -553,3 +553,164 @@ class TestBacklog3ChannelRegistry:
         assert isinstance(custom, self._Protocol)
         self._register("web", custom)
         assert self._get("web").channel_name() == "web"
+
+
+# ─── Auditoría arquitectónica + ADR-0017 Multi-agent ────────────────────────
+
+
+class TestAuditNoHardcodedVertical:
+    """Audit fix — system_prompt no asume vertical (multi-vertical agnóstico)."""
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from agentic.system_prompt import build_system_prompt, _render_philosophy_block
+        self._build = build_system_prompt
+        self._philosophy = _render_philosophy_block
+
+    def test_default_pitch_no_asume_cosmetica(self):
+        # Tenant sin pitch ni philosophy — bot NO debe decir cosmética.
+        prompt = self._build(
+            tenant_name="Tech X",
+            tenant_pitch=None,
+            tenant_business_pitch=None,
+            tenant_tone=None,
+            agent_name="Carolina Tech",
+        )
+        assert "cosmética" not in prompt.lower()
+        assert "artesanal natural" not in prompt.lower()
+        # Debe usar fallback agnóstico.
+        assert "Tech X" in prompt
+        assert "Carolina Tech" in prompt
+
+    def test_pitch_custom_es_respetado(self):
+        prompt = self._build(
+            tenant_name="Tech X",
+            tenant_pitch=None,
+            tenant_business_pitch="soluciones de software B2B",
+            tenant_tone=None,
+            agent_name="Carolina",
+        )
+        assert "soluciones de software B2B" in prompt
+        assert "cosmética" not in prompt.lower()
+
+    def test_philosophy_se_inyecta(self):
+        block = self._philosophy({
+            "mision": "Llevar tecnología al alcance de PyMEs colombianas.",
+            "vision": "Ser el SaaS líder en LATAM.",
+            "valores": "Innovación, eficiencia, soporte",
+        })
+        assert "Misión" in block
+        assert "Visión" in block
+        assert "Valores" in block
+        assert "Llevar tecnología" in block
+
+    def test_philosophy_vacia_retorna_vacio(self):
+        assert self._philosophy(None) == ""
+        assert self._philosophy({}) == ""
+        assert self._philosophy({"mision": "", "vision": "", "valores": ""}) == ""
+
+
+class TestADR0017AgentTemplates:
+    """ADR-0017 — templates por rol."""
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from lib.agent_templates import (
+            AGENT_TEMPLATES, get_template, render_skeleton, list_roles, is_valid_role,
+        )
+        self._TEMPLATES = AGENT_TEMPLATES
+        self._get = get_template
+        self._render = render_skeleton
+        self._list = list_roles
+        self._valid = is_valid_role
+
+    def test_5_roles_canonicos(self):
+        assert set(self._list()) == {"sales", "support", "marketing", "claims", "custom"}
+
+    def test_sales_tools_incluye_add_to_cart(self):
+        t = self._get("sales")
+        assert "add_to_cart" in (t.get("tools_allowed") or [])
+        assert "generate_payment_link" in (t.get("tools_allowed") or [])
+
+    def test_support_no_tiene_add_to_cart(self):
+        t = self._get("support")
+        tools = t.get("tools_allowed") or []
+        assert "add_to_cart" not in tools
+        assert "generate_payment_link" not in tools
+        # Support sí puede leer + escalar.
+        assert "get_recent_orders" in tools
+        assert "escalate_to_human" in tools
+
+    def test_render_skeleton_inyecta_name_tenant(self):
+        out = self._render("sales", agent_name="Sara Camila", tenant_name="KAIU")
+        assert "Sara Camila" in out
+        assert "KAIU" in out
+
+    def test_role_invalido_fallback_custom(self):
+        t = self._get("inexistente_xyz")
+        assert t == self._TEMPLATES["custom"]
+
+    def test_is_valid_role(self):
+        assert self._valid("sales") is True
+        assert self._valid("invalid") is False
+
+
+class TestADR0017AgentRouter:
+    """ADR-0017 — router pre-LLM clasificador."""
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from agentic.agent_router import (
+            classify_intent_to_role, select_agent_for_inbound,
+        )
+        self._classify = classify_intent_to_role
+        self._select = select_agent_for_inbound
+
+    def test_claims_keyword_detected(self):
+        assert self._classify("Quiero reclamar mi pedido") == "claims"
+        assert self._classify("El producto vino defectuoso") == "claims"
+        assert self._classify("Quiero retracto") == "claims"
+        assert self._classify("No me llegó el envío") == "claims"
+
+    def test_support_keyword_detected(self):
+        assert self._classify("¿Dónde está mi pedido?") == "support"
+        assert self._classify("Quiero tracking") == "support"
+        assert self._classify("¿Cuándo llega?") == "support"
+
+    def test_marketing_keyword_detected(self):
+        assert self._classify("¿Tienen promo?") == "marketing"
+        assert self._classify("¿Hay descuento?") == "marketing"
+
+    def test_default_sales(self):
+        assert self._classify("Quiero comprar 1 jabón") == "sales"
+        assert self._classify("Hola") == "sales"
+
+    def test_select_single_agent_backward_compat(self):
+        agents = [{"name": "Sara Camila", "role": "sales", "is_default": True}]
+        result = self._select(inbound_text="Hola", agents=agents)
+        assert result["name"] == "Sara Camila"
+
+    def test_select_multi_routes_to_support(self):
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Andrés", "role": "support", "is_default": False},
+        ]
+        result = self._select(
+            inbound_text="¿Dónde está mi pedido?", agents=agents,
+        )
+        assert result["name"] == "Andrés"
+
+    def test_select_fallback_to_default_if_no_match(self):
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Andrés", "role": "support", "is_default": False},
+        ]
+        # No hay agente de marketing → fallback al default Sara.
+        result = self._select(
+            inbound_text="¿Hay promo?", agents=agents,
+        )
+        assert result["name"] == "Sara"
+
+    def test_select_empty_agents_safe_fallback(self):
+        result = self._select(inbound_text="Hola", agents=[])
+        assert result["name"] == "Sara Camila"  # defensive default

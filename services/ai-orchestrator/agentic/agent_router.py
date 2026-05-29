@@ -26,11 +26,19 @@ logger = logging.getLogger("orchestrator.agent_router")
 
 
 _CLAIMS_PATTERNS = (
-    re.compile(r"\b(?:reclam|defecto|defectuoso|dañad|rot[oa])\b", re.I),
-    re.compile(r"\b(?:retract(?:o|arme)|devoluci[oó]n|devolver)\b", re.I),
-    re.compile(r"\b(?:garant[ií]a|reembolso|refund)\b", re.I),
-    re.compile(r"\b(?:no\s+funciona|vino\s+mal|llegó\s+mal)\b", re.I),
-    re.compile(r"\b(?:no\s+(?:me\s+)?(?:llegó|lleg[oó]|recib[ií]))\b", re.I),
+    # Prefix-friendly (reclam → reclamar, reclamo; defectuos → defectuoso/a)
+    re.compile(r"\breclam\w*", re.I),
+    re.compile(r"\bdefectuos\w*", re.I),
+    re.compile(r"\bdañ\w+", re.I),
+    re.compile(r"\brot[oa]\b", re.I),
+    re.compile(r"\bretract\w*", re.I),
+    re.compile(r"\bdevoluci[oó]n", re.I),
+    re.compile(r"\bdevolver", re.I),
+    re.compile(r"\bgarant[ií]a", re.I),
+    re.compile(r"\breembolso|refund", re.I),
+    re.compile(r"\bno\s+funciona", re.I),
+    re.compile(r"\bvino\s+mal|llegó\s+mal", re.I),
+    re.compile(r"\bno\s+(?:me\s+)?(?:llegó|lleg[oó]|recib[ií])", re.I),
 )
 
 _SUPPORT_PATTERNS = (
