@@ -1066,6 +1066,122 @@ class TestFakeEscalationInvariant:
         assert result.outcome == InvariantOutcome.OK
 
 
+class TestClaimsTools:
+    """Rev. 109 founder 2026-05-28 — tool `create_claim` cierra el gap
+    del agente Reclamos. Antes solo escalaba; ahora registra ticket +
+    notifica + le da al cliente número de referencia."""
+
+    def test_create_claim_tool_registered(self):
+        import sys
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        # Asegura módulo cargado
+        import agentic.tools.claims  # noqa
+        from agentic.tools.registry import _TOOLS
+        assert "create_claim" in _TOOLS
+        assert "get_claim_status" in _TOOLS
+
+    def test_create_claim_args_schema(self):
+        from agentic.tools.claims import CreateClaimArgs
+        # Válido
+        args = CreateClaimArgs(order_id="abc-uuid", reason="producto dañado")
+        assert args.order_id == "abc-uuid"
+        assert args.requested_amount is None
+        # Con monto
+        args2 = CreateClaimArgs(
+            order_id="x", reason="defectuoso", requested_amount=50000,
+        )
+        assert args2.requested_amount == 50000
+
+    def test_create_claim_args_validation_reason_too_short(self):
+        import pytest
+        from agentic.tools.claims import CreateClaimArgs
+        with pytest.raises(Exception):  # ValidationError
+            CreateClaimArgs(order_id="x", reason="ab")  # min_length=3
+
+    def test_get_claim_status_args_schema(self):
+        from agentic.tools.claims import GetClaimStatusArgs
+        args = GetClaimStatusArgs(ticket_number=42)
+        assert args.ticket_number == 42
+
+    def test_get_claim_status_args_rejects_negative(self):
+        import pytest
+        from agentic.tools.claims import GetClaimStatusArgs
+        with pytest.raises(Exception):
+            GetClaimStatusArgs(ticket_number=0)  # ge=1
+
+    def test_create_claim_tool_returns_failure_when_order_not_found(self):
+        import asyncio
+        from agentic.tools.base import ToolContext
+        from agentic.tools.claims import CreateClaimTool, CreateClaimArgs
+
+        class FakeQuery:
+            def __init__(self):
+                self.data = []
+            def select(self, *_): return self
+            def eq(self, *_): return self
+            def limit(self, *_): return self
+            def execute(self):
+                return type("R", (), {"data": []})()
+
+        class FakeSupabase:
+            def table(self, name):
+                return FakeQuery()
+
+        ctx = ToolContext(
+            tenant_id="t1", conversation_id="c1", contact_id="ct1",
+            supabase=FakeSupabase(),
+        )
+        args = CreateClaimArgs(
+            order_id="non-existent", reason="producto dañado",
+        )
+        result = asyncio.run(CreateClaimTool().execute(args, ctx))
+        assert result.success is False
+        assert result.data["code"] == "CLAIM_ORDER_NOT_FOUND"
+
+    def test_claims_role_template_includes_create_claim_tool(self):
+        from lib.agent_templates import get_template
+        claims = get_template("claims")
+        assert "create_claim" in (claims.get("tools_allowed") or [])
+        assert "get_claim_status" in (claims.get("tools_allowed") or [])
+        # Mantiene escalate_to_human para casos complejos
+        assert "escalate_to_human" in (claims.get("tools_allowed") or [])
+
+    def test_sales_role_can_also_create_claim(self):
+        # Ventas también: si el cliente reporta reclamo en medio de
+        # compra, evitamos handoff cruzando a Carolina.
+        from lib.agent_templates import get_template
+        sales = get_template("sales")
+        assert "create_claim" in (sales.get("tools_allowed") or [])
+
+    def test_claims_skeleton_mentions_create_claim(self):
+        # Skeleton actualizado: ya NO dice "siempre escala". Ahora
+        # instruye usar create_claim ANTES de escalar.
+        from lib.agent_templates import _CLAIMS_SKELETON
+        assert "create_claim" in _CLAIMS_SKELETON
+        assert "get_claim_status" in _CLAIMS_SKELETON
+        # Y el escalado queda condicional (no "SIEMPRE")
+        assert "SIEMPRE escala al operador humano" not in _CLAIMS_SKELETON
+
+
+class TestNotificationSourceUnified:
+    """Rev. 109 founder 2026-05-28 — unificar canales. notify_escalation_async
+    ahora lee de `notification_settings` (no `tenant_integrations`).
+    Single source of truth con dispatch_human_takeover_event."""
+
+    def test_notify_uses_notification_settings_not_tenant_integrations(self):
+        import sys
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        if "telegram_notifications" in sys.modules:
+            del sys.modules["telegram_notifications"]
+        import inspect
+        from telegram_notifications import notify_escalation_async
+        source = inspect.getsource(notify_escalation_async)
+        # Lee de notification_settings
+        assert "notification_settings" in source
+        # NO debe leer de tenant_integrations (path A deprecado)
+        assert "tenant_integrations" not in source
+
+
 class TestHumanTakeoverSLA:
     """Fix founder 2026-05-28 — SLA tracker: si el bot escala y nadie
     responde en X horas, alerta operador. Cierra el loop "super delicado"."""

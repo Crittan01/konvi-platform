@@ -1,13 +1,14 @@
 """Mapeo estado → tools permitidos (rev. 109).
 
-Reduce carga cognitiva del LLM: en lugar de 15 tools registradas, cada
+Reduce carga cognitiva del LLM: en lugar de 17 tools registradas, cada
 estado expone solo las relevantes para su contexto.
 
-Tools globales registradas (15 post-consolidación rev. 108):
+Tools globales registradas (17 post rev. 109 founder 2026-05-28):
   list_catalog, get_cart, add_to_cart, update_cart_item_quantity,
   remove_cart_item, get_contact_info, record_consent, save_contact_field,
   quote_shipping, select_carrier, generate_payment_link, escalate_to_human,
-  get_recent_orders, kb_query, send_product_image
+  get_recent_orders, kb_query, send_product_image,
+  create_claim, get_claim_status  (rev. 109 — agente Reclamos productivo)
 """
 from __future__ import annotations
 
@@ -35,10 +36,27 @@ _CART_MODS = frozenset({
     "set_shipping_recipient",  # rev. 109 BUG 37 — receptor alterno
 })
 
+# Rev. 109 founder 2026-05-28 — Claims capability. Reclamos pueden surgir
+# en CUALQUIER estado donde el cliente esté interactuando (cliente puede
+# decir "mi pedido pasado llegó dañado" en medio de una nueva compra).
+# Excluye solo HUMAN_HANDOFF (humano ya tomó control).
+_CLAIMS_CAPABILITY = frozenset({
+    "get_recent_orders",   # para identificar order_id del reclamo
+    "create_claim",
+    "get_claim_status",
+})
+
 
 def _with_cart_mods(*tools: str) -> frozenset[str]:
-    """Helper para construir subset estado-específico + cart mods + escalate."""
-    return frozenset(tools) | _CART_MODS | frozenset({_ESCALATE})
+    """Helper para construir subset estado-específico + cart mods + escalate +
+    claims capability (rev. 109 founder 2026-05-28 — reclamos en cualquier
+    estado pre-handoff)."""
+    return (
+        frozenset(tools)
+        | _CART_MODS
+        | _CLAIMS_CAPABILITY
+        | frozenset({_ESCALATE})
+    )
 
 
 # Mapeo declarativo estado → set de tool names permitidos.
@@ -48,11 +66,10 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "list_catalog",
         "add_to_cart",
         "get_contact_info",
-        "get_recent_orders",
         "kb_query",
         "send_product_image",
         _ESCALATE,
-    }),
+    }) | _CLAIMS_CAPABILITY,  # cliente puede iniciar con "tengo un reclamo"
     # Navegación catálogo. Cart vacío típicamente, pero el cliente puede
     # decidir agregar — add_to_cart presente.
     AgenticState.EXPLORING: frozenset({
@@ -63,7 +80,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "get_contact_info",
         "set_shipping_recipient",  # rev. 109 BUG 37 — receptor alterno
         _ESCALATE,
-    }),
+    }) | _CLAIMS_CAPABILITY,  # rev. 109 — cliente puede reportar reclamo aquí
     # Construcción cart — todas las ops de carrito + foto producto.
     AgenticState.CART_BUILDING: _with_cart_mods(
         "send_product_image",
@@ -102,13 +119,16 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
     ),
     # Post-pago: tracking, status, nuevo pedido. Cart de la orden ya está
     # convertido — NO cart mods (la orden es inmutable post-confirm).
+    # Rev. 109 founder 2026-05-28 — post-compra es el momento canónico
+    # para reclamos (producto llegó dañado, equivocado, etc.). claims
+    # capability obligatoria aquí.
     AgenticState.POST_PAYMENT: frozenset({
         "get_recent_orders",
         "get_cart",
         "kb_query",
         "list_catalog",
         _ESCALATE,
-    }),
+    }) | _CLAIMS_CAPABILITY,
     # Humano takeover — sin LLM. Mantenemos escalation por consistencia.
     AgenticState.HUMAN_HANDOFF: frozenset({_ESCALATE}),
 }

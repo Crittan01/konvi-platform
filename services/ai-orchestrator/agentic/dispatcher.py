@@ -428,6 +428,7 @@ async def _run_agentic_full(
     import agentic.tools.orders  # noqa: F401
     import agentic.tools.knowledge  # noqa: F401
     import agentic.tools.media  # noqa: F401
+    import agentic.tools.claims  # noqa: F401  # Rev. 109 founder 2026-05-28
 
     from agentic.agent import run_agentic_turn
     from agentic.system_prompt import build_system_prompt
@@ -2246,6 +2247,7 @@ async def _run_agentic_shadow(
     import agentic.tools.shipping  # noqa: F401
     import agentic.tools.payment  # noqa: F401
     import agentic.tools.escalation  # noqa: F401
+    import agentic.tools.claims  # noqa: F401  # Rev. 109 founder 2026-05-28
 
     from agentic.agent import run_agentic_turn
     from agentic.system_prompt import build_system_prompt
