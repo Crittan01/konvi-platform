@@ -9,7 +9,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { useState } from 'react'
 
 const MAX_NAME = 80
-const MAX_ROLE = 1500
+// Rev. 109 — 2500 chars. Coincide con meta-prompt IA ("200-400 palabras"
+// = ~1200-2400 chars) + buffer. ~625 tokens/turno aceptables.
+const MAX_ROLE = 2500
 
 function SubmitButton() {
   const { pending } = useFormStatus()
