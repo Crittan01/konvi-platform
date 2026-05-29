@@ -51,6 +51,7 @@ import {
   groupConvsByPhone,
 } from '../_lib/format'
 import { wrapSelection, prefixLine, prefixLineNumbered } from '../_lib/editor'
+import { ChatEditorToolbar } from './chat-editor-toolbar'
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 // Refactor 2026-05-29 paso 2/10 — extraído de page.tsx como Client Component.
@@ -1267,65 +1268,10 @@ export default function InboxManager() {
                       Bloque: > cita · viñetas · numerada
                     Atajos: Ctrl+B negrita · Ctrl+I cursiva · Ctrl+E código.
                 */}
-                <div className="flex items-center gap-0.5 px-1 flex-wrap">
-                  {/* — Inline format — */}
-                  <button
-                    type="button"
-                    onClick={() => wrapSelection(replyInputRef, setReplyText, '*')}
-                    title="Negrita — *texto*  (Ctrl+B)"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm font-bold"
-                  >B</button>
-                  <button
-                    type="button"
-                    onClick={() => wrapSelection(replyInputRef, setReplyText, '_')}
-                    title="Cursiva — _texto_  (Ctrl+I)"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm italic"
-                  >I</button>
-                  <button
-                    type="button"
-                    onClick={() => wrapSelection(replyInputRef, setReplyText, '~')}
-                    title="Tachado — ~texto~"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm line-through"
-                  >S</button>
-                  <button
-                    type="button"
-                    onClick={() => wrapSelection(replyInputRef, setReplyText, '`')}
-                    title="Código alineado — `texto`  (Ctrl+E)"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-mono"
-                  >{'<>'}</button>
-                  <button
-                    type="button"
-                    onClick={() => wrapSelection(replyInputRef, setReplyText, '```')}
-                    title="Bloque monoespaciado — ```texto```"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-mono"
-                  >{'</>'}</button>
-
-                  {/* Separador visual */}
-                  <span className="h-5 w-px bg-border mx-1" aria-hidden="true" />
-
-                  {/* — Block format — */}
-                  <button
-                    type="button"
-                    onClick={() => prefixLine(replyInputRef, setReplyText, '> ')}
-                    title="Cita — > texto"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-sm"
-                  >&ldquo;&rdquo;</button>
-                  <button
-                    type="button"
-                    onClick={() => prefixLine(replyInputRef, setReplyText, '* ')}
-                    title="Lista con viñetas — * texto"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-base"
-                  >•</button>
-                  <button
-                    type="button"
-                    onClick={() => prefixLineNumbered(replyInputRef, setReplyText)}
-                    title="Lista numerada — 1. texto"
-                    className="h-7 min-w-[28px] px-1.5 rounded hover:bg-accent text-foreground inline-flex items-center justify-center text-xs font-medium"
-                  >1.</button>
-                </div>
-                <p className="text-[10px] text-muted-foreground px-1 leading-tight">
-                  Formato WhatsApp: <code className="font-mono">*negrita*</code> · <code className="font-mono">_cursiva_</code> · <code className="font-mono">~tachado~</code> · <code className="font-mono">`código`</code> · <code className="font-mono">{'```mono```'}</code> · <code className="font-mono">{'> cita'}</code> · <code className="font-mono">* lista</code> · <code className="font-mono">1. numerada</code>
-                </p>
+                <ChatEditorToolbar
+                  textareaRef={replyInputRef}
+                  setReplyText={setReplyText}
+                />
                 <div className="flex gap-2 items-end">
                   <textarea
                     ref={replyInputRef}
