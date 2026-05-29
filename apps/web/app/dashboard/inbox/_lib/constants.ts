@@ -72,21 +72,18 @@ export const STATUS_CONFIG = {
 //   + Fallback drill-down → Todas (incluye cerradas).
 //
 // Eliminados:
-//   - Bot / Agente: redundantes con "Activas" (cada row ya tiene su badge
-//     de status colorcoded → no hace falta filtrar para distinguirlos).
-//   - Cerradas: cubierto por "Todas" (drill-down) + "Ver archivadas" toggle
-//     (histórico permanente >90d). Filtrar solo cerradas activas (≤90d) no
-//     es un caso de uso real recurrente.
-//
-// Cobertura preservada: el type FilterStatus mantiene los valores legacy
-// (bot_active, human_takeover, closed) para que filtros via URL ?filter=X
-// sigan funcionando si algún operador tiene bookmarks viejos. La UI sólo
-// ofrece los 4 chips canónicos.
+// Rev. 109 founder 2026-05-29 (post-audit) — RESTAURADOS los 7 chips
+// originales tras feedback del founder. La simplificación inicial 7→4 fue
+// decisión UX no autorizada. Backward-compat completa con el monolito original:
+// cada chip mapea a un valor exacto del type FilterStatus.
 export const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
-  { value: 'active',     label: 'Activas' },
-  { value: 'sla_breach', label: '⏰ SLA breach' },
-  { value: 'opted_out',  label: 'Opt-out' },
-  { value: 'all',        label: 'Todas' },
+  { value: 'active',         label: 'Activas' },
+  { value: 'sla_breach',     label: '⏰ SLA breach' },
+  { value: 'all',            label: 'Todas' },
+  { value: 'bot_active',     label: 'Bot' },
+  { value: 'human_takeover', label: 'Agente' },
+  { value: 'closed',         label: 'Cerradas' },
+  { value: 'opted_out',      label: 'Opt-out' },
 ]
 
 // Rev. 109 — agentic_state badge UI (Day 5).
