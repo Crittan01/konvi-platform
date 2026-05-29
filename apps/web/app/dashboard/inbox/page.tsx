@@ -165,7 +165,15 @@ interface SelectedVariation {
   label: string
 }
 
-type FilterStatus = 'active' | 'all' | 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
+type FilterStatus = 'active' | 'sla_breach' | 'all' | 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
+
+// Rev. 109 founder 2026-05-28 — SLA threshold para escalación human_takeover.
+// Debe coincidir con worker.py HUMAN_TAKEOVER_SLA_HOURS (default 2h).
+// El operador puede agregar `NEXT_PUBLIC_HUMAN_TAKEOVER_SLA_HOURS=N` para override
+// si en el futuro el backend cambia. Hoy 2h es estándar.
+const SLA_BREACH_HOURS =
+  Number(process.env.NEXT_PUBLIC_HUMAN_TAKEOVER_SLA_HOURS || 2)
+const SLA_BREACH_MS = SLA_BREACH_HOURS * 60 * 60 * 1000
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
   pending:    'Pendiente',
@@ -221,12 +229,25 @@ const STATUS_CONFIG = {
 // para auditoría histórica, pero no saturan el listado day-to-day.
 const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
   { value: 'active',         label: 'Activas' },
+  // Rev. 109 founder 2026-05-28 — SLA breach: human_takeover sin respuesta
+  // humana ≥SLA_BREACH_HOURS. Cierra loop del "super delicado": operador
+  // ve qué convs están sin atender + alerta visual.
+  { value: 'sla_breach',     label: '⏰ SLA breach' },
   { value: 'all',            label: 'Todas' },
   { value: 'bot_active',     label: 'Bot' },
   { value: 'human_takeover', label: 'Agente' },
   { value: 'closed',         label: 'Cerradas' },
   { value: 'opted_out',      label: 'Opt-out' },
 ]
+
+// Rev. 109 — heuristic SLA breach detection (front-side, sin query extra).
+// El worker hace el chequeo real cada 10min + envía notif Telegram + persiste
+// audit row. Esta función es para UI render — operador ve breach AHORA.
+function isSlaBreach(conv: Conversation): boolean {
+  if (conv.status !== 'human_takeover') return false
+  const lastTs = conv.last_interaction_at ?? conv.created_at
+  return Date.now() - new Date(lastTs).getTime() >= SLA_BREACH_MS
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 // Normaliza y formatea teléfono sin importar si el raw ya trae '+' o espacios
@@ -528,13 +549,16 @@ export default function InboxPage() {
   const filteredConvs = conversations.filter(c => {
     const matchesSearch = search === '' || c.customer_phone.includes(search.replace('+', ''))
     // 'active' = bot_active + human_takeover (accionables día-a-día).
+    // 'sla_breach' = human_takeover sin respuesta humana ≥SLA_BREACH_HOURS.
     // 'all' = literalmente todas. Otros valores = match exacto al status.
     const matchesFilter =
       filterStatus === 'all'
         ? true
         : filterStatus === 'active'
           ? c.status === 'bot_active' || c.status === 'human_takeover'
-          : c.status === filterStatus
+          : filterStatus === 'sla_breach'
+            ? isSlaBreach(c)
+            : c.status === filterStatus
     return matchesSearch && matchesFilter
   })
 
@@ -1212,6 +1236,10 @@ export default function InboxPage() {
 
           {(() => {
             const groupCount = groupConvsByPhone(filteredConvs).length
+            // Rev. 109 — breach count global (de todas las convs, no del filtro).
+            // Visible aunque el operador esté viendo "Activas" — alerta no se
+            // pierde por filtro.
+            const breachCount = conversations.filter(isSlaBreach).length
             return (
               <p className="text-xs text-muted-foreground">
                 {groupCount} cliente{groupCount !== 1 ? 's' : ''}
@@ -1221,6 +1249,16 @@ export default function InboxPage() {
                   </span>
                 )}
                 {showArchived && ' · incl. archivadas'}
+                {breachCount > 0 && filterStatus !== 'sla_breach' && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterStatus('sla_breach')}
+                    className="ml-2 inline-flex items-center text-[10px] font-semibold text-red-700 hover:underline"
+                    title="Ver convs sin respuesta humana en SLA"
+                  >
+                    · ⏰ {breachCount} en SLA breach
+                  </button>
+                )}
               </p>
             )
           })()}
@@ -1311,6 +1349,16 @@ export default function InboxPage() {
                           title={`Estado del bot: ${conv.agentic_state}`}
                         >
                           {agenticStateLabel(conv.agentic_state)}
+                        </span>
+                      )}
+                      {/* Rev. 109 founder 2026-05-28 — alerta SLA breach.
+                          Operador identifica de un vistazo convs sin respuesta. */}
+                      {isSlaBreach(conv) && (
+                        <span
+                          className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border border-red-700 bg-red-700/10 text-red-700 font-semibold"
+                          title={`Sin respuesta humana hace ≥${SLA_BREACH_HOURS}h — atender ya`}
+                        >
+                          ⏰ SLA
                         </span>
                       )}
                     </div>
