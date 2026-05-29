@@ -52,6 +52,7 @@ import {
 } from '../_lib/format'
 import { wrapSelection, prefixLine, prefixLineNumbered } from '../_lib/editor'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
+import { OrderMiniForm } from './order-mini-form'
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 // Refactor 2026-05-29 paso 2/10 — extraído de page.tsx como Client Component.
@@ -101,19 +102,12 @@ export default function InboxManager() {
   // Rev. 103 — indicador silencioso de auto-refresh (visible en header panel
   // como pequeño spinner cuando el polling silent dispara).
   const [contextRefreshing, setContextRefreshing] = useState(false)
-  const [productSearchForm, setProductSearchForm]       = useState('')  // búsqueda en mini-form de pedido
   const [productSearchCatalog, setProductSearchCatalog] = useState('')  // búsqueda en catálogo informativo
   const [showAllOrders, setShowAllOrders] = useState(false)  // B2: paginación pedidos
-
-  // --- Mini-form crear pedido ---
-  const [showOrderForm, setShowOrderForm] = useState(false)
-  const [selectedVariations, setSelectedVariations] = useState<SelectedVariation[]>([])
-  const [orderQtys, setOrderQtys] = useState<Record<string, number>>({})
-  const [orderShipping, setOrderShipping] = useState<string>('')
-  const [orderNotes, setOrderNotes] = useState('')
-  const [creatingOrder, setCreatingOrder] = useState(false)
-  const [orderError, setOrderError] = useState<string | null>(null)
-  const [orderSuccess, setOrderSuccess] = useState<string | null>(null)
+  // Refactor paso 4/10 2026-05-29 — state local del mini-form (productSearchForm,
+  // showOrderForm, selectedVariations, orderQtys, orderShipping, orderNotes,
+  // creatingOrder, orderError, orderSuccess) + handlers (toggleVariation,
+  // createOrder) ahora viven encapsulados en <OrderMiniForm/>.
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const replyInputRef = useRef<HTMLTextAreaElement>(null)
@@ -264,10 +258,11 @@ export default function InboxManager() {
     }
     setContextLoading(true)
     setConvContext(null)
-    setShowOrderForm(false)
-    setSelectedVariations([])
-    setOrderSuccess(null)
-    setOrderError(null)
+    // Refactor paso 4/10 — antes aquí se reseteaba state del mini-form
+    // (showOrderForm/selectedVariations/orderSuccess/orderError). Ya no
+    // viven aquí: <OrderMiniForm/> se desmonta cuando cambia el
+    // conversationId (key implícita por unmount/mount via el padre que lo
+    // monta solo en human_takeover de la conv actual). State reset automático.
 
     const controller = new AbortController()
     let refreshTimer: ReturnType<typeof setInterval> | null = null
@@ -648,93 +643,26 @@ export default function InboxManager() {
     }
   }
 
-  // ── Crear pedido desde Inbox ───────────────────────────────────────────────
-  const handleToggleVariation = (v: SelectedVariation) => {
-    setSelectedVariations(prev => {
-      const exists = prev.find(x => x.variationId === v.variationId)
-      if (exists) return prev.filter(x => x.variationId !== v.variationId)
-      return [...prev, v]
-    })
-    setOrderQtys(prev => ({ ...prev, [v.variationId]: prev[v.variationId] ?? 1 }))
-    setOrderError(null)
-    setOrderSuccess(null)
-  }
-
-  const handleCreateOrder = async () => {
-    if (!selectedId || selectedVariations.length === 0) return
-    setCreatingOrder(true)
-    setOrderError(null)
-    setOrderSuccess(null)
-
-    const { data: { session } } = await supabase.auth.getSession()
-    const token = session?.access_token
-    if (!token) { setOrderError('Sesión expirada.'); setCreatingOrder(false); return }
-
-    const shippingCost = parseFloat(orderShipping || '0')
-    const items = selectedVariations.map(v => ({
-      product_id: v.productId,
-      variation_id: v.variationId,
-      title: `${v.productTitle} — ${v.label}`,
-      unit_price: v.price,
-      quantity: orderQtys[v.variationId] ?? 1,
-    }))
-
-    const idempotencyKey = createIdempotencyKey('orders.create')
-    try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify({
-          conversation_id: selectedId,
-          contact_id: convContext?.contact?.id ?? null,
-          notes: orderNotes.trim() || null,
-          shipping_cost: isNaN(shippingCost) ? 0 : shippingCost,
-          items,
-          // Crear directo en confirmed para que descuente stock
-          auto_confirm: true,
-        }),
+  // Refactor paso 4/10 2026-05-29 — la lógica de crear pedido y selección
+  // de variantes vive ahora en <OrderMiniForm/>. El padre solo provee:
+  // products, conversationId, contactId y un callback opcional para
+  // refrescar el contexto tras crear pedido (mostrar el nuevo en
+  // "Pedidos recientes").
+  const refreshContextAfterOrder = useCallback(() => {
+    if (!selectedId) return
+    supabase.auth.getSession().then(({ data }) => {
+      const t = data.session?.access_token
+      if (!t) return
+      fetch(`/api/conversations/${selectedId}/context`, {
+        headers: { 'Authorization': `Bearer ${t}` },
       })
-      const json = await res.json().catch(() => ({ detail: 'Error desconocido' }))
-      if (!res.ok) {
-        setOrderError(json.detail || 'Error al crear el pedido')
-      } else {
-        setOrderSuccess(`Pedido #${json.id?.slice(0, 8)} creado y confirmado.`)
-        setSelectedVariations([])
-        setOrderQtys({})
-        setOrderShipping('')
-        setOrderNotes('')
-        setShowOrderForm(false)
-        // Recargar contexto para mostrar el nuevo pedido
-        setTimeout(() => {
-          supabase.auth.getSession().then(({ data }) => {
-            const t = data.session?.access_token
-            if (!t) return
-            fetch(`/api/conversations/${selectedId}/context`, {
-              headers: { 'Authorization': `Bearer ${t}` },
-            })
-              .then(r => r.json())
-              .then(j => setConvContext(j))
-              .catch(() => {})
-          })
-        }, 800)
-      }
-    } catch {
-      setOrderError('Error de red al crear el pedido.')
-    } finally {
-      setCreatingOrder(false)
-    }
-  }
+        .then(r => r.json())
+        .then(j => setConvContext(j))
+        .catch(() => {})
+    })
+  }, [selectedId, supabase])
 
-  // ── Productos filtrados — dos listas independientes por búsqueda separada ──
-  const filteredProductsForm = (convContext?.products ?? []).filter(p =>
-    productSearchForm === '' ||
-    p.title.toLowerCase().includes(productSearchForm.toLowerCase()) ||
-    (p.product_variations ?? []).some(v => v.sku?.toLowerCase().includes(productSearchForm.toLowerCase()))
-  )
+  // ── Productos filtrados — catálogo informativo (búsqueda independiente) ────
   const filteredProducts = (convContext?.products ?? []).filter(p =>
     productSearchCatalog === '' ||
     p.title.toLowerCase().includes(productSearchCatalog.toLowerCase()) ||
@@ -1158,11 +1086,10 @@ export default function InboxManager() {
               }
               return null
             })()}
-            {orderSuccess && (
-              <div className="px-4 py-2 text-[11px] text-emerald-600 bg-emerald-500/5 border-b border-emerald-500/20 flex items-center gap-1">
-                <BadgeCheck className="h-3.5 w-3.5" /> {orderSuccess}
-              </div>
-            )}
+            {/* Refactor paso 4/10 — el banner orderSuccess vive ahora dentro
+                de <OrderMiniForm/> (state encapsulado). Si en el futuro se
+                requiere mostrar el éxito en el panel central también, exponerlo
+                via callback onOrderCreated del mini-form. */}
 
             {/* Mensajes */}
             <div
@@ -1633,154 +1560,21 @@ export default function InboxManager() {
                 <p className="text-xs text-muted-foreground">No hay pedidos vinculados.</p>
               )}
 
-              {/* CTA Crear pedido — solo en human_takeover */}
-              {selectedConv.status === 'human_takeover' && !showOrderForm && (
-                <button
-                  onClick={() => { setShowOrderForm(true); setOrderError(null); setOrderSuccess(null) }}
-                  className="mt-3 w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg border border-dashed border-primary/40 text-primary text-xs hover:bg-primary/5 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Crear Pedido desde Inbox
-                </button>
+              {/* Refactor paso 4/10 — CTA + mini-form encapsulados.
+                  Sólo se monta cuando aplica (status=human_takeover) — visibilidad
+                  controlada por el padre, lógica/UI del form interna al componente. */}
+              {selectedId && selectedConv.status === 'human_takeover' && (
+                <OrderMiniForm
+                  products={convContext?.products ?? []}
+                  conversationId={selectedId}
+                  contactId={convContext?.contact?.id ?? null}
+                  onOrderCreated={refreshContextAfterOrder}
+                />
               )}
             </section>
 
-            {/* Mini-form Crear Pedido */}
-            {showOrderForm && selectedConv.status === 'human_takeover' && (
-              <section className="p-4 border-b border-border bg-background/50">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-semibold flex items-center gap-1.5">
-                    <ShoppingBag className="h-3.5 w-3.5 text-primary" /> Nuevo Pedido
-                  </p>
-                  <button onClick={() => { setShowOrderForm(false); setSelectedVariations([]); setOrderError(null) }}
-                    className="text-muted-foreground hover:text-foreground">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {/* Selector de variantes */}
-                <div className="mb-3">
-                  <div className="relative mb-2">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="Buscar producto..."
-                      value={productSearchForm}
-                      onChange={e => setProductSearchForm(e.target.value)}
-                      className="w-full pl-7 pr-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div className="max-h-40 overflow-y-auto space-y-1">
-                    {filteredProductsForm.map(product =>
-                      (product.product_variations ?? []).map(v => {
-                        const label = variationLabel(v)
-                        const sel = selectedVariations.find(x => x.variationId === v.id)
-                        return (
-                          <button
-                            key={v.id}
-                            onClick={() => handleToggleVariation({
-                              productId: product.id,
-                              productTitle: product.title,
-                              variationId: v.id,
-                              sku: v.sku,
-                              price: v.price,
-                              stock: v.stock_quantity,
-                              label,
-                            })}
-                            className={`w-full text-left px-2 py-1.5 rounded-lg text-xs border transition-colors ${
-                              sel
-                                ? 'bg-primary/10 border-primary/30 text-primary'
-                                : 'bg-background border-border hover:bg-secondary/50'
-                            }`}
-                          >
-                            <span className="font-medium">{product.title}</span>
-                            {label !== 'Estándar' && <span className="text-muted-foreground"> — {label}</span>}
-                            <span className="float-right font-semibold">{formatMoney(v.price)}</span>
-                            <br />
-                            <span className={`text-[10px] ${v.stock_quantity <= 0 ? 'text-red-500' : 'text-muted-foreground'}`}>
-                              Stock: {v.stock_quantity}
-                            </span>
-                          </button>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* Ítems seleccionados con cantidades */}
-                {selectedVariations.length > 0 && (
-                  <div className="space-y-1.5 mb-3">
-                    <p className="text-[11px] text-muted-foreground font-medium">Seleccionados:</p>
-                    {selectedVariations.map(v => (
-                      <div key={v.variationId} className="flex items-center gap-2">
-                        <span className="text-xs flex-1 truncate">{v.productTitle} — {v.label}</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={v.stock}
-                          value={orderQtys[v.variationId] ?? 1}
-                          onChange={e => setOrderQtys(prev => ({ ...prev, [v.variationId]: Math.max(1, parseInt(e.target.value) || 1) }))}
-                          className="w-14 px-1 py-0.5 text-xs rounded border border-border bg-background text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <button onClick={() => handleToggleVariation(v)} className="text-muted-foreground hover:text-red-400">
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                    {/* Total estimado */}
-                    <p className="text-xs font-semibold text-right border-t border-border pt-1.5">
-                      Subtotal: {formatMoney(
-                        selectedVariations.reduce((sum, v) => sum + v.price * (orderQtys[v.variationId] ?? 1), 0)
-                      )}
-                    </p>
-                  </div>
-                )}
-
-                {/* Envío */}
-                <div className="mb-2">
-                  <label className="text-[11px] text-muted-foreground">Costo de envío (COP)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={orderShipping}
-                    onChange={e => setOrderShipping(e.target.value)}
-                    placeholder="0"
-                    className="mt-0.5 w-full px-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-
-                {/* Notas */}
-                <div className="mb-3">
-                  <label className="text-[11px] text-muted-foreground">Notas (opcional)</label>
-                  <textarea
-                    value={orderNotes}
-                    onChange={e => setOrderNotes(e.target.value)}
-                    rows={2}
-                    placeholder="Instrucciones de entrega, referencia, etc."
-                    className="mt-0.5 w-full resize-none px-2 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-
-                {orderError && (
-                  <p className="text-[11px] text-red-400 mb-2 flex items-center gap-1">
-                    <AlertCircle className="h-3.5 w-3.5" /> {orderError}
-                  </p>
-                )}
-
-                <Button
-                  size="sm"
-                  onClick={handleCreateOrder}
-                  disabled={creatingOrder || selectedVariations.length === 0}
-                  className="w-full text-xs h-8 bg-primary hover:bg-primary/90"
-                >
-                  {creatingOrder
-                    ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Creando…</>
-                    : <><Package className="h-3.5 w-3.5 mr-1.5" /> Crear Pedido Confirmado</>}
-                </Button>
-                <p className="text-[10px] text-muted-foreground text-center mt-1">
-                  El pedido se crea confirmado y descuenta stock inmediatamente.
-                </p>
-              </section>
-            )}
+            {/* Mini-form Crear Pedido — extraído paso 4/10 a OrderMiniForm
+                (vive arriba dentro de la sección "Pedidos recientes"). */}
 
             {/* Catálogo / Inventario */}
             <section className="p-4">
@@ -1795,8 +1589,12 @@ export default function InboxManager() {
                 )}
               </div>
 
-              {/* Buscador de producto */}
-              {!showOrderForm && (
+              {/* Buscador de producto — siempre visible. Antes se ocultaba
+                  cuando showOrderForm=true (state local del manager); ahora
+                  el mini-form encapsula su propio search. Mostrar siempre
+                  el catálogo informativo es coherente: el operador puede
+                  consultar SKUs/precios mientras el mini-form está abierto. */}
+              {true && (
                 <div className="relative mb-2">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                   <input
