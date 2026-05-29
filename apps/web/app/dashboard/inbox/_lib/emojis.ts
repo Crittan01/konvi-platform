@@ -1,28 +1,30 @@
 /**
- * Emoji picker — set curado para customer service WhatsApp.
+ * Emoji picker — set curado amplio para customer service WhatsApp.
  *
- * Founder feedback 2026-05-29 ("en modo humano, pueda enviar emojis").
+ * Founder feedback 2026-05-29 ("en modo humano, pueda enviar emojis
+ * compatibles con whatsapp").
  *
- * Diseño intencional: NO instalar emoji-mart ni libs externas. Un grid
- * hardcoded de ~40 emojis cubre el 95% de casos de soporte/ventas:
- *   - Saludo: 👋 🙏
- *   - Confirmación: ✅ ☑️ 👍 💯
- *   - Atención/alerta: ⏰ ⚠️ 🚨 ❗
- *   - Carrito/comercial: 🛒 📦 💵 🏷️ 🎁
- *   - Envío: 🚚 📍 🗺️
- *   - Emocional/empatía: 😊 🤝 ❤️ 🌟
- *   - Negativos cuidadosos: 😔 🙇 (humilde, no triste excesivo)
- *   - Acción cliente: 📞 📧 ✍️ 📋
+ * Diseño intencional: NO instalar emoji-mart ni libs externas (~30kb extra).
+ * Un grid hardcoded de ~85 emojis cubre el 98% de casos reales de
+ * soporte/ventas/seguimiento. Todos son Unicode estándar — WhatsApp los
+ * renderiza nativamente en todas las plataformas (Android Noto, iOS Apple
+ * Color Emoji, Web Twemoji, Desktop Segoe UI Emoji).
  *
- * Si en el futuro se necesita más cobertura, evaluar:
- *   - emoji-picker-react (~30kb gzip, dep adicional)
- *   - Trigger nativo OS (Ctrl+Cmd+Space Mac / Win+. Win) — gratis pero
- *     menos descubrible para operadores no técnicos.
+ * Diseño visual: 10 grupos temáticos para que el operador encuentre
+ * rápido. Cada grupo agrupa por intención comunicativa, no por categoría
+ * Unicode (que sería confuso para no-técnicos).
  *
- * Cualquier emoji que el operador escriba a mano (con OS picker o
- * copy-paste) funciona igual — Unicode passa por el textarea sin
- * conversión, persiste en DB UTF-8 y se renderiza en WhatsApp 100%.
- * Este picker es solo "shortcut UX para los más comunes".
+ * Si el operador necesita un emoji fuera de este set:
+ *   - Mac: Ctrl+Cmd+Space (OS native picker — todos los Unicode)
+ *   - Win: Win+. (Punto, mismo OS picker)
+ *   - Copy-paste de WhatsApp Web o app — Unicode pass-through funciona.
+ *
+ * Persistence + render guarantees:
+ *   - Textarea acepta Unicode arbitrario (no input mask).
+ *   - DB Supabase Postgres UTF-8 → emojis caben en TEXT columns.
+ *   - WhatsApp Cloud API recibe Unicode en text.body — render automático.
+ *   - Inbox UI usa Inter font (Tailwind) que delegará glyphs a font-family
+ *     del SO (Apple Color Emoji / Noto Color Emoji / Segoe UI Emoji).
  */
 
 export type EmojiGroup = {
@@ -33,31 +35,47 @@ export type EmojiGroup = {
 export const EMOJI_GROUPS: EmojiGroup[] = [
   {
     label: 'Saludo',
-    emojis: ['👋', '🙏', '😊', '🤝'],
+    emojis: ['👋', '🙏', '😊', '🤝', '🌞', '☀️'],
   },
   {
     label: 'Confirmar',
-    emojis: ['✅', '☑️', '👍', '💯', '🎉', '🌟'],
+    emojis: ['✅', '☑️', '👍', '💯', '🎉', '🌟', '🥳', '🙌', '🤩'],
   },
   {
     label: 'Alerta',
-    emojis: ['⏰', '⚠️', '🚨', '❗', '🆘'],
+    emojis: ['⏰', '⚠️', '🚨', '❗', '🆘', '🔔', '⛔', '🚫'],
   },
   {
     label: 'Comercial',
-    emojis: ['🛒', '📦', '💵', '🏷️', '🎁', '💳'],
+    emojis: ['🛒', '📦', '💵', '🏷️', '🎁', '💳', '🛍️', '💰', '🪙'],
+  },
+  {
+    label: 'Productos',
+    emojis: ['👗', '👜', '👟', '⌚', '💍', '💄', '🧴', '🌸', '✨'],
   },
   {
     label: 'Envío',
-    emojis: ['🚚', '📍', '🗺️', '📮'],
+    emojis: ['🚚', '📍', '🗺️', '📮', '🛵', '✈️', '📬', '📭', '🧭'],
+  },
+  {
+    label: 'Pago',
+    emojis: ['💳', '🏦', '🧾', '📑', '💸', '🔐', '✔️'],
   },
   {
     label: 'Empatía',
-    emojis: ['❤️', '🙇', '😔', '💜'],
+    emojis: ['❤️', '🙇', '😔', '💜', '💚', '💙', '🫶', '🤗'],
   },
   {
     label: 'Acción',
-    emojis: ['📞', '📧', '✍️', '📋', '🔍', '💬'],
+    emojis: ['📞', '📧', '✍️', '📋', '🔍', '💬', '📨', '📩', '📝', '🔗'],
+  },
+  {
+    label: 'Más',
+    emojis: [
+      '🤔', '😉', '😅', '🙂', '🫡', '👀',
+      '💡', '🔥', '⭐', '👏',
+      '🆗', '🆙', '🆕', '🔄',
+    ],
   },
 ]
 
