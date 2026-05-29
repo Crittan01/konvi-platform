@@ -638,6 +638,15 @@ class OrchestratorWorker:
         except Exception:
             pass  # La función puede no existir si la migración rev. 69 no está aplicada
 
+        # Rev. 109 (F.10 cierre / MA-2) — cleanup grace period expirado en
+        # tenant_webhook_secrets. NULL-out previous_secret_hash + grace_period_until
+        # cuando grace_period_until < NOW(). Defense-in-depth: el verify_inbound_secret()
+        # Python ya chequea timestamp, pero borrar el hash zombie reduce surface.
+        try:
+            self.supabase.rpc("fn_cleanup_webhook_secrets").execute()
+        except Exception:
+            pass  # La función puede no existir si la migración 20260614110000 no está aplicada
+
         # Rev. 71 — cleanup del bot_source_log (TTL 30 días, append-only).
         try:
             self.supabase.rpc("cleanup_expired_bot_source_log", {"retention_days": 30}).execute()

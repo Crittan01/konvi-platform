@@ -6,6 +6,22 @@
 
 ---
 
+## Items Plan K cerrados — audit 2026-05-29
+
+Audit exhaustivo del Plan K (workflow 22 agents paralelos) detectó 4 items
+PARTIAL del foundation layer. Cerrados en sesiones 2026-05-29:
+
+- **F.2** (rate-limiting `TokenBucket` en `IntegrationClient.execute()`) — IMPLEMENTED. Ver PR #2.
+- **H.2.1** (Envia idempotency wireado en runtime) — IMPLEMENTED. Ver PR #2.
+- **F.10** (`fn_cleanup_webhook_secrets()` RPC + worker hourly invoke) — IMPLEMENTED. Migration `20260614110000` pendiente apply en remote.
+- **H.3.1** (Wompi `GET /transactions/{id}`) — **CLOSED-AS-DEFERRED**. Cliente Python implementado, endpoint HTTP diferido hasta que UI o cron justifique. Ver [`docs/reports/h31_wompi_get_transaction_closure.md`](../docs/reports/h31_wompi_get_transaction_closure.md).
+
+Avance global Plan K post-cierres: **10 → 14 IMPLEMENTED** (de 18 críticos auditados).
+
+Re-abrir H.3.1 como `H.3.1.1` si: founder prioriza UI "Reconciliar pago" en Tenant Console, o se diseña cron de reconciliación background (que NO requiere endpoint HTTP, solo invoca `WompiClient.get_transaction_with_resilience()` directamente).
+
+---
+
 ## Prioridades post-rev106 (orden recomendado)
 
 ### P0 — Sem 6: Re-uso framework común para HSM templates (~2-3 días)
