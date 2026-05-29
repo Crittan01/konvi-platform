@@ -6,19 +6,36 @@ import LoginForm from './login-form'
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { message?: string; error?: string }
+  searchParams: { message?: string; error?: string; force?: string }
 }) {
   const supabase = createClient()
   const { data } = await supabase.auth.getUser()
 
-  if (data?.user) {
-    // Rev. 109 J.2.4.3 — si ya tiene sesión pero le falta segundo factor,
-    // mandarlo al challenge en lugar del dashboard.
+  // Rev. 109 J.2.4.3 — flow multi-user en mismo browser.
+  // Si `?force=1` → mostrar form para login como otra cuenta.
+  // Si sesión activa sin force → mostrar pantalla intermedia con opciones
+  // (continuar como X / cambiar de cuenta).
+  const forceLogin = searchParams.force === '1'
+
+  if (data?.user && !forceLogin) {
+    // Sesión activa con MFA pendiente → al challenge (no a intermedia).
     const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     if (aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1') {
       redirect('/login/mfa')
     }
+    // Sesión válida sin ?force → renderizar intermedia abajo (NO auto-redirect).
+  }
+
+  const continueAction = async () => {
+    'use server'
     redirect('/dashboard')
+  }
+
+  const switchUserAction = async () => {
+    'use server'
+    const sb = createClient()
+    await sb.auth.signOut()
+    redirect('/login?force=1')
   }
 
   const loginAction = async (formData: FormData) => {
@@ -26,6 +43,16 @@ export default async function LoginPage({
     const email = formData.get('email') as string
     const password = formData.get('password') as string
     const supabase = createClient()
+
+    // Rev. 109 J.2.4.3 — Si hay sesión activa de otro usuario, cerrarla
+    // antes de iniciar sesión nueva. Evita que la cookie residual de A
+    // se mezcle con la nueva sesión de B (Supabase Auth lo manejaría
+    // sobreescribiendo, pero el signOut explícito limpia la sesión SSR
+    // sin race condition).
+    const { data: existing } = await supabase.auth.getUser()
+    if (existing?.user && existing.user.email !== email) {
+      await supabase.auth.signOut()
+    }
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -61,11 +88,53 @@ export default async function LoginPage({
           <p className="text-emerald-500/80 mt-2 text-sm text-center font-medium">Tenant Administrativo de Comercio</p>
         </div>
 
-        <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
-          <CardContent className="pt-6">
-            <LoginForm action={loginAction} message={searchParams.error ?? searchParams.message} />
-          </CardContent>
-        </Card>
+        {forceLogin && data?.user && (
+          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-50/95 p-3 text-sm text-amber-900">
+            <p className="font-medium">Sesión activa de otro usuario</p>
+            <p className="text-xs mt-1 text-amber-800">
+              Actualmente: <code className="font-mono">{data.user.email}</code>.
+              Si te logueas ahora, esa sesión se cerrará automáticamente.
+            </p>
+          </div>
+        )}
+
+        {data?.user && !forceLogin ? (
+          /* Sesión activa SIN ?force → pantalla intermedia con opciones */
+          <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+            <CardContent className="pt-6 space-y-4">
+              <div className="text-center space-y-1">
+                <p className="text-sm text-muted-foreground">Sesión activa</p>
+                <p className="font-mono text-base font-medium break-all">{data.user.email}</p>
+              </div>
+              <form action={continueAction}>
+                <button
+                  type="submit"
+                  className="w-full px-4 py-2.5 rounded-md bg-foreground text-background hover:opacity-90 font-medium text-sm"
+                >
+                  Continuar al dashboard
+                </button>
+              </form>
+              <form action={switchUserAction}>
+                <button
+                  type="submit"
+                  className="w-full px-4 py-2.5 rounded-md border border-border hover:bg-accent text-sm"
+                >
+                  Cambiar de cuenta
+                </button>
+              </form>
+              <p className="text-[10px] text-center text-muted-foreground">
+                Si esta no es tu sesión y no reconoces el email,
+                usa "Cambiar de cuenta" para iniciar como otro usuario.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+            <CardContent className="pt-6">
+              <LoginForm action={loginAction} message={searchParams.error ?? searchParams.message} />
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )
