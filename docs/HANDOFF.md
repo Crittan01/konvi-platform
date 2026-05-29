@@ -120,6 +120,17 @@ No asumir que frontend o RLS por sí solos aíslan cuando se usa `service_role`.
   - backfill de `conversations.last_interaction_at` desde `messages.created_at`
   - trigger DB para mantener recencia de Inbox consistente en nuevos mensajes
 
+- `20260616000000_tenant_offboarding.sql` ⚠️ **PENDIENTE APPLY EN REMOTE**
+  - cierra item J.2.4.4 del Plan K (Tenant offboarding workflow)
+  - agrega columnas `deletion_requested_at/scheduled_for/by/reason/deleted_at` a `tenants`
+  - crea tabla append-only `tenant_offboarding_log` (RLS owner-only SELECT) —
+    sobrevive hard-delete (sin FK CASCADE) por Art. 22 Ley 1581
+  - crea 3 RPCs (`fn_log_tenant_offboarding_event`, `fn_request_tenant_deletion`,
+    `fn_cancel_tenant_deletion`) — SECURITY DEFINER, GRANT solo service_role
+  - **APLICAR via Supabase Dashboard SQL Editor antes de mergear PR a `main`**
+    (o vía `supabase db query --linked -f` con autorización explícita)
+  - Habeas Data Ley 1581 Art. 16 + Art. 22 cumplimiento
+
 ---
 
 ## Operación rápida
