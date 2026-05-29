@@ -173,6 +173,16 @@ export type FilterStatus =
 // drift histórico (UAT testing, ediciones manuales) puede dejar múltiples
 // rows por phone. Esta función agrupa visualmente: 1 fila per cliente,
 // expandible para ver sesiones históricas.
+// Rev. 109 founder 2026-05-29 — Notas privadas del operador (P0-1).
+export interface ConversationNote {
+  id: string
+  content: string
+  is_pinned: boolean
+  author_user_id: string
+  created_at: string
+  updated_at: string
+}
+
 export type ConvGroup = {
   phone: string
   primary: Conversation

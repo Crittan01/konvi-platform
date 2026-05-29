@@ -31,6 +31,7 @@ import {
 } from '../_lib/format'
 import { ORDER_STATUS_COLOR, ORDER_STATUS_LABEL } from '../_lib/constants'
 import { OrderMiniForm } from './order-mini-form'
+import { ConversationNotes } from './conversation-notes'
 
 interface Props {
   conversation: Conversation
@@ -90,6 +91,9 @@ export function ContextPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-0">
+        {/* Notas privadas del operador (P0-1 founder 2026-05-29) */}
+        <ConversationNotes conversationId={conversation.id} />
+
         {/* Contacto */}
         <section className="p-4 border-b border-border">
           <div className="flex items-center justify-between mb-2">
