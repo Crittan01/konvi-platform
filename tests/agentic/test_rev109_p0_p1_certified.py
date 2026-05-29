@@ -802,6 +802,376 @@ class TestMultiAgentFallback:
         t3 = self._select(inbound_text="agrega otro jabón", agents=agents)
         assert t3["name"] == "Sara"
 
+    def test_fallback_for_roles_default_4_roles_backward_compat(self):
+        # Default seedeado con los 4 roles → comportamiento previo:
+        # cualquier role no-especialista cae al default (NO handoff).
+        from agentic.agent_router import select_agent_for_inbound
+        agents = [
+            {
+                "name": "Sara", "role": "sales", "is_default": True,
+                "fallback_for_roles": [
+                    "sales", "support", "marketing", "claims",
+                ],
+            },
+            {"name": "Lucy", "role": "support", "is_default": False},
+        ]
+        # Inbound de claims (no hay especialista) → Sara con 4 roles cubre.
+        chosen = select_agent_for_inbound(
+            inbound_text="vino defectuoso quiero garantía", agents=agents,
+        )
+        assert chosen["name"] == "Sara"
+        assert not chosen.get("_needs_human_handoff")
+
+    def test_fallback_for_roles_excluye_claims_dispara_handoff(self):
+        # Operador desmarcó "claims" del default → handoff humano para
+        # reclamos (escalación legal consciente, no LLM).
+        from agentic.agent_router import select_agent_for_inbound
+        agents = [
+            {
+                "name": "Sara", "role": "sales", "is_default": True,
+                "fallback_for_roles": ["sales", "support", "marketing"],
+            },
+            {"name": "Lucy", "role": "support", "is_default": False},
+        ]
+        chosen = select_agent_for_inbound(
+            inbound_text="quiero devolución el producto llegó dañado",
+            agents=agents,
+        )
+        assert chosen["_needs_human_handoff"] is True
+        assert chosen["name"] == "Asistente"
+        assert chosen["tools_allowed"] == []  # bloqueado de tools
+
+    def test_fallback_for_roles_especialista_existe_no_dispara_handoff(self):
+        # Si HAY especialista, fallback_for_roles es irrelevante.
+        # El especialista atiende su role sin consultar fallback.
+        from agentic.agent_router import select_agent_for_inbound
+        agents = [
+            {
+                "name": "Sara", "role": "sales", "is_default": True,
+                "fallback_for_roles": [],  # default no cubre nada
+            },
+            {"name": "Carlos", "role": "claims", "is_default": False},
+        ]
+        chosen = select_agent_for_inbound(
+            inbound_text="quiero devolución urgente", agents=agents,
+        )
+        assert chosen["name"] == "Carlos"
+        assert not chosen.get("_needs_human_handoff")
+
+    def test_coupons_block_lista_cupones_activos(self):
+        # Bug A.0.1 UAT 2026-05-28: agente afirmaba "no hay promos" sin
+        # consultar DB. Fix: inyectar cupones al system prompt + regla
+        # anti-hallu. Test verifica que cupones reales lleguen al prompt.
+        from agentic.system_prompt import build_system_prompt
+        coupons = [
+            {
+                "code": "KAIU15", "discount_type": "percent",
+                "discount_value": 15, "max_redemptions": 10,
+                "redemptions_count": 0, "valid_until": "2026-06-27 11:56:20",
+            },
+        ]
+        prompt = build_system_prompt(
+            tenant_name="KAIU", catalog=[], contact_record={},
+            active_coupons=coupons,
+        )
+        assert "CUPONES ACTIVOS DEL TENANT" in prompt
+        assert "**KAIU15**" in prompt
+        assert "15% de descuento" in prompt
+        assert "10 usos disponibles" in prompt
+        assert "vigente hasta 2026-06-27" in prompt
+        # Regla anti-hallu presente
+        assert "NUNCA inventes códigos" in prompt
+        assert "Si NO está listado arriba, NO existe" in prompt
+
+    def test_coupons_block_sin_cupones_responde_honestamente(self):
+        from agentic.system_prompt import build_system_prompt
+        prompt = build_system_prompt(
+            tenant_name="KAIU", catalog=[], contact_record={},
+            active_coupons=[],
+        )
+        # Sin cupones: regla explícita NO inventar
+        assert "ninguno hoy" in prompt
+        assert "NO inventes códigos" in prompt
+
+    def test_coupons_block_renderiza_tipo_fixed_amount(self):
+        from agentic.system_prompt import build_system_prompt
+        prompt = build_system_prompt(
+            tenant_name="KAIU", catalog=[], contact_record={},
+            active_coupons=[{
+                "code": "PROMO5K", "discount_type": "fixed_amount",
+                "discount_value": 500000, "valid_until": "2026-12-31",
+            }],
+        )
+        assert "**PROMO5K**" in prompt
+        # 500000 cents = $5.000 COP
+        assert "$5.000 COP de descuento" in prompt
+
+    def test_coupons_block_renderiza_free_shipping(self):
+        from agentic.system_prompt import build_system_prompt
+        prompt = build_system_prompt(
+            tenant_name="KAIU", catalog=[], contact_record={},
+            active_coupons=[{
+                "code": "FREESHIP", "discount_type": "free_shipping",
+                "valid_until": "2026-12-31",
+            }],
+        )
+        assert "**FREESHIP**" in prompt
+        assert "envío gratis" in prompt
+
+    def test_dispatcher_skip_opted_out_placeholder(self):
+        # placeholder reordering
+        pass
+
+
+import asyncio
+
+
+class TestFakeEscalationInvariant:
+    """Fix founder 2026-05-28 "super delicado" — LLM dice promesa de
+    escalación sin invocar tool → cliente queda sin atención. Invariant
+    detecta y fuerza el side-effect real."""
+
+    def test_fake_escalation_detect_phrases(self):
+        # Fix founder 2026-05-28 "super delicado": LLM dice "te paso con
+        # un especialista" sin invocar escalate_to_human → fake escalation.
+        from agentic.invariants.fake_escalation import detects_escalation_promise
+        # Variantes que debe detectar
+        assert detects_escalation_promise("Te paso con un especialista") is True
+        assert detects_escalation_promise("te conecto con mi equipo") is True
+        assert detects_escalation_promise("Voy a escalar tu caso") is True
+        assert detects_escalation_promise("Debo escalar esto urgente") is True
+        assert detects_escalation_promise(
+            "Lo mejor es que un especialista te ayude con esto"
+        ) is True
+        assert detects_escalation_promise(
+            "Mi equipo se contactará contigo pronto"
+        ) is True
+        assert detects_escalation_promise(
+            "Te contactará un asesor"
+        ) is True
+        # Frases inocentes que NO deben matchear (info producto, etc.)
+        assert detects_escalation_promise(
+            "Nuestro jabón es excelente para piel sensible"
+        ) is False
+        assert detects_escalation_promise(
+            "Tu pedido va en camino, llegará mañana"
+        ) is False
+
+    def test_fake_escalation_invariant_forces_real_escalation(self):
+        return asyncio.run(self._test_invariant_forces_real_escalation())
+
+    async def _test_invariant_forces_real_escalation(self):
+        # Si el LLM promete escalación PERO no llamó el tool, el invariant
+        # debe (a) ejecutar el update real de status, (b) preservar el texto
+        # (la promesa ahora es válida porque el side-effect ocurrió).
+        from agentic.invariants.fake_escalation import FakeEscalationInvariant
+        from agentic.invariants.base import InvariantOutcome
+
+        captured_updates = []
+
+        class FakeQuery:
+            def __init__(self, store, table_name):
+                self._store = store
+                self._table = table_name
+                self._payload = None
+            def update(self, payload):
+                self._payload = payload
+                return self
+            def insert(self, payload):
+                self._payload = payload
+                self._store.append(("insert", self._table, payload))
+                return self
+            def eq(self, *args, **kwargs):
+                return self
+            def execute(self):
+                if self._payload is not None and not any(
+                    e[0] == "insert" for e in self._store
+                ) or self._payload and "status" in self._payload:
+                    self._store.append(("update", self._table, self._payload))
+                return type("R", (), {"data": [{"id": "fake"}]})()
+
+        class FakeSupabase:
+            def __init__(self, store):
+                self._store = store
+            def table(self, name):
+                return FakeQuery(self._store, name)
+
+        inv = FakeEscalationInvariant()
+        result = await inv.validate(
+            candidate_text="Te paso con un especialista de mi equipo.",
+            tenant_id="0fb0777e-aaaa-bbbb-cccc-dddddddddddd",
+            conversation_id="abc12345-0000-0000-0000-000000000000",
+            contact_id=None,
+            supabase=FakeSupabase(captured_updates),
+            tool_call_log=[],  # crucial: LLM NO llamó escalate_to_human
+        )
+        # Invariant pasa OK pero ejecutó el side-effect
+        assert result.outcome == InvariantOutcome.OK
+        assert result.invariant_name == "fake_escalation"
+        # Verificar que llamó update con status='human_takeover'
+        update_calls = [c for c in captured_updates if c[0] == "update"]
+        assert len(update_calls) >= 1
+        assert update_calls[0][1] == "conversations"
+        assert update_calls[0][2].get("status") == "human_takeover"
+
+    def test_fake_escalation_skips_if_tool_invoked(self):
+        return asyncio.run(self._test_skips_if_tool_invoked())
+
+    async def _test_skips_if_tool_invoked(self):
+        # Si el LLM SÍ invocó escalate_to_human, el invariant no debe
+        # ejecutar side-effect duplicado.
+        from agentic.invariants.fake_escalation import FakeEscalationInvariant
+        from agentic.invariants.base import InvariantOutcome
+
+        captured = []
+
+        class FakeSupabase:
+            def table(self, name):
+                captured.append(name)
+                return self
+            def update(self, *a, **kw): return self
+            def insert(self, *a, **kw): return self
+            def eq(self, *a, **kw): return self
+            def execute(self):
+                return type("R", (), {"data": []})()
+
+        result = await FakeEscalationInvariant().validate(
+            candidate_text="Te conecto con un especialista.",
+            tenant_id="t1", conversation_id="c1", contact_id=None,
+            supabase=FakeSupabase(),
+            tool_call_log=[{"tool": "escalate_to_human", "success": True}],
+        )
+        assert result.outcome == InvariantOutcome.OK
+        # NO debió tocar DB (tool ya hizo el side-effect)
+        assert len(captured) == 0
+
+    def test_fake_escalation_skips_if_no_promise(self):
+        return asyncio.run(self._test_skips_if_no_promise())
+
+    async def _test_skips_if_no_promise(self):
+        # Si el outbound no contiene frase de escalación, OK sin tocar DB.
+        from agentic.invariants.fake_escalation import FakeEscalationInvariant
+        from agentic.invariants.base import InvariantOutcome
+
+        class FakeSupabase:
+            def table(self, name):
+                raise AssertionError("DB no debe ser tocada")
+
+        result = await FakeEscalationInvariant().validate(
+            candidate_text="Tu jabón de coco cuesta $24.000.",
+            tenant_id="t1", conversation_id="c1", contact_id=None,
+            supabase=FakeSupabase(),
+            tool_call_log=[],
+        )
+        assert result.outcome == InvariantOutcome.OK
+
+
+class TestHumanTakeoverSLA:
+    """Fix founder 2026-05-28 — SLA tracker: si el bot escala y nadie
+    responde en X horas, alerta operador. Cierra el loop "super delicado"."""
+
+    def test_sla_constants_configurable_via_env(self):
+        # Constantes deben estar definidas y ser configurables.
+        import importlib
+        import sys
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        if "worker" in sys.modules:
+            del sys.modules["worker"]
+        worker = importlib.import_module("worker")
+        # Valores default razonables
+        assert worker.HUMAN_TAKEOVER_SLA_HOURS >= 1
+        assert worker.HUMAN_TAKEOVER_SLA_HOURS <= 24
+        assert worker.HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS >= 60
+
+    def test_sla_method_registered_in_poll_cycle(self):
+        # _check_human_takeover_sla_if_due debe estar en la clase y ser
+        # invocado en _poll_cycle.
+        import sys, inspect
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        if "worker" in sys.modules:
+            import importlib
+            importlib.reload(sys.modules["worker"])
+        from worker import OrchestratorWorker
+        assert hasattr(OrchestratorWorker, "_check_human_takeover_sla_if_due")
+        # Verifica que el método se invoca en _poll_cycle
+        source = inspect.getsource(OrchestratorWorker._poll_cycle)
+        assert "_check_human_takeover_sla_if_due" in source
+
+
+class TestOptOutGate:
+    """Fix founder 2026-05-28 — opt-out EN CUALQUIER SITUACIÓN +
+    tests adicionales (cupones block, fallback_for_roles edge cases,
+    multi-agent caso 0) que requieren select_agent_for_inbound."""
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from agentic.agent_router import select_agent_for_inbound
+        self._select = select_agent_for_inbound
+
+    def test_dispatcher_skip_opted_out_conversation(self):
+        # El dispatcher debe skipear conv en opted_out (Habeas Data Ley
+        # 1581 ART. 9), incluso si el mensaje del cliente no es STOP.
+        from agentic.dispatcher import _SKIP_STATUSES
+        assert "opted_out" in _SKIP_STATUSES
+        assert "human_takeover" in _SKIP_STATUSES
+        assert "closed" in _SKIP_STATUSES
+
+    def test_dispatcher_should_skip_opted_out_returns_true(self):
+        from agentic.dispatcher import _should_skip_for_conv_status
+
+        class FakeRes:
+            def __init__(self, data): self.data = data
+
+        class FakeTable:
+            def __init__(self, status):
+                self._status = status
+            def select(self, *_): return self
+            def eq(self, *_): return self
+            def limit(self, *_): return self
+            def execute(self):
+                return FakeRes([{"status": self._status}])
+
+        class FakeSupabase:
+            def __init__(self, status):
+                self._status = status
+            def table(self, name):
+                return FakeTable(self._status)
+
+        # opted_out → skip TRUE (lo que el founder pidió "en cualquier situación")
+        assert _should_skip_for_conv_status(FakeSupabase("opted_out"), "any-uuid") is True
+        # human_takeover, closed → skip TRUE (pre-existente)
+        assert _should_skip_for_conv_status(FakeSupabase("human_takeover"), "any-uuid") is True
+        assert _should_skip_for_conv_status(FakeSupabase("closed"), "any-uuid") is True
+        # bot_active → skip FALSE (bot procesa)
+        assert _should_skip_for_conv_status(FakeSupabase("bot_active"), "any-uuid") is False
+
+    def test_coupons_block_min_subtotal_se_muestra(self):
+        from agentic.system_prompt import build_system_prompt
+        prompt = build_system_prompt(
+            tenant_name="KAIU", catalog=[], contact_record={},
+            active_coupons=[{
+                "code": "BIG20", "discount_type": "percent",
+                "discount_value": 20, "min_subtotal_cents": 10000000,
+                "valid_until": "2026-12-31",
+            }],
+        )
+        # 10000000 cents = $100.000 COP
+        assert "compra mínima $100.000 COP" in prompt
+
+    def test_fallback_for_roles_none_tratado_como_4_roles(self):
+        # Backward-compat 100%: agente sin fallback_for_roles (None/missing)
+        # se trata como "cubre los 4 roles" — comportamiento pre-migration.
+        from agentic.agent_router import select_agent_for_inbound
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Lucy", "role": "support", "is_default": False},
+        ]
+        chosen = select_agent_for_inbound(
+            inbound_text="cupón black friday descuento", agents=agents,
+        )
+        assert chosen["name"] == "Sara"
+        assert not chosen.get("_needs_human_handoff")
+
     def test_caso_0_agentes_safe_fallback_sara_camila(self):
         """Edge case — tenant sin agentes (no debería pasar pero defensivo)."""
         result = self._select(inbound_text="hola", agents=[])
@@ -853,3 +1223,78 @@ class TestNormalizeLineWraps:
     def test_texto_vacio_safe(self):
         assert self._norm("") == ""
         assert self._norm(None) is None
+
+
+class TestAgentPersonaInjection:
+    """Rev. 109 ADR-0017 — el role_description custom del agente activo
+    DEBE inyectarse al system prompt cuando viene seteado.
+
+    Cierra gap arquitectónico detectado en cert post-deploy: build_system_prompt
+    recibía agent_name (Lucy) pero no su role_description, así Lucy se
+    identificaba como Lucy pero pensaba como Sara monolítica. Multi-agente
+    solo funciona end-to-end si CADA agente lleva su prompt maestro al runtime.
+    """
+
+    def _build(self, *, role_description=None, agent_name="Lucy"):
+        from agentic.system_prompt import build_system_prompt
+        return build_system_prompt(
+            tenant_name="KAIU",
+            agent_name=agent_name,
+            agent_role_description=role_description,
+            catalog=[],
+            contact_record={},
+        )
+
+    def test_role_description_se_inyecta_al_prompt(self):
+        custom = (
+            "Eres especialista en soporte post-venta. Resuelve tracking y "
+            "dudas de envío. Si el cliente quiere comprar, escala al agente "
+            "de ventas con un handoff cordial."
+        )
+        prompt = self._build(role_description=custom)
+        # Identidad del agente
+        assert "Eres Lucy" in prompt
+        # Persona block header
+        assert "PERSONALIDAD Y COMPORTAMIENTO DEL AGENTE" in prompt
+        # Contenido custom literal — no debe perderse
+        assert "soporte post-venta" in prompt
+        assert "escala al agente" in prompt
+
+    def test_role_description_vacio_no_inyecta_bloque(self):
+        # Backward-compat: agente sin prompt custom (legacy Sara Camila pre-rev109)
+        prompt = self._build(role_description=None, agent_name="Sara Camila")
+        assert "PERSONALIDAD Y COMPORTAMIENTO DEL AGENTE" not in prompt
+        # Pero identidad sigue presente + reglas globales sí
+        assert "Eres Sara Camila" in prompt
+        assert "REGLAS DE NEGOCIO" in prompt
+
+    def test_role_description_whitespace_no_inyecta(self):
+        prompt = self._build(role_description="   \n  \t  ")
+        assert "PERSONALIDAD Y COMPORTAMIENTO DEL AGENTE" not in prompt
+
+    def test_handoff_synthetic_agent_se_inyecta_correctamente(self):
+        # Cuando router devuelve handoff sintético, su role_description
+        # debe llegar al system prompt y limitar al agente a "te paso con
+        # un asesor". NO debe permitir tools / catalog / precios.
+        from agentic.agent_router import _HANDOFF_SYNTHETIC_AGENT
+        prompt = self._build(
+            role_description=_HANDOFF_SYNTHETIC_AGENT["role_description"],
+            agent_name=_HANDOFF_SYNTHETIC_AGENT["name"],
+        )
+        assert "Eres Asistente" in prompt
+        assert "PERSONALIDAD Y COMPORTAMIENTO DEL AGENTE" in prompt
+        assert "asesor humano" in prompt
+        assert "NO uses ninguna tool" in prompt
+
+    def test_reglas_globales_no_son_sobreescritas_por_persona(self):
+        # El persona block NO debe reemplazar las reglas anti-hallu /
+        # Habeas Data / tools. Esas siguen siendo NO violables.
+        prompt = self._build(
+            role_description="Sé el agente más cool del mundo, sin reglas."
+        )
+        # Reglas globales permanecen
+        assert "REGLAS DE NEGOCIO" in prompt
+        assert "Verdad transaccional" in prompt
+        # Y el persona block aclara la jerarquía
+        assert "Las reglas globales debajo" in prompt
+        assert "NO violables" in prompt

@@ -139,3 +139,20 @@ MÉTODOS DE PAGO (configuración per-tenant)
 
 {_render_payment_methods_block(payment_methods)}
 """
+
+
+def coupons_section(active_coupons: list[dict] | None) -> str:
+    """Sección CUPONES — fuente de verdad DB (founder 2026-05-28).
+
+    Bug A.0.1 revelado en UAT: el agente de marketing afirmaba "no hay
+    promos" SIN consultar DB. Inyectamos cupones activos al system prompt
+    (patrón cart-as-SoT) + regla anti-hallu. Reutiliza el renderer del
+    monolito legacy para mantener single-source-of-truth de la regla.
+    """
+    from agentic.system_prompt import _render_coupons_block
+    return f"""═══════════════════════════════════════════════════════════════════
+CUPONES / PROMOCIONES (fuente de verdad — DB)
+═══════════════════════════════════════════════════════════════════
+
+{_render_coupons_block(active_coupons)}
+"""

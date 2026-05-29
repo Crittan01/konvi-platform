@@ -81,6 +81,25 @@ def classify_intent_to_role(text: str) -> str:
     return "sales"
 
 
+_HANDOFF_SYNTHETIC_AGENT = {
+    "name": "Asistente",
+    "role": "handoff",
+    "role_description": (
+        "Tu ÚNICA función ahora es transmitirle al cliente con calidez "
+        "que su consulta se enviará a un asesor humano que le responderá "
+        "lo antes posible. NO uses ninguna tool. NO ofrezcas productos. "
+        "NO respondas sobre catálogo, envíos, precios ni nada operativo. "
+        "Responde en máximo 2 líneas en español Colombia, cordial y "
+        "profesional. Ejemplo: 'Recibido. En breve te contacta uno de "
+        "nuestros asesores para resolver tu consulta.'"
+    ),
+    "tools_allowed": [],
+    "fsm_states_allowed": None,
+    "is_default": False,
+    "_needs_human_handoff": True,
+}
+
+
 def select_agent_for_inbound(
     *,
     inbound_text: str,
@@ -88,28 +107,33 @@ def select_agent_for_inbound(
 ) -> dict:
     """Selecciona el agente apropiado para el inbound dado.
 
+    Rev. 109 fallback_for_roles explícito (founder 2026-05-28):
+    cuando el role clasificado NO matchea especialista, ANTES de caer al
+    default verifica que el role esté en `default.fallback_for_roles`.
+    Si NO está → retorna agente sintético de handoff humano (el dispatcher
+    ya pasa role_description al system prompt, así que esta respuesta cae
+    naturalmente).
+
+    Backward-compat: agentes default seedeados con los 4 roles → NUNCA
+    se activa handoff. Operador desmarca explícitamente para activarlo.
+
     Args:
         inbound_text: contenido del mensaje del cliente.
-        agents: lista de agentes activos del tenant (de
-            `lib.tenant_agents.list_tenant_agents`).
+        agents: lista de agentes activos del tenant.
 
     Returns:
-        El agente elegido (dict). Si tenant tiene 1 solo agente o si no
-        hay match específico para el rol detectado → retorna el agente
-        con is_default=True. Si no hay default, el primero de la lista.
+        Dict del agente. Si activa handoff humano, dict incluye
+        `_needs_human_handoff=True` para que upstream alerte operador
+        (cuando esté implementado el canal de notificación).
     """
     if not agents:
-        # Edge case: no debería pasar (siempre hay al menos 1 default),
-        # pero por defensa retornamos un dict mínimo.
         return {"name": "Sara Camila", "role": "sales", "is_default": True}
 
-    # Backward-compat: 1 agente → siempre ese.
     if len(agents) == 1:
         return agents[0]
 
     classified_role = classify_intent_to_role(inbound_text)
 
-    # Buscar agente con el rol clasificado.
     for ag in agents:
         if (ag.get("role") or "").lower() == classified_role:
             logger.info(
@@ -118,16 +142,31 @@ def select_agent_for_inbound(
             )
             return ag
 
-    # Fallback: agente default del tenant.
-    for ag in agents:
-        if ag.get("is_default"):
-            logger.info(
-                "[ROUTER] no agent for role=%s → fallback default agent=%s",
-                classified_role, ag.get("name") or "?",
-            )
-            return ag
+    # No especialista. Antes de caer al default, verificar fallback explícito.
+    default_agent = next(
+        (ag for ag in agents if ag.get("is_default")), None,
+    )
 
-    # Sin default → primer agente.
+    if default_agent is not None:
+        fallback_roles = default_agent.get("fallback_for_roles")
+        # Tolerante a None (DB row pre-migration) → backward-compat 100%
+        # tratando como "cubre los 4 roles" (comportamiento previo).
+        if fallback_roles is None or classified_role in fallback_roles:
+            logger.info(
+                "[ROUTER] no agent for role=%s → fallback default agent=%s "
+                "(fallback_for_roles=%s)",
+                classified_role, default_agent.get("name") or "?",
+                fallback_roles,
+            )
+            return default_agent
+        # Role NO está en fallback explícito del default → handoff humano.
+        logger.info(
+            "[ROUTER] role=%s NO está en default.fallback_for_roles=%s → "
+            "handoff humano",
+            classified_role, fallback_roles,
+        )
+        return dict(_HANDOFF_SYNTHETIC_AGENT)
+
     logger.warning(
         "[ROUTER] no default agent — using first of %d agents", len(agents),
     )

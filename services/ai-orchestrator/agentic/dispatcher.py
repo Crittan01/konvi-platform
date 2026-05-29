@@ -437,6 +437,7 @@ async def _run_agentic_full(
         CartRenderCoherenceInvariant,
         ConsentRequiredInvariant,
         EmptyPromiseInvariant,
+        FakeEscalationInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
         PaymentCoherenceInvariant,
         PIICoherenceInvariant,
@@ -551,6 +552,40 @@ async def _run_agentic_full(
             tenant_id[:8], _pm_exc,
         )
 
+    # Rev. 109 founder 2026-05-28 — cupones activos como fuente de verdad.
+    # Bug A.0.1 detectado en UAT: agente marketing afirmaba "no hay promos"
+    # sin consultar DB. Patrón cart-as-SoT: el LLM no decide verdad
+    # transaccional. Inyectamos cupones activos al system_prompt igual
+    # que catalog/payment_methods/carriers.
+    active_coupons: list[dict] = []
+    try:
+        _now_iso = __import__("datetime").datetime.utcnow().isoformat()
+        _coupons_res = (
+            supabase.table("coupons")
+            .select(
+                "code, discount_type, discount_value, min_subtotal_cents, "
+                "max_redemptions, redemptions_count, valid_until",
+            )
+            .eq("tenant_id", tenant_id)
+            .eq("is_active", True)
+            .gt("valid_until", _now_iso)
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        # Filtro adicional: descartar cupones con redemptions agotadas.
+        # (postgrest no admite comparar 2 columnas en .lt directo)
+        for c in (_coupons_res.data or []):
+            max_red = c.get("max_redemptions")
+            used = c.get("redemptions_count") or 0
+            if max_red is None or int(used) < int(max_red):
+                active_coupons.append(c)
+    except Exception as _coup_exc:
+        logger.warning(
+            "[COUPONS] no pude cargar tenant=%s: %s — prompt sin bloque",
+            tenant_id[:8], _coup_exc,
+        )
+
     # Rev. 109 ADR-0017 — Multi-agente per-tenant con router pre-LLM.
     # Si tenant tiene >1 agente activo, agent_router clasifica el inbound
     # por heurística (cero costo LLM) y elige el agente apropiado.
@@ -576,6 +611,8 @@ async def _run_agentic_full(
         carriers=carriers_caps,
         payment_methods=payment_methods_cfg,
         tenant_philosophy=tenant_philosophy,
+        agent_role_description=_agent.get("role_description"),
+        active_coupons=active_coupons,
     )
 
     # ── Pre-LLM resolver determinístico: variant selection continuation ──
@@ -1890,6 +1927,7 @@ async def _run_agentic_full(
                 contact_record=contact or {},
                 carriers=carriers_caps,
                 payment_methods=payment_methods_cfg,
+                active_coupons=active_coupons,
             )
             _allowed_tools = set(tools_for_state(_resolved_state))
             logger.info(
@@ -2038,6 +2076,10 @@ async def _run_agentic_full(
             PIISaveTruthfulnessInvariant(),
             PostToolCoherenceInvariant(),
             EmptyPromiseInvariant(),
+            # Rev. 109 founder 2026-05-28 "super delicado" — detecta fake
+            # escalation (LLM promete especialista sin invocar tool) y
+            # FUERZA el side-effect real para garantizar atención humana.
+            FakeEscalationInvariant(),
             PassiveClosingInvariant(),
             # Rev. 109 UAT live — normaliza variaciones del LLM al naming
             # canónico de categorías (Sérums Faciales → Sérums, Kits de
@@ -2233,6 +2275,7 @@ async def _run_agentic_shadow(
         tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
         catalog=catalog,
         agent_name=_agent_shadow.get("name") or "Sara Camila",
+        agent_role_description=_agent_shadow.get("role_description"),
     )
 
     started_at = time.monotonic()
@@ -2455,13 +2498,22 @@ def _persist_turn_audit(
 # ─── Gate de conversation status (Rev. 107) ────────────────────────────────
 
 
-_SKIP_STATUSES = frozenset({"human_takeover", "closed"})
+_SKIP_STATUSES = frozenset({"human_takeover", "closed", "opted_out"})
 
 
 def _should_skip_for_conv_status(supabase: Any, conversation_id: str) -> bool:
     """True si la conv está en estado donde el bot NO debe responder.
 
-    El operador tomó la conversación (human_takeover) o ya está cerrada.
+    Estados de skip:
+      • human_takeover — el operador tomó la conv (rev. 107).
+      • closed — conv archivada manualmente o por timeout.
+      • opted_out — cliente revocó consent (Habeas Data Ley 1581).
+        Fix founder 2026-05-28: el bot debe respetar opt-out EN CUALQUIER
+        SITUACIÓN, no solo cuando llega un STOP. Combinado con el gate del
+        connector (db_persistence._upsert_conversation), garantiza que un
+        cliente revocado nunca recibe respuesta auto del bot — solo humano
+        puede re-engagement manual desde Inbox.
+
     Best-effort lectura — si falla, NO skipea (default: dejar pasar para
     que el legacy aplique su propio gate como segunda defensa).
     """
@@ -2487,12 +2539,12 @@ def _should_skip_for_conv_status(supabase: Any, conversation_id: str) -> bool:
 
 
 def _mark_message_skipped(supabase: Any, message_id: str) -> None:
-    """Marca el message como skipped por status conv. Mismo behavior que
-    el path legacy (orchestrator.py SKIP_REASON_HUMAN_TAKEOVER)."""
+    """Marca el message como skipped por status conv (human_takeover /
+    closed / opted_out). Mismo behavior que el path legacy."""
     try:
         supabase.table("messages").update({
             "processing_status": "skipped",
-            "skip_reason": "human_takeover_or_closed",
+            "skip_reason": "conv_status_no_bot",
             "processed": True,
         }).eq("id", message_id).execute()
         logger.info(

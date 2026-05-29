@@ -156,6 +156,74 @@ def _render_payment_methods_block(payment_methods: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
+def _render_coupons_block(active_coupons: Optional[list]) -> str:
+    """Renderiza CUPONES ACTIVOS del tenant (rev. 109 founder 2026-05-28).
+
+    BUG REVELADO POR UAT live: agente de marketing (Lucy) respondía
+    "no tenemos promociones activas" SIN consultar DB → mentira
+    transaccional (viola A.0.1 "LLM no decide verdad transaccional").
+
+    Patrón idéntico a CATALOG_ACTUAL y MÉTODOS_DE_PAGO: inyectamos la
+    fuente de verdad al system prompt. El LLM lee y reporta. Cero tool
+    call risk, cero latencia. La regla anti-hallu del prompt cierra el
+    loop: NUNCA afirmar cupón fuera de este bloque.
+
+    Args:
+        active_coupons: lista de dicts con campos `code`, `discount_type`,
+            `discount_value`, `min_subtotal_cents` (opt), `valid_until`,
+            `redemptions_count`, `max_redemptions`. Se asume que el caller
+            (dispatcher) ya filtró por `is_active=true` Y `valid_until>now()`
+            Y `redemptions_count<max_redemptions`.
+    """
+    if not active_coupons:
+        return (
+            "**CUPONES ACTIVOS**: ninguno hoy. Si el cliente pregunta por "
+            "promociones o cupones, responde HONESTAMENTE que no hay "
+            "promociones activas en este momento. NO inventes códigos."
+        )
+    lines = ["**CUPONES ACTIVOS DEL TENANT (fuente de verdad — DB):**", ""]
+    for c in active_coupons:
+        code = c.get("code") or "?"
+        dtype = (c.get("discount_type") or "").lower()
+        dval = c.get("discount_value")
+        if dtype == "percent":
+            desc = f"{dval}% de descuento"
+        elif dtype == "fixed_amount":
+            cents = int(dval or 0)
+            desc = f"${cents // 100:,} COP de descuento".replace(",", ".")
+        elif dtype == "free_shipping":
+            desc = "envío gratis"
+        else:
+            desc = f"descuento {dval}"
+        constraints = []
+        min_sub = c.get("min_subtotal_cents")
+        if min_sub:
+            constraints.append(
+                f"compra mínima ${int(min_sub) // 100:,} COP".replace(",", ".")
+            )
+        max_red = c.get("max_redemptions")
+        used = c.get("redemptions_count") or 0
+        if max_red:
+            remaining = int(max_red) - int(used)
+            constraints.append(f"{remaining} usos disponibles")
+        valid_until = c.get("valid_until")
+        if valid_until:
+            vu = str(valid_until).split("T")[0].split(" ")[0]
+            constraints.append(f"vigente hasta {vu}")
+        suffix = f" ({'; '.join(constraints)})" if constraints else ""
+        lines.append(f"• **{code}** — {desc}{suffix}")
+    lines.extend([
+        "",
+        "**REGLA ANTI-HALLU CUPONES:**",
+        "• NUNCA inventes códigos. Si NO está listado arriba, NO existe.",
+        "• Si el cliente pregunta por promociones/cupones/descuentos, "
+        "responde citando ÚNICAMENTE los cupones de esta lista.",
+        "• Para aplicar un cupón al carrito, el cliente debe escribir "
+        "el código exactamente como aparece arriba.",
+    ])
+    return "\n".join(lines)
+
+
 def _render_carriers_block(carriers: Optional[list]) -> str:
     """Renderiza CARRIERS — compacto (rev. 108 prompt size opt 2026-05-27).
 
@@ -200,6 +268,47 @@ def _render_carriers_block(carriers: Optional[list]) -> str:
         "   error.extra.available_options al cliente — NO hablar de 'items'.",
     ])
     return "\n".join(lines)
+
+
+def _render_agent_persona_block(role_description: Optional[str]) -> str:
+    """Rev. 109 ADR-0017 — inyecta el role_description del agente activo.
+
+    Sin esto, el prompt maestro custom (editado por operador o generado
+    por IA generativa en /dashboard/ai-agents) era IGNORADO — el bot
+    solo conocía el nombre del agente pero no su personalidad/comporta-
+    miento específico por rol. Lucy se identificaba como Lucy pero
+    actuaba como Sara monolítica.
+
+    Multi-agente solo funciona end-to-end si CADA agente lleva su prompt
+    maestro al runtime.
+
+    Args:
+        role_description: texto del prompt maestro custom del agente
+            (de ai_agents.role_description). None o vacío → no inyecta
+            (backward-compat con agentes sin prompt custom).
+    """
+    if not role_description or not isinstance(role_description, str):
+        return ""
+    text = role_description.strip()
+    if not text:
+        return ""
+    return (
+        "═══════════════════════════════════════════════════════════════════\n"
+        "PERSONALIDAD Y COMPORTAMIENTO DEL AGENTE (configurado por el tenant)\n"
+        "═══════════════════════════════════════════════════════════════════\n"
+        "Este es tu prompt maestro específico. Las reglas globales debajo\n"
+        "(anti-hallu, Habeas Data, tools) siguen siendo NO violables, pero\n"
+        "tu tono y razonamiento se rigen por estas directrices:\n\n"
+        f"{text}\n\n"
+        "**REGLA TÉCNICA NO VIOLABLE — ESCALACIÓN HUMANA:**\n"
+        "Si vas a decirle al cliente cualquier variante de 'te paso con un "
+        "especialista', 'te conecto con mi equipo', 'voy a escalar', 'un "
+        "asesor te contactará', etc. — DEBES llamar la tool "
+        "`escalate_to_human` en este mismo turno ANTES de componer el texto. "
+        "NUNCA prometas atención humana sin invocar la tool. Si no llamas la "
+        "tool, NADIE será notificado y el cliente quedará sin respuesta — "
+        "lo cual viola la promesa que le hiciste."
+    )
 
 
 def _render_philosophy_block(philosophy: Optional[dict]) -> str:
@@ -349,6 +458,8 @@ def build_system_prompt(
     carriers: Optional[list[dict]] = None,
     payment_methods: Optional[dict] = None,
     tenant_philosophy: Optional[dict] = None,
+    agent_role_description: Optional[str] = None,
+    active_coupons: Optional[list[dict]] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -381,6 +492,8 @@ def build_system_prompt(
     carriers_block = _render_carriers_block(carriers)
     payment_methods_block = _render_payment_methods_block(payment_methods)
     philosophy_block = _render_philosophy_block(tenant_philosophy)
+    agent_persona_block = _render_agent_persona_block(agent_role_description)
+    coupons_block = _render_coupons_block(active_coupons)
     if server_greeting is None:
         server_greeting, _ = _co_time_of_day_greeting()
 
@@ -399,6 +512,8 @@ mensaje.
 {contact_block}
 
 {philosophy_block}
+
+{agent_persona_block}
 
 ═══════════════════════════════════════════════════════════════════
 REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
@@ -627,6 +742,12 @@ incluye su `variation_id` real para que puedas usarlo directamente en
 `add_to_cart`. NO inventes productos ni precios — solo lo que ves aquí:
 
 {catalog_block}
+
+═══════════════════════════════════════════════════════════════════
+CUPONES / PROMOCIONES
+═══════════════════════════════════════════════════════════════════
+
+{coupons_block}
 
 ═══════════════════════════════════════════════════════════════════
 """
