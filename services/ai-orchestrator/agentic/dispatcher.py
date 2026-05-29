@@ -1133,23 +1133,51 @@ async def _run_agentic_full(
                     # flow tiene complejidad legal (5d hábiles, validación
                     # producto, refund 30d) que requiere humano experto.
                     short_id = target_order_id[:8].upper()
-                    # Rev. 109 fix UAT live BUG 40 — mensaje cauteloso. NO
-                    # prometer "reembolso completo" sin validar política tenant
-                    # (Art. 47 parágrafo excluye cosmética abierta, perecederos,
-                    # productos uso íntimo). Especialista valida exclusiones.
-                    _retracto_msg = (
-                        f"Entiendo que quieres retractarte del pedido "
-                        f"*#{short_id}*.\n\n"
-                        f"La *Ley 1480 Art. 47* otorga 5 días hábiles desde "
-                        f"la entrega para retractarse. Sin embargo, su "
-                        f"*parágrafo* excluye algunas categorías "
-                        f"(productos abiertos de uso íntimo, perecederos, "
-                        f"personalizados, etc.).\n\n"
-                        f"Te conecto con un especialista para validar si tu "
-                        f"caso aplica según la política de KAIU + estado del "
-                        f"producto. Si aplica, procesamos devolución y "
-                        f"reembolso en *máximo 30 días calendario* (Art. 49)."
-                    )
+
+                    # Rev. 109 backlog #1 — Retracto categories multi-tenant.
+                    # Si el tenant configuró flag `retracto_excluded=true`
+                    # en productos del pedido (cosmética abierta /
+                    # software descargable / perecederos / lo que sea),
+                    # citar razones específicas con producto + ley.
+                    _retracto_check = None
+                    try:
+                        from lib.retracto import (
+                            check_retracto_eligibility,
+                            format_excluded_message,
+                        )
+                        _retracto_check = check_retracto_eligibility(
+                            supabase,
+                            order_id=target_order_id,
+                            tenant_id=tenant_id,
+                        )
+                    except Exception as _r_exc:
+                        logger.warning(
+                            "[RETRACTO] check eligibility crashed: %s — "
+                            "fallback mensaje genérico", _r_exc,
+                        )
+
+                    if (_retracto_check
+                            and not _retracto_check.eligible
+                            and _retracto_check.excluded_items):
+                        # Mensaje específico con productos excluidos.
+                        _retracto_msg = format_excluded_message(
+                            _retracto_check, short_id,
+                        )
+                    else:
+                        # Mensaje cauteloso genérico (BUG 40 fix existente).
+                        _retracto_msg = (
+                            f"Entiendo que quieres retractarte del pedido "
+                            f"*#{short_id}*.\n\n"
+                            f"La *Ley 1480 Art. 47* otorga 5 días hábiles desde "
+                            f"la entrega para retractarse. Sin embargo, su "
+                            f"*parágrafo* excluye algunas categorías "
+                            f"(productos abiertos de uso íntimo, perecederos, "
+                            f"personalizados, etc.).\n\n"
+                            f"Te conecto con un especialista para validar si tu "
+                            f"caso aplica según la política del tenant + estado "
+                            f"del producto. Si aplica, procesamos devolución y "
+                            f"reembolso en *máximo 30 días calendario* (Art. 49)."
+                        )
                     # Rev. 109 fix UAT live BUG 39 — persistir audit row
                     # order_cancellations para trazabilidad SIC + visibilidad
                     # operador en panel.
@@ -1169,7 +1197,13 @@ async def _run_agentic_full(
                                 _cancel_match.reason_text or "retracto solicitado"
                             )[:300],
                             "escalated_to_operator": True,
-                            "escalation_reason": "ORDER_DELIVERED",
+                            "escalation_reason": (
+                                "RETRACTO_EXCLUDED_PRODUCTS"
+                                if (_retracto_check
+                                    and not _retracto_check.eligible
+                                    and _retracto_check.excluded_items)
+                                else "ORDER_DELIVERED"
+                            ),
                             "legal_basis": "ley_1480_art_47",
                         }).execute()
                         supabase.table("orders").update({
