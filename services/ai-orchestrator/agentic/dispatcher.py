@@ -540,11 +540,21 @@ async def _run_agentic_full(
             tenant_id[:8], _pm_exc,
         )
 
+    # Rev. 109 backlog #2 — Multi-agente per-tenant. Lee el agente
+    # default del tenant; fallback "Sara Camila" si no hay row en
+    # tenant_agents (backward-compat con tenants pre-migration).
+    try:
+        from lib.tenant_agents import get_active_agent
+        _agent = get_active_agent(supabase, tenant_id=tenant_id)
+    except Exception:
+        _agent = {"name": "Sara Camila", "pitch": None, "tone": None}
+
     system_prompt = build_system_prompt(
         tenant_name=tenant_name,
         catalog=catalog,
-        tenant_pitch=tenant_pitch,
-        tenant_tone=tenant_tone,
+        agent_name=_agent.get("name") or "Sara Camila",
+        tenant_pitch=(_agent.get("pitch") or tenant_pitch),
+        tenant_tone=(_agent.get("tone") or tenant_tone),
         contact_record=contact or {},
         carriers=carriers_caps,
         payment_methods=payment_methods_cfg,
@@ -2177,9 +2187,19 @@ async def _run_agentic_shadow(
     else:
         contact_id, contact = None, {}
 
+    # Rev. 109 backlog #2 — Multi-agente per-tenant en shadow path también.
+    try:
+        from lib.tenant_agents import get_active_agent
+        _agent_shadow = get_active_agent(supabase, tenant_id=tenant_id)
+    except Exception:
+        _agent_shadow = {"name": "Sara Camila", "pitch": None, "tone": None}
+
     system_prompt = build_system_prompt(
         tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
         catalog=catalog,
+        agent_name=_agent_shadow.get("name") or "Sara Camila",
+        tenant_pitch=_agent_shadow.get("pitch"),
+        tenant_tone=_agent_shadow.get("tone"),
     )
 
     started_at = time.monotonic()
