@@ -27,13 +27,21 @@ import {
   wrapSelection,
 } from '../_lib/editor'
 import { EMOJI_GROUPS } from '../_lib/emojis'
+import { AttachmentUploader } from './attachment-uploader'
 
 interface Props {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   setReplyText: (v: string) => void
+  /** Rev. 109 P0-2 — necesario para attachment-uploader. NULL si no hay conv
+   *  seleccionada o conv no está en human_takeover (botón disabled). */
+  conversationId?: string | null
 }
 
-export function ChatEditorToolbar({ textareaRef, setReplyText }: Props) {
+export function ChatEditorToolbar({
+  textareaRef,
+  setReplyText,
+  conversationId,
+}: Props) {
   // Rev. 109 founder 2026-05-29 — emoji picker integrado.
   // State local del botón: abierto/cerrado. Click-outside cierra.
   const [emojiOpen, setEmojiOpen] = useState(false)
@@ -166,6 +174,9 @@ export function ChatEditorToolbar({ textareaRef, setReplyText }: Props) {
             </div>
           )}
         </div>
+
+        {/* Rev. 109 P0-2 — Attachment imagen al outbound humano. */}
+        <AttachmentUploader conversationId={conversationId ?? null} />
       </div>
       <p className="text-[10px] text-muted-foreground px-1 leading-tight">
         Formato WhatsApp: <code className="font-mono">*negrita*</code> · <code className="font-mono">_cursiva_</code> · <code className="font-mono">~tachado~</code> · <code className="font-mono">`código`</code> · <code className="font-mono">{'```mono```'}</code> · <code className="font-mono">{'> cita'}</code> · <code className="font-mono">* lista</code> · <code className="font-mono">1. numerada</code>
