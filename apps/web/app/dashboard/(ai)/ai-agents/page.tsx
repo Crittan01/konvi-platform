@@ -109,7 +109,9 @@ export default async function AiAgentsPage() {
     // pitch/tone viven en tenants (Settings → Filosofía).
     const role  = ((formData.get('role')  as string) || 'sales').trim()
 
-    if (role_description.length > 1500) return
+    // Rev. 109 — límite 2500 coincide con meta-prompt IA + UI form.
+    // ~625 tokens/turno aceptables. DB tipo TEXT (sin restricción).
+    if (role_description.length > 2500) return
 
     await sb.from('ai_agents').upsert({
       tenant_id: m.tenant_id,

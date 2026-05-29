@@ -115,7 +115,7 @@ export function AgentsList({ agents }: Props) {
   const onSave = async () => {
     if (!agentName.trim()) { setError('El nombre del agente es obligatorio'); return }
     if (!roleDescription.trim()) { setError('El prompt maestro es obligatorio'); return }
-    if (roleDescription.length > 1500) { setError('Máximo 1500 caracteres'); return }
+    if (roleDescription.length > 2500) { setError('Máximo 2500 caracteres'); return }
 
     setSaving(true)
     setError(null)
@@ -259,10 +259,10 @@ export function AgentsList({ agents }: Props) {
                 onChange={e => setRoleDescription(e.target.value)}
                 placeholder="Eres [nombre], asesor/a de [negocio]..."
                 className="min-h-[280px] font-mono text-xs"
-                maxLength={1500}
+                maxLength={2500}
               />
               <p className="text-[11px] text-muted-foreground">
-                {roleDescription.length}/1500 — La IA lee la filosofía del negocio + catálogo para personalizar.
+                {roleDescription.length}/2500 — La IA lee la filosofía del negocio + catálogo para personalizar.
               </p>
             </div>
 
