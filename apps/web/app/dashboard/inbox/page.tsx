@@ -165,7 +165,7 @@ interface SelectedVariation {
   label: string
 }
 
-type FilterStatus = 'all' | 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
+type FilterStatus = 'active' | 'all' | 'bot_active' | 'human_takeover' | 'closed' | 'opted_out'
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
   pending:    'Pendiente',
@@ -216,7 +216,11 @@ const STATUS_CONFIG = {
   },
 }
 
+// Rev. 109 founder 2026-05-28 — default "Activas" muestra accionables
+// (Bot + Agente humano). Cerradas + Opt-out quedan accesibles vía chip
+// para auditoría histórica, pero no saturan el listado day-to-day.
 const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
+  { value: 'active',         label: 'Activas' },
   { value: 'all',            label: 'Todas' },
   { value: 'bot_active',     label: 'Bot' },
   { value: 'human_takeover', label: 'Agente' },
@@ -402,7 +406,7 @@ export default function InboxPage() {
   const [sendError, setSendError] = useState<string | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('active')
   // F1: toggle para mostrar conversaciones archivadas (>90 días sin actividad).
   const [showArchived, setShowArchived] = useState(false)
   const showArchivedRef = useRef(false)
@@ -464,7 +468,14 @@ export default function InboxPage() {
   // ── Filtros ────────────────────────────────────────────────────────────────
   const filteredConvs = conversations.filter(c => {
     const matchesSearch = search === '' || c.customer_phone.includes(search.replace('+', ''))
-    const matchesFilter = filterStatus === 'all' || c.status === filterStatus
+    // 'active' = bot_active + human_takeover (accionables día-a-día).
+    // 'all' = literalmente todas. Otros valores = match exacto al status.
+    const matchesFilter =
+      filterStatus === 'all'
+        ? true
+        : filterStatus === 'active'
+          ? c.status === 'bot_active' || c.status === 'human_takeover'
+          : c.status === filterStatus
     return matchesSearch && matchesFilter
   })
 
