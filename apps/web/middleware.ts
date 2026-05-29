@@ -72,21 +72,26 @@ export async function middleware(request: NextRequest) {
   //
   // Excepciones:
   //   - /login/mfa: el challenge en sí
-  //   - sessionStorage flag mfa_recovery_used permite acceso (manejado por
-  //     client-side, no por middleware — recovery code consumido OK).
+  //   - Cookie `mfa_recovery_session` HttpOnly seteada por
+  //     /api/mfa/recovery-codes/verify cuando recovery code OK.
+  //     Vigencia 24h. Permite acceso AAL1 si el user usó código de respaldo
+  //     (no podemos forzar TOTP factor si lo perdió).
   if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    try {
-      const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
-      const needsMfa =
-        aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1'
-      if (needsMfa) {
-        const url = request.nextUrl.clone()
-        url.pathname = '/login/mfa'
-        return NextResponse.redirect(url)
+    const recoveryBypass = request.cookies.get('mfa_recovery_session')?.value === '1'
+    if (!recoveryBypass) {
+      try {
+        const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+        const needsMfa =
+          aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1'
+        if (needsMfa) {
+          const url = request.nextUrl.clone()
+          url.pathname = '/login/mfa'
+          return NextResponse.redirect(url)
+        }
+      } catch {
+        // Si el check de AAL falla (network/timeout), prefer fail open
+        // para no bloquear users por outage temporal de Supabase Auth.
       }
-    } catch {
-      // Si el check de AAL falla (network/timeout), prefer fail open
-      // para no bloquear users por outage temporal de Supabase Auth.
     }
   }
 

@@ -64,6 +64,9 @@ export function MfaChallengeForm({ factorId, message }: Props) {
       if (!session) throw new Error('Sesión expirada — inicia de nuevo.')
 
       // Verificar recovery code via backend.
+      // El proxy /api/mfa/recovery-codes/verify setea cookie HttpOnly
+      // `mfa_recovery_session` (24h) que el middleware acepta como bypass
+      // AAL2. NO se requiere sessionStorage — la cookie cubre el flow.
       const res = await fetch('/api/mfa/recovery-codes/verify', {
         method: 'POST',
         headers: {
@@ -72,15 +75,18 @@ export function MfaChallengeForm({ factorId, message }: Props) {
         },
         body: JSON.stringify({ code: code.trim() }),
       })
-      const data = await res.json()
+
+      // Defensive: si el proxy retorna HTML (404, 500), .json() falla.
+      let data: { ok?: boolean; detail?: string }
+      try {
+        data = await res.json()
+      } catch {
+        throw new Error(
+          `Error inesperado del servidor (HTTP ${res.status}). Reintenta o usa el código del authenticator.`
+        )
+      }
       if (!res.ok) throw new Error(data.detail || 'Código inválido')
 
-      // ⚠️ NOTA: Supabase Auth NO permite forzar AAL2 sin TOTP factor verify.
-      // El recovery code es nuestro mecanismo custom — al validar OK,
-      // marcamos un flag en localStorage que el middleware respeta como
-      // "MFA bypassed por recovery" para esta sesión. Tras login, recordar
-      // al usuario regenerar codes + eventualmente re-enrollar TOTP.
-      sessionStorage.setItem('mfa_recovery_used', '1')
       router.push('/dashboard?recovery_used=1')
       router.refresh()
     } catch (e) {
