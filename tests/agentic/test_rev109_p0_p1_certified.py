@@ -714,3 +714,96 @@ class TestADR0017AgentRouter:
     def test_select_empty_agents_safe_fallback(self):
         result = self._select(inbound_text="Hola", agents=[])
         assert result["name"] == "Sara Camila"  # defensive default
+
+
+# ─── Aterrizaje multi-agente: matriz comportamiento por #agentes ──────────
+
+
+class TestMultiAgentFallback:
+    """Decisión 1 (A): default absorbe lo que no tiene rol especialista.
+    Decisión 3 (B): router clasifica per-turn, re-enruta silenciosamente.
+
+    4 escenarios de configuración del tenant + verifica garantía:
+    cada mensaje SIEMPRE recibe un agente (default o especialista).
+    """
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from agentic.agent_router import select_agent_for_inbound
+        self._select = select_agent_for_inbound
+
+    def test_caso_1_solo_default_recibe_todo(self):
+        """Tenant con solo Sara Ventas. Sara recibe ventas/soporte/reclamos/marketing."""
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+        ]
+        # Ventas → Sara
+        assert self._select(inbound_text="quiero comprar jabón", agents=agents)["name"] == "Sara"
+        # Soporte → Sara (no hay especialista)
+        assert self._select(inbound_text="¿dónde está mi pedido?", agents=agents)["name"] == "Sara"
+        # Reclamos → Sara
+        assert self._select(inbound_text="vino defectuoso", agents=agents)["name"] == "Sara"
+        # Marketing → Sara
+        assert self._select(inbound_text="tienen promo?", agents=agents)["name"] == "Sara"
+
+    def test_caso_2_default_mas_soporte(self):
+        """Sara (default) + Andrés (support). Reclamos y marketing caen en Sara."""
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Andrés", "role": "support", "is_default": False},
+        ]
+        assert self._select(inbound_text="quiero comprar", agents=agents)["name"] == "Sara"
+        assert self._select(inbound_text="tracking", agents=agents)["name"] == "Andrés"
+        # Reclamos: no hay Carolina → cae al default (Sara)
+        assert self._select(inbound_text="vino defectuoso", agents=agents)["name"] == "Sara"
+        # Marketing: no hay → default Sara
+        assert self._select(inbound_text="hay promo?", agents=agents)["name"] == "Sara"
+
+    def test_caso_3_default_mas_reclamos(self):
+        """Sara (default) + Carolina (claims). Soporte y marketing caen en Sara."""
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Carolina", "role": "claims", "is_default": False},
+        ]
+        assert self._select(inbound_text="comprar 2 jabones", agents=agents)["name"] == "Sara"
+        # Tracking: no hay Andrés → default Sara
+        assert self._select(inbound_text="dónde está mi pedido", agents=agents)["name"] == "Sara"
+        # Reclamo: Carolina
+        assert self._select(inbound_text="vino defectuoso", agents=agents)["name"] == "Carolina"
+        assert self._select(inbound_text="quiero retracto", agents=agents)["name"] == "Carolina"
+
+    def test_caso_4_los_4_roles_matriz_completa(self):
+        """Cobertura total: cada intent va a su especialista."""
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Andrés", "role": "support", "is_default": False},
+            {"name": "María", "role": "marketing", "is_default": False},
+            {"name": "Carolina", "role": "claims", "is_default": False},
+        ]
+        assert self._select(inbound_text="quiero comprar", agents=agents)["name"] == "Sara"
+        assert self._select(inbound_text="dónde está mi pedido", agents=agents)["name"] == "Andrés"
+        assert self._select(inbound_text="hay promo?", agents=agents)["name"] == "María"
+        assert self._select(inbound_text="vino defectuoso", agents=agents)["name"] == "Carolina"
+
+    def test_router_per_turn_no_per_conversation(self):
+        """Decisión 3 — el router clasifica CADA mensaje, no por sesión.
+        Si el cliente cambia de tema, el agente cambia silenciosamente."""
+        agents = [
+            {"name": "Sara", "role": "sales", "is_default": True},
+            {"name": "Andrés", "role": "support", "is_default": False},
+        ]
+        # Turno 1: cliente quiere comprar → Sara
+        t1 = self._select(inbound_text="quiero 1 jabón coco", agents=agents)
+        assert t1["name"] == "Sara"
+        # Turno 2: cliente pregunta tracking (cambió tema) → Andrés
+        t2 = self._select(inbound_text="¿dónde está mi pedido?", agents=agents)
+        assert t2["name"] == "Andrés"
+        # Turno 3: vuelve a compras → Sara de nuevo
+        t3 = self._select(inbound_text="agrega otro jabón", agents=agents)
+        assert t3["name"] == "Sara"
+
+    def test_caso_0_agentes_safe_fallback_sara_camila(self):
+        """Edge case — tenant sin agentes (no debería pasar pero defensivo)."""
+        result = self._select(inbound_text="hola", agents=[])
+        assert result["name"] == "Sara Camila"  # hardcoded backward-compat
+        assert result["is_default"] is True

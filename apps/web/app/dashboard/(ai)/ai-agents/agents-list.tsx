@@ -190,6 +190,54 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
         )}
       </div>
 
+      {/* Decisión 2 — Sugerencia roles no creados.
+          Card discreta que invita (NO obliga) a crear los faltantes.
+          Cuando un cliente envía un mensaje que NO tiene rol especialista
+          asignado, el AGENTE DEFAULT lo atiende (decisión 1 = A). Eso
+          funciona, pero crear el especialista da mejor UX + tools
+          enforcement específico por rol. */}
+      {canWrite && agents.length > 0 && agents.length < ALL_ROLES.length && (() => {
+        const missingRoles = ALL_ROLES.filter(r => !takenRoles.has(r) && r !== 'custom')
+        if (missingRoles.length === 0) return null
+        const ROLE_VALUE: Record<string, string> = {
+          sales:     'Atención a ventas y compras',
+          support:   'Tracking, post-venta, dudas de envíos',
+          marketing: 'Promociones y comunicación HSM proactiva',
+          claims:    'Devoluciones, reclamos, garantías (Ley 1480)',
+        }
+        return (
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3.5 mt-1 space-y-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-amber-500" />
+              <p className="text-sm font-semibold text-foreground">
+                Sugerencia: mejora la cobertura de tu bot
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Hoy el agente <strong>default</strong> recibe los mensajes que no
+              encajan en un rol específico. Crear especialistas para los roles
+              faltantes mejora la precisión + activa guardrails por rol.
+            </p>
+            <div className="space-y-1 pt-1">
+              {missingRoles.map(r => (
+                <div key={r} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">•</span>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${ROLE_BADGE[r] ?? ROLE_BADGE.custom}`}>
+                      {ROLE_LABEL[r]}
+                    </span>
+                    <span className="text-muted-foreground">{ROLE_VALUE[r]}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-1 italic">
+              Opcional — el bot funciona sin estos. Crear es 1 click + IA genera el prompt.
+            </p>
+          </div>
+        )
+      })()}
+
       {/* Lista agentes */}
       {agents.length > 0 && (
         <div className="space-y-1.5">
