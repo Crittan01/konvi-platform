@@ -56,11 +56,63 @@ REDEMPTION_STATUS_REVOKED = "revoked"
 class ValidationResult:
     ok: bool
     reason: str = ""
-    # Texto-friendly para mostrar al cliente. Mapea reason → mensaje claro.
+    # Rev. 109 BUG 41 — context para mensajes enriquecidos (mínimo cupón,
+    # fechas, código, etc.). Opcional — None = fallback al mensaje genérico.
+    context: Optional[dict] = None
 
     @property
     def user_message(self) -> str:
-        return _USER_MESSAGES.get(self.reason, "Cupón no aplicable.")
+        return _format_user_message(self.reason, self.context or {})
+
+
+def _fmt_cop(cents: int) -> str:
+    """$54.000 estilo COP (punto miles, sin decimal)."""
+    pesos = int(cents) // 100
+    return f"${pesos:,}".replace(",", ".")
+
+
+def _format_user_message(reason: str, ctx: dict) -> str:
+    """Rev. 109 BUG 41 — mensajes user-friendly enriquecidos con contexto.
+
+    Si ctx provee datos relevantes (subtotal actual, mínimo, código), el
+    mensaje incluye esa info para que el cliente entienda CÓMO activar el
+    cupón (cuánto falta para llegar al mínimo, etc.). Si ctx vacío, cae
+    al mensaje genérico de `_USER_MESSAGES`.
+    """
+    if reason == "min_subtotal_not_met" and ctx:
+        subtotal = int(ctx.get("subtotal_cents") or 0)
+        min_req = int(ctx.get("min_subtotal_cents") or 0)
+        code = (ctx.get("code") or "").strip()
+        if subtotal > 0 and min_req > 0:
+            falta = max(0, min_req - subtotal)
+            falta_str = _fmt_cop(falta)
+            min_str = _fmt_cop(min_req)
+            cur_str = _fmt_cop(subtotal)
+            code_str = f" *{code}*" if code else ""
+            return (
+                f"El cupón{code_str} requiere mínimo *{min_str}* y tu "
+                f"pedido va en *{cur_str}*. Te faltan *{falta_str}* para "
+                f"activarlo — ¿agregas algo más?"
+            )
+    if reason == "expired" and ctx:
+        code = (ctx.get("code") or "").strip()
+        code_str = f" *{code}*" if code else ""
+        return f"El cupón{code_str} expiró y ya no se puede usar."
+    if reason == "before_valid_from" and ctx:
+        code = (ctx.get("code") or "").strip()
+        valid_from = (ctx.get("valid_from") or "").strip()
+        code_str = f" *{code}*" if code else ""
+        if valid_from:
+            return f"El cupón{code_str} estará disponible desde {valid_from[:10]}."
+    if reason == "max_redemptions_reached" and ctx:
+        code = (ctx.get("code") or "").strip()
+        code_str = f" *{code}*" if code else ""
+        return f"El cupón{code_str} llegó a su límite de usos."
+    if reason == "not_active" and ctx:
+        code = (ctx.get("code") or "").strip()
+        code_str = f" *{code}*" if code else ""
+        return f"El cupón{code_str} ya no está disponible."
+    return _USER_MESSAGES.get(reason, "Cupón no aplicable.")
 
 
 _USER_MESSAGES = {
@@ -85,12 +137,14 @@ class ApplyResult:
     coupon_code: Optional[str] = None
     discount_cents: int = 0
     redemption_id: Optional[str] = None
+    # Rev. 109 BUG 41 — context para mensajes enriquecidos (mínimo, código, etc.).
+    context: Optional[dict] = None
 
     @property
     def user_message(self) -> str:
         if self.ok:
             return f"Cupón {self.coupon_code} aplicado."
-        return _USER_MESSAGES.get(self.reason, "No pude aplicar el cupón.")
+        return _format_user_message(self.reason, self.context or {})
 
 
 # ── Pure functions ───────────────────────────────────────────────────────────
@@ -113,8 +167,12 @@ def validate_coupon_applicable(
     if not coupon:
         return ValidationResult(ok=False, reason="coupon_not_found")
 
+    code = coupon.get("code") or ""
+
     if not coupon.get("is_active", False):
-        return ValidationResult(ok=False, reason="not_active")
+        return ValidationResult(
+            ok=False, reason="not_active", context={"code": code},
+        )
 
     discount_type = coupon.get("discount_type")
     if discount_type not in VALID_DISCOUNT_TYPES:
@@ -126,23 +184,41 @@ def validate_coupon_applicable(
     if valid_from:
         vf = _parse_ts(valid_from)
         if vf and vf > now:
-            return ValidationResult(ok=False, reason="before_valid_from")
+            return ValidationResult(
+                ok=False, reason="before_valid_from",
+                context={"code": code, "valid_from": str(valid_from)},
+            )
 
     valid_until = coupon.get("valid_until")
     if valid_until:
         vu = _parse_ts(valid_until)
         if vu and vu < now:
-            return ValidationResult(ok=False, reason="expired")
+            return ValidationResult(
+                ok=False, reason="expired",
+                context={"code": code, "valid_until": str(valid_until)},
+            )
 
     min_subtotal = int(coupon.get("min_subtotal_cents") or 0)
     if subtotal_cents < min_subtotal:
-        return ValidationResult(ok=False, reason="min_subtotal_not_met")
+        # Rev. 109 BUG 41 — incluir contexto subtotal + mínimo + código
+        # para mensaje útil al cliente ("te faltan $X para activarlo").
+        return ValidationResult(
+            ok=False, reason="min_subtotal_not_met",
+            context={
+                "code": code,
+                "subtotal_cents": subtotal_cents,
+                "min_subtotal_cents": min_subtotal,
+            },
+        )
 
     max_redemptions = coupon.get("max_redemptions")
     if max_redemptions is not None:
         used = int(coupon.get("redemptions_count") or 0)
         if used >= int(max_redemptions):
-            return ValidationResult(ok=False, reason="max_redemptions_reached")
+            return ValidationResult(
+                ok=False, reason="max_redemptions_reached",
+                context={"code": code},
+            )
 
     return ValidationResult(ok=True, reason="ok")
 
@@ -284,8 +360,14 @@ def apply_coupon(
     # 4. Validate applicability.
     validation = validate_coupon_applicable(coupon, subtotal, now=now)
     if not validation.ok:
-        return ApplyResult(ok=False, reason=validation.reason,
-                           coupon_id=coupon["id"], coupon_code=coupon["code"])
+        # Rev. 109 BUG 41 — propagar context (subtotal, mínimo, código)
+        # para que user_message muestre "te faltan $X" en lugar de
+        # mensaje genérico.
+        return ApplyResult(
+            ok=False, reason=validation.reason,
+            coupon_id=coupon["id"], coupon_code=coupon["code"],
+            context=validation.context,
+        )
 
     # 5. Compute discount.
     discount = compute_discount(coupon, subtotal, shipping)
