@@ -126,6 +126,22 @@ HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS = int(
 HUMAN_TAKEOVER_SLA_HOURS = int(
     os.getenv("HUMAN_TAKEOVER_SLA_HOURS", "2")  # threshold 2h por defecto
 )
+
+# Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
+# Después del grace period 30d (Fase 1), el cron de aquí busca tenants
+# elegibles y ejecuta hard-delete (snapshot a archive + DELETE CASCADE).
+# Habilitable per-env (default OFF — Fase 1 SOFT-delete suficiente hasta
+# que el founder valide en staging).
+TENANT_HARD_DELETE_ENABLED = os.getenv(
+    "TENANT_HARD_DELETE_ENABLED", "false"
+).lower() in {"1", "true", "yes", "on"}
+TENANT_HARD_DELETE_INTERVAL_SECONDS = int(
+    os.getenv("TENANT_HARD_DELETE_INTERVAL_SECONDS", "21600")  # 6h default
+)
+TENANT_HARD_DELETE_BATCH_SIZE = int(
+    os.getenv("TENANT_HARD_DELETE_BATCH_SIZE", "10")  # 10 tenants per ciclo
+)
+
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
@@ -212,6 +228,9 @@ class OrchestratorWorker:
         self._last_sla_check_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
+        # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron timestamps.
+        self._tenant_hard_delete_enabled = TENANT_HARD_DELETE_ENABLED
+        self._last_tenant_hard_delete_at = 0.0
         self._metrics = {
             "poll_cycles": 0,
             "inbound_seen": 0,
@@ -263,6 +282,7 @@ class OrchestratorWorker:
         await self._poll_wompi_pending_voids_if_due()
         await self._anti_hibernation_ping_if_due()
         await self._check_human_takeover_sla_if_due()
+        await self._run_tenant_hard_delete_if_due()
 
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
         """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente.
@@ -1756,6 +1776,80 @@ class OrchestratorWorker:
                 message_id, exc,
             )
         return False
+
+    async def _run_tenant_hard_delete_if_due(self) -> None:
+        """Rev. 109 J.2.4.4 Fase 2 — Hard-delete tenants cuyo grace period expiró.
+
+        Cron interval (default 6h). Process batch (default 10 tenants/ciclo).
+        Cada tenant: snapshot ARCHIVE_BEFORE_HARD_DELETE a Storage bucket
+        'offboarding-archive' → invoca RPC fn_hard_delete_tenant atómica.
+
+        Idempotente: ya marcados deleted_at se saltan automáticamente vía
+        fn_list_tenants_pending_hard_delete (filtra deleted_at IS NULL).
+        Tolerante a errores: 1 tenant que falla NO detiene los demás.
+
+        DESACTIVADO por default (TENANT_HARD_DELETE_ENABLED=false). Founder
+        debe habilitar en Render env tras validar Fase 2 en staging.
+        """
+        if not self._tenant_hard_delete_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if (
+            self._last_tenant_hard_delete_at
+            and (now - self._last_tenant_hard_delete_at) < max(60, TENANT_HARD_DELETE_INTERVAL_SECONDS)
+        ):
+            return
+        self._last_tenant_hard_delete_at = now
+
+        # Lazy import — evita circular si el lib no está cargado al boot.
+        try:
+            sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+            from lib.tenant_offboarding import (  # noqa: PLC0415
+                hard_delete_tenant,
+                list_tenants_pending_hard_delete,
+                TenantOffboardingError,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "[OFFBOARDING-CRON] No se pudo importar lib.tenant_offboarding: %s. "
+                "Hard-delete cron desactivado en este proceso.",
+                exc,
+            )
+            self._tenant_hard_delete_enabled = False
+            return
+
+        pending = list_tenants_pending_hard_delete(self.supabase, limit=TENANT_HARD_DELETE_BATCH_SIZE)
+        if not pending:
+            return
+
+        logger.info("[OFFBOARDING-CRON] %s tenant(s) pending hard-delete", len(pending))
+
+        for row in pending:
+            tenant_id = row.get("tenant_id")
+            if not tenant_id:
+                continue
+            try:
+                result = hard_delete_tenant(self.supabase, str(tenant_id))
+                logger.info(
+                    "[OFFBOARDING-CRON] Hard-deleted tenant=%s archive=%s rows=%s",
+                    tenant_id, result.get("archive_path"), result.get("total_archived_rows"),
+                )
+                self._metrics.setdefault("tenant_hard_delete_count", 0)
+                self._metrics["tenant_hard_delete_count"] += 1
+            except TenantOffboardingError as exc:
+                logger.warning(
+                    "[OFFBOARDING-CRON] Skip tenant=%s (no elegible): %s",
+                    tenant_id, exc,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[OFFBOARDING-CRON] Error hard-delete tenant=%s: %s. "
+                    "Continuando con próximos tenants.",
+                    tenant_id, exc, exc_info=True,
+                )
 
     def _mark_outbound_failed(self, tenant_id: str, message_id: str, reason: str) -> None:
         if not tenant_id or not message_id:
