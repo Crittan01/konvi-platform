@@ -1077,3 +1077,114 @@ async def delete_conversation_note(
     }).eq("id", note_id).eq("tenant_id", tenant_id).execute()
 
     return None
+
+
+# ─── Rerun IA — re-procesar último turno del bot (P0-3 founder 2026-05-29) ───
+
+
+@router.post("/{conversation_id}/rerun", response_model=dict, status_code=202)
+async def rerun_last_inbound(
+    conversation_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Re-procesa el último inbound del cliente. El bot generará nuevo outbound.
+
+    Casos de uso (P0-3 backlog):
+      - Bot dio respuesta mala / con typo → operador quiere segunda toma.
+      - Operador actualizó catálogo/cupón/prompt y quiere ver el bot con
+        el nuevo contexto sin esperar al cliente.
+
+    Implementación:
+      1. Validar conv pertenece al tenant + está en bot_active (si está en
+         human_takeover, el rerun no tiene sentido — el operador ya tomó
+         control).
+      2. Encontrar el último inbound del cliente (direction='inbound', not
+         processing_status='skipped').
+      3. Clonar el inbound: nuevo UUID + processing_status='pending'.
+         NO modificar el original (audit trail).
+      4. Worker lo procesa naturalmente — genera nuevo outbound.
+
+    Sin Idempotency-Key intencional: cada rerun es operación distinta
+    (operador puede querer N reruns). Si se requiere dedup, el operador
+    debe limitar manualmente desde UI (botón deshabilitado durante 5s
+    post-clic, por ejemplo).
+    """
+    # 1. Validar conv del tenant + status bot_active.
+    conv_res = (
+        supabase.table("conversations")
+        .select("id, status")
+        .eq("id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_res.data:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    conv = conv_res.data[0]
+    if conv["status"] != "bot_active":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Rerun solo permitido cuando la conv está en bot_active "
+                f"(status actual: {conv['status']})."
+            ),
+        )
+
+    # 2. Buscar último inbound (no context_snapshot ni skipped).
+    last_inbound_res = (
+        supabase.table("messages")
+        .select("id, content, content_type, media_url, created_at")
+        .eq("conversation_id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .eq("direction", "inbound")
+        .neq("content_type", "context_snapshot")
+        .neq("processing_status", "skipped")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not last_inbound_res.data:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay mensajes inbound previos del cliente para re-procesar.",
+        )
+    last_inbound = last_inbound_res.data[0]
+
+    # 3. Clonar como nuevo inbound pending.
+    clone_payload = {
+        "conversation_id": conversation_id,
+        "tenant_id": tenant_id,
+        "direction": "inbound",
+        "content": last_inbound["content"],
+        "content_type": last_inbound["content_type"],
+        "media_url": last_inbound.get("media_url"),
+        "processing_status": "pending",
+        "processed": False,
+        # Audit: payload metadata explícita para distinguir reruns en logs
+        # post-mortem.
+        "payload": {
+            "_rerun": True,
+            "_rerun_source_msg_id": last_inbound["id"],
+            "_rerun_triggered_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+    insert_res = supabase.table("messages").insert(clone_payload).execute()
+    if not insert_res.data:
+        raise HTTPException(status_code=500, detail="No se pudo encolar rerun")
+
+    new_msg = insert_res.data[0]
+    logger.info(
+        "[RERUN] tenant=%s conv=%s source_msg=%s new_msg=%s",
+        tenant_id[:8], conversation_id[:8],
+        last_inbound["id"][:8], new_msg["id"][:8],
+    )
+    return {
+        "rerun_message_id": new_msg["id"],
+        "source_message_id": last_inbound["id"],
+        "status": "queued",
+        "note": "El bot procesará el inbound nuevamente en segundos.",
+    }
