@@ -6,6 +6,23 @@
 
 ---
 
+## 🗺️ Roadmap pendientes consolidado (2026-05-29)
+
+**Documento canónico**: [`docs/refactor/0006-roadmap-pending-sessions.md`](../docs/refactor/0006-roadmap-pending-sessions.md).
+
+Lee ese doc PRIMERO al retomar el proyecto — consolida:
+- 6 PRs abiertos pendientes de review + orden de merge
+- Bloqueantes humanos externos (V.3 legal · V.4 DPO · V.5 pen testing · V.7 dominio)
+- Próximas 5 sesiones priorizadas con esfuerzo + objetivos
+- Items diferidos a Platform Console + Storefront
+- Decisiones diferidas (hard-delete cron activación, Sentry trigger, etc.)
+
+**Plan K avance**: 16 / 18 IMPLEMENTED (89%) tras sesión 2026-05-29.
+
+**Próxima sesión recomendada**: J.2.11 Health dashboard providers PER-TENANT (3.5d).
+
+---
+
 ## Prioridades post-rev106 (orden recomendado)
 
 ### P0 — Sem 6: Re-uso framework común para HSM templates (~2-3 días)
