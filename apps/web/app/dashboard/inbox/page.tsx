@@ -338,7 +338,10 @@ function groupConvsByPhone(convs: Conversation[]): ConvGroup[] {
     byPhone.set(key, arr)
   }
   const groups: ConvGroup[] = []
-  for (const [phone, list] of byPhone) {
+  // forEach() en vez de for-of directo: tsconfig del proyecto NO tiene
+  // downlevelIteration y target ES5 — iterar Map<,> directo rompe
+  // `next build` (baseline 2026-05-29).
+  byPhone.forEach((list, phone) => {
     const sorted = [...list].sort((a, b) => {
       // Primero por status priority (bot_active gana), luego por timestamp desc.
       const pa = _STATUS_PRIORITY[a.status] ?? 99
@@ -350,7 +353,7 @@ function groupConvsByPhone(convs: Conversation[]): ConvGroup[] {
     })
     const [primary, ...others] = sorted
     groups.push({ phone, primary, others })
-  }
+  })
   // Ordenar grupos por última actividad de su primary (más reciente primero).
   groups.sort((a, b) => {
     const ta = new Date(a.primary.last_interaction_at ?? a.primary.created_at).getTime()
