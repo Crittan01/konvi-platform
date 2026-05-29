@@ -112,6 +112,9 @@ app.include_router(envia_webhook.router, prefix="/api/v1/webhooks/envia")
 # Rev. 108 — Aveonline webhook estados de guía (dossier §6.2)
 app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline")
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
+# Rev. 109 ADR-0017 — Multi-agente per tenant (templates + AI suggest).
+from routers import ai_agents as _ai_agents  # noqa: E402
+app.include_router(_ai_agents.router, prefix="/api/v1")
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
 app.include_router(claims.router, prefix="/api/v1/claims")
 app.include_router(purchases.router, prefix="/api/v1/purchases")
