@@ -5,6 +5,7 @@ import { Bot, BookOpen, Sparkles } from 'lucide-react'
 import { AiAgentForm } from './ai-agent-form'
 import { BotPreview } from './bot-preview'
 import { ReadinessCard } from './readiness-card'
+import { AgentsList } from './agents-list'
 
 const TONO_LABEL: Record<string, string> = {
   amigable: 'Amigable y cercano',
@@ -26,7 +27,13 @@ export default async function AiAgentsPage() {
   }
 
   const [{ data }, { data: tenant }, { data: kbStats }, { data: catalogStats }, { data: integrations }] = await Promise.all([
-    supabase.from('ai_agents').select('name, role_description, strict_guardrails, role').eq('tenant_id', tenantId).maybeSingle(),
+    // Rev. 109 ADR-0017 — multi-agente. order is_default desc para que
+    // el primero retornado sea siempre el default cuando existan varios.
+    supabase.from('ai_agents')
+      .select('id, name, role_description, strict_guardrails, role, is_default')
+      .eq('tenant_id', tenantId)
+      .order('is_default', { ascending: false })
+      .order('name', { ascending: true }),
     supabase.from('tenants').select(
       'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin, nit, email_contacto, telefono_contacto'
     ).eq('id', tenantId).maybeSingle(),
@@ -57,10 +64,20 @@ export default async function AiAgentsPage() {
     pagos:     kbDocs.filter(d => d.is_active && d.category === 'pagos').length,
   }
 
-  const agent = data || {
+  // Rev. 109 ADR-0017 — multi-agente. data ahora es array (no single).
+  const agentsList = (data ?? []) as Array<{
+    id?: string
+    name: string
+    role_description: string
+    strict_guardrails: boolean
+    role?: string | null
+    is_default?: boolean | null
+  }>
+  const agent = agentsList[0] || {
     name: 'Vendedor Oficial',
     role_description: 'Eres el agente de atención al cliente de esta tienda por WhatsApp. Te encargas de asistir e informar cordialmente.',
-    strict_guardrails: true
+    strict_guardrails: true,
+    role: 'sales',
   }
 
   const hasFilosofia = !!(tenant?.mision || tenant?.valores)
@@ -203,6 +220,9 @@ export default async function AiAgentsPage() {
           cómo actúa el bot en ventas: su nombre, qué ofrece primero, cómo cierra.
         </p>
       </div>
+
+      {/* Rev. 109 ADR-0017 — lista multi-agente cuando hay >1 agente */}
+      <AgentsList agents={agentsList} />
 
       <AiAgentForm agent={agent} canWrite={canWrite} saveAiAgent={saveAiAgent} />
 

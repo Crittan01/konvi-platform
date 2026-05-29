@@ -551,14 +551,17 @@ async def _run_agentic_full(
             tenant_id[:8], _pm_exc,
         )
 
-    # Rev. 109 backlog #2 — Multi-agente per-tenant. Lee el agente
-    # default del tenant; fallback "Sara Camila" si no hay row en
-    # tenant_agents (backward-compat con tenants pre-migration).
+    # Rev. 109 ADR-0017 — Multi-agente per-tenant con router pre-LLM.
+    # Si tenant tiene >1 agente activo, agent_router clasifica el inbound
+    # por heurística (cero costo LLM) y elige el agente apropiado.
+    # Si tenant tiene 1 agente → default (backward-compat).
     try:
         from lib.tenant_agents import get_active_agent
-        _agent = get_active_agent(supabase, tenant_id=tenant_id)
+        _agent = get_active_agent(
+            supabase, tenant_id=tenant_id, inbound_text=content,
+        )
     except Exception:
-        _agent = {"name": "Sara Camila", "pitch": None, "tone": None}
+        _agent = {"name": "Sara Camila"}
 
     # Rev. 109 auditoría — pitch/tone YA NO se duplican en ai_agents.
     # Única fuente verdad: tenants.business_pitch + tenants.tono_comunicacion.
@@ -1901,6 +1904,23 @@ async def _run_agentic_full(
                 conversation_id[:8], _resolved_state.value, _ps_exc,
             )
             _allowed_tools = None  # monolito = todas las tools
+
+    # Rev. 109 ADR-0017 — multi-agente tools enforcement.
+    # Si el agente tiene `tools_allowed` restringido, intersectamos con
+    # el subset de estado. Ej: agente Support nunca expone add_to_cart
+    # aunque el estado lo permita.
+    _agent_tools = _agent.get("tools_allowed") if isinstance(_agent, dict) else None
+    if _agent_tools and isinstance(_agent_tools, list):
+        _agent_tools_set = {str(t) for t in _agent_tools if t}
+        if _allowed_tools is None:
+            _allowed_tools = _agent_tools_set
+        else:
+            _allowed_tools = _allowed_tools & _agent_tools_set
+        logger.info(
+            "[AGENTIC_AGENT_TOOLS] conv=%s agent=%s tools_after_intersect=%d",
+            conversation_id[:8], _agent.get("name") or "?",
+            len(_allowed_tools),
+        )
     # ─── /per-state ───
 
     # Ejecutar agente.

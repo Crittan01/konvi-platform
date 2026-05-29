@@ -49,24 +49,50 @@ def get_active_agent(
     *,
     tenant_id: str,
     intent: Optional[str] = None,
+    inbound_text: Optional[str] = None,
 ) -> dict:
     """Retorna el agente activo del tenant.
 
-    Hoy: SIEMPRE el agente con is_default=true.
-    Futuro: si `intent` provisto, router selecciona agente especializado.
+    Si el tenant tiene >1 agente Y se provee `inbound_text`, el router
+    pre-LLM (agent_router) clasifica el intent y elige el agente
+    apropiado (sales / support / claims / marketing).
+
+    Si tenant tiene 1 agente o no se provee inbound → default agent.
 
     Args:
         supabase: cliente DB.
         tenant_id: UUID del tenant.
-        intent: clasificación opcional ('sales' | 'support' | 'claims' |
-            'marketing'). Hoy ignorado.
+        intent: hint manual del rol (sobreescribe el clasificador).
+        inbound_text: el mensaje del cliente para clasificar.
 
     Returns:
-        Dict del agente. Si tenant_agents no existe / vacío → fallback
-        "Sara Camila" con pitch=None (build_system_prompt aplica default).
+        Dict del agente. Fallback "Sara Camila" si ai_agents vacío / DB error.
     """
     if not tenant_id:
         return dict(_FALLBACK_AGENT)
+
+    # Multi-agente: si hay >1 agente activo, usar router.
+    if inbound_text:
+        try:
+            from agentic.agent_router import (
+                select_agent_for_inbound,
+                classify_intent_to_role,
+            )
+            all_agents = list_tenant_agents(supabase, tenant_id=tenant_id)
+            if len(all_agents) > 1:
+                if intent:
+                    # Hint manual: buscar agente con ese rol.
+                    for ag in all_agents:
+                        if (ag.get("role") or "").lower() == intent.lower():
+                            return ag
+                return select_agent_for_inbound(
+                    inbound_text=inbound_text, agents=all_agents,
+                )
+        except Exception as exc:
+            logger.info(
+                "[AGENT] router multi-agente falló tenant=%s: %s — "
+                "fallback default", tenant_id[:8], exc,
+            )
 
     # Rev. 109 auditoría — pitch/tone YA NO viven aquí. Vienen de tenants
     # como única fuente de verdad. ai_agents solo guarda el comportamiento
