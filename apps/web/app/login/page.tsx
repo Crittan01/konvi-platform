@@ -12,6 +12,12 @@ export default async function LoginPage({
   const { data } = await supabase.auth.getUser()
 
   if (data?.user) {
+    // Rev. 109 J.2.4.3 — si ya tiene sesión pero le falta segundo factor,
+    // mandarlo al challenge en lugar del dashboard.
+    const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1') {
+      redirect('/login/mfa')
+    }
     redirect('/dashboard')
   }
 
@@ -29,6 +35,15 @@ export default async function LoginPage({
     if (error) {
       return redirect('/login?message=Correo+o+contraseña+incorrectos')
     }
+
+    // Rev. 109 J.2.4.3 — Si el usuario tiene MFA activa, el AAL inicial
+    // post-password es 'aal1'. Necesita challenge para subir a 'aal2'.
+    const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1') {
+      // Tiene factor verified pero sesión actual es solo password.
+      return redirect('/login/mfa')
+    }
+
     return redirect('/dashboard')
   }
 
