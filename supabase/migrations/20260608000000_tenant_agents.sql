@@ -83,7 +83,7 @@ CREATE POLICY tenant_agents_isolation ON tenant_agents
   FOR ALL
   USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_memberships
+      SELECT tenant_id FROM tenant_users
       WHERE user_id = auth.uid()
     )
   );
