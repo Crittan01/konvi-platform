@@ -807,3 +807,49 @@ class TestMultiAgentFallback:
         result = self._select(inbound_text="hola", agents=[])
         assert result["name"] == "Sara Camila"  # hardcoded backward-compat
         assert result["is_default"] is True
+
+
+# ─── Normalización line wraps (UX prompt sugerido) ──────────────────────────
+
+
+class TestNormalizeLineWraps:
+    """Founder UAT: la IA wrappa líneas a 60-70 chars rompiendo oraciones.
+    Normalizamos: \\n\\n preservado, \\n+bullet preservado, \\n simple → espacio."""
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "api"))
+        from routers.ai_agents import _normalize_line_wraps
+        self._norm = _normalize_line_wraps
+
+    def test_oracion_partida_se_une(self):
+        text = "Eres Andres, especialista en soporte de\nKAIU Living Natural."
+        out = self._norm(text)
+        assert "soporte de KAIU" in out
+        assert "\n" not in out
+
+    def test_separador_parrafo_preservado(self):
+        text = "Primer parrafo.\n\nSegundo parrafo."
+        out = self._norm(text)
+        assert "\n\n" in out
+
+    def test_bullet_preservado(self):
+        text = "Reglas:\n• Primera regla\n• Segunda regla"
+        out = self._norm(text)
+        assert "\n• Primera" in out
+        assert "\n• Segunda" in out
+
+    def test_bullet_con_wrap_se_pega(self):
+        # Bullet wrappa a la siguiente línea SIN bullet → pegar al bullet
+        text = "• Cuando hay problema, valida en el\n  sistema."
+        out = self._norm(text)
+        assert "valida en el sistema" in out
+
+    def test_numero_lista_preservado(self):
+        text = "Pasos:\n1. Primero\n2. Segundo"
+        out = self._norm(text)
+        assert "\n1. Primero" in out
+        assert "\n2. Segundo" in out
+
+    def test_texto_vacio_safe(self):
+        assert self._norm("") == ""
+        assert self._norm(None) is None

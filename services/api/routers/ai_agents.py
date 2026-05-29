@@ -248,6 +248,14 @@ async def suggest_agent_prompt(
             f"Eres {agent_name}, asistente de {tenant_name} por WhatsApp."
         )
 
+    # Normalización de saltos: la IA a veces wrappa líneas a 60-70 chars
+    # (rompe oraciones a mitad). Reglas:
+    #   • '\n\n' → preservar (separa párrafos)
+    #   • '\n' simple ANTES de bullet ('•', '-', '*') o número → preservar
+    #     (es un item de lista)
+    #   • '\n' simple en otro contexto → reemplazar por espacio
+    suggested = _normalize_line_wraps(suggested)
+
     # Capa 3 de control: truncate elegante si supera 2500 chars
     # (coincide con UI/backend limit). Corta en última oración completa
     # para no dejar texto mid-palabra.
@@ -260,6 +268,38 @@ async def suggest_agent_prompt(
         suggested_role_description=suggested,
         model_used=model_used,
     )
+
+
+def _normalize_line_wraps(text: str) -> str:
+    """Normaliza saltos de línea artificiales de la IA.
+
+    Problema observado: Gemini wrappa líneas a 60-70 chars rompiendo
+    oraciones a mitad ("Eres Andres, especialista en soporte de\\nKAIU
+    Living Natural...") → visualmente confuso al operador.
+
+    Reglas (preserva estructura, limpia ruido):
+      • '\\n\\n' → preservar (separadores de párrafo intencionales).
+      • '\\n' seguido de '•' / '-' / '*' / '1.' '2.' ... → preservar (lista).
+      • '\\n' simple en otro contexto → reemplazar por espacio.
+    """
+    if not text:
+        return text
+    import re
+    # Marker temporal para preservar separadores de párrafo y de lista.
+    PARA_MARKER = "\x00PARA\x00"
+    LIST_MARKER = "\x00LIST\x00"
+    # 1. Preservar \n\n.
+    text = text.replace("\n\n", PARA_MARKER)
+    # 2. Preservar \n seguido de bullet/número.
+    text = re.sub(r"\n(?=\s*(?:[•\-\*]|\d+\.))", LIST_MARKER, text)
+    # 3. Resto de \n simples → espacio.
+    text = text.replace("\n", " ")
+    # 4. Restaurar markers.
+    text = text.replace(PARA_MARKER, "\n\n")
+    text = text.replace(LIST_MARKER, "\n")
+    # 5. Limpiar espacios duplicados sin tocar saltos.
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
 
 
 def _truncate_to_last_sentence(text: str, *, max_chars: int) -> str:
@@ -332,6 +372,13 @@ REGLAS DE LONGITUD (target):
 - Texto compacto, denso en valor, sin filler.
 - Si la información lo permite, profundiza con ejemplos específicos
   del catálogo y filosofía del negocio.
+
+REGLAS DE FORMATO (estricto):
+- NO uses line wraps artificiales dentro de oraciones. Una oración
+  completa por línea.
+- Separa párrafos con UNA línea en blanco (\\n\\n).
+- Listas con bullets: una idea por bullet, sin wrap a mitad.
+- NO uses Markdown ni headers ===, solo texto plano.
 
 REGLAS DE CONTENIDO:
 - Español Colombia natural.
