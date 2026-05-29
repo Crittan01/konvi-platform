@@ -191,11 +191,14 @@ async def suggest_agent_prompt(
     )
 
     # 5. Invocar cascade Gemini Flash (mismo que el orchestrator usa).
+    # Capa 2 de control: max_output_tokens hard cap técnico.
+    #   ~650 tokens ≈ 2500 chars en español (4 chars/token aprox).
     suggested = ""
     model_used: Optional[str] = None
     try:
         from llm_cascade import cascade_invoke
         from orchestrator import _get_genai_client
+        from google.genai import types as genai_types
 
         client = _get_genai_client()
 
@@ -203,6 +206,13 @@ async def suggest_agent_prompt(
             return client.models.generate_content(
                 model=model_name,
                 contents=meta_prompt,
+                config=genai_types.GenerateContentConfig(
+                    # 800 tokens ≈ 3000 chars upper bound. La capa 3
+                    # (_truncate_to_last_sentence) recorta a 2500 si
+                    # excede. Permitir margen evita textos muy cortos.
+                    max_output_tokens=800,
+                    temperature=0.5,
+                ),
             )
 
         outcome = cascade_invoke(
@@ -222,11 +232,26 @@ async def suggest_agent_prompt(
             tenant_id[:8], exc,
         )
 
-    # Fallback: si IA degraded o vacío, devuelve solo el skeleton.
-    if not suggested:
+    # Fallback robusto:
+    #   • Vacío o muy corto (< 500 chars) → Gemini saturado o truncó la
+    #     respuesta. Devolvemos el skeleton (700 chars+ de contexto útil)
+    #     en lugar de un fragmento inútil al operador.
+    #   • Cualquier otro caso → texto generado tal cual.
+    _MIN_USEFUL_CHARS = 500
+    if not suggested or len(suggested) < _MIN_USEFUL_CHARS:
+        logger.info(
+            "[AI_AGENTS] suggest respuesta corta (%d chars) tenant=%s — "
+            "fallback skeleton (Gemini saturado o truncó)",
+            len(suggested), tenant_id[:8],
+        )
         suggested = skeleton or (
             f"Eres {agent_name}, asistente de {tenant_name} por WhatsApp."
         )
+
+    # Capa 3 de control: truncate elegante si supera 2500 chars
+    # (coincide con UI/backend limit). Corta en última oración completa
+    # para no dejar texto mid-palabra.
+    suggested = _truncate_to_last_sentence(suggested, max_chars=2500)
 
     return SuggestResponse(
         role=role,
@@ -235,6 +260,30 @@ async def suggest_agent_prompt(
         suggested_role_description=suggested,
         model_used=model_used,
     )
+
+
+def _truncate_to_last_sentence(text: str, *, max_chars: int) -> str:
+    """Trunca el texto en la última oración completa antes de max_chars.
+
+    Garantiza:
+      • Output ≤ max_chars.
+      • Si hay punto final dentro del límite, corta ahí (oración completa).
+      • Si NO hay punto (raro), corta en max_chars-1 + '.' al final.
+
+    No agrega "..." — el resultado debe verse natural.
+    """
+    if not text or len(text) <= max_chars:
+        return text
+    # Buscar el último '.', '!', '?' o '\n' antes de max_chars.
+    head = text[:max_chars]
+    # Priorizar fin de párrafo, después fin de oración.
+    for sep in ("\n\n", ". ", ".\n", "! ", "? "):
+        idx = head.rfind(sep)
+        if idx > max_chars * 0.5:  # al menos 50% del texto
+            # +1 incluye el separador.
+            return text[:idx + len(sep)].rstrip()
+    # Sin separador útil — corte duro con punto.
+    return head.rstrip().rstrip(",;:") + "."
 
 
 def _build_meta_prompt(
@@ -278,8 +327,14 @@ CONTEXTO DEL NEGOCIO:{pitch_line}{mision_line}{vision_line}{valores_line}{tono_l
 TEMPLATE BASE (personalízalo, NO lo copies literal):
 \"\"\"{template_skeleton}\"\"\"
 
-REGLAS:
-- 200-400 palabras, español Colombia.
+REGLAS DE LONGITUD (target):
+- Objetivo: 1800-2300 caracteres (~300-350 palabras).
+- Texto compacto, denso en valor, sin filler.
+- Si la información lo permite, profundiza con ejemplos específicos
+  del catálogo y filosofía del negocio.
+
+REGLAS DE CONTENIDO:
+- Español Colombia natural.
 - Adapta el lenguaje al vertical/identidad del negocio.
 - NO inventes características de producto que no estén en el catálogo.
 - NO repitas la filosofía literal (el bot la tiene inyectada aparte).
