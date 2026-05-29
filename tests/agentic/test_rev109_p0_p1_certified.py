@@ -332,3 +332,43 @@ class TestOutboundDistinguishesRecipient:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ─── BUG 41 — Cupón rechazo enriquecido (mínimo + cuánto falta) ─────────────
+
+
+class TestBUG41CouponRejectionEnriched:
+    """BUG 41 — bot decía solo 'no alcanza el mínimo' sin especificar."""
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "api" / "lib"))
+        from coupons import validate_coupon_applicable
+        self._validate = validate_coupon_applicable
+        self._coupon = {
+            'id': 'x', 'code': 'KAIU15', 'discount_type': 'percent',
+            'discount_value': 15, 'is_active': True,
+            'min_subtotal_cents': 4000000, 'max_redemptions': 10,
+            'redemptions_count': 0, 'valid_from': None, 'valid_until': None,
+        }
+
+    def test_min_no_met_message_includes_code_min_actual_falta(self):
+        r = self._validate(self._coupon, subtotal_cents=1800000)
+        msg = r.user_message
+        assert "KAIU15" in msg
+        assert "$40.000" in msg
+        assert "$18.000" in msg
+        assert "$22.000" in msg
+
+    def test_min_met_returns_ok(self):
+        r = self._validate(self._coupon, subtotal_cents=5400000)
+        assert r.ok is True
+        assert r.reason == "ok"
+
+    def test_inactive_coupon_includes_code(self):
+        c = {**self._coupon, 'code': 'PRUEBA10', 'is_active': False}
+        r = self._validate(c, subtotal_cents=5400000)
+        assert "PRUEBA10" in r.user_message
+
+    def test_not_found_fallback_generic(self):
+        r = self._validate({}, subtotal_cents=5400000)
+        assert "no encontrado" in r.user_message.lower()
