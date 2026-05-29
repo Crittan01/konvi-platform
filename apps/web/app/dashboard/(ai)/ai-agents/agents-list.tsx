@@ -157,9 +157,12 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     // Solo enviar fallback_for_roles si estamos editando el default
     // (server action ignora para non-default igual, pero limpiamos payload).
     if (mode === 'edit' && editing?.is_default) {
-      for (const r of fallbackRoles) {
+      // Array.from() en vez de for-of directo: el tsconfig del proyecto NO
+      // tiene downlevelIteration habilitado, e iterar Set<T> directo rompe
+      // `next build` (baseline 2026-05-29 — bug detectado al validar build).
+      Array.from(fallbackRoles).forEach(r => {
         fd.append('fallback_for_roles', r)
-      }
+      })
     }
 
     startTransition(async () => {

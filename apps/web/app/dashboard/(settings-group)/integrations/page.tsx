@@ -21,6 +21,7 @@ export default async function IntegrationsPage({
 }: {
   searchParams: {
     connected?: string; error?: string
+    meli_same_user?: string  // baseline 2026-05-29 — campo faltante en type detectado al validar `next build`
     tg_test?: string; tg_msg?: string
     wa_test?: string; wa_msg?: string
     envia_test?: string; envia_msg?: string
