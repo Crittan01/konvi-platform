@@ -63,20 +63,30 @@ export const STATUS_CONFIG = {
   },
 }
 
-// Rev. 109 founder 2026-05-28 — default "Activas" muestra accionables
-// (Bot + Agente humano). Cerradas + Opt-out quedan accesibles vía chip
-// para auditoría histórica, pero no saturan el listado day-to-day.
+// Rev. 109 founder 2026-05-29 — filtros simplificados de 7 → 4 chips.
+//
+// Justificación: la decisión cognitiva del operador es de 3 caminos:
+//   1) "Lo que tengo que atender HOY" → Activas (default).
+//   2) "Lo que me está rompiendo SLA AHORA" → ⏰ SLA breach.
+//   3) "Compliance/auditoría puntual" → Opt-out.
+//   + Fallback drill-down → Todas (incluye cerradas).
+//
+// Eliminados:
+//   - Bot / Agente: redundantes con "Activas" (cada row ya tiene su badge
+//     de status colorcoded → no hace falta filtrar para distinguirlos).
+//   - Cerradas: cubierto por "Todas" (drill-down) + "Ver archivadas" toggle
+//     (histórico permanente >90d). Filtrar solo cerradas activas (≤90d) no
+//     es un caso de uso real recurrente.
+//
+// Cobertura preservada: el type FilterStatus mantiene los valores legacy
+// (bot_active, human_takeover, closed) para que filtros via URL ?filter=X
+// sigan funcionando si algún operador tiene bookmarks viejos. La UI sólo
+// ofrece los 4 chips canónicos.
 export const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
-  { value: 'active',         label: 'Activas' },
-  // Rev. 109 founder 2026-05-28 — SLA breach: human_takeover sin respuesta
-  // humana ≥SLA_BREACH_HOURS. Cierra loop del "super delicado": operador
-  // ve qué convs están sin atender + alerta visual.
-  { value: 'sla_breach',     label: '⏰ SLA breach' },
-  { value: 'all',            label: 'Todas' },
-  { value: 'bot_active',     label: 'Bot' },
-  { value: 'human_takeover', label: 'Agente' },
-  { value: 'closed',         label: 'Cerradas' },
-  { value: 'opted_out',      label: 'Opt-out' },
+  { value: 'active',     label: 'Activas' },
+  { value: 'sla_breach', label: '⏰ SLA breach' },
+  { value: 'opted_out',  label: 'Opt-out' },
+  { value: 'all',        label: 'Todas' },
 ]
 
 // Rev. 109 — agentic_state badge UI (Day 5).
