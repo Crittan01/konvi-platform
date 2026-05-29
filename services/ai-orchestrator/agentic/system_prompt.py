@@ -202,6 +202,47 @@ def _render_carriers_block(carriers: Optional[list]) -> str:
     return "\n".join(lines)
 
 
+def _render_philosophy_block(philosophy: Optional[dict]) -> str:
+    """Rev. 109 auditoría — inyecta filosofía del negocio (tenants.*).
+
+    Lee misión / visión / valores / tono_comunicacion configurados por
+    el operador en Settings → Filosofía del Negocio. Sin esto, el bot
+    desconoce el "por qué" del negocio (gap arquitectónico previo).
+
+    Multi-vertical agnóstico: si los campos están vacíos, el bloque NO
+    se inyecta (no inventa filosofía). El operador la configura cuando
+    quiera enriquecer el contexto del bot.
+
+    Args:
+        philosophy: dict con keys mision, vision, valores, tono_comunicacion.
+            None o todos los keys vacíos → retorna string vacío.
+    """
+    if not philosophy or not isinstance(philosophy, dict):
+        return ""
+    mision = (philosophy.get("mision") or "").strip()
+    vision = (philosophy.get("vision") or "").strip()
+    valores = (philosophy.get("valores") or "").strip()
+    if not any((mision, vision, valores)):
+        return ""
+
+    lines = [
+        "═══════════════════════════════════════════════════════════════════",
+        "FILOSOFÍA DEL NEGOCIO (contexto identitario — NO citar literal al cliente)",
+        "═══════════════════════════════════════════════════════════════════",
+        "Esta es la esencia del negocio que representas. Te informa el porqué",
+        "de las decisiones y el tono. NO la repitas literal al cliente: úsala",
+        "como contexto para tu razonamiento, tono y prioridades.",
+        "",
+    ]
+    if mision:
+        lines.append(f"• Misión: {mision}")
+    if vision:
+        lines.append(f"• Visión: {vision}")
+    if valores:
+        lines.append(f"• Valores: {valores}")
+    return "\n".join(lines)
+
+
 def _render_contact_block(
     contact_record: Optional[dict],
     tenant_name: str = "el negocio",
@@ -307,29 +348,39 @@ def build_system_prompt(
     contact_record: Optional[dict] = None,
     carriers: Optional[list[dict]] = None,
     payment_methods: Optional[dict] = None,
+    tenant_philosophy: Optional[dict] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
+    Multi-vertical agnóstico (rev. 109 auditoría): el pitch viene del
+    tenant config; si está vacío, fallback NEUTRO sin asumir vertical.
+    Si llega `tenant_philosophy` con mision/vision/valores, se inyecta
+    como bloque "Filosofía del negocio" en el prompt.
+
     El prompt declara:
       • Identidad del agente + tenant.
+      • Filosofía del negocio (opcional, desde tenants).
       • Reglas de negocio NO violables (anti-hallu, Habeas Data, etc.).
       • Cuándo usar cada tool (descriptivo, no procedural).
       • Estilo conversacional (cordial, español CO, máx 4 líneas).
       • Saludo time-aware: si server_greeting no se pasa, se computa
-        desde hora Colombia. Inyectado al prompt como regla obligatoria
-        para evitar rewrite downstream por `time-aware-greeting` invariant.
+        desde hora Colombia.
 
     El LLM lee la documentación de cada tool (auto-injected por Gemini
     via tools=...) y decide cuándo invocar cuál.
     """
+    # Rev. 109 auditoría: pitch agnóstico (no hardcodear vertical).
+    # Orden: tenant_pitch (ai_agents/legacy) > tenant_business_pitch
+    # (tenants config) > fallback neutro "asesor/a de {tenant_name}".
     pitch = tenant_pitch or tenant_business_pitch or (
-        f"asesora de {tenant_name}, cosmética artesanal natural"
+        f"asesor/a de {tenant_name}"
     )
     tone = tenant_tone or "cordial y profesional, en español Colombia"
     catalog_block = _render_catalog_block(catalog or [])
     contact_block = _render_contact_block(contact_record, tenant_name=tenant_name)
     carriers_block = _render_carriers_block(carriers)
     payment_methods_block = _render_payment_methods_block(payment_methods)
+    philosophy_block = _render_philosophy_block(tenant_philosophy)
     if server_greeting is None:
         server_greeting, _ = _co_time_of_day_greeting()
 
@@ -346,6 +397,8 @@ turnos anteriores, NO vuelvas a saludar — responde directo a su
 mensaje.
 
 {contact_block}
+
+{philosophy_block}
 
 ═══════════════════════════════════════════════════════════════════
 REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)

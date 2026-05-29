@@ -494,16 +494,27 @@ async def _run_agentic_full(
     tenant_name = "el negocio"
     tenant_pitch = None
     tenant_tone = None
+    tenant_philosophy: Optional[dict] = None
     try:
         ten_row = (
             supabase.table("tenants")
-            .select("name, business_pitch, tono_comunicacion")
+            .select(
+                "name, business_pitch, tono_comunicacion, "
+                "mision, vision, valores",
+            )
             .eq("id", tenant_id).single().execute()
         )
         td = ten_row.data or {}
         tenant_name = td.get("name") or tenant_name
         tenant_pitch = td.get("business_pitch") or None
         tenant_tone = td.get("tono_comunicacion") or None
+        # Rev. 109 auditoría — inyectar filosofía completa al system_prompt.
+        if any(td.get(k) for k in ("mision", "vision", "valores")):
+            tenant_philosophy = {
+                "mision": td.get("mision"),
+                "vision": td.get("vision"),
+                "valores": td.get("valores"),
+            }
     except Exception:
         pass
 
@@ -549,15 +560,19 @@ async def _run_agentic_full(
     except Exception:
         _agent = {"name": "Sara Camila", "pitch": None, "tone": None}
 
+    # Rev. 109 auditoría — pitch/tone YA NO se duplican en ai_agents.
+    # Única fuente verdad: tenants.business_pitch + tenants.tono_comunicacion.
+    # Filosofía completa inyectada como bloque dedicado al system_prompt.
     system_prompt = build_system_prompt(
         tenant_name=tenant_name,
         catalog=catalog,
         agent_name=_agent.get("name") or "Sara Camila",
-        tenant_pitch=(_agent.get("pitch") or tenant_pitch),
-        tenant_tone=(_agent.get("tone") or tenant_tone),
+        tenant_pitch=tenant_pitch,
+        tenant_tone=tenant_tone,
         contact_record=contact or {},
         carriers=carriers_caps,
         payment_methods=payment_methods_cfg,
+        tenant_philosophy=tenant_philosophy,
     )
 
     # ── Pre-LLM resolver determinístico: variant selection continuation ──
@@ -2192,14 +2207,12 @@ async def _run_agentic_shadow(
         from lib.tenant_agents import get_active_agent
         _agent_shadow = get_active_agent(supabase, tenant_id=tenant_id)
     except Exception:
-        _agent_shadow = {"name": "Sara Camila", "pitch": None, "tone": None}
+        _agent_shadow = {"name": "Sara Camila"}
 
     system_prompt = build_system_prompt(
         tenant_name=os.getenv("TENANT_DEFAULT_NAME", "el negocio"),
         catalog=catalog,
         agent_name=_agent_shadow.get("name") or "Sara Camila",
-        tenant_pitch=_agent_shadow.get("pitch"),
-        tenant_tone=_agent_shadow.get("tone"),
     )
 
     started_at = time.monotonic()
