@@ -6,6 +6,48 @@
 
 ---
 
+## Plan K Sesión 2026-05-29 — items cerrados
+
+Audit exhaustivo del Plan K (workflow 22 agents paralelos) detectó 4 items
+PARTIAL del foundation layer. Cerrados:
+
+- **F.2** rate-limiting `TokenBucket` en `IntegrationClient.execute()` — PR #2
+- **H.2.1** Envia idempotency wireado en runtime — PR #2
+- **F.10** `fn_cleanup_webhook_secrets()` RPC + worker hourly invoke — PR #3 — migration aplicada remote 2026-05-29
+- **H.3.1** Wompi `GET /transactions/{id}` — **CLOSED-AS-DEFERRED** ([reporte](../docs/reports/h31_wompi_get_transaction_closure.md))
+- **J.2.4.4** Tenant offboarding Fase 1 backend — PR #4 — migration aplicada remote 2026-05-29. Fase 2 (cron + UI + middleware) pendiente sesión siguiente
+
+**Plan K avance: 10 → 15 IMPLEMENTED** (83%).
+
+---
+
+## Platform Console — Items diferidos (vista cross-tenant)
+
+Decisión arquitectónica founder 2026-05-29: features con vista **cross-tenant**
+NO se construyen en Tenant Console; se documentan como pendientes Platform
+Console (NO existe — bloqueante OQ-P01).
+
+Tenant Console (apps/web actual) construye vista **PER-TENANT** de:
+- J.2.11 Health dashboard providers — el tenant ve la salud de SUS integraciones
+- I.8 Billing aggregator — el tenant ve SUS costos del mes
+- J.2.4.3 MFA TOTP — cada user activa MFA en su Settings
+- I.7 Onboarding Wizard — guía 5-7 pasos al tenant nuevo
+
+Platform Console (DIFERIDO ~6 meses post-deploy) tendrá vista cross-tenant de
+estos features (reusando backend) + features 100% nuevas (tenant CRUD admin,
+audit log global, subscription billing platform-level).
+
+Detalle completo + roadmap: [`docs/refactor/0005-platform-console-pending-items.md`](../docs/refactor/0005-platform-console-pending-items.md).
+
+**Trigger activación Platform Console**: 50+ tenants, founder pide vista global,
+compliance externa, o pricing tier complejo. Esfuerzo total estimado ~20-25d.
+
+**Excepción Sentry tracing (J.2.7.4)**: NO requiere UI propia — usa
+sentry.io/organizations/konvi/ directamente. Solo founder accede. SDK
+instrumentation se implementa AHORA en backend (sirve a ambos consoles).
+
+---
+
 ## Prioridades post-rev106 (orden recomendado)
 
 ### P0 — Sem 6: Re-uso framework común para HSM templates (~2-3 días)
