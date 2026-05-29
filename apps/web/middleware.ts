@@ -66,6 +66,30 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Rev. 109 J.2.4.3 — Enforcement MFA en /dashboard/*.
+  // Si user tiene factor TOTP verified pero la sesión actual es solo
+  // password (AAL1), bloquea acceso y manda al challenge.
+  //
+  // Excepciones:
+  //   - /login/mfa: el challenge en sí
+  //   - sessionStorage flag mfa_recovery_used permite acceso (manejado por
+  //     client-side, no por middleware — recovery code consumido OK).
+  if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
+    try {
+      const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      const needsMfa =
+        aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1'
+      if (needsMfa) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/login/mfa'
+        return NextResponse.redirect(url)
+      }
+    } catch {
+      // Si el check de AAL falla (network/timeout), prefer fail open
+      // para no bloquear users por outage temporal de Supabase Auth.
+    }
+  }
+
   // Nota: cuentas inactivas son manejadas nativamente por Supabase Auth (ban_duration).
   // Un usuario baneado no puede obtener sesión válida — getUser() retorna null → redirect a /login.
   // No se necesita check adicional aquí.
