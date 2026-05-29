@@ -46,8 +46,20 @@ class EmptyPromiseInvariantTests(unittest.TestCase):
         self.assertIn("cotizar", r.replacement_text.lower())
 
     def test_estoy_calculando_con_quote_shipping_ok(self):
-        """Si corrió quote_shipping, la 'promesa' es coherente → OK."""
-        text = "Listo, estoy calculando opciones — aquí van:"
+        """Rev. 109 BUG 42 update — si corrió quote_shipping Y el outbound
+        incluye CONTENIDO SUSTANTIVO (precio, lista, pregunta concreta), OK.
+
+        El invariant rev109 ahora exige contenido útil además de la promesa
+        — prevenir el patrón "Un momento, ya te confirmo" + tools=N pero
+        cliente queda esperando sin nada útil.
+        """
+        text = (
+            "Listo, estoy calculando opciones de envío a Medellín. "
+            "Opciones:\n"
+            "* Servientrega: $15.000 — 2-3 días\n"
+            "* Coordinadora: $12.500 — 3-5 días\n"
+            "¿Cuál prefieres?"
+        )
         r = _run(self.inv.validate(
             candidate_text=text,
             tool_call_log=[
@@ -76,8 +88,15 @@ class EmptyPromiseInvariantTests(unittest.TestCase):
         self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
 
     def test_un_momento_pero_con_list_catalog_ok(self):
-        """'Un momento, consulto catálogo' con list_catalog ejecutado → OK."""
-        text = "Un momento por favor — aquí están las presentaciones:"
+        """Rev. 109 BUG 42 update — list_catalog ejecutado Y contenido
+        sustantivo (lista de productos con precios) → OK."""
+        text = (
+            "Un momento, aquí están las presentaciones disponibles:\n"
+            "* Coco 250ml — $32.000\n"
+            "* Coco 500ml — $58.000\n"
+            "* Sérum vit C — $45.000\n"
+            "¿Cuál te interesa?"
+        )
         r = _run(self.inv.validate(
             candidate_text=text,
             tool_call_log=[
