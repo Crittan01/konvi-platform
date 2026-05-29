@@ -36,9 +36,7 @@ logger = logging.getLogger("orchestrator.tenant_agents")
 _FALLBACK_AGENT = {
     "name": "Sara Camila",
     "role": "sales",
-    "pitch": None,  # build_system_prompt aplicará su default
-    "tone": None,
-    "system_prompt_override": None,
+    "role_description": None,
     "persona_block": None,
     "tools_allowed": None,
     "fsm_states_allowed": None,
@@ -70,11 +68,14 @@ def get_active_agent(
     if not tenant_id:
         return dict(_FALLBACK_AGENT)
 
+    # Rev. 109 auditoría — pitch/tone YA NO viven aquí. Vienen de tenants
+    # como única fuente de verdad. ai_agents solo guarda el comportamiento
+    # del bot (name + role + role_description + guardrails + tools_allowed).
     try:
         res = (
             supabase.table("ai_agents")
             .select(
-                "id, name, role, pitch, tone, role_description, "
+                "id, name, role, role_description, "
                 "persona_block, tools_allowed, fsm_states_allowed, "
                 "is_default",
             )
