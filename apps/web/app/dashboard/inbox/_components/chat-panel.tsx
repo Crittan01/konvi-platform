@@ -390,6 +390,7 @@ export function ChatPanel({
               <ChatEditorToolbar
                 textareaRef={replyInputRef}
                 setReplyText={setReplyText}
+                conversationId={selectedConv.id}
               />
               <div className="flex gap-2 items-end">
                 <textarea
