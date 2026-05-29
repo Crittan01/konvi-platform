@@ -120,6 +120,15 @@ No asumir que frontend o RLS por sí solos aíslan cuando se usa `service_role`.
   - backfill de `conversations.last_interaction_at` desde `messages.created_at`
   - trigger DB para mantener recencia de Inbox consistente en nuevos mensajes
 
+- `20260614110000_webhook_secrets_cron_cleanup.sql` ⚠️ **PENDIENTE APPLY EN REMOTE**
+  - función `fn_cleanup_webhook_secrets()` cierra item F.10 del Plan K
+  - invocada hourly desde `services/ai-orchestrator/worker.py` (patrón canónico,
+    igual a `cleanup_expired_meli_webhook_dedup`)
+  - limpia `previous_secret_hash` + `grace_period_until` post-grace en
+    `tenant_webhook_secrets` (NULL out, no delete row)
+  - **APLICAR via Supabase Dashboard SQL Editor antes de mergear PR a `main`**
+  - GRANT EXECUTE solo a service_role; REVOKE de authenticated/anon
+
 ---
 
 ## Operación rápida
