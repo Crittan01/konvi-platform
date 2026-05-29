@@ -113,14 +113,28 @@ export default async function AiAgentsPage() {
     // ~625 tokens/turno aceptables. DB tipo TEXT (sin restricción).
     if (role_description.length > 2500) return
 
-    await sb.from('ai_agents').upsert({
-      tenant_id: m.tenant_id,
-      name,
-      role_description,
-      strict_guardrails,
-      role,
-      is_default: true,
-    }, { onConflict: 'tenant_id' })
+    // Rev. 109 ADR-0017 — multi-agente per tenant. El partial unique
+    // index ai_agents_tenant_default_unique garantiza 1 default por
+    // tenant, pero NO sirve para upsert onConflict (sintaxis PostgREST
+    // no soporta partial indexes). SELECT explícito + UPDATE/INSERT.
+    const { data: existingDefault } = await sb
+      .from('ai_agents')
+      .select('id')
+      .eq('tenant_id', m.tenant_id)
+      .eq('is_default', true)
+      .maybeSingle()
+
+    if (existingDefault?.id) {
+      await sb.from('ai_agents').update({
+        name, role_description, strict_guardrails, role,
+      }).eq('id', existingDefault.id)
+    } else {
+      await sb.from('ai_agents').insert({
+        tenant_id: m.tenant_id,
+        name, role_description, strict_guardrails, role,
+        is_default: true,
+      })
+    }
 
     revalidatePath('/dashboard/ai-agents')
   }
