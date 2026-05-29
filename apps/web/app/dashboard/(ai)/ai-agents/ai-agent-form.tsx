@@ -28,6 +28,10 @@ interface AiAgentFormProps {
     name: string
     role_description: string
     strict_guardrails: boolean
+    // Rev. 109 backlog #2 — campos multi-vertical agnósticos.
+    role?: string | null         // sales | support | marketing | claims
+    pitch?: string | null         // pitch inyectado al system prompt
+    tone?: string | null          // tono conversacional
   }
   canWrite: boolean
   saveAiAgent: (formData: FormData) => Promise<void>
@@ -56,6 +60,61 @@ export function AiAgentForm({ agent, canWrite, saveAiAgent }: AiAgentFormProps) 
           onChange={e => setNameLen(e.target.value.length)}
         />
         <p className="text-xs text-muted-foreground">Este es el rol que el modelo asumirá implícitamente.</p>
+      </div>
+
+      {/* Rev. 109 backlog #2 — Multi-agente per-tenant (Plan I.5).
+          Campos extendidos para soportar verticales distintas. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="role">Rol funcional</Label>
+          <select
+            id="role"
+            name="role"
+            defaultValue={agent.role ?? 'sales'}
+            disabled={!canWrite}
+            className="w-full h-9 rounded-md border border-input bg-background text-sm px-2 text-foreground"
+          >
+            <option value="sales">Ventas</option>
+            <option value="support">Soporte</option>
+            <option value="marketing">Marketing</option>
+            <option value="claims">Reclamos</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Útil cuando un tenant tenga varios agentes (router pre-LLM elige por intent).
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="tone">Tono conversacional</Label>
+          <Input
+            id="tone"
+            name="tone"
+            defaultValue={agent.tone ?? ''}
+            placeholder="Ej: cordial y profesional, español Colombia"
+            readOnly={!canWrite}
+            maxLength={120}
+          />
+          <p className="text-xs text-muted-foreground">
+            Estilo del bot al conversar. Inyectado al system prompt.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="pitch">Pitch del negocio (1 línea, multi-vertical)</Label>
+        <Textarea
+          id="pitch"
+          name="pitch"
+          defaultValue={agent.pitch ?? ''}
+          placeholder="Ej KAIU: asesora de KAIU Living Natural, cosmética artesanal natural"
+          readOnly={!canWrite}
+          maxLength={240}
+          className="min-h-[60px] text-sm"
+        />
+        <p className="text-xs text-muted-foreground">
+          Inyectado en el system prompt cada turno. Multi-vertical agnóstico — cosmética,
+          tecnología, comida, etc. Si lo dejas vacío, el bot usa pitch genérico.
+        </p>
       </div>
 
       <div className="space-y-2">

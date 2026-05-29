@@ -4,8 +4,13 @@ Hoy retorna SIEMPRE el agente default del tenant. En el futuro, un
 router pre-LLM clasificará el inbound y elegirá el agente apropiado
 (Ventas / Soporte / Marketing / Reclamos / Custom).
 
+CONSOLIDACIÓN (rev. 109 backlog #2 fix): originalmente este helper leía
+de tabla `tenant_agents` nueva, pero `ai_agents` ya existía con UI completa
+en /dashboard/ai-agents. Tras migration 20260610000000_consolidate_ai_
+agents.sql, leemos de `ai_agents` (ÚNICA fuente de verdad).
+
 Backward-compat total:
-  • Si `tenant_agents` row no existe → fallback hardcoded "Sara Camila"
+  • Si `ai_agents` row no existe → fallback hardcoded "Sara Camila"
     + pitch genérico (preserva comportamiento pre-migration).
   • Si DB query falla por cualquier razón → mismo fallback.
 
@@ -67,14 +72,13 @@ def get_active_agent(
 
     try:
         res = (
-            supabase.table("tenant_agents")
+            supabase.table("ai_agents")
             .select(
-                "id, name, role, pitch, tone, system_prompt_override, "
+                "id, name, role, pitch, tone, role_description, "
                 "persona_block, tools_allowed, fsm_states_allowed, "
                 "is_default",
             )
             .eq("tenant_id", tenant_id)
-            .eq("is_active", True)
             .eq("is_default", True)
             .limit(1)
             .execute()
@@ -82,16 +86,16 @@ def get_active_agent(
         rows = res.data or []
         if rows:
             return rows[0]
-        # Tenant existe pero sin agentes configurados → fallback.
+        # Tenant existe pero sin agente configurado → fallback.
         logger.info(
-            "[AGENT] tenant=%s sin tenant_agents — fallback Sara Camila",
+            "[AGENT] tenant=%s sin ai_agents row — fallback Sara Camila",
             tenant_id[:8],
         )
     except Exception as exc:
         # Tabla no existe aún (migration no aplicada) o cualquier otro
         # error → fallback silencioso para no romper flow.
         logger.info(
-            "[AGENT] tenant_agents lookup falló tenant=%s: %s — "
+            "[AGENT] ai_agents lookup falló tenant=%s: %s — "
             "fallback Sara Camila",
             tenant_id[:8], exc,
         )
@@ -100,15 +104,16 @@ def get_active_agent(
 
 
 def list_tenant_agents(supabase, *, tenant_id: str) -> list[dict]:
-    """Lista todos los agentes (activos + inactivos) del tenant.
+    """Lista todos los agentes del tenant (multi-agente futuro).
 
-    Útil para UI Settings → Agentes del Tenant Console (futuro).
+    Hoy retorna 1 row (1 agente per tenant). Cuando UI Tenant Console
+    soporte CRUD multi-agente, podrá retornar N rows.
     """
     if not tenant_id:
         return []
     try:
         res = (
-            supabase.table("tenant_agents")
+            supabase.table("ai_agents")
             .select("*")
             .eq("tenant_id", tenant_id)
             .order("is_default", desc=True)
