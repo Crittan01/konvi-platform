@@ -14,12 +14,13 @@ Subclass concreta provee:
 
 El método `execute()` ejecuta el flow standard:
   1. circuit_breaker.before_request → CircuitOpenError si OPEN
-  2. rate_limit consume → RateLimitExceededError si bucket vacío
-  3. idempotency.lookup → return cached si hit
-  4. retry_async wrapping http call
-  5. idempotency.register tras success
-  6. circuit_breaker.record_success / record_failure
-  7. error mapping según status code
+  2. rate_limiter.consume → RateLimitLocalError si bucket vacío
+  3. construye URL completa
+  4. idempotency.lookup → return cached si hit
+  5. retry_async wrapping http call
+  6. validate_response semántico (ej. Envia meta:"error" en 200)
+  7. circuit_breaker.record_success / record_failure
+  8. idempotency.register tras 2xx success
 
 Caller construye una instancia con todas las strategies inyectadas:
 
@@ -50,9 +51,15 @@ from .errors import (
     IntegrationClientError,
     ProviderRejectedError,
     ProviderUnavailableError,
+    RateLimitLocalError,
     ResponseValidationError,
 )
 from .retry import RetryPolicy, default_is_retriable, retry_async
+
+# Rate limiting: reuso del TokenBucket de F.1 (webhook_framework).
+# Lazy import dentro de __init__/execute() para que test_integration_client.py
+# (que carga este módulo via importlib raw sin sys.path setup) no necesite
+# resolver lib.webhook_framework.
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +78,8 @@ class IntegrationClient(ABC):
         circuit_breaker: Optional[CircuitBreaker] = None,
         idempotency_enabled: bool = False,
         idempotency_ttl_seconds: int = idemp.DEFAULT_TTL_SECONDS,
+        rate_limit_rule: Optional[Any] = None,  # TokenBucketRule (lazy)
+        rate_limiter: Optional[Any] = None,     # TokenBucketLimiter (lazy)
         http_client: Optional[Any] = None,  # httpx.AsyncClient inyectable para tests
     ):
         self.tenant_id = tenant_id
@@ -79,6 +88,15 @@ class IntegrationClient(ABC):
         self.circuit_breaker = circuit_breaker
         self.idempotency_enabled = idempotency_enabled
         self.idempotency_ttl = idempotency_ttl_seconds
+        self.rate_limit_rule = rate_limit_rule
+        # Singleton global por defecto; inyectable en tests para aislamiento.
+        if rate_limiter is not None:
+            self._rate_limiter = rate_limiter
+        elif rate_limit_rule is not None:
+            from lib.webhook_framework.rate_limit import get_global_limiter
+            self._rate_limiter = get_global_limiter()
+        else:
+            self._rate_limiter = None
         self._http = http_client
 
     # ── Abstractos ───────────────────────────────────────────────────────────
@@ -133,10 +151,30 @@ class IntegrationClient(ABC):
         if self.circuit_breaker is not None:
             self.circuit_breaker.before_request(self.provider)
 
-        # 2. Construir URL completa.
+        # 2. Rate limit consume (per tenant_id+provider, in-memory TokenBucket).
+        #    Si bucket vacío levanta RateLimitLocalError (HTTP 429 semántico).
+        #    NO cuenta como failure del circuit breaker — el provider no fue
+        #    contactado, fue el caller quien excedió su quota local.
+        if self.rate_limit_rule is not None and self._rate_limiter is not None:
+            from lib.webhook_framework.errors import (
+                RateLimitExceededError as _WebhookRLE,
+            )
+            try:
+                self._rate_limiter.consume(
+                    tenant_id=self.tenant_id,
+                    integration=self.provider,
+                    rule=self.rate_limit_rule,
+                )
+            except _WebhookRLE as e:
+                raise RateLimitLocalError(
+                    provider=self.provider,
+                    retry_after_seconds=e.retry_after_seconds,
+                ) from e
+
+        # 3. Construir URL completa.
         url = self.get_base_url().rstrip("/") + "/" + path.lstrip("/")
 
-        # 3. Idempotency cache lookup (POST/PUT/PATCH).
+        # 4. Idempotency cache lookup (POST/PUT/PATCH).
         request_hash: Optional[str] = None
         if self.idempotency_enabled and method.upper() in {"POST", "PUT", "PATCH"}:
             request_hash = idempotency_key or idemp.hash_request(method, url, body)
@@ -155,7 +193,7 @@ class IntegrationClient(ABC):
                         "cached": True,
                     }
 
-        # 4. Retry-wrapped HTTP call.
+        # 5. Retry-wrapped HTTP call.
         async def _do_request() -> dict[str, Any]:
             return await self._do_http(
                 method=method,
@@ -176,14 +214,14 @@ class IntegrationClient(ABC):
                 self.circuit_breaker.record_failure(self.provider)
             raise
 
-        # 5. Validar response semántico (ej. meta:"error" en 200).
+        # 6. Validar response semántico (ej. meta:"error" en 200).
         self.validate_response(response["status"], response["body"])
 
-        # 6. Registrar circuit success.
+        # 7. Registrar circuit success.
         if self.circuit_breaker is not None:
             self.circuit_breaker.record_success(self.provider)
 
-        # 7. Cachear response (si idempotency enabled + 2xx + sb client).
+        # 8. Cachear response (si idempotency enabled + 2xx + sb client).
         if (
             self.idempotency_enabled
             and request_hash is not None
