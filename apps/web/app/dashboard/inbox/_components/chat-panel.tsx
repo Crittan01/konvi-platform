@@ -27,7 +27,10 @@ import {
   Circle, Clock, Info, MessageSquare, Phone, Send, User,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { createClient } from '@/utils/supabase/client'
 import { renderWhatsAppFormat } from '@/lib/whatsapp-format'
+import { RotateCw } from 'lucide-react'
+import { useState } from 'react'
 import type { ConvContext, Conversation, Message } from '../_lib/types'
 import { STATUS_CONFIG } from '../_lib/constants'
 import { formatDateTime, formatPhone, timeAgo } from '../_lib/format'
@@ -93,6 +96,41 @@ export function ChatPanel({
   contextPanelOpen,
   onToggleContextPanel,
 }: Props) {
+  // Rev. 109 founder 2026-05-29 — Rerun IA (P0-3 backlog).
+  const [rerunning, setRerunning] = useState(false)
+  const [rerunNotice, setRerunNotice] = useState<string | null>(null)
+
+  const handleRerun = async () => {
+    if (!selectedConv || selectedConv.status !== 'bot_active') return
+    setRerunning(true)
+    setRerunNotice(null)
+    try {
+      const sb = createClient()
+      const { data: { session } } = await sb.auth.getSession()
+      const token = session?.access_token
+      if (!token) { setRerunNotice('Sesión expirada'); return }
+      const res = await fetch(
+        `/api/conversations/${selectedConv.id}/rerun`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        },
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setRerunNotice(data.detail || 'No se pudo re-ejecutar')
+      } else {
+        setRerunNotice('Rerun encolado — el bot responderá en segundos.')
+        // Auto-clear notice tras 6s.
+        setTimeout(() => setRerunNotice(null), 6000)
+      }
+    } catch {
+      setRerunNotice('Error de red al re-ejecutar')
+    } finally {
+      setRerunning(false)
+    }
+  }
+
   return (
     <div className={`
       flex-1 flex flex-col bg-[#F3F6F4] min-w-0
@@ -153,10 +191,22 @@ export function ChatPanel({
             </div>
             <div className="flex gap-2 shrink-0">
               {selectedConv.status === 'bot_active' && (
-                <Button size="sm" variant="outline" onClick={() => onUpdateStatus('human_takeover')} disabled={takingOver}
-                  className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-xs h-8">
-                  <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRerun}
+                    disabled={rerunning || messages.length === 0}
+                    title="Re-procesar último mensaje del cliente — útil si el bot dio respuesta mala o si actualizaste catálogo/cupones"
+                    className="text-violet-600 border-violet-500/30 hover:bg-violet-500/10 text-xs h-8"
+                  >
+                    <RotateCw className={`h-3.5 w-3.5 mr-1 ${rerunning ? 'animate-spin' : ''}`} /> Rerun IA
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => onUpdateStatus('human_takeover')} disabled={takingOver}
+                    className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-xs h-8">
+                    <AlertCircle className="h-3.5 w-3.5 mr-1" /> Tomar control
+                  </Button>
+                </>
               )}
               {selectedConv.status === 'human_takeover' && (
                 <Button size="sm" variant="outline" onClick={() => onUpdateStatus('bot_active')} disabled={takingOver}
@@ -192,6 +242,11 @@ export function ChatPanel({
           {statusError && (
             <div className="px-4 py-2 text-[11px] text-red-400 bg-red-500/5 border-b border-red-500/20">
               {statusError}
+            </div>
+          )}
+          {rerunNotice && (
+            <div className="px-4 py-2 text-[11px] text-violet-700 bg-violet-500/10 border-b border-violet-500/30 flex items-center gap-1">
+              <RotateCw className="h-3 w-3" /> {rerunNotice}
             </div>
           )}
           {/* Banner Meta ventana 24h */}
