@@ -75,6 +75,22 @@ META_CSW_HOURS = int(os.getenv("META_CSW_HOURS", "24"))
 # Dispara template MARKETING cart_abandoned_24h_v1 a carritos sin actividad
 # >24h cuyo cliente tiene consent_given=TRUE (Habeas Data Ley 1581).
 # Costo: ~$0.025 USD/msg (MARKETING tier). ROI esperado positivo por recovery.
+# Rev. 109 P1 #1 — Polling backup Wompi (MA-9 universal pattern).
+# Si Wompi nunca envía el webhook `transaction.updated` con status=VOIDED
+# (visto en sandbox UAT 2026-05-28), el cron lo detecta consultando GET
+# /transactions/{id} para órdenes canceladas con refund_method=
+# wompi_void_auto cuya payment local sigue marcada APPROVED. Garantiza
+# que el cliente reciba notificación de refund aún si webhook falla.
+WOMPI_VOID_POLL_ENABLED = os.getenv("WOMPI_VOID_POLL_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+WOMPI_VOID_POLL_INTERVAL_SECONDS = int(
+    os.getenv("WOMPI_VOID_POLL_INTERVAL_SECONDS", "1800"),  # 30 min default
+)
+WOMPI_VOID_POLL_LOOKBACK_HOURS = int(
+    os.getenv("WOMPI_VOID_POLL_LOOKBACK_HOURS", "48"),
+)
+
 CART_ABANDONED_REMINDER_ENABLED = os.getenv("CART_ABANDONED_REMINDER_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -180,6 +196,9 @@ class OrchestratorWorker:
         self._last_reminder_at = 0.0
         self._cart_abandoned_enabled = CART_ABANDONED_REMINDER_ENABLED
         self._last_cart_abandoned_at = 0.0
+        # Rev. 109 P1 #1 — Polling backup Wompi VOIDED.
+        self._wompi_void_poll_enabled = WOMPI_VOID_POLL_ENABLED
+        self._last_wompi_void_poll_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
         self._metrics = {
@@ -230,6 +249,7 @@ class OrchestratorWorker:
         await self._send_payment_reminders_if_due()
         await self._send_cart_abandoned_reminders_if_due()
         await self._release_expired_pending_payment_orders()
+        await self._poll_wompi_pending_voids_if_due()
         await self._anti_hibernation_ping_if_due()
 
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
@@ -1258,6 +1278,140 @@ class OrchestratorWorker:
                 "to=%s meta_msg_id=%s",
                 str(cart_id)[:8], customer_phone, msg_id,
             )
+
+    async def _poll_wompi_pending_voids_if_due(self) -> None:
+        """Rev. 109 P1 #1 — Polling backup Wompi VOIDED (Plan MA-9).
+
+        Detecta payments cuya orden está cancelled con refund_method=
+        wompi_void_auto pero el local wompi_status sigue APPROVED (porque
+        Wompi nunca envió el webhook transaction.updated). Consulta GET
+        /transactions/{id} a Wompi; si retorna VOIDED, actualiza local
+        + dispara notify_client_refund_completed.
+
+        Ventana lookback configurable (default 48h). Frecuencia
+        configurable (default 30min).
+        """
+        if not self._wompi_void_poll_enabled:
+            return
+        now = time.time()
+        interval = max(60, WOMPI_VOID_POLL_INTERVAL_SECONDS)
+        if now - self._last_wompi_void_poll_at < interval:
+            return
+        self._last_wompi_void_poll_at = now
+
+        try:
+            # Buscar payments approved cuya orden está cancelled con
+            # refund_method=wompi_void_auto en últimas LOOKBACK_HOURS.
+            cutoff_iso = (
+                datetime.now(timezone.utc)
+                - timedelta(hours=WOMPI_VOID_POLL_LOOKBACK_HOURS)
+            ).isoformat()
+            # Schema PostgREST: 2 FKs entre orders y order_cancellations.
+            # Especificamos orders_cancellation_id_fkey (la 1:1 vía link).
+            res = (
+                self.supabase.table("payments")
+                .select(
+                    "id, tenant_id, order_id, wompi_txn_id, amount_in_cents, "
+                    "wompi_status, orders(status, cancellation_id, "
+                    "order_cancellations!orders_cancellation_id_fkey"
+                    "(refund_method, refund_status))",
+                )
+                .eq("wompi_status", "APPROVED")
+                .gte("updated_at", cutoff_iso)
+                .limit(50)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("[WOMPI_POLL] query candidates falló: %s", exc)
+            return
+
+        candidates = res.data or []
+        if not candidates:
+            return
+
+        # Filter only those linked to cancelled+wompi_void_auto.
+        eligible = []
+        for p in candidates:
+            order = p.get("orders") or {}
+            if (order.get("status") or "").lower() != "cancelled":
+                continue
+            cancellations = order.get("order_cancellations") or []
+            if isinstance(cancellations, list):
+                # PostgREST embed retorna lista para 1:1 via FK.
+                cr = cancellations[0] if cancellations else {}
+            else:
+                cr = cancellations
+            if (cr or {}).get("refund_method") != "wompi_void_auto":
+                continue
+            eligible.append(p)
+
+        if not eligible:
+            return
+
+        logger.info(
+            "[WOMPI_POLL] %d candidatos void pendientes (lookback=%dh)",
+            len(eligible), WOMPI_VOID_POLL_LOOKBACK_HOURS,
+        )
+
+        # Para cada uno: GET txn a Wompi. Si VOIDED, actualizar + notif.
+        for p in eligible:
+            txn_id = p.get("wompi_txn_id")
+            tenant_id = p.get("tenant_id")
+            order_id = p.get("order_id")
+            amount = int(p.get("amount_in_cents") or 0)
+            if not (txn_id and tenant_id and order_id):
+                continue
+            try:
+                from integrations.wompi_client import (
+                    get_tenant_wompi_creds, wompi_base_url,
+                )
+                pk, _, env = get_tenant_wompi_creds(self.supabase, tenant_id)
+                if not pk:
+                    continue
+                import httpx
+                url = f"{wompi_base_url(env or 'sandbox')}/transactions/{txn_id}"
+                with httpx.Client(timeout=10.0) as client:
+                    r = client.get(
+                        url, headers={"Authorization": f"Bearer {pk}"},
+                    )
+                if r.status_code >= 400:
+                    continue
+                data = (r.json() or {}).get("data") or {}
+                if (data.get("status") or "").upper() != "VOIDED":
+                    continue
+                # VOIDED en Wompi pero local sigue APPROVED → sync.
+                self.supabase.table("payments").update({
+                    "wompi_status": "VOIDED",
+                }).eq("wompi_txn_id", txn_id).execute()
+                logger.info(
+                    "[WOMPI_POLL] sync VOIDED txn=%s order=%s tenant=%s",
+                    txn_id, order_id[:8], tenant_id[:8],
+                )
+                # Notif cliente (reusa el path del webhook handler).
+                try:
+                    import sys as _sys
+                    from pathlib import Path as _Path
+                    _api_routers = (
+                        _Path(__file__).resolve().parents[1] / "api" / "routers"
+                    )
+                    if str(_api_routers) not in _sys.path:
+                        _sys.path.insert(0, str(_api_routers))
+                    from wompi_webhook import (
+                        _notify_client_refund_completed,
+                    )
+                    _notify_client_refund_completed(
+                        self.supabase, order_id=order_id,
+                        amount_in_cents=amount,
+                    )
+                except Exception as _notif_exc:
+                    logger.warning(
+                        "[WOMPI_POLL] notif refund falló order=%s: %s",
+                        order_id[:8], _notif_exc,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[WOMPI_POLL] check txn=%s falló: %s", txn_id, exc,
+                )
 
     async def _release_expired_pending_payment_orders(self) -> None:
         """
