@@ -372,3 +372,184 @@ class TestBUG41CouponRejectionEnriched:
     def test_not_found_fallback_generic(self):
         r = self._validate({}, subtotal_cents=5400000)
         assert "no encontrado" in r.user_message.lower()
+
+
+# ─── Backlog #1 — Retracto categories multi-tenant ──────────────────────────
+
+
+class TestBacklog1RetractoEligibility:
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from lib.retracto import check_retracto_eligibility, format_excluded_message
+        self._check = check_retracto_eligibility
+        self._format = format_excluded_message
+
+    def _mock_sb(self, items):
+        class MockResult:
+            def __init__(self, data): self.data = data
+        class MockQuery:
+            def __init__(self, items): self.items = items
+            def select(self, *a, **k): return self
+            def eq(self, *a, **k): return self
+            def execute(self): return MockResult(self.items)
+        class MockSupabase:
+            def __init__(self, items): self.items = items
+            def table(self, t): return MockQuery(self.items)
+        return MockSupabase(items)
+
+    def test_kaiu_cosmetica_excluida(self):
+        sb = self._mock_sb([{
+            'title': 'Jabón Coco', 'quantity': 1, 'product_id': 'x',
+            'products': {
+                'retracto_excluded': True,
+                'retracto_excluded_reason': 'cosmética uso íntimo (Art. 47 parágrafo)',
+            },
+        }])
+        r = self._check(sb, order_id='abc', tenant_id='tkaiu')
+        assert r.eligible is False
+        assert len(r.excluded_items) == 1
+        assert 'cosmética uso íntimo' in r.reasons[0]
+
+    def test_tienda_tech_software_excluido(self):
+        sb = self._mock_sb([{
+            'title': 'License Pro', 'quantity': 1, 'product_id': 'y',
+            'products': {
+                'retracto_excluded': True,
+                'retracto_excluded_reason': 'software descargado/activado (Art. 47 parágrafo)',
+            },
+        }])
+        r = self._check(sb, order_id='abc', tenant_id='ttech')
+        assert r.eligible is False
+        assert 'software' in r.reasons[0]
+
+    def test_textil_retracto_aplica(self):
+        sb = self._mock_sb([{
+            'title': 'Camiseta', 'quantity': 2, 'product_id': 'z',
+            'products': {
+                'retracto_excluded': False, 'retracto_excluded_reason': None,
+            },
+        }])
+        r = self._check(sb, order_id='abc', tenant_id='ttextil')
+        assert r.eligible is True
+        assert r.excluded_items == []
+
+
+# ─── Backlog #2 — Multi-agente per-tenant ───────────────────────────────────
+
+
+class TestBacklog2MultiAgente:
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "ai-orchestrator"))
+        from lib.tenant_agents import get_active_agent
+        self._get = get_active_agent
+
+    def _mock_sb(self, rows):
+        class MockResult:
+            def __init__(self, data): self.data = data
+        class MockQuery:
+            def __init__(self, rows): self.rows = rows
+            def select(self, *a, **k): return self
+            def eq(self, *a, **k): return self
+            def limit(self, *a, **k): return self
+            def execute(self): return MockResult(self.rows)
+        class MockSupabase:
+            def __init__(self, rows): self.rows = rows
+            def table(self, t): return MockQuery(self.rows)
+        return MockSupabase(rows)
+
+    def test_kaiu_sara_camila(self):
+        sb = self._mock_sb([{
+            'id': 'a1', 'name': 'Sara Camila', 'role': 'sales',
+            'pitch': 'asesora de KAIU Living Natural',
+            'tone': 'cordial español Colombia', 'is_default': True,
+        }])
+        a = self._get(sb, tenant_id='tkaiu')
+        assert a['name'] == 'Sara Camila'
+        assert 'KAIU' in a['pitch']
+
+    def test_tienda_tech_agente_personalizado(self):
+        sb = self._mock_sb([{
+            'id': 'a2', 'name': 'Andrés Tech', 'role': 'support',
+            'pitch': 'asesor técnico Tech X',
+            'tone': 'directo profesional', 'is_default': True,
+        }])
+        a = self._get(sb, tenant_id='ttech')
+        assert a['name'] == 'Andrés Tech'
+        assert a['role'] == 'support'
+
+    def test_tenant_sin_config_fallback(self):
+        sb = self._mock_sb([])
+        a = self._get(sb, tenant_id='tnoconfig')
+        assert a['name'] == 'Sara Camila'  # fallback
+
+    def test_db_error_fallback(self):
+        class MockSupabaseError:
+            def table(self, t):
+                raise RuntimeError("relation does not exist")
+        a = self._get(MockSupabaseError(), tenant_id='tx')
+        assert a['name'] == 'Sara Camila'
+
+
+# ─── Backlog #3 — Channel Registry pluggable ────────────────────────────────
+
+
+class TestBacklog3ChannelRegistry:
+
+    def setup_method(self):
+        sys.path.insert(0, str(_ROOT / "services" / "api"))
+        from lib.channels import (
+            get_channel_adapter, register_channel,
+            list_registered_channels, ChannelAdapter,
+            InboundMessage, OutboundResult, ComplianceVerdict,
+        )
+        self._get = get_channel_adapter
+        self._register = register_channel
+        self._list = list_registered_channels
+        self._Protocol = ChannelAdapter
+        self._OutboundResult = OutboundResult
+        self._InboundMessage = InboundMessage
+        self._ComplianceVerdict = ComplianceVerdict
+
+    def test_stubs_pre_registrados(self):
+        channels = self._list()
+        for required in ['whatsapp', 'meli', 'telegram', 'web', 'messenger', 'instagram']:
+            assert required in channels
+
+    def test_lookup_existente(self):
+        wa = self._get("whatsapp")
+        assert wa is not None
+        assert wa.channel_name() == "whatsapp"
+
+    def test_lookup_case_insensitive(self):
+        wa = self._get("WhatsApp")
+        assert wa is not None
+
+    def test_lookup_no_registrado(self):
+        assert self._get("tiktok") is None
+
+    def test_custom_adapter_sobreescribe_stub(self):
+        OutboundResult = self._OutboundResult
+        InboundMessage = self._InboundMessage
+        ComplianceVerdict = self._ComplianceVerdict
+
+        class WebAdapter:
+            def channel_name(self): return "web"
+            def parse_inbound(self, payload):
+                return InboundMessage(
+                    channel="web", tenant_id=payload["tenant_id"],
+                    external_message_id=payload["msg_id"],
+                    sender_id=payload["session"],
+                    content=payload.get("text", ""),
+                )
+            async def send_outbound(self, **kwargs):
+                return OutboundResult(ok=True, external_message_id="web-123")
+            def verify_signature(self, **kwargs): return True
+            async def compliance_check(self, **kwargs):
+                return ComplianceVerdict(ok=True)
+
+        custom = WebAdapter()
+        assert isinstance(custom, self._Protocol)
+        self._register("web", custom)
+        assert self._get("web").channel_name() == "web"
