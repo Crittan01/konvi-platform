@@ -286,12 +286,116 @@ class GetOffboardingStatusTests(unittest.TestCase):
 
 
 class HardDeleteTests(unittest.TestCase):
-    def test_levanta_not_implemented(self):
-        """Stub Fase 2 — debe levantar para que cron NO lo invoque por error."""
-        sb = _FakeSupabase()
-        with self.assertRaises(NotImplementedError) as ctx:
+    """Fase 2 — implementación real del hard-delete."""
+
+    def _supabase_with_storage(self, rpc_result=True, archive_fail=False):
+        """FakeSupabase con .storage.from_().upload() mockeado."""
+        sb = _FakeSupabase(
+            tables={
+                "audit_log": [{"id": "a1", "tenant_id": "T1"}],
+                "consent_audit_log": [{"id": "c1", "tenant_id": "T1"}],
+            },
+            rpc_results={"fn_hard_delete_tenant": rpc_result},
+        )
+
+        class _StorageBucket:
+            def __init__(self, fail):
+                self._fail = fail
+                self.uploads = []
+
+            def upload(self, path, content, *args, **kwargs):
+                if self._fail:
+                    raise Exception("Storage timeout")
+                self.uploads.append({"path": path, "size": len(content)})
+                return SimpleNamespace(error=None)
+
+        class _Storage:
+            def __init__(self, fail):
+                self._bucket = _StorageBucket(fail)
+
+            def from_(self, name):
+                assert name == "offboarding-archive"
+                return self._bucket
+
+        sb.storage = _Storage(archive_fail)
+        return sb
+
+    def test_hard_delete_happy_path(self):
+        sb = self._supabase_with_storage(rpc_result=True)
+        result = toff.hard_delete_tenant(sb, "T1")
+        self.assertEqual(result["tenant_id"], "T1")
+        self.assertTrue(result["rpc_result"])
+        self.assertIn("archive_path", result)
+        # Verificar RPC invocada con archive_path como param.
+        rpc_call = next(c for c in sb.rpc_calls if c["fn"] == "fn_hard_delete_tenant")
+        self.assertEqual(rpc_call["args"]["p_tenant_id"], "T1")
+        self.assertIn("p_archive_path", rpc_call["args"])
+
+    def test_hard_delete_idempotente_si_ya_deleted(self):
+        """RPC retorna False si tenant ya fue hard-deleted antes (race condition cron)."""
+        sb = self._supabase_with_storage(rpc_result=False)
+        result = toff.hard_delete_tenant(sb, "T1")
+        self.assertFalse(result["rpc_result"])
+
+    def test_hard_delete_levanta_si_no_elegible(self):
+        class _Storage:
+            def from_(self, name):
+                class _B:
+                    uploads = []
+                    def upload(self, *a, **kw):
+                        return None
+                return _B()
+        sb = _FakeSupabase(
+            rpc_errors={
+                "fn_hard_delete_tenant":
+                    "ERROR: Tenant T1 todavía en grace period (scheduled_for=...)",
+            },
+            tables={"audit_log": []},
+        )
+        sb.storage = _Storage()
+
+        with self.assertRaises(toff.TenantOffboardingError) as ctx:
             toff.hard_delete_tenant(sb, "T1")
-        self.assertIn("Fase 2", str(ctx.exception))
+        self.assertIn("grace period", str(ctx.exception).lower())
+
+    def test_hard_delete_tolera_storage_failure(self):
+        """Si upload a archive falla, NO debe bloquear el delete (degraded mode).
+        Compliance Art. 16 derecho eliminación > Art. 22 custodia (preferimos
+        eliminar con audit log degradado a no eliminar)."""
+        sb = self._supabase_with_storage(rpc_result=True, archive_fail=True)
+        # No debe levantar — solo loguea warning.
+        result = toff.hard_delete_tenant(sb, "T1")
+        self.assertEqual(result["tenant_id"], "T1")
+
+
+class ListPendingHardDeleteTests(unittest.TestCase):
+    def test_retorna_lista_vacia_si_rpc_no_existe(self):
+        """Migration Fase 2 no aplicada → silenciosamente retorna []."""
+        sb = _FakeSupabase(
+            rpc_errors={
+                "fn_list_tenants_pending_hard_delete":
+                    "function fn_list_tenants_pending_hard_delete does not exist",
+            },
+        )
+        result = toff.list_tenants_pending_hard_delete(sb)
+        self.assertEqual(result, [])
+
+    def test_retorna_filas_si_rpc_OK(self):
+        future = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        sb = _FakeSupabase(
+            rpc_results={
+                "fn_list_tenants_pending_hard_delete": [
+                    {
+                        "tenant_id": "T1",
+                        "deletion_scheduled_for": future,
+                        "grace_period_days": 30,
+                    },
+                ],
+            },
+        )
+        result = toff.list_tenants_pending_hard_delete(sb)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["tenant_id"], "T1")
 
 
 if __name__ == "__main__":

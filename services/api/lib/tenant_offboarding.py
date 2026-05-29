@@ -401,31 +401,180 @@ def get_offboarding_status(sb: Any, tenant_id: str) -> dict[str, Any]:
 
 # ─── Hard-delete (cron-only, NO exponer en router HTTP) ──────────────────────
 
-def hard_delete_tenant(sb: Any, tenant_id: str) -> dict[str, int]:
+ARCHIVE_BUCKET = "offboarding-archive"
+
+
+def _snapshot_to_archive(sb: Any, tenant_id: str) -> tuple[str, dict[str, int]]:
+    """Snapshot de tablas ARCHIVE_BEFORE_HARD_DELETE al bucket Storage
+    'offboarding-archive'. Retorna (archive_path, counts_per_table).
+
+    Path format: {tenant_id}/{utc_iso_timestamp}/manifest.json + 1 file per table.
+    Retention: manual 5 años (Supabase Free tier NO tiene TTL automático;
+    cleanup vía script admin SIC-driven post-grace).
+    """
+    import json as _json
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base_path = f"{tenant_id}/{timestamp}"
+    counts: dict[str, int] = {}
+
+    manifest: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "archived_at": datetime.now(timezone.utc).isoformat(),
+        "retention_years": 5,
+        "legal_basis": "Ley 1581 Art. 22 — deber custodia trazabilidad post-cierre",
+        "tables": [],
+    }
+
+    for table in ARCHIVE_BEFORE_HARD_DELETE:
+        try:
+            rows, _truncated = _query_tenant_scoped(sb, table, tenant_id, limit=100_000)
+        except Exception as exc:
+            logger.warning(
+                "[OFFBOARDING-ARCHIVE] Skip tabla %s (no existe o sin permisos): %s",
+                table, exc,
+            )
+            counts[table] = 0
+            continue
+
+        counts[table] = len(rows)
+        manifest["tables"].append({"name": table, "row_count": len(rows)})
+
+        if not rows:
+            continue
+
+        # Upload jsonl al bucket — append-only audit data.
+        content_jsonl = "\n".join(_json.dumps(r, default=str) for r in rows)
+        file_path = f"{base_path}/{table}.jsonl"
+        try:
+            sb.storage.from_(ARCHIVE_BUCKET).upload(
+                file_path,
+                content_jsonl.encode("utf-8"),
+                {"content-type": "application/x-ndjson", "upsert": "false"},
+            )
+        except Exception as exc:
+            # NO romper si el upload falla — preferimos audit log degradado
+            # a NO borrar el tenant (compliance Art. 16 derecho eliminación).
+            logger.error(
+                "[OFFBOARDING-ARCHIVE] Falló upload %s tenant=%s: %s. "
+                "Procediendo con hard-delete sin esta tabla en archive.",
+                table, tenant_id, exc,
+            )
+
+    # Subir manifest.json
+    manifest["counts"] = counts
+    manifest_path = f"{base_path}/manifest.json"
+    try:
+        sb.storage.from_(ARCHIVE_BUCKET).upload(
+            manifest_path,
+            _json.dumps(manifest, indent=2).encode("utf-8"),
+            {"content-type": "application/json", "upsert": "false"},
+        )
+    except Exception as exc:
+        logger.error(
+            "[OFFBOARDING-ARCHIVE] Falló upload manifest tenant=%s: %s",
+            tenant_id, exc,
+        )
+
+    return base_path, counts
+
+
+def hard_delete_tenant(sb: Any, tenant_id: str) -> dict[str, Any]:
     """Ejecuta hard-delete del tenant. Invocada por cron worker tras
     grace_period vencido (deletion_scheduled_for <= NOW + deleted_at IS NULL).
 
     NO exponer en endpoint HTTP — solo cron job autorizado.
 
     Flujo:
-      1. Snapshot de ARCHIVE_BEFORE_HARD_DELETE a Storage 'offboarding-archive'
-         con retention 5y (Art. 22 deber custodia).
-      2. DELETE FROM tenants WHERE id = tenant_id — CASCADE limpia el resto.
-      3. Marca tenants.deleted_at = NOW() vía RPC (pero como CASCADE borra
-         la fila tenants, el log queda en tenant_offboarding_log que NO
-         cascade).
-      4. Log evento 'hard_deleted' en tenant_offboarding_log.
+      1. Snapshot ARCHIVE_BEFORE_HARD_DELETE a Storage 'offboarding-archive'
+         (audit_log + consent + pii_access + legal + offboarding_log).
+         Retention manual 5y (Art. 22 deber custodia).
+      2. RPC fn_hard_delete_tenant ejecuta atómicamente:
+         - Log 'archived' con archive_path.
+         - UPDATE tenants SET deleted_at = NOW().
+         - Log 'hard_deleted' (sobrevive CASCADE por diseño Fase 1).
+         - DELETE FROM tenants — CASCADE limpia ~50 tablas hijas.
 
-    Returns dict con conteo de filas archivadas por tabla.
+    Returns dict con: tenant_id, archive_path, archive_counts,
+    total_archived_rows, rpc_result.
 
-    FASE 2 / TODO: implementar archive a Storage bucket + ejecución real
-    del DELETE. Por ahora esta función es stub que solo loguea — el cron
-    worker no debe ejecutarla hasta que esté completa.
+    Raises TenantOffboardingError si tenant no elegible o RPC falla.
     """
-    raise NotImplementedError(
-        "hard_delete_tenant pendiente implementación Fase 2. "
-        "Requiere: (1) Storage bucket 'offboarding-archive' creado, "
-        "(2) función de snapshot a bucket, (3) DELETE FROM tenants con "
-        "verificación FK CASCADE completa, (4) trigger NOTIFY post-delete. "
-        "Ver docs/refactor/0005-tenant-offboarding-phase-2.md (TODO)."
+    # 1. Snapshot a archive.
+    archive_path, counts = _snapshot_to_archive(sb, tenant_id)
+    total_archived = sum(counts.values())
+    logger.info(
+        "[OFFBOARDING] Snapshot tenant=%s path=%s rows=%s",
+        tenant_id, archive_path, total_archived,
     )
+
+    # 2. Invocar RPC atómica.
+    try:
+        res = sb.rpc(
+            "fn_hard_delete_tenant",
+            {
+                "p_tenant_id": tenant_id,
+                "p_archive_path": archive_path,
+                "p_evidence": {
+                    "counts": counts,
+                    "total_archived_rows": total_archived,
+                },
+            },
+        ).execute()
+    except Exception as exc:
+        msg = str(exc).lower()
+        if (
+            "no es elegible" in msg
+            or "todavía en grace period" in msg
+            or "40000" in msg
+        ):
+            raise TenantOffboardingError(str(exc))
+        logger.error(
+            "[OFFBOARDING] Error invocando fn_hard_delete_tenant tenant=%s: %s",
+            tenant_id, exc,
+        )
+        raise TenantOffboardingError(
+            f"Hard-delete falló para tenant {tenant_id}: {exc}. "
+            "Snapshot ya subido a archive — re-intentar tras resolver."
+        )
+
+    rpc_result = res.data
+    if isinstance(rpc_result, list):
+        rpc_result = rpc_result[0] if rpc_result else False
+    if isinstance(rpc_result, dict):
+        rpc_result = next(iter(rpc_result.values()), False)
+
+    return {
+        "tenant_id": tenant_id,
+        "archive_path": archive_path,
+        "archive_counts": counts,
+        "total_archived_rows": total_archived,
+        "rpc_result": bool(rpc_result),
+    }
+
+
+def list_tenants_pending_hard_delete(sb: Any, limit: int = 50) -> list[dict[str, Any]]:
+    """Invocado por worker cron — lista tenants cuyo grace period expiró
+    y aún no fueron hard-deleted.
+
+    Returns lista de dicts con tenant_id, deletion_scheduled_for,
+    deletion_requested_at, grace_period_days. Lista vacía si Fase 2
+    migration no aplicada (gate gracioso).
+    """
+    try:
+        res = sb.rpc(
+            "fn_list_tenants_pending_hard_delete",
+            {"p_limit": limit},
+        ).execute()
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "does not exist" in msg or "fn_list_tenants_pending_hard_delete" in msg:
+            logger.warning(
+                "[OFFBOARDING] fn_list_tenants_pending_hard_delete no disponible "
+                "(Fase 2 migration pendiente). Hard-delete cron desactivado."
+            )
+            return []
+        logger.error("[OFFBOARDING] Error listing pending tenants: %s", exc)
+        return []
+
+    rows = res.data or []
+    return rows if isinstance(rows, list) else []
