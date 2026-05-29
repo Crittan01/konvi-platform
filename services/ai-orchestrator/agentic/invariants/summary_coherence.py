@@ -120,6 +120,26 @@ def _load_contact_safe(
         return None
 
 
+def _outbound_distinguishes_recipient(text: str) -> bool:
+    """Rev. 109 BUG 41 — True si outbound distingue Titular vs Receptor.
+
+    Patrones aceptados:
+      • "Recibe:" / "Recibe (destinatario)" / "Destinatario:"
+      • "Paga (titular)" + "Recibe"
+      • "Envío a [Nombre]" donde [Nombre] != titular WhatsApp
+
+    False si solo aparece "Datos de envío:" + datos del titular.
+    """
+    if not text:
+        return False
+    norm = text.lower()
+    return bool(
+        re.search(r"\brecibe\b\s*[:(\-]", norm)
+        or "destinatario" in norm
+        or re.search(r"\bpaga\b\s*\(titular", norm)
+    )
+
+
 def _outbound_mentions_discount(text: str) -> bool:
     """Rev. 109 BUG 38d — True si el outbound menciona la línea descuento.
 
@@ -413,6 +433,33 @@ class SummaryCoherenceInvariant:
                     f"cart con cupón aplicado (discount=${discount_cents//100:,}) "
                     f"pero outbound omite línea Descuento — cliente no ve "
                     f"motivo del rebaja"
+                ),
+            )
+
+        # Rev. 109 BUG 41 — cart tiene receptor alterno pero outbound NO
+        # distingue Titular vs Receptor → cliente ve datos del titular como
+        # destino. Riesgo: courier entrega a dirección equivocada + UX
+        # confusa ("¿pero el envío es a mi mamá?"). Habeas Data Ley 1581
+        # + Ley 1480 Art. 47 exigen que el cliente vea exactamente quién
+        # recibe + dónde antes de confirmar.
+        recipient = (cart.get("shipping_meta") or {}).get("recipient") or {}
+        has_recipient = bool(
+            recipient.get("name") or recipient.get("phone")
+            or recipient.get("document_number"),
+        )
+        if has_recipient and not _outbound_distinguishes_recipient(candidate_text):
+            replacement = _build_canonical_summary(
+                cart, cart.get("shipping_meta") or {},
+                contact=_load_contact_safe(supabase, tenant_id, contact_id),
+            )
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    "cart con receptor alterno (envío a tercero) pero "
+                    "outbound NO distingue Titular vs Receptor — cliente "
+                    "ve datos del titular como destino del envío"
                 ),
             )
 

@@ -659,6 +659,67 @@ async def _run_agentic_full(
             exc,
         )
 
+    # PRE-LLM #-0.5: Recipient intent — envío a tercero (BUG 37 enforcement).
+    # Cuando cliente dice "es para mi mamá: Maria, CC X, Cel Y", persistimos
+    # los datos del receptor en cart.shipping_meta.recipient ANTES del LLM.
+    # Sin esto, LLM agentic elegía save_contact_field (path familiar) y
+    # sobrescribía datos del titular WhatsApp (violación Habeas Data Ley 1581).
+    # Si el cart no existe aún → solo marcamos shipping_meta y el LLM
+    # completa flow normal. NO bloquea, solo prepara estado correcto.
+    try:
+        from agentic.shipping_recipient_intent_resolver import (
+            detect_recipient_intent,
+        )
+        _recip_match = detect_recipient_intent(content)
+        if _recip_match and (
+            _recip_match.name or _recip_match.phone or _recip_match.document_number
+        ):
+            try:
+                from tools.cart_tool import (
+                    get_cart_with_items,
+                    set_shipping_recipient as _set_recipient,
+                    ensure_cart as _ensure_cart_r,
+                )
+                # Cart puede no existir aún (cliente menciona receptor antes
+                # de elegir producto). Si no hay, lo creamos vacío para
+                # persistir la intent y que el LLM downstream lo respete.
+                _cart_r = get_cart_with_items(
+                    supabase, conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                )
+                if not _cart_r:
+                    _cart_r = _ensure_cart_r(
+                        supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id, contact_id=contact_id,
+                    )
+                _set_recipient(
+                    supabase,
+                    cart_id=_cart_r["id"],
+                    tenant_id=tenant_id,
+                    name=_recip_match.name,
+                    document_type=_recip_match.document_type,
+                    document_number=_recip_match.document_number,
+                    phone=_recip_match.phone,
+                    address=None,  # LLM completa address turn-by-turn
+                )
+                logger.info(
+                    "[AGENTIC_PRE_LLM] recipient_intent set conv=%s "
+                    "name=%s doc=%s phone=%s",
+                    conversation_id[:8],
+                    _recip_match.name, _recip_match.document_number,
+                    _recip_match.phone,
+                )
+            except Exception as _r_exc:
+                logger.warning(
+                    "[AGENTIC_PRE_LLM] recipient_intent persist falló: %s",
+                    _r_exc,
+                )
+    except Exception as exc:
+        logger.warning(
+            "[AGENTIC_PRE_LLM] recipient_intent_resolver crashed: %s — skip",
+            exc,
+        )
+
     # PRE-LLM #0: COD intent marker. Rev. 108 Fase B.
     # NO es bypass — solo marca el cart con payment_method='cod' cuando
     # el cliente menciona explícitamente "contraentrega"/"pago al recibir".

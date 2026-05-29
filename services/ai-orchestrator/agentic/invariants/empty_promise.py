@@ -83,6 +83,39 @@ def _executed_any_action_tool(tool_call_log: list[dict]) -> bool:
     return False
 
 
+def _is_pure_promise_without_content(text: str) -> bool:
+    """Rev. 109 BUG 42 — True si outbound es SOLO promesa sin contenido útil.
+
+    Caso UAT live observado: "Permíteme un momento, voy a verificar tus
+    datos. Te confirmo en seguida." — el LLM corrió tools (legítimo)
+    pero NO entregó NADA útil al cliente. Promesa colgada → cliente
+    espera indefinidamente.
+
+    Heurística contenido sustantivo (cualquiera lo descarta como vacío):
+      • Precios ($X.XXX)
+      • Listas de productos / opciones (líneas con * o •)
+      • Datos del cart (Total, Subtotal, Descuento, Envío)
+      • Pregunta concreta al cliente (¿confirmas? / ¿prefieres? / ¿cuál?)
+      • Texto largo (>180 chars sin contar la promesa) sugiere contenido útil
+    """
+    if not text:
+        return False
+    has_substantive = bool(
+        re.search(r"\$\s*[\d.,]+", text)
+        or re.search(r"^\s*[\*•\-]\s", text, re.MULTILINE)
+        or re.search(
+            r"\b(?:total|subtotal|descuento|env[ií]o|carrier|cupon|cup[oó]n)\b",
+            text, re.IGNORECASE,
+        )
+        or re.search(
+            r"[¿?]\s*(?:cu[aá]l|prefieres|confirmas|qu[eé])\b",
+            text, re.IGNORECASE,
+        )
+        or len(re.sub(r"\s+", " ", text.strip())) > 180
+    )
+    return not has_substantive
+
+
 def _detect_promised_action(text: str) -> str:
     """Identifica qué acción concreta prometió el bot para el rewrite."""
     if not text:
@@ -160,6 +193,22 @@ class EmptyPromiseInvariant:
             return InvariantResult(
                 outcome=InvariantOutcome.OK,
                 invariant_name=self.name,
+            )
+
+        # Rev. 109 BUG 42 — incluso si tools corrieron, si el outbound
+        # es promesa pura sin contenido útil, REWRITE. El cliente quedó
+        # esperando "te confirmo en seguida" sin nada más.
+        if _is_pure_promise_without_content(candidate_text):
+            promised = _detect_promised_action(candidate_text)
+            replacement = _replacement_for_promise(promised, candidate_text)
+            return InvariantResult(
+                outcome=InvariantOutcome.REWRITE,
+                invariant_name=self.name,
+                replacement_text=replacement,
+                reason=(
+                    "Promesa pura sin contenido útil — rewrite a CTA "
+                    "determinístico aunque tools hayan corrido"
+                ),
             )
 
         # Hay promesa. ¿Corrió tool de acción?

@@ -133,12 +133,36 @@ class PIICoherenceInvariant:
         db_name = (contact.get("name") or "").strip()
         db_email = (contact.get("email") or "").strip()
 
+        # Rev. 109 BUG 42b — leer recipient alterno del cart (BUG 37 schema).
+        # Si outbound menciona name del recipient (envío a tercero), NO es
+        # mismatch — es coherente con cart.shipping_meta.recipient.
+        recipient_name = ""
+        try:
+            cart_q = (
+                supabase.table("conversation_carts")
+                .select("shipping_meta")
+                .eq("tenant_id", tenant_id)
+                .eq("conversation_id", conversation_id)
+                .in_("status", ["open", "checkout", "converted"])
+                .order("updated_at", desc=True).limit(1).execute()
+            )
+            cart_row = (cart_q.data or [{}])[0]
+            recipient = (cart_row.get("shipping_meta") or {}).get("recipient") or {}
+            recipient_name = (recipient.get("name") or "").strip()
+        except Exception:
+            pass
+
         outbound_name = _extract_name_from_text(candidate_text)
         outbound_email = _extract_email_from_text(candidate_text)
 
         # Validar name si aparece en outbound + existe en DB.
         if outbound_name and db_name:
-            if not _names_match(outbound_name, db_name):
+            matches_titular = _names_match(outbound_name, db_name)
+            matches_recipient = bool(
+                recipient_name
+                and _names_match(outbound_name, recipient_name)
+            )
+            if not matches_titular and not matches_recipient:
                 return InvariantResult(
                     outcome=InvariantOutcome.REWRITE,
                     invariant_name=self.name,
@@ -148,7 +172,8 @@ class PIICoherenceInvariant:
                     ),
                     reason=(
                         f"name mismatch: outbound={outbound_name!r} "
-                        f"vs contact.name={db_name!r}"
+                        f"vs contact.name={db_name!r} ni recipient.name="
+                        f"{recipient_name!r}"
                     ),
                 )
 
