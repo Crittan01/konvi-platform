@@ -87,7 +87,7 @@ export function AgentsList({ agents }: Props) {
         setError('Sesión expirada')
         return
       }
-      const resp = await fetch('/api/v1/ai-agents/suggest', {
+      const resp = await fetch('/api/ai-agents/suggest', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
