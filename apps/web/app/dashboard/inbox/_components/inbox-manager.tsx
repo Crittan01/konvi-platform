@@ -53,6 +53,7 @@ import {
 import { wrapSelection, prefixLine, prefixLineNumbered } from '../_lib/editor'
 import { ChatEditorToolbar } from './chat-editor-toolbar'
 import { OrderMiniForm } from './order-mini-form'
+import { useConversationContext } from '../_hooks/use-conversation-context'
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 // Refactor 2026-05-29 paso 2/10 — extraído de page.tsx como Client Component.
@@ -97,11 +98,9 @@ export default function InboxManager() {
 
   // --- Panel contextual ---
   const [contextPanelOpen, setContextPanelOpen] = useState(true)
-  const [convContext, setConvContext] = useState<ConvContext | null>(null)
-  const [contextLoading, setContextLoading] = useState(false)
-  // Rev. 103 — indicador silencioso de auto-refresh (visible en header panel
-  // como pequeño spinner cuando el polling silent dispara).
-  const [contextRefreshing, setContextRefreshing] = useState(false)
+  // Refactor paso 5/10 2026-05-29 — context vive en hook dedicado.
+  // Beneficios: AbortController + interval cleanup automáticos, refresh()
+  // expuesto al padre como callback puro, sin state local extra.
   const [productSearchCatalog, setProductSearchCatalog] = useState('')  // búsqueda en catálogo informativo
   const [showAllOrders, setShowAllOrders] = useState(false)  // B2: paginación pedidos
   // Refactor paso 4/10 2026-05-29 — state local del mini-form (productSearchForm,
@@ -246,74 +245,17 @@ export default function InboxManager() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showArchived])
 
-  // ── Cargar contexto del panel al cambiar conversación + auto-refresh ───────
-  // Rev. 103 — Real-time mirror del Inbox: refresh cada 5s mientras la
-  // conversación está seleccionada para reflejar cambios en cart, address,
-  // contact (caso real: bot agrega item al cart en el siguiente turno → el
-  // operador humano lo ve sin recargar la página).
-  useEffect(() => {
-    if (!selectedId) {
-      setConvContext(null)
-      return
-    }
-    setContextLoading(true)
-    setConvContext(null)
-    // Refactor paso 4/10 — antes aquí se reseteaba state del mini-form
-    // (showOrderForm/selectedVariations/orderSuccess/orderError). Ya no
-    // viven aquí: <OrderMiniForm/> se desmonta cuando cambia el
-    // conversationId (key implícita por unmount/mount via el padre que lo
-    // monta solo en human_takeover de la conv actual). State reset automático.
-
-    const controller = new AbortController()
-    let refreshTimer: ReturnType<typeof setInterval> | null = null
-    let cancelled = false
-
-    const fetchContext = async (opts?: { silent?: boolean }) => {
-      if (opts?.silent) setContextRefreshing(true)
-      try {
-        const { data } = await supabase.auth.getSession()
-        const token = data.session?.access_token
-        if (!token) {
-          if (!opts?.silent) setContextLoading(false)
-          return
-        }
-        const res = await fetch(`/api/conversations/${selectedId}/context`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-          signal: controller.signal,
-        })
-        if (!res.ok) {
-          // Sem 7 F2 cierre 2026-05-19 — si la conversación ya no existe
-          // (ej. tras purge del contact desde UI), deseleccionar para
-          // evitar loop de fetches cada 5s. El usuario verá la lista de
-          // conversaciones vacía/actualizada en lugar del panel roto.
-          if (res.status === 404 && !cancelled && !controller.signal.aborted) {
-            setSelectedId(null)
-          }
-          return
-        }
-        const json = await res.json()
-        if (!cancelled && !controller.signal.aborted) setConvContext(json)
-      } catch (e) {
-        if (!controller.signal.aborted && !opts?.silent) console.warn('context error', e)
-      } finally {
-        if (!cancelled && !controller.signal.aborted) {
-          if (opts?.silent) setContextRefreshing(false)
-          else setContextLoading(false)
-        }
-      }
-    }
-
-    fetchContext().then(() => {
-      // Real-time refresh cada 5s (silent — sin loading flicker).
-      refreshTimer = setInterval(() => fetchContext({ silent: true }), 5000)
-    })
-
-    return () => {
-      cancelled = true
-      controller.abort()
-      if (refreshTimer) clearInterval(refreshTimer)
-    }
-  }, [selectedId])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Refactor paso 5/10 2026-05-29 — Contexto del panel derecho via hook.
+  // Rev. 103 patrón intacto: real-time mirror del bot (refresh silent 5s)
+  // + abort + 404 handling. Lógica extraída a _hooks/use-conversation-context.ts.
+  const {
+    context: convContext,
+    loading: contextLoading,
+    refreshing: contextRefreshing,
+    refresh: refreshConvContext,
+  } = useConversationContext(selectedId, {
+    onDeleted: () => setSelectedId(null),
+  })
 
   // ── Cargar mensajes ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -648,19 +590,8 @@ export default function InboxManager() {
   // products, conversationId, contactId y un callback opcional para
   // refrescar el contexto tras crear pedido (mostrar el nuevo en
   // "Pedidos recientes").
-  const refreshContextAfterOrder = useCallback(() => {
-    if (!selectedId) return
-    supabase.auth.getSession().then(({ data }) => {
-      const t = data.session?.access_token
-      if (!t) return
-      fetch(`/api/conversations/${selectedId}/context`, {
-        headers: { 'Authorization': `Bearer ${t}` },
-      })
-        .then(r => r.json())
-        .then(j => setConvContext(j))
-        .catch(() => {})
-    })
-  }, [selectedId, supabase])
+  // Refactor paso 5/10 — refresh delegado al hook (encapsula auth + endpoint).
+  const refreshContextAfterOrder = refreshConvContext
 
   // ── Productos filtrados — catálogo informativo (búsqueda independiente) ────
   const filteredProducts = (convContext?.products ?? []).filter(p =>
