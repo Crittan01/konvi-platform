@@ -10,7 +10,7 @@ from observability import init_sentry
 # Init Sentry ANTES de cargar routers (capturar errores de import también).
 init_sentry(service_name="api")
 
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, envia_webhook, aveonline_webhook
+from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, aveonline_webhook
 from dependencies.auth import get_current_tenant, reject_if_tenant_deleting
 from fastapi import Depends as _Depends
 
@@ -125,9 +125,8 @@ app.include_router(marketplace.router, prefix="/api/v1", dependencies=_OFFBOARDI
 # eliminado, los webhooks fallarán en otros guards (RLS, FK, etc.).
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
-# Rev. 105 H.2.2 Fase A — Envia webhook capture endpoint (descubrimiento empírico)
-app.include_router(envia_webhook.router, prefix="/api/v1/webhooks/envia")
-# Rev. 108 — Aveonline webhook estados de guía (dossier §6.2)
+# Rev. 108 — Aveonline webhook estados de guía (dossier §6.2). Provider único
+# de shipping post-pivote rev. 107 (ver ADR-0019). Envia eliminado en rev. 109.
 app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline")
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
 # Rev. 109 ADR-0017 — Multi-agente per tenant (templates + AI suggest).

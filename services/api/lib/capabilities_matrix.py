@@ -8,8 +8,8 @@ Ejemplos de uso:
 
     from lib.capabilities_matrix import is_capability_enabled, get_capability_config
 
-    # Antes de generar etiqueta Envia
-    if is_capability_enabled(client, tenant_id, "envia", "label_generation"):
+    # Antes de generar etiqueta Aveonline
+    if is_capability_enabled(client, tenant_id, "aveonline", "label_generation"):
         ...
 
     # Antes de enviar HSM template
@@ -30,13 +30,6 @@ logger = logging.getLogger(__name__)
 # Catálogo canónico de capabilities por provider. Application layer valida
 # `capability` contra este dict antes de set/get para evitar typos silentes.
 CAPABILITIES_BY_PROVIDER: dict[str, frozenset[str]] = {
-    "envia": frozenset({
-        "insurance",
-        "label_generation",
-        "pickup",
-        "cancel",
-        "tracking_polling",
-    }),
     "wompi": frozenset({
         "payment_method_card",
         "payment_method_pse",
@@ -73,6 +66,13 @@ CAPABILITIES_BY_PROVIDER: dict[str, frozenset[str]] = {
         "custom_domain",
         "webhooks_delivery",
         "list_unsubscribe",
+    }),
+    "aveonline": frozenset({
+        "label_generation",
+        "pickup",
+        "cancel",
+        "tracking_webhook",
+        "cod_native",
     }),
 }
 
