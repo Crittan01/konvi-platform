@@ -260,11 +260,12 @@ class QuoteRequest(BaseModel):
 # ─── Helper ──────────────────────────────────────────────────────────────────
 
 def _get_active_shipping_provider(tenant_id: str, supabase: Client) -> str:
-    """Resuelve `active_provider` del tenant. Default 'envia' (preserva
-    comportamiento legacy si no hay row en tenant_shipping_provider_config).
+    """Resuelve `active_provider` del tenant. Default 'aveonline' (provider
+    activo único post-pivote rev. 107 — ver ADR-0019).
 
-    Rev. 107 M.5/Cotizador: routing multi-provider sin fallback automático
-    (ADR-0019).
+    Rev. 109 (2026-05-30): Envia eliminado del runtime. Tag archivo
+    `archive/envia-investigacion-rev106-2026-05-08` preserva investigación
+    histórica para rollback path teórico.
     """
     try:
         cfg = (
@@ -275,13 +276,13 @@ def _get_active_shipping_provider(tenant_id: str, supabase: Client) -> str:
             .execute()
         )
         if cfg and cfg.data:
-            return (cfg.data.get("active_provider") or "envia").strip().lower()
+            return (cfg.data.get("active_provider") or "aveonline").strip().lower()
     except Exception as exc:
         logger.warning(
-            "No pude leer active_provider tenant=%s — default envia: %s",
+            "No pude leer active_provider tenant=%s — default aveonline: %s",
             tenant_id, exc,
         )
-    return "envia"
+    return "aveonline"
 
 
 def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
