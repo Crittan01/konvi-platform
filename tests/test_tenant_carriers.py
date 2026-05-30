@@ -115,32 +115,32 @@ class ValidateProviderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tc._validate_provider("wompi")  # no en VALID_PROVIDERS
 
-    def test_envia_ok(self):
-        self.assertEqual(tc._validate_provider("envia"), "envia")
-        self.assertEqual(tc._validate_provider("ENVIA"), "envia")
-        self.assertEqual(tc._validate_provider("  envia  "), "envia")
+    def test_aveonline_ok(self):
+        self.assertEqual(tc._validate_provider("aveonline"), "aveonline")
+        self.assertEqual(tc._validate_provider("AVEONLINE"), "aveonline")
+        self.assertEqual(tc._validate_provider("  aveonline  "), "aveonline")
 
 
 class ListPreferencesTests(unittest.TestCase):
     def test_empty(self):
         sb = _FakeSupabase()
-        result = tc.list_preferences(sb, "tenant-A", "envia")
+        result = tc.list_preferences(sb, "tenant-A", "aveonline")
         self.assertEqual(result, [])
 
     def test_orders_by_priority(self):
         sb = _FakeSupabase()
         sb._tables["tenant_carriers"].extend([
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "carrier_code": "fedex", "enabled": True, "priority": 50,
             },
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "carrier_code": "servientrega", "enabled": True, "priority": 10,
             },
-            {"tenant_id": "tenant-B", "provider": "envia",
+            {"tenant_id": "tenant-B", "provider": "aveonline",
              "carrier_code": "dhl", "enabled": True, "priority": 1,
             },
         ])
-        result = tc.list_preferences(sb, "tenant-A", "envia")
+        result = tc.list_preferences(sb, "tenant-A", "aveonline")
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0].carrier_code, "servientrega")  # priority 10
         self.assertEqual(result[1].carrier_code, "fedex")  # priority 50
@@ -150,21 +150,21 @@ class FilterEnabledCarriersTests(unittest.TestCase):
     def test_no_preferences_returns_all_default_open(self):
         sb = _FakeSupabase()
         candidates = ["fedex", "servientrega", "dhl"]
-        result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
+        result = tc.filter_enabled_carriers(sb, "tenant-A", "aveonline", candidates)
         self.assertEqual(result, candidates)
 
     def test_with_preferences_filters_only_enabled(self):
         sb = _FakeSupabase()
         sb._tables["tenant_carriers"].extend([
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "carrier_code": "servientrega", "enabled": True, "priority": 100,
             },
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "carrier_code": "fedex", "enabled": False, "priority": 100,
             },
         ])
         candidates = ["fedex", "servientrega", "dhl"]
-        result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
+        result = tc.filter_enabled_carriers(sb, "tenant-A", "aveonline", candidates)
         # Solo servientrega tiene enabled=true.
         # dhl no está en preferences (no en enabled set).
         # fedex está pero enabled=false.
@@ -174,42 +174,42 @@ class FilterEnabledCarriersTests(unittest.TestCase):
         # Envia mezcla camelCase y snake_case.
         sb = _FakeSupabase()
         sb._tables["tenant_carriers"].append({
-            "tenant_id": "tenant-A", "provider": "envia",
+            "tenant_id": "tenant-A", "provider": "aveonline",
             "carrier_code": "interrapidisimo",
             "enabled": True, "priority": 100,
         })
         candidates = ["FedEx", "interRapidisimo", "DHL"]
-        result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
+        result = tc.filter_enabled_carriers(sb, "tenant-A", "aveonline", candidates)
         self.assertEqual(result, ["interRapidisimo"])  # preserva casing original
 
     def test_preserves_order_of_candidates(self):
         sb = _FakeSupabase()
         sb._tables["tenant_carriers"].extend([
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "carrier_code": "fedex", "enabled": True, "priority": 100,
             },
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "carrier_code": "servientrega", "enabled": True, "priority": 100,
             },
         ])
         candidates = ["servientrega", "fedex"]
-        result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
+        result = tc.filter_enabled_carriers(sb, "tenant-A", "aveonline", candidates)
         self.assertEqual(result, ["servientrega", "fedex"])  # order preserved
 
     def test_all_disabled_returns_empty(self):
         sb = _FakeSupabase()
         sb._tables["tenant_carriers"].append({
-            "tenant_id": "tenant-A", "provider": "envia",
+            "tenant_id": "tenant-A", "provider": "aveonline",
             "carrier_code": "fedex", "enabled": False, "priority": 100,
         })
         candidates = ["fedex", "dhl"]
-        result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", candidates)
+        result = tc.filter_enabled_carriers(sb, "tenant-A", "aveonline", candidates)
         # Tenant configuró pero deshabilitó todos. Caller debe alertar.
         self.assertEqual(result, [])
 
     def test_empty_candidates_returns_empty(self):
         sb = _FakeSupabase()
-        result = tc.filter_enabled_carriers(sb, "tenant-A", "envia", [])
+        result = tc.filter_enabled_carriers(sb, "tenant-A", "aveonline", [])
         self.assertEqual(result, [])
 
 
@@ -217,7 +217,7 @@ class UpsertPreferenceTests(unittest.TestCase):
     def test_insert_new(self):
         sb = _FakeSupabase()
         pref = tc.upsert_preference(
-            sb, "tenant-A", "envia",
+            sb, "tenant-A", "aveonline",
             carrier_code="servientrega",
             enabled=True, priority=10,
         )
@@ -230,11 +230,11 @@ class UpsertPreferenceTests(unittest.TestCase):
         sb = _FakeSupabase()
         # Insert primero.
         tc.upsert_preference(
-            sb, "tenant-A", "envia", carrier_code="fedex", enabled=True,
+            sb, "tenant-A", "aveonline", carrier_code="fedex", enabled=True,
         )
         # Update mismo carrier — UNIQUE conflict resuelto via on_conflict.
         pref = tc.upsert_preference(
-            sb, "tenant-A", "envia", carrier_code="fedex",
+            sb, "tenant-A", "aveonline", carrier_code="fedex",
             enabled=False, priority=50,
         )
         self.assertFalse(pref.enabled)
@@ -245,9 +245,9 @@ class UpsertPreferenceTests(unittest.TestCase):
     def test_empty_carrier_code_raises(self):
         sb = _FakeSupabase()
         with self.assertRaises(ValueError):
-            tc.upsert_preference(sb, "tenant-A", "envia", carrier_code="")
+            tc.upsert_preference(sb, "tenant-A", "aveonline", carrier_code="")
         with self.assertRaises(ValueError):
-            tc.upsert_preference(sb, "tenant-A", "envia", carrier_code="   ")
+            tc.upsert_preference(sb, "tenant-A", "aveonline", carrier_code="   ")
 
 
 if __name__ == "__main__":

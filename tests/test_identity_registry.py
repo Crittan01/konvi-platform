@@ -135,7 +135,7 @@ class ProviderValidationTests(unittest.TestCase):
 
     def test_supported_providers_set_estable(self):
         # Garantiza que los 6 providers canónicos están presentes.
-        for p in ("whatsapp", "wompi", "envia", "meli", "telegram", "resend"):
+        for p in ("whatsapp", "wompi", "aveonline", "meli", "telegram", "resend"):
             self.assertIn(p, registry.SUPPORTED_PROVIDERS)
 
     def test_internal_id_none_levanta(self):
@@ -225,18 +225,18 @@ class ListAndRevokeTests(unittest.TestCase):
 
     def test_revoke_existente_retorna_true(self):
         client = _FakeSupabase()
-        registry.register_identity(client, "tenant-A", "envia", "ACCT-1")
-        self.assertTrue(registry.revoke_identity(client, "envia", "ACCT-1"))
+        registry.register_identity(client, "tenant-A", "aveonline", "ACCT-1")
+        self.assertTrue(registry.revoke_identity(client, "aveonline", "ACCT-1"))
         # Tras revoke, el slot queda libre para otro tenant.
-        registry.register_identity(client, "tenant-B", "envia", "ACCT-1")
+        registry.register_identity(client, "tenant-B", "aveonline", "ACCT-1")
         self.assertEqual(
-            registry.resolve_tenant_id(client, "envia", "ACCT-1"),
+            registry.resolve_tenant_id(client, "aveonline", "ACCT-1"),
             "tenant-B",
         )
 
     def test_revoke_inexistente_retorna_false(self):
         client = _FakeSupabase()
-        self.assertFalse(registry.revoke_identity(client, "envia", "NO-EXISTE"))
+        self.assertFalse(registry.revoke_identity(client, "aveonline", "NO-EXISTE"))
 
 
 if __name__ == "__main__":

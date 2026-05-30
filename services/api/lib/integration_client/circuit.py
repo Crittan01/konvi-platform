@@ -19,7 +19,7 @@ Configuración típica:
   - open_duration_seconds=30: pausa 30s antes de probar
   - half_open_max_requests=1: solo 1 request en half-open (no thundering herd)
 
-State per provider (key="envia", "wompi", etc.). Single-process in-memory;
+State per provider (key="aveonline", "wompi", etc.). Single-process in-memory;
 multi-worker requiere Redis sync (sesión Sem 11 observability).
 """
 from __future__ import annotations
@@ -62,7 +62,7 @@ class _CircuitState:
 
 
 class CircuitBreaker:
-    """Per-key state machine. key suele ser provider name ('envia', 'wompi')
+    """Per-key state machine. key suele ser provider name ('aveonline', 'wompi')
     o (provider, tenant_id) para granularidad mayor.
 
     Thread-safe via RLock (FastAPI request handlers concurrentes en mismo

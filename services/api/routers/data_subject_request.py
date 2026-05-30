@@ -215,7 +215,7 @@ def _build_export_payload(sb: Client, tenant_id: str, contact_id: str) -> dict:
             {"name": "Supabase", "role": "DB hosting", "jurisdiction": "USA/EU"},
             {"name": "Meta WhatsApp Business", "role": "Mensajería", "jurisdiction": "USA"},
             {"name": "Wompi", "role": "Procesador de pagos", "jurisdiction": "Colombia"},
-            {"name": "Envia.com", "role": "Cotización envíos", "jurisdiction": "Colombia/México"},
+            {"name": "Aveonline", "role": "Cotización envíos + gestión guías", "jurisdiction": "Colombia"},
         ],
         "legal_basis": {
             "law": "Ley 1581/2012 Colombia (Habeas Data)",

@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 class IntegrationClient(ABC):
     """Subclass por provider. Inyectar dependencias por constructor."""
 
-    provider: str  # canónico ('envia', 'wompi', 'meli', 'meta', 'telegram', 'resend')
+    provider: str  # canónico ('aveonline', 'wompi', 'meli', 'meta', 'telegram', 'resend')
 
     def __init__(
         self,
@@ -103,7 +103,7 @@ class IntegrationClient(ABC):
 
     @abstractmethod
     def get_base_url(self) -> str:
-        """URL base del provider (e.g. 'https://api.envia.com/')."""
+        """URL base del provider (e.g. 'https://api.aveonline.co/')."""
 
     @abstractmethod
     def get_auth_headers(self) -> dict[str, str]:

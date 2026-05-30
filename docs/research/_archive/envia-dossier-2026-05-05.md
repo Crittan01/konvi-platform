@@ -1,5 +1,7 @@
 # Dossier Envia.com — 2026-05-05
 
+> ⚠️ **SUPERSEDED 2026-05-30** — Konvi pivotó a **Aveonline** como shipping provider único (ver [`ADR-0019`](../../adr/0019-aveonline-as-primary-shipping-provider.md)). Este dossier se archiva como audit trail de investigación pre-pivote y eventual rollback path. Tag git: `archive/envia-investigacion-rev106-2026-05-08`. NO usar como referencia para implementación nueva — usar [`aveonline-dossier.md`](../aveonline-dossier.md) y [`ADR-0023`](../../adr/0023-shipping-provider-integration-pattern.md) (cuando exista).
+
 **Fecha**: 2026-05-05 · **Sesión**: investigación previa Sección H.2 plan maestro · **Sin pruebas en vivo**.
 **Fuente primaria**: `https://docs.envia.com/docs/*` (público).
 **Cobertura**: Shipping API + Queries API + Geocodes API + Webhooks + MCP.

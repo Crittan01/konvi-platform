@@ -19,13 +19,12 @@ interface HealthRow {
 const PROVIDER_LABELS: Record<string, string> = {
   whatsapp: 'WhatsApp Business',
   wompi: 'Wompi (pagos)',
-  envia: 'Envia (despachos)',
+  aveonline: 'Aveonline (despachos)',
   meli: 'MercadoLibre',
   telegram: 'Telegram (notificaciones operador)',
-  aveonline: 'Aveonline (despachos)',
 }
 
-const PROVIDER_ORDER = ['whatsapp', 'wompi', 'envia', 'meli', 'telegram', 'aveonline']
+const PROVIDER_ORDER = ['whatsapp', 'wompi', 'aveonline', 'meli', 'telegram']
 
 function StatusIcon({ status }: { status: HealthRow['status'] }) {
   if (status === 'healthy') {
