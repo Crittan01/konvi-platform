@@ -1414,7 +1414,7 @@ Si Aveonline tiene 503 transitorio → la cascada Gemini ya cubre la respuesta d
 
 **Preservado**: cart-as-SoT, idempotency lifecycle (ADR-0011), invariantes (consent + resumen-before-link).
 
-**Branch**: `feat/rev107-aveonline-provider` (no commit a `phase-1-orchestrator-refactor` ni `develop` hasta cierre tests + UAT + ADR).
+**Branch**: `feat/rev107-aveonline-provider` (sin commit a `develop` hasta cierre tests + UAT + ADR). Nota histórica: la mención original a `phase-1-orchestrator-refactor` quedó superseded post-pivot a agentic-orchestrator-hybrid (ADR-0018) — branch eliminada, contexto preservado en tag `archive/phase-1-strangler-fig-sem1`.
 
 **Estrategia**: **adapter pluggable + provider selector per-tenant** — mismo `agentic/tools/shipping.py` interface, el adapter routea según `tenant_shipping_provider_config.active_provider` (single enum, no array).
 
