@@ -38,20 +38,25 @@ class MFARecoveryCodesError(Exception):
 
 
 def generate_codes(num: int = DEFAULT_NUM_CODES) -> list[str]:
-    """Genera N plaintexts URL-safe, formateados con guiones para legibilidad.
+    """Genera N plaintexts hex, formateados con guiones para legibilidad.
 
-    Formato: XXXX-XXXX-XXXX-XXXX (4 grupos de 4 chars). NO altera entropía;
-    es solo legibilidad cuando el usuario copia/pega del .txt descargado.
+    Formato: XXXX-XXXX-XXXX-XXXX (4 grupos de 4 chars hex). Entropía 64-bit
+    (8 bytes hex = 16 chars). Más que suficiente para single-use codes.
+
+    Fix audit 2026-05-29: el approach anterior usaba `secrets.token_urlsafe`
+    que produce caracteres `-` y `_` del alfabeto base64url. Cuando esos
+    chars caían en el rango [:16] tras quitar `=`, el formato XXXX-XXXX-
+    XXXX-XXXX se rompía (5+ grupos al split por `-`). Fix: usar `token_hex`
+    que garantiza alfabeto [0-9a-f].
     """
     if num < 1 or num > 50:
         raise MFARecoveryCodesError(f"num inválido: {num} (rango 1-50)")
     out = []
     for _ in range(num):
-        raw = secrets.token_urlsafe(CODE_BYTES)
-        # Quitar padding base64 + tomar 16 chars + formatear.
-        clean = raw.replace("=", "")[:16]
+        # 8 bytes hex = 16 chars [0-9a-f] sin caracteres especiales.
+        clean = secrets.token_hex(8).upper()
         formatted = f"{clean[0:4]}-{clean[4:8]}-{clean[8:12]}-{clean[12:16]}"
-        out.append(formatted.upper())
+        out.append(formatted)
     return out
 
 
