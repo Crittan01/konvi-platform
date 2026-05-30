@@ -158,13 +158,13 @@ class CollectWompiTests(unittest.TestCase):
         self.assertEqual(result[0].value, "15.0%")
 
 
-class CollectEnviaTests(unittest.TestCase):
+class CollectAveonlineTests(unittest.TestCase):
     def test_stale_0_es_healthy(self):
         sb = _FakeSupabase(table_responses={
             "tenant_integrations": [{"status": "connected"}],
             "shipments": [],
         })
-        result = hm.collect_envia(sb, "T1")
+        result = hm.collect_aveonline(sb, "T1")
         self.assertEqual(result[0].status, "healthy")
         self.assertEqual(result[0].value, "0")
 
@@ -173,7 +173,7 @@ class CollectEnviaTests(unittest.TestCase):
             "tenant_integrations": [{"status": "connected"}],
             "shipments": [{"id": str(i)} for i in range(5)],
         })
-        result = hm.collect_envia(sb, "T1")
+        result = hm.collect_aveonline(sb, "T1")
         self.assertEqual(result[0].status, "warning")
         self.assertEqual(result[0].value, "5")
 
@@ -182,7 +182,7 @@ class CollectEnviaTests(unittest.TestCase):
             "tenant_integrations": [{"status": "connected"}],
             "shipments": [{"id": str(i)} for i in range(15)],
         })
-        result = hm.collect_envia(sb, "T1")
+        result = hm.collect_aveonline(sb, "T1")
         self.assertEqual(result[0].status, "critical")
         self.assertEqual(result[0].value, "15")
 
@@ -241,7 +241,7 @@ class UpsertMetricsTests(unittest.TestCase):
         metrics = [
             hm.HealthMetric(provider="whatsapp", metric="m1", value="v1", status="healthy"),
             hm.HealthMetric(provider="wompi", metric="m2", value="v2", status="healthy"),
-            hm.HealthMetric(provider="envia", metric="m3", value="v3", status="healthy"),
+            hm.HealthMetric(provider="aveonline", metric="m3", value="v3", status="healthy"),
         ]
         count = hm.upsert_metrics(sb, "T1", metrics)
         # 2 OK (whatsapp + envia), 1 fail (wompi).
