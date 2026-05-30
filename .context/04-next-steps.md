@@ -6,20 +6,65 @@
 
 ---
 
-## 🗺️ Roadmap pendientes consolidado (2026-05-29)
+## 🗺️ Roadmap pendientes consolidado (2026-05-30)
 
 **Documento canónico**: [`docs/refactor/0006-roadmap-pending-sessions.md`](../docs/refactor/0006-roadmap-pending-sessions.md).
 
 Lee ese doc PRIMERO al retomar el proyecto — consolida:
-- 10 PRs abiertos pendientes de review + orden de merge
+- 14 PRs cerrados en sesión 2026-05-29/30 (incl. consolidación phase-2 → develop)
 - Bloqueantes humanos externos (V.3 legal · V.4 DPO · V.5 pen testing · V.7 dominio)
+- **NUEVO sección 2.5**: Billing + entidad legal (Fase 0 blindaje fiscal · J.2.12 subscription engine · J.2.13 two-rail accounting · Trigger SAS) — ver [ADR-0022](../docs/adr/0022-legal-entity-billing-rails-risk-mitigation.md)
 - Próximas 5 sesiones priorizadas con esfuerzo + objetivos
 - Items diferidos a Platform Console + Storefront
 - Decisiones diferidas (hard-delete cron activación, Sentry trigger, etc.)
 
 **Plan K avance**: 16 / 18 IMPLEMENTED (89%) tras sesión 2026-05-29.
 
-**Próxima sesión recomendada**: cierre validaciones humanas + Sem 6 HSM templates.
+**Próxima sesión recomendada**: Fase 0 blindaje fiscal (contador + facturación electrónica + 2 pólizas E&O+Cyber + abogado contrato tipo + cambio nombre Wompi a "KONVI") — próximas 2-4 semanas. Ver ADR-0022.
+
+---
+
+## 🔴 Compliance Fiscal Founder — VENTANA CRÍTICA Fase 0 (sesión 2026-05-30)
+
+**Disparador**: workflow 4-agentes sesión 2026-05-30 sobre estructura comercial Konvi reveló riesgo patrimonial dormido del founder como persona natural. Mitigación multi-capa documentada en [ADR-0022](../docs/adr/0022-legal-entity-billing-rails-risk-mitigation.md).
+
+### Acciones founder próximas 2-4 semanas
+
+| # | Acción | Plazo | Costo | Fuente |
+|---|---|---|---|---|
+| 1 | Contratar contador público especializado SaaS (RST + IVA cloud + multi-entidad) | Semana 1 | $200-300 USD/mes | ADR-0022 §Fase 0 |
+| 2 | Activar facturación electrónica DIAN (Alegra recomendado) | Semana 1-2 | $30 USD/mes | DIAN obligatorio desde 1er peso |
+| 3 | Cotizar 2 pólizas (RC Profesional E&O + Cyber Risk) con 2-3 corredores | Semana 1-2 | $0 (corredor pagado por aseguradora) | [`insurance-checklist.md`](../docs/legal/insurance-checklist.md) |
+| 4 | Contratar pólizas seguros (E&O ≥$500M + Cyber ≥$500M) | Semana 3-4 | $3-5M COP/año | [`insurance-checklist.md`](../docs/legal/insurance-checklist.md) |
+| 5 | Cambiar `Nombre del comercio` Wompi a "KONVI" (descriptor neutro) | Semana 1 | $0 (1-5 días hábiles soporte) | ADR-0022 §Acciones Founder |
+| 6 | Abogado comercial revisa contrato tipo tenant — cláusulas Capa 1 (limitación responsabilidad, exclusión daños indirectos, indemnidad, Habeas Data) | Semana 2-4 | $1-2M COP one-shot | [`contract-template-tenant.md`](../docs/legal/contract-template-tenant.md) |
+| 7 | Autodiagnóstico exclusión IVA cloud (NIST 5 características + Concepto DIAN 017056/2017) | Semana 2 | $0 (gratis, hace el contador) | ADR-0022 §Hechos confirmados |
+
+**Costo total Fase 0:** ~$7-10M COP año 1 → mitiga ~80% riesgo patrimonial.
+
+### Hard constraints (NO negociables)
+
+1. **Correo Wompi inmutable** — pensar bien correo definitivo
+2. **UNA cuenta Wompi = UN nombre comercial** — cliente final ve "KONVI" en extracto
+3. **Wompi NO marketplace** — Konvi NO recibe pagos para terceros (sería intermediación financiera regulada SFC)
+4. **Persona natural = patrimonio personal ilimitado** — mitigar Capa 1 (contratos) + Capa 2 (seguros) obligatorias
+5. **Facturación electrónica DIAN desde 1er peso** — sin esto, ingresos no deducibles para tenants enterprise
+6. **RST 2027 ventana cierra 28-feb-2027** — ventana 2026 ya cerrada (5.9-7.3% sobre brutos vs 33% renta)
+
+### Triggers SAS Konvi (futuro, NO ahora)
+
+Cualquiera activa migración persona natural → SAS:
+- Ingresos brutos founder ≥ $10M COP/mes × 3 meses consecutivos
+- Tenant enterprise exige contrato con sociedad
+- Capital externo (inversión, deuda institucional)
+- Ingresos consolidados cruzan 3.500 UVT ($183M COP año 2026)
+- Vertical propia >$5M/mes sostenida
+
+### Plan K — items nuevos (sección 2.5 roadmap 0006)
+
+- **J.2.12** Subscription Billing Engine (link Wompi manual + Resend reminder)
+- **J.2.13** Two-rail accounting separation (`payment_purpose` distingue product_sale vs saas_subscription)
+- **J.5.X** Compliance fiscal tracking (cron mensual ingresos founder vs triggers SAS)
 
 ---
 

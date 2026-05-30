@@ -81,6 +81,20 @@ Ledger sync verificado vía `supabase migration list --linked` — ambas columna
 | **MFA-B** | **Auto-logout por inactividad** (60min owner/manager, 4h operator) | 4h | Cierra escenario "B cierra browser sin logout → A entra como B" — detectado founder 2026-05-29 PR #10 |
 | **MFA-C** | **Step-up auth** (re-pedir password para acciones críticas: eliminar tenant, cambiar email, regenerar codes MFA) | 1d | Defense in depth para operaciones sensibles · pattern bancario |
 
+### 2.5 💰 BILLING + ENTIDAD LEGAL (sesión 2026-05-30 — ver [ADR-0022](../adr/0022-legal-entity-billing-rails-risk-mitigation.md))
+
+Items nuevos del workflow estratégico sobre cómo cobrar suscripción a tenants + mitigar riesgo patrimonial founder persona natural.
+
+| # | Item | Esfuerzo | Prio | Detalle |
+|---|---|---|---|---|
+| **Fase 0** | **Blindaje fiscal founder** (contador + facturación electrónica + seguros E&O+Cyber + abogado contrato tipo + cambio nombre Wompi a "KONVI") | ~10h founder + $7-10M COP/año | 🔴 URGENTE | Próximas 2-4 semanas. Ver [`docs/legal/insurance-checklist.md`](../legal/insurance-checklist.md) + [`docs/legal/contract-template-tenant.md`](../legal/contract-template-tenant.md) |
+| **J.2.12** | **Subscription Billing Engine** (Konvi→Tenant rail) — link Wompi manual mensual + Resend reminder + reconciliación | 1-2 semanas eng | 🟡 P1 post Plan K | Suficiente 1-3 tenants iniciales. Migrar a PSP subscriptions (Bold/dLocal) si >3 tenants pagando. |
+| **J.2.13** | **Two-rail accounting separation** — ledger interno distingue tenant→cliente-final vs Konvi→tenant. Columna `payment_purpose` | 3-5d | 🟡 P1 con J.2.12 | Trazabilidad fiscal correcta para contador. Persona natural founder factura SaaS y operación vertical separadas. |
+| **J.5.X** | **Compliance fiscal tracking** — cron mensual reporta ingresos brutos founder vs triggers SAS (UVT, $10M/mes sostenido) | 2-3d | 🟢 P2 | Dashboard visibilidad ventana migración SAS. Trigger objetivo, no emocional. |
+| **RST-2027** | **Inscripción Régimen Simple Tributación** antes 28-feb-2027 (ventana 2026 ya cerró) | $0 dev | 🟡 IMPORTANTE | 5.9-7.3% sobre brutos vs 33% renta corporativa. Aplica persona natural y SAS. |
+| **Trigger SAS** | **Constituir SAS Konvi** (Fase 3 ADR-0022) — solo si ingresos ≥$10M/mes × 3 meses O tenant enterprise exige O capital externo O vertical >$5M/mes | $1.5-2.5M COP setup + $500-800 USD/mes operativo | ⚪ TRIGGER-DRIVEN | NO fecha fija. Re-evaluar Sem 13 + trimestralmente. |
+| **Fase 2 Multi-vertical** | Cuando arranque 2da vertical propia (cosmética/zapatos): validar con Wompi si persona natural N cuentas | $0-200K COP por cuenta | ⚪ TRIGGER-DRIVEN | Sem 14-20 típicamente. Si Wompi no permite → adelantar trigger SAS para esa vertical. |
+
 ---
 
 ## 3. Plan de próximas sesiones (3-5 sesiones siguientes)
