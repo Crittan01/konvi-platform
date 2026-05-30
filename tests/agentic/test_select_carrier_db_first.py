@@ -57,7 +57,11 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
 
     def test_db_options_resuelven_rate_id_sin_ctx_extras(self):
         """Caso runtime conv 2eb3bb48: legacy cotizó (DB tiene options),
-        agentic turn siguiente selecciona. ctx.extras está vacío (turn nuevo).
+        agentic turn siguiente selecciona.
+
+        Rev. 108 update — guardrail anti-auto-select: con >1 opción,
+        cliente DEBE haber mencionado el carrier en últimos inbounds.
+        Test pasa 'Coordinadora' en recent_inbound_texts.
         """
         options_in_db = [
             {
@@ -96,7 +100,11 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
         try:
             ctx = ToolContext(
                 tenant_id="t", conversation_id="c", contact_id="ct",
-                supabase=sb, extras={},  # ← EXTRAS VACÍO (turn nuevo).
+                supabase=sb,
+                extras={
+                    # Rev. 108 — cliente mencionó "Coordinadora" en inbound previo.
+                    "recent_inbound_texts": ["Coordinadora me parece bien"],
+                },
             )
             args = self.tool.args_schema(rate_id="envia-coordinadora-eco")
             result = _run(self.tool.execute(args, ctx))
@@ -172,7 +180,12 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
             from unittest.mock import MagicMock
             ctx = ToolContext(
                 tenant_id="t", conversation_id="c", contact_id="ct",
-                supabase=sb, extras={}, logger=MagicMock(),
+                supabase=sb,
+                extras={
+                    # Rev. 108 — cliente mencionó "Envia" explícitamente.
+                    "recent_inbound_texts": ["Por transportadora Envia"],
+                },
+                logger=MagicMock(),
             )
             # LLM inventó nombre que contiene 'envia'.
             args = self.tool.args_schema(rate_id="envia_medellin_rate_id")
@@ -237,7 +250,12 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
             from unittest.mock import MagicMock
             ctx = ToolContext(
                 tenant_id="t", conversation_id="c", contact_id="ct",
-                supabase=sb, extras={}, logger=MagicMock(),
+                supabase=sb,
+                extras={
+                    # Rev. 108 — cliente mencionó "Coordinadora" explícitamente.
+                    "recent_inbound_texts": ["Coordinadora por favor"],
+                },
+                logger=MagicMock(),
             )
             args = self.tool.args_schema(rate_id="rate_coordinadora_mercantil")
             result = _run(self.tool.execute(args, ctx))
@@ -393,7 +411,11 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
         try:
             ctx = ToolContext(
                 tenant_id="t", conversation_id="c", contact_id="ct",
-                supabase=sb, extras={},
+                supabase=sb,
+                extras={
+                    # Rev. 108 — cliente mencionó "Coordinadora" (KAIU 2026-05-23).
+                    "recent_inbound_texts": ["Coordinadora me parece bien"],
+                },
             )
             # rate_id vacío + carrier_name → debe resolver por fuzzy.
             args = self.tool.args_schema(rate_id="", carrier_name="Coordinadora")

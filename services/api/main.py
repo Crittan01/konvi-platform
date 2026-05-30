@@ -110,6 +110,9 @@ app.include_router(_dsr.router, prefix="/api/v1/contacts", dependencies=_OFFBOAR
 # NO aplicar _OFFBOARDING_GATE — el owner debe poder cancelar dentro del grace.
 from routers import tenant_offboarding as _toff  # noqa: E402
 app.include_router(_toff.router, prefix="/api/v1/tenant/offboarding")
+# Rev. 109 J.2.4.3 — MFA TOTP recovery codes.
+from routers import mfa as _mfa  # noqa: E402
+app.include_router(_mfa.router, prefix="/api/v1/mfa")
 # Rev. 101 (F5) — SIC pre-cocinado.
 from routers import sic_report as _sic  # noqa: E402
 app.include_router(_sic.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)

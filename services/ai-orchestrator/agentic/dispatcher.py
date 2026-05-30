@@ -109,6 +109,29 @@ async def dispatch_message(
         _mark_message_skipped(supabase, message_id)
         return
 
+    # Rev. 109 founder 2026-05-29 — Opt-out STOP gate (Habeas Data Ley 1581 ART. 9 +
+    # Meta Business Policy). ANTES estaba SOLO en orchestrator.py:6932 path legacy.
+    # KAIU usa agentic → el detector NUNCA disparaba. Detectado en UAT exhaustivo.
+    # Resuelve compliance regulatorio + UX: cliente envía STOP → confirmación
+    # canónica + revoca consent + marca conv opted_out + NO invoca LLM.
+    try:
+        await _handle_optout_if_keyword(
+            supabase,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            content=content,
+            content_type=content_type,
+        )
+        # Si el detector procesó el opt-out, _handle_optout_if_keyword marca
+        # el message como processed y retorna True. Verificamos status conv
+        # post-handle: si quedó opted_out, no avanzar al LLM.
+        post_handle_status = _get_conversation_status_safe(supabase, conversation_id)
+        if post_handle_status == "opted_out":
+            return
+    except Exception as exc:
+        logger.warning("[OPTOUT_GATE] error en optout handler: %s", exc)
+
     agentic_enabled = await is_tenant_agentic_enabled(supabase, tenant_id)
 
     if agentic_enabled:
@@ -2558,3 +2581,183 @@ def _mark_message_skipped(supabase: Any, message_id: str) -> None:
             "[AGENTIC_DISPATCH] error marcando msg=%s skipped: %s",
             message_id[:8], exc,
         )
+
+
+# ─── Opt-out gate (Rev. 109 founder 2026-05-29) ─────────────────────────────
+
+
+def _get_conversation_status_safe(supabase: Any, conversation_id: str) -> str:
+    """Lee status conv silencioso — usado por opt-out gate post-handle."""
+    try:
+        res = (
+            supabase.table("conversations")
+            .select("status")
+            .eq("id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return (rows[0].get("status") or "").lower() if rows else ""
+    except Exception:
+        return ""
+
+
+async def _handle_optout_if_keyword(
+    supabase: Any,
+    *,
+    message_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    content: str,
+    content_type: str,
+) -> bool:
+    """Detecta STOP/BAJA/CANCELAR/UNSUBSCRIBE/... y procesa opt-out completo.
+
+    Migración del path legacy `orchestrator.py:6924-7010` al dispatcher
+    agentic. Mismo patrón:
+      1. Detect via `is_optout_keyword`.
+      2. `soft_revoke_consent` en contacts (consent_revoked_at=NOW).
+      3. `_log_consent_event` para audit Habeas Data.
+      4. `mark_conversation_opted_out` (status='opted_out').
+      5. Enviar OPTOUT_CONFIRMATION_TEXT al cliente vía WhatsApp.
+      6. Persistir el outbound en messages para Inbox.
+      7. Marcar message inbound como processed (no re-loop).
+
+    Returns True si procesó opt-out (caller debe NO avanzar al LLM).
+    Returns False si no era keyword (caller sigue al LLM normal).
+    """
+    if content_type != "text":
+        return False
+    try:
+        from lib.whatsapp_optout import (  # noqa: PLC0415
+            OPTOUT_CONFIRMATION_TEXT,
+            is_optout_keyword,
+            mark_conversation_opted_out,
+            soft_revoke_consent,
+        )
+    except Exception:
+        # Lib no disponible (migración faltante) — degradar silent.
+        return False
+
+    if not is_optout_keyword(content):
+        return False
+
+    # Resolver contact_id + phone para la conv.
+    try:
+        conv_res = (
+            supabase.table("conversations")
+            .select("customer_phone")
+            .eq("id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+        if not (conv_res.data or []):
+            return False
+        customer_phone = conv_res.data[0].get("customer_phone") or ""
+        if not customer_phone:
+            return False
+
+        contact_res = (
+            supabase.table("contacts")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("phone", customer_phone)
+            .limit(1)
+            .execute()
+        )
+        contact_id = (contact_res.data or [{}])[0].get("id")
+        if not contact_id:
+            # Sin contact en DB → no podemos revocar. Procesar como mensaje
+            # normal (raro pero posible si el connector no creó el contact).
+            return False
+    except Exception as exc:
+        logger.warning("[OPTOUT_GATE] lookup conv/contact falló: %s", exc)
+        return False
+
+    logger.info(
+        "[OPTOUT_GATE] STOP detectado msg=%s conv=%s contact=%s",
+        message_id[:8], conversation_id[:8], contact_id[:8] if contact_id else "?",
+    )
+
+    # 1. Revoca consent.
+    try:
+        soft_revoke_consent(
+            supabase,
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            conversation_id=conversation_id,
+            phone=customer_phone,
+        )
+    except Exception as exc:
+        logger.error("[OPTOUT_GATE] soft_revoke_consent falló: %s", exc)
+        return False
+
+    # 2. Audit log Habeas Data Art. 9 trail (opcional — si falla no rompe).
+    try:
+        from orchestrator import _log_consent_event  # noqa: PLC0415
+        _log_consent_event(
+            supabase,
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            phone=customer_phone,
+            event="revoked",
+            source="whatsapp",
+            conversation_id=conversation_id,
+            evidence={
+                "trigger": "stop_keyword",
+                "keyword_matched": content.strip().lower(),
+                "rev": "109_dispatcher_gate",
+                "path": "agentic_dispatcher",
+            },
+        )
+    except Exception as exc:
+        logger.warning("[OPTOUT_GATE] audit log falló (no crítico): %s", exc)
+
+    # 3. Marca conv opted_out (visibilidad UI Inbox).
+    try:
+        mark_conversation_opted_out(
+            supabase,
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.error("[OPTOUT_GATE] mark_conversation_opted_out falló: %s", exc)
+
+    # 4. Envía confirmación canónica al cliente.
+    try:
+        from whatsapp_sender import send_whatsapp_message  # noqa: PLC0415
+        meta_msg_id = await send_whatsapp_message(
+            tenant_id=tenant_id,
+            supabase=supabase,
+            to_phone=customer_phone,
+            text=OPTOUT_CONFIRMATION_TEXT,
+        )
+    except Exception as exc:
+        logger.error("[OPTOUT_GATE] send confirmación falló: %s", exc)
+        meta_msg_id = None
+
+    # 5. Persistir outbound en messages para que aparezca en Inbox.
+    try:
+        supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "text",
+            "content": OPTOUT_CONFIRMATION_TEXT,
+            "meta_message_id": meta_msg_id,
+            "processed": True,
+            "processing_status": "processed",
+        }).execute()
+    except Exception as exc:
+        logger.error("[OPTOUT_GATE] persist outbound falló: %s", exc)
+
+    # 6. Marcar message inbound como processed (no re-loop).
+    try:
+        supabase.table("messages").update({
+            "processing_status": "processed",
+            "processed": True,
+        }).eq("id", message_id).execute()
+    except Exception as exc:
+        logger.warning("[OPTOUT_GATE] mark inbound processed falló: %s", exc)
+
+    return True

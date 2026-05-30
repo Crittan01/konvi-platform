@@ -183,4 +183,36 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+// ── Sentry wrapper (Rev. 109 J.2.7.4) ──────────────────────────────────────
+// Wrap con withSentryConfig para que @sentry/nextjs auto-inject:
+//   - sentry.client.config.ts en el browser bundle
+//   - sentry.server.config.ts en el server runtime Node
+//   - sentry.edge.config.ts si hay middleware/route edge (no usado hoy)
+//   - source maps upload en build (require SENTRY_AUTH_TOKEN)
+//   - tunnel route /monitoring para evadir ad-blockers (opcional)
+//
+// Si NEXT_PUBLIC_SENTRY_DSN no está configurado, Sentry queda inert
+// (enabled: false en cada config). Build sigue funcionando.
+
+const { withSentryConfig } = require('@sentry/nextjs')
+
+module.exports = withSentryConfig(
+  nextConfig,
+  {
+    // Suppress logs de upload en build (no romper CI si falta auth token).
+    silent: true,
+    // Org + project se leen de env. Sin estos, source map upload se salta.
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    // Auth token NUNCA va en el bundle — solo en build env.
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+  },
+  {
+    // Hide source maps del bundle público (privacy).
+    hideSourceMaps: true,
+    // Disable logger output en runtime (logs vienen del Sentry SDK init).
+    disableLogger: true,
+    // Auto-instrumentation de fetch + DB clients ya viene en el SDK.
+    automaticVercelMonitors: false,  // not on Vercel
+  },
+)
