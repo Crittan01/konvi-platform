@@ -56,6 +56,12 @@ def format_pesos(value: object) -> str:
 
 
 def format_cents_cop(cents: int) -> str:
-    """Formatea centavos COP a string legible: 1350000 → '$13.500 COP'"""
+    """Formatea centavos COP a string legible: 1350000 → '$13.500'.
+
+    Sem 7 F2 cierre 2026-05-20 — P5 founder UAT: removido sufijo " COP".
+    Razón UX: en WhatsApp commerce CO el formato `$X` ya implica pesos
+    para hablantes nativos; "COP" sonaba técnico/redundante.
+    Sigue siendo función pura — formato sin moneda explícita.
+    """
     pesos = (cents or 0) // 100
-    return f"${pesos:,.0f} COP".replace(",", ".")
+    return f"${pesos:,.0f}".replace(",", ".")

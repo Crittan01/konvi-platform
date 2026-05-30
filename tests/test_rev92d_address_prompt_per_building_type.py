@@ -25,7 +25,9 @@ class UnknownBuildingTypeTests(unittest.TestCase):
     def test_no_address_data(self):
         out = _build_address_request_prompt({}, None)
         self.assertIn("Tipo de vivienda", out)
-        self.assertIn("casa, edificio o conjunto", out)
+        # Sem 7 F2 cierre — texto canónico ahora incluye 'oficina' como
+        # delivery_context descubrible.
+        self.assertIn("casa, edificio, conjunto u oficina", out)
         self.assertIn("(obligatorio)", out)
         self.assertIn("Calle y número", out)
         self.assertIn("Ciudad", out)
@@ -36,6 +38,8 @@ class UnknownBuildingTypeTests(unittest.TestCase):
         # Pero el opcional debe sugerir condicional (nombre + ref).
         self.assertIn("nombre del edificio/conjunto", out.lower())
         self.assertIn("punto de referencia", out.lower())
+        # Sem 7 F2 cierre — oficina como modalidad opcional descubrible.
+        self.assertIn("oficina", out.lower())
 
     def test_partial_address_no_type(self):
         contact = {"address": {"street": "Calle 5 #6-7"}}  # sin building_type
@@ -48,9 +52,12 @@ class CasaBuildingTypeTests(unittest.TestCase):
     """Tipo casa — solo punto de referencia es opcional."""
 
     def test_casa_address_complete(self):
-        # Address completa para casa (street + city + type=casa).
+        # Address completa para casa (street + city + barrio + type=casa).
+        # Sem 7 F2 cierre 2026-05-20 — P6 opción C: barrio obligatorio en residencial.
         contact = {"address": {
-            "street": "Calle 5 #6-7", "city": "Bogotá", "building_type": "casa"
+            "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
+            "building_type": "casa",
         }}
         out = _build_address_request_prompt(contact, None)
         # No debería pedir nada — address completa.
@@ -87,6 +94,7 @@ class EdificioBuildingTypeTests(unittest.TestCase):
     def test_edificio_address_complete(self):
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
             "building_type": "edificio", "apartment": "501"
         }}
         out = _build_address_request_prompt(contact, None)
@@ -96,10 +104,21 @@ class EdificioBuildingTypeTests(unittest.TestCase):
 class ConjuntoBuildingTypeTests(unittest.TestCase):
     """Tipo conjunto — torre + apartamento obligatorios; nombre+ref opcionales."""
 
-    def test_conjunto_missing_tower_and_apt(self):
+    def test_conjunto_without_conjunto_type_pides_clarificacion(self):
+        """Sem 7 F2 cierre — conjunto sin sub-tipo pide clarificación primero
+        (torres vs casas). NO pide torre/apto aún porque depende del sub-tipo."""
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
             "building_type": "conjunto"
+        }}
+        out = _build_address_request_prompt(contact, None)
+        self.assertIn("Tipo de conjunto (torres o casas)", out)
+
+    def test_conjunto_torres_missing_tower_and_apt(self):
+        contact = {"address": {
+            "street": "Calle 5 #6-7", "city": "Bogotá",
+            "building_type": "conjunto",
+            "conjunto_type": "torres",
         }}
         out = _build_address_request_prompt(contact, None)
         # Pide torre Y apartamento como obligatorios.
@@ -111,10 +130,12 @@ class ConjuntoBuildingTypeTests(unittest.TestCase):
         # NO debería ofrecer "nombre del edificio".
         self.assertNotIn("nombre del edificio", out.lower())
 
-    def test_conjunto_only_missing_apartment(self):
+    def test_conjunto_torres_only_missing_apartment(self):
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
-            "building_type": "conjunto", "tower": "3"
+            "building_type": "conjunto",
+            "conjunto_type": "torres",
+            "tower": "3",
         }}
         out = _build_address_request_prompt(contact, None)
         self.assertIn("Apartamento", out)
@@ -123,10 +144,36 @@ class ConjuntoBuildingTypeTests(unittest.TestCase):
         # Opcionales conjunto.
         self.assertIn("nombre del conjunto", out.lower())
 
-    def test_conjunto_address_complete(self):
+    def test_conjunto_torres_address_complete(self):
         contact = {"address": {
             "street": "Calle 5 #6-7", "city": "Bogotá",
-            "building_type": "conjunto", "tower": "3", "apartment": "401"
+            "neighborhood": "Chapinero",
+            "building_type": "conjunto",
+            "conjunto_type": "torres",
+            "tower": "3", "apartment": "401",
+        }}
+        out = _build_address_request_prompt(contact, None)
+        self.assertIn("ya tengo tu dirección", out)
+
+    def test_conjunto_casas_missing_house_number(self):
+        """Sem 7 F2 cierre — conjunto de casas solo pide casa# (alias apartment)."""
+        contact = {"address": {
+            "street": "Calle 5 #6-7", "city": "Bogotá",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+        }}
+        out = _build_address_request_prompt(contact, None)
+        self.assertIn("Número de casa", out)
+        # NO pide torre.
+        self.assertNotIn("Torre", out)
+
+    def test_conjunto_casas_address_complete(self):
+        contact = {"address": {
+            "street": "Calle 5 #6-7", "city": "Bogotá",
+            "neighborhood": "Chapinero",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",  # alias semántico de "casa #12"
         }}
         out = _build_address_request_prompt(contact, None)
         self.assertIn("ya tengo tu dirección", out)

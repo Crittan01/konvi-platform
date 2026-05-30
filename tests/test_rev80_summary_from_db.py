@@ -125,9 +125,10 @@ class BuildOrderSummaryFromDbTests(unittest.TestCase):
         # AMBOS productos deben aparecer en el resumen.
         self.assertIn("Jabón Artesanal de Coco", out)
         self.assertIn("Jabón Artesanal de Lavanda", out)
-        self.assertIn("$82.000 COP", out)   # subtotal
-        self.assertIn("$11.000 COP", out)   # shipping
-        self.assertIn("$93.000 COP", out)   # total
+        # Sem 7 F2 cierre 2026-05-20 — P5: sin sufijo " COP".
+        self.assertIn("$82.000", out)   # subtotal
+        self.assertIn("$11.000", out)   # shipping
+        self.assertIn("$93.000", out)   # total
         self.assertNotIn("$26.000", out)    # bug del log NO debe aparecer
 
     def test_summary_with_requires_requote_extracts_shipping_from_history(self):

@@ -94,12 +94,12 @@ export default async function ContactsPage({
 }: {
   searchParams?: { q?: string; consent?: string }
 }) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  // Sem 5 perf: cached comparte con DashboardLayout.
+  const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   const consentFilter = searchParams?.consent ?? 'all'
 
@@ -172,8 +172,14 @@ export default async function ContactsPage({
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
     // Rev. 69 — campos estructurados de address.
+    // Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY):
+    //   building_type ∈ {casa, edificio, conjunto, oficina}
+    //   conjunto_type ∈ {torres, casas} si conjunto.
+    //   floor + company_name opcionales.
     const buildingTypeRaw = (formData.get('addr_building_type') as string) || ''
-    const buildingType = ['casa', 'edificio', 'conjunto'].includes(buildingTypeRaw) ? buildingTypeRaw : undefined
+    const buildingType = ['casa', 'edificio', 'conjunto', 'oficina'].includes(buildingTypeRaw) ? buildingTypeRaw : undefined
+    const conjuntoTypeRaw = (formData.get('addr_conjunto_type') as string) || ''
+    const conjuntoType = ['torres', 'casas'].includes(conjuntoTypeRaw) ? conjuntoTypeRaw : undefined
     const address  = street ? {
       street,
       number:        (formData.get('addr_number')        as string) || undefined,
@@ -187,6 +193,9 @@ export default async function ContactsPage({
       apartment:     (formData.get('addr_apartment')     as string) || undefined,
       complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
       reference:     (formData.get('addr_reference')     as string) || undefined,
+      conjunto_type: conjuntoType,
+      floor:         (formData.get('addr_floor')         as string) || undefined,
+      company_name:  (formData.get('addr_company_name')  as string) || undefined,
     } : null
     // Rev. 69 — documento de identidad.
     const docTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
@@ -382,8 +391,11 @@ export default async function ContactsPage({
     const addrCity = (formData.get('addr_city')   as string) || null
     const daneCode = normalizeDaneCode(formData.get('addr_dane_code') as string)
     // Rev. 69 — campos estructurados de address (igual que addAction).
+    // Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY).
     const editBuildingTypeRaw = (formData.get('addr_building_type') as string) || ''
-    const editBuildingType = ['casa', 'edificio', 'conjunto'].includes(editBuildingTypeRaw) ? editBuildingTypeRaw : undefined
+    const editBuildingType = ['casa', 'edificio', 'conjunto', 'oficina'].includes(editBuildingTypeRaw) ? editBuildingTypeRaw : undefined
+    const editConjuntoTypeRaw = (formData.get('addr_conjunto_type') as string) || ''
+    const editConjuntoType = ['torres', 'casas'].includes(editConjuntoTypeRaw) ? editConjuntoTypeRaw : undefined
     const address  = street ? {
       street,
       number:        (formData.get('addr_number')        as string) || undefined,
@@ -397,6 +409,9 @@ export default async function ContactsPage({
       apartment:     (formData.get('addr_apartment')     as string) || undefined,
       complex_name:  (formData.get('addr_complex_name')  as string) || undefined,
       reference:     (formData.get('addr_reference')     as string) || undefined,
+      conjunto_type: editConjuntoType,
+      floor:         (formData.get('addr_floor')         as string) || undefined,
+      company_name:  (formData.get('addr_company_name')  as string) || undefined,
     } : null
     // Rev. 69 — documento de identidad en edit. Rev. 102: TI removido.
     const editDocTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
@@ -521,56 +536,89 @@ export default async function ContactsPage({
   async function deleteContact(formData: FormData) {
     'use server'
     const sb = createClient()
+    // Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (web.log alerta):
+    // ANTES usábamos `session.user` directamente — Supabase lo marcaba
+    // como `insecure` porque viene de cookies sin verificación de JWT.
+    // AHORA: `getUser()` contacta al Auth Server y valida autenticidad
+    // (operación segura). `getSession()` solo para el `access_token`
+    // que va al endpoint API (que también verifica el JWT server-side).
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    // Sem 7 F2 cierre 2026-05-19 — purge endpoint requiere role 'owner'
+    // (hard cascade es destructivo, no debe ser permitido a 'manager').
+    if (!m.tenant_id || m.role !== 'owner') {
+      throw new Error('Solo el owner puede eliminar contactos en cascade.')
+    }
     const contactId = (formData.get('contact_id') as string) || ''
     if (!contactId) return
     const reason = ((formData.get('delete_reason') as string) || '').trim()
-
-    // Rev. 103 (SaaS B2B) — audit ANTES del DELETE físico. El audit log
-    // es append-only e inmutable; la fila persiste con phone hasheado
-    // aunque el contact_id quede huérfano. Trazabilidad ante SIC.
-    //
-    // RLS de consent_audit_log: GRANT INSERT TO service_role solamente.
-    // El cliente user-auth NO puede escribir; el insert silenciosamente
-    // devuelve { error } sin throw. Por eso usamos createAdminClient()
-    // SOLO para el audit insert. El delete del contact sigue usando el
-    // cliente user-auth (RLS contacts permite owner/manager del tenant).
-    const { data: snapshot } = await sb.from('contacts')
-      .select('phone')
-      .eq('id', contactId)
-      .eq('tenant_id', m.tenant_id)
-      .single()
-    if (!snapshot) return
-
-    const admin = createAdminClient()
-    const auditResult = await admin.from('consent_audit_log').insert({
-      tenant_id: m.tenant_id,
-      contact_id: contactId,
-      phone_hash: hashPhone((snapshot as { phone?: string | null }).phone),
-      event: 'deleted',
-      source: 'tenant_console',
-      actor_email: u?.email ?? null,
-      actor_user_id: u?.id ?? null,
-      evidence: {
-        reason: reason || null,
-        deleted_by: u?.email ?? null,
-      },
-    })
-    if (auditResult.error) {
-      // Audit log es legal-required; no procedemos al delete si falla.
-      console.error('[deleteContact] audit log insert falló', auditResult.error)
-      throw new Error(
-        'No se pudo registrar el audit log del eliminado. El contacto NO fue eliminado. ' +
-        `(detalle: ${auditResult.error.message})`
-      )
+    const { data: { session } } = await sb.auth.getSession()
+    const token = session?.access_token
+    if (!token) {
+      throw new Error('Sesión expirada — recarga la página.')
     }
 
-    await sb.from('contacts')
-      .delete()
-      .eq('id', contactId)
-      .eq('tenant_id', m.tenant_id)
+    // Sem 7 F2 cierre 2026-05-19 — Bug founder UAT (conv 056490b8):
+    // ANTES esta server action hacía DELETE directo a tabla contacts. Eso
+    // dejaba carts/conversations/orders huérfanos en DB que el cart-recovery
+    // del bot recuperaba silenciosamente en próximas conversaciones del
+    // mismo phone → cart contaminado con items históricos.
+    //
+    // AHORA delega al endpoint `POST /api/v1/contacts/{id}/purge` que
+    // ejecuta cascade completo (audit log + helper `purge_contact_completely`).
+    // Misma lógica reusable desde `scripts/wipe_conversation.py --purge-contact`.
+    try {
+      const res = await fetch(
+        `${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(contactId)}/purge`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ reason: reason || null }),
+          cache: 'no-store',
+        },
+      )
+      if (!res.ok) {
+        // Sem 7 F2 cierre 2026-05-21 — Capa A.3 (Wompi payment link guard):
+        // 409 = purge bloqueada por link Wompi activo (<30 min). Wompi NO
+        // permite invalidar links existentes, así que propagamos mensaje
+        // claro al operador en lugar de error genérico.
+        if (res.status === 409) {
+          type PurgeBlockedDetail = {
+            code?: string
+            message?: string
+            pending_payments?: unknown[]
+          }
+          let parsed: PurgeBlockedDetail | null = null
+          try {
+            const body = (await res.json()) as { detail?: PurgeBlockedDetail }
+            parsed = body?.detail ?? null
+          } catch {
+            parsed = null
+          }
+          if (parsed?.code === 'purge_blocked_active_payment_link') {
+            const count = Array.isArray(parsed.pending_payments)
+              ? parsed.pending_payments.length
+              : 0
+            throw new Error(
+              parsed.message ||
+                `No se puede eliminar: el contacto tiene ${count} link(s) de pago Wompi activo(s). ` +
+                  'Wompi no permite invalidar links existentes — espera ~30 min a que expire(n) ' +
+                  'o cancela la(s) orden(es) manualmente antes de reintentar.'
+            )
+          }
+        }
+        const errText = await res.text()
+        throw new Error(
+          `Purge falló (${res.status}): ${errText.slice(0, 200)}`
+        )
+      }
+    } catch (e) {
+      console.error('[deleteContact] purge API call falló', e)
+      throw e
+    }
     revalidatePath('/dashboard/contacts')
   }
 
@@ -661,6 +709,113 @@ export default async function ContactsPage({
     }
   }
 
+  // Rev. 105 H.4.1.x — Server action: reactivar consent tras soft opt-out
+  // (STOP keyword via WhatsApp). Limpia consent_revoked_at + reason; PII
+  // intacta (no se anonimizó). Audit log Habeas Data Art. 9 con actor +
+  // reason. Idempotente: si ya está activo, no-op.
+  async function reactivateConsentAction(
+    formData: FormData,
+  ): Promise<{ ok: boolean; status: number; message: string }> {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    // Rev. 105 H.4.1.x — owner-only (Habeas Data ART. 11). Manager NO
+    // puede reactivar consent — debe escalar al owner para que firme.
+    if (!m.tenant_id || m.role !== 'owner') {
+      return {
+        ok: false,
+        status: 403,
+        message: 'Solo el owner puede reactivar consent (gobierno Habeas Data ART. 11). Contactar al owner del tenant para que ejecute la acción.',
+      }
+    }
+    const contactId = ((formData.get('contact_id') as string) || '').trim()
+    const reason = ((formData.get('reason') as string) || '').trim()
+    if (!contactId) return { ok: false, status: 400, message: 'contact_id requerido' }
+    if (reason.length < 10) {
+      return { ok: false, status: 400, message: 'Razón requerida (mínimo 10 caracteres)' }
+    }
+
+    // Verificar contact + capturar phone para hash audit.
+    const { data: contact } = await sb.from('contacts')
+      .select('phone, consent_revoked_at, consent_revoked_reason')
+      .eq('id', contactId)
+      .eq('tenant_id', m.tenant_id)
+      .single()
+    if (!contact) {
+      return { ok: false, status: 404, message: 'Contacto no encontrado' }
+    }
+    if (!contact.consent_revoked_at) {
+      return { ok: true, status: 200, message: 'Consent ya estaba activo (no-op)' }
+    }
+
+    // Audit log ANTES de UPDATE (Habeas Data Art. 9 — append-only inmutable).
+    const admin = createAdminClient()
+    const auditResult = await admin.from('consent_audit_log').insert({
+      tenant_id: m.tenant_id,
+      contact_id: contactId,
+      phone_hash: hashPhone((contact as { phone?: string | null }).phone),
+      event: 'granted',
+      source: 'tenant_console',
+      actor_email: u?.email ?? null,
+      actor_user_id: u?.id ?? null,
+      evidence: {
+        trigger: 'manual_reactivate',
+        reason,
+        previous_revoked_reason: (contact as { consent_revoked_reason?: string | null }).consent_revoked_reason,
+        reactivated_at: new Date().toISOString(),
+      },
+    })
+    if (auditResult.error) {
+      console.error('[reactivateConsent] audit log insert falló', auditResult.error)
+      return { ok: false, status: 500, message: 'No se pudo registrar audit log. Reactivación abortada.' }
+    }
+
+    // UPDATE contacts limpiando revoke flags (PII intacta, NO anonimiza).
+    const { error: updateErr } = await sb.from('contacts')
+      .update({ consent_revoked_at: null, consent_revoked_reason: null })
+      .eq('id', contactId)
+      .eq('tenant_id', m.tenant_id)
+    if (updateErr) {
+      console.error('[reactivateConsent] update contact falló', updateErr)
+      return { ok: false, status: 500, message: 'Audit log se registró pero update falló. Estado inconsistente — reportar.' }
+    }
+
+    // Rev. 105 H.4.1.x.gov.sync — Sincronía Inbox: también vuelve
+    // conversations.status='opted_out' → 'bot_active' para que el operador
+    // vea estado consistente en ambas UIs (Contactos + Inbox). Asimetría
+    // STOP→opted_out / Reactivar→bot_active es el design simétrico correcto.
+    // El customer_phone del contact mapea a conversations.customer_phone (1:N).
+    const contactPhone = (contact as { phone?: string | null }).phone
+    let conversationsReactivated = 0
+    if (contactPhone) {
+      const { data: convData, error: convUpdateErr } = await sb.from('conversations')
+        .update({ status: 'bot_active' })
+        .eq('tenant_id', m.tenant_id)
+        .eq('customer_phone', contactPhone)
+        .eq('status', 'opted_out')
+        .select('id')
+      if (convUpdateErr) {
+        // No abortamos — el consent ya se reactivó. Solo loguear.
+        console.error('[reactivateConsent] conversations sync falló (no crítico)', convUpdateErr)
+      } else {
+        conversationsReactivated = (convData ?? []).length
+      }
+    }
+
+    revalidatePath('/dashboard/contacts')
+    revalidatePath('/dashboard/inbox')
+
+    const syncMsg = conversationsReactivated > 0
+      ? ` Conversaciones reactivadas: ${conversationsReactivated} (Inbox sincronizado).`
+      : ''
+    return {
+      ok: true,
+      status: 200,
+      message: `Consent reactivado. Marketing puede reanudarse al cliente.${syncMsg}`,
+    }
+  }
+
   // ── UI ─────────────────────────────────────────────────────────────────────
 
   return (
@@ -679,7 +834,7 @@ export default async function ContactsPage({
       </div>
 
       {/* AI Insight — a demanda */}
-      {(meta.role === 'owner' || meta.role === 'manager') && (
+      {(role === 'owner' || role === 'manager') && (
         <AiInsightPanel module="contacts" label="Contactos" />
       )}
 
@@ -695,11 +850,13 @@ export default async function ContactsPage({
       <ContactsManager
         initialContacts={contacts}
         canWrite={canWrite}
+        userRole={role}
         addAction={addContact}
         editAction={editContact}
         deleteAction={deleteContact}
         sarAction={sarAction}
         sarPrintableAction={sarPrintableAction}
+        reactivateConsentAction={reactivateConsentAction}
       />
     </div>
   )

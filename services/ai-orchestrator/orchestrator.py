@@ -3,7 +3,7 @@ import os
 import re
 import unicodedata
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types as genai_types
@@ -11,9 +11,6 @@ from supabase import Client
 from tools.catalog_tool import get_tenant_catalog
 from tools.payment_link_tool import handle_payment_link_if_applicable
 from tools.kb_tool import get_tenant_kb_rag, format_kb_for_prompt
-from tools.shipping_quote_tool import handle_shipping_quote_if_applicable
-from tools.image_send_tool import handle_image_request_if_applicable
-from tools.order_status_tool import handle_order_status_if_applicable
 from guardrails import validate_orchestrator_output
 from whatsapp_sender import send_whatsapp_message
 from checkout_form import CheckoutFormConductor
@@ -25,10 +22,12 @@ from conversation_contract import (
     PROCESSING_STATUS_PENDING,
     PROCESSING_STATUS_PROCESSED,
     PROCESSING_STATUS_SKIPPED,
+    CONVERSATION_STATUS_OPTED_OUT,
     SKIP_REASON_CLOSED,
     SKIP_REASON_GUARDRAIL,
     SKIP_REASON_HUMAN_TAKEOVER,
     SKIP_REASON_NON_TEXT,
+    SKIP_REASON_OPTED_OUT,
 )
 
 logger = logging.getLogger("orchestrator.core")
@@ -77,27 +76,17 @@ _CONSENT_QUESTION_MARKERS = (
     "eliminar mis datos",
     "elimina mis datos",
 )
-_REVOCATION_TOKENS = {
-    # Variantes "X mis datos"
-    "eliminar mis datos", "elimina mis datos",
-    "borrar mis datos", "borra mis datos",
-    # Variantes "X todos mis datos" (rev. 92.e — caso real S8)
-    "eliminar todos mis datos", "elimina todos mis datos",
-    "borrar todos mis datos", "borra todos mis datos",
-    # Variantes "X toda mi informacion"
-    "eliminar mi informacion", "elimina mi informacion",
-    "eliminar toda mi informacion", "elimina toda mi informacion",
-    "borrar mi informacion", "borra mi informacion",
-    "borrar toda mi informacion", "borra toda mi informacion",
-    # Otros fraseos naturales
-    "quiero ser eliminado", "no guardes mis datos",
-    "no quieras guardar mis datos", "no quiero que guardes",
-    "quiero borrar mis datos", "quiero eliminar mis datos",
-    "olvida mis datos", "olvida toda mi info",
-    # Habeas Data formal
-    "revoco el consentimiento", "revoco mi consentimiento",
-    "retiro el consentimiento",
-}
+# Rev. 104 (F1-1 batch 4) — extraído a safety/consent_gates.py.
+from safety.consent_gates import (
+    detect_revocation_intent as _detect_revocation_intent,
+    detect_data_export_intent as _detect_data_export_intent,
+    detect_rectification_intent as _detect_rectification_intent,
+    detect_minor_intent as _detect_minor_intent,
+    REVOCATION_TOKENS as _REVOCATION_TOKENS,
+    DATA_EXPORT_TOKENS as _DATA_EXPORT_TOKENS,
+    RECTIFICATION_TOKENS as _RECTIFICATION_TOKENS,
+    MINOR_EXPLICIT_PHRASES as _MINOR_EXPLICIT_PHRASES,
+)
 
 # Rev. 84 — Guardrails de cumplimiento Meta Business Policy.
 #
@@ -113,44 +102,13 @@ _REVOCATION_TOKENS = {
 # P0 — crisis de salud mental: escalación INMEDIATA con mensaje de
 # seguridad. Lista conservadora; falsos positivos son mejor que falsos
 # negativos en este caso.
-_MENTAL_HEALTH_CRISIS_PHRASES = (
-    "me quiero matar", "me voy a matar", "quiero matarme",
-    "voy a suicidarme", "suicidarme", "suicidio",
-    "voy a morir", "quiero morir", "no quiero vivir", "no quiero seguir viviendo",
-    "no quiero seguir aqui",  # _normalize_text_simple strip accents → "aqui"
-    "hacerme dano", "hacer dano", "hacerme daño", "hacer daño",
-    "lastimarme", "cortarme",
-    "no aguanto mas",
-    "acabar con mi vida", "acabar con todo",
-    "me quitare la vida",
-    "pensamientos suicidas", "tentado a suicidarme",
+# Rev. 104 (F1-1 batch 2) — extraídos a safety/content_safety.py.
+# Aliases legacy para call-sites internos sin breaking changes.
+from safety.content_safety import (
+    detect_mental_health_crisis as _detect_mental_health_crisis,
+    MENTAL_HEALTH_CRISIS_PHRASES as _MENTAL_HEALTH_CRISIS_PHRASES,
 )
-
-# Detección de números potencialmente sensibles que el cliente NO debería
-# enviar al chat (Wompi maneja datos de pago en su widget).
-# Patrones cubiertos:
-#   • Tarjeta de crédito: 13-19 dígitos consecutivos (con o sin espacios/guiones)
-#   • CVV explícito: "cvv 123", "cvc: 456"
-import re as _re_meta
-# CVV: keyword + hasta 6 chars no-dígitos + 3-4 dígitos. Cubre "cvv 123",
-# "cvv es 123", "cvc: 456", "código de seguridad es 789".
-_CVV_RE = _re_meta.compile(
-    r"(?:cvv|cvc|cvn|c[oó]digo\s+de\s+seguridad)\D{0,6}\d{3,4}",
-    _re_meta.IGNORECASE,
-)
-
-
-def _detect_mental_health_crisis(text: str) -> bool:
-    """True si el texto sugiere crisis de salud mental (autolesión / suicidio).
-
-    Diseño conservador: la prioridad es NO ignorar un caso real.
-    Falsos positivos derivan en escalación humana, que el agente humano
-    puede manejar correctamente. Falsos negativos son inaceptables.
-    """
-    if not text:
-        return False
-    normalized = _normalize_text_simple(text)
-    return any(phrase in normalized for phrase in _MENTAL_HEALTH_CRISIS_PHRASES)
+import re as _re_meta  # mantenido para otros usos en este módulo
 
 
 # Rev. 92.b — Telemedicina / consultas médicas / diagnóstico.
@@ -166,110 +124,22 @@ def _detect_mental_health_crisis(text: str) -> bool:
 # o pide diagnóstico, respondemos templated redirigiendo a profesional
 # médico. Conservador con falsos positivos — mejor mandar al médico
 # que dar consejo médico ilegal.
-_MEDICAL_QUERY_PHRASES = (
-    # Enfermedades dermatológicas/sistémicas comunes
-    "acne", "rosacea", "eczema", "psoriasis", "dermatitis",
-    "vitiligo", "alopecia", "celulitis", "infeccion", "infección",
-    "herpes", "verruga", "queratosis", "melanoma", "lupus",
-    "diabetes", "hipertension", "hipertensión", "cancer", "cáncer",
-    "tumor", "asma", "hepatitis", "vih", "sida",
-    # Lenguaje de diagnóstico/tratamiento
-    "me diagnostic", "diagnosticar", "diagnostico", "diagnóstico",
-    "que enfermedad tengo", "qué enfermedad tengo",
-    "tratamiento para", "que tratamiento", "qué tratamiento",
-    "cura ", "curar ", "cura el", "cura la", "cura mi",
-    "trata el", "trata la", "trata mi", "tratar el", "tratar la",
-    "es seguro en embaraz", "puedo usar embaraz",
-    "estoy embaraz", "lactanc", "amamantar",
-    "soy alergic", "es alergic", "tengo alergia", "alergia a",
-    "sintoma", "síntoma",
-    "receta medica", "receta médica",
-    "doctor recom", "medico recom", "médico recom",
-    "que medicament", "qué medicament",
-    # Consultas tipo "este producto sirve para X enfermedad"
-    "sirve para tratar", "sirve para curar",
-    "es bueno para mi", "remedio para",
+# Rev. 104 (F1-1) — extraídos a safety/domain_filter.py (strangler fig).
+# Aliases legacy mantenidos para call-sites internos del orchestrator y
+# tests que aún importan los nombres viejos. Eliminar cuando se complete
+# el strangle (post-Fase 1).
+from safety.domain_filter import (
+    detect_medical_query as _detect_medical_query,
+    detect_drug_purchase_request as _detect_drug_purchase_request,
+    MEDICAL_QUERY_PHRASES as _MEDICAL_QUERY_PHRASES,
+    DRUG_PURCHASE_PHRASES as _DRUG_PURCHASE_PHRASES,
 )
 
 
-def _detect_medical_query(text: str) -> bool:
-    """True si el cliente hace consulta médica/diagnóstica que el bot
-    NO debe responder.
-
-    Cobertura Meta Business Policy + Ley 23 de 1981 Colombia (ejercicio
-    ilegal de medicina). El bot debe redirigir a profesional médico,
-    nunca afirmar que un producto cura/trata una condición clínica.
-
-    Conservador: si hay duda, redirigir es mejor que arriesgar claim
-    médico ilegal o ban de Meta.
-    """
-    if not text:
-        return False
-    normalized = _normalize_text_simple(text)
-    return any(phrase in normalized for phrase in _MEDICAL_QUERY_PHRASES)
-
-
-# Rev. 92.b — Solicitud de compra de medicamentos.
-# Meta Commerce Policy: "Content that attempts to buy, sell, trade,
-# donate, gift or ask for over-the-counter medicine is prohibited"
-# (mismo principio para Rx). Ningún tipo de medicamento puede
-# comerciarse en WhatsApp Business.
-#
-# KAIU vende cosmética artesanal, NO drogas. Si el cliente pide un
-# medicamento, redirigir a droguería/farmacia.
-_DRUG_PURCHASE_PHRASES = (
-    # Genéricos populares (Rx + OTC)
-    "ibuprofeno", "acetaminofen", "acetaminofén", "paracetamol",
-    "aspirina", "naproxeno", "diclofenaco", "loratadina", "cetirizina",
-    "amoxicilina", "azitromicina", "penicilina",
-    "antibiotico", "antibiótico", "antibióticos",
-    "antidepresiv", "ansiolítico", "ansiolitico",
-    "viagra", "cialis", "anticonceptiv",
-    "morfina", "tramadol", "oxicodona", "codeina", "codeína",
-    "ritalin", "metilfenidato",
-    # Genéricos genéricos
-    "medicamento", "medicamentos", "remedio para el dolor",
-    "pastilla para", "pastillas para", "tableta para",
-    "vendes medic", "venden medic",
+# Rev. 104 (F1-1 batch 2) — extraído a safety/content_safety.py.
+from safety.content_safety import (
+    detect_sensitive_payment_data as _detect_sensitive_payment_data,
 )
-
-
-def _detect_drug_purchase_request(text: str) -> bool:
-    """True si el cliente intenta comprar/conseguir un medicamento.
-
-    Meta Commerce Policy prohíbe la venta de Rx y OTC en WhatsApp.
-    KAIU es tienda cosmética; redirigir a droguería.
-    """
-    if not text:
-        return False
-    normalized = _normalize_text_simple(text)
-    return any(phrase in normalized for phrase in _DRUG_PURCHASE_PHRASES)
-
-
-def _detect_sensitive_payment_data(text: str) -> tuple[bool, str]:
-    """True si el cliente envió datos sensibles que NO deben procesarse en chat.
-
-    Returns:
-        (detected, reason) — `reason` describe qué tipo se detectó para log.
-
-    NOTA: el sistema sí pide y guarda `document_number` (CC), eso es
-    aceptable y necesario. Lo que NO debe pasar:
-      • Números de tarjeta de crédito en chat (Wompi widget seguro).
-      • CVV en chat.
-      • Cuentas bancarias completas en chat.
-    """
-    if not text:
-        return False, ""
-    if _CVV_RE.search(text):
-        return True, "cvv_detected"
-    # Tarjeta de crédito: secuencia de 13-19 dígitos en el texto, posibly
-    # separada por espacios o guiones. Cédulas colombianas son 8-12 dígitos
-    # → no gatillarán este detector.
-    # Pattern: dígito inicial (no precedido por dígito) + 12-18 dígitos más
-    # (cada uno con opcional espacio/guión antes) + no seguido por dígito.
-    if _re_meta.search(r"(?<!\d)\d(?:[ \-]?\d){12,18}(?!\d)", text):
-        return True, "credit_card_pattern"
-    return False, ""
 
 
 # Rev. 86 — Detector de intent de UPDATE de datos personales.
@@ -331,38 +201,139 @@ _SHIPPING_KEYWORDS = (
     "adicional", "nuevo numero", "nuevo número",
     "diferente", "secundario",
     "su celular es", "su numero es", "su número es",
+    # Sem 7 F2 cierre — verbos de cambio explícito sobre número (caso
+    # runtime: "Deseo cambiar el número 322... por 3003919461"). Sin
+    # estos verbos, el regex no disparaba PRE_BYPASS → LLM componía
+    # outbound libre con resumen mal renderizado.
+    "cambiar el numero", "cambiar el número",
+    "cambia el numero", "cambia el número",
+    "cambiar mi numero", "cambiar mi número",
+    "cambia mi numero", "cambia mi número",
+    "reemplazar el numero", "reemplazar el número",
+    "reemplaza el numero", "reemplaza el número",
+    "modificar el numero", "modificar el número",
+    "modifica el numero", "modifica el número",
+    "cambiar el celular", "cambia el celular",
+    "reemplazar el celular", "reemplaza el celular",
+    "modificar el celular", "modifica el celular",
 )
 
 _SHIPPING_PHONE_DIGITS_RE = re.compile(r"(?:\+?57\s*)?(\d{10})\b")
 
 
-def _detect_shipping_phone_update(text: str) -> Optional[str]:
-    """Rev. 103 — Pre-LLM: extrae phone alternativo de envío SOLO si el
-    cliente lo menciona con keyword discriminante.
+def _detect_shipping_phone_update(
+    text: str, history: Optional[list[dict]] = None,
+) -> Optional[str]:
+    """Rev. 103 — Pre-LLM: extrae phone alternativo de envío.
 
-    Patrones cubiertos (requieren keyword + dígitos):
-      - "celular alternativo: 3001234567"
-      - "actualiza mi celular: 3001234567"
-      - "el pedido lo recibe mi mamá, su celular es 3001234567"
-      - "número adicional 3009998877"
+    Patrones cubiertos:
+      - Con keyword en mismo inbound (legacy):
+        * "celular alternativo: 3001234567"
+        * "actualiza mi celular: 3001234567"
+        * "el pedido lo recibe mi mamá, su celular es 3001234567"
+        * "número adicional 3009998877"
+        * "cambiar el número 3001234567 por 3009998877"
+      - Sem 7 F2 cierre 2026-05-20 — Bug P7 founder UAT (conv 7053666a):
+        Sin keyword en inbound PERO outbound anterior pidió número alterno
+        ("dime cuál es el número", "compárteme tu celular alterno").
+        Cliente responde solo "3223840887" → debe interpretarse como
+        update. Sin esto, el resumen post-update perdía el número y el
+        cliente debía señalar la omisión explícitamente.
 
-    Defensivo: si el cliente solo da su WhatsApp normal sin keyword
-    contextual, NO extrae (evita sobrescribir contacts.phone).
+    Defensivo: si el cliente solo da su WhatsApp normal sin contexto
+    (no keyword en inbound + no pregunta previa del bot), NO extrae.
 
     Retorna 10 dígitos sin prefijo (+57 implícito) o None.
     """
     if not text:
         return None
+    digits_matches = _SHIPPING_PHONE_DIGITS_RE.findall(text)
+    if not digits_matches:
+        return None
+
+    # Camino A: keyword discriminante en el inbound mismo.
     normalized = _normalize_text_simple(text).lower()
-    if not any(kw in normalized for kw in _SHIPPING_KEYWORDS):
+    has_keyword = any(kw in normalized for kw in _SHIPPING_KEYWORDS)
+
+    # Camino B: outbound anterior pidió explícitamente el número alterno
+    # (Sem 7 F2 cierre 2026-05-20 — Bug P7).
+    contextual_request = False
+    if not has_keyword and history:
+        contextual_request = _last_outbound_requested_shipping_phone(history)
+
+    if not (has_keyword or contextual_request):
         return None
-    m = _SHIPPING_PHONE_DIGITS_RE.search(text)
-    if not m:
-        return None
-    digits = m.group(1)
+
+    # Último match: caso "cambiar X por Y" → Y (el nuevo).
+    digits = digits_matches[-1]
     if len(digits) != 10 or digits[0] == "0":
         return None
     return digits
+
+
+# Detección semántica de outbounds que piden número alterno de envío.
+# Sem 7 F2 cierre 2026-05-20 — Bug P7 founder UAT.
+#
+# Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv f6ec7213):
+# El bot dijo "Cuál es el número de celular que quieres agregar para el
+# envío?" y los markers substring rígidos no machearon (faltaba contigüidad
+# por "de celular" intercalado). Cliente respondió "3223840887" → detector
+# no disparó → resumen rendereado con contact_record stale (sin segundo
+# número). Solución arquitectónica: reemplazar lista de substrings frágiles
+# por una regex SEMÁNTICA que captura la intención independiente del
+# fraseo exacto del LLM.
+#
+# Intención capturada: "outbound pide al cliente un número/teléfono/celular
+# alterno o adicional para envío". Tres patrones complementarios para evitar
+# tanto falsos negativos (markers rígidos previos) como falsos positivos
+# ("Te envío tu link de pago a tu celular" — informativo, no petición).
+_SHIPPING_PHONE_REQUEST_REGEX = re.compile(
+    # P1 — interrogativo/imperativo + sustantivo + cualidad de petición.
+    #      "Cuál es el número de celular que quieres agregar para el envío?"
+    r"\b(?:cual|dime|dame|comparteme)\b.*?"
+    r"\b(?:numero|telefono|celular)\b.*?"
+    r"\b(?:agregar|adicional|alterno|alternativo|envio|entrega)\b"
+    r"|"
+    # P2 — verbo de petición + sustantivo.
+    #      "Agrega tu celular", "Compárteme el número adicional"
+    r"\b(?:agrega|agregar|comparteme|dame)\b.*?"
+    r"\b(?:numero|telefono|celular)\b"
+    r"|"
+    # P3 — sustantivo + cualidad alterna (orden inverso o adyacente).
+    #      "El celular adicional", "número alternativo"
+    r"\b(?:numero|telefono|celular)\b\s+\w*\s*"
+    r"\b(?:adicional|alterno|alternativo)\b"
+    r"|"
+    # P4 — sustantivo + "para" + envío/entrega.
+    #      "celular para el envío", "número para la entrega"
+    r"\b(?:numero|telefono|celular)\b\s+(?:para|de)\s+(?:el\s+|la\s+)?"
+    r"\b(?:envio|entrega)\b",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _last_outbound_requested_shipping_phone(history: list[dict]) -> bool:
+    """True si el último outbound (no context_snapshot) pidió al cliente
+    un número alterno de envío. Permite que el cliente responda solo con
+    dígitos ("3223840887") sin keyword y aún así extraerlo correctamente.
+
+    Mira solo el outbound MÁS RECIENTE (1 turno atrás) — más allá podría
+    estar fuera de contexto.
+
+    Sem 7 F2 cierre 2026-05-21 — detección semántica vía regex (antes:
+    lista de substrings frágiles que perdían matches con filler words).
+    """
+    if not history:
+        return False
+    for msg in reversed(history):
+        if str(msg.get("direction") or "").lower() != "outbound":
+            continue
+        content = str(msg.get("content") or "")
+        if not content.strip():
+            continue
+        normalized = _normalize_text_simple(content).lower()
+        return bool(_SHIPPING_PHONE_REQUEST_REGEX.search(normalized))
+    return False
 
 
 # Rev. 83: detección de cancelación de pedido. UX: el cliente que cancela
@@ -405,6 +376,17 @@ _ORDER_CONFIRMATION_MARKERS = (
     # del cliente al resumen ("Si, confirmo") avance directo a payment link.
     "generar tu link de pago",
     "datos estan correctos para generar",
+    # Sem 7 F2 cierre — variantes con determinante "el" (no solo "tu").
+    # Caso runtime: bot dijo "Para confirmar tu pedido y generar el link
+    # de pago, respóndeme con un Sí, confirmo" → marker "generar tu link"
+    # NO matchea por el "tu" vs "el". Sin matcher, el bypass payment_link
+    # directo NO dispara → LLM compone "te genero el link" → anti-hallu
+    # bloquea → fallback "armamos pedido?" = 1 turno extra (smell B).
+    "generar el link de pago",
+    "para generar el link",
+    "confirmo para generar",
+    "respondeme con un si confirmo",
+    "respondeme con un si, confirmo",
 )
 _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", flags=re.IGNORECASE)
 # Versión search-friendly (sin ^$) para extraer email embebido en texto libre.
@@ -417,10 +399,8 @@ def _normalize_text_simple(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c)).strip()
 
 
-def _detect_revocation_intent(text: str) -> bool:
-    """Retorna True si el mensaje es una solicitud de eliminación de datos."""
-    normalized = _normalize_text_simple(text)
-    return any(token in normalized for token in _REVOCATION_TOKENS)
+# Rev. 104 (F1-1 batch 4) — _detect_revocation_intent extraído a
+# safety/consent_gates.py (importado arriba como alias legacy).
 
 
 # Rev. 103 — Detector pre-LLM determinístico de petición explícita de
@@ -431,95 +411,19 @@ def _detect_revocation_intent(text: str) -> bool:
 # del LLM, pero NO debe atrapar al cliente que pide explícitamente un
 # asesor. Este detector marca un flag `force_human_request` que sobrevive
 # a TODOS los guards y dispara `_set_conversation_status(human_takeover)`.
-_HUMAN_REQUEST_PATTERNS = (
-    # "Hablar con un asesor / humano / persona / agente"
-    re.compile(
-        r"\b(?:hablar|hable|comunicar(?:me)?|comunique(?:me)?|comuniqueme|"
-        r"pasar(?:me)?|paseme|pasame|pásame|atender(?:me)?|atiendame|atiéndame)\s+"
-        r"(?:con\s+)?(?:un|una|el|la|otro|otra)?\s*"
-        r"(?:asesor|asesora|humano|humana|persona|agente|alguien|"
-        r"vendedor|vendedora|representante|gestor|gestora|consultor|"
-        r"consultora|operador|operadora|servicio\s+al\s+cliente)\b",
-        re.IGNORECASE,
-    ),
-    # "Quiero / necesito un asesor / humano"
-    re.compile(
-        r"\b(?:quiero|necesito|requiero|deseo|preciso|busco|solicito)\s+"
-        r"(?:hablar\s+con\s+)?(?:un|una|el|la)?\s*"
-        r"(?:asesor|asesora|humano|humana|persona\s+real|agente|"
-        r"vendedor|vendedora|representante|operador|"
-        r"atenci[oó]n\s+humana|atenci[oó]n\s+personal|atenci[oó]n\s+personalizada|"
-        r"ayuda\s+(?:de\s+)?(?:un|una)?\s*(?:asesor|persona|humano|alguien))\b",
-        re.IGNORECASE,
-    ),
-    # Frases compuestas
-    re.compile(
-        r"\b(?:atenci[oó]n\s+humana|asesor\s+real|persona\s+real|"
-        r"humano\s+real|operador\s+humano|hablar\s+con\s+alguien|"
-        r"contactar(?:me)?\s+con\s+(?:un|una)?\s*(?:asesor|humano|persona|agente)|"
-        r"que\s+me\s+llame|llamame\s+un|ll[aá]meme\s+un)\b",
-        re.IGNORECASE,
-    ),
+# Rev. 104 (F1-1 batch 3) — extraído a safety/escalation.py.
+from safety.escalation import (
+    detect_human_request_intent as _detect_human_request_intent,
+    HUMAN_REQUEST_PATTERNS as _HUMAN_REQUEST_PATTERNS,
 )
-
-
-def _detect_human_request_intent(text: str) -> bool:
-    """Rev. 103 — True si el cliente pide EXPLÍCITAMENTE atención humana.
-
-    Conservador: solo dispara con frases inequívocas. Casos como "tengo
-    una duda" o "ayúdame" NO matchean (son consultas normales que el bot
-    debe atender). El propósito de este detector es proteger la petición
-    legítima de escalación contra el guard anti-escalación-espuria del
-    orchestrator (que existe para bloquear `requires_human=True` espurio
-    en CATALOG_MODE).
-    """
-    if not text:
-        return False
-    return any(p.search(text) for p in _HUMAN_REQUEST_PATTERNS)
 
 
 # Rev. 97 — Cliente self-service Habeas Data Art. 14 (acceso a sus datos).
 # El titular puede pedir vía WhatsApp un resumen de los datos que el
 # tenant guarda sobre él. Detector pre-LLM determinístico (no se delega
 # al modelo para evitar respuestas erráticas a un derecho fundamental).
-_DATA_EXPORT_TOKENS = {
-    # "Mis datos" — pedido directo
-    "envia mis datos", "enviame mis datos", "enviar mis datos",
-    "manda mis datos", "mandame mis datos", "mandar mis datos",
-    "quiero mis datos", "necesito mis datos",
-    "dame mis datos", "comparte mis datos",
-    # "Mi informacion"
-    "envia mi informacion", "enviame mi informacion",
-    "manda mi informacion", "mandame mi informacion",
-    "quiero mi informacion", "dame mi informacion",
-    "comparte mi informacion",
-    # "Que tienen sobre mi" — consulta natural
-    "que tienen sobre mi", "que datos tienen sobre mi",
-    "que informacion tienen sobre mi", "que tienen de mi",
-    "que datos guardan sobre mi", "que informacion guardan sobre mi",
-    "que datos tienen mios", "que informacion tienen mia",
-    # Habeas Data formal (Art. 14)
-    "habeas data", "derecho de acceso", "ejercer habeas data",
-    "solicito mis datos", "acceso a mis datos personales",
-    # Portabilidad (Art. 19)
-    "portabilidad de datos", "exportar mis datos",
-}
-
-
-def _detect_data_export_intent(text: str) -> bool:
-    """Rev. 97 — True si el titular solicita ejercer derecho Art. 14 (acceso).
-
-    Rev. 101 — también excluye si hay tokens de rectificación (más específicos);
-    la frase "habeas data" sola es genérica y el detector rectify gana.
-    """
-    if not text:
-        return False
-    normalized = _normalize_text_simple(text)
-    if any(rev in normalized for rev in _REVOCATION_TOKENS):
-        return False
-    if any(rec in normalized for rec in _RECTIFICATION_TOKENS):
-        return False
-    return any(token in normalized for token in _DATA_EXPORT_TOKENS)
+# Rev. 104 (F1-1 batch 4) — _DATA_EXPORT_TOKENS + _detect_data_export_intent
+# extraídos a safety/consent_gates.py (importados arriba como aliases legacy).
 
 
 # Rev. 101 (F6) — Detector pre-LLM rectificación Habeas Data Art. 16.
@@ -527,45 +431,8 @@ def _detect_data_export_intent(text: str) -> bool:
 # email, dirección, nombre, documento. NO actualizamos auto — registramos
 # audit "rectified" pendiente de revisión + notificamos al tenant para
 # que valide y ejecute el cambio (puede requerir verificación de identidad).
-_RECTIFICATION_TOKENS = {
-    # "Corregir / actualizar mi X"
-    "corregir mis datos", "corrige mis datos",
-    "actualizar mis datos", "actualiza mis datos",
-    "modificar mis datos", "modifica mis datos",
-    "rectificar mis datos", "rectifica mis datos",
-    # Variantes con campos específicos
-    "actualizar mi email", "actualiza mi email",
-    "actualizar mi correo", "actualiza mi correo",
-    "actualizar mi direccion", "actualiza mi direccion",
-    "actualizar mi telefono", "actualiza mi telefono",
-    "cambiar mis datos", "cambia mis datos",
-    # Ley 1581 formal
-    "ejercer rectificacion", "derecho de rectificacion",
-    "solicito rectificacion", "rectificacion habeas data",
-    # Errores en datos
-    "tienen mal mis datos", "estan mal mis datos",
-    "mis datos estan incorrectos", "mis datos no son correctos",
-}
-
-
-def _detect_rectification_intent(text: str) -> bool:
-    """Rev. 101 — True si el titular solicita corrección de datos (Art. 16).
-
-    Orden de precedencia: revocación > rectificación > export. La
-    rectificación PRECEDE al export en la decisión: si el mensaje
-    contiene un token de rectify (más específico), gana sobre tokens
-    de export como "habeas data" (más genérico).
-    """
-    if not text:
-        return False
-    normalized = _normalize_text_simple(text)
-    # Revocación es siempre dominante (mayor riesgo si se ignora).
-    if any(rev in normalized for rev in _REVOCATION_TOKENS):
-        return False
-    # Si hay token de rectificación, gana incluso si también hay token export.
-    if any(token in normalized for token in _RECTIFICATION_TOKENS):
-        return True
-    return False
+# Rev. 104 (F1-1 batch 4) — _RECTIFICATION_TOKENS + _detect_rectification_intent
+# extraídos a safety/consent_gates.py (importados arriba como aliases legacy).
 
 
 # Rev. 102 — Detector pre-LLM de minoría de edad.
@@ -578,49 +445,8 @@ def _detect_rectification_intent(text: str) -> bool:
 # Conservador: falsos positivos (e.g., "tengo 16 productos") son
 # aceptables porque escalan a humano que decide. Falsos negativos NO
 # son aceptables porque generan tratamiento ilegal de datos de menor.
-_MINOR_EXPLICIT_PHRASES = (
-    "soy menor de edad", "soy menor", "soy menor de 18",
-    "no tengo mayoria de edad", "no soy mayor de edad",
-    "soy un nino", "soy una nina", "soy un menor",
-    "estoy en colegio", "estoy en bachillerato",
-    "mi mama me dijo", "mi papa me dijo",  # señales contextuales
-    "tengo permiso de mis padres", "tengo permiso de mi mama",
-    "tengo permiso de mi papa",
-)
-
-# Regex: "tengo N años" / "ya tengo N" / "N años de edad" donde N es número
-# Captura: \b(\d{1,2})\s*(?:años|anos|year|años de edad|anos de edad)
-_AGE_REGEX = re.compile(
-    r"\b(?:tengo|tengo casi|tengo apenas|cumpli|ya tengo)?\s*(\d{1,2})\s*(?:años|anos|añitos|anitos|year|years)\b",
-    re.IGNORECASE,
-)
-
-
-def _detect_minor_intent(text: str) -> bool:
-    """Rev. 102 — True si el cliente declara/sugiere ser menor de edad.
-
-    Habeas Data Decreto 1377/2013 Art. 7. Conservador: prefiere falso
-    positivo (escalar a humano) sobre falso negativo (tratar datos de
-    menor sin autorización).
-    """
-    if not text:
-        return False
-    normalized = _normalize_text_simple(text)
-
-    # Frases explícitas
-    if any(p in normalized for p in _MINOR_EXPLICIT_PHRASES):
-        return True
-
-    # Edad numérica: si menciona "tengo N años" con N entre 1 y 17, trigger
-    for match in _AGE_REGEX.finditer(normalized):
-        try:
-            age = int(match.group(1))
-        except (ValueError, IndexError):
-            continue
-        if 1 <= age < 18:
-            return True
-
-    return False
+# Rev. 104 (F1-1 batch 4) — _MINOR_EXPLICIT_PHRASES, _AGE_REGEX, _detect_minor_intent
+# extraídos a safety/consent_gates.py (importados arriba como aliases legacy).
 
 
 def _mask_value(value: Optional[str]) -> str:
@@ -1178,22 +1004,45 @@ def _fetch_recoverable_cart_items(
 
 def _last_outbound_offered_cart_retake(history: list[dict]) -> bool:
     """True si el último outbound del bot ofreció retomar el cart previo.
-    Markers conservadores que aparecen en el cart_recovery prompt cuando el
-    LLM hace la oferta ("Veo que tenías X items en tu carrito reciente",
-    "¿Lo retomamos o nuevo pedido?").
+    Markers que aparecen cuando el LLM ofrece retake en distintas variantes
+    fraseológicas. La detección debe ser AMPLIA porque el LLM compone con
+    variabilidad — sin matcher, `_persist_recovered_cart_items` no dispara
+    y el cart queda vacío → bot enuncia items via history-parsing pero
+    add_item posterior los pierde (caso UAT runtime 2026-05-19 conv a4db1801).
     """
     markers = (
+        # Variantes "carrito ..."
         "carrito reciente",
+        "carrito anterior",
         "tu carrito anterior",
+        "carrito previo",
+        "tu carrito previo",
+        # Sem 7 F2 cierre — variantes "carrito que se canceló/abandonó"
+        # que el LLM usa cuando descubre cart histórico cancelled.
+        "carrito que se cancel",
+        "carrito que se cancelo",
+        "carrito que cancel",
+        "carrito que abandon",
+        "un carrito que",
+        # Variantes "retomar/retomamos"
         "¿lo retomamos",
         "lo retomamos o",
-        "carrito previo",
+        "te gustaria retomarlo",
+        "te gustaria retomar",
+        "retomarlo o prefieres",
+        "retomar o prefieres",
+        "retomarlo o quieres",
+        "lo retomamos",
+        # Variantes "X items en tu carrito"
         "tenias x items",
         "tenias 1 items",
         "tenias 2 items",
         "tenias 3 items",
         "ítems en tu carrito",
         "items en tu carrito",
+        # Variantes "tenías un [producto]" (caso single-item)
+        "tenias un ",
+        "tenias una ",
     )
     for msg in reversed(history or []):
         if str(msg.get("direction") or "").strip().lower() == "outbound":
@@ -1388,7 +1237,7 @@ def _load_cart_recovery_block(
 
     lines = ["", f"CARRITO PREVIO (cancelado por timeout, {when}):"]
     lines.extend(item_lines)
-    lines.append(f"Total recalculado al precio actual: {_format_pesos(new_total)} COP.")
+    lines.append(f"Total recalculado al precio actual: {_format_pesos(new_total)}.")
     lines.append(
         "INSTRUCCIÓN: si el cliente quiere retomar, ofrece el total recalculado "
         "y advierte si algún precio cambió. Si algo está SIN STOCK, ofrece "
@@ -1551,6 +1400,9 @@ def _load_customer_context_block(
             lines.append(label)
         lines.append(f"- Subtotal: {_format_cop(_subtotal_cents)}")
         # Shipping en vivo desde history (último quote del bot)
+        # Sem 6 I.2.7 — incluir descuento de cupón si está aplicado.
+        _discount_cents = int(active_cart_summary.get("discount_cents") or 0)
+        _coupon_code = active_cart_summary.get("coupon_code")
         if history:
             _ship_cents = _extract_shipping_cost_from_history(history) or 0
             _carrier_nm = _extract_shipping_carrier_from_history(history) or ""
@@ -1559,7 +1411,22 @@ def _load_customer_context_block(
                 if _carrier_nm:
                     _ship_label += f" (Económica · {_carrier_nm})"
                 lines.append(f"- {_ship_label}: {_format_cop(_ship_cents)}")
-                lines.append(f"- Total con envío: {_format_cop(_subtotal_cents + _ship_cents)}")
+                if _discount_cents > 0 and _coupon_code:
+                    lines.append(
+                        f"- Descuento: -{_format_cop(_discount_cents)} ({_coupon_code})"
+                    )
+                lines.append(
+                    f"- Total con envío: "
+                    f"{_format_cop(_subtotal_cents + _ship_cents - _discount_cents)}"
+                )
+        elif _discount_cents > 0 and _coupon_code:
+            # Sin shipping aún — pero ya hay cupón aplicado.
+            lines.append(
+                f"- Descuento: -{_format_cop(_discount_cents)} ({_coupon_code})"
+            )
+            lines.append(
+                f"- Total: {_format_cop(_subtotal_cents - _discount_cents)}"
+            )
 
     if active_orders:
         lines.append("")
@@ -1568,7 +1435,7 @@ def _load_customer_context_block(
             short = (o.get("id") or "")[:8].upper()
             status = o.get("status", "?")
             total = o.get("total_amount") or 0
-            lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)} COP")
+            lines.append(f"- Pedido #{short} | estado: {status} | total: {_format_pesos(total)}")
 
     if open_claims:
         lines.append("")
@@ -1764,10 +1631,17 @@ class OrchestratorOutput(BaseModel):
     extracted_direction: Optional[dict] = Field(
         default=None,
         description=(
-            "Dirección estructurada con claves canónicas rev. 68: "
-            "street, number, city, neighborhood, building_type (casa|edificio|conjunto), "
-            "tower (solo conjunto), apartment, complex_name (nombre del edificio/conjunto), "
-            "reference (punto de referencia). 'additional_info' queda solo para residuos legacy."
+            "Dirección estructurada con claves canónicas. Rev. 68 + Sem 7 F2 cierre: "
+            "street, number, city, neighborhood, "
+            "building_type (casa|edificio|conjunto|oficina), "
+            "conjunto_type (torres|casas, solo si building_type=conjunto), "
+            "tower (solo conjunto/torres), "
+            "floor (piso, opcional para edificio/oficina), "
+            "apartment (apartamento/casa#/oficina# según building_type), "
+            "complex_name (nombre del edificio/conjunto residencial), "
+            "company_name (nombre de la empresa, solo building_type=oficina), "
+            "reference (punto de referencia genérico — NO uses para piso ni empresa). "
+            "'additional_info' queda solo para residuos legacy."
         ),
     )
     extracted_email: Optional[str] = Field(
@@ -2011,6 +1885,256 @@ async def _send_outbound_text(
             conversation_id,
         )
         return False
+
+    # Rev. 104 (F1-5) — Invocación formal al OutputValidator. Reemplaza los
+    # 2 bloques inline previos (BUG-5 resumen-before-link telemetry +
+    # BUG-8 no-pii-pre-consent rewrite) con un único entrypoint estructurado
+    # que devuelve un veredicto (`ok` / `rewrite` / `block`).
+    try:
+        from outbound.validator import OutputValidator, ValidationContext
+
+        # Una sola query a `messages` para construir history compartido.
+        # Sem 7 F2 cierre 2026-05-19 — Bug 3a founder UAT (conv 11c2dbde):
+        # ANTES: `desc=False.limit(20)` tomaba los 20 más VIEJOS de la conv.
+        # En conversaciones largas (45+ msgs) el resumen pre-link queda
+        # fuera de la ventana → invariant `summary-before-link` dispara
+        # falso positivo → Opción B ejecuta con contact incompleto →
+        # texto acumulado caótico al cliente.
+        # FIX: traer los 20 más RECIENTES (`desc=True`) y reordenar en
+        # memoria como ascendente — los invariants esperan oldest-first
+        # (`_is_first_outbound`, `last_outbound_was_summary` con lookback).
+        recent = (
+            supabase.table("messages")
+            .select("direction, content")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        try:
+            recent.data = list(reversed(recent.data or []))
+        except Exception:
+            pass  # data inmutable o nula — preservar tal cual
+        # Lookup contact.consent_given. Rev. 104 (F1 fix): la tabla
+        # `conversations` NO tiene columna `contact_id` — el lookup correcto
+        # es vía `customer_phone` → `contacts.phone`. La query previa
+        # (`conversations.contact_id`) devolvía HTTP 400 silenciado por el
+        # try/except, dejando el invariant time-aware desactivado de facto.
+        _conv_row = (
+            supabase.table("conversations")
+            .select("customer_phone")
+            .eq("id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+        _customer_phone = (
+            (_conv_row.data or [{}])[0].get("customer_phone") or ""
+        )
+        _consent_given = False
+        if _customer_phone:
+            _phone_digits = _customer_phone.lstrip("+")
+            _ctc = (
+                supabase.table("contacts")
+                .select("consent_given")
+                .eq("tenant_id", tenant_id)
+                .or_(f"phone.eq.{_phone_digits},phone.eq.+{_phone_digits}")
+                .limit(1)
+                .execute()
+            )
+            _consent_given = bool(
+                (_ctc.data or [{}])[0].get("consent_given")
+            )
+
+        # SMELL-1: pasar saludo time-aware computado por hora local Colombia.
+        # El validator solo aplica el rewrite si este valor está presente
+        # y si el outbound es el primer mensaje (history sin outbounds previos).
+        try:
+            _server_greet, _ = _co_time_of_day_greeting()
+        except Exception:
+            _server_greet = None
+        result = OutputValidator().validate(ValidationContext(
+            candidate_text=text,
+            history=recent.data or [],
+            contact_consent_given=_consent_given,
+            consent_question_template=CONSENT_QUESTION_TEMPLATE,
+            server_time_greeting=_server_greet,
+        ))
+        for v in result.violations:
+            logger.warning("[INVARIANT_VIOLATION] conv=%s %s", conversation_id, v)
+        if result.rewrote and result.text:
+            logger.info(
+                "[OUTPUT_VALIDATOR] rewrite aplicado conv=%s",
+                conversation_id,
+            )
+            text = result.text
+        elif result.blocked:
+            # Sem 7 F2 cierre (S12 UAT diagnosis) — fix Opción B:
+            # cuando el invariant `summary-before-link` bloquea, en vez de
+            # quedarnos mudos (loop silencioso si el bypass reintenta el
+            # mismo flow), construimos el resumen desde cart-as-SoT y lo
+            # PREFIJAMOS al outbound. Re-validamos: si pasa, enviamos el
+            # outbound combinado (resumen + link en mismo mensaje).
+            # Cumple ADR-0011 §A.10 sin dejar al cliente sin respuesta.
+            _is_summary_block = (
+                "summary-before-link" in (result.block_reason or "")
+            )
+            if _is_summary_block:
+                # Sem 7 F2 cierre 2026-05-19 — Bug 3b founder UAT (conv 11c2dbde):
+                # ANTES: contact_record={"phone": ...} solo, y se concatenaba
+                # `_summary_text + text`. Si `text` venía del bypass payment_link
+                # con "Perfecto! Tu pedido #X listo + link", quedaba duplicado:
+                # 2 resúmenes + pregunta confirmación obsoleta + mensaje pedido.
+                # FIX:
+                #   1. Cargar contact COMPLETO (name, email, doc, address) por
+                #      phone para que el resumen tenga todos los datos.
+                #   2. Si `text` ya contiene "Pedido #XXXX" + Wompi link
+                #      (formato canónico del bypass), REEMPLAZAR el outbound
+                #      por uno determinístico limpio. NO concatenar.
+                #   3. Si `text` es solo un link suelto del LLM (sin formato
+                #      canónico), PREFIJAR resumen como antes.
+                try:
+                    from tools.cart_tool import (  # type: ignore
+                        get_cart_with_items as _get_cart_with_items,
+                    )
+                    _cart_db = _get_cart_with_items(
+                        supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                    )
+
+                    # Cargar contact completo (no solo phone).
+                    _contact_record = {"phone": _customer_phone}
+                    if _customer_phone:
+                        _phone_digits = _customer_phone.lstrip("+")
+                        _full_contact = (
+                            supabase.table("contacts")
+                            .select(
+                                "id, name, email, phone, shipping_phone, "
+                                "document_type, document_number, address, "
+                                "consent_given"
+                            )
+                            .eq("tenant_id", tenant_id)
+                            .or_(
+                                f"phone.eq.{_phone_digits},"
+                                f"phone.eq.+{_phone_digits}"
+                            )
+                            .limit(1)
+                            .execute()
+                        )
+                        _rows = _full_contact.data or []
+                        if _rows:
+                            _contact_record = _rows[0]
+
+                    _summary_text = _build_order_summary_text(
+                        contact_record=_contact_record,
+                        verified_ctx=None,
+                        history=recent.data or [],
+                        cart_from_db=_cart_db,
+                        supabase=supabase,
+                        tenant_id=tenant_id,
+                    )
+                except Exception as _sum_exc:
+                    logger.warning(
+                        "[OUTPUT_VALIDATOR] fix Opción B: error armando "
+                        "resumen conv=%s: %s",
+                        conversation_id, _sum_exc,
+                    )
+                    _summary_text = None
+
+                if _summary_text:
+                    # Detectar si `text` viene del bypass payment_link
+                    # (contiene "Pedido *#" formato canónico + Wompi link).
+                    # Si sí → REPLACE limpio. Si no → PREFIX legacy.
+                    import re as _re
+                    _order_match = _re.search(
+                        r"Pedido\s+\*?#([A-F0-9]{4,12})\*?", text or "",
+                        flags=_re.IGNORECASE,
+                    )
+                    _link_match = _re.search(
+                        r"https?://checkout\.wompi\.co/l/[A-Za-z0-9_-]+",
+                        text or "",
+                    )
+                    _bypass_emit = bool(_order_match and _link_match)
+                    if _bypass_emit:
+                        # REPLACE: armar outbound determinístico limpio.
+                        _short_id = _order_match.group(1)
+                        _link_url = _link_match.group(0)
+                        _first_name = ""
+                        try:
+                            _full_name = str(
+                                _contact_record.get("name") or ""
+                            ).strip()
+                            _first_name = _full_name.split()[0] if _full_name else ""
+                        except Exception:
+                            pass
+                        _greeting = (
+                            f"Perfecto *{_first_name}*! "
+                            if _first_name else "Perfecto! "
+                        )
+                        _combined = (
+                            f"{_summary_text}\n\n"
+                            f"{_greeting}Tu pedido *#{_short_id}* está listo.\n\n"
+                            f"*Paga aquí:*\n{_link_url}\n\n"
+                            f"> El link es válido por 30 minutos. Una vez "
+                            f"confirmado el pago recibirás la confirmación por "
+                            f"este chat."
+                        )
+                        logger.info(
+                            "[OUTPUT_VALIDATOR] fix Opción B REPLACE aplicado "
+                            "conv=%s order=#%s — bypass emit detectado",
+                            conversation_id, _short_id,
+                        )
+                    else:
+                        # PREFIX legacy: el texto del LLM no tiene formato
+                        # canónico; prefijar resumen al final del LLM.
+                        _combined = _summary_text + "\n\n" + text
+                        logger.info(
+                            "[OUTPUT_VALIDATOR] fix Opción B PREFIX aplicado "
+                            "conv=%s — resumen prefijado al texto LLM",
+                            conversation_id,
+                        )
+
+                    _revalidated = OutputValidator().validate(
+                        ValidationContext(
+                            candidate_text=_combined,
+                            history=recent.data or [],
+                            contact_consent_given=_consent_given,
+                            consent_question_template=CONSENT_QUESTION_TEMPLATE,
+                            server_time_greeting=None,
+                        )
+                    )
+                    if not _revalidated.blocked:
+                        text = (
+                            _revalidated.text
+                            if (_revalidated.rewrote and _revalidated.text)
+                            else _combined
+                        )
+                    else:
+                        logger.error(
+                            "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s "
+                            "reason=%s (fix Opción B re-validó pero sigue "
+                            "bloqueado: %s)",
+                            conversation_id, result.block_reason,
+                            _revalidated.block_reason,
+                        )
+                        return False
+                else:
+                    logger.error(
+                        "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s "
+                        "reason=%s (fix Opción B: cart-as-SoT no provee "
+                        "resumen — verified_ctx None)",
+                        conversation_id, result.block_reason,
+                    )
+                    return False
+            else:
+                logger.error(
+                    "[OUTPUT_VALIDATOR] outbound BLOQUEADO conv=%s reason=%s",
+                    conversation_id, result.block_reason,
+                )
+                return False  # NO enviar
+    except Exception as _inv_exc:
+        logger.debug("[OUTPUT_VALIDATOR] falló (no-bloqueante): %s", _inv_exc)
+
     conv_res = (
         supabase.table("conversations")
         .select("customer_phone")
@@ -2048,6 +2172,16 @@ async def _send_outbound_text(
             "processing_status": PROCESSING_STATUS_PROCESSED,
         }).execute()
         logger.info("[OUTBOUND] Respuesta enviada directamente a %s", customer_phone)
+        # Rev. 104 (F1-6) — hook único: si el texto enviado es resumen
+        # determinístico (marker `📋`), emitir `summary_rendered` en
+        # cart_events para auditoría. Best-effort.
+        if "📋" in text:
+            _emit_summary_rendered_event(
+                supabase,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                summary_text=text,
+            )
         return True
 
     # Fallo en envío directo — insertar en DB y encolar para retry del worker
@@ -2294,30 +2428,38 @@ _VARIANT_QTY_RE = re.compile(
 )
 
 
-def _last_outbound_presented_variants(
+def _last_outbound_presented_variants_all(
     catalog: list, history: list[dict],
-) -> Optional[dict]:
-    """Si el outbound más reciente del bot listó las variantes de un
-    producto del catálogo, retorna el producto. Else None.
+) -> list[dict]:
+    """Rev. 104 (Bug-C runtime) — devuelve TODOS los productos cuyas
+    variantes fueron presentadas en el último outbound del bot.
 
-    Discrimina por:
-      • Mención del título del producto (con o sin formato bold).
-      • Marker de presentación de variantes ("lo tenemos en", etc.) Y/O
-        listado con bullet + atributo numérico (60g/100g/30ml/etc).
+    Mejora sobre la versión singular: cuando el bot lista variantes de
+    múltiples productos en un solo outbound (ej. "Coco: 60g/100g/150g.
+    Sérum: 15ml/30ml"), debemos considerar AMBOS como candidatos para
+    resolver el variant que el cliente elija a continuación. El caller
+    itera hasta encontrar un match.
+
+    Match plural-tolerante: usa los tokens discriminativos del título
+    (no substring exacto). "Jabones Artesanales de Coco" matchea el
+    producto "Jabón Artesanal de Coco" porque comparten {coco, jabon,
+    artesanal} (los plurales se resuelven por prefijo de 4-5 chars).
+
+    Retorna `[]` si:
+      • No hay outbound previo
+      • El outbound no muestra signos de listado de variantes (sin marker
+        ni bullets numéricos suficientes)
+      • Ningún producto del catálogo matchea por discriminativos
     """
     if not catalog or not history:
-        return None
-    # Mirar SOLO el último outbound — si no presentó variantes ahí, el
-    # contexto cambió y el inbound siguiente NO es confirmación.
+        return []
     for msg in reversed(history):
         if str(msg.get("direction") or "").lower() != "outbound":
             continue
         content = str(msg.get("content") or "")
         if not content:
-            return None
+            return []
         content_norm = _normalize_text(content)
-        # Heurística: el outbound debe mencionar el título Y un marker de
-        # presentación O contener al menos 2 bullets con atributos numéricos.
         has_marker = any(m in content_norm for m in _PRESENTATION_MARKERS)
         bullet_attrs = re.findall(
             r"[\*•\-]\s*(\d+)\s*(?:g|gr|gramos|ml|cc|mililitros|kg|oz)\b",
@@ -2325,52 +2467,362 @@ def _last_outbound_presented_variants(
             re.IGNORECASE,
         )
         if not (has_marker or len(bullet_attrs) >= 2):
-            return None
-        # Buscar el producto del catálogo cuyo título completo aparezca
-        # en el outbound. Match estricto (norm título in norm content).
+            return []
+        content_tokens = set(re.findall(r"[a-z0-9ñ]+", content_norm))
+        results: list[dict] = []
+        _stop = {"de", "con", "y", "o", "la", "el", "los", "las",
+                 "un", "una", "para", "por"}
         for prod in catalog:
             title = str(prod.get("title") or "").strip()
             if not title:
                 continue
-            norm_title = _normalize_text(title)
-            if norm_title and norm_title in content_norm:
-                return prod
-        return None
-    return None
+            title_norm = _normalize_text(title)
+            title_tokens = (
+                set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _stop
+            )
+            if not title_tokens:
+                continue
+            # Match laxo plural-tolerante: cada token discriminativo del
+            # título debe aparecer en el contenido EXACTO o como prefijo
+            # ≥4 chars de algún token del contenido.
+            def _match_token(tw: str) -> bool:
+                if tw in content_tokens:
+                    return True
+                if len(tw) < 4:
+                    return False
+                # Prefijo: el token del contenido empieza con el del título
+                # (cubre "jabones" matchea "jabon").
+                return any(
+                    ct.startswith(tw[:4]) and len(ct) >= 4
+                    for ct in content_tokens
+                )
+
+            if all(_match_token(tw) for tw in title_tokens):
+                results.append(prod)
+        return results
+    return []
+
+
+def _last_outbound_presented_variants(
+    catalog: list, history: list[dict],
+) -> Optional[dict]:
+    """Wrapper singular para back-compat: retorna el primer producto
+    cuyas variantes fueron presentadas, o None.
+
+    Para flujos multi-producto usar `_last_outbound_presented_variants_all`.
+    """
+    products = _last_outbound_presented_variants_all(catalog, history)
+    return products[0] if products else None
+
+
+_QTY_STOPWORDS: frozenset[str] = frozenset({
+    "de", "con", "y", "o", "la", "el", "los", "las", "un", "una",
+    "para", "por", "que", "del", "al",
+})
+
+_QTY_UNIT_TOKENS: frozenset[str] = frozenset({
+    "g", "gr", "gramos", "ml", "cc", "kg", "oz", "mililitros",
+})
+
+
+def _extract_qty_for_product(
+    content_norm: str,
+    product: dict,
+    *,
+    generic_terms: Optional[set[str]] = None,
+) -> int:
+    """Devuelve la cantidad declarada para `product` en el inbound, o 1.
+
+    Atribución *product-local*: solo cuenta dígitos que estén dentro de
+    una ventana de ±3 tokens respecto a una palabra discriminativa del
+    título del producto (o su variante plural). Evita el caso típico de
+    cross-attribution en inbounds multi-producto: "quiero 2 jabones de
+    coco y 1 sérum" — el "2" es de coco, el "1" es de sérum, NUNCA al
+    revés.
+
+    Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv febcec09):
+    inbound "1 Jabón Coco y 2 Lavanda" producía qty=2 para Coco porque:
+      a) La ventana ±3 tokens desde "coco" alcanzaba al "2" de Lavanda.
+      b) "jabon" + "artesanal" se trataban como discriminativos de cada
+         producto aunque son palabras GENÉRICAS entre jabones.
+    Fix doble:
+      1. SEGMENTAR el inbound por separators ("y", ",", "+", ";") y
+         evaluar la ventana SOLO dentro del segmento del producto.
+      2. Aceptar `generic_terms` opcional del catálogo y RESTARLO de
+         las palabras discriminativas (igual lógica que
+         `_detect_explicit_products_in_inbound`).
+
+    Reglas:
+      • Segmentar por " y "/", "/"; "/"+ ".
+      • Tokens del título − stop-words − generic_terms = `discriminative`.
+      • Match laxo: token del inbound coincide con discriminative si son
+        iguales OR comparten prefijo de ≥4 chars (cubre plurales).
+      • Para cada segmento que contenga discriminativo del producto,
+        busca dígitos 1-2 cifras dentro de ESE segmento. Excluye dígitos
+        cuyo siguiente token es unidad (g/ml/etc.).
+      • Devuelve el MÁXIMO encontrado entre segmentos. Default 1.
+    """
+    if not content_norm or not product:
+        return 1
+    title_norm = _normalize_text(str(product.get("title") or ""))
+    title_words = (
+        set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _QTY_STOPWORDS
+    )
+    # Restar palabras genéricas del catálogo (e.g. "jabon"/"artesanal"
+    # compartidas por todos los jabones). Sin esto, el caller que llame
+    # con producto Coco para inbound "2 lavanda" obtendría qty=2 porque
+    # "jabon"/"artesanal" matchearían en el segmento "2 jabon artesanal
+    # de lavanda" como discriminativos espurios de Coco.
+    if generic_terms:
+        title_words = title_words - generic_terms
+    if not title_words:
+        return 1
+
+    def _is_discriminative(tok: str) -> bool:
+        if tok in title_words:
+            return True
+        # Match por prefijo (cubre plurales): el token comparte ≥4 chars
+        # iniciales con alguna palabra del título de longitud ≥4.
+        for tw in title_words:
+            if len(tw) >= 4 and len(tok) >= 4 and tok.startswith(tw[:4]):
+                return True
+            if len(tw) >= 4 and len(tok) >= 4 and tw.startswith(tok[:4]):
+                return True
+        return False
+
+    def _scan_qty_in_tokens(tokens_list: list[str], require_discriminative: bool) -> int:
+        """Escanea una lista de tokens y retorna el MAX qty (≥2) detectado.
+        Si `require_discriminative=True` el segmento DEBE contener un
+        discriminativo del producto; cualquier dígito ≥2 no-unidad del
+        segmento cuenta (la segmentación ya garantizó localización al
+        producto)."""
+        local_qty = 1
+        if require_discriminative and not any(_is_discriminative(t) for t in tokens_list):
+            return local_qty
+        # Escanear todo el segmento (no ventana ±3) — segmentación previa
+        # ya garantiza que este segmento corresponde a UN solo producto.
+        # Ventana ±3 era anti-cross-attribution; ahora la segmentación
+        # cumple esa función con mejor precisión.
+        for j, w in enumerate(tokens_list):
+            if not re.fullmatch(r"\d{1,2}", w):
+                continue
+            if j + 1 < len(tokens_list) and tokens_list[j + 1] in _QTY_UNIT_TOKENS:
+                continue
+            try:
+                v = int(w)
+                if 2 <= v <= 99:
+                    local_qty = max(local_qty, v)
+            except ValueError:
+                continue
+        return local_qty
+
+    # Sem 7 F2 cierre 2026-05-21 — segmentar primero por separators.
+    # Caso runtime: "1 jabon coco y 2 lavanda" → ["1 jabon coco", "2 lavanda"].
+    # Cada segmento se evalúa de forma aislada → qty no se contagia entre
+    # productos. Tipos de separators reconocidos: " y ", ", ", " + ", "; ".
+    segments_raw: list[str] = []
+    # Aplicar split secuencial: si el inbound tiene varios separators,
+    # iterativamente cada split divide segmentos resultantes.
+    _segments_tmp: list[str] = [content_norm]
+    for sep in [" y ", ", ", " + ", "; "]:
+        _next: list[str] = []
+        for seg in _segments_tmp:
+            if sep in seg:
+                _next.extend(s.strip() for s in seg.split(sep) if s.strip())
+            else:
+                _next.append(seg)
+        _segments_tmp = _next
+    segments_raw = _segments_tmp or [content_norm]
+
+    qty = 1
+    # Si hay discriminativo en cualquier segmento, aplicar atribución
+    # product-local POR SEGMENTO (cada segmento evalúa qty solo si tiene
+    # discriminativo del producto). Si NINGÚN segmento tiene
+    # discriminativo:
+    #   • Caller pasó `generic_terms` (identificando productos en
+    #     contexto multi-producto) → qty=1 default. NO usar Camino A
+    #     porque significaría inventar qty para un producto NO mencionado.
+    #   • Caller NO pasó `generic_terms` (contexto producto único, ej.
+    #     bot recién presentó variantes) → Camino A: cualquier dígito
+    #     no-unidad del inbound puede ser qty.
+    all_tokens = re.findall(r"[a-z0-9ñ]+", content_norm)
+    if not all_tokens:
+        return 1
+    has_any_discriminative = any(_is_discriminative(t) for t in all_tokens)
+    if has_any_discriminative:
+        for seg in segments_raw:
+            seg_tokens = re.findall(r"[a-z0-9ñ]+", seg)
+            if not seg_tokens:
+                continue
+            seg_qty = _scan_qty_in_tokens(seg_tokens, require_discriminative=True)
+            qty = max(qty, seg_qty)
+    elif generic_terms is None:
+        # Camino A: contexto producto fijado por presentación previa,
+        # cliente solo da "2 unidades de 60g" sin nombre.
+        qty = _scan_qty_in_tokens(all_tokens, require_discriminative=False)
+    # else: generic_terms provisto + no discriminativo → qty=1 default
+    # (defensa contra cross-attribution en contexto multi-producto).
+    return qty
 
 
 def _resolve_variant_from_inbound(
     inbound_text: str, product: dict,
-) -> tuple[Optional[dict], int]:
-    """Match el inbound del cliente a una variante específica del producto.
+    *,
+    require_discriminative_per_segment: bool = False,
+) -> list[tuple[dict, int]]:
+    """Match el inbound del cliente a una o más variantes del producto.
 
-    Estrategia:
+    Sem 7 F2 cierre: cambio de contrato — retorna `list[tuple[variant, qty]]`
+    (puede ser vacía, 1 elemento, o N) en lugar de tupla única.
+
+    Caso runtime motivador (UAT 2026-05-19): cliente dice "1 de 100ml y 1
+    de 250ml" para Aceite de Almendras. El contrato anterior (1 inbound →
+    1 variant) tomaba solo "100ml" y descartaba "250ml". El cliente perdía
+    el segundo item.
+
+    Estrategia (por cada match encontrado, agregar a la lista):
       1. Match por value de attributes (ej. "60g" matches attribute valor "60g").
       2. Match por sustring numérico + unidad (ej. "60 gramos" matches "60g").
       3. Match por label completo de la variant.
 
-    Devuelve (variant_dict, quantity). Si no resuelve, (None, 1).
+    Si el inbound contiene separator (" y ", " + "), procesa segmentos
+    independientes para asignar qty correcta a cada variante.
+
+    Default: si producto tiene 1 sola variante y no resolvió arriba, asume
+    esa variante (rev. 104 F1-8 BUG-7).
+
+    Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+    `require_discriminative_per_segment` (default False, opt-in): cuando True
+    Y hay multi-segments, exige que cada segmento contenga al menos una
+    palabra discriminativa del título del producto. Usado por el caller
+    tier-2 cuando hay múltiples productos potenciales en juego (caso
+    "1 de Coco 100g y 1 de Lavanda 150g" — el segmento "1 de Lavanda 150g"
+    NO debe matchearse contra Jabón Coco solo porque "150g" esté en sus
+    variantes). El caller que conoce el contexto "un solo producto" (ej.
+    `_detect_variant_confirmation` cuando el bot acaba de presentar UN
+    producto) deja este flag en False para mantener back-compat.
+
+    Sem 7 F2 cierre 2026-05-21 — la disambiguación CROSS-PRODUCT (caso
+    "3 sérums presentados, cliente dice 'Sérum Vitamina C 30ml'") NO vive
+    aquí — está en `_detect_variant_confirmation` que aplica la lógica
+    post-resolución basada en si la variante matched es ambigua (label
+    compartido entre productos del set).
     """
     if not inbound_text or not product:
-        return None, 1
+        return []
     norm = _normalize_text(inbound_text)
     variants = product.get("variants") or []
     if not variants:
-        return None, 1
+        return []
 
-    # Extraer cantidad explícita ("2", "quiero 3", "el de 60") — solo si
-    # el número aparece al inicio o como separador, no si es parte de
-    # un atributo (ej. "60g" donde 60 es atributo, no qty).
-    qty = 1
-    qty_match = re.match(r"^\s*(\d+)\s+(?!g|ml|cc|kg|oz|gr|mililitros|gramos)",
-                         norm, re.IGNORECASE)
-    if qty_match:
-        try:
-            v = int(qty_match.group(1))
-            if 1 <= v <= 99:
-                qty = v
-        except ValueError:
-            pass
+    # Detectar separadores que indican multi-variant intent.
+    # "1 de 100ml y 1 de 250ml" → segments=["1 de 100ml", "1 de 250ml"]
+    segments: list[str] = []
+    if any(sep in norm for sep in (" y ", " + ", ", ", "tambien", "ademas")):
+        # Split por separators conocidos.
+        for sep in [" y ", " + ", "; "]:
+            if sep in norm:
+                segments = [s.strip() for s in norm.split(sep) if s.strip()]
+                break
+        if not segments:
+            segments = [norm]
+    else:
+        segments = [norm]
+
+    # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+    # OPT-IN (require_discriminative_per_segment=True): cuando hay multi-segments
+    # Y el caller indica que hay múltiples productos potenciales en juego,
+    # calculamos las palabras DISCRIMINATIVAS del título y exigimos que cada
+    # segmento contenga al menos una. Sin esto: inbound "1 de Coco 100g y 1
+    # de Lavanda 150g" matcheaba la variante 150g a Jabón Coco falsamente.
+    # Cuando el caller sabe "este detector es para UN producto" (post-pregunta
+    # de variantes), deja el flag en False y se preserva la semántica original.
+    discriminative_words: set[str] = set()
+    if require_discriminative_per_segment and len(segments) > 1:
+        title_norm = _normalize_text(str(product.get("title") or ""))
+        title_words = set(re.findall(r"[a-z0-9ñ]+", title_norm))
+        _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+        title_words -= _stop
+        # Palabras del título ≥4 chars (heurística: descarta stop-words y
+        # conectores como "de"/"con"; preserva sustantivos del título tipo
+        # "coco", "lavanda", "jabon", "artesanal", "almendras"). Adjetivos
+        # genéricos compartidos por todo el catálogo (ej. "artesanal") son
+        # filtrados naturalmente por el caller que aplica category-lock.
+        discriminative_words = {w for w in title_words if len(w) >= 4}
+
+    # Si solo 1 segment, procesarlo igual que antes (1 variante o default).
+    # Si N segments, procesar cada uno por separado y juntar matches únicos.
+    results: list[tuple[dict, int]] = []
+    seen_variation_ids: set[str] = set()
+
+    for segment in segments:
+        # Sem 7 F2 cierre — Bug 2 (OPT-IN): en multi-segment con
+        # require_discriminative_per_segment, exigir match discriminative
+        # para evitar atribución cruzada de variantes.
+        if discriminative_words:
+            seg_tokens = set(re.findall(r"[a-z0-9ñ]+", segment))
+            if not (seg_tokens & discriminative_words):
+                # Este segmento NO menciona el producto actual — skip.
+                continue
+
+        # Por segmento, intentar resolver una variante.
+        segment_qty = _extract_qty_for_product(segment, product) if len(segments) == 1 else _extract_qty_from_segment(segment)
+        segment_variant = _match_single_variant_in_text(segment, variants)
+        if segment_variant:
+            variation_id = str(segment_variant.get("id") or "")
+            if variation_id and variation_id not in seen_variation_ids:
+                results.append((segment_variant, segment_qty))
+                seen_variation_ids.add(variation_id)
+
+    # Default: si no resolvió ninguna variante Y producto tiene 1 sola, asumir.
+    # Solo cuando había 1 segment (no multi-variant input ambiguo).
+    if not results and len(segments) == 1 and len(variants) == 1:
+        qty = _extract_qty_for_product(norm, product)
+        results.append((variants[0], qty))
+
+    return results
+
+
+def _extract_qty_from_segment(segment: str) -> int:
+    """Sem 7 F2 cierre — extract qty from a multi-variant segment.
+
+    Para "1 de 100ml" → qty=1. Para "2 de 250ml" → qty=2.
+    Si no hay qty explícita, default 1.
+    """
+    if not segment:
+        return 1
+    # Primer dígito SIN unidad seguida (60g, 30ml son atributos, no qty).
+    m = re.search(r"\b(\d+)\s*(?!\s*(?:g|gr|gramos|ml|mililitros|cc|kg|oz)\b)\d*", segment, re.IGNORECASE)
+    if not m:
+        # Patrón más simple: cualquier número que NO esté seguido de unidad.
+        nums = re.findall(r"\b(\d+)\b", segment)
+        if not nums:
+            return 1
+        # Tomar el primer número que NO esté seguido inmediatamente por unidad.
+        for num in nums:
+            # Check si está seguido de unidad en el segment.
+            num_unit_pattern = rf"\b{num}\s*(g|gr|gramos|ml|mililitros|cc|kg|oz)\b"
+            if not re.search(num_unit_pattern, segment, re.IGNORECASE):
+                try:
+                    return max(1, min(100, int(num)))
+                except ValueError:
+                    continue
+        return 1
+    try:
+        return max(1, min(100, int(m.group(1))))
+    except (ValueError, IndexError):
+        return 1
+
+
+def _match_single_variant_in_text(text: str, variants: list) -> Optional[dict]:
+    """Helper de `_resolve_variant_from_inbound`: matchea UNA variante
+    contra un trozo de texto (segment) usando las 3 estrategias estándar.
+
+    Returns: variant dict o None.
+    """
+    if not text or not variants:
+        return None
+    norm = _normalize_text(text)
 
     # 1. Match por attribute value (más confiable).
     for v in variants:
@@ -2380,10 +2832,9 @@ def _resolve_variant_from_inbound(
         for av in attrs.values():
             av_n = _normalize_text(str(av or "")).strip()
             if av_n and av_n in norm and len(av_n) >= 2:
-                return v, qty
+                return v
 
-    # 2. Match por número + unidad (ej. cliente dice "60 gramos" pero
-    #    attribute value es "60g").
+    # 2. Match por número + unidad.
     num_unit = re.search(
         r"(\d{1,4})\s*(g|gr|gramos|ml|mililitros|cc|kg|oz)\b",
         norm, re.IGNORECASE,
@@ -2397,15 +2848,489 @@ def _resolve_variant_from_inbound(
             for av in attrs.values():
                 av_n = _normalize_text(str(av or ""))
                 if target_num and target_num in av_n:
-                    return v, qty
+                    return v
 
     # 3. Match por label de la variant.
     for v in variants:
         label_n = _normalize_text(str(v.get("label") or "")).strip()
         if label_n and label_n in norm and len(label_n) >= 3:
-            return v, qty
+            return v
 
-    return None, qty
+    return None
+
+
+def _detect_explicit_products_in_inbound(
+    content: str, catalog: list,
+) -> tuple[list[dict], list[dict]]:
+    """Rev. 104 — detector multi-producto con propuestas (F1-8 / Bug-A runtime).
+
+    Devuelve `(matches, proposals)`:
+      • `matches` — productos con producto+variante+precio resolubles desde
+        el inbound actual. Listos para `cart_tool.add_item`.
+      • `proposals` — productos mencionados con cantidad explícita (>=2)
+        cuya variante NO es resoluble aún (multi-variant ambiguo). Se
+        emiten como `cart_event(item_proposed)` para preservar la cantidad
+        declarada hasta que el cliente elija variante en un turno posterior.
+
+    Esto reemplaza el parche regex-en-historial por un patrón
+    cart-as-SoT estructural (Plan A.3): item_proposed con
+    `requires_confirmation=true` → ascende a item_added solo con
+    confirmación explícita (variante elegida).
+
+    Caso runtime (conv 9d357efc, 2026-05-04):
+      T1: "quiero 2 jabones de coco y 1 sérum vit C"
+        → matches=[] (ambos multi-variant ambiguos)
+        → proposals=[{coco, qty=2}]  (sérum qty=1 default → no proposal)
+      T3: "60 gramos por favor"  (caller mira proposals al resolver variante)
+        → ascende coco proposal qty=2 → cart_add_item(qty=2) ✓
+    """
+    if not content or not catalog:
+        return [], []
+    norm = _normalize_text(content)
+    if "?" in content:
+        # Rev. 104 — antes: rechazo total si "?". Caso runtime motivador
+        # (2026-05-05 manual UAT): cliente "Puedo adicionar jabón de
+        # lavanda? De 100g" tenía intent CLARO de add_item pero el
+        # detector descartaba por la pregunta cortés. Hoy diferenciamos:
+        #   • pregunta de catálogo/disponibilidad ("tienen X?",
+        #     "venden X?") → descartar (no es add_item).
+        #   • pregunta-cortés con verbo de add ("puedo agregar?",
+        #     "¿adicionar X?", "incluyes X?") → procesar normalmente.
+        _add_intent_markers = (
+            "agreg", "adicion", "anad", "anadir", "incluy", "incorpor",
+            "sumar", "tambien",
+        )
+        _has_add_intent = any(m in norm for m in _add_intent_markers)
+        if not _has_add_intent:
+            return [], []
+    norm_tokens = set(re.findall(r"[a-z0-9ñ]+", norm))
+    if not norm_tokens:
+        return [], []
+
+    generic_terms = _generic_catalog_terms(catalog)
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+
+    matches: list[dict] = []
+    proposals: list[dict] = []
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        title_norm = _normalize_text(title)
+        title_words = set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _stop
+        discriminative = title_words - generic_terms
+        if not discriminative:
+            continue
+        if not (discriminative & norm_tokens):
+            continue
+        # Sem 7 F2 cierre — `_resolve_variant_from_inbound` ahora retorna
+        # `list[tuple]`. Para callers que esperan single, tomar el primero.
+        # Si no hay match de variant, qty se extrae del content (preserva
+        # comportamiento previo para Camino B / proposals).
+        _variant_matches = _resolve_variant_from_inbound(content, prod)
+        if _variant_matches:
+            variant, qty = _variant_matches[0]
+        else:
+            variant = None
+            # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv febcec09):
+            # pasar generic_terms para que "jabon"/"artesanal" no se traten
+            # como discriminativos del producto al extraer qty.
+            qty = _extract_qty_for_product(
+                _normalize_text(content), prod, generic_terms=generic_terms,
+            )
+        if not variant:
+            # Sin variante resoluble. Si el cliente declaró una qty
+            # explícita >=2, registrar PROPUESTA para no perder la cantidad
+            # cuando elija variante después.
+            if qty >= 2:
+                proposals.append({
+                    "product_id": str(prod.get("id") or ""),
+                    "title": str(prod.get("title") or "Producto"),
+                    "quantity": qty,
+                })
+            continue
+        unit_price = float(variant.get("price") or 0)
+        if unit_price <= 0:
+            continue
+        matches.append({
+            "product_id": str(prod.get("id") or ""),
+            "variation_id": str(variant.get("id") or ""),
+            "quantity": qty,
+            "unit_price_cents": int(round(unit_price * 100)),
+            "title": str(prod.get("title") or "Producto"),
+            "variant_label": str(variant.get("label") or ""),
+            "match_score": len(discriminative & norm_tokens),
+        })
+    matches.sort(key=lambda m: -m.get("match_score", 0))
+    return matches, proposals
+
+
+# Rev. 104 — Tier-2 intent detection (ADR-0011 §6.4.4)
+# Verbos canónicos de add_item. El detector tier-2 también acepta
+# preguntas-corteses ("¿puedo adicionar?") y verbos de deseo ("deseo X").
+_ADD_ITEM_VERB_MARKERS = (
+    "agreg", "adicion", "anad", "anadir", "incluy",
+    "incorpor", "sumar", "tambien",
+    # Verbos de deseo/petición (cliente expresa intent de obtener algo).
+    "deseo", "deseamos", "quisiera", "quisieramos",
+    "me gustaria", "me gustaría",
+    "ponme", "ponle", "echame", "échame",
+    # Petición cortés con verbo de obtención.
+    "puedo agregar", "puedo adicionar", "puedo añadir", "puedo anadir",
+    "puedo incluir", "puedo sumar", "puedo pedir",
+    "podria agregar", "podría agregar", "podria adicionar", "podría adicionar",
+    "podria pedir", "podría pedir",
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    # cliente dijo "Me peudes vender 1 Jabon de Coco y 1 de Lavanda".
+    # Faltaban verbos de venta/compra en español CO + petición con
+    # "vender" + typo común "peudes". Sin esto, tier-2 retornaba
+    # `no_intent` → flow caía al LLM → alucinación de gramaje.
+    "vender", "vende", "vendeme", "véndeme", "vendes", "venderme",
+    "comprar", "compro", "compra", "comprarte", "comprarles",
+    "me lo llevo", "me los llevo", "llevame", "llévame", "me llevo",
+    "dame", "deme", "déme", "regalame", "regálame",
+    "puedes vender", "puedes venderme", "peudes vender", "peudes venderme",
+    "puede venderme", "podrias vender", "podrías vender",
+    "podrias venderme", "podrías venderme",
+    "me vendes", "me vendrias", "me vendrías",
+    "quiero comprar", "quiero llevar", "quiero pedir",
+    "quisiera comprar", "quisiera llevar", "quisiera pedir",
+    "necesito", "necesitamos",
+)
+
+
+def _detect_add_item_intent_with_resolution(
+    content: str,
+    catalog: list,
+) -> dict:
+    """Detector tier-2 de intent de add_item con clasificación de
+    resolución (ADR-0011 §6.4.4).
+
+    Plan A.0.1 / A.0.3 — separa "qué quiere el cliente" (intent) de
+    "tengo lo necesario para ejecutar" (resolution). El orchestrator usa
+    `resolution` para decidir el path:
+
+      • resolved          — producto + variante identificados → add_item.
+      • product_ambiguous — verbo + discriminativa que matchea ≥2 productos
+                            (ej. "lavanda" → Aceite + Jabón Lavanda).
+      • variant_ambiguous — 1 producto único pero sin variante explícita
+                            (ej. "jabón de coco" → 60g/100g/150g?).
+      • no_product        — verbo de add pero sin producto identificable.
+      • no_intent         — el inbound no expresa intent de add_item.
+
+    Reusa heurísticas existentes:
+      • `_normalize_text`, `_generic_catalog_terms` (palabras compartidas
+        por ≥40% del catálogo, no discriminativas).
+      • `_resolve_variant_from_inbound` (extrae variante + qty del texto).
+
+    Retorna dict con keys consistentes:
+      {
+        "resolution": str,
+        "matches": list[dict],     # presente si resolution=resolved
+        "candidates": list[dict],  # presente si product/variant_ambiguous
+        "qty": int,
+      }
+    """
+    if not content or not catalog:
+        return {"resolution": "no_intent", "matches": [], "candidates": [], "qty": 0}
+
+    norm = _normalize_text(content)
+    has_add_verb = any(m in norm for m in _ADD_ITEM_VERB_MARKERS)
+    if not has_add_verb:
+        return {"resolution": "no_intent", "matches": [], "candidates": [], "qty": 0}
+
+    norm_tokens = set(re.findall(r"[a-z0-9ñ]+", norm))
+    generic_terms = _generic_catalog_terms(catalog)
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+
+    # Buscar productos cuya palabra discriminativa esté en el inbound.
+    product_hits: list[dict] = []
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        title_norm = _normalize_text(title)
+        title_words = set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _stop
+        discriminative = title_words - generic_terms
+        if not discriminative:
+            continue
+        if not (discriminative & norm_tokens):
+            continue
+        product_hits.append({
+            "product": prod,
+            "discriminative_match": len(discriminative & norm_tokens),
+        })
+
+    # Extraer qty (default 1).
+    nums_in_text = [int(n) for n in re.findall(r"\b(\d+)\b", norm)]
+    detected_qty = max(1, nums_in_text[0]) if nums_in_text else 1
+    if detected_qty > 50:
+        detected_qty = 1  # sanity
+
+    if not product_hits:
+        return {
+            "resolution": "no_product",
+            "matches": [], "candidates": [], "qty": detected_qty,
+        }
+
+    # Filtrar por TOP score: el producto más específico al inbound. Si el
+    # cliente dice "jabon de lavanda", "lavanda" es más discriminativa
+    # que "jabon" (palabra que matchea varios productos). El producto que
+    # comparte más palabras discriminativas con el inbound es el más
+    # probable. Productos con score < top quedan filtrados.
+    product_hits.sort(key=lambda h: -h["discriminative_match"])
+    top_score = product_hits[0]["discriminative_match"]
+    product_hits = [h for h in product_hits if h["discriminative_match"] == top_score]
+
+    # Rev. 104 — filtro por variant compatibility (caso runtime UAT
+    # 2026-05-05: cliente "1 adicional de Coco de 60g" → Aceite Coco
+    # viene en ml, NO en gramos; solo Jabón Coco tiene 60g). Si hay >1
+    # productos en el top score Y el cliente especificó variante explícita
+    # (60g, 250ml, etc.), filtrar solo los que tienen esa variante.
+    has_explicit_variant = bool(re.search(
+        r"\d{1,4}\s*(g|gr|gramos|ml|mililitros|cc|kg|oz)\b",
+        norm, re.IGNORECASE,
+    ))
+    if len(product_hits) > 1 and has_explicit_variant:
+        compatible: list[dict] = []
+        for h in product_hits:
+            # Sem 7 F2 cierre — Bug 2: opt-in discriminative-per-segment para
+            # evitar atribución cruzada de variantes entre productos distintos
+            # en un mismo inbound (caso "1 de Coco 100g y 1 de Lavanda 150g").
+            _matches_h = _resolve_variant_from_inbound(
+                content, h["product"],
+                require_discriminative_per_segment=True,
+            )
+            if _matches_h:
+                # Sem 7 F2 cierre — Bug 2: tomar todas las variantes que
+                # matcheen (no solo la primera). Necesario cuando el cliente
+                # declara 2+ variantes de un mismo producto en un inbound.
+                # Para multi-product (1 variante por producto), tomamos
+                # solo la primera, que es la que el segmento del producto
+                # ya filtró con discriminative_words.
+                v, q = _matches_h[0]
+                compatible.append({**h, "_resolved_variant": v, "_resolved_qty": q})
+        if compatible:
+            product_hits = compatible
+
+    # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+    # Caso "N productos × 1 variante c/u" en un solo inbound (ej. "1 de Coco
+    # 100g y 1 de Lavanda 150g"). Si después del filtro de compatibility
+    # tenemos >1 productos Y cada uno tiene su variante explícita resolvida,
+    # NO es ambiguo — el cliente declaró todos. Resolver como resolved_multi.
+    if (
+        len(product_hits) > 1
+        and has_explicit_variant
+        and all(
+            isinstance(h.get("_resolved_variant"), dict) for h in product_hits
+        )
+    ):
+        matches = []
+        for h in product_hits:
+            prod = h["product"]
+            v = h["_resolved_variant"]
+            q = h.get("_resolved_qty") or 1
+            unit_price = float(v.get("price") or 0)
+            matches.append({
+                "product_id": str(prod.get("id") or ""),
+                "variation_id": str(v.get("id") or ""),
+                "title": str(prod.get("title") or "Producto"),
+                "variant_label": str(v.get("label") or ""),
+                "quantity": q if q >= 1 else 1,
+                "unit_price_cents": int(round(unit_price * 100)),
+            })
+        return {
+            "resolution": "resolved_multi",
+            "matches": matches,
+            "candidates": [],
+            "qty": sum(m["quantity"] for m in matches),
+        }
+
+    # Si solo 1 producto en el top, intentar resolver variante.
+    if len(product_hits) == 1:
+        prod = product_hits[0]["product"]
+        _matches_p = _resolve_variant_from_inbound(content, prod)
+        if _matches_p:
+            variant, qty = _matches_p[0]
+        else:
+            variant, qty = None, 1
+        if variant:
+            unit_price = float(variant.get("price") or 0)
+            return {
+                "resolution": "resolved",
+                "matches": [{
+                    "product_id": str(prod.get("id") or ""),
+                    "variation_id": str(variant.get("id") or ""),
+                    "title": str(prod.get("title") or "Producto"),
+                    "variant_label": str(variant.get("label") or ""),
+                    "quantity": qty if qty >= 1 else detected_qty,
+                    "unit_price_cents": int(round(unit_price * 100)),
+                }],
+                "candidates": [],
+                "qty": qty if qty >= 1 else detected_qty,
+            }
+        # Producto único pero sin variante resoluble → variant_ambiguous.
+        variants = prod.get("variants") or []
+        return {
+            "resolution": "variant_ambiguous",
+            "matches": [],
+            "candidates": [{
+                "product_id": str(prod.get("id") or ""),
+                "title": str(prod.get("title") or "Producto"),
+                "variants": [
+                    {
+                        "variation_id": str(v.get("id") or ""),
+                        "label": str(
+                            (v.get("attributes") or {}).get("size")
+                            or v.get("label") or ""
+                        ),
+                        "price": float(v.get("price") or 0),
+                    }
+                    for v in variants
+                ],
+            }],
+            "qty": detected_qty,
+        }
+
+    # Múltiples productos match con mismo score → product_ambiguous.
+    # (El sort + filter top_score arriba ya dejó solo los empates).
+    return {
+        "resolution": "product_ambiguous",
+        "matches": [],
+        "candidates": [{
+            "product_id": str(h["product"].get("id") or ""),
+            "title": str(h["product"].get("title") or "Producto"),
+            "variants": [
+                {
+                    "variation_id": str(v.get("id") or ""),
+                    "label": str(
+                        (v.get("attributes") or {}).get("size")
+                        or v.get("label") or ""
+                    ),
+                    "price": float(v.get("price") or 0),
+                }
+                for v in (h["product"].get("variants") or [])
+            ],
+        } for h in product_hits],
+        "qty": detected_qty,
+    }
+
+
+# Rev. 104 — qty-change intent detector (ADR-0011 §6.4.3)
+# Verbos canónicos que el cliente usa para CAMBIAR la cantidad de un item
+# ya en el cart. Diferenciado de add_item: estos NO suman al qty existente,
+# REEMPLAZAN el qty (update_item_quantity).
+_QTY_UPDATE_VERB_PHRASES = (
+    "que sean", "que sea",
+    "ahora son", "ahora es",
+    "en vez de", "en lugar de",
+    "cambia a", "cambiar a", "cambialo a", "cámbialo a",
+    "cambiame a", "cámbiame a",
+    "actualizar", "actualizalo", "actualízalo", "actualizame",
+    "actualízame", "actualizar a",
+    "modificar", "modificalo", "modifícalo",
+    "subir a", "subelo a", "súbelo a",
+    "bajar a", "bajalo a", "bájalo a",
+    "ponme", "pon",
+    "que en vez", "vez de",
+)
+
+
+def _detect_qty_change_intent(
+    content: str,
+    cart_items_with_titles: list[dict],
+) -> Optional[dict]:
+    """Detector pre-LLM de intent de **cambio de cantidad** sobre item ya en cart.
+
+    Plan A.0.1 (cart-as-SoT) — diferenciado de add_item:
+      • add_item: cliente quiere AGREGAR un producto nuevo o más unidades
+        sumando al qty existente.
+      • qty_change: cliente quiere REEMPLAZAR el qty actual de un item ya
+        en el cart. "Que sean 2 de lavanda" cuando hay 1×Lavanda → qty=2,
+        no qty=3 (1+2).
+
+    Resolución del producto: contra el **cart real**, no contra el catálogo
+    abstracto. Si cart tiene 1×Lavanda y cliente dice "que sean 2 de
+    lavanda", el match es unívoco aún sin variante explícita en el inbound.
+
+    cart_items_with_titles: lista de dicts con {variation_id, product_id,
+        title, quantity, unit_price_cents}.
+
+    Retorna:
+      None si no hay intent de qty_change detectado.
+      {"ambiguous": True, "candidates": [...], "new_qty": N} si hay >=2
+        items del cart que matchean igual.
+      {variation_id, product_id, title, current_qty, new_qty,
+       unit_price_cents} si match unívoco.
+    """
+    if not content or not cart_items_with_titles:
+        return None
+    norm = _normalize_text(content)
+    if not any(v in norm for v in _QTY_UPDATE_VERB_PHRASES):
+        return None
+
+    # Extraer números enteros del inbound. En frases tipo "en vez de 1 sean 2"
+    # tomamos el ÚLTIMO número como qty objetivo (más reciente en la frase).
+    nums_found = [int(n) for n in re.findall(r"\b(\d+)\b", norm)]
+    if not nums_found:
+        return None
+    new_qty = nums_found[-1]
+    if new_qty < 1 or new_qty > 50:  # sanity cap
+        return None
+
+    # Resolver producto: matchear palabras del inbound contra títulos del cart.
+    _stop = {
+        "de", "con", "y", "o", "la", "el", "los", "las", "un", "una",
+        "que", "sea", "sean", "ahora", "es", "vez", "en", "lugar", "son",
+        "cambia", "cambiar", "actualizar", "modificar", "ponme", "pon",
+        "subir", "bajar", "subelo", "bajalo", "actualizalo", "modificalo",
+        "favor", "por", "quiero", "deseo", "quisiera",
+    }
+    inbound_tokens = set(re.findall(r"[a-z0-9ñ]+", norm)) - _stop
+
+    matches: list[tuple[dict, int]] = []
+    for item in cart_items_with_titles:
+        title = item.get("title") or ""
+        title_norm = _normalize_text(title)
+        title_tokens = set(re.findall(r"[a-z0-9ñ]+", title_norm)) - _stop
+        intersection = title_tokens & inbound_tokens
+        if intersection:
+            matches.append((item, len(intersection)))
+    matches.sort(key=lambda m: -m[1])
+
+    if not matches:
+        # Sin producto explícito en el inbound. Heurística: si el cart tiene
+        # exactamente 1 item, asumir que el cliente se refiere a ese.
+        if len(cart_items_with_titles) == 1:
+            it = cart_items_with_titles[0]
+            return {
+                "variation_id": str(it.get("variation_id") or ""),
+                "product_id": str(it.get("product_id") or ""),
+                "title": str(it.get("title") or "Producto"),
+                "current_qty": int(it.get("quantity") or 1),
+                "new_qty": new_qty,
+                "unit_price_cents": int(it.get("unit_price_cents") or 0),
+            }
+        return None
+
+    # Si hay tie (varios items con la misma cantidad de palabras matcheadas),
+    # devolver ambiguous para que el bot pida clarificación.
+    if len(matches) >= 2 and matches[0][1] == matches[1][1]:
+        return {
+            "ambiguous": True,
+            "candidates": [str(m[0].get("title") or "Producto") for m in matches[:3]],
+            "new_qty": new_qty,
+        }
+
+    it = matches[0][0]
+    return {
+        "variation_id": str(it.get("variation_id") or ""),
+        "product_id": str(it.get("product_id") or ""),
+        "title": str(it.get("title") or "Producto"),
+        "current_qty": int(it.get("quantity") or 1),
+        "new_qty": new_qty,
+        "unit_price_cents": int(it.get("unit_price_cents") or 0),
+    }
 
 
 def _detect_explicit_product_in_inbound(
@@ -2454,8 +3379,12 @@ def _detect_explicit_product_in_inbound(
         # Necesita ALGUNA discriminativa en el inbound
         if not (discriminative & norm_tokens):
             continue
-        # Match — ahora resolver variante
-        variant, qty = _resolve_variant_from_inbound(content, prod)
+        # Match — ahora resolver variante (Sem 7 F2: lista[tuple], single)
+        _vmatch = _resolve_variant_from_inbound(content, prod)
+        if _vmatch:
+            variant, qty = _vmatch[0]
+        else:
+            variant, qty = None, 1
         if not variant:
             continue
         unit_price = float(variant.get("price") or 0)
@@ -2482,46 +3411,140 @@ def _detect_explicit_product_in_inbound(
 
 def _detect_variant_confirmation(
     content: str, history: list[dict], catalog: list,
-) -> Optional[dict]:
+) -> list[dict]:
     """Rev. 103 — Detector pre-LLM determinístico cart-as-SoT.
 
+    Sem 7 F2 cierre: contrato cambiado a `list[dict]` (puede ser vacía, 1
+    elemento, o N) para soportar multi-variant input ("1 de 100ml y 1 de
+    250ml"). El caller itera la lista llamando `add_item` por cada item.
+
     Dos caminos:
-      A. Bot acaba de presentar variantes → cliente elige una con
-         mensaje corto ("60g"). Match por variant attribute.
+      A. Bot acaba de presentar variantes → cliente elige una o más
+         ("60g" o "1 de 100ml y 1 de 250ml"). Match por variant attribute.
       B. Cliente especifica producto+variante en un mensaje
          ("quiero jabón de coco 60g") sin esperar presentación.
          Match por discriminative word del título + variant attribute.
 
-    Devuelve dict listo para `cart_tool.add_item` o None.
+    Devuelve lista de dicts listos para `cart_tool.add_item`.
     """
     if not content or not catalog:
-        return None
+        return []
     if "?" in content:
-        return None
+        return []
     norm = _normalize_text(content)
     tokens = norm.split()
     if not tokens or len(tokens) > 14:
-        return None  # Mensajes muy largos descartados (probablemente
-                     # consulta o address dump, no intent de compra)
+        return []  # Mensajes muy largos descartados (probablemente
+                   # consulta o address dump, no intent de compra)
 
-    # Camino A: ¿bot presentó variantes en el último outbound?
-    product = _last_outbound_presented_variants(catalog, history)
-    if product:
-        variant, qty = _resolve_variant_from_inbound(content, product)
-        if variant:
+    results: list[dict] = []
+    seen_variation_ids: set[str] = set()
+
+    # Camino A: ¿bot presentó variantes de uno o más productos en T-1?
+    # Para cada producto presentado, evaluar TODAS las variantes que
+    # matcheen el inbound (multi-variant support).
+    products = _last_outbound_presented_variants_all(catalog, history)
+    # Sem 7 F2 cierre 2026-05-19 — Bug 2.2 founder UAT:
+    # Si T-1 listó múltiples productos (ej. Coco + Lavanda), aplicar
+    # discriminative-per-segment para evitar atribución cruzada de
+    # variantes entre productos distintos en un mismo inbound. Caso
+    # runtime: "1 de Coco 100g y 1 de Lavanda 150g" matcheaba la
+    # variante 150g de Coco (porque Coco tiene 150g) y la 100g de
+    # Lavanda (porque Lavanda tiene 100g) → 4 items en cart en vez de 2.
+    multi_product_context = len(products) > 1
+
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv f6ec7213):
+    # disambiguación CROSS-PRODUCT a nivel de VARIANTE (post-resolución).
+    # Caso: bot listó 3 sérums; cliente dijo "Sérum Vitamina C 30ml".
+    # Cada sérum tenía variante 30ml → matcheaban los 3 → cart con 3 items.
+    #
+    # Arquitectura limpia:
+    #   1. Computar `ambiguous_variant_labels`: labels (e.g. "30ml") que
+    #      aparecen en ≥2 productos del set presentado. Si solo 1 producto
+    #      tiene "60g", "60g" NO es ambigua y matchea sin requerir mención
+    #      del nombre del producto (caso Coco/Sérum: 60g solo en Coco).
+    #   2. Computar `product_discriminative_words` por producto: palabras
+    #      del título exclusivas de ese producto vs los otros del set.
+    #   3. Para cada match (producto, variante): si la variante es ambigua
+    #      (compartida), exigir que el inbound contenga ≥1 palabra
+    #      discriminativa del producto matched. Si la variante NO es
+    #      ambigua, aceptar sin requerir mención (la variante misma
+    #      identifica al producto unívocamente).
+    ambiguous_variant_labels: set[str] = set()
+    product_discriminative: dict[str, set[str]] = {}
+    if multi_product_context:
+        _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+        # Conteo de labels de variante a través de productos.
+        _variant_label_counts: dict[str, int] = {}
+        for _prod in products:
+            for _v in _prod.get("variants") or []:
+                _label = _normalize_text(str(_v.get("label") or "")).strip()
+                if _label:
+                    _variant_label_counts[_label] = _variant_label_counts.get(_label, 0) + 1
+        ambiguous_variant_labels = {
+            lbl for lbl, c in _variant_label_counts.items() if c >= 2
+        }
+        # Conteo de palabras de título a través de productos (para
+        # identificar palabras compartidas que NO sirven como discriminadores).
+        _title_word_counts: dict[str, int] = {}
+        for _prod in products:
+            _tn = _normalize_text(str(_prod.get("title") or ""))
+            _tw = {w for w in re.findall(r"[a-z0-9ñ]+", _tn) if len(w) >= 4} - _stop
+            for w in _tw:
+                _title_word_counts[w] = _title_word_counts.get(w, 0) + 1
+        _shared_title_words = {w for w, c in _title_word_counts.items() if c >= 2}
+        # Per-producto: palabras exclusivas del título.
+        for _prod in products:
+            _tn = _normalize_text(str(_prod.get("title") or ""))
+            _tw = {w for w in re.findall(r"[a-z0-9ñ]+", _tn) if len(w) >= 4} - _stop
+            product_discriminative[str(_prod.get("id") or "")] = _tw - _shared_title_words
+
+    _content_tokens = set(re.findall(r"[a-z0-9ñ]+", _normalize_text(content)))
+
+    for product in products:
+        variant_matches = _resolve_variant_from_inbound(
+            content, product,
+            require_discriminative_per_segment=multi_product_context,
+        )
+        for variant, qty in variant_matches:
             unit_price = float(variant.get("price") or 0)
-            if unit_price > 0:
-                return {
-                    "product_id": str(product.get("id") or ""),
-                    "variation_id": str(variant.get("id") or ""),
-                    "quantity": qty,
-                    "unit_price_cents": int(round(unit_price * 100)),
-                    "title": str(product.get("title") or "Producto"),
-                    "variant_label": str(variant.get("label") or ""),
-                }
+            if unit_price <= 0:
+                continue
+            variation_id = str(variant.get("id") or "")
+            if not variation_id or variation_id in seen_variation_ids:
+                continue
+            # Sem 7 F2 cierre 2026-05-21 — gate cross-product post-resolución.
+            # Si la variante matched tiene label compartido con otros productos
+            # presentados, exigir que el inbound mencione palabra exclusiva
+            # del título de ESTE producto. Si la variante es única (solo este
+            # producto la tiene), aceptar sin requerir mención.
+            if multi_product_context:
+                _label_norm = _normalize_text(str(variant.get("label") or "")).strip()
+                if _label_norm in ambiguous_variant_labels:
+                    _disc = product_discriminative.get(str(product.get("id") or ""), set())
+                    if not (_content_tokens & _disc):
+                        # Variante ambigua + inbound no menciona producto.
+                        # Rechazar para evitar atribución cruzada.
+                        continue
+            results.append({
+                "product_id": str(product.get("id") or ""),
+                "variation_id": variation_id,
+                "quantity": qty,
+                "unit_price_cents": int(round(unit_price * 100)),
+                "title": str(product.get("title") or "Producto"),
+                "variant_label": str(variant.get("label") or ""),
+            })
+            seen_variation_ids.add(variation_id)
 
-    # Camino B: producto+variante explícitos en el inbound
-    return _detect_explicit_product_in_inbound(content, catalog)
+    if results:
+        return results
+
+    # Camino B: producto+variante explícitos en el inbound (single).
+    # Si el detector explícito retorna un dict, envolverlo en lista.
+    single = _detect_explicit_product_in_inbound(content, catalog)
+    if single:
+        return [single]
+    return []
 
 
 def _save_product_snapshot(
@@ -2662,6 +3685,17 @@ ANÁLISIS DE VARIANTE (QUERY ACTUAL):
 _BUYING_INTENT_STRONG_TOKENS = {
     "comprar", "compra", "lo compro", "lo quiero comprar", "agregar al pedido", "hacer pedido",
     "proceder", "procede", "confirmo", "confirmar pedido", "me lo llevo", "pagar", "pago",
+    # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv bae0f6a2):
+    # frases coloquiales CO de "véndeme/vendeme" + typo "peudes" que NO
+    # estaban listadas. Sin estos, "Me peudes vender 1 Coco y 1 Lavanda"
+    # caía a buying_intent=False → CATALOG_MODE → LLM libre → alucinación.
+    "vendeme", "véndeme", "me vendes", "venderme",
+    "puedes vender", "peudes vender", "puede venderme", "puedes venderme",
+    "podrias vender", "podrías vender", "podrias venderme", "podrías venderme",
+    "quiero comprar", "quiero llevar", "quiero pedir",
+    "quisiera comprar", "quisiera llevar", "quisiera pedir",
+    "necesito comprar", "necesito llevar",
+    "dame", "regalame", "regálame",
 }
 _BUYING_INTENT_CONTEXT_MARKERS = {
     "cotice el envio", "cotizar envio", "envio de", "economica", "rapida", "direccion de entrega",
@@ -2967,6 +4001,93 @@ def _last_outbound_was_order_confirmation_question(history: list[dict]) -> bool:
     return False
 
 
+def _emit_summary_rendered_event(
+    supabase,
+    *,
+    conversation_id: str,
+    tenant_id: str,
+    summary_text: str,
+    correlation_id: Optional[str] = None,
+) -> None:
+    """Rev. 104 (F1-6) — emite `cart_events.summary_rendered` best-effort.
+
+    Resuelve cart_id buscando el cart abierto de la conversación. Si no
+    hay cart o falla la emisión, swallow + log debug. El cliente ya recibió
+    el resumen cuando este helper se invoca; la auditoría no debe bloquear.
+
+    Por convención se invoca DESPUÉS de `_send_outbound_text` con el texto
+    del resumen para que la trazabilidad refleje el orden real visto por
+    el cliente.
+    """
+    try:
+        from tools.cart_tool import get_cart_with_items
+        from cart.events import emit as _emit
+        cart = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+        if not cart or not cart.get("id"):
+            return
+        items_count = len(cart.get("items") or [])
+        _emit(
+            supabase,
+            cart_id=cart["id"], tenant_id=tenant_id,
+            event_type="summary_rendered",
+            payload={
+                "total_cents": int(cart.get("total_cents") or 0),
+                "subtotal_cents": int(cart.get("subtotal_cents") or 0),
+                "shipping_cents": int(cart.get("shipping_cents") or 0),
+                "items_count": items_count,
+                "summary_chars": len(summary_text or ""),
+            },
+            correlation_id=correlation_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[CART_EVENT] summary_rendered emit falló: %s", exc)
+
+
+# Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv e0d7c539):
+# Detector determinístico de "LLM intentó confirmar cart-add sin que
+# `cart_tool.add_item` haya corrido". El detector busca CONFIRMACIÓN
+# verbal + VARIANTE explícita (peso/volumen entre paréntesis) + PRECIO
+# en un mismo segmento. Los 3 elementos juntos = LLM afirmando estado
+# de carrito concreto que no existe en DB. Sin los 3, podría ser solo
+# acuse-de-recibo neutral ("Claro, te muestro...") que no requiere
+# rewrite.
+#
+# Caso runtime: "Listo, 1x Jabón Artesanal de Coco (60g) por $18.000 COP"
+#   → confirmación "Listo" ✓
+#   → variante "(60g)" ✓
+#   → precio "$18.000" ✓
+#   → REWRITE: pedir presentación al cliente.
+#
+# Falso positivo defensa: el caller solo invoca este detector cuando
+# `_cart_add_executed_this_turn=False`. Si add_item corrió legítimamente,
+# la confirmación es real y no se reescribe.
+_CART_ADD_CONFIRMATION_VERBS = (
+    r"listo|agregue|agregu[eé]|a[nñ]ad[ií]|te\s+vendo|"
+    r"agreg[oó]\s+a\s+tu\s+carrito|sum[eé]|agregad[oa]s?"
+)
+_CART_ADD_CONFIRMATION_REGEX = re.compile(
+    rf"\b(?:{_CART_ADD_CONFIRMATION_VERBS})\b"
+    r"[\s\S]{0,250}?"                                  # filler tolerante
+    r"\(\s*\d+\s*(?:g|gr|gramos|ml|mililitros|cc|kg|oz)\s*\)"   # variante
+    r"[\s\S]{0,80}?"
+    r"\$\s*\d",                                        # precio
+    flags=re.IGNORECASE,
+)
+
+
+def _looks_like_cart_add_confirmation(text: str) -> bool:
+    """True si el texto del LLM afirma haber agregado item(s) al carrito
+    con variante + precio explícitos. Caller debe gatear con
+    `_cart_add_executed_this_turn` para evitar falsos positivos sobre
+    confirmaciones legítimas post add_item."""
+    if not text:
+        return False
+    norm = _normalize_text(text)
+    return bool(_CART_ADD_CONFIRMATION_REGEX.search(norm))
+
+
 def _last_outbound_was_summary(history: list[dict]) -> bool:
     """Rev. 103+ — True si el último outbound del bot ya fue un resumen.
 
@@ -3086,16 +4207,63 @@ def _truncate_at_first_question(text: str) -> str:
     return truncated
 
 
+def _detect_document_type_from_text(text: str) -> Optional[str]:
+    """Sem 7 F2 cierre 2026-05-20 — P4 founder UAT (conv 7053666a):
+    Detector determinístico de tipo de documento colombiano.
+
+    Caso runtime motivador: cliente dijo "Cedula de Ciudadania" → LLM no
+    extrajo `CC` → bot re-preguntó como si nada hubiera entendido.
+
+    Reconoce variantes coloquiales típicas en español CO:
+      • Cédula / Cedula / Cédula de Ciudadanía → CC
+      • Cédula de Extranjería / Extranjeria → CE
+      • NIT (también "RUT" mal usado) → NIT
+      • Pasaporte / Passport → PP
+      • Tarjeta de Identidad / TI → TI
+
+    Returns: "CC" | "CE" | "NIT" | "PP" | "TI" | None.
+    Defensa en profundidad: si LLM no extrajo, este detector cubre.
+    """
+    if not text:
+        return None
+    norm = _normalize_text_simple(text)
+    # Orden importante: más específicos primero (extranjería antes que cédula).
+    if "extranjeria" in norm or "cedula extranjera" in norm:
+        return "CE"
+    if "tarjeta de identidad" in norm or re.search(r"\bti\b", norm):
+        return "TI"
+    if "pasaporte" in norm or "passport" in norm:
+        return "PP"
+    if re.search(r"\bnit\b", norm) or re.search(r"\brut\b", norm):
+        # Algunos clientes dicen "RUT" por error (es Chile/España). Asumimos NIT en CO.
+        return "NIT"
+    # "Cedula" cubre CC + "Cédula de Ciudadanía". Va al final por especificidad.
+    if "cedula" in norm or re.search(r"\bcc\b", norm):
+        return "CC"
+    return None
+
+
 def _detect_building_type_from_text(text: str) -> Optional[str]:
     """Rev. 86 — Si el LLM olvida setear building_type pero el cliente
-    menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa' en el
-    texto, lo inferimos para que el FSM exija los campos correctos.
+    menciona explícitamente 'conjunto'/'torre'/'edificio'/'casa'/'oficina'
+    en el texto, lo inferimos para que el FSM exija los campos correctos.
 
-    Returns: "conjunto" | "edificio" | "casa" | None
+    Sem 7 F2 cierre 2026-05-19 — agrega 'oficina' como tipo descubrible.
+    'oficina' tiene precedencia sobre 'edificio' cuando ambos están presentes
+    ("oficina en el edificio Acme" → oficina).
+
+    Returns: "conjunto" | "edificio" | "casa" | "oficina" | None
     """
     if not text:
         return None
     normalized = _normalize_text_simple(text)
+    # Oficina primero — más específico (precedencia sobre edificio).
+    if any(kw in normalized for kw in (
+        "oficina", "mi trabajo", "en el trabajo", "lugar de trabajo",
+        "donde trabajo", "horario laboral", "en horario de oficina",
+        "la empresa", "en la empresa",
+    )):
+        return "oficina"
     if any(kw in normalized for kw in ("conjunto", "unidad residencial", "torres del", "torre ")):
         return "conjunto"
     if any(kw in normalized for kw in ("edificio", "apartamento", "apto ", "apto.", " apto", "piso ", "torre")):
@@ -3107,54 +4275,39 @@ def _detect_building_type_from_text(text: str) -> Optional[str]:
     return None
 
 
-def _normalize_building_type(value: Optional[str]) -> str:
-    normalized = _normalize_text_simple(str(value or ""))
-    if normalized in {"casa", "hogar", "residencia"}:
-        return "casa"
-    if normalized in {"edificio", "apartamento", "apto"}:
-        return "edificio"
-    if normalized in {"conjunto", "unidad", "unidad residencial"}:
-        return "conjunto"
-    return ""
+def _detect_conjunto_type_from_text(text: str) -> Optional[str]:
+    """Sem 7 F2 cierre 2026-05-19 — Detecta si un conjunto residencial
+    es de torres o de casas. Solo se invoca cuando ya sabemos
+    building_type='conjunto' pero falta el sub-tipo.
 
-
-def _missing_address_fields(direction: Optional[dict]) -> list[str]:
-    """Campos requeridos para que la dirección quede lista para envío.
-
-    Reglas alineadas al formulario Contactos (Wompi/Envía):
-      - street: obligatorio.
-      - city: obligatorio.
-      - building_type: obligatorio (casa | edificio | conjunto). Sin esto no
-        sabemos si necesitamos torre/apartamento.
-      - apartment: obligatorio si building_type ∈ {edificio, conjunto}.
-      - tower:     obligatorio si building_type = conjunto.
+    Returns: "torres" | "casas" | None.
     """
-    address = direction if isinstance(direction, dict) else {}
-    street = str(address.get("street") or "").strip()
-    city = str(address.get("city") or "").strip()
-    building_type = _normalize_building_type(address.get("building_type"))
-    tower = str(address.get("tower") or "").strip()
-    apartment = str(address.get("apartment") or "").strip()
-
-    missing: list[str] = []
-    if not street:
-        missing.append("Calle y número")
-    if not city:
-        missing.append("Ciudad")
-    if not building_type:
-        missing.append("Tipo de vivienda (casa, edificio o conjunto)")
-    elif building_type == "edificio" and not apartment:
-        missing.append("Apartamento")
-    elif building_type == "conjunto":
-        if not tower:
-            missing.append("Torre")
-        if not apartment:
-            missing.append("Apartamento")
-    return missing
+    if not text:
+        return None
+    normalized = _normalize_text_simple(text)
+    # Señales fuertes "casas":
+    if any(kw in normalized for kw in (
+        "conjunto de casas", "conjunto cerrado de casas",
+        "casas del conjunto", "es de casas", "son casas",
+        "casa #", "casa numero", "casa no", "mi casa es la",
+    )):
+        return "casas"
+    # Señales fuertes "torres":
+    if any(kw in normalized for kw in (
+        "conjunto de torres", "torres del conjunto",
+        "torre ", "bloque ", "torres y", "es de torres",
+    )):
+        return "torres"
+    return None
 
 
-def _has_real_address_data(direction: Optional[dict]) -> bool:
-    return len(_missing_address_fields(direction)) == 0
+# Rev. 104 (F1-2) — extraídos a fsm/address.py.
+from fsm.address import (
+    normalize_building_type as _normalize_building_type,
+    normalize_conjunto_type as _normalize_conjunto_type,
+    missing_address_fields as _missing_address_fields,
+    has_real_address_data as _has_real_address_data,
+)
 
 
 def _merge_address_data(existing: Optional[dict], incoming: Optional[dict]) -> dict:
@@ -3175,23 +4328,27 @@ def _merge_address_data(existing: Optional[dict], incoming: Optional[dict]) -> d
     normalized_type = _normalize_building_type(merged.get("building_type"))
     if normalized_type:
         merged["building_type"] = normalized_type
+    # Sem 7 F2 cierre — normalizar sub-tipo conjunto si viene presente.
+    normalized_conjunto = _normalize_conjunto_type(merged.get("conjunto_type"))
+    if normalized_conjunto:
+        merged["conjunto_type"] = normalized_conjunto
     return merged
 
 
 def _build_address_request_prompt(contact_record: dict, first_name: Optional[str]) -> str:
     """Rev. 92.d — Prompt de address diferenciado por tipo de vivienda.
 
+    Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY):
+      • `building_type` con 4 escenarios: casa, edificio, conjunto, oficina.
+      • Para conjunto sin sub-tipo → pide clarificación torres/casas.
+      • Para oficina → pide número de oficina (apartment) y menciona
+        floor + nombre empresa como opcionales.
+
     Reglas:
       • Solo lista los OBLIGATORIOS faltantes (nunca pide lo ya dado).
       • Marca explícitamente cada faltante como obligatorio.
       • Sugiere OPCIONALES contextuales según tipo conocido (o
         condicionales si tipo aún se desconoce).
-
-    Spec módulo Contactos:
-      • Casa: street + city + type [+ reference opcional].
-      • Edificio: + apartment [+ complex_name + reference opcionales].
-      • Conjunto: + tower + apartment [+ complex_name + reference
-                  opcionales].
     """
     name_prefix = f", {first_name}" if first_name else ""
     address = contact_record.get("address") if isinstance(contact_record, dict) else None
@@ -3218,18 +4375,32 @@ def _build_address_request_prompt(contact_record: dict, first_name: Optional[str
         )
     elif building_type == "edificio":
         optional_msg = (
-            "_Opcional_: nombre del edificio, punto de referencia."
+            "_Opcional_: piso, nombre del edificio, punto de referencia."
+        )
+    elif building_type == "oficina":
+        optional_msg = (
+            "_Opcional_: piso, nombre de la empresa, punto de referencia."
         )
     elif building_type == "conjunto":
-        optional_msg = (
-            "_Opcional_: nombre del conjunto, punto de referencia."
-        )
+        # Si es conjunto de casas, mencionar manzana/bloque como opcional
+        # (reusa el campo `tower` semánticamente).
+        from fsm.address import normalize_conjunto_type as _norm_ct
+        _ct = _norm_ct((address or {}).get("conjunto_type"))
+        if _ct == "casas":
+            optional_msg = (
+                "_Opcional_: manzana/bloque, nombre del conjunto, "
+                "punto de referencia."
+            )
+        else:
+            optional_msg = (
+                "_Opcional_: nombre del conjunto, punto de referencia."
+            )
     else:
         # Tipo aún se desconoce — sugerir condicionales sin pedir
         # lo que ya tenemos.
         optional_msg = (
-            "_Opcional_ (según el tipo): nombre del edificio/conjunto, "
-            "o punto de referencia."
+            "_Opcional_ (según el tipo): nombre del edificio/conjunto/empresa, "
+            "piso, o punto de referencia."
         )
 
     lines.append("")
@@ -3237,27 +4408,16 @@ def _build_address_request_prompt(contact_record: dict, first_name: Optional[str
     return "\n".join(lines)
 
 
-def _determine_transactional_state(contact: dict) -> str:
-    """Orden FSM rev. 68: consent → email → name → document → direction → ready.
+# Rev. 104 (F1-2) — extraído a fsm/. Wrappers preservan firma legacy del
+# call-site (que pasa `history` y `carrier_selected_db` separados); el
+# resolver puro toma `carrier_selected` ya combinado.
+from fsm import resolver as _fsm_resolver
+from fsm import _has_real_address_data as _fsm_has_real_address_data  # noqa: F401
 
-    NEEDS_DOCUMENT (rev. 68) se inserta entre NAME y DIRECTION para que el
-    customer_data Wompi quede pre-poblado en checkout (legal_id + legal_id_type).
-    Si la pasarela cambia la regla, ajustar aquí sin tocar el resto del FSM.
-    """
-    if not contact:
-        return "NEEDS_CONSENT"
-    if not contact.get("consent_given"):
-        return "NEEDS_CONSENT"
-    if not str(contact.get("email") or "").strip():
-        return "NEEDS_EMAIL"
-    if not str(contact.get("name") or "").strip():
-        return "NEEDS_NAME"
-    # Rev. 68 — documento: ambos campos juntos.
-    if not str(contact.get("document_type") or "").strip() or not str(contact.get("document_number") or "").strip():
-        return "NEEDS_DOCUMENT"
-    if not _has_real_address_data(contact.get("address")):
-        return "NEEDS_DIRECTION"
-    return "READY_FOR_SUMMARY"
+
+def _determine_transactional_state(contact: dict) -> str:
+    """Wrapper legacy → fsm.resolver.determine_transactional_state."""
+    return _fsm_resolver.determine_transactional_state(contact)
 
 
 def _resolve_display_state(
@@ -3268,49 +4428,26 @@ def _resolve_display_state(
     shipping_quoted: bool,
     carrier_selected_db: Optional[bool] = None,
 ) -> str:
-    transaction_state = _determine_transactional_state(contact_record)
-    # Rev. 103 — fallback DB para carrier_selected (igual patrón que
-    # shipping_quoted). El history-only se "olvida" del carrier elegido
-    # cuando la conversación supera CONVERSATION_HISTORY_LIMIT=25 mensajes.
-    # Caso real conv 3448118a (41 msgs): cliente eligió "Económica" en msg
-    # #9 → quedó fuera del window al llegar al resumen → state degradó a
-    # AWAITING_CARRIER_SELECTION → LLM compuso resumen freestyle con
-    # alucinación de productos + payment_link_tool no disparó.
+    """Wrapper legacy: combina history + DB fallback antes de delegar al resolver puro.
+
+    Mantiene la firma original (history + carrier_selected_db separados) para
+    que los call-sites del orchestrator no requieran cambios. Internamente
+    computa `carrier_selected` y `order_confirm_pending` y delega.
+    """
     carrier_selected = (
         _has_carrier_been_selected(history or [])
         or bool(carrier_selected_db)
     )
-    order_confirm_pending = _last_outbound_was_order_confirmation_question(history or [])
-
-    # Rev. 73 — ELIMINADO el shortcut "consent_given → carrier_selected=True".
-    # Ese shortcut causaba que el cliente conocido (con consent histórico de una
-    # sesión vieja) saltara el paso de selección de carrier en NUEVOS pedidos →
-    # el LLM inventaba carrier y precio (alucinación detectada en log
-    # 2026-04-29 conv 615a9902, $17.730 con "Coordinadora" sin que el tool
-    # corriera). carrier_selected es per-pedido, NO per-cliente. Si el history
-    # en memoria está truncado, el detector se basa en outbounds presentes;
-    # falta de carrier reabre el flujo `AWAITING_CARRIER_SELECTION` aunque sea
-    # cliente conocido — es el comportamiento correcto para que cada pedido
-    # tenga su selección de envío explícita y verificable.
-
-    if buying_intent:
-        if not shipping_quoted:
-            return "NEEDS_SHIPPING_CITY"
-        if not carrier_selected:
-            return "AWAITING_CARRIER_SELECTION"
-        # Recolección de datos (rev. 68 FSM) NUNCA se salta por una pregunta de
-        # confirmación previa. Si faltan consent/email/name/document/direction
-        # devolvemos el estado correspondiente — Wompi customer_data exige el
-        # documento, y saltarlo deja el checkout sin legal_id pre-poblado.
-        if transaction_state in {
-            "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME",
-            "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
-        }:
-            return transaction_state
-        if order_confirm_pending:
-            return "AWAITING_ORDER_CONFIRMATION"
-        return transaction_state
-    return "CATALOG_MODE"
+    order_confirm_pending = _last_outbound_was_order_confirmation_question(
+        history or []
+    )
+    return _fsm_resolver.resolve_display_state(
+        contact_record=contact_record,
+        buying_intent=buying_intent,
+        shipping_quoted=shipping_quoted,
+        carrier_selected=carrier_selected,
+        order_confirm_pending=order_confirm_pending,
+    )
 
 
 def _fix_null_phone_in_summary(text: str, customer_phone: Optional[str]) -> str:
@@ -3368,7 +4505,16 @@ def _format_phone_for_summary(phone: Optional[str]) -> str:
 
 
 def _format_address_for_summary(address: Optional[dict]) -> str:
-    """Renderiza la dirección persistida en una sola línea legible para el resumen."""
+    """Renderiza la dirección persistida en una sola línea legible para el resumen.
+
+    Sem 7 F2 cierre 2026-05-19 (Opción 1 SIMPLIFY) — render condicional según
+    `building_type`:
+      • casa → solo street + barrio + city.
+      • edificio → + "Piso X" (si floor) + "Apto Y".
+      • conjunto torres → + complex + "Torre X" + "Apto Y".
+      • conjunto casas → + complex + "Casa #Y" (sin torre).
+      • oficina → + "Piso X" (si floor) + "Oficina Y" + "(Empresa: Z)" si company_name.
+    """
     if not isinstance(address, dict):
         return ""
     parts: list[str] = []
@@ -3376,6 +4522,10 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
     if street:
         parts.append(street)
     btype = _normalize_building_type(address.get("building_type"))
+    ctype = _normalize_conjunto_type(address.get("conjunto_type"))
+    floor = str(address.get("floor") or "").strip()
+    company = str(address.get("company_name") or "").strip()
+
     sub_parts: list[str] = []
     if btype == "conjunto":
         tower = str(address.get("tower") or "").strip()
@@ -3383,17 +4533,38 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
         complex_name = str(address.get("complex_name") or "").strip()
         if complex_name:
             sub_parts.append(complex_name)
-        if tower:
-            sub_parts.append(f"Torre {tower}" if not tower.lower().startswith("torre") else tower)
-        if apt:
-            sub_parts.append(f"Apto {apt}")
+        if ctype == "casas":
+            # Sem 7 F2 cierre 2026-05-20 (D4) — manzana opcional en
+            # conjunto de casas. Reusa `tower` semánticamente como
+            # "Manzana / Bloque". Sin migración de schema.
+            if tower:
+                _tlow = tower.lower()
+                if _tlow.startswith("manzana") or _tlow.startswith("bloque"):
+                    sub_parts.append(tower)
+                else:
+                    sub_parts.append(f"Manzana {tower}")
+            if apt:
+                sub_parts.append(f"Casa #{apt}")
+        else:
+            if tower:
+                sub_parts.append(f"Torre {tower}" if not tower.lower().startswith("torre") else tower)
+            if apt:
+                sub_parts.append(f"Apto {apt}")
     elif btype == "edificio":
         apt = str(address.get("apartment") or "").strip()
         complex_name = str(address.get("complex_name") or "").strip()
         if complex_name:
             sub_parts.append(complex_name)
+        if floor:
+            sub_parts.append(f"Piso {floor}")
         if apt:
             sub_parts.append(f"Apto {apt}")
+    elif btype == "oficina":
+        apt = str(address.get("apartment") or "").strip()
+        if floor:
+            sub_parts.append(f"Piso {floor}")
+        if apt:
+            sub_parts.append(f"Oficina {apt}")
     if sub_parts:
         parts.append(", ".join(sub_parts))
     neighborhood = str(address.get("neighborhood") or "").strip()
@@ -3402,7 +4573,11 @@ def _format_address_for_summary(address: Optional[dict]) -> str:
     city = str(address.get("city") or "").strip()
     if city:
         parts.append(city)
-    return " — ".join(parts)
+
+    base = " — ".join(parts)
+    if btype == "oficina" and company:
+        return f"{base} _(Empresa: {company})_"
+    return base
 
 
 def _verified_ctx_from_cart(cart: dict) -> Optional[dict]:
@@ -3446,11 +4621,16 @@ def _verified_ctx_from_cart(cart: dict) -> Optional[dict]:
             "quantity": int(it.get("quantity") or 1),
             "unit_price_cents": int(it.get("unit_price_cents") or 0),
         })
+    # Sem 6 I.2.7 — propagar cupón aplicado para que el resumen lo muestre.
+    coupon_code = cart.get("coupon_code")
+    discount_cents = int(cart.get("discount_cents") or 0)
     return {
         "items": out_items,
         "subtotal_cents": subtotal,
         "shipping_cost_cents": shipping,
         "total_cents": total,
+        "coupon_code": coupon_code,
+        "discount_cents": discount_cents,
         "_source": "cart_db",
     }
 
@@ -3462,6 +4642,8 @@ def _build_order_summary_text(
     catalog: Optional[list] = None,
     history: Optional[list[dict]] = None,
     cart_from_db: Optional[dict] = None,
+    supabase: Any = None,
+    tenant_id: Optional[str] = None,
 ) -> Optional[str]:
     """Resumen estructurado determinístico antes de la confirmación final.
 
@@ -3524,16 +4706,42 @@ def _build_order_summary_text(
     subtotal = int(verified_ctx.get("subtotal_cents") or 0)
     shipping = int(verified_ctx.get("shipping_cost_cents") or 0)
     total = int(verified_ctx.get("total_cents") or 0)
+    # Sem 6 I.2.7 (ADR-0015) — descuento de cupón.
+    discount = int(verified_ctx.get("discount_cents") or 0)
+    coupon_code = verified_ctx.get("coupon_code")
     lines.append("")
     lines.append(f"Subtotal: {_format_cop(subtotal)}")
     # Rev. 103 — incluir carrier en línea de envío para que el cliente
     # vea qué transportadora cotizó (Económica = default cuando dice
     # "sigamos" sin elegir explícitamente).
-    carrier_name = _extract_shipping_carrier_from_history(history or [])
+    #
+    # Sem 7 F2 cierre 2026-05-20 — Bug P9 founder UAT (conv 7053666a):
+    # En conversaciones largas (≥25 msgs), el outbound de cotización queda
+    # FUERA del window de history → extractor retorna None → resumen
+    # muestra "Envío: $X" sin carrier (regresión visual).
+    # Fix: usar `cart_from_db.shipping_meta.carrier` como FUENTE PRIMARIA
+    # (cart-as-SoT, ADR-0011) y caer a history solo si DB no tiene.
+    carrier_name: Optional[str] = None
+    if isinstance(cart_from_db, dict):
+        _meta = cart_from_db.get("shipping_meta") or {}
+        if isinstance(_meta, dict):
+            _carrier_db = str(_meta.get("carrier") or "").strip()
+            _service_db = str(_meta.get("service_level") or "").strip()
+            if _carrier_db:
+                # Componer "Coordinadora Ground" o "FedEx Express®" con
+                # service_level si está disponible.
+                carrier_name = (
+                    f"{_carrier_db} {_service_db}".strip()
+                    if _service_db else _carrier_db
+                )
+    if not carrier_name:
+        carrier_name = _extract_shipping_carrier_from_history(history or [])
     if carrier_name and shipping > 0:
         lines.append(f"Envío (Económica - {carrier_name}): {_format_cop(shipping)}")
     else:
         lines.append(f"Envío: {_format_cop(shipping)}")
+    if discount > 0 and coupon_code:
+        lines.append(f"Descuento: -{_format_cop(discount)} ({coupon_code})")
     lines.append(f"*TOTAL: {_format_cop(total)}*")
 
     contact = contact_record if isinstance(contact_record, dict) else {}
@@ -3568,8 +4776,50 @@ def _build_order_summary_text(
         if address_line:
             lines.append(f"• Dirección: {address_line}")
 
+    # ── Rev. 108 holístico — texto adaptado a payment_method del cart ────
+    # Si cart_from_db.payment_method == 'cod':
+    #   • Mensaje "Pagas $X al recibir" en lugar de "link de pago"
+    #   • Warning condicional si carrier.charges_return_fee=true (dossier
+    #     §7.2: ENVIA y COORDINADORA cobran costo devolución).
+    is_cod_order = False
+    carrier_charges_return = False
+    if isinstance(cart_from_db, dict):
+        is_cod_order = (
+            (cart_from_db.get("payment_method") or "credit").lower() == "cod"
+        )
+        if is_cod_order and carrier_name and supabase is not None and tenant_id:
+            try:
+                from lib.carrier_capabilities import (
+                    get_effective_carrier_capability,
+                )
+                # carrier_name puede tener service_level concatenado;
+                # extraer primer token (ej. "SERVIENTREGA Mensajería" → "SERVIENTREGA")
+                _carrier_pure = (carrier_name.split() or [""])[0]
+                _cap = get_effective_carrier_capability(
+                    supabase,
+                    tenant_id=tenant_id,
+                    carrier_name=_carrier_pure,
+                )
+                carrier_charges_return = _cap.charges_return_fee
+            except Exception:
+                # Fallback: no warning — log silent.
+                carrier_charges_return = False
+
     lines.append("")
-    lines.append("¿Confirmas que los datos están correctos para generar tu link de pago?")
+    if is_cod_order:
+        lines.append(f"💵 Pagarás *{_format_cop(total)}* en efectivo al recibir tu pedido.")
+        if carrier_charges_return:
+            lines.append("")
+            _carrier_short = (carrier_name or "el courier").split()[0] if carrier_name else "el courier"
+            lines.append(
+                f"⚠️ *Aviso de devolución*: si rechazas el pedido al recibir, "
+                f"{_carrier_short} cobra costo de devolución (a tu cargo, "
+                f"~$5.000 estimado)."
+            )
+        lines.append("")
+        lines.append("¿Confirmas tu pedido?")
+    else:
+        lines.append("¿Confirmas que los datos están correctos para generar tu link de pago?")
     return "\n".join(lines)
 
 
@@ -3593,6 +4843,30 @@ def _build_next_data_request_prompt(contact_record: dict) -> str:
     if state == "NEEDS_NAME":
         return "Gracias. Para continuar, compárteme tu nombre completo."
     if state == "NEEDS_DOCUMENT":
+        # Sem 7 F2 cierre 2026-05-19 — Bug 1 founder UAT: prompt contextual.
+        # Si el cliente ya dio el tipo en un turno previo (persistido como
+        # partial), pedir SOLO el número. Evita que el bot re-pregunte
+        # ambos como si nada hubiera avanzado.
+        _doc_type_actual = str(
+            (contact_record or {}).get("document_type") or ""
+        ).strip().upper()
+        _doc_num_actual = str(
+            (contact_record or {}).get("document_number") or ""
+        ).strip()
+        if _doc_type_actual and not _doc_num_actual:
+            return (
+                f"Gracias{name_prefix}. Tengo registrado tu tipo de documento "
+                f"como *{_doc_type_actual}*. Ahora compárteme el número, por favor."
+            )
+        if _doc_num_actual and not _doc_type_actual:
+            return (
+                f"Gracias{name_prefix}. Tengo el número de documento. "
+                "¿Qué tipo es: Cédula (CC), Cédula de extranjería (CE), "
+                "NIT, Pasaporte (PP) o Tarjeta de identidad (TI)?"
+            )
+        # Caso inicial: ambos vacíos. Pedir ambos en una sola pregunta
+        # pero aceptar respuesta parcial (el LLM/extractor persiste lo
+        # que venga y este prompt re-itera con contexto en el próximo turno).
         return (
             "Para procesar tu pago, necesito tu documento de identidad. "
             "¿Qué tipo es: Cédula (CC), Cédula de extranjería (CE), NIT, Pasaporte (PP) o Tarjeta de identidad (TI)? "
@@ -3622,6 +4896,33 @@ _CHECKOUT_FORM_CONDUCTOR = CheckoutFormConductor(
 
 
 def _is_affirmative_confirmation(text: str) -> bool:
+    """True si el inbound es confirmación afirmativa pura.
+
+    Rev. 104 (F0-5 / BUG-4): el detector NO debe interpretar como afirmativo
+    un mensaje que contiene un token telefónico (10 dígitos consecutivos o
+    frase "celular es"/"número alterno"). Caso: cliente conocido tras resumen
+    dice "el pedido lo recibe mi mamá, su celular es 3225551234". Sin guard,
+    se interpretaba como afirmativo → bypass payment_link → phone alterno
+    nunca extraído. Con guard, cae al LLM que extrae `extracted_shipping_phone`.
+    """
+    raw = str(text or "")
+    # Guard 1: token telefónico explícito (10 dígitos consecutivos).
+    if re.search(r"\b\+?5?7?\s?\d{10}\b", raw):
+        return False
+    # Guard 2: frases que mencionan celular/número alterno (intent update PII).
+    raw_norm = _normalize_text(raw)
+    _phone_intent_phrases = (
+        "celular es", "celular alterno", "celular alternativo",
+        "celular para envio", "celular para envío",
+        "numero alterno", "número alterno",
+        "numero alternativo", "número alternativo",
+        "lo recibe", "el pedido lo recibe",
+        "cambiar el celular", "actualizar el celular",
+        "actualiza mi celular", "actualizar mi celular",
+    )
+    if any(p in raw_norm for p in _phone_intent_phrases):
+        return False
+
     normalized = _normalize_text_simple(text)
     if not normalized:
         return False
@@ -3751,26 +5052,31 @@ def _extract_shipping_carrier_from_history(history: list[dict]) -> Optional[str]
     return None
 
 
-def _persist_cart_shipping_if_needed(
+async def _persist_cart_shipping_if_needed(
     *,
     supabase: Client,
     conversation_id: str,
     tenant_id: str,
     history: list[dict],
 ) -> None:
-    """Rev. 103 — Cart-as-SoT: persiste shipping al cart cuando carrier
+    """Rev. 103/104 — Cart-as-SoT: persiste shipping al cart cuando carrier
     está seleccionado pero `cart.shipping_cents` aún es 0 o el cart está
     en `requires_requote=True`.
 
-    Sin esta sincronización, el cart queda con `shipping_cents=0` y
-    `total_cents=subtotal_cents` aunque el carrier ya esté escogido. El
-    panel Inbox + el bot resumen + la UI de checkout necesitan workarounds
-    (`_extract_shipping_cost_from_history`, `_extract_shipping_cost_from_db`)
-    cada vez que leen el shipping. Al persistir aquí, el cart vuelve a ser
-    fuente única de verdad coherente: `subtotal + shipping = total`.
+    Política de fuentes (en orden de preferencia, ADR-0011 §6.5):
+      1. Si `requires_requote=True` (cliente modificó cart post-cotización),
+         intentar **recotización lazy** contra Envia con peso/dims actuales.
+         Eso garantiza que el shipping refleja el cart real, no la
+         cotización vieja del history (que estaría stale tras add_item).
+      2. Si recotización falla o `requires_requote=False`, fallback al
+         shipping del history (o DB) — comportamiento legacy.
+
+    Sin paso (1) los re-usos del shipping del history producían que el
+    link Wompi nuevo (post-modificación cart) cobrara el shipping viejo
+    aunque el peso/dims hubieran cambiado → pérdida silenciosa de margen.
 
     Idempotente: si el cart ya tiene shipping correcto y NO requires_requote,
-    no toca. Best-effort: si extracción falla, log warning y no bloquea.
+    no toca. Best-effort: si todo falla, log warning y no bloquea.
     """
     try:
         from tools.cart_tool import get_cart_with_items, set_shipping_meta
@@ -3791,6 +5097,49 @@ def _persist_cart_shipping_if_needed(
     if current_shipping > 0 and not requires_requote:
         return  # ya sincronizado
 
+    # Preservar city del cart (Plan A.0.1: cart-as-SoT).
+    # El shipping_quote_tool persiste city al cart en cuanto la resuelve
+    # (vía _persist_destination_city_to_cart), así que `_city` debe estar
+    # poblada en este punto si hubo cotización previa exitosa.
+    _meta = cart.get("shipping_meta") or {}
+    _city = (_meta.get("city") or "").strip()
+
+    # Paso 1 (ADR-0011 §6.5) — recotización lazy si requires_requote.
+    if requires_requote:
+        try:
+            from tools.shipping_quote_tool import requote_shipping_for_cart
+            requote = await requote_shipping_for_cart(
+                supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            )
+            if requote and int(requote.get("shipping_cents", 0)) > 0:
+                set_shipping_meta(
+                    supabase,
+                    cart_id=cart["id"],
+                    tenant_id=tenant_id,
+                    carrier=requote["carrier_name"],
+                    service_level=requote["service_level"],
+                    shipping_cents=int(requote["shipping_cents"]),
+                    city=requote.get("city") or _city or None,
+                    rate_id=requote.get("rate_id"),
+                )
+                logger.info(
+                    "[CART_SYNC] cart=%s shipping=%s carrier=%s service=%s "
+                    "RECOTIZADO (requires_requote=True)",
+                    cart["id"][:8], requote["shipping_cents"],
+                    requote["carrier_name"], requote["service_level"],
+                )
+                return
+            logger.warning(
+                "[CART_SYNC] recotización lazy retornó None — fallback a history conv=%s",
+                conversation_id[:8],
+            )
+        except Exception as exc:
+            logger.warning(
+                "[CART_SYNC] recotización lazy excepción: %s — fallback a history",
+                exc,
+            )
+
+    # Paso 2 — fallback al shipping del history (comportamiento legacy).
     ship_cents = _extract_shipping_cost_from_history(history) or 0
     if ship_cents <= 0:
         ship_cents = _extract_shipping_cost_from_db(supabase, conversation_id) or 0
@@ -3806,10 +5155,11 @@ def _persist_cart_shipping_if_needed(
             carrier=carrier_name,
             service_level="Económica",
             shipping_cents=ship_cents,
+            city=_city or None,
         )
         logger.info(
-            "[CART_SYNC] cart=%s shipping=%s carrier=%s persistido",
-            cart["id"][:8], ship_cents, carrier_name,
+            "[CART_SYNC] cart=%s shipping=%s carrier=%s city=%s persistido (history fallback)",
+            cart["id"][:8], ship_cents, carrier_name, _city or "?",
         )
     except Exception as exc:
         logger.warning("[CART_SYNC] set_shipping_meta falló: %s", exc)
@@ -3839,6 +5189,109 @@ def _generic_catalog_terms(catalog: list) -> set[str]:
         return set()
     threshold = max(2, int(n * 0.4))
     return {w for w, c in counts.items() if c >= threshold}
+
+
+def _category_head_words(catalog: list) -> set[str]:
+    """Sem 7 F2 cierre — primer token significativo (>=3 chars, no stop) de
+    cada título. Esto identifica el SUSTANTIVO DE CATEGORÍA (ej. "jabon" en
+    "Jabón Artesanal de Coco", "aceite" en "Aceite de Coco Virgen"). Útil
+    para preferir el sustantivo de categoría sobre adjetivos comunes
+    ("artesanal") al detectar el contexto declarado por el cliente.
+    """
+    _stop = {"de", "con", "y", "o", "la", "el", "los", "las", "un", "una"}
+    heads: set[str] = set()
+    for prod in catalog:
+        title = str(prod.get("title") or "").strip()
+        if not title:
+            continue
+        tokens = re.findall(r"[a-z0-9ñ]+", _normalize_text(title))
+        for t in tokens:
+            if len(t) >= 3 and t not in _stop:
+                heads.add(t)
+                break  # primera palabra significativa solamente
+    return heads
+
+
+def _extract_category_token_from_recent_context(
+    history: list[dict],
+    catalog: list,
+    max_lookback: int = 5,
+) -> Optional[str]:
+    """Sem 7 F2 cierre 2026-05-19 — Extrae el token de categoría declarado
+    en el contexto conversacional reciente (Bug 2 founder UAT manual).
+
+    Caso runtime motivador (conv b36ecb31):
+      T5 cliente: "Que jabones artesanales venden?"   ← declara "jabones"
+      T6 bot:    lista 4 jabones específicos          ← framing jabón
+      T7 cliente: "Me peudes vender 1 Jabon de Cogo..." ← declara "jabón"
+      T8 bot:    "Confírmame la presentación de cada jabón"
+      T9 cliente: "Ok, deseo 1 de Coco 100g y 1 de Lavanda 150g"
+        ← NO declara "jabón" pero el contexto sigue siendo jabón.
+
+    Estrategia:
+      1. `category_head_words` (primer token significativo de cada título)
+         identifica los SUSTANTIVOS de categoría (ej. "jabon", "aceite").
+         Se prefiere sobre `generic_terms` para evitar matchear adjetivos
+         comunes como "artesanal" que aparecen pluri-categóricamente.
+      2. Fallback: `generic_terms` si head_words no matchea.
+      3. Iterar últimos `max_lookback` mensajes desde el más reciente.
+
+    Returns: token de categoría o None si no se identifica framing.
+    """
+    if not history or not catalog:
+        return None
+    head_words = _category_head_words(catalog)
+    generic_terms = _generic_catalog_terms(catalog) if head_words else set()
+    if not head_words and not generic_terms:
+        return None
+    # Iterar de más reciente a más viejo.
+    for msg in reversed(history[-max_lookback:]):
+        content = str(msg.get("content") or "")
+        if not content:
+            continue
+        norm = _normalize_text(content)
+        tokens = re.findall(r"[a-zñ]+", norm)  # lista preserva orden
+        # PASS 1: priorizar head_words (sustantivos de categoría).
+        for token in tokens:
+            if token in head_words:
+                return token
+            if token.endswith("es") and token[:-2] in head_words:
+                return token[:-2]
+            if token.endswith("s") and token[:-1] in head_words:
+                return token[:-1]
+        # PASS 2: fallback a generic_terms si head_words no matchea.
+        for token in tokens:
+            if token in generic_terms:
+                return token
+            if token.endswith("es") and token[:-2] in generic_terms:
+                return token[:-2]
+            if token.endswith("s") and token[:-1] in generic_terms:
+                return token[:-1]
+    return None
+
+
+def _filter_catalog_by_category_token(
+    catalog: list, category_token: Optional[str],
+) -> list:
+    """Sem 7 F2 cierre 2026-05-19 — Filtra el catalog dejando solo productos
+    cuyo título contiene `category_token`. Pure, sin side effects.
+
+    Si `category_token` es None o vacío → retorna catalog completo (no-op).
+    Si el filtro deja 0 productos → retorna catalog completo (back-compat).
+    """
+    if not category_token or not catalog:
+        return catalog
+    token_norm = _normalize_text(category_token).strip()
+    if not token_norm:
+        return catalog
+    filtered = []
+    for prod in catalog:
+        title_norm = _normalize_text(str(prod.get("title") or ""))
+        # Match por palabra completa (token está en tokens del título).
+        title_tokens = set(re.findall(r"[a-zñ]+", title_norm))
+        if token_norm in title_tokens:
+            filtered.append(prod)
+    return filtered if filtered else catalog
 
 
 def _build_verified_multi_product_context(
@@ -4137,7 +5590,8 @@ _TONO_INSTRUCCIONES: dict[str, str] = {
 _HUMAN_STYLE_GUIDE = """
 GUÍA DE ESTILO HUMANO (aplica siempre, encima del tono):
 - Nunca uses fórmulas robóticas: "Procesando su solicitud", "Estamos procesando", "Lamentamos los inconvenientes ocasionados", "Su solicitud ha sido recibida".
-- NO RE-SALUDES dentro de la misma conversación. "¡Hola!" SOLO en el primer mensaje saliente cuando el cliente saluda ("hola", "buenas"). Si el primer mensaje del cliente es una PREGUNTA DIRECTA (sin saludo, ej: "¿Qué productos tienes?", "¿Cuál es la política de devoluciones?"), abre con un conector cordial ("Claro", "Por supuesto", "Te cuento", "Con gusto", "Listo") + va al grano — NO uses "¡Hola!" si el cliente no saludó. Si ya hubo intercambio previo, abre con conector ("Claro", "Listo", "Perfecto", "Entendido", "Genial") o entra directo al contenido — nunca con "¡Hola!".
+- ESTILO PUNTUACIÓN WhatsApp (casual colombiano): NO uses los signos de apertura `¡` ni `¿`. Solo usa los de CIERRE `!` y `?`. Ejemplos correctos: "Hola!" (NO "¡Hola!"), "Cómo estás?" (NO "¿Cómo estás?"), "Te ayudo?" (NO "¿Te ayudo?"). Es el registro real de WhatsApp en Colombia. Aplica a TODOS los outbounds — saludos, preguntas, exclamaciones, listas con preguntas finales.
+- NO RE-SALUDES dentro de la misma conversación. "Hola!" SOLO en el primer mensaje saliente cuando el cliente saluda ("hola", "buenas"). Si el primer mensaje del cliente es una PREGUNTA DIRECTA (sin saludo, ej: "Qué productos tienes?", "Cuál es la política de devoluciones?"), abre con un conector cordial ("Claro", "Por supuesto", "Te cuento", "Con gusto", "Listo") + va al grano — NO uses "Hola!" si el cliente no saludó. Si ya hubo intercambio previo, abre con conector ("Claro", "Listo", "Perfecto", "Entendido", "Genial") o entra directo al contenido — nunca con "Hola!".
 - No repitas la misma estructura sintáctica en mensajes consecutivos: varía inicios, transiciones y cierres.
 - Adáptate al registro del cliente: si escribe corto e informal, responde corto e informal; si escribe formal, mantén formalidad.
 - Confirma comprensión rotando expresiones: "Listo", "Perfecto", "Entendido", "Ya veo", "Claro" — no repitas la misma dos veces seguidas.
@@ -4693,756 +6147,50 @@ def _build_system_prompt(
     tenant_after_hours_message: str = "",
     tenant_is_outside_hours: bool = False,
     customer_context_block: str = "",
+    # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant.
+    tenant_business_pitch: str = "",
+    tenant_product_groups: Optional[list] = None,
+    tenant_show_prices: bool = True,
 ) -> str:
-    """Construye el system prompt con FSM contextual para venta vs consulta."""
-    if history is None:
-        history = []
-    def _format_product_for_prompt(product: dict) -> str:
-        raw_title = product.get("title", "Sin nombre")
-        # Eliminar prefijos de ambiente [TEST], [DEMO], [STAGING] antes de exponer al LLM
-        title = re.sub(r"^\[.*?\]\s*", "", str(raw_title)).strip() or raw_title
-        variants = product.get("variants") or []
-        if variants:
-            price_min = _format_pesos(product.get("price_min"))
-            price_max = _format_pesos(product.get("price_max"))
-            stock_total = product.get("stock_total", product.get("stock", 0))
-            lines = [
-                f"- {title}: precio {price_min}-{price_max} (stock total: {stock_total})"
-            ]
-            for variant in variants[:3]:
-                lines.append(
-                    f"  - {variant.get('label', 'variante')}: "
-                    f"{_format_pesos(variant.get('price'))} "
-                    f"(stock: {variant.get('stock', 0)})"
-                )
-            remaining = len(variants) - 3
-            if remaining > 0:
-                lines.append(f"  - ... y {remaining} variante(s) adicional(es)")
-            return "\n".join(lines)
-        # Compatibilidad con estructura legacy.
-        return f"- {title}: {_format_pesos(product.get('price'))} (stock: {product.get('stock', 0)})"
+    """Thin wrapper — delega a `prompt.builder.build_system_prompt` (rev. 104, F1-4).
 
-    # Catálogo condicional por estado — evita inyectar el catálogo completo
-    # cuando el cliente ya tomó decisiones y solo necesitamos recolectar datos.
-    _data_collection_states = {
-        "NEEDS_CONSENT", "NEEDS_EMAIL", "NEEDS_NAME", "NEEDS_DOCUMENT", "NEEDS_DIRECTION",
-        "AWAITING_ORDER_CONFIRMATION",
-    }
-    display_state_for_catalog = _resolve_display_state(
-        contact_record=contact_record,
-        history=history,
-        buying_intent=buying_intent,
-        shipping_quoted=shipping_quoted,
-    )
-    if display_state_for_catalog in _data_collection_states:
-        # Solo incluir el producto en contexto (1 ítem), no el catálogo completo
-        context_product = _find_context_product_from_history(catalog, history)
-        if context_product:
-            catalog_text = f"Producto en contexto:\n{_format_product_for_prompt(context_product)}"
-        else:
-            catalog_text = "(catálogo omitido — recolección de datos)"
-        variant_section = ""  # Sin análisis de variantes en este estado
-    elif display_state_for_catalog == "READY_FOR_SUMMARY":
-        # Solo el producto en contexto para el resumen
-        context_product = _find_context_product_from_history(catalog, history)
-        catalog_text = (
-            f"Producto en contexto:\n{_format_product_for_prompt(context_product)}"
-            if context_product else "(catálogo omitido — resumen)"
-        )
-        variant_section = ""
-    else:
-        # CATALOG_MODE / NEEDS_SHIPPING_CITY / AWAITING_CARRIER_SELECTION → catálogo completo
-        catalog_text = "\n".join([_format_product_for_prompt(p) for p in catalog])
-        if not catalog_text:
-            catalog_text = "(No hay productos disponibles en este momento)"
-        variant_section = _build_variant_match_section(catalog, query_text, history)
-
-        # GAP-2: Si el producto del contexto tiene stock=0, inyectar lista de alternativas con stock
-        _ctx_product = _find_context_product_from_history(catalog, history)
-        if _ctx_product:
-            _ctx_stock = int(_ctx_product.get("stock_total") or _ctx_product.get("stock") or 0)
-            if _ctx_stock == 0:
-                _alternatives = [
-                    p for p in catalog
-                    if str(p.get("id")) != str(_ctx_product.get("id"))
-                    and int(p.get("stock_total") or p.get("stock") or 0) > 0
-                ]
-                if _alternatives:
-                    _alt_lines = "\n".join(
-                        _format_product_for_prompt(p) for p in _alternatives[:5]
-                    )
-                    _ctx_title = re.sub(r"^\[.*?\]\s*", "", str(_ctx_product.get("title", ""))).strip()
-                    catalog_text += (
-                        f"\n\n⚠️ PRODUCTO AGOTADO: {_ctx_title}\n"
-                        f"INSTRUCCIÓN: informa al cliente que ese producto está agotado y ofrece alguna de estas alternativas con stock disponible (usa datos reales, no inventes precios):\n"
-                        f"{_alt_lines}"
-                    )
-                else:
-                    catalog_text += "\n\n⚠️ PRODUCTO AGOTADO y sin alternativas en catálogo. Informa amablemente y pregunta si desea ver el catálogo completo."
-
-    kb_section = ""
-    if kb_text and display_state_for_catalog not in _data_collection_states:
-        kb_section = f"\n\nINFORMACIÓN EXTRAÍDA DE LA BASE DE CONOCIMIENTOS (ÚSALA PARA RESPONDER):\n{kb_text}"
-
-    store_location_section = _build_store_info_section(
+    El cuerpo de la composición (~778 LOC) vive ahora en
+    `services/ai-orchestrator/prompt/builder.py`. Esta función mantiene
+    la firma + nombre legacy para compat con tests que hacen
+    `patch.object(orchestrator, "_build_system_prompt")` y para call-sites
+    que aún no migran al import directo.
+    """
+    from prompt.builder import build_system_prompt
+    return build_system_prompt(
+        catalog=catalog,
         tenant_name=tenant_name,
-        store_type=tenant_store_type,
-        shipping_origin=tenant_shipping_origin or {},
-        social_links=tenant_social_links or {},
-        store_locations=tenant_store_locations or [],
-        support_schedule=tenant_support_schedule or {},
-        mision=tenant_mision or "",
-        vision=tenant_vision or "",
-        valores=tenant_valores or "",
-        nit=tenant_nit or "",
-        email_contacto=tenant_email_contacto or "",
-        telefono_contacto=tenant_telefono_contacto or "",
-    )
-
-    # Rev. 71 — CONTEXTO TEMPORAL: si estamos fuera del horario configurado,
-    # damos al LLM la indicación para tono y manejo de escalación. NO duplica
-    # la respuesta literal del tenant — el bot conserva su personalidad pero
-    # sabe que cualquier "te conecto con humano" se cumplirá en el próximo turno.
-    after_hours_section = ""
-    if tenant_is_outside_hours:
-        after_hours_section_lines = [
-            "\nCONTEXTO TEMPORAL — FUERA DE HORARIO HUMANO:",
-            f"- Estamos fuera del horario de atención humana ({_format_support_schedule_text(tenant_support_schedule) or 'no configurado'}).",
-            "- Sigue atendiendo (catálogo, cotización, captura de datos, link de pago) — el bot opera 24/7.",
-            "- REGLA UX: NO menciones espontáneamente que estamos fuera de horario. NUNCA digas en saludos o respuestas iniciales que 'los asesores no están disponibles' — eso suena defensivo y rompe la experiencia. El bot atiende todo lo transaccional sin disclaim.",
-            f"- SOLO menciona el horario si el cliente pide EXPLÍCITAMENTE hablar con una persona (ej. 'quiero hablar con un asesor', 'pásame con humano'). En ese caso indica con cordialidad que un {tenant_escalation_role} responderá apenas inicie el próximo turno y deja registrada la solicitud.",
-        ]
-        if tenant_after_hours_message:
-            after_hours_section_lines.append(
-                f"- Mensaje guía del tenant (úsalo SOLO al escalar a humano, NO en saludos): \"{tenant_after_hours_message}\""
-            )
-        after_hours_section = "\n".join(after_hours_section_lines)
-    tono_instruccion = _TONO_INSTRUCCIONES.get(tenant_tono, _TONO_INSTRUCCIONES["amigable"])
-
-    strict_rules = ""
-    if ai_agent.get("strict_guardrails"):
-        strict_rules = """
-- ESTRICTO: NO INVENTES INFORMACIÓN, PRECIOS, NI POLÍTICAS que no estén explícitas arriba.
-- Si falta un dato para responder (producto, variante, ciudad), pide precisión antes de escalar.
-- Escala a humano solo cuando el usuario insista sin resolución, haya molestia, reclamo o riesgo transaccional.
-- CONSULTAS DE SALUD/LEGAL/FINANZAS: NO des consejos clínicos, diagnósticos ni dosis específicas. PERO antes de escalar, SIEMPRE intenta primero esta secuencia (en un solo mensaje corto):
-  1. Comparte beneficios reales del producto que aparezcan en su descripción del catálogo (ej. "según su descripción, este aceite es regenerador celular y ayuda a reducir cicatrices").
-  2. Recomienda consultar al profesional adecuado (dermatólogo, médico, abogado, contador) como complemento — nunca como reemplazo.
-  3. Cierra con una pregunta abierta del producto: "¿Te gustaría conocer más beneficios o cotizar el envío?".
-- NO escales a humano en la PRIMERA pregunta médica/legal/financiera. Solo escala si el cliente INSISTE en hablar con una persona o expresa molestia tras tu respuesta.
-"""
-
-    consent_template = CONSENT_QUESTION_TEMPLATE
-    display_state = _resolve_display_state(
+        kb_text=kb_text,
+        ai_agent=ai_agent,
         contact_record=contact_record,
+        query_text=query_text,
         history=history,
         buying_intent=buying_intent,
         shipping_quoted=shipping_quoted,
+        tenant_shipping_origin=tenant_shipping_origin,
+        tenant_store_type=tenant_store_type,
+        tenant_social_links=tenant_social_links,
+        tenant_store_locations=tenant_store_locations,
+        tenant_support_schedule=tenant_support_schedule,
+        tenant_mision=tenant_mision,
+        tenant_vision=tenant_vision,
+        tenant_valores=tenant_valores,
+        tenant_tono=tenant_tono,
+        tenant_escalation_role=tenant_escalation_role,
+        tenant_nit=tenant_nit,
+        tenant_email_contacto=tenant_email_contacto,
+        tenant_telefono_contacto=tenant_telefono_contacto,
+        tenant_after_hours_message=tenant_after_hours_message,
+        tenant_is_outside_hours=tenant_is_outside_hours,
+        customer_context_block=customer_context_block,
+        tenant_business_pitch=tenant_business_pitch,
+        tenant_product_groups=tenant_product_groups or [],
+        tenant_show_prices=tenant_show_prices,
     )
-    logger.info(
-        "[FSM] display_state=%s buying_intent=%s shipping_quoted=%s contact_email=%r contact_consent=%r",
-        display_state, buying_intent, shipping_quoted,
-        (contact_record or {}).get("email"),
-        (contact_record or {}).get("consent_given"),
-    )
-
-    if display_state == "NEEDS_SHIPPING_CITY":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: COTIZAR ENVÍO — PEDIR CIUDAD.
-- El usuario quiere comprar. AÚN NO has cotizado envío.
-- NO pidas nombre, email, documento, consentimiento ni dirección todavía.
-- ANTES de pedir ciudad, RESUME el carrito una sola vez si aún no lo hiciste:
-  "Tienes [producto + variante] × [cantidad] = $[subtotal]. ¿Te cotizo el envío?"
-- También pregunta si quiere agregar otro producto: "¿Quieres agregar algo más a tu pedido o seguimos con el envío?"
-- Si el cliente confirma proceder con el envío, pide ciudad de entrega para cotizar.
-"""
-    elif display_state == "AWAITING_CARRIER_SELECTION":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: ESPERANDO SELECCIÓN DE TRANSPORTISTA.
-- Ya mostraste opciones Económica/Rápida.
-- NO pidas datos personales todavía.
-- Si no eligió, recuerda: "¿Con cuál continuamos? (*Económica* o *Rápida*)".
-"""
-    elif display_state == "NEEDS_CONSENT":
-        state_instruction = f"""
-ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR CONSENTIMIENTO LEGAL.
-- Solo debes pedir autorización después de cotizar envío y elegir transportista.
-- USA EXACTAMENTE este texto:
-  "{consent_template}"
-- NO pidas email, nombre ni dirección todavía.
-"""
-    elif display_state == "NEEDS_EMAIL":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR EMAIL DEL CLIENTE.
-- Ya tienes consentimiento. Pide solo email válido y extráelo en extracted_email.
-- NO pidas nombre ni dirección todavía.
-"""
-    elif display_state == "NEEDS_NAME":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR NOMBRE DEL CLIENTE.
-- Ya tienes consentimiento y email. Pide solo el nombre.
-- Cuando el cliente responde con su nombre, extráelo OBLIGATORIAMENTE en extracted_name (nombre completo tal como lo escribió).
-- En response_text usa SOLO el primer nombre. Ejemplo: si da "Cristian Camilo Garzon Tamayo", escribe "Gracias, Cristian." (nunca el nombre completo).
-- NO pidas documento ni dirección todavía.
-"""
-    elif display_state == "NEEDS_DOCUMENT":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DOCUMENTO DE IDENTIDAD.
-- Ya tienes consentimiento, email y nombre.
-- Pide tipo Y número de documento. Tipos válidos en Colombia: CC (Cédula), CE (Cédula Extranjería), NIT (empresa), PP (Pasaporte), TI (Tarjeta de Identidad).
-- Si el cliente solo da número, pregunta tipo. Si solo da tipo, pide número.
-- Cuando tengas ambos, indícalo extrayendo en extracted_document_type ('CC'/'CE'/'NIT'/'PP'/'TI'/'OTHER') y extracted_document_number (solo dígitos, sin puntos ni espacios).
-- Es necesario para emitir tu link de pago Wompi pre-poblado y para la factura del envío.
-- NO pidas dirección todavía.
-"""
-    elif display_state == "NEEDS_DIRECTION":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: PEDIR DIRECCIÓN DE ENTREGA.
-- Ya tenemos nombre y email.
-- Campos OBLIGATORIOS de la dirección (no avances mientras falte alguno):
-  • Calle y número
-  • Ciudad
-  • Tipo de vivienda: *casa* | *edificio* | *conjunto*
-  • Si es *edificio*: número de apartamento.
-  • Si es *conjunto*: torre y número de apartamento.
-  • Opcional: nombre del conjunto/edificio, barrio, referencia.
-- Si el cliente da datos parciales, pide SOLO lo que falte (no repitas todo).
-- NO digas "te genero el link de pago" ni "armamos el pedido" mientras falten campos
-  obligatorios — primero se completa la dirección.
-"""
-    elif display_state == "READY_FOR_SUMMARY":
-        # Calcular contexto verificado desde datos reales (no delegar al LLM)
-        _verified_ctx = _build_verified_order_context(catalog, history)
-        # Rev. 73 — guard anti-alucinación: extraer shipping_cost directo del
-        # historial. Si NO hay precio cotizado por shipping_quote_tool, no hay
-        # cotización legítima y NO debemos armar resumen (el LLM inventaría
-        # totales — caso log 2026-04-29 conv 615a9902).
-        # NOTA: usamos `_extract_shipping_cost_from_history` directamente —
-        # `_verified_ctx` puede ser None por otras razones (producto no
-        # detectado en history, cliente con cambio de variante, etc.) y eso
-        # NO debe degradar el FSM si la cotización SÍ existe.
-        _shipping_extracted = _extract_shipping_cost_from_history(history) or 0
-        _has_shipping_verified = _shipping_extracted > 0
-        if not _has_shipping_verified:
-            logger.warning(
-                "[ORCH] READY_FOR_SUMMARY sin shipping verificado — degradar a AWAITING_CARRIER_SELECTION"
-            )
-            display_state = "AWAITING_CARRIER_SELECTION"
-            state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: COTIZAR ENVÍO ANTES DE RESUMEN.
-- El cliente parece estar listo para confirmar datos pero NO TENEMOS un costo de envío verificado en el historial.
-- Pide la ciudad de entrega o reabrí la cotización con shipping_quote_tool.
-- NO inventes costos de envío bajo ninguna circunstancia.
-- Mensaje sugerido: "Antes de armarte el resumen, cotizo el envío con peso real. ¿A qué ciudad enviamos?"
-"""
-        else:
-            # Rev. 73 — incluir dirección del contacto en el bloque verificado
-            # para que el LLM la use literal en el resumen, sin inventar.
-            _verified_address = _format_address_for_summary(
-                contact_record.get("address") if isinstance(contact_record, dict) else None
-            )
-            _address_line = f"• Dirección de entrega: {_verified_address}\n" if _verified_address else ""
-            if _verified_ctx:
-                _p = _verified_ctx
-                _variant_str = f" ({_p['variant_label']})" if _p.get("variant_label") else ""
-                _qty_str = f" × {_p['quantity']}" if _p["quantity"] > 1 else ""
-                _verified_block = (
-                    f"\nCONTEXTO VERIFICADO DE PEDIDO (usa estos valores exactos — NO recalcules):\n"
-                    f"• Producto: {_p['product_name']}{_variant_str}\n"
-                    f"• Precio unitario: {_format_cop(_p['unit_price_cents'])}{_qty_str}\n"
-                    f"• Subtotal productos: {_format_cop(_p['subtotal_cents'])}\n"
-                    f"• Envío: {_format_cop(_p['shipping_cost_cents'])}\n"
-                    f"• *TOTAL: {_format_cop(_p['total_cents'])}*\n"
-                    f"{_address_line}"
-                )
-            else:
-                # Shipping verificado pero producto no detectado en history.
-                # Inyectar al menos el envío + dirección — el LLM compone los
-                # productos a partir del catálogo / historial.
-                _verified_block = (
-                    f"\nCONTEXTO VERIFICADO PARCIAL (usa estos valores exactos — NO recalcules):\n"
-                    f"• Envío: {_format_cop(_shipping_extracted)}\n"
-                    f"{_address_line}"
-                )
-            state_instruction = f"""
-ESTADO ACTUAL DEL FLUJO DE VENTA: RESUMEN Y CONFIRMACIÓN DE DATOS.
-- Ya tienes información completa. Genera el resumen con los datos del cliente (de contact_record en el contexto) y los valores de pedido.
-- OBLIGATORIO: usa los valores del bloque CONTEXTO VERIFICADO para subtotal, envío y total. NO calcules precios por tu cuenta.
-- INCLUYE en el resumen: productos con cantidad y precio, subtotal, envío con carrier y ETA, dirección de entrega (la que está en CONTEXTO VERIFICADO), y total general.
-- Rev. 73 — Termina SIEMPRE con CTA explícito: "¿Confirmas para generarte el link de pago?".
-  NO uses variantes ambiguas como "¿confirmas que los datos están correctos?" — el cliente debe entender que el SIGUIENTE paso es pagar.
-- NO escales a humano en este paso. Solo muestra resumen y pide confirmación.
-{_verified_block}"""
-    elif display_state == "AWAITING_ORDER_CONFIRMATION":
-        state_instruction = """
-ESTADO ACTUAL DEL FLUJO DE VENTA: CONFIRMACIÓN FINAL DE CREACIÓN DE PEDIDO.
-- El cliente ya confirmó datos y ahora debes generar pedido + link de pago.
-- Responde breve (2 líneas máx) y marca intent_detected=order_acknowledgment.
-- requires_human=true solo para activar el tool transaccional y link de pago.
-- total_in_cents DEBE ser exactamente el mismo total que mostraste en el resumen anterior. NO recalcules. Lee el total del último resumen en el historial.
-- shipping_cost_cents DEBE ser el costo de envío que aparece en el resumen anterior.
-- Rev. 73 — el texto de respuesta NO debe afirmar que el pedido ya está creado. El payment_link_tool generará el link Wompi y el cliente paga PRIMERO. El pedido pasa a 'confirmed' SOLO tras webhook Wompi APPROVED.
-- Mensaje sugerido cuando el cliente confirma: "Perfecto, te genero tu link de pago." (luego el tool emite el link).
-"""
-    else:
-        state_instruction = """
-ESTADO ACTUAL: MODO CONSULTA DE CATÁLOGO.
-- El usuario está consultando, no cerrando compra.
-- NO pidas consentimiento ni datos personales en este modo.
-- Responde breve con datos reales de catálogo/KB.
-- Si el cliente saluda sin preguntar nada concreto: PRESÉNTATE brevemente usando el catálogo.
-  Ejemplo: "¡Hola! Puedo ayudarte con [tipo de productos que aparecen en CATÁLOGO ACTUAL], precios y envíos. ¿Qué necesitas?"
-  Si el catálogo está vacío o dice "No hay productos disponibles", omite la mención de productos.
-- OBLIGATORIO: termina SIEMPRE con UNA pregunta de siguiente paso natural (nunca cortes sin ofrecer continuidad):
-  • Tras responder precio o disponibilidad: "¿Te gustaría cotizar el envío o tienes otra consulta?"
-  • Tras responder características del producto: "¿Te interesa saber el costo de envío a tu ciudad?"
-  • Tras respuesta general o saludo: "¿En qué te puedo ayudar?"
-"""
-
-    # Role/comportamiento del agente IA (cómo responde) — ortogonal a la
-    # identidad del negocio (qué es / por qué existe), que vive en
-    # tenants.mision/vision/valores y se inyecta en store_location_section.
-    # Rev. 68 — D1: eliminamos la mención "alineado a su misión" del default
-    # porque la misión ya se inyecta abajo en SOBRE LA TIENDA. Mencionarla
-    # también aquí duplica el bloque y consume tokens sin aportar.
-    role_desc = (ai_agent.get("role_description") or "").strip()
-    if not role_desc:
-        role_desc = f"Asistente comercial cordial de {tenant_name}."
-
-    # Personalización por cliente conocido — el bot debe usar el primer
-    # nombre cuando hay contact con consent. Aplica al PRIMER mensaje de
-    # la conversación, sea saludo o pregunta directa (rev. 103: consistencia).
-    _kc_first_name = _extract_first_name(
-        contact_record.get("name") if isinstance(contact_record, dict) else None
-    )
-    known_customer_block = ""
-    if _kc_first_name and isinstance(contact_record, dict) and contact_record.get("consent_given"):
-        known_customer_block = (
-            f"\nCLIENTE CONOCIDO: {_kc_first_name}.\n"
-            f"- En el PRIMER mensaje de respuesta de la conversación, SIEMPRE incluye "
-            f"el primer nombre del cliente — sea saludo ('¡Hola, {_kc_first_name}!...') "
-            f"o pregunta directa ('Claro, {_kc_first_name}, te muestro...'). "
-            f"Es cliente recurrente y aprecia ese reconocimiento.\n"
-            f"- En el resto de la conversación (mensajes posteriores), usa el primer nombre "
-            f"con moderación (1-2 veces máximo) para no sonar artificial.\n"
-        )
-
-    _greet_phrase, _greet_label = _co_time_of_day_greeting()
-    time_aware_greeting_block = (
-        f"\nHORA LOCAL ({_greet_label}, Colombia UTC-5): saluda con "
-        f"\"{_greet_phrase}\" en el primer mensaje al cliente. "
-        f"Después en la conversación NO repitas el saludo.\n"
-    )
-
-    return f"""Eres {ai_agent.get('name', 'el asistente')} de {tenant_name} atendiendo por WhatsApp.
-COMPORTAMIENTO DEL AGENTE: {role_desc}
-(La identidad del negocio — misión, visión, valores — está abajo en "SOBRE LA TIENDA".)
-{tono_instruccion}
-{_HUMAN_STYLE_GUIDE}
-[ESTADO DE MÁQUINA (FSM): {display_state}]
-{time_aware_greeting_block}
-{known_customer_block}
-{customer_context_block}
-{store_location_section}
-{after_hours_section}
-REGLAS OBLIGATORIAS (META ANTI-SPAM COMPLIANCE):
-- Mantén las respuestas extremadamente cortas y directas (máximo 2 a 3 oraciones cortas). WhatsApp odia los textos gigantes.
-- No seas repetitivo. Evita saludar en cada mensaje si ya están en conversación.
-- NUNCA envíes promociones crudas no solicitadas o texto masivo (Evita el bloqueo de la línea WABA).
-
-REGLAS ANTI-ALUCINACIÓN TRANSACCIONAL (CRÍTICAS — rev. 73):
-- NUNCA digas "tu pedido fue creado", "ya generé tu pedido", "tu pedido será entregado", "confirmaré tu compra", "ya seleccioné el envío con X" ni equivalentes a menos que un tool determinístico (payment_link_tool, order_status_tool) haya retornado éxito.
-- NUNCA confirmes carrier de envío con un nombre específico ("Coordinadora", "Servientrega", "Deprisa", "TCC") sin que ese nombre haya aparecido en un outbound previo del bot derivado de shipping_quote_tool.
-- NUNCA inventes ni redondees costos de envío, totales o ETA. Si el bloque CONTEXTO VERIFICADO no trae los valores, NO los emitas — pide al cliente confirmar ciudad para cotizar.
-- Si el cliente dice "ok, gracias", "listo", "vale" o similar después del resumen, eso NO es confirmación de pago. Pregunta explícitamente: "¿Confirmas para generar tu link de pago?".
-
-REGLAS ANTI-IMPROVISACIÓN GENERAL (rev. 83):
-- NO inventes datos del mundo real fuera de tu dominio: clima, hora actual, ubicación geográfica de ciudades, eventos, noticias, deportes, política, salud no relacionada con productos, traducciones, tareas escolares, código, recetas no relacionadas con tus productos.
-- Si el cliente pregunta sobre cualquiera de los temas anteriores, responde EXACTAMENTE con esta plantilla (adaptando solo el nombre del tenant): "No tengo información sobre eso — soy asesor virtual de {tenant_name} y solo puedo ayudarte con nuestros productos, envíos y pedidos. ¿Te interesa algo de la tienda?".
-- NUNCA respondas como si fueras un asistente de IA de propósito general. Eres asesor de la tienda — nada más.
-- Pregunta sobre clima, hora, fechas calendario, ubicación geográfica o eventos del mundo real → out-of-domain → plantilla anterior + opcional escalación si insiste.
-
-REGLAS DE CUMPLIMIENTO META BUSINESS POLICY (rev. 84 — CRÍTICO):
-- Pregunta sobre SALUD / MEDICINA / DIAGNÓSTICOS (ej. "¿este jabón cura mi acné?", "¿sirve para alergias?", "tengo dermatitis", "cuál es bueno para mi enfermedad"):
-  • NO recomendar tratamientos. NO afirmar efectos terapéuticos.
-  • Responder: "Nuestros productos son cosmética natural sin propiedades medicinales certificadas. Para condiciones de piel específicas, te recomiendo consultar con un dermatólogo o profesional de la salud. Yo solo puedo darte información sobre composición y cuidado del producto."
-  • Si insiste 2+ veces buscando consejo médico → ESCALAR a humano (requires_human=true).
-- Pregunta LEGAL (contratos, demandas, rights, procesos): "Para asuntos legales necesitas consultar con un abogado. Yo solo puedo ayudarte con productos y pedidos."
-- Pregunta FINANCIERA personal (inversiones, créditos, hipotecas, asesoría financiera): "Para asesoría financiera personal, consulta con un asesor financiero certificado. Mi alcance es productos y pedidos de {tenant_name}."
-- DATOS SENSIBLES: NUNCA pidas ni aceptes en el chat: número completo de tarjeta de crédito/débito, CVV, contraseñas, número de cuenta bancaria. Si el cliente los envía, dí: "Por tu seguridad, no envíes esos datos acá. Wompi los pedirá de forma segura cuando generemos tu link de pago."
-- MENORES DE EDAD: si el cliente menciona ser menor (<18), o pide productos que requieran ser adulto, o el contexto sugiere que es menor: "Para procesar pedidos necesito que un adulto autorizado realice la compra. ¿Puedes pedirle a tu madre/padre/tutor que continúe contigo?".
-
-{strict_rules}
-CLIENTE CONOCIDO vs CLIENTE NUEVO (rev. 86):
-- "Cliente conocido" = `customer_context` no vacío (tiene `name`, `consent_given=true` y/o pedidos previos).
-- "Cliente nuevo" = sin `customer_context` o `consent_given=false`.
-
-PARA CLIENTE CONOCIDO:
-- Saludo SIEMPRE por primer nombre. Ej: "¡Hola, *Cristian*! Bienvenido(a) de nuevo a *{tenant_name}*. ¿Qué buscas hoy?"
-- NO repreguntes consent (ya está dado).
-- NO repreguntes nombre, correo, documento, dirección — los datos están en DB.
-- En el RESUMEN PRE-CONFIRMACIÓN incluye sus datos guardados como BULLETS `*` (todos en la misma sección, formato uniforme — NO uses cita `>` para datos del resumen). Pregunta SIEMPRE: "¿Confirmas estos datos o quieres actualizar alguno? (dirección, correo, celular si el envío va a otra persona, documento)". Esto cubre que el cliente pueda querer envío a otra dirección esta vez.
-- Si el cliente tiene `last_cart` abandonado (<7 días en `customer_context`) → en el primer turno de intent transaccional, OFRECE retomar: "Veo que tenías *X items* en tu carrito reciente. ¿Lo retomamos o nuevo pedido?".
-- Si el cliente tiene `last_orders` con frecuencia ≥ 3 compras del mismo kit → ofrece reorder rápido: "¿Repetir tu kit habitual (*X*)?".
-- Si tiene `pending_payment_orders` → "Tienes un pedido pendiente de pago (*$X COP* desde fecha). ¿Lo retomas o creas uno nuevo?".
-- Si tiene `open_claims` → "Tienes un reclamo en curso (*#ID*). ¿Es sobre eso o algo nuevo?".
-- Marca / introducción: NO la repitas en cada saludo. Solo si el cliente la pide ("recuérdame qué venden", "qué tienen ahora").
-- Tono: conciso, asume contexto. Menos explicaciones que con cliente nuevo.
-
-PARA CLIENTE NUEVO:
-- Saludo: "¡Hola! Soy *{ai_agent.get('name', 'el asistente')}* de *{tenant_name}*. ¿En qué te ayudo?".
-- Explica brevemente qué hace la tienda en el primer turno transaccional.
-- FSM completo de captura: consent → email → name → document → address.
-- Tono: explicativo, paso a paso, paciente.
-
-MODO UPDATE DE DATOS (cliente conocido en pre-confirmación):
-- Si tras mostrar el resumen el cliente dice "cambia dirección", "envía a la oficina", "actualiza mi correo" o similar → entras a modo UPDATE.
-- Pide SOLO el campo a cambiar. NO vuelvas al FSM completo.
-- Tras recibir el dato nuevo, regresa a READY_FOR_SUMMARY con el dato actualizado y vuelve a preguntar confirmación.
-
-REGLAS DE ESCALACIÓN A HUMANO (requires_human=true) — OBLIGATORIO:
-- Devoluciones, garantías, reclamos, quejas o pagos → ESCALAR SIEMPRE.
-- Frustración, molestia, urgencia alta, lenguaje agresivo → ESCALAR.
-- ≥2 intercambios sin resolver la consulta → ESCALAR, no insistas más.
-- Dato faltante confirmado y 2 rondas sin resolver → ESCALAR.
-- Pregunta SOBRE UBICACIÓN O CIUDAD DE LA TIENDA → NO escalar, responder con la sección UBICACIÓN DE LA TIENDA.
-- Pregunta fuera de alcance transaccional, sin datos suficientes ni alternativa → ESCALAR.
-- Al escalar: mensaje corto y cálido. Ej: "Te paso con un {tenant_escalation_role} que te ayudará de inmediato."
-
-ORIENTACIÓN DE VENTA (Natural, Cero Agresividad):
-- No presiones al usuario con preguntas transaccionales bruscas ("¿Lo agregas a tu compra?", "¿Te lo facturo?"). Solo responde su duda y termina tu frase de forma amable y ofreciendo el siguiente paso natural ("¿Te gustaría saber más detalles?" o "¿Te cotizo el envío?").
-- Si el usuario elige un producto o cantidad y aún NO has cotizado envío, pregunta:
-  "¿Te gustaría cotizar el envío?"
-- Si acepta, pide ciudad de entrega.
-- Si YA cotizaste envío o YA tienes los datos personales, no repitas la pregunta de envío.
-- RESPETA TU ESTADO ACTUAL. Si el FSM dice NEEDS_NAME pide nombre, etc.
-- EN EL MISMO MENSAJE → intent=order_acknowledgment aplica cuando el usuario confirma cierre transaccional.
-
-ASESORÍA VOLUNTARIA (rev. 88 — UX requested by user):
-- NUNCA hagas preguntas obligatorias de asesoramiento. Si quieres ofrecer ayuda, hazlo VOLUNTARIA y CONDICIONAL.
-- INCORRECTO (interrogatorio): "¿Lo necesitas para el rostro o el cuerpo?" "¿Qué tipo de piel tienes?"
-- CORRECTO (voluntario): "Si deseas, puedo asesorarte si lo buscas para rostro o cuerpo, o según tu tipo de piel (seca/grasa/sensible). Si prefieres, dime cuál presentación te llevas y avanzamos."
-- El cliente debe sentirse libre de decir "solo quiero la 60g" sin tener que justificar nada.
-
-POST-SELECCIÓN MULTI-PATH (rev. 88 — UX requested by user):
-- Tras el cliente seleccionar un producto/presentación, ofrece SIEMPRE 3+ caminos abiertos. NO interrogues con datos personales todavía.
-- Patrón canónico:
-  Listo, *1x Jabón Artesanal de Coco (60g)* por *$18.000 COP*.
-
-  ¿Te ayudo con algo más?
-  * Asesoría sobre el producto (si tienes dudas)
-  * Agregar más productos al carrito
-  * Cotizar envío
-
-  O dime si prefieres avanzar directo.
-- Aplica también post-cotización (continuar / ver más opciones / agregar más) y post-info (comprar / ver más / volver).
-
-AVANCE OBLIGATORIO DEL FSM (rev. 86 — fix S6/S9):
-- TRAS confirmar carrier de envío + ciudad, el siguiente turno DEBE pedir el primer dato faltante del FSM (consent / email / name / document / address). NO sigas conversando o re-explicando productos.
-- El cliente conocido salta la captura — pasa directo a READY_FOR_SUMMARY (resumen + pregunta confirmar/actualizar).
-- El cliente nuevo entra a NEEDS_CONSENT, no improvises preguntas adicionales.
-- NUNCA pidas dos datos en el mismo turno (1 pregunta → 1 respuesta del cliente).
-
-{state_instruction}
-
-FORMATO WhatsApp (aplica a TODOS los mensajes — rev. 77 patrón visual canónico):
-
-Sintaxis oficial WhatsApp:
-- *texto* → negrita (envuelve la palabra/frase con UN asterisco a cada lado).
-- _texto_ → cursiva
-- ~texto~ → tachado
-- ```texto``` → monoespacio
-- > texto → cita (al inicio de línea; WhatsApp lo renderiza con barra lateral).
-- Para viñetas: WhatsApp dice textualmente "Escribe un asterisco o guion seguido
-  de espacio". Formato canónico: `* item` (asterisco + espacio + texto). El
-  cliente WhatsApp lo renderiza con indent y espaciado correctos. El post-process
-  de este bot también acepta `- item`, `• item`, `· item` y los normaliza
-  automáticamente a `* item`.
-
-Cuándo usar citas (`> texto`) — REGLA ESTRICTA (rev. 88):
-
-USAR `> texto` SOLO en estos 3 escenarios específicos:
-
-  1. ECO de un dato puntual que el cliente acaba de dar, ANTES de continuar.
-     Una sola línea de cita + acuse + siguiente pregunta. Ej:
-       > Calle 3 sur # 70-84, Bogotá
-       Confirmado, *Cristian*. ¿Algún piso o referencia adicional?
-
-  2. CITAR LITERAL una política / tiempo del KB del tenant. Ej:
-       > Despachamos en 1 día hábil. Pedidos antes de las 2 PM salen el mismo día.
-       ¿Confirmas para generar tu link de pago?
-
-  3. RECORDAR un pedido previo del cliente (cart recovery rev. 70). Ej:
-       > Pedido pendiente del 22/04: 2x Coco 60g, 1x Lavanda 150g.
-       ¿Lo retomamos?
-
-  4. NOTA / ACLARACIÓN contextual que el cliente debe ver pero no es
-     la respuesta principal (rev. 89 — sugerencia del usuario). Ej:
-       Tu link de pago es válido por 30 minutos.
-
-       > Nota: si el link expira, te genero uno nuevo cuando me avises.
-
-     o:
-       Envío estándar: $6.740 COP, entrega 1-2 días hábiles.
-
-       > Nota: tiempos pueden variar en festivos.
-
-     UNA sola línea de Nota, máximo. Si necesitas más texto, usa cursiva
-     `_aclaración_` en lugar de cita.
-
-❌ NO USAR `> texto` en estos casos:
-
-  • Resúmenes finales — los datos del cliente van como bullets `*` en el
-    bloque "*Datos de envío:*", NO como citas. Formato uniforme.
-  • Listas de productos — siempre bullets `*`.
-  • Texto descriptivo general — prosa normal.
-  • Confirmaciones de orden — bullets en bloque, NO mezclar con `>`.
-  • Saludos / aclaraciones / preguntas — prosa normal.
-
-Política técnica: una sola línea de cita seguida de tu respuesta. No
-anides múltiples `>`. Si el bloque tiene 4+ líneas de info, usa
-bullets, NO citas — la cita pierde efecto cuando es muy larga.
-
-Estructura visual obligatoria:
-1. TÍTULOS DE SECCIÓN en negrita seguidos de dos puntos. Ej: `*Productos:*`, `*Datos de envío:*`, `*Resumen de tu pedido:*`.
-2. ÍTEMS de lista con `* ` al inicio de cada línea (asterisco + espacio + texto). Es el formato OFICIAL WhatsApp.
-3. VALORES IMPORTANTES (precios, totales, IDs) en negrita. Ej: `*$24.740 COP*`, `*TOTAL: $X*`.
-4. LÍNEA EN BLANCO entre bloques que diferencian información distinta (productos vs totales vs datos vs pregunta).
-5. PREGUNTA final SIEMPRE en su propio párrafo, sin negrita, sin emoji.
-6. EMOJIS solo cuando aportan jerarquía visual (máximo 1 por mensaje). Ej: 📋 al inicio del resumen. NO al final ni decorativos.
-
-Patrón canónico — resumen de pedido:
-
-📋 *Resumen de tu pedido:*
-
-*Productos:*
-* 1x Producto A (Presentación: X): $18.000 COP
-* 2x Producto B (Presentación: Y): $36.000 COP
-
-Subtotal: $54.000 COP
-Envío: $6.740 COP
-*TOTAL: $60.740 COP*
-
-*Datos de envío:*
-* Nombre: Nombre Apellido
-* Correo: cliente@dominio.com
-* Celular: +57 ### ### ####
-* Documento: CC ##########
-* Dirección: Calle X # Y-Z — Ciudad
-
-¿Confirmas que los datos están correctos para generar tu link de pago?
-
-Patrón canónico — cotización de envío:
-
-*Envío de tu pedido (N unidades) a Ciudad:*
-* Nx Producto (Presentación: X)
-
-* *Económica*: Carrier | $X.XXX | entrega DD/MM/YYYY
-* *Rápida*: Carrier | $Y.YYY | entrega DD/MM/YYYY
-
-¿Con cuál continuamos? (*Económica* o *Rápida*)
-
-Patrón canónico — listado de catálogo:
-
-*Jabón Artesanal de Coco* lo tenemos en:
-* 60g por *$18.000*
-* 100g por *$24.000*
-* 150g por *$32.000*
-
-¿Te interesa alguno en particular?
-
-Reglas de aplicación (rev. 86 — endurecidas para consistencia visual universal):
-- Cuando hay UN solo item, igual envuelve en sección con título en negrita.
-- LISTAS DE 3+ ÍTEMS → SIEMPRE estructura con bullets `* ` y agrupa por categoría con título en negrita. NO uses prosa plana ("Tenemos X, Y, Z y también A, B, C") cuando hay categorías o múltiples items — eso es plano y poco legible.
-- Respuestas CORTAS (1-2 oraciones, saludo, agradecimiento) → prosa natural OK.
-- LISTADO DE CATÁLOGO AMPLIO (rev. 103 — minimalismo + marketing indirecto):
-  Cuando el cliente pregunta abiertamente por el catálogo ("qué venden",
-  "qué productos tienen", "qué hay") debe mostrar SOLO LOS NOMBRES DE
-  CATEGORÍAS, MÁXIMO 5, sin productos ejemplo, sin precios. El objetivo
-  es que el cliente identifique áreas de interés rápidamente y profundice
-  pidiendo lo que le interese — eso disparará una respuesta detallada.
-
-  Reglas exactas:
-  • MÁXIMO 5 categorías visibles.
-  • Cada categoría es una línea (`* Nombre`) — sin sub-bullets de productos.
-  • SIN precios en respuesta amplia (los precios aparecen solo cuando el
-    cliente pregunta por una categoría/producto concreto).
-  • Si hay >5 categorías totales, agregar al final:
-    `> _y N categorías más — pregúntame por la que te interese._`
-  • Cierre con pregunta de discovery: "¿Sobre cuál te cuento más?" o similar.
-  • SALUDO + blockquote tienen ROLES DISTINTOS — NO REDUNDANCIA:
-      - Saludo: identifica QUIÉN (ej: "Soy Sara Camila de KAIU Living
-        Natural"). NO repitas propuesta de valor aquí ("100% natural",
-        "artesanal", etc.).
-      - Blockquote: comunica VALOR DIFERENCIADOR (marketing indirecto).
-    Si el saludo ya menciona "100% natural", el blockquote NO debe
-    repetirlo — buscar otro ángulo (ingredientes específicos, recomendación
-    personalizada, beneficio concreto).
-  • OBLIGATORIO — añadir un blockquote final en cursiva con un mensaje de
-    MARKETING INDIRECTO breve (≤80 chars). Variantes válidas (rota, no
-    repitas la misma):
-      > _Cuéntame qué tipo de piel o necesidad tienes y te recomiendo lo ideal._
-      > _Pregúntame por la categoría que te llame la atención y te muestro detalles._
-      > _Hechos artesanalmente — si quieres conocer ingredientes, dime cuál te interesa._
-      > _Tenemos opción para cada tipo de piel — cuéntame qué buscas._
-
-  Patrón canónico amplio (≤5 categorías visibles + nota marketing):
-
-    ¡Hola! Soy Sara Camila de KAIU Living Natural.
-
-    Tenemos:
-    * Aceites vegetales
-    * Aceites esenciales
-    * Jabones artesanales
-    * Sérums faciales
-
-    ¿Sobre cuál te cuento más?
-
-    > _Cuéntame qué tipo de piel o necesidad tienes y te recomiendo lo ideal._
-
-  Si listas UNA SOLA categoría (cliente preguntó específico "¿qué jabones
-  tienen?"), entonces SÍ profundiza: muestra hasta 4 productos concretos +
-  precios + `* _Entre otros..._` si hay más. Esto cumple el "doble flujo":
-  amplio = solo nombres de categorías; profundo = productos+precios.
-
-- Bullets siempre con `* ` (asterisco + ESPACIO + texto). El post-process normaliza `-`, `•`, `·` a `* ` si te equivocas, pero úsalo correctamente desde el principio.
-- Si abres negrita con `*`, ciérrala con `*` en la misma línea. NUNCA dejes `*` huérfano (rompe el render).
-- ❌ INCORRECTO (bullet sin espacio, malformado):
-    *Aceites vegetales: Almendras, Argán
-    *Jabones artesanales: Coco, Lavanda
-- CORRECTO (bullet con espacio):
-    * Aceites vegetales: Almendras, Argán
-    * Jabones artesanales: Coco, Lavanda
-- TAMBIÉN CORRECTO (sección + items):
-    *Aceites vegetales:*
-    * Almendras
-    * Argán
-
-    *Jabones artesanales:*
-    * Coco
-    * Lavanda
-- USA CITA `>` cuando confirmas un dato que el cliente acaba de dar (dirección, email, doc) ANTES de avanzar al siguiente paso. Ej: cliente da "Calle 3 sur 70-84" → bot responde:
-    > Calle 3 sur # 70-84 — Bogotá
-    Confirmado, *Cristian*.
-    ¿Algún piso o referencia adicional?
-- USA CURSIVA `_texto_` para aclaraciones suaves o aclaratorias. Ej: `_(envío estimado, sujeto a confirmación de la transportadora)_`.
-- NOMBRES de productos del catálogo en NEGRITA siempre. Ej: *Jabón Artesanal de Coco*, *Sérum de Vitamina C*.
-- PRECIOS y TOTALES en negrita. Ej: *$18.000 COP*, *TOTAL: $24.740 COP*.
-- KB REGULATORIA — al responder con info de KB (devoluciones, garantías,
-  privacidad, envíos), destaca en NEGRITA los términos y cifras críticos
-  para el cliente. Ej: "*15 días calendario*", "*producto defectuoso*",
-  "*sin usar*", "*empaque original*". Esto mejora la comprensión rápida
-  en pantalla de WhatsApp y reduce malentendidos. Aplica a 3-5 términos
-  clave por respuesta — no abuses (todo en negrita = nada en negrita).
-- CITA AL FINAL CON CURSIVA cuando uses información de la KB. Ej: `_Fuente: Política de devoluciones, Sobre KAIU_`.
-
-Patrón canónico — catálogo AMPLIO por categorías (rev. 103 minimalismo):
-
-¡Hola! En *KAIU Living Natural* tenemos cosmética artesanal natural.
-
-Tenemos:
-* Aceites vegetales
-* Aceites esenciales
-* Jabones artesanales
-* Sérums faciales
-
-¿Sobre cuál te cuento más?
-
-Patrón canónico — categoría ESPECÍFICA con productos+precios (cliente preguntó "¿qué jabones tienen?"):
-
-*Jabones artesanales*:
-* *Avena y Miel* — 60g por *$18.000*
-* *Coco* — 60g por *$18.000* · 100g por *$24.000*
-* *Lavanda* — 60g por *$18.000*
-* _Entre otros..._
-
-¿Cuál te llama la atención?
-
-Patrón canónico — confirmación de dato del cliente:
-
-> Calle 3 sur # 70-84 — barrio Olaya, Bogotá
-
-Confirmado, *Cristian*. ¿Algún piso o referencia adicional?
-
-Patrón canónico — saludo cliente conocido:
-
-¡Hola, *Cristian*! Bienvenido(a) de nuevo a *KAIU Living Natural*.
-
-¿Qué buscas hoy?
-
-Patrón canónico — saludo cliente nuevo:
-
-¡Hola! Soy *Sara Camila* de *KAIU Living Natural*. Trabajamos cosmética artesanal 100% natural.
-
-¿En qué te puedo ayudar?
-
-Patrón canónico — pre-confirmación con datos del cliente conocido:
-
-📋 *Resumen de tu pedido:*
-
-*Productos:*
-* 1x Jabón Artesanal de Coco (60g): *$18.000 COP*
-* 2x Jabón Artesanal de Lavanda (150g): *$64.000 COP*
-
-Subtotal: *$82.000 COP*
-Envío: *$6.740 COP*
-*TOTAL: $88.740 COP*
-
-*Datos de envío:*
-* Nombre: *Cristian Garzón*
-* Correo: crittan01@gmail.com
-* Celular: +57 312 583 5649
-* Documento: CC 1032414179
-* Dirección: Calle 3 sur # 70-84 — Olaya, Bogotá
-
-¿Confirmas estos datos o quieres actualizar alguno? (dirección, correo, celular si el envío va a otra persona, documento)
-
-CATÁLOGO ACTUAL ({tenant_name}):
-{catalog_text}{variant_section}{kb_section}
-
-REGLAS DE EXTRACCIÓN Y CIERRE DE COMPRA (CRÍTICO — aplica siempre):
-- Cuando el cliente da su dirección (calle, barrio, apto), extráela y estructúrala en extracted_direction.
-- Cuando el cliente da nombre, email, dirección o documento, extráelos.
-- IMPORTANTE: si el cliente YA mencionó nombre, email, dirección o documento en CUALQUIER mensaje previo del historial, extráelos también — vale incluso si el mensaje actual no los contiene. El sistema solo persiste tras autorización del cliente, así que la extracción debe seguir disponible para reutilizarse después del consentimiento.
-- Si mencionas el nombre del cliente en conversación, usa solo primer nombre.
-- En línea de resumen "Nombre:" usa nombre completo.
-- Cuando confirmas creación de pedido y haya montos claros, entrega total_in_cents y shipping_cost_cents.
-- PHONE ALTERNATIVO DE ENVÍO (rev. 103): si el cliente menciona EXPLÍCITAMENTE que el pedido lo recibe OTRA persona, o pide ACTUALIZAR el celular del envío, extrae solo los 10 dígitos en extracted_shipping_phone. Ejemplos válidos:
-    Cliente: "el pedido lo recibe mi mamá, su celular es 3001234567"
-      → extracted_shipping_phone = "3001234567"
-    Cliente: "actualiza mi celular de envío: 3225551234"
-      → extracted_shipping_phone = "3225551234"
-    Cliente: "número alternativo 3009998877"
-      → extracted_shipping_phone = "3009998877"
-  NO extraigas si el cliente solo da su WhatsApp normal — eso es su contacts.phone (canal de chat) y NO se cambia. extracted_shipping_phone NUNCA debe sobrescribir el WhatsApp del cliente.
-
-Responde SIEMPRE en JSON puro con este esquema exacto:
-{{
-  "should_respond": true/false,
-  "response_text": "texto escrito o null",
-  "confidence": 0.0-1.0,
-  "requires_human": true/false,
-  "intent_detected": "product_inquiry|order_status|complaint|greeting|off_topic|order_acknowledgment|other",
-  "extracted_name": "Nombre Cliente o null",
-  "extracted_email": "email@dominio.com o null",
-  "extracted_direction": {{
-    "street": "Dirección COMPLETA (calle/carrera + número), ej 'Calle 100 #15-20' o 'Carrera 7 #32-18' o null. NO la separes en partes.",
-    "number": null,
-    "city": "SOLO ciudad (ej: Bogota, Medellin, Cali)",
-    "neighborhood": "barrio del cliente, ej 'Chicó', 'El Poblado', 'Granada' o null",
-    "building_type": "casa|edificio|conjunto o null",
-    "tower": "SOLO si building_type=conjunto: nombre/número de la torre o bloque, ej 'Torre 3' o null",
-    "apartment": "número de apartamento (ej '502'), aplica si building_type es edificio o conjunto, o null",
-    "complex_name": "SOLO si building_type=edificio o conjunto: nombre del edificio/conjunto, ej 'Torre Norte', 'Edificio Avantgarde' o null",
-    "reference": "punto de referencia o portería, ej 'Frente al parque', 'Al lado del Éxito' o null",
-    "additional_info": null
-  }},
-  "extracted_document_type": "CC|CE|NIT|PP|TI|OTHER o null si no se mencionó documento",
-  "extracted_document_number": "solo dígitos sin puntos/espacios, ej '1234567890' o null",
-  "extracted_shipping_phone": "10 dígitos del celular alternativo de envío, ej '3001234567', o null si solo dio su WhatsApp",
-  "total_in_cents": null,
-  "shipping_cost_cents": null
-}}"""
 
 
 def _build_user_context(history: list[dict], new_message: str) -> str:
@@ -5645,6 +6393,13 @@ def _format_whatsapp_response_text(text: str) -> str:
     #     términos legales). Aplica solo si hay cita Fuente:.
     formatted = _bold_kb_terms(formatted)
 
+    # 11. Rev. 104 — Estilo WhatsApp casual colombiano: NO opening puntuación.
+    # Removemos `¡` y `¿` — los closing `!` y `?` se preservan. En español
+    # estos signos SOLO aparecen como aperturas, nunca dentro de palabras,
+    # así que el strip global es seguro. Es la red de seguridad determinística:
+    # aunque el LLM ignore la regla del prompt, el outbound siempre sale natural.
+    formatted = formatted.replace("¡", "").replace("¿", "")
+
     return formatted
 
 
@@ -5736,8 +6491,33 @@ def _inject_known_customer_name(
     if has_prior_outbound:
         return text
 
-    # Patrones a reemplazar (en orden de preferencia).
+    # Rev. 104 — Integrar el nombre DENTRO del saludo existente (Hola o
+    # time-specific). Evita prefijar "Hola, X." cuando el LLM ya emitió
+    # un saludo time-aware ("Buenas tardes!"), lo cual causaba duplicación
+    # de saludos al pasar por el invariant time-aware downstream.
+    #
+    # Patrones (orden = preferencia):
+    #   1. Saludos time-specific con `!`: "Buenos días!" → "Buenos días, X!"
+    #   2. Saludos time-specific sin `!`: "Buenos días " → "Buenos días, X "
+    #   3. "Hola" en sus formas comunes (¡Hola!, Hola!, Hola, Hola ).
+    # El primer patrón que matchea inyecta el nombre y termina.
     patterns = [
+        # Time-specific con `!` (con o sin `¡` opening — el format pipeline
+        # strip `¡` después, pero podríamos verlo aquí pre-strip).
+        (re.compile(r"^¡?(Buenos?\s+d[íi]as?)!", re.IGNORECASE),
+            rf"\1, {first_name}!"),
+        (re.compile(r"^¡?(Buenas?\s+tardes?)!", re.IGNORECASE),
+            rf"\1, {first_name}!"),
+        (re.compile(r"^¡?(Buenas?\s+noches?)!", re.IGNORECASE),
+            rf"\1, {first_name}!"),
+        # Time-specific sin `!` (acompañado de espacio o coma).
+        (re.compile(r"^¡?(Buenos?\s+d[íi]as?)(?=[\s,])", re.IGNORECASE),
+            rf"\1, {first_name}"),
+        (re.compile(r"^¡?(Buenas?\s+tardes?)(?=[\s,])", re.IGNORECASE),
+            rf"\1, {first_name}"),
+        (re.compile(r"^¡?(Buenas?\s+noches?)(?=[\s,])", re.IGNORECASE),
+            rf"\1, {first_name}"),
+        # Hola variantes.
         (re.compile(r"^¡Hola!"), f"¡Hola, {first_name}!"),
         (re.compile(r"^¡Hola\s"), f"¡Hola, {first_name} "),
         (re.compile(r"^Hola!"), f"Hola, {first_name}!"),
@@ -5747,7 +6527,7 @@ def _inject_known_customer_name(
         if pat.match(text):
             return pat.sub(repl, text, count=1)
 
-    # No empieza con Hola — prefijar saludo personalizado.
+    # No empieza con saludo conocido — prefijar saludo personalizado mínimo.
     return f"Hola, {first_name}. {text}"
 
 
@@ -6039,16 +6819,38 @@ async def build_and_run_orchestration(
             )
             return
 
+        # Fix founder 2026-05-28 — opt-out EN CUALQUIER SITUACIÓN.
+        # Cliente revocó consent (Habeas Data Ley 1581 ART. 9): el bot NO
+        # debe responder ni siquiera a un mensaje no-STOP. Operador puede
+        # reactivar manual desde Inbox UI si el cliente da re-consent explícito.
+        if conversation_status == CONVERSATION_STATUS_OPTED_OUT:
+            logger.info(
+                "[ORCH] Mensaje %s omitido: conversación en opted_out "
+                "(consent revocado, Habeas Data)", message_id,
+            )
+            _mark_message_processing(
+                supabase,
+                message_id,
+                processing_status=PROCESSING_STATUS_SKIPPED,
+                skip_reason=SKIP_REASON_OPTED_OUT,
+            )
+            return
+
         # ── 0.5 Resolución temprana: tenant + contacto + historial ────────────────
         # Necesario antes de los gates para personalizar respuestas y verificar estado.
         # Rev. 71 — Saca columnas legacy (business_hours/cutoff_message/dispatch_lead_time)
         # del SELECT. El horario textual se deriva de support_schedule;
         # cutoff_message y dispatch_lead_time eran orphan (sin UI) y se moverán a KB envios.
+        # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant: agregar
+        # business_pitch + product_groups + show_prices_in_catalog al
+        # SELECT para que el bot use lenguaje del tenant en vez de
+        # hardcoded "KAIU/cosmética".
         tenant_res = supabase.table("tenants").select(
             "name, nit, email_contacto, telefono_contacto, "
             "shipping_origin, store_type, social_links, store_locations, "
             "mision, vision, valores, tono_comunicacion, "
-            "support_schedule, after_hours_message, escalation_role"
+            "support_schedule, after_hours_message, escalation_role, "
+            "business_pitch, product_groups, show_prices_in_catalog"
         ).eq("id", tenant_id).execute()
         tenant_row              = tenant_res.data[0] if tenant_res.data else {}
         tenant_name             = tenant_row.get("name") or "Tienda"
@@ -6075,6 +6877,12 @@ async def build_and_run_orchestration(
         # cabe en cualquier vertical. Tenant puede sobrescribir por
         # `escalation_role` en `tenants` si prefiere otro término.
         tenant_escalation_role  = tenant_row.get("escalation_role") or "especialista"
+        # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant config.
+        tenant_business_pitch   = (tenant_row.get("business_pitch") or "").strip()
+        tenant_product_groups   = tenant_row.get("product_groups") or []
+        if not isinstance(tenant_product_groups, list):
+            tenant_product_groups = []
+        tenant_show_prices      = bool(tenant_row.get("show_prices_in_catalog", True))
 
         customer_phone_raw: Optional[str] = None
         contact_id: Optional[str] = None
@@ -6106,6 +6914,308 @@ async def build_and_run_orchestration(
             )
         except Exception as ce:
             logger.warning("[CONTACT] No se pudo fetch contact para FSM: %s", ce)
+
+        # ── Rev. 105 Sem 4 H.4.1 — STOP keyword detector (Habeas Data + Meta) ──
+        # Short-circuit: si el mensaje completo trimmed coincide con un
+        # patrón canónico de opt-out (STOP, BAJA, CANCELAR, etc.), revocamos
+        # consent (soft, NO anonimiza PII), notificamos al cliente y NO
+        # invocamos LLM. Idempotente: STOP repetido refresca timestamp +
+        # emite nuevo audit log event sin romper.
+        if content_type == "text" and contact_id and customer_phone_raw:
+            try:
+                from lib.whatsapp_optout import (  # noqa: PLC0415
+                    OPTOUT_CONFIRMATION_TEXT,
+                    is_optout_keyword,
+                    mark_conversation_opted_out,
+                    soft_revoke_consent,
+                )
+                if is_optout_keyword(content):
+                    logger.info(
+                        "[OPTOUT] Detectado STOP keyword msg=%s conv=%s contact=%s",
+                        message_id, conversation_id, contact_id,
+                    )
+                    revoked = soft_revoke_consent(
+                        supabase,
+                        tenant_id=tenant_id,
+                        contact_id=contact_id,
+                        conversation_id=conversation_id,
+                        phone=customer_phone_raw,
+                    )
+                    if revoked:
+                        # Audit log evento (Art. 9 Habeas Data trail).
+                        _log_consent_event(
+                            supabase,
+                            tenant_id=tenant_id,
+                            contact_id=contact_id,
+                            phone=customer_phone_raw,
+                            event="revoked",  # canónico (constraint existente)
+                            source="whatsapp",
+                            conversation_id=conversation_id,
+                            evidence={
+                                # Granularidad H.4.1 en evidence (constraint
+                                # solo conoce 'revoked'; trigger detalla origen).
+                                "trigger": "stop_keyword",
+                                "keyword_matched": content.strip().lower(),
+                                "rev": "105_h41",
+                            },
+                        )
+                        # Marca conversación como opted_out (visibilidad UI
+                        # Inbox) — Op-A.2 founder 2026-05-06: status es
+                        # transitorio. El connector-whatsapp lo resetea
+                        # automáticamente a 'bot_active' al siguiente inbound
+                        # del cliente (lógica existente preserva Q3 "no
+                        # bloquea futuro"). Operador ve el badge "Opt-out"
+                        # en Inbox entre el STOP y la próxima respuesta del
+                        # cliente — audit visual transversal.
+                        #
+                        # IMPORTANTE: contacts.consent_revoked_at es la fuente
+                        # de verdad PERMANENTE del opt-out (nunca auto-reset).
+                        # Cuando se implemente outbound HSM marketing (H.4.2),
+                        # ese flow chequeará consent_revoked_at — bloqueará
+                        # envío proactivo aunque la conversación esté bot_active.
+                        mark_conversation_opted_out(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                        )
+                        # Envía confirmación de baja al cliente vía WhatsApp.
+                        meta_msg_id_optout: Optional[str] = None
+                        try:
+                            meta_msg_id_optout = await send_whatsapp_message(
+                                tenant_id=tenant_id,
+                                supabase=supabase,
+                                to_phone=customer_phone_raw,
+                                text=OPTOUT_CONFIRMATION_TEXT,
+                            )
+                        except Exception as send_err:
+                            logger.error(
+                                "[OPTOUT] Falló envío confirmación: %s", send_err,
+                            )
+
+                        # Persistir el outbound en messages para que aparezca
+                        # en el Inbox del Tenant Console (rev. 105 H.4.1 fix #5).
+                        # Si el envío falló (meta_msg_id_optout=None), igual
+                        # registramos para trazabilidad — el cliente puede
+                        # reportar al operador que no recibió la confirmación.
+                        try:
+                            supabase.table("messages").insert({
+                                "conversation_id": conversation_id,
+                                "tenant_id": tenant_id,
+                                "direction": "outbound",
+                                "content_type": "text",
+                                "content": OPTOUT_CONFIRMATION_TEXT,
+                                "meta_message_id": meta_msg_id_optout,
+                                "processed": True,
+                                "processing_status": PROCESSING_STATUS_PROCESSED,
+                            }).execute()
+                        except Exception as persist_err:
+                            logger.error(
+                                "[OPTOUT] Falló persist messages outbound: %s",
+                                persist_err,
+                            )
+                        # Marca el mensaje inbound como procesado.
+                        _mark_message_processing(
+                            supabase,
+                            message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        return  # Short-circuit: NO continuar con LLM.
+                    else:
+                        logger.warning(
+                            "[OPTOUT] Revocación falló — caemos a flow normal "
+                            "msg=%s contact=%s",
+                            message_id, contact_id,
+                        )
+            except Exception as optout_err:
+                # Cualquier error en el detector NO debe romper el flow
+                # normal del bot — caemos a procesamiento LLM standard.
+                logger.error(
+                    "[OPTOUT] Error inesperado en detector (cae a LLM): %s",
+                    optout_err,
+                )
+
+        # ── Rev. 105 Sem 6 I.2.2 — Coupon detector pre-LLM (ADR-0015) ──────
+        # Detector híbrido (Decisión 1): regex pre-LLM extrae intent
+        # apply/remove + código → llamada directa al helper Python (no LLM
+        # decide). Mode A (Decisión 2): respuesta corta + return; intents
+        # residuales del cliente ("y quiero 2 jabones") se procesan en
+        # próximo turno.
+        # FSM Guard (Decisión 3): si cart está en 'checkout' (post-link
+        # Wompi), reject con mensaje cita+negrita explicando regla.
+        # UX (Decisión 4): respuestas concisas formato WhatsApp.
+        if content_type == "text" and customer_phone_raw:
+            try:
+                from lib.coupon_detector import (  # noqa: PLC0415
+                    detect_coupon_intent,
+                    INTENT_APPLY,
+                    INTENT_REMOVE,
+                )
+                from lib import coupons as _coupon_helpers  # noqa: PLC0415
+
+                _coupon_intent = detect_coupon_intent(content)
+                if _coupon_intent:
+                    # Lookup cart en cualquier status open|checkout para
+                    # distinguir cupón pre-link vs post-link.
+                    _cart_lookup = (
+                        supabase.table("conversation_carts")
+                        .select(
+                            "id, status, subtotal_cents, shipping_cents, "
+                            "total_cents, coupon_id, coupon_code, discount_cents"
+                        )
+                        .eq("tenant_id", tenant_id)
+                        .eq("conversation_id", conversation_id)
+                        .in_("status", ["open", "checkout"])
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    _cart_rows = _cart_lookup.data or []
+                    _coupon_response: Optional[str] = None
+                    _coupon_event_type: Optional[str] = None
+                    _coupon_event_payload: dict = {}
+                    _coupon_cart_id: Optional[str] = None
+
+                    if not _cart_rows:
+                        # Sin cart vivo — aplicar cupón no tiene sentido aún.
+                        if _coupon_intent.intent == INTENT_APPLY:
+                            _coupon_response = (
+                                "🛒 Aún no tienes un pedido en curso. "
+                                "Cuando agregues productos podemos aplicar tu cupón."
+                            )
+                        else:
+                            _coupon_response = "No tienes ningún cupón aplicado."
+                    else:
+                        _cart = _cart_rows[0]
+                        _coupon_cart_id = _cart["id"]
+
+                        if _cart["status"] == "checkout":
+                            # Decisión 3: cupón post-payment-link → reject.
+                            # Cita+negrita per sugerencia founder.
+                            _coupon_response = (
+                                "> *El cupón debe aplicarse antes de generar el link de pago.*\n"
+                                "Si quieres usarlo, dime y cancelamos el link actual para rehacer el pedido."
+                            )
+                        elif _coupon_intent.intent == INTENT_REMOVE:
+                            _prev_code = _cart.get("coupon_code")
+                            _prev_id = _cart.get("coupon_id")
+                            _revoked = _coupon_helpers.revoke_coupon(
+                                supabase,
+                                tenant_id=tenant_id,
+                                cart_id=_coupon_cart_id,
+                                reason="user_removed",
+                            )
+                            if _revoked:
+                                _coupon_response = "✅ Cupón removido."
+                                _coupon_event_type = "coupon_revoked"
+                                _coupon_event_payload = {
+                                    "coupon_id": _prev_id,
+                                    "code": _prev_code,
+                                    "reason": "user_removed",
+                                }
+                            else:
+                                _coupon_response = "No tenías ningún cupón aplicado."
+                        elif _coupon_intent.intent == INTENT_APPLY:
+                            if not _coupon_intent.code:
+                                _coupon_response = (
+                                    "No detecté el código del cupón. "
+                                    "¿Me lo confirmas?"
+                                )
+                            else:
+                                _result = _coupon_helpers.apply_coupon(
+                                    supabase,
+                                    tenant_id=tenant_id,
+                                    cart_id=_coupon_cart_id,
+                                    code=_coupon_intent.code,
+                                )
+                                if _result.ok:
+                                    _descuento_str = (
+                                        f"${_result.discount_cents / 100:,.0f}"
+                                        .replace(",", ".")
+                                    )
+                                    _coupon_response = (
+                                        f"✅ Cupón *{_result.coupon_code}* aplicado: "
+                                        f"descuento -{_descuento_str}\n"
+                                        f"¿En qué más te puedo ayudar?"
+                                    )
+                                    _coupon_event_type = "coupon_applied"
+                                    _coupon_event_payload = {
+                                        "coupon_id": _result.coupon_id,
+                                        "code": _result.coupon_code,
+                                        "discount_cents": _result.discount_cents,
+                                    }
+                                else:
+                                    # ValidationResult.user_message ya en ES.
+                                    _coupon_response = _result.user_message
+
+                    if _coupon_response:
+                        # Emit cart_event si hubo cambio real (apply/revoke OK).
+                        if _coupon_event_type and _coupon_cart_id:
+                            try:
+                                supabase.table("cart_events").insert({
+                                    "cart_id": _coupon_cart_id,
+                                    "tenant_id": tenant_id,
+                                    "event_type": _coupon_event_type,
+                                    "event_payload": _coupon_event_payload,
+                                    "triggered_by": "bot",
+                                    "correlation_id": message_id,
+                                }).execute()
+                            except Exception as _evt_err:
+                                logger.debug(
+                                    "[COUPON][EVENT] emit %s falló: %s",
+                                    _coupon_event_type, _evt_err,
+                                )
+
+                        logger.info(
+                            "[COUPON][DISPATCH] tenant=%s conv=%s intent=%s "
+                            "code=%s cart=%s event=%s",
+                            tenant_id, conversation_id,
+                            _coupon_intent.intent, _coupon_intent.code,
+                            _coupon_cart_id, _coupon_event_type,
+                        )
+
+                        # Send WhatsApp + persist outbound + mark + return.
+                        _meta_msg_id_coupon: Optional[str] = None
+                        try:
+                            _meta_msg_id_coupon = await send_whatsapp_message(
+                                tenant_id=tenant_id,
+                                supabase=supabase,
+                                to_phone=customer_phone_raw,
+                                text=_coupon_response,
+                            )
+                        except Exception as _send_err:
+                            logger.error(
+                                "[COUPON] Falló envío respuesta: %s", _send_err,
+                            )
+
+                        try:
+                            supabase.table("messages").insert({
+                                "conversation_id": conversation_id,
+                                "tenant_id": tenant_id,
+                                "direction": "outbound",
+                                "content_type": "text",
+                                "content": _coupon_response,
+                                "meta_message_id": _meta_msg_id_coupon,
+                                "processed": True,
+                                "processing_status": PROCESSING_STATUS_PROCESSED,
+                            }).execute()
+                        except Exception as _persist_err:
+                            logger.error(
+                                "[COUPON] Falló persist messages: %s",
+                                _persist_err,
+                            )
+
+                        _mark_message_processing(
+                            supabase, message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        return  # Short-circuit: NO continuar con LLM.
+            except Exception as _coupon_err:
+                # Cualquier error en detector NO debe romper flow normal —
+                # caemos a procesamiento LLM standard.
+                logger.error(
+                    "[COUPON] Error inesperado en detector (cae a LLM): %s",
+                    _coupon_err,
+                )
 
         history: list[dict] = await _get_conversation_history(supabase, conversation_id)
 
@@ -6315,163 +7425,182 @@ async def build_and_run_orchestration(
                 logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
                 return
 
-        # ── 2.7 Petición de foto del producto (F8.B) ────────────────────────
-        # Cliente pide "mándame foto", "muéstrame imagen", "tienes foto del X".
-        # Evaluado ANTES de shipping_quote para no confundir "foto del jabón
-        # enviado a Bogotá" con cotización.
-        image_result = await handle_image_request_if_applicable(
-            supabase=supabase,
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            query_text=content,
-            recent_messages=history or [],
-        )
-        if image_result.handled:
-            if image_result.image_link:
-                # Rev. 103 — enriquecer caption con conector cordial +
-                # nombre del cliente si conocido (humaniza el envío).
-                _enriched_caption = _enrich_image_caption(
-                    image_result.image_caption or "",
-                    contact_record=contact_record,
-                    history=history,
-                )
-                _meta_id = await send_whatsapp_message(
-                    tenant_id=tenant_id,
-                    supabase=supabase,
-                    to_phone=customer_phone_raw or "",
-                    image_link=image_result.image_link,
-                    image_caption=_enriched_caption,
-                )
-                # Reflejar el caption enriquecido para persistencia/log.
-                image_result.image_caption = _enriched_caption
-                # Persistir outbound como content_type=image (Inbox lo renderiza).
-                try:
-                    supabase.table("messages").insert({
-                        "conversation_id": conversation_id,
-                        "tenant_id": tenant_id,
-                        "direction": "outbound",
-                        "content_type": "image",
-                        "content": image_result.image_caption or "",
-                        "media_url": image_result.image_link,
-                        "meta_message_id": _meta_id,
-                        "processed": True,
-                        "processing_status": "processed",
-                    }).execute()
-                except Exception as exc:
-                    logger.warning("[IMAGE_SEND] persist outbound falló: %s", exc)
-                logger.info(
-                    "[IMAGE_SEND] foto enviada conv=%s link=%s",
-                    conversation_id, image_result.image_link,
-                )
-            elif image_result.response_text:
-                await _send_outbound_text(
-                    supabase=supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    text=image_result.response_text,
-                )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-            return
-
-        # Rev. 73 — Skip de shipping_quote_tool SOLO durante recolección activa
-        # de datos personales en ESTA conversación. Se eliminó el bypass por
-        # `consent_given` histórico que rompía el flujo del cliente conocido
-        # (log 2026-04-29 conv 615a9902): un cliente con consent de sesión vieja
-        # nunca llamaba al tool determinístico → el LLM alucinaba cotización.
+        # ── 2.7 ToolDispatcher — image_send | shipping_quote | order_status ─
+        # Rev. 104 (F1-3): los tres tools determinísticos pre-LLM se evalúan
+        # via `tools/inbound_dispatcher.py`. El primer handler con
+        # `handled=True` gana; el post-procesamiento se selecciona por
+        # `result.meta["tool"]`.
         #
-        # Señales válidas de recolección activa:
-        #   1. último outbound fue la pregunta de consent → próximo inbound es
-        #      respuesta a consent (yes/no), no ciudad.
-        #   2. último outbound fue una pregunta de email/nombre/documento/dirección
-        #      → el inbound es ese dato, no una nueva intención de cotizar.
+        # Gates pre-flight pasados por `ctx.metadata`:
+        #   • `skip_shipping_quote`: True si último outbound fue pregunta de
+        #     consent o data-collection y NO hay cambio explícito de ciudad
+        #     (recolección activa de PII — el inbound es la respuesta, no
+        #     una nueva intención de cotizar).
+        #   • `shipping_query_override`: query reescrito a "cotizar envío a
+        #     <new_city>" cuando el cliente pidió cambiar destino post-quote.
         #
-        # Si el cliente legítimamente quiere cambiar destino reabre con
-        # "cambia el envío a Medellín" (correction explícita, GAP-1).
+        # Side-effect cart-as-SoT (F0-3 / BUG-1) se ejecuta ANTES del
+        # dispatch porque es independiente del handler shipping_quote.
         _last_oc_consent = _last_outbound_was_consent_question(history or [])
         _last_oc_data_request = _last_outbound_was_data_collection_question(history or [])
-        # Rev. 90: el SKIP por "recolección activa" no debe bloquear cambios
-        # explícitos de ubicación de envío. Si el cliente claramente pide
-        # cambiar destino ("cambia el envío a Medellín"), permitir el flow
-        # de shipping aunque el último outbound haya sido consent/data.
         _explicit_location_change = _detect_shipping_location_change(
             content, history or []
         )
-        if (_last_oc_consent or _last_oc_data_request) and not _explicit_location_change:
-            shipping_result = type(
-                "_NoOp", (),
-                {"handled": False, "response_text": None, "requires_human": False},
-            )()
+        _skip_shipping = bool(
+            (_last_oc_consent or _last_oc_data_request)
+            and not _explicit_location_change
+        )
+        if _skip_shipping:
             logger.info(
                 "[SHIPPING_QUOTE][SKIP] last_oc_consent=%s last_oc_data=%s — recolección activa",
                 _last_oc_consent, _last_oc_data_request,
             )
-        else:
-            # Rev. 87: si el cliente pide cambiar ciudad post-cotización,
-            # reescribimos el query para que el shipping_quote_tool lo
-            # detecte como followup de cotización a la nueva ciudad.
-            # `_new_city` viene del detector (calculado arriba en
-            # `_explicit_location_change`).
-            _new_city = _explicit_location_change
-            _query_for_shipping = (
-                f"cotizar envío a {_new_city}"
-                if _new_city else content
+        _new_city = _explicit_location_change
+        _shipping_query_override: str | None = (
+            f"cotizar envío a {_new_city}" if _new_city else None
+        )
+        if _new_city:
+            logger.info(
+                "[SHIPPING_LOCATION_CHANGE] cliente cambió a %s — re-quote forzado",
+                _new_city,
             )
-            if _new_city:
-                logger.info(
-                    "[SHIPPING_LOCATION_CHANGE] cliente cambió a %s — re-quote forzado",
-                    _new_city,
+            try:
+                from tools.cart_tool import get_cart_with_items, set_shipping_city
+                _cart_for_city = get_cart_with_items(
+                    supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
                 )
-            shipping_result = await handle_shipping_quote_if_applicable(
-                supabase=supabase,
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                query_text=_query_for_shipping,
-            )
-        if shipping_result.handled:
-            if shipping_result.response_text:
-                # Si es la primera respuesta del bot en la conversación,
-                # prefijar saludo natural — el cliente abrió con "Hola" + pedido
-                # combinado y el tool determinístico no incluye saludo.
-                _resp_text = shipping_result.response_text
-                _outbound_count = sum(
-                    1 for m in (history or [])
-                    if str(m.get("direction") or "").lower() == "outbound"
-                    and str(m.get("content_type") or "text") != "context_snapshot"
-                )
-                if _outbound_count == 0:
-                    _first_name_greet = _extract_first_name(
-                        contact_record.get("name") if isinstance(contact_record, dict) else None
+                if _cart_for_city and _cart_for_city.get("id"):
+                    set_shipping_city(
+                        supabase,
+                        cart_id=_cart_for_city["id"],
+                        new_city=_new_city,
+                        tenant_id=tenant_id,
                     )
-                    _td_greet, _ = _co_time_of_day_greeting()
-                    if _first_name_greet:
-                        _greet = f"{_td_greet}, {_first_name_greet}. "
-                    else:
-                        _greet = f"{_td_greet}. "
-                    _resp_text = f"{_greet}\n\n{_resp_text}"
-                await _send_outbound_text(
-                    supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                    text=_resp_text,
+            except Exception as _city_exc:
+                logger.warning(
+                    "[SHIPPING_LOCATION_CHANGE] set_shipping_city falló: %s",
+                    _city_exc,
                 )
-            if shipping_result.requires_human:
-                _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
-            return
 
-        order_status_result = await handle_order_status_if_applicable(
+        from tools.inbound_dispatcher import build_inbound_dispatcher
+        from tools.dispatcher import ToolContext as _ToolContext
+        _dispatcher = build_inbound_dispatcher()
+        # `display_state` se resuelve más abajo con FSM — no relevante aquí.
+        _ds_for_dispatch = locals().get("display_state") or ""
+        _dispatch_ctx = _ToolContext(
             supabase=supabase,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
-            query_text=content,
+            contact_id=contact_id,
+            contact_record=contact_record or {},
+            content=content,
+            history=history or [],
+            catalog=[],
+            display_state=_ds_for_dispatch,
+            metadata={
+                "skip_shipping_quote": _skip_shipping,
+                "shipping_query_override": _shipping_query_override,
+            },
         )
-        if order_status_result.handled:
-            if order_status_result.response_text:
-                await _send_outbound_text(
-                    supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
-                    text=order_status_result.response_text,
+        _dispatch_result, _dispatch_name = await _dispatcher.dispatch(_dispatch_ctx)
+
+        if _dispatch_result.handled:
+            _tool_id = _dispatch_result.meta.get("tool", _dispatch_name or "")
+            if _tool_id == "image_send":
+                _img_link = _dispatch_result.meta.get("image_link")
+                _img_caption = _dispatch_result.meta.get("image_caption")
+                if _img_link:
+                    # Rev. 103 — enriquecer caption con conector cordial +
+                    # nombre del cliente si conocido (humaniza el envío).
+                    _enriched_caption = _enrich_image_caption(
+                        _img_caption or "",
+                        contact_record=contact_record,
+                        history=history,
+                    )
+                    # Rev. 104 — aplicar el mismo format pipeline que outbound
+                    # text (bullets canónicos, bold, strip `¡`/`¿`, etc.). Sin
+                    # esto los image captions iban bypass y mantenían signos
+                    # opening que rompían el estilo casual colombiano.
+                    _enriched_caption = _format_whatsapp_response_text(
+                        _enriched_caption
+                    )
+                    _meta_id = await send_whatsapp_message(
+                        tenant_id=tenant_id,
+                        supabase=supabase,
+                        to_phone=customer_phone_raw or "",
+                        image_link=_img_link,
+                        image_caption=_enriched_caption,
+                    )
+                    try:
+                        supabase.table("messages").insert({
+                            "conversation_id": conversation_id,
+                            "tenant_id": tenant_id,
+                            "direction": "outbound",
+                            "content_type": "image",
+                            "content": _enriched_caption or "",
+                            "media_url": _img_link,
+                            "meta_message_id": _meta_id,
+                            "processed": True,
+                            "processing_status": "processed",
+                        }).execute()
+                    except Exception as exc:
+                        logger.warning("[IMAGE_SEND] persist outbound falló: %s", exc)
+                    logger.info(
+                        "[IMAGE_SEND] foto enviada conv=%s link=%s",
+                        conversation_id, _img_link,
+                    )
+                elif _dispatch_result.response_text:
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_dispatch_result.response_text,
+                    )
+            elif _tool_id == "shipping_quote":
+                if _dispatch_result.response_text:
+                    # Si es la primera respuesta del bot, prefijar saludo
+                    # natural — el cliente abrió con "Hola" + pedido combinado
+                    # y el tool determinístico no incluye saludo.
+                    _resp_text = _dispatch_result.response_text
+                    _outbound_count = sum(
+                        1 for m in (history or [])
+                        if str(m.get("direction") or "").lower() == "outbound"
+                        and str(m.get("content_type") or "text") != "context_snapshot"
+                    )
+                    if _outbound_count == 0:
+                        _first_name_greet = _extract_first_name(
+                            contact_record.get("name") if isinstance(contact_record, dict) else None
+                        )
+                        _td_greet, _ = _co_time_of_day_greeting()
+                        _greet = (
+                            f"{_td_greet}, {_first_name_greet}. "
+                            if _first_name_greet else f"{_td_greet}. "
+                        )
+                        _resp_text = f"{_greet}\n\n{_resp_text}"
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_resp_text,
+                    )
+            else:  # order_status u otros futuros con send_text simple
+                if _dispatch_result.response_text:
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_dispatch_result.response_text,
+                    )
+            if _dispatch_result.requires_human:
+                _set_conversation_status(
+                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER,
                 )
-            if order_status_result.requires_human:
-                _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(
+                supabase, message_id,
+                processing_status=PROCESSING_STATUS_PROCESSED,
+            )
             return
 
         # ── 2. Obtener catálogo, RAG KB y Config. AI (paralelo; historial ya cargado) ──
@@ -6957,40 +8086,645 @@ async def build_and_run_orchestration(
                     items=_recovered_items,
                 )
 
+        # ADR-0011 §6.4.4 — Tier-2 add_item intent detection (Plan A.0.3).
+        # ANTES del flujo qty_change y add_item normales, intentar
+        # resolver intent de add_item con clasificación granular:
+        #   • resolved          → continúa al flow add_item normal abajo.
+        #   • product_ambiguous → outbound determinístico con candidatos.
+        #   • variant_ambiguous → outbound determinístico con presentaciones.
+        #   • no_intent / no_product → continúa flow normal (qty_change /
+        #     bypass / LLM).
+        #
+        # Caso runtime motivador (manual UAT 2026-05-05 conv 59bab7cc):
+        #   "Puedo adicionar otro jabon? Deseo 1 de lavanda" → cliente
+        #   quería Jabón Lavanda pero no especificó variante. Bot ANTES:
+        #   emitía resumen viejo o alucinaba "no tenemos Lavanda". AHORA:
+        #   tier 2 detecta variant_ambiguous para Jabón Lavanda y emite
+        #   "*Jabón Artesanal de Lavanda* lo tenemos en: 60g, 100g, 150g.
+        #   ¿Cuál presentación?" — determinístico, sin alucinación LLM.
+        try:
+            # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT:
+            # Pre-filtrar catalog por categoría declarada en contexto reciente
+            # (capas A+B). Si el cliente/bot encuadraron "jabones" en turnos
+            # previos, el detector tier-2 solo evalúa jabones, evitando que
+            # "coco" matchee Aceite Coco + Jabón Coco como ambiguo.
+            _category_token = _extract_category_token_from_recent_context(
+                history or [], catalog or [],
+            )
+            _eff_catalog = _filter_catalog_by_category_token(
+                catalog or [], _category_token,
+            )
+            if _category_token and len(_eff_catalog) != len(catalog or []):
+                logger.info(
+                    "[TIER2] category-lock '%s' aplicado: catalog %d → %d productos (conv=%s)",
+                    _category_token, len(catalog or []), len(_eff_catalog),
+                    conversation_id[:8],
+                )
+            _tier2 = _detect_add_item_intent_with_resolution(content, _eff_catalog)
+            _resolution = _tier2.get("resolution")
+            if _resolution == "product_ambiguous":
+                _cands = _tier2.get("candidates") or []
+                _lines = [
+                    f"Tenemos varios productos relacionados:"
+                ]
+                for c in _cands[:5]:
+                    _lines.append(f"* *{c['title']}*")
+                _lines.append("")
+                _lines.append("¿Cuál te gustaría llevar?")
+                _ambig_text = "\n".join(_lines)
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=_ambig_text,
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+                logger.info(
+                    "[TIER2] product_ambiguous (%d candidatos) — outbound "
+                    "determinístico conv=%s",
+                    len(_cands), conversation_id[:8],
+                )
+                return
+            if _resolution == "resolved_multi":
+                # Sem 7 F2 cierre 2026-05-19 — Bug 2 founder UAT (refinado).
+                # Cliente declaró N productos con variantes explícitas en un
+                # solo inbound (ej. "1 de Coco 100g y 1 de Lavanda 150g").
+                # Tier-2 ya resolvió todos los matches deterministically.
+                #
+                # Bug 2.1 (UAT 2026-05-19 conv ee6cc665): "dejar que el flow
+                # normal arme el resumen" producía DOBLE add_item porque
+                # `_detect_variant_confirmation` posterior re-procesaba el
+                # mismo inbound. Resultado: qty duplicado en cart.
+                #
+                # Fix: persistir + emitir resumen determinístico + RETURN
+                # explícito (mismo patrón que product_ambiguous y
+                # variant_ambiguous).
+                _matches_multi = _tier2.get("matches") or []
+                if _matches_multi:
+                    try:
+                        from tools.cart_tool import (
+                            add_item as _add_item_multi,
+                            ensure_cart as _ensure_cart_multi,
+                            get_cart_with_items as _get_cart_multi,
+                        )
+                        _cart_multi = _ensure_cart_multi(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            contact_id=contact_id,
+                        )
+                        for _m in _matches_multi:
+                            _add_item_multi(
+                                supabase,
+                                cart_id=_cart_multi["id"],
+                                tenant_id=tenant_id,
+                                product_id=_m["product_id"],
+                                variation_id=_m["variation_id"],
+                                quantity=int(_m["quantity"]),
+                                unit_price_cents=int(_m["unit_price_cents"]),
+                            )
+                            logger.info(
+                                "[TIER2][RESOLVED_MULTI] add_item %s × %d (cart=%s conv=%s)",
+                                _m["title"], _m["quantity"],
+                                _cart_multi["id"][:8], conversation_id[:8],
+                            )
+
+                        # Resumen determinístico del cart actualizado
+                        # (lee cart-as-SoT, NO history-parsing).
+                        _cart_after = _get_cart_multi(
+                            supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                        )
+                        _items_after = (_cart_after or {}).get("items") or []
+                        _lines = ["Listo, agregué a tu carrito:"]
+                        for _m in _matches_multi:
+                            _price_fmt = (
+                                f"${int(_m['unit_price_cents'] / 100):,}".replace(",", ".")
+                            )
+                            _label = _m.get("variant_label") or ""
+                            _label_str = f" ({_label})" if _label else ""
+                            _lines.append(
+                                f"* {_m['quantity']}x *{_m['title']}{_label_str}*: "
+                                f"*{_price_fmt}*"
+                            )
+                        if _items_after and len(_items_after) > len(_matches_multi):
+                            # Hay items previos en el cart — mostrar resumen total.
+                            _subtotal_cents = sum(
+                                int(it.get("subtotal_cents") or 0) for it in _items_after
+                            )
+                            _subtotal_fmt = (
+                                f"${int(_subtotal_cents / 100):,}".replace(",", ".")
+                            )
+                            _lines.append("")
+                            _lines.append(f"Subtotal: *{_subtotal_fmt}*")
+                        _lines.append("")
+                        _lines.append(
+                            "¿Quieres agregar algo más, cotizar envío o avanzar al pedido?"
+                        )
+                        _resumen_text = "\n".join(_lines)
+                        await _send_outbound_text(
+                            supabase=supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            text=_resumen_text,
+                        )
+                        _mark_message_processing(
+                            supabase, message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        logger.info(
+                            "[TIER2] resolved_multi N=%d items añadidos + resumen "
+                            "emitido — conv=%s",
+                            len(_matches_multi), conversation_id[:8],
+                        )
+                        return
+                    except Exception as _rm_exc:
+                        logger.warning(
+                            "[TIER2][RESOLVED_MULTI] persist+emit falló: %s",
+                            _rm_exc,
+                        )
+                        # Si falla, NO retornamos — dejamos que el flow
+                        # tradicional intente recuperar (degrade gracefully).
+            if _resolution == "variant_ambiguous":
+                _cands = _tier2.get("candidates") or []
+                if _cands:
+                    _c0 = _cands[0]
+                    _vars = _c0.get("variants") or []
+                    _opt_lines: list[str] = []
+                    for v in _vars:
+                        label = v.get("label") or ""
+                        price = float(v.get("price") or 0)
+                        if label and price > 0:
+                            _opt_lines.append(
+                                f"* {label} por *${int(price):,}*".replace(",", ".")
+                            )
+                    if _opt_lines:
+                        _ask_text = (
+                            f"*{_c0['title']}* lo tenemos en:\n"
+                            + "\n".join(_opt_lines)
+                            + "\n\n¿Cuál presentación y cuántas unidades te gustaría llevar?"
+                        )
+                        await _send_outbound_text(
+                            supabase=supabase,
+                            conversation_id=conversation_id,
+                            tenant_id=tenant_id,
+                            text=_ask_text,
+                        )
+                        _mark_message_processing(
+                            supabase, message_id,
+                            processing_status=PROCESSING_STATUS_PROCESSED,
+                        )
+                        logger.info(
+                            "[TIER2] variant_ambiguous (%s) — outbound "
+                            "determinístico conv=%s",
+                            _c0["title"], conversation_id[:8],
+                        )
+                        return
+            # resolved / no_intent / no_product → continúa flow normal.
+        except Exception as _t2_exc:
+            logger.warning(
+                "[TIER2] detector falló (no bloquea): %s", _t2_exc,
+            )
+
+        # ADR-0011 §6.4.3 — qty-change intent (Plan A.0.1, cart-as-SoT).
+        # Antes del flujo de add_item normal, detectar si el cliente quiere
+        # CAMBIAR la cantidad de un item ya en el cart ("que sean 2 de
+        # lavanda", "en vez de 1 sean 2", "actualizar...sean N"). Sin este
+        # hook, esos patterns caían a:
+        #   • detector multi-product → emitía propuestas duplicadas o nada,
+        #   • bypass READY_FOR_SUMMARY → emitía resumen sin cambiar qty,
+        # y el cliente se frustraba repitiendo la intención.
+        try:
+            from tools.cart_tool import (
+                get_cart_with_items as _get_cart_qty,
+                update_item_quantity as _update_qty_tool,
+            )
+            _cart_for_qty = _get_cart_qty(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            )
+            _cart_items_qty = (_cart_for_qty or {}).get("items") or []
+            if _cart_items_qty:
+                _qty_items_with_titles = [{
+                    "variation_id": it.get("variation_id"),
+                    "product_id": it.get("product_id"),
+                    "title": (it.get("product") or {}).get("title")
+                             or (it.get("product") or {}).get("name")
+                             or "Producto",
+                    "quantity": int(it.get("quantity") or 1),
+                    "unit_price_cents": int(it.get("unit_price_cents") or 0),
+                } for it in _cart_items_qty]
+                _qty_change = _detect_qty_change_intent(
+                    content, _qty_items_with_titles,
+                )
+                if _qty_change and not _qty_change.get("ambiguous"):
+                    _new_qty = int(_qty_change["new_qty"])
+                    _current_qty = int(_qty_change.get("current_qty") or 1)
+                    if _new_qty != _current_qty:
+                        # Ejecuta el cambio.
+                        _qty_payload = _update_qty_tool(
+                            supabase,
+                            cart_id=_cart_for_qty["id"],
+                            tenant_id=tenant_id,
+                            product_id=_qty_change["product_id"],
+                            variation_id=_qty_change["variation_id"],
+                            new_quantity=_new_qty,
+                            unit_price_cents=int(_qty_change["unit_price_cents"]),
+                        )
+                        logger.info(
+                            "[CART][QTY_CHANGE] %s: %d → %d (cart=%s conv=%s)",
+                            _qty_change["title"], _current_qty, _new_qty,
+                            _cart_for_qty["id"][:8], conversation_id[:8],
+                        )
+
+                        # Recotización lazy + resumen unificado (mismo path
+                        # que el add_item invalidante). update_item_quantity
+                        # ya marcó requires_requote=True.
+                        try:
+                            await _persist_cart_shipping_if_needed(
+                                supabase=supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                history=history_for_prompt,
+                            )
+                        except Exception as _qe:
+                            logger.warning(
+                                "[CART][QTY_CHANGE] sync shipping falló: %s", _qe,
+                            )
+
+                        # Si update_item_quantity invalidó orden, emitir
+                        # resumen unificado con prefijo. Sino, solo resumen.
+                        _qty_inv = (_qty_payload or {}).get("order_invalidated") if isinstance(_qty_payload, dict) else None
+                        try:
+                            _cart_post_qty = _get_cart_qty(
+                                supabase, conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                            )
+                            _vctx_qty = (
+                                _verified_ctx_from_cart(_cart_post_qty)
+                                if _cart_post_qty else None
+                            )
+                            if _vctx_qty and int(_vctx_qty.get("total_cents") or 0) > 0:
+                                _summary_qty = _build_order_summary_text(
+                                    contact_record=contact_record,
+                                    verified_ctx=_vctx_qty,
+                                    catalog=catalog,
+                                    history=history,
+                                    cart_from_db=_cart_post_qty,
+                                    supabase=supabase,
+                                    tenant_id=tenant_id,
+                                )
+                                if _summary_qty:
+                                    if _qty_inv:
+                                        _short_q = str(_qty_inv.get("order_id") or "")[:8].upper()
+                                        _prefix = (
+                                            f"Listo, actualicé tu carrito. "
+                                            f"El link de pago anterior "
+                                            f"(*#{_short_q}*) ya no es válido.\n\n"
+                                        )
+                                    else:
+                                        _prefix = "Listo, actualicé tu carrito.\n\n"
+                                    _unified_qty = _prefix + _summary_qty
+                                    await _send_outbound_text(
+                                        supabase=supabase,
+                                        conversation_id=conversation_id,
+                                        tenant_id=tenant_id,
+                                        text=_unified_qty,
+                                    )
+                                    _emit_summary_rendered_event(
+                                        supabase,
+                                        conversation_id=conversation_id,
+                                        tenant_id=tenant_id,
+                                        summary_text=_unified_qty,
+                                    )
+                                    _mark_message_processing(
+                                        supabase, message_id,
+                                        processing_status=PROCESSING_STATUS_PROCESSED,
+                                    )
+                                    return
+                        except Exception as _qsexc:
+                            logger.warning(
+                                "[CART][QTY_CHANGE] resumen unificado falló: %s",
+                                _qsexc,
+                            )
+                elif _qty_change and _qty_change.get("ambiguous"):
+                    # Ambiguo: pedir clarificación.
+                    _cands = _qty_change.get("candidates") or []
+                    _cand_lines = "\n".join(f"* {c}" for c in _cands)
+                    _ambig_text = (
+                        f"Tienes varios productos en el carrito. ¿De cuál "
+                        f"quieres que sean *{_qty_change['new_qty']}*?\n\n"
+                        f"{_cand_lines}"
+                    )
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_ambig_text,
+                    )
+                    _mark_message_processing(
+                        supabase, message_id,
+                        processing_status=PROCESSING_STATUS_PROCESSED,
+                    )
+                    logger.info(
+                        "[CART][QTY_CHANGE] ambiguous (%d candidates) — pidiendo clarificación conv=%s",
+                        len(_cands), conversation_id[:8],
+                    )
+                    return
+        except Exception as _qty_exc:
+            logger.warning(
+                "[CART][QTY_CHANGE] detector falló (no bloquea): %s", _qty_exc,
+            )
+
         # Rev. 103 — Cart-as-SoT: detectar confirmación de variante
         # determinísticamente y persistir AL CART en el momento exacto en
         # que el cliente eligió. Antes el cart se inferia tarde (en
         # READY_FOR_SUMMARY) leyendo del history truncado → producto
         # alucinado. Ahora el cart es la fuente de verdad turn-by-turn.
         # El Inbox del Tenant Console (F-Inbox-1) leerá del cart real.
+        # Sem 7 F2 cierre 2026-05-21 — flag turn-by-turn para invariante
+        # anti-alucinación cart-add (orchestrator.py:~9820). Se setea a
+        # True si CUALQUIER `cart_tool.add_item` corre exitosamente durante
+        # este turn. Si LLM dice "Listo, 1x ... (60g) por $X" pero este
+        # flag es False, REWRITE para pedir variante en lugar de mentir.
+        _cart_add_executed_this_turn = False
         try:
+            # Rev. 104 — Detector de variantes con propuestas (Plan A.3).
+            #   Camino A: bot presentó opciones → cliente elige una variante.
+            #   Camino B: cliente da producto+variante en un solo mensaje.
+            #   Camino C (nuevo): cliente declara qty con variante ambigua →
+            #     emitimos `cart_event(item_proposed)` para preservar la qty
+            #     hasta que se resuelva la variante. Cuando Camino A
+            #     resuelve la variante, elevamos la qty desde la propuesta.
+            # Sem 7 F2 cierre — `_detect_variant_confirmation` ahora retorna
+            # `list[dict]` (puede ser vacía, 1 elemento, o N) para soportar
+            # multi-variant input ("1 de 100ml y 1 de 250ml" → 2 items).
             _variant_confirmed = _detect_variant_confirmation(
                 content, history_for_prompt, catalog or [],
             )
-            if _variant_confirmed:
-                from tools.cart_tool import ensure_cart, add_item
-                _cart = ensure_cart(
-                    supabase,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    contact_id=contact_id,
+            _multi_explicit: list[dict] = []
+            _proposals: list[dict] = []
+            if not _variant_confirmed:
+                # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv febcec09):
+                # Catalog FULL produce false positives multi-categoría.
+                # Caso runtime: cliente dijo "1 Jabón Coco y 2 Lavanda" tras
+                # ver listado de jabones → detector hizo 5 propuestas
+                # (incluyó Aceite de Coco Virgen + Avena/Menta por overlap
+                # de "jabon" + "artesanal"). Fix: filtrar catalog por
+                # categoría reciente (mismo helper que tier-2 ya usa) ANTES
+                # del detector explícito.
+                _category_token_pre = _extract_category_token_from_recent_context(
+                    history_for_prompt or [], catalog or [],
                 )
-                add_item(
+                _eff_catalog_pre = _filter_catalog_by_category_token(
+                    catalog or [], _category_token_pre,
+                )
+                _multi_explicit, _proposals = _detect_explicit_products_in_inbound(
+                    content, _eff_catalog_pre,
+                )
+
+            from tools.cart_tool import ensure_cart, add_item
+            from cart.events import (
+                emit_item_proposal,
+                find_unresolved_proposal,
+                emit_proposal_resolved,
+            )
+
+            # Cart se asegura sólo si hay algo que persistir (item o propuesta).
+            _cart_handle: Optional[dict] = None
+            def _get_cart() -> dict:
+                nonlocal _cart_handle
+                if _cart_handle is None:
+                    _cart_handle = ensure_cart(
+                        supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        contact_id=contact_id,
+                    )
+                return _cart_handle
+
+            # Camino C: emitir propuestas para productos sin variante resuelta
+            # cuando el cliente declaró qty>=2.
+            for _prop in _proposals:
+                _cart_for_prop = _get_cart()
+                emit_item_proposal(
                     supabase,
-                    cart_id=_cart["id"],
+                    cart_id=_cart_for_prop["id"],
                     tenant_id=tenant_id,
-                    product_id=_variant_confirmed["product_id"],
-                    variation_id=_variant_confirmed["variation_id"],
-                    quantity=_variant_confirmed["quantity"],
-                    unit_price_cents=_variant_confirmed["unit_price_cents"],
+                    product_id=_prop["product_id"],
+                    title=_prop["title"],
+                    quantity=_prop["quantity"],
                 )
                 logger.info(
-                    "[CART][VARIANT_CONFIRMED] %dx %s (%s) → cart=%s conv=%s",
-                    _variant_confirmed["quantity"],
-                    _variant_confirmed["title"],
-                    _variant_confirmed.get("variant_label") or "default",
-                    _cart["id"][:8], conversation_id[:8],
+                    "[CART][PROPOSAL] %dx %s (variante pendiente) → cart=%s conv=%s",
+                    _prop["quantity"], _prop["title"],
+                    _cart_for_prop["id"][:8], conversation_id[:8],
                 )
+
+            # Items a persistir + reconciliación con propuestas pendientes.
+            # Sem 7 F2 cierre: `_variant_confirmed` ahora es lista (no
+            # single dict), soporta multi-variant input directamente.
+            _items_to_add = (
+                _variant_confirmed if _variant_confirmed
+                else _multi_explicit
+            )
+            # Sem 7 F2 cierre — fix arquitectónico Bug A multi-variant.
+            # Antes: el `return` dentro del for loop (post emisión resumen
+            # unificado) terminaba prematuramente sin procesar items restantes.
+            # Resultado: "1 de 100ml y 1 de 250ml" solo agregaba el 100ml.
+            # Fix: el for SOLO persiste items + acumula `_invalidation_info`.
+            # Después del loop, UNA emisión de resumen unificado con cart final.
+            _invalidation_info: Optional[dict] = None
+            if _items_to_add:
+                _cart = _get_cart()
+                for _item in _items_to_add:
+                    # Si el inbound NO declaró qty explícita (default 1) y
+                    # existe una propuesta unresolved para este producto,
+                    # adoptar su qty (preserva intención del cliente declarada
+                    # turnos atrás).
+                    _proposal = None
+                    if int(_item.get("quantity") or 1) <= 1:
+                        _proposal = find_unresolved_proposal(
+                            supabase,
+                            cart_id=_cart["id"],
+                            product_id=_item["product_id"],
+                        )
+                        if _proposal and int(_proposal.get("quantity") or 1) >= 2:
+                            _item["quantity"] = int(_proposal["quantity"])
+                            logger.info(
+                                "[CART][PROPOSAL_RESOLVED] qty=%d desde propuesta "
+                                "para %s (cart=%s)",
+                                _item["quantity"], _item["title"],
+                                _cart["id"][:8],
+                            )
+                    _add_payload = add_item(
+                        supabase,
+                        cart_id=_cart["id"],
+                        tenant_id=tenant_id,
+                        product_id=_item["product_id"],
+                        variation_id=_item["variation_id"],
+                        quantity=_item["quantity"],
+                        unit_price_cents=_item["unit_price_cents"],
+                    )
+                    # Sem 7 F2 cierre 2026-05-21 — flag para anti-hallu cart-add.
+                    _cart_add_executed_this_turn = True
+                    logger.info(
+                        "[CART][VARIANT_CONFIRMED] %dx %s (%s) → cart=%s conv=%s",
+                        _item["quantity"], _item["title"],
+                        _item.get("variant_label") or "default",
+                        _cart["id"][:8], conversation_id[:8],
+                    )
+                    # ADR-0011 §6.4.1 — recotización lazy INMEDIATA tras
+                    # add_item invalidante. Sin esto, el resumen que el LLM
+                    # construye después en este mismo turn lee shipping del
+                    # cart (=0 por invalidate_shipping) y cae a heurística
+                    # de history-parsing → muestra shipping stale.
+                    # Caso runtime motivador 2026-05-05 (manual UAT):
+                    # cart Coco+Sérum recotizado a $11.570; tras agregar
+                    # Lavanda 100g (peso/dims +106%), el resumen final
+                    # mantuvo $11.570 stale en lugar de recotizar.
+                    # El guard genérico de _persist_cart_shipping_if_needed
+                    # (que depende de buying_intent + carrier_selected) no
+                    # se cumple post add_item porque el FSM degrada a
+                    # CATALOG_MODE / buying_intent=False mientras el LLM
+                    # procesa la nueva variante.
+                    if isinstance(_add_payload, dict) and bool(
+                        _add_payload.get("order_invalidated")
+                        or _add_payload.get("requires_requote", True)
+                    ):
+                        try:
+                            await _persist_cart_shipping_if_needed(
+                                supabase=supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                history=history_for_prompt,
+                            )
+                        except Exception as _sync_exc:
+                            logger.warning(
+                                "[CART_SYNC] post add_item lazy requote falló: %s",
+                                _sync_exc,
+                            )
+
+                    # Sem 7 F2 cierre — solo acumular info de invalidación.
+                    # NO emitir outbound aquí (eso bloquearía items restantes
+                    # del multi-variant input). Se emitirá DESPUÉS del loop
+                    # con el cart final que tiene TODOS los items.
+                    if isinstance(_add_payload, dict) and _add_payload.get("order_invalidated"):
+                        _invalidation_info = _add_payload["order_invalidated"]
+                    # Cierre de la propuesta (si la consumimos arriba).
+                    if _proposal and _proposal.get("event_id"):
+                        emit_proposal_resolved(
+                            supabase,
+                            cart_id=_cart["id"],
+                            tenant_id=tenant_id,
+                            proposed_event_id=_proposal["event_id"],
+                            variation_id=_item["variation_id"],
+                            final_quantity=int(_item["quantity"]),
+                        )
+                if len(_items_to_add) > 1:
+                    logger.info(
+                        "[CART][MULTI_PRODUCT] %d items distintos detectados conv=%s",
+                        len(_items_to_add), conversation_id[:8],
+                    )
+
+            # Sem 7 F2 cierre — Plan A.0.1 / ADR-0011 §6.4.2: emitir resumen
+            # unificado UNA VEZ después del loop con el cart final que ya
+            # tiene TODOS los items procesados. Antes esto vivía dentro del
+            # for y hacía `return` prematuro al primer item invalidante,
+            # bloqueando items restantes del multi-variant input.
+            if _invalidation_info:
+                _short_id = str(_invalidation_info.get("order_id") or "")[:8].upper()
+                _unified_emitted = False
+                try:
+                    from tools.cart_tool import get_cart_with_items as _get_cart_post
+                    _cart_post = _get_cart_post(
+                        supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                    )
+                    _vctx_post = (
+                        _verified_ctx_from_cart(_cart_post)
+                        if _cart_post else None
+                    )
+                    if _vctx_post and int(_vctx_post.get("total_cents") or 0) > 0:
+                        _summary_post = _build_order_summary_text(
+                            contact_record=contact_record,
+                            verified_ctx=_vctx_post,
+                            catalog=catalog,
+                            history=history,
+                            cart_from_db=_cart_post,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
+                        )
+                        if _summary_post:
+                            _prefix = (
+                                f"Listo, actualicé tu carrito. "
+                                f"El link de pago anterior "
+                                f"(*#{_short_id}*) ya no es válido.\n\n"
+                            )
+                            _unified_text = _prefix + _summary_post
+                            await _send_outbound_text(
+                                supabase=supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                text=_unified_text,
+                            )
+                            _emit_summary_rendered_event(
+                                supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                summary_text=_unified_text,
+                            )
+                            _mark_message_processing(
+                                supabase, message_id,
+                                processing_status=PROCESSING_STATUS_PROCESSED,
+                            )
+                            logger.info(
+                                "[CART_INVALIDATE] resumen unificado emitido "
+                                "conv=%s order=%s shipping=%s items=%d",
+                                conversation_id, _short_id,
+                                _vctx_post.get("shipping_cost_cents"),
+                                len(_items_to_add or []),
+                            )
+                            _unified_emitted = True
+                except Exception as _unified_exc:
+                    logger.warning(
+                        "[CART_INVALIDATE] resumen unificado falló: %s "
+                        "— fallback a notice + LLM resumen",
+                        _unified_exc,
+                    )
+
+                if _unified_emitted:
+                    return
+
+                # Fallback (no se pudo construir resumen unificado):
+                # emitir notice básico y dejar que el flujo normal del LLM
+                # construya su respuesta.
+                _notice = (
+                    f"Actualicé tu carrito. El link de pago anterior "
+                    f"(*#{_short_id}*) ya no es válido. Cuando confirmes "
+                    f"el resumen, *recotizo el envío* con los productos "
+                    f"actualizados y te genero un link nuevo."
+                )
+                try:
+                    await _send_outbound_text(
+                        supabase=supabase,
+                        conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                        text=_notice,
+                    )
+                    logger.info(
+                        "[CART_INVALIDATE] fallback notice conv=%s order=%s",
+                        conversation_id, _short_id,
+                    )
+                except Exception as _notice_exc:
+                    logger.warning(
+                        "[CART_INVALIDATE] notice fallback falló: %s",
+                        _notice_exc,
+                    )
         except Exception as _vc_exc:
             logger.warning(
                 "[CART] Variant confirmation persistence falló conv=%s: %s",
@@ -7043,12 +8777,52 @@ async def build_and_run_orchestration(
             buying_intent
             and (_has_carrier_been_selected(history_for_fsm) or _carrier_selected_db)
         ):
-            _persist_cart_shipping_if_needed(
+            await _persist_cart_shipping_if_needed(
                 supabase=supabase,
                 conversation_id=conversation_id,
                 tenant_id=tenant_id,
                 history=history_for_fsm,
             )
+
+        # Sem 7 F2 cierre — Sólo una noción de "shipping resuelto" / "carrier
+        # elegido", computada desde TODAS las fuentes de verdad coherentemente:
+        #   1. History reciente (`shipping_quoted` de _has_shipping_quoted_in_conversation).
+        #   2. DB carrier_selected_db (carrier persistido en cart).
+        #   3. DB orders.pending_payment — si existe orden creada con
+        #      shipping_cost > 0, AMBAS condiciones (shipping_quoted +
+        #      carrier_selected) son TRUE por definición: la orden no se
+        #      pudo crear sin esos pasos.
+        # Caso runtime descubierto: cliente conocido retoma orden pendiente
+        # ("Tengo carrito pendiente?"). History nuevo no muestra cotización
+        # pero la orden DB ya la tiene → FSM caía en NEEDS_SHIPPING_CITY,
+        # bypass payment_link no disparaba, LLM alucinaba "te genero el link".
+        # Rev. 107 fix: la columna canónica de orders es `shipping_cost`
+        # (DECIMAL), no `shipping_amount`. Bug silente del legacy que
+        # devolvía HTTP 400 sin afectar UX pero impedía esta verificación.
+        if contact_id and not (shipping_quoted and _carrier_selected_db):
+            try:
+                _po_check = (
+                    supabase.table("orders")
+                    .select("id, shipping_cost, status")
+                    .eq("tenant_id", tenant_id)
+                    .eq("contact_id", contact_id)
+                    .eq("conversation_id", conversation_id)
+                    .eq("status", "pending_payment")
+                    .gt("shipping_cost", 0)
+                    .limit(1)
+                    .execute()
+                )
+                if _po_check.data:
+                    if not shipping_quoted:
+                        shipping_quoted = True
+                    if not _carrier_selected_db:
+                        _carrier_selected_db = True
+            except Exception as _po_exc:
+                logger.debug(
+                    "[FSM] order DB lookup como fuente de verdad shipping/carrier "
+                    "falló conv=%s: %s",
+                    conversation_id, _po_exc,
+                )
 
         display_state = _resolve_display_state(
             contact_record=contact_record,
@@ -7168,10 +8942,88 @@ async def build_and_run_orchestration(
             and _aff
             and _last_oc
         ):
-            verified_ctx_bypass = (
-                _build_verified_multi_product_context(catalog, history_for_bypass)
-                or _build_verified_order_context(catalog, history_for_bypass)
-            )
+            # Rev. 104 — Cart-as-SoT primero (Plan A.0.1: cart es SoT
+            # transaccional). Antes el bypass usaba `_build_verified_*_context`
+            # que leen del history del LLM → en multi-producto sin mención
+            # explícita en T-1, el ctx terminaba con SOLO 1 item, y la orden
+            # se creaba con monto erróneo (caso runtime conv c8e07eff:
+            # cart real 2×Coco+1×Sérum=$132.570 pero orden creada con 1×Coco=$29.570).
+            verified_ctx_bypass = None
+            _requote_info: Optional[dict] = None
+            try:
+                from tools.cart_tool import get_cart_with_items as _get_cart_bp, set_shipping_meta as _set_meta_bp
+                _cart_bp = _get_cart_bp(
+                    supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                )
+                if _cart_bp and (_cart_bp.get("items") or []):
+                    # ADR-0011 §6.5 — recotización lazy. Si el cart tiene
+                    # `requires_requote=true` (típicamente por add_item /
+                    # remove_item con orden previa invalidada), intentar
+                    # recotizar contra Envia con peso/dims actualizados ANTES
+                    # de generar el resumen+link. Mantiene el invariante:
+                    # "el link Wompi nunca refleja shipping stale".
+                    if _cart_bp.get("requires_requote"):
+                        try:
+                            from tools.shipping_quote_tool import requote_shipping_for_cart as _requote_lazy
+                            _requote_info = await _requote_lazy(
+                                supabase,
+                                tenant_id=tenant_id,
+                                conversation_id=conversation_id,
+                            )
+                            if _requote_info and _requote_info.get("shipping_cents", 0) > 0:
+                                _set_meta_bp(
+                                    supabase,
+                                    cart_id=_cart_bp["id"],
+                                    tenant_id=tenant_id,
+                                    carrier=_requote_info["carrier_name"],
+                                    service_level=_requote_info["service_level"],
+                                    shipping_cents=int(_requote_info["shipping_cents"]),
+                                )
+                                # Re-leer cart con shipping recotizado persistido.
+                                _cart_bp = _get_cart_bp(
+                                    supabase,
+                                    conversation_id=conversation_id,
+                                    tenant_id=tenant_id,
+                                )
+                                logger.info(
+                                    "[BYPASS] recotización lazy aplicada conv=%s "
+                                    "shipping=%s carrier=%s",
+                                    conversation_id, _requote_info["shipping_cents"],
+                                    _requote_info["carrier_name"],
+                                )
+                        except Exception as _rq_exc:
+                            logger.warning(
+                                "[BYPASS] recotización lazy falló conv=%s: %s "
+                                "— fallback a history-parsing (puede ser stale)",
+                                conversation_id, _rq_exc,
+                            )
+
+                    verified_ctx_bypass = _verified_ctx_from_cart(_cart_bp)
+                    # Si recotización falló y cart sigue requires_requote → fallback history.
+                    if verified_ctx_bypass and not verified_ctx_bypass.get("shipping_cost_cents"):
+                        _ship_hist = _extract_shipping_cost_from_history(
+                            history_for_bypass
+                        ) or 0
+                        if _ship_hist > 0:
+                            verified_ctx_bypass["shipping_cost_cents"] = _ship_hist
+                            verified_ctx_bypass["total_cents"] = (
+                                int(verified_ctx_bypass.get("subtotal_cents") or 0)
+                                + _ship_hist
+                            )
+            except Exception as _bp_cart_exc:
+                logger.warning(
+                    "[BYPASS] cart-as-SoT lookup falló: %s", _bp_cart_exc,
+                )
+            # Fallback defensivo (sólo si cart vacío) — usa history-parsing.
+            if not verified_ctx_bypass:
+                logger.warning(
+                    "[BYPASS] cart vacío → fallback history-parsing (puede alucinar) conv=%s",
+                    conversation_id,
+                )
+                verified_ctx_bypass = (
+                    _build_verified_multi_product_context(catalog, history_for_bypass)
+                    or _build_verified_order_context(catalog, history_for_bypass)
+                )
             if verified_ctx_bypass and verified_ctx_bypass.get("total_cents", 0) > 0:
                 pl_result = await handle_payment_link_if_applicable(
                     tenant_id=tenant_id,
@@ -7185,6 +9037,37 @@ async def build_and_run_orchestration(
                     verified_ctx=verified_ctx_bypass,
                 )
                 if pl_result and pl_result.response_text:
+                    # Rev. 104 (F1-5 mandatory) — GATE: si el último outbound
+                    # NO fue un resumen, EMITIR resumen primero y POSPONER el
+                    # link. El cliente confirmará el resumen y en el siguiente
+                    # turn se dispara el link real. Sin este gate el
+                    # OutputValidator BLOQUEA el send (defensa en profundidad).
+                    if not _last_outbound_was_summary(history or []):
+                        _summary_text = _build_order_summary_text(
+                            contact_record=contact_record,
+                            verified_ctx=verified_ctx_bypass,
+                            catalog=catalog,
+                            history=history,
+                            cart_from_db=None,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
+                        )
+                        if _summary_text:
+                            await _send_outbound_text(
+                                supabase=supabase,
+                                conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                                text=_summary_text,
+                            )
+                            _mark_message_processing(
+                                supabase, message_id,
+                                processing_status=PROCESSING_STATUS_PROCESSED,
+                            )
+                            logger.info(
+                                "[ORCH][BYPASS] resumen mandatorio emitido antes del link conv=%s",
+                                conversation_id,
+                            )
+                            return
                     await _send_outbound_text(
                         supabase=supabase,
                         conversation_id=conversation_id,
@@ -7218,21 +9101,150 @@ async def build_and_run_orchestration(
         #     LLM de extracted_shipping_phone — caso S12 known T6 "3223840887"
         #     respondiendo a "¿Cuál es tu número alterno?").
         #   • inbound NO contiene email/document (PII update midflow).
+        #
+        # Sem 7 F2 cierre — Caso shipping_phone update post-resumen.
+        # Cliente dice "Deseo cambiar el número X por Y" tras el resumen.
+        # Fix arquitectónico completo:
+        #   1. Persistir shipping_phone en DB
+        #   2. Re-cargar contact_record fresh
+        #   3. Emitir resumen determinístico DIRECTAMENTE con ambos
+        #      celulares (NO delegar al bypass general — ese solo dispara
+        #      para READY_FOR_SUMMARY, no AWAITING_ORDER_CONFIRMATION).
+        #   4. Return early — LLM NO compone.
+        # Garantiza: contrato resumen siempre por builder determinístico.
+        # Sem 7 F2 cierre 2026-05-20 — pasar history para detectar contexto
+        # cuando el outbound anterior pidió el número alterno (Bug P7).
+        _shipping_phone_pre_persist = _detect_shipping_phone_update(content or "", history or [])
+        _shipping_phone_just_persisted = False
+        if (
+            _shipping_phone_pre_persist
+            and contact_id
+            and display_state in {"READY_FOR_SUMMARY", "AWAITING_ORDER_CONFIRMATION"}
+        ):
+            _ship_digits = re.sub(r"\D", "", str(_shipping_phone_pre_persist))
+            if len(_ship_digits) >= 10 and _ship_digits[-10] != "0":
+                _new_ship = f"+57{_ship_digits[-10:]}"
+                try:
+                    supabase.table("contacts").update(
+                        {"shipping_phone": _new_ship}
+                    ).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
+                    # Re-cargar contact_record fresh.
+                    _fresh_res = (
+                        supabase.table("contacts")
+                        .select(
+                            "id, consent_given, name, email, address, "
+                            "document_type, document_number, phone, shipping_phone"
+                        )
+                        .eq("id", contact_id)
+                        .single()
+                        .execute()
+                    )
+                    if _fresh_res.data:
+                        contact_record = _fresh_res.data
+                        _shipping_phone_just_persisted = True
+                        logger.info(
+                            "[PRE_BYPASS] shipping_phone=%s persisted conv=%s",
+                            _new_ship, conversation_id[:8],
+                        )
+                        # Emitir resumen determinístico inmediato (no delegar).
+                        try:
+                            from tools.cart_tool import get_cart_with_items as _gcwi_sp
+                            _cart_sp = _gcwi_sp(
+                                supabase, conversation_id=conversation_id,
+                                tenant_id=tenant_id,
+                            )
+                        except Exception:
+                            _cart_sp = None
+                        if _cart_sp and (_cart_sp.get("items") or []):
+                            _vctx_sp = _verified_ctx_from_cart(_cart_sp)
+                            if _vctx_sp and not _vctx_sp.get("shipping_cost_cents"):
+                                _ship_h = (
+                                    _extract_shipping_cost_from_history(history or [])
+                                    or _extract_shipping_cost_from_db(supabase, conversation_id)
+                                    or 0
+                                )
+                                if _ship_h > 0:
+                                    _vctx_sp["shipping_cost_cents"] = _ship_h
+                                    _vctx_sp["total_cents"] = (
+                                        int(_vctx_sp.get("subtotal_cents") or 0) + _ship_h
+                                    )
+                            if _vctx_sp and int(_vctx_sp.get("total_cents") or 0) > 0:
+                                _resumen_sp = _build_order_summary_text(
+                                    contact_record=contact_record,
+                                    verified_ctx=_vctx_sp,
+                                    catalog=catalog,
+                                    history=history,
+                                    cart_from_db=_cart_sp,
+                                    supabase=supabase,
+                                    tenant_id=tenant_id,
+                                )
+                                if _resumen_sp:
+                                    # Preámbulo cordial + resumen actualizado.
+                                    _outbound_sp = (
+                                        f"Listo, *{_new_ship}* quedó como "
+                                        f"celular para el envío.\n\n{_resumen_sp}"
+                                    )
+                                    await _send_outbound_text(
+                                        supabase=supabase,
+                                        conversation_id=conversation_id,
+                                        tenant_id=tenant_id,
+                                        text=_outbound_sp,
+                                    )
+                                    _mark_message_processing(
+                                        supabase, message_id,
+                                        processing_status=PROCESSING_STATUS_PROCESSED,
+                                    )
+                                    logger.info(
+                                        "[PRE_BYPASS] shipping_phone update → "
+                                        "resumen determinístico emitido conv=%s",
+                                        conversation_id[:8],
+                                    )
+                                    return
+                except Exception as _sp_exc:
+                    logger.warning(
+                        "[PRE_BYPASS] shipping_phone persist/emit falló conv=%s: "
+                        "%s — sigue flow normal post-LLM",
+                        conversation_id, _sp_exc,
+                    )
+
         _is_pii_update = bool(
-            _detect_shipping_phone_update(content or "")
+            (_detect_shipping_phone_update(content or "", history or []) and not _shipping_phone_just_persisted)
             or _detect_data_update_intent(content or "")
         )
         # Heurística adicional: si el inbound es 10+ dígitos consecutivos
         # respondiendo a una pregunta del bot sobre número, es phone update.
+        # Sem 7 F2 cierre: si ya persistimos shipping_phone arriba, ya NO
+        # bloquea bypass (el resumen actualizado es lo correcto a emitir).
         _looks_like_phone = bool(
             re.search(r"\b\+?5?7?\s?\d{10}\b", content or "")
-        )
+        ) and not _shipping_phone_just_persisted
+        # Rev. 104 — guard add_item intent (Plan A.0.1, ADR-0011 §6.4.1):
+        # si el cliente pide agregar producto explícitamente, NO interceptar
+        # con resumen. Dejar que el flujo normal procese variant detector +
+        # add_item; el resumen actualizado vendrá DESPUÉS.
+        # Caso runtime: "Puedo adicionar jabón de lavanda? De 100g" tras
+        # un link generado: el bypass emitía resumen del cart anterior sin
+        # agregar Lavanda → cliente no veía cambio.
+        _has_add_item_intent = False
+        if content and catalog:
+            _norm_content = _normalize_text(content)
+            _add_markers = (
+                "agreg", "adicion", "anad", "anadir", "incluy",
+                "incorpor", "sumar", "tambien",
+            )
+            if any(m in _norm_content for m in _add_markers):
+                _matches_pre, _proposals_pre = _detect_explicit_products_in_inbound(
+                    content, catalog,
+                )
+                if _matches_pre or _proposals_pre:
+                    _has_add_item_intent = True
         if (
             display_state == "READY_FOR_SUMMARY"
             and not _last_outbound_was_summary(history or [])
             and not _is_affirmative_confirmation(content or "")
             and not _is_pii_update
             and not _looks_like_phone
+            and not _has_add_item_intent
         ):
             try:
                 from tools.cart_tool import get_cart_with_items
@@ -7262,6 +9274,8 @@ async def build_and_run_orchestration(
                         catalog=catalog,
                         history=history,
                         cart_from_db=_cart_resumen,
+                        supabase=supabase,
+                        tenant_id=tenant_id,
                     )
                     if _resumen_text:
                         await _send_outbound_text(
@@ -7279,6 +9293,70 @@ async def build_and_run_orchestration(
                             conversation_id[:8],
                         )
                         return
+
+        # ── Sem 7 F2 cierre 2026-05-21 — State renderers determinísticos ───
+        # Bug founder UAT (conv 72e3f77e): el FSM resuelve correctamente
+        # `display_state=NEEDS_SHIPPING_CITY` pero el LLM, dentro de ese
+        # estado, redactaba libremente y a veces pedía consent/email/etc.
+        # aunque cliente conocido ya tenía esos datos en DB. Solución:
+        # override determinístico pre-LLM para estados transaccionales.
+        # Patrón idéntico al bypass `READY_FOR_SUMMARY → resumen` arriba.
+        #
+        # CATALOG_MODE y NEEDS_X PII se delegan al LLM/conductor existente
+        # (esos paths funcionan; el bug runtime estaba en NEEDS_SHIPPING_CITY).
+        #
+        # Guards: solo bypass cuando el inbound NO es una respuesta a otro
+        # flow paralelo (shipping_phone update, qty_change, etc.) — esos
+        # detectores ya corrieron arriba y emitieron sus propios outbounds.
+        if (
+            display_state in {"NEEDS_SHIPPING_CITY", "AWAITING_CARRIER_SELECTION"}
+            and not _is_pii_update
+            and not _looks_like_phone
+            and not _has_add_item_intent
+        ):
+            from fsm import state_renderers as _state_renderers
+            _override_text: Optional[str] = None
+            if display_state == "NEEDS_SHIPPING_CITY":
+                try:
+                    from tools.cart_tool import get_cart_with_items as _gcwi_sr
+                    _cart_sr = _gcwi_sr(
+                        supabase, conversation_id=conversation_id,
+                        tenant_id=tenant_id,
+                    )
+                except Exception:
+                    _cart_sr = None
+                _cart_items_sr = (_cart_sr or {}).get("items") or []
+                _last_products = _last_outbound_presented_variants_all(
+                    catalog or [], history or [],
+                )
+                _override_text = _state_renderers.render_needs_shipping_city(
+                    cart_items=_cart_items_sr,
+                    last_outbound_products=_last_products,
+                    inbound_text=content,
+                )
+            elif display_state == "AWAITING_CARRIER_SELECTION":
+                _override_text = _state_renderers.render_awaiting_carrier_selection(
+                    last_outbound_was_quote=
+                        _state_renderers.last_outbound_was_shipping_quote(
+                            history or [],
+                        ),
+                )
+            if _override_text:
+                await _send_outbound_text(
+                    supabase=supabase,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    text=_override_text,
+                )
+                _mark_message_processing(
+                    supabase, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+                logger.info(
+                    "[STATE_RENDER] %s → outbound determinístico conv=%s",
+                    display_state, conversation_id[:8],
+                )
+                return
 
         # GAP-1: Corrección de datos en el resumen — el cliente indica que un campo está mal
         if display_state == "READY_FOR_SUMMARY" and contact_id:
@@ -7343,6 +9421,10 @@ async def build_and_run_orchestration(
             tenant_after_hours_message=tenant_after_hours_msg,
             tenant_is_outside_hours=_is_outside_support_hours(tenant_support_schedule),
             customer_context_block=customer_context_block,
+            # Sem 7 F2 cierre 2026-05-20 — P1+P2 multitenant config.
+            tenant_business_pitch=tenant_business_pitch,
+            tenant_product_groups=tenant_product_groups,
+            tenant_show_prices=tenant_show_prices,
         )
         user_context = _build_user_context(history, content)
 
@@ -7387,6 +9469,25 @@ async def build_and_run_orchestration(
                 "[GEMINI] degradado tras %d intentos | last_err=%s",
                 cascade.attempts, (cascade.last_error or "")[:160],
             )
+            # Rev. 104 (F1-10) — encolar en review_queue + cambiar status a
+            # human_takeover con contexto del fallo. El operador ve la cola
+            # en Inbox/Revisión LLM y atiende manualmente. Sin esto, el
+            # cliente quedaba con respuesta degradada y operador sin contexto.
+            try:
+                from llm.degraded import on_cascade_degraded
+                on_cascade_degraded(
+                    supabase,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    last_message_id=message_id,
+                    fsm_state=display_state,
+                    error=(cascade.last_error or "")[:1500],
+                    prompt_snapshot=(system_prompt or "")[:6000],
+                )
+            except Exception as _hk_exc:
+                logger.warning(
+                    "[F1-10] hook on_cascade_degraded falló: %s", _hk_exc,
+                )
         else:
             response = cascade.response
             raw_json = response.text
@@ -7650,9 +9751,42 @@ async def build_and_run_orchestration(
                         verified_ctx=verified_ctx,  # IDs reales para stock correcto
                     )
                 if payment_link_result:
-                    parsed.requires_human = False
-                    parsed.should_respond = True
-                    parsed.response_text = payment_link_result.response_text
+                    # Rev. 104 (F1-5 mandatory) — GATE: si el último outbound
+                    # NO fue un resumen, REEMPLAZAR el response_text del
+                    # payment_link por el resumen determinístico. El siguiente
+                    # turn del cliente "Sí confirmo" disparará el link.
+                    if (
+                        not _last_outbound_was_summary(history or [])
+                        and verified_ctx
+                    ):
+                        _summary_text = _build_order_summary_text(
+                            contact_record=contact_record,
+                            verified_ctx=verified_ctx,
+                            catalog=catalog,
+                            history=history,
+                            cart_from_db=None,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
+                        )
+                        if _summary_text:
+                            parsed.requires_human = False
+                            parsed.should_respond = True
+                            parsed.response_text = _summary_text
+                            logger.info(
+                                "[ORCH] resumen mandatorio antepuesto al link conv=%s",
+                                conversation_id,
+                            )
+                            # NO sobreescribir parsed.response_text con el link.
+                        else:
+                            # Fallback: emitir el link aunque no haya resumen
+                            # (mejor que dejar al cliente sin respuesta).
+                            parsed.requires_human = False
+                            parsed.should_respond = True
+                            parsed.response_text = payment_link_result.response_text
+                    else:
+                        parsed.requires_human = False
+                        parsed.should_respond = True
+                        parsed.response_text = payment_link_result.response_text
 
         # ── 6. Guardrails ─────────────────────────────────────────────────────
         is_safe = validate_orchestrator_output(parsed)
@@ -7904,6 +10038,8 @@ async def build_and_run_orchestration(
                             catalog=catalog,
                             history=history_for_prompt,
                             cart_from_db=_cart_for_summary,
+                            supabase=supabase,
+                            tenant_id=tenant_id,
                         )
                         if _summary:
                             parsed.response_text = _summary
@@ -8015,6 +10151,8 @@ async def build_and_run_orchestration(
                                 catalog=catalog,
                                 history=history,
                                 cart_from_db=_cart_lh,
+                                supabase=supabase,
+                                tenant_id=tenant_id,
                             )
                 if _replacement_text:
                     parsed.response_text = _replacement_text
@@ -8027,6 +10165,38 @@ async def build_and_run_orchestration(
                         "Antes de confirmarte el pedido necesito tu visto bueno. "
                         "¿Confirmas para generar tu link de pago?"
                     )
+
+            # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv e0d7c539):
+            # Anti-alucinación CART-ADD. Cliente pidió "1 Coco y 1 Lavanda"
+            # SIN gramaje; detector determinístico retornó [] (correcto,
+            # ambiguo entre 60g/100g/150g) → NO se ejecutó add_item; LLM
+            # compuso "Listo, 1x Coco (60g) por $18.000 y 1x Lavanda (60g)
+            # por $18.000" — alucinó el gramaje + alucinó la confirmación
+            # de carrito. Mismo patrón que el guard payment_link arriba.
+            #
+            # Detector determinístico: el texto contiene confirmación
+            # ("listo", "agregué", "te vendo", "añadí", "sumé") + variante
+            # con unidad de peso/volumen en paréntesis ("(60g)", "(100g)",
+            # "(15ml)", etc.) + precio ($X). Tres elementos juntos = LLM
+            # afirmando estado de carrito concreto.
+            #
+            # Gate: `_cart_add_executed_this_turn=False` (no corrió
+            # add_item en este turn). Cuando sí corrió, la confirmación
+            # es legítima — no se reescribe.
+            if (
+                not _cart_add_executed_this_turn
+                and _looks_like_cart_add_confirmation(parsed.response_text or "")
+            ):
+                logger.warning(
+                    "[ANTI_HALLU][CART_ADD] LLM confirmó cart-add sin que add_item "
+                    "haya corrido conv=%s. Texto original: %r",
+                    conversation_id, (parsed.response_text or "")[:300],
+                )
+                parsed.response_text = (
+                    "Para procesar el pedido necesito saber la presentación "
+                    "exacta de cada producto. ¿Cuál presentación y cuántas "
+                    "unidades te gustaría llevar?"
+                )
 
             # Bug 30 — sincronizar texto y status. Si el response_text promete
             # handover ("te paso con un asesor") pero requires_human=False, el
@@ -8087,11 +10257,23 @@ async def build_and_run_orchestration(
         # mencionar datos en su pitch pero el bot los retiene en el contexto
         # de la conversación sin escribirlos en DB hasta que autorice.
         _consent_ok = bool(contact_record and contact_record.get("consent_given"))
+        # Sem 7 F2 cierre 2026-05-20 — P4 founder UAT: defensa en profundidad.
+        # Si el LLM no extrajo el tipo de documento (caso "Cedula de Ciudadania"
+        # que el LLM no mapeó a CC), regex pre-LLM cubre las variantes
+        # coloquiales típicas en español CO.
+        if not parsed.extracted_document_type:
+            _doc_type_detected = _detect_document_type_from_text(content or "")
+            if _doc_type_detected:
+                parsed.extracted_document_type = _doc_type_detected
+                logger.info(
+                    "[DOC] tipo detectado por regex pre-LLM: %s (LLM no extrajo)",
+                    _doc_type_detected,
+                )
         _has_doc_extract = bool(parsed.extracted_document_type or parsed.extracted_document_number)
         # Rev. 103 — pre-LLM dual cobertura: regex defensivo si LLM no extrajo.
         _shipping_phone_extracted = (
             getattr(parsed, "extracted_shipping_phone", None)
-            or _detect_shipping_phone_update(content or "")
+            or _detect_shipping_phone_update(content or "", history or [])
         )
         if contact_id and _consent_ok and (
             parsed.extracted_name
@@ -8111,13 +10293,22 @@ async def build_and_run_orchestration(
                 update_data["email"] = str(parsed.extracted_email).strip().lower()
             if parsed.extracted_name and str(parsed.extracted_name).strip():
                 update_data["name"] = " ".join(str(parsed.extracted_name).split())
-            # Rev. 68 — documento. Solo persiste si tipo+número son válidos juntos.
+            # Rev. 68 — documento.
+            # Sem 7 F2 cierre 2026-05-19 — Bug 1 founder UAT (conv 11c2dbde):
+            # ANTES exigía tipo+número JUNTOS para persistir. Cliente dio
+            # solo "CC" → no persistía → FSM seguía en NEEDS_DOCUMENT → bot
+            # re-preguntaba ambos como si nada hubiera avanzado.
+            # AHORA admite persistencia parcial: tipo solo o número solo
+            # son válidos progresivos. El FSM sigue en NEEDS_DOCUMENT hasta
+            # que ambos estén; el prompt es contextual (pide solo lo que falta).
             if _has_doc_extract:
                 _doc_type = (str(parsed.extracted_document_type or "").strip().upper() or None)
                 _doc_num_raw = str(parsed.extracted_document_number or "").strip()
                 _doc_num = re.sub(r"[\s.]", "", _doc_num_raw) or None
-                if _doc_type and _doc_num and _doc_type in {"CC", "CE", "NIT", "PP", "TI", "OTHER"}:
+                _valid_types = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
+                if _doc_type and _doc_type in _valid_types:
                     update_data["document_type"] = _doc_type
+                if _doc_num:
                     update_data["document_number"] = _doc_num
             # Rev. 91 — Reconciliación cross-cutting de building_type.
             # El detector textual tiene precedencia sobre la clasificación

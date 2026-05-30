@@ -45,10 +45,12 @@ class CustomerDataBuilderTests(unittest.TestCase):
         self.assertNotIn("legal_id", cd)
 
     def test_phone_without_57_prefix(self):
+        # Rev. 104 (F0-4): canon helper INFIERE prefix CO cuando phone es cel
+        # local de 10 dígitos empezando con '3' (3001234567 → 573001234567).
+        # Para Wompi, esto produce prefix='+57' + number='3001234567'.
         cd = _build_customer_data({"phone": "3001234567"})
-        # No agrega prefix porque no detecta CO
+        self.assertEqual(cd.get("phone_number_prefix"), "+57")
         self.assertEqual(cd.get("phone_number"), "3001234567")
-        self.assertNotIn("phone_number_prefix", cd)
 
     def test_phone_with_plus(self):
         cd = _build_customer_data({"phone": "+573120000000"})

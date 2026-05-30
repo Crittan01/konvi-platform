@@ -129,9 +129,19 @@ def _extract_carrier_name(item: dict) -> str:
     return ""
 
 
-async def _resolve_carriers_for_quote(client: EnviaClient, country_code: str) -> list[str]:
+async def _resolve_carriers_for_quote(
+    client: EnviaClient,
+    country_code: str,
+    *,
+    supabase: Optional[Client] = None,
+    tenant_id: Optional[str] = None,
+) -> list[str]:
     """
     Prioriza Queries API para resolver carriers activos; si falla, usa fallback estable.
+
+    Sem 5 H.2.7: si `supabase + tenant_id` provistos, filtra resultado
+    final por las preferencias del tenant en `tenant_carriers`. Si el
+    tenant NO configuró preferencias → todos enabled (backward compat).
     """
     carriers: list[str] = []
     try:
@@ -177,6 +187,25 @@ async def _resolve_carriers_for_quote(client: EnviaClient, country_code: str) ->
         if token not in seen:
             unique.append(carrier)
             seen.add(token)
+
+    # Sem 5 H.2.7 — aplicar preferencias per-tenant si están provistas.
+    if supabase is not None and tenant_id:
+        try:
+            from lib.tenant_carriers import filter_enabled_carriers
+            filtered = filter_enabled_carriers(
+                supabase, tenant_id, "envia", unique,
+            )
+            logger.info(
+                "[CARRIERS] tenant=%s filtered %d → %d (preferencias DB)",
+                tenant_id, len(unique), len(filtered),
+            )
+            return filtered
+        except Exception as exc:
+            logger.warning(
+                "[CARRIERS] no se pudo aplicar filter tenant=%s: %s — "
+                "devuelvo todos (default open)",
+                tenant_id, exc,
+            )
     return unique
 
 
@@ -207,6 +236,18 @@ class Parcel(BaseModel):
     insuranceAmount: float = Field(default=0, ge=0)
     content: str = Field(default="Mercancía general", max_length=180)
     amount: int = Field(default=1, ge=1)
+    # Sem 5 H.2.5 v2 (2026-05-08) — declaredValue per parcel.
+    # Se envía SIEMPRE en el payload Envia. Carriers como Coordinadora,
+    # FedEx, DHL aplican su política interna de seguro automáticamente
+    # sobre este valor. Solo el carrier propio "envia" recibe además
+    # `additional_services:["envia_insurance"]` (id=125 en Queries API).
+    # Evidencia: docs/research/empirical-evidence/envia-insurance-carriers-CO-2026-05-07-PROD.json
+    declaredValueCop: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Valor declarado en pesos COP (NO cents). Si NULL o 0, "
+                    "no se reparte declaredValue al payload.",
+    )
 
 
 class QuoteRequest(BaseModel):
@@ -217,6 +258,31 @@ class QuoteRequest(BaseModel):
 
 
 # ─── Helper ──────────────────────────────────────────────────────────────────
+
+def _get_active_shipping_provider(tenant_id: str, supabase: Client) -> str:
+    """Resuelve `active_provider` del tenant. Default 'envia' (preserva
+    comportamiento legacy si no hay row en tenant_shipping_provider_config).
+
+    Rev. 107 M.5/Cotizador: routing multi-provider sin fallback automático
+    (ADR-0019).
+    """
+    try:
+        cfg = (
+            supabase.table("tenant_shipping_provider_config")
+            .select("active_provider")
+            .eq("tenant_id", tenant_id)
+            .maybe_single()
+            .execute()
+        )
+        if cfg and cfg.data:
+            return (cfg.data.get("active_provider") or "envia").strip().lower()
+    except Exception as exc:
+        logger.warning(
+            "No pude leer active_provider tenant=%s — default envia: %s",
+            tenant_id, exc,
+        )
+    return "envia"
+
 
 def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
     """
@@ -243,10 +309,183 @@ def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
         raise HTTPException(status_code=400, detail="API token de Envia no encontrado")
 
     sandbox = creds.get("sandbox", False)
-    return EnviaClient(api_token=api_token, sandbox=sandbox)
+    return EnviaClient(
+        api_token=api_token,
+        sandbox=sandbox,
+        supabase_client=supabase,
+        tenant_id=tenant_id,
+    )
+
+
+# ─── Aveonline routing helper (Rev. 107 M.x — Cotizador Console) ─────────
+
+
+async def _quote_via_aveonline(
+    tenant_id: str,
+    supabase: Client,
+    req: "QuoteRequest",
+) -> dict:
+    """Branch del endpoint /quote para tenants con active_provider='aveonline'.
+
+    Retorna el MISMO response shape que el flow Envia (rates + highlights +
+    shipment_id) para preservar compat con el frontend Cotizador del Console.
+    """
+    from integrations.aveonline_client import (
+        AveonlineClient,
+        AveonlineAuthError,
+        AveonlineNoCarriersError,
+        AveonlinePackageLimitError,
+        AveonlinePermanentError,
+        AveonlineTransientError,
+        to_aveonline_city_format,
+    )
+
+    # Convertir direcciones a formato Aveonline (uppercase city+state).
+    origin_canonical = to_aveonline_city_format(
+        req.origin.city or "", req.origin.state or "",
+    )
+    dest_canonical = to_aveonline_city_format(
+        req.destination.city or "", req.destination.state or "",
+    )
+    if not origin_canonical or not dest_canonical:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No pude convertir origin/destination al formato Aveonline. "
+                "Faltan city o state. Usa formato: city='Bogotá', state='Cundinamarca'."
+            ),
+        )
+
+    # Agregar peso/dim de todos los parcels (Aveonline cotiza por paquete único).
+    total_weight = sum(float(p.weight or 0) for p in req.parcels)
+    max_length = max((float(p.length or 0) for p in req.parcels), default=10)
+    max_width = max((float(p.width or 0) for p in req.parcels), default=10)
+    total_height = sum(float(p.height or 0) for p in req.parcels)
+    total_units = sum(int(p.amount or 1) for p in req.parcels) or 1
+    declared_total = sum(int(p.declaredValueCop or 0) for p in req.parcels) or 50000
+    first_content = (req.parcels[0].content if req.parcels else "Producto") or "Producto"
+
+    client = AveonlineClient(tenant_id, supabase)
+    try:
+        result = await client.quote(
+            origin={"city_canonical": origin_canonical, "city": req.origin.city},
+            destination={"city_canonical": dest_canonical, "city": req.destination.city},
+            package={
+                "weight_kg": total_weight or 1.0,
+                "length_cm": max_length,
+                "width_cm": max_width,
+                "height_cm": total_height or 10,
+                "declared_value_cop": declared_total,
+                "units": total_units,
+                "product_name": first_content,
+                "cod_enabled": False,
+            },
+        )
+    except AveonlineAuthError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Aveonline no autenticado: {exc}. Reconecta en /dashboard/integrations/aveonline.",
+        )
+    except AveonlineNoCarriersError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sin carriers Aveonline para {req.destination.city}: {exc}",
+        )
+    except AveonlinePackageLimitError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Paquete excede límites Aveonline: {exc}",
+        )
+    except AveonlineTransientError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Aveonline temporalmente no disponible: {exc}",
+        )
+    except AveonlinePermanentError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Aveonline error: {exc}",
+        )
+
+    # Mapear QuoteOption → shape `normalized_rates` Envia-compat + campos
+    # extra Aveonline (rev. 107: logo, breakdown, COD, peso volumétrico).
+    # El frontend lee: rate.carrier, rate.service, rate.total_price,
+    # rate.currency, rate.delivery_estimate, rate.rate_id, rate.id + nuevos.
+    rates = []
+    for opt in result.options:
+        rates.append({
+            # Campos canónicos (compat Envia legacy frontend).
+            "rate_id": opt.rate_id,
+            "id": opt.rate_id,
+            "carrier": opt.carrier_name,
+            "service": opt.service_level,
+            "total_price": opt.price_cents / 100,
+            "currency": "COP",
+            "delivery_estimate": (
+                f"{opt.eta_days} días" if opt.eta_days else "consultar"
+            ),
+            "delivery_days": opt.eta_days,
+            "provider": "aveonline",
+            # Campos extendidos Aveonline (rev. 107) — el frontend puede
+            # mostrarlos si los reconoce; si no, se ignoran sin romper compat.
+            "carrier_logo_url": opt.logo_url,
+            "carrier_logo_url_alt": opt.logo_url_alt,
+            "route_code": opt.route_code,
+            "route_type": opt.route_type,
+            "weight_real_kg": opt.weight_real_kg,
+            "weight_volumetric_kg": opt.weight_volumetric_kg,
+            "units": opt.units,
+            "declared_value_cop": opt.declared_value_cop,
+            "valuation_percent": opt.valuation_percent,
+            "freight_total_cop": (
+                opt.freight_total_cents / 100 if opt.freight_total_cents else None
+            ),
+            "handling_cop": (
+                opt.handling_cents / 100 if opt.handling_cents else None
+            ),
+            "cod_extras_cop": (
+                opt.cod_extras_cents / 100 if opt.cod_extras_cents else None
+            ),
+            "subtotal_cop": (
+                opt.subtotal_cents / 100 if opt.subtotal_cents else None
+            ),
+            "cod_supported": opt.cod_supported,
+        })
+
+    # Persistir shipment row (mismo patrón Envia para que /history funcione).
+    shipment_id = None
+    try:
+        shipment_result = supabase.table("shipments").insert({
+            "tenant_id": tenant_id,
+            "status": "quoted",
+            "provider": "aveonline",
+            "origin_address": req.origin.model_dump(exclude_none=True),
+            "destination_address": req.destination.model_dump(exclude_none=True),
+            "parcels": [p.model_dump() for p in req.parcels],
+            "rates_snapshot": rates,
+        }).execute()
+        if shipment_result.data:
+            shipment_id = shipment_result.data[0]["id"]
+    except Exception as exc:
+        logger.warning(
+            "[shipping.quote.aveonline] persist shipment falló: %s", exc,
+        )
+
+    return {
+        "shipment_id": shipment_id,
+        "rates": rates,
+        "highlights": _build_rate_highlights(rates),
+        "provider": "aveonline",
+    }
 
 
 def _require_envia_phase2() -> None:
+    """
+    DEPRECADO post-rev. 105 Sem 5 H.2.6 — gate global env-var.
+    Usar `_require_envia_capability(supabase, tenant_id, capability)`
+    en su lugar para granularidad per-tenant per-capability.
+    Mantenido como fallback temporal durante migración.
+    """
     if not ENVIA_PHASE2_ENABLED:
         raise HTTPException(
             status_code=503,
@@ -255,6 +494,46 @@ def _require_envia_phase2() -> None:
                 "Activa ENVIA_PHASE2_ENABLED=true para habilitar label/tracking/pickup/cancel."
             ),
         )
+
+
+def _require_envia_capability(
+    supabase: Client,
+    tenant_id: str,
+    capability: str,
+) -> None:
+    """
+    Valida que el tenant tenga una capability Envia habilitada en
+    `tenant_provider_capabilities` (F.3 matrix). Reemplaza el flag
+    global env-var por gate granular per-tenant per-feature.
+
+    Capabilities Envia válidas (ver `lib/capabilities_matrix.py`):
+      - 'label_generation' — POST /shipments/{id}/label
+      - 'tracking_polling' — POST /shipping/tracking
+      - 'pickup'           — POST /shipments/{id}/schedule-pickup
+      - 'cancel'           — POST /shipments/{id}/cancel
+      (Nota: `insurance` removido 2026-05-08 — declaredValue se envía
+       siempre, decisión per-carrier, no opt-in tenant.)
+
+    Backward compat: si el env var global ENVIA_PHASE2_ENABLED=true,
+    se permite (durante migración). Tras seed inicial de capabilities
+    para tenants existentes, este fallback se puede retirar.
+    """
+    from lib.capabilities_matrix import is_capability_enabled
+    enabled = is_capability_enabled(
+        supabase, tenant_id, "envia", capability, default=False,
+    )
+    if enabled:
+        return
+    # Fallback transición.
+    if ENVIA_PHASE2_ENABLED:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            f"Capability Envia '{capability}' deshabilitada para este tenant. "
+            f"Actívala en Settings → Integraciones → Envia."
+        ),
+    )
 
 
 def _parse_envia_label_data(raw: dict) -> dict:
@@ -434,6 +713,23 @@ async def quote_shipment(
                 headers={"Idempotency-Replayed": "true"},
             )
 
+        # Rev. 107 — Cotizador Console respeta active_provider del tenant.
+        # Si Aveonline, branch dedicada (formato body y response distinto a
+        # Envia pero el shape final que retornamos es el mismo para que el
+        # frontend no necesite cambios).
+        active_provider = _get_active_shipping_provider(tenant_id, supabase)
+        if active_provider == "aveonline":
+            response_body = await _quote_via_aveonline(tenant_id, supabase, req)
+            finalize_idempotency(
+                supabase=supabase,
+                tenant_id=tenant_id,
+                session=idem_session,
+                status_code=201,
+                body=response_body,
+            )
+            return response_body
+
+        # Default: provider='envia' (flow legacy completo a continuación).
         client = _get_envia_client(tenant_id, supabase)
 
         # Normalización mínima de país
@@ -482,12 +778,20 @@ async def quote_shipment(
         }
 
         # Carriers activos: resolver desde Queries API; fallback seguro si el endpoint falla.
+        # Sem 5 H.2.7: filtra por preferencias tenant_carriers per-tenant.
         quote_country = req.origin.country if req.origin.country == req.destination.country else "CO"
-        carriers = await _resolve_carriers_for_quote(client, quote_country)
+        carriers = await _resolve_carriers_for_quote(
+            client, quote_country,
+            supabase=supabase, tenant_id=tenant_id,
+        )
         if not carriers:
             raise HTTPException(
                 status_code=502,
-                detail="No se pudieron obtener carriers disponibles desde Envia Queries API.",
+                detail=(
+                    "No se pudieron obtener carriers disponibles. "
+                    "Verifica preferencias del tenant en Settings → Integraciones → Envia "
+                    "(¿todos los carriers están desactivados?) o estado de Envia Queries API."
+                ),
             )
 
         carrier_errors: dict[str, str] = {}
@@ -504,8 +808,39 @@ async def quote_shipment(
             base_payload.get("destination", {}).get("postalCode"),
         )
 
+        # Sem 5 H.2.5 — declaredValue total (suma de parcels) para insurance.
+        total_declared_value_cop = sum(
+            int(p.declaredValueCop or 0) for p in req.parcels
+        )
+
         async def _fetch_carrier(carrier: str):
-            payload = {**base_payload, "shipment": {"carrier": carrier, "type": 1}}
+            # Sem 5 H.2.5 v2 (2026-05-08): declaredValue se envía SIEMPRE per
+            # package. `additional_services:["envia_insurance"]` se agrega
+            # SOLO cuando carrier=="envia" (carrier propio). Carriers como
+            # Coordinadora aplican prima automática sobre declaredValue
+            # (validado empíricamente prod 2026-05-07).
+            # Evidencia: docs/research/empirical-evidence/envia-insurance-carriers-CO-2026-05-07-PROD.json
+            carrier_packages = packages
+            if total_declared_value_cop > 0:
+                try:
+                    from lib.insurance import apply_insurance_to_packages
+                    carrier_packages = apply_insurance_to_packages(
+                        packages,
+                        declared_value_cop=total_declared_value_cop,
+                        carrier=carrier,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[INSURANCE] no se pudo aplicar declaredValue tenant=%s "
+                        "carrier=%s: %s — cotización sigue sin seguro",
+                        tenant_id, carrier, exc,
+                    )
+
+            payload = {
+                **base_payload,
+                "packages": carrier_packages,
+                "shipment": {"carrier": carrier, "type": 1},
+            }
             for attempt in range(2):
                 try:
                     resp = await client.get_rates(payload)
@@ -755,7 +1090,7 @@ async def generate_label(
     """
     Genera etiqueta para un shipment cotizado usando selected_rate o payload explícito.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "label_generation")
     try:
         row = (
             supabase.table("shipments")
@@ -888,7 +1223,7 @@ async def track_shipments(
     """
     Consulta tracking en Envia por shipment_id o tracking_numbers.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "tracking_polling")
     tracking_numbers = [n.strip() for n in body.tracking_numbers if isinstance(n, str) and n.strip()]
 
     shipment = None
@@ -978,7 +1313,7 @@ async def schedule_pickup(
     """
     Agenda pickup de un shipment etiquetado.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "pickup")
     row = (
         supabase.table("shipments")
         .select("id, tenant_id, origin_address, tracking_number, carrier")
@@ -1031,7 +1366,7 @@ async def cancel_shipment(
     """
     Cancela un envío etiquetado por tracking_number o shipment_id.
     """
-    _require_envia_phase2()
+    _require_envia_capability(supabase, tenant_id, "cancel")
 
     tracking_number = (body.tracking_number or "").strip()
     carrier = (body.carrier or "").strip()

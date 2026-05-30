@@ -68,6 +68,20 @@ _SHIPPING_FOLLOWUP_PROMPT_MARKERS = (
     # Frases que el LLM genera libremente al pedir ciudad de entrega en contexto de envío
     "ciudad de destino",     # "ciudad de destino"
     "ciudad del envio",      # "ciudad del envío"
+    # Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (conv 56ff85d8):
+    # El bot emite "Para qué ciudad es el envío?" tras "Cotizar" del cliente.
+    # Cuando el cliente respondía solo "Bogota", el detector NO matcheaba
+    # ningún marker → tool retornaba False → LLM tomaba control → respondía
+    # texto genérico de KB sobre tiempos de entrega y saltaba a flow PII
+    # SIN cotizar realmente. Faltaba esta familia de markers canónicos.
+    "para que ciudad es el envio",       # "Para qué ciudad es el envío?"
+    "para que ciudad es",                 # variante corta
+    "a que ciudad va",                    # "¿A qué ciudad va tu pedido?"
+    "a que ciudad enviamos",              # "¿A qué ciudad enviamos?"
+    "cual es la ciudad",                  # "¿Cuál es la ciudad de entrega?"
+    "ciudad de entrega",                  # general
+    "me dices la ciudad",                 # "me dices la ciudad de entrega"
+    "me dices a que ciudad",              # variante
     # Frases de ofrecimiento de cotización por parte del bot
     "deseas que te cotice",
     "quieres que te cotice",
@@ -349,6 +363,17 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
     # malinterpretaba "Ok, gracias" tras el resumen como "sí cotiza" porque
     # el resumen contiene la palabra "envío" + un costo.
     # Detectado en UAT E2E real (conv c2043f98 turn 12).
+    #
+    # Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (conv 56ff85d8):
+    # ANTES "subtotal:" estaba en summary_markers. Eso causaba falso
+    # positivo en el mini-resumen pre-cotización (T10 del log: "Productos
+    # en tu carrito... Subtotal: $56.000 ... Para qué ciudad es el envío?")
+    # — el detector lo confundía con el resumen FINAL → retornaba False →
+    # tool no se invocaba → bot saltaba a flow PII sin cotizar.
+    # FIX: "subtotal:" es genérico (aparece tanto en mini-resumen pre-cot
+    # como en resumen final). Los otros markers son ESPECÍFICOS al resumen
+    # final (header "Resumen de tu pedido", CTA "link de pago", "datos
+    # correctos") y bastan para distinguir.
     summary_markers = [
         "resumen de tu pedido",
         "datos estan correctos",
@@ -356,15 +381,33 @@ def _is_shipping_followup_query(query_text: str, recent_messages: list[dict]) ->
         "generar tu link de pago",
         "para generar tu link",
         "tu link de pago",
-        "subtotal:",
     ]
     if any(m in outbound_text for m in summary_markers):
         return False
 
     has_separator = "/" in query_text or "," in query_text
-    shipping_context_tokens = {"envio", "cotizar", "cotice", "costo", "flete", "despacho", "domicilio", "delivery"}
+    # Sem 7 F2 cierre 2026-05-20 — prefijos en vez de tokens exactos para
+    # cubrir variantes verbales del español: "envio"/"envia"/"enviamos"/
+    # "enviar", "cotizar"/"cotizamos"/"cotice", "entrega"/"entregar"/
+    # "entregamos", etc. El guard previo `personal_data_markers` ya
+    # bloquea outbounds de captura PII ("dirección de entrega..."), por
+    # lo que estos prefijos aquí solo matchean cotización legítima.
+    _shipping_context_prefixes = (
+        "envi",       # envio, envía, enviamos, enviar, envío
+        "cotiz",      # cotizar, cotizamos, cotizo
+        "cotice",     # subjuntivo
+        "costo",      # costos también
+        "flete",
+        "despach",    # despacho, despachar, despachamos
+        "domicili",
+        "deliver",    # delivery, deliveries
+        "entreg",     # entrega, entregar, entregamos
+    )
     marker_matched = any(marker in outbound_text for marker in _SHIPPING_FOLLOWUP_PROMPT_MARKERS)
-    has_shipping_context = bool(_tokenize_words(outbound_text) & shipping_context_tokens)
+    has_shipping_context = any(
+        any(tok.startswith(p) for p in _shipping_context_prefixes)
+        for tok in _tokenize_words(outbound_text)
+    )
     if marker_matched:
         if not has_shipping_context:
             return False
@@ -1535,6 +1578,226 @@ def _build_quote_failure_response(detail: str, status_code: int) -> tuple[str, b
     )
 
 
+def _persist_destination_city_to_cart(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    destination: dict,
+) -> None:
+    """Plan A.0.1 / ADR-0011 §6.5 — persiste city al cart en cuanto se resuelve.
+
+    Idempotente: si el cart ya tiene la misma city, no hace nada. Solo
+    actualiza si la city es nueva o estaba vacía. NO toca carrier/service
+    ni `requires_requote` (eso es responsabilidad de set_shipping_meta al
+    confirmar carrier o de invalidate_shipping al modificar items).
+
+    Esta persistencia temprana cierra la ventana donde `cart.shipping_meta.city`
+    estaba vacío entre el momento en que el cliente declara la city y el
+    momento en que se confirma carrier — ventana en la que una modificación
+    de cart hubiera dejado a `requote_shipping_for_cart` sin city para
+    construir el payload Envia.
+    """
+    new_city = (destination.get("city") or "").strip()
+    if not new_city:
+        return
+    new_dane = (destination.get("dane_code") or destination.get("postalCode") or "")
+    new_dane = str(new_dane).strip() or None
+
+    res = (
+        supabase.table("conversation_carts")
+        .select("id, shipping_meta")
+        .eq("tenant_id", tenant_id)
+        .eq("conversation_id", conversation_id)
+        .eq("status", "open")
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        return
+    cart_row = res.data[0]
+    cart_id = cart_row["id"]
+    meta = cart_row.get("shipping_meta") or {}
+    if (meta.get("city") or "").strip() == new_city:
+        return  # idempotente
+
+    # Merge no destructivo: preserva carrier/service/rate_id/etc si existen.
+    new_meta = dict(meta)
+    new_meta["city"] = new_city
+    if new_dane:
+        new_meta["dane_code"] = new_dane
+
+    supabase.table("conversation_carts").update({
+        "shipping_meta": new_meta,
+    }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
+    logger.info(
+        "[SHIPPING_QUOTE] persistida city=%s al cart=%s (prev=%s)",
+        new_city, cart_id[:8], meta.get("city") or "vacío",
+    )
+
+
+async def requote_shipping_for_cart(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+) -> Optional[dict]:
+    """Recotización lazy de envío post-modificación del cart (ADR-0011 §6.5).
+
+    Pensado para invocación silenciosa cuando `cart.requires_requote=true`,
+    típicamente tras `cart_tool.add_item` / `remove_item` con orden previa
+    invalidada. NO emite mensaje al cliente; el caller decide cómo informar.
+
+    Flujo:
+      1. Lee cart.shipping_meta para obtener city + carrier elegido previo.
+      2. Calcula package (peso billable + dims) desde items actuales del cart.
+      3. Llama Envia (`_request_shipping_quote`) con el payload nuevo.
+      4. Intenta preservar la elección previa del cliente (si seleccionó
+         "Económica" antes y todavía está disponible, devuelve esa rate).
+         Fallback: cheapest.
+      5. Retorna dict con {shipping_cents, carrier_name, service_level}
+         para que el caller persista vía `cart_tool.set_shipping_meta` y
+         actualice el `verified_ctx` antes de generar resumen+link.
+
+    Retorna None si:
+      • cart vacío o sin items
+      • origin/destination no resolvibles
+      • Envia rechaza la cotización (4xx) o transient (504)
+
+    El caller debe degradar a comportamiento previo (reusar shipping del
+    history) si retorna None — preferimos shipping stale a no tener
+    resumen, pero loggeamos el evento para alertar.
+    """
+    try:
+        from tools.cart_tool import get_cart_with_items
+    except Exception as exc:  # pragma: no cover
+        logger.warning("[REQUOTE_LAZY] cart_tool no disponible: %s", exc)
+        return None
+
+    try:
+        cart = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning("[REQUOTE_LAZY] get_cart falló conv=%s: %s",
+                       conversation_id[:8], exc)
+        return None
+
+    if not cart or not (cart.get("items") or []):
+        return None
+
+    shipping_meta = cart.get("shipping_meta") or {}
+    city_known = (shipping_meta.get("city") or "").strip()
+    if not city_known:
+        # Cart-as-SoT: city debe estar persistida desde la primera cotización
+        # exitosa (handle_shipping_quote_if_applicable lo hace vía
+        # _persist_destination_city_to_cart). Si no está, abortamos —
+        # no caemos a heurísticas de history-parsing (Plan A.0.2).
+        logger.warning(
+            "[REQUOTE_LAZY] cart.shipping_meta.city vacío — abortando recotización "
+            "(esperado: handle_shipping_quote_if_applicable persiste la city)"
+        )
+        return None
+
+    # Resolver origen del tenant.
+    try:
+        origin_cfg = _get_tenant_shipping_origin(supabase, tenant_id)
+        origin = _coerce_origin(origin_cfg)
+    except Exception as exc:
+        logger.warning("[REQUOTE_LAZY] origin lookup falló: %s", exc)
+        return None
+    if not origin:
+        return None
+
+    # Destino desde city del cart.shipping_meta (autoritario post-fix S14).
+    destination, _ambiguous = _resolve_destination_from_conversation(
+        query_text=f"envío a {city_known}",
+        recent_messages=[],
+    )
+    if not destination:
+        logger.warning(
+            "[REQUOTE_LAZY] no pude resolver destination city=%s", city_known,
+        )
+        return None
+    # Recipient phone si está en contact (best-effort)
+    try:
+        phone = _get_conversation_customer_phone(supabase, conversation_id)
+        if phone:
+            recipient_phone = _get_contact_shipping_phone(supabase, tenant_id, phone)
+            if recipient_phone:
+                destination["phone"] = recipient_phone
+    except Exception:
+        pass
+
+    # Package desde cart actual (peso/dims actualizados).
+    pkg_decision = _estimate_package_from_cart_if_available(
+        supabase, tenant_id, conversation_id,
+    )
+    if pkg_decision is None or pkg_decision.package is None:
+        logger.warning("[REQUOTE_LAZY] no pude estimar package desde cart")
+        return None
+    package = pkg_decision.package
+
+    payload = _build_quote_payload(origin, destination, package)
+    try:
+        status_code, body = await _request_shipping_quote(tenant_id, payload)
+    except Exception as exc:  # pragma: no cover (defensivo)
+        logger.warning("[REQUOTE_LAZY] _request_shipping_quote excepción: %s", exc)
+        return None
+
+    if status_code >= 400:
+        logger.warning(
+            "[REQUOTE_LAZY] Envia status=%s body=%s",
+            status_code, str(body)[:200],
+        )
+        return None
+
+    highlights = body.get("highlights") if isinstance(body, dict) else {}
+    cheapest = highlights.get("cheapest") if isinstance(highlights, dict) else None
+    fastest = highlights.get("fastest") if isinstance(highlights, dict) else None
+    if not isinstance(cheapest, dict):
+        return None
+
+    # Mapeo: previo "Económica" → cheapest; previo "Rápida" → fastest.
+    prev_service = (shipping_meta.get("service_level") or "").strip().lower()
+    chosen = cheapest
+    chosen_service = "Económica"
+    if prev_service in ("rápida", "rapida") and isinstance(fastest, dict):
+        chosen = fastest
+        chosen_service = "Rápida"
+
+    # `total_price` viene como string formateado o número en cents.
+    total_raw = chosen.get("total_price") or chosen.get("total")
+    try:
+        if isinstance(total_raw, (int, float)):
+            shipping_cents = int(round(float(total_raw) * 100))
+        else:
+            cleaned = str(total_raw).replace("$", "").replace(".", "").replace(",", "").strip()
+            shipping_cents = int(cleaned) * 100 if cleaned.isdigit() else 0
+    except Exception:
+        shipping_cents = 0
+    if shipping_cents <= 0:
+        logger.warning("[REQUOTE_LAZY] total_price inválido en cheapest=%s", chosen)
+        return None
+
+    carrier_name = str(chosen.get("carrier") or "Coordinadora").strip()
+    rate_id = chosen.get("rate_id") or chosen.get("id")
+
+    logger.info(
+        "[REQUOTE_LAZY] conv=%s service=%s carrier=%s new_shipping_cents=%s "
+        "(prev=%s)",
+        conversation_id[:8], chosen_service, carrier_name, shipping_cents,
+        shipping_meta.get("shipping_cents"),
+    )
+    return {
+        "shipping_cents": shipping_cents,
+        "carrier_name": carrier_name,
+        "service_level": chosen_service,
+        "rate_id": rate_id,
+        "city": city_known,
+    }
+
+
 async def handle_shipping_quote_if_applicable(
     supabase: Client,
     tenant_id: str,
@@ -1559,11 +1822,49 @@ async def handle_shipping_quote_if_applicable(
             )
 
         phone = _get_conversation_customer_phone(supabase, conversation_id)
-        contact_address = _get_contact_address(supabase, tenant_id, phone)
-        destination = _coerce_destination(contact_address)
-        # Rev. 103 — destination.phone = shipping_phone (alternativo) si
-        # existe, sino contact.phone (WhatsApp). Asegura que la guía Envía
-        # tenga el phone correcto del RECEPTOR (no siempre el pagador).
+
+        # Rev. 104 (S14[known] fix) — prioridad de destino:
+        #   1. cart.shipping_meta.city: si el cliente acaba de cambiar la
+        #      ciudad post-cotización, el orchestrator ya invocó
+        #      `cart_tool.set_shipping_city(new_city)` ANTES del dispatch.
+        #      Respetar esa intención sobre la dirección guardada del
+        #      contacto (caso known user que dice "cambia el envío a
+        #      Medellín" cuando su address default es Bogotá).
+        #   2. contact.address: fallback a dirección guardada del cliente.
+        #   3. query_text + history: parsing explícito del inbound.
+        #
+        # Sin (1), un known user nunca podía cambiar ciudad: el tool
+        # siempre defaulteaba a su address guardada.
+        destination = None
+        try:
+            cart_row = (
+                supabase.table("conversation_carts")
+                .select("shipping_meta")
+                .eq("conversation_id", conversation_id)
+                .eq("status", "open")
+                .limit(1).execute()
+            )
+            if cart_row.data:
+                meta = cart_row.data[0].get("shipping_meta") or {}
+                city_from_cart = (meta.get("city") or "").strip()
+                if city_from_cart:
+                    destination, _amb = _resolve_destination_from_conversation(
+                        query_text=f"envío a {city_from_cart}",
+                        recent_messages=[],
+                    )
+                    if destination:
+                        logger.info(
+                            "[SHIPPING_QUOTE] destino desde cart.shipping_meta.city=%s",
+                            city_from_cart,
+                        )
+        except Exception as exc:
+            logger.warning("[SHIPPING_QUOTE] cart shipping_meta lookup falló: %s", exc)
+
+        if destination is None:
+            contact_address = _get_contact_address(supabase, tenant_id, phone)
+            destination = _coerce_destination(contact_address)
+
+        ambiguous_city = None
         if destination is not None:
             recipient_phone = _get_contact_shipping_phone(supabase, tenant_id, phone)
             if recipient_phone:
@@ -1586,6 +1887,21 @@ async def handle_shipping_quote_if_applicable(
                 response_text=(
                     "Para cotizar envío necesito tu ciudad de entrega (por ejemplo: Medellín)."
                 ),
+            )
+
+        # Plan A.0.1 / ADR-0011 §6.5 — persistir city al cart en cuanto se
+        # resuelve, no esperar al confirmar carrier. Sin esto, una recotización
+        # lazy posterior (post add_item) no encuentra city en cart.shipping_meta
+        # y debe caer a heurísticas de history-parsing (anti-Plan).
+        try:
+            _persist_destination_city_to_cart(
+                supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+                destination=destination,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[SHIPPING_QUOTE] persistir city al cart falló conv=%s: %s",
+                conversation_id[:8], exc,
             )
 
         # Rev. 81 — Si hay cart-en-DB con items, lo usamos como fuente de
@@ -1671,6 +1987,58 @@ async def handle_shipping_quote_if_applicable(
                 response_text="No llegaron tarifas disponibles en este momento. Intentemos nuevamente en unos minutos.",
                 requires_human=True,
             )
+
+        # Persistir quoted_options en cart.shipping_meta para que el
+        # `select_carrier` (agentic) pueda resolver el rate_id real cuando
+        # el cliente elija "Económica"/"Rápida" en el siguiente turn.
+        # Rev. 106 — fix RATE_ID_NOT_CACHED (conv 2eb3bb48). DB-first
+        # Plan A.0.2: cross-path legacy↔agentic comparten misma fuente.
+        try:
+            from tools.cart_tool import (
+                get_cart_with_items, set_quoted_options,
+            )
+            cart_row = get_cart_with_items(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            )
+            if cart_row and cart_row.get("id"):
+                opts_to_persist: list[dict] = []
+                seen_rate_ids: set[str] = set()
+                for label_key, rate in (("cheapest", highlights.get("cheapest")),
+                                        ("fastest",  highlights.get("fastest"))):
+                    if not isinstance(rate, dict):
+                        continue
+                    rid = str(rate.get("rate_id") or rate.get("id") or "").strip()
+                    if not rid or rid in seen_rate_ids:
+                        continue
+                    seen_rate_ids.add(rid)
+                    total_raw = rate.get("total_price") or rate.get("total") or 0
+                    try:
+                        price_cents = int(float(total_raw) * 100)
+                    except (TypeError, ValueError):
+                        price_cents = 0
+                    opts_to_persist.append({
+                        "rate_id": rid,
+                        "carrier": str(rate.get("carrier") or ""),
+                        "service_level": str(rate.get("service") or ""),
+                        "price_cents": price_cents,
+                        "eta_date": str(
+                            rate.get("delivery_estimate")
+                            or rate.get("eta") or ""
+                        ),
+                        "currency": str(rate.get("currency") or "COP"),
+                    })
+                if opts_to_persist:
+                    set_quoted_options(
+                        supabase,
+                        cart_id=cart_row["id"],
+                        tenant_id=tenant_id,
+                        options=opts_to_persist,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "[SHIPPING_QUOTE] persist quoted_options falló: %s", exc,
+            )
+
         return ShippingQuoteResult(handled=True, response_text=message)
     except Exception as exc:
         logger.error("Error en shipping_quote_tool tenant=%s: %s", tenant_id, exc, exc_info=True)

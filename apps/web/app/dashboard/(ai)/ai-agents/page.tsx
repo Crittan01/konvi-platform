@@ -2,9 +2,9 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Bot, BookOpen, Sparkles } from 'lucide-react'
-import { AiAgentForm } from './ai-agent-form'
 import { BotPreview } from './bot-preview'
 import { ReadinessCard } from './readiness-card'
+import { AgentsList } from './agents-list'
 
 const TONO_LABEL: Record<string, string> = {
   amigable: 'Amigable y cercano',
@@ -26,7 +26,13 @@ export default async function AiAgentsPage() {
   }
 
   const [{ data }, { data: tenant }, { data: kbStats }, { data: catalogStats }, { data: integrations }] = await Promise.all([
-    supabase.from('ai_agents').select('*').eq('tenant_id', tenantId).maybeSingle(),
+    // Rev. 109 ADR-0017 — multi-agente. order is_default desc para que
+    // el primero retornado sea siempre el default cuando existan varios.
+    supabase.from('ai_agents')
+      .select('id, name, role_description, strict_guardrails, role, is_default, fallback_for_roles')
+      .eq('tenant_id', tenantId)
+      .order('is_default', { ascending: false })
+      .order('name', { ascending: true }),
     supabase.from('tenants').select(
       'mision, vision, valores, tono_comunicacion, support_schedule, store_locations, shipping_origin, nit, email_contacto, telefono_contacto'
     ).eq('id', tenantId).maybeSingle(),
@@ -57,10 +63,20 @@ export default async function AiAgentsPage() {
     pagos:     kbDocs.filter(d => d.is_active && d.category === 'pagos').length,
   }
 
-  const agent = data || {
+  // Rev. 109 ADR-0017 — multi-agente. data ahora es array (no single).
+  const agentsList = (data ?? []) as Array<{
+    id?: string
+    name: string
+    role_description: string
+    strict_guardrails: boolean
+    role?: string | null
+    is_default?: boolean | null
+  }>
+  const agent = agentsList[0] || {
     name: 'Vendedor Oficial',
     role_description: 'Eres el agente de atención al cliente de esta tienda por WhatsApp. Te encargas de asistir e informar cordialmente.',
-    strict_guardrails: true
+    strict_guardrails: true,
+    role: 'sales',
   }
 
   const hasFilosofia = !!(tenant?.mision || tenant?.valores)
@@ -78,27 +94,163 @@ export default async function AiAgentsPage() {
   const wompiConnected = integrationsRows.some(i => i.provider === 'wompi' && i.status === 'connected')
   const enviaConnected = integrationsRows.some(i => i.provider === 'envia' && i.status === 'connected')
 
-  async function saveAiAgent(formData: FormData) {
+  // ─── Server actions consolidadas (CRUD agente) ──────────────────────
+  // Rev. 109 ADR-0017 cierre — antes había 2 server actions duplicadas
+  // (form inline solo para default + insert directo desde drawer en
+  // client). Ahora 3 acciones explícitas: createAgent / updateAgent /
+  // deleteAgent. La UI invoca según contexto (drawer crear vs editar).
+
+  async function createAgent(formData: FormData) {
     'use server'
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos' }
+    }
+    const name = (formData.get('name') as string || '').trim()
+    const roleVal = (formData.get('role') as string || 'sales').trim()
+    const role_description = (formData.get('role_description') as string || '').trim()
+    if (!name) return { ok: false, error: 'El nombre del agente es obligatorio' }
+    if (!role_description) return { ok: false, error: 'El prompt maestro es obligatorio' }
+    if (role_description.length > 2500) return { ok: false, error: 'Máximo 2500 caracteres' }
 
-    const name = (formData.get('name') as string).trim() || 'Vendedor Oficial'
-    const role_description = (formData.get('role_description') as string).trim() || 'Asistente de ventas.'
-    const strict_guardrails = formData.get('strict_guardrails') !== null
+    // Validación rol único: el rol debe estar libre (excepto si no hay
+    // ningún agente — primer agente se crea como default sales).
+    const { data: existing } = await sb
+      .from('ai_agents')
+      .select('id, role, is_default')
+      .eq('tenant_id', m.tenant_id)
+    const existingArr = existing ?? []
+    const roleTaken = existingArr.some(a => (a.role ?? 'sales') === roleVal)
+    if (roleTaken) {
+      return {
+        ok: false,
+        error: `Ya tienes un agente con rol ${roleVal}. Solo 1 agente por rol.`,
+      }
+    }
 
-    if (role_description.length > 1500) return
-
-    await sb.from('ai_agents').upsert({
+    // Si no hay agentes, el primero es default. Si ya hay default,
+    // los nuevos son is_default=false (1 default por tenant garantizado
+    // por partial unique index).
+    const hasDefault = existingArr.some(a => a.is_default === true)
+    const { error: e1 } = await sb.from('ai_agents').insert({
       tenant_id: m.tenant_id,
-      name,
-      role_description,
-      strict_guardrails
-    }, { onConflict: 'tenant_id' })
-
+      name, role: roleVal, role_description,
+      strict_guardrails: true,
+      is_default: !hasDefault,
+    })
+    if (e1) return { ok: false, error: e1.message }
     revalidatePath('/dashboard/ai-agents')
+    return { ok: true }
+  }
+
+  async function updateAgent(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos' }
+    }
+    const id = (formData.get('id') as string || '').trim()
+    const name = (formData.get('name') as string || '').trim()
+    const roleVal = (formData.get('role') as string || 'sales').trim()
+    const role_description = (formData.get('role_description') as string || '').trim()
+    const strict_guardrails = formData.get('strict_guardrails') !== null
+    if (!id || !name || !role_description) {
+      return { ok: false, error: 'Datos incompletos' }
+    }
+    if (role_description.length > 2500) return { ok: false, error: 'Máximo 2500 caracteres' }
+
+    // Si el rol cambia, validar que el nuevo rol no esté tomado por OTRO agente.
+    const { data: current } = await sb
+      .from('ai_agents')
+      .select('role, is_default')
+      .eq('id', id)
+      .eq('tenant_id', m.tenant_id)
+      .maybeSingle()
+    if (!current) return { ok: false, error: 'Agente no encontrado' }
+
+    const isDefault = current.is_default === true
+    // El default tiene rol bloqueado en 'sales' — protege coherencia.
+    const finalRole = isDefault ? (current.role ?? 'sales') : roleVal
+    if (!isDefault && finalRole !== current.role) {
+      const { data: peers } = await sb
+        .from('ai_agents')
+        .select('id, role')
+        .eq('tenant_id', m.tenant_id)
+        .neq('id', id)
+      const roleTaken = (peers ?? []).some(p => (p.role ?? 'sales') === finalRole)
+      if (roleTaken) {
+        return {
+          ok: false,
+          error: `Ya tienes un agente con rol ${finalRole}.`,
+        }
+      }
+    }
+
+    // Rev. 109 fallback_for_roles — solo aplica al default. Para non-default
+    // ignoramos (el rol del agente especialista define qué cubre).
+    const CANONICAL_ROLES = ['sales', 'support', 'marketing', 'claims'] as const
+    const rawFallbackRoles = formData.getAll('fallback_for_roles') as string[]
+    const fallbackRoles = isDefault
+      ? rawFallbackRoles.filter((r): r is (typeof CANONICAL_ROLES)[number] =>
+          (CANONICAL_ROLES as readonly string[]).includes(r),
+        )
+      : null
+
+    const updatePayload: Record<string, unknown> = {
+      name, role: finalRole, role_description, strict_guardrails,
+    }
+    if (fallbackRoles !== null) {
+      updatePayload.fallback_for_roles = fallbackRoles
+    }
+
+    const { error: e1 } = await sb
+      .from('ai_agents')
+      .update(updatePayload)
+      .eq('id', id)
+      .eq('tenant_id', m.tenant_id)
+    if (e1) return { ok: false, error: e1.message }
+    revalidatePath('/dashboard/ai-agents')
+    return { ok: true }
+  }
+
+  async function deleteAgent(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos' }
+    }
+    const id = (formData.get('id') as string || '').trim()
+    if (!id) return { ok: false, error: 'ID requerido' }
+
+    // No permitir borrar el default — el tenant siempre necesita 1 agente.
+    const { data: target } = await sb
+      .from('ai_agents')
+      .select('is_default')
+      .eq('id', id)
+      .eq('tenant_id', m.tenant_id)
+      .maybeSingle()
+    if (!target) return { ok: false, error: 'Agente no encontrado' }
+    if (target.is_default) {
+      return {
+        ok: false,
+        error: 'No puedes borrar el agente default. Edítalo si necesitas cambios.',
+      }
+    }
+
+    const { error: e1 } = await sb
+      .from('ai_agents')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', m.tenant_id)
+    if (e1) return { ok: false, error: e1.message }
+    revalidatePath('/dashboard/ai-agents')
+    return { ok: true }
   }
 
   return (
@@ -199,7 +351,15 @@ export default async function AiAgentsPage() {
         </p>
       </div>
 
-      <AiAgentForm agent={agent} canWrite={canWrite} saveAiAgent={saveAiAgent} />
+      {/* Rev. 109 ADR-0017 — gestión consolidada multi-agente (CRUD).
+          Reemplazó el form inline legacy que solo editaba el default. */}
+      <AgentsList
+        agents={agentsList}
+        canWrite={canWrite}
+        createAgent={createAgent}
+        updateAgent={updateAgent}
+        deleteAgent={deleteAgent}
+      />
 
       <BotPreview />
     </div>

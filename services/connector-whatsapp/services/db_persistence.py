@@ -3,6 +3,8 @@ import logging
 from typing import Dict, Any, Optional
 from supabase import create_client, Client
 
+from lib.phone import to_canonical as _phone_to_canonical  # rev. 104 F0-4
+
 logger = logging.getLogger(__name__)
 
 # ─── Supabase con service_role (bypass RLS — se fija tenant_id explícitamente) ──
@@ -48,12 +50,17 @@ def _resolve_tenant_by_waba(supabase: Client, meta_waba_id: str) -> Optional[str
 
 
 def _normalize_phone(phone: str) -> str:
+    """Normaliza phone usando helper canónico shared (rev. 104, F0-4).
+
+    Delega a `lib/phone.py::to_canonical` (idéntico en api/orchestrator/connector,
+    validado por pact test). Forma canónica = digits-only, alineada con Meta wa_id.
+    Si el helper retorna None (input inválido), preserva comportamiento
+    legacy `lstrip('+').strip()` para no romper rows con phone basura.
     """
-    Normaliza el teléfono a formato sin prefijo '+'.
-    Meta envía el wa_id sin '+' (ej: '573125835649').
-    Guardar siempre sin '+' evita conversaciones duplicadas por formato.
-    """
-    return phone.lstrip("+").strip()
+    canonical = _phone_to_canonical(phone)
+    if canonical is not None:
+        return canonical
+    return (phone or "").lstrip("+").strip()
 
 
 def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) -> str:
@@ -61,13 +68,47 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
     Find-or-create de conversación para el cliente.
 
     Política de reutilización: siempre la conversación MÁS RECIENTE para el par
-    (tenant_id, customer_phone). Si está 'closed', se reabre con 'bot_active'.
-    Esto evita el bug de mensajes que se enrutaban no-determinísticamente a
-    conversaciones cerradas cuando había duplicados históricos en DB.
+    (tenant_id, customer_phone). Reabrir/crear respeta consent_revoked_at del
+    contact (Habeas Data Ley 1581 ART. 9 + Meta Business Policy):
+
+      • Si contact.consent_revoked_at IS NOT NULL → conv queda/se crea en
+        'opted_out'. El bot NO responde. Para re-engagement, un humano debe
+        intervenir manualmente (Inbox UI tomar control) o el cliente debe
+        enviar re-consent explícito (flujo aparte, no auto-detectado aquí).
+      • Si contact NO ha revocado → comportamiento estándar:
+        - status='closed' → reabre como 'bot_active'
+        - status fuera de contrato → reabre como 'bot_active'
+        - status válido → reutiliza
+
+    Esto cierra el bug arquitectónico revelado en sesión 2026-05-28:
+    cliente revocado escribe cualquier cosa (no STOP) → connector reabría
+    como 'bot_active' → bot respondía → violaba opt-out.
 
     Retorna el conversation_id.
     """
     customer_phone = _normalize_phone(customer_phone)
+
+    # Habeas Data gate — consultar consent_revoked_at del contact ANTES
+    # de decidir reapertura.
+    contact_revoked = False
+    try:
+        contact_res = (
+            supabase.table("contacts")
+            .select("consent_revoked_at")
+            .eq("tenant_id", tenant_id)
+            .eq("phone", customer_phone)
+            .limit(1)
+            .execute()
+        )
+        if contact_res.data:
+            contact_revoked = bool(contact_res.data[0].get("consent_revoked_at"))
+    except Exception as exc:
+        # Si el lookup falla, asumimos NO revocado para no bloquear flow
+        # accidentalmente. Log para auditoría.
+        logger.warning(
+            f"No pude verificar consent_revoked_at para {customer_phone}: {exc}"
+        )
+
     res = (
         supabase.table("conversations")
         .select("id, status")
@@ -83,8 +124,23 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         conversation_id = conversation["id"]
         current_status = conversation.get("status")
 
-        # Reabrir si está cerrada o tiene status fuera del contrato.
-        if current_status in {"closed"} or current_status not in {"bot_active", "human_takeover", "closed"}:
+        if contact_revoked:
+            # Cliente con consent revocado → conv se mantiene/coloca en
+            # 'opted_out'. Bot NO debe responder. Operador humano puede
+            # intervenir vía Inbox si quiere re-engagement explícito.
+            if current_status != "opted_out":
+                supabase.table("conversations").update(
+                    {"status": "opted_out"}
+                ).eq("id", conversation_id).execute()
+                logger.info(
+                    f"Conv {conversation_id} forzada a 'opted_out' por "
+                    f"contact.consent_revoked_at (era '{current_status}')"
+                )
+            else:
+                logger.debug(f"Conv {conversation_id} mantiene 'opted_out' (consent revocado)")
+        elif current_status in {"closed"} or current_status not in {"bot_active", "human_takeover", "closed", "opted_out"}:
+            # Reabrir cerrada o status fuera de contrato (sin incluir opted_out
+            # que ahora se respeta arriba).
             supabase.table("conversations").update(
                 {"status": "bot_active"}
             ).eq("id", conversation_id).execute()
@@ -92,13 +148,19 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         else:
             logger.debug(f"Conversación existente reutilizada: {conversation_id}")
     else:
+        # Nueva conv. Si contact ya está revocado (raro pero posible si
+        # contact existió en otro canal antes), respeta opt-out.
+        initial_status = "opted_out" if contact_revoked else "bot_active"
         new_conv = supabase.table("conversations").insert({
             "tenant_id": tenant_id,
             "customer_phone": customer_phone,
-            "status": "bot_active",
+            "status": initial_status,
         }).execute()
         conversation_id = new_conv.data[0]["id"]
-        logger.info(f"Nueva conversación creada: {conversation_id} para {customer_phone}")
+        logger.info(
+            f"Nueva conversación creada: {conversation_id} para {customer_phone} "
+            f"status={initial_status}"
+        )
 
     return conversation_id
 

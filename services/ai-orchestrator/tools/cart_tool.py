@@ -33,6 +33,181 @@ from supabase import Client
 logger = logging.getLogger("orchestrator.tools.cart")
 
 
+def _emit_cart_event(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: Optional[str],
+    event_type: str,
+    payload: Optional[dict] = None,
+    correlation_id: Optional[str] = None,
+) -> None:
+    """Wrapper best-effort sobre `cart.events.emit`.
+
+    Se importa lazy para evitar circulares (cart/events.py no debe depender
+    de tools/cart_tool.py). Cualquier fallo es swalloweado: la auditoría
+    nunca debe bloquear la mutación funcional del cart.
+    """
+    if not tenant_id:
+        return
+    try:
+        from cart.events import emit as _emit
+        _emit(
+            supabase,
+            cart_id=cart_id,
+            tenant_id=tenant_id,
+            event_type=event_type,
+            payload=payload or {},
+            correlation_id=correlation_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[CART_EVENT] emit wrapper falló: %s", exc)
+
+
+def invalidate_pending_order_on_cart_change(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    reason: str,
+) -> Optional[dict]:
+    """Si la conversación del cart tiene una `orders.pending_payment` activa,
+    cancelarla + marcar `payments.pending` como `voided`.
+
+    Plan A.0.1 (cart-as-SoT, ADR-0011): toda mutación del cart con orden
+    activa rompe el contrato "una conv = una orden con un total acordado".
+    El link Wompi ya generado tiene un `amount_in_cents` congelado al momento
+    de crear la orden y NO se actualiza con el cart. Si el cliente paga el
+    link viejo después de modificar el cart, el monto pagado diverge del cart
+    real → pérdida o queja.
+
+    La invalidación es síncrona y precede al cambio del cart: si esto falla,
+    NO mutamos el cart (mejor rechazar la modificación que dejar inconsistencia).
+
+    Retorna:
+      None si no había orden activa (caso normal: cliente todavía construyendo
+      el cart antes de generar link).
+      dict {order_id, voided_payment_count, reason} si invalidó algo. El
+      caller (orchestrator) usa este dict para informar al cliente que el
+      link anterior ya no es válido.
+
+    Args:
+      cart_id: identifica la conversación (cart → conversation_id).
+      tenant_id: scope multi-tenant.
+      reason: motivo de la invalidación (ej. 'item_added', 'item_removed',
+              'qty_changed'). Se persiste en notes y en cart_events.
+    """
+    # Resolver conversation_id desde el cart.
+    try:
+        cart_res = (
+            supabase.table("conversation_carts")
+            .select("conversation_id")
+            .eq("id", cart_id)
+            .eq("tenant_id", tenant_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[CART_INVALIDATE] no pude leer cart=%s: %s — skip invalidation",
+            cart_id[:8], exc,
+        )
+        return None
+    cart_rows = cart_res.data if isinstance(cart_res.data, list) else []
+    if not cart_rows or not isinstance(cart_rows[0], dict):
+        return None
+    conversation_id = cart_rows[0].get("conversation_id")
+    if not conversation_id:
+        return None
+
+    # Buscar orden pending_payment activa para esta conversación.
+    try:
+        orders_res = (
+            supabase.table("orders")
+            .select("id, total_amount, notes")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .eq("status", "pending_payment")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[CART_INVALIDATE] lookup orders falló conv=%s: %s",
+            str(conversation_id)[:8], exc,
+        )
+        return None
+    orders_data = orders_res.data if isinstance(orders_res.data, list) else []
+    if not orders_data or not isinstance(orders_data[0], dict):
+        return None  # No hay orden activa — caso normal
+    order = orders_data[0]
+    order_id = order.get("id")
+    if not order_id:
+        return None
+
+    # Cancelar orden con motivo cart_modified.
+    try:
+        from datetime import datetime, timezone
+        prior_notes = str(order.get("notes") or "")
+        new_notes = (
+            f"{prior_notes} | cancelled_due_to_cart_change={reason}"
+            if prior_notes else f"cancelled_due_to_cart_change={reason}"
+        )
+        supabase.table("orders").update({
+            "status": "cancelled",
+            "notes": new_notes,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", order_id).eq("tenant_id", tenant_id).eq(
+            "status", "pending_payment"  # CAS: no pisar otros estados
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[CART_INVALIDATE] no pude cancelar order=%s: %s",
+            str(order_id)[:8], exc,
+        )
+        return None
+
+    # Voided todos los payments.pending de esta orden.
+    voided_count = 0
+    try:
+        upd = (
+            supabase.table("payments")
+            .update({"status": "voided"})
+            .eq("tenant_id", tenant_id)
+            .eq("order_id", order_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        voided_count = len(upd.data or []) if isinstance(upd.data, list) else 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[CART_INVALIDATE] no pude voided payments order=%s: %s — orden ya cancelada",
+            str(order_id)[:8], exc,
+        )
+
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="order_invalidated_due_to_cart_change",
+        payload={
+            "order_id": order_id,
+            "reason": reason,
+            "voided_payment_count": voided_count,
+            "previous_total_amount": float(order.get("total_amount") or 0),
+        },
+    )
+    logger.info(
+        "[CART_INVALIDATE] order=%s cancelada + %d payment(s) voided por reason=%s",
+        str(order_id)[:8], voided_count, reason,
+    )
+    return {
+        "order_id": order_id,
+        "voided_payment_count": voided_count,
+        "reason": reason,
+    }
+
+
 # ─── Cart lifecycle ──────────────────────────────────────────────────────────
 
 def ensure_cart(
@@ -50,7 +225,8 @@ def ensure_cart(
     res = (
         supabase.table("conversation_carts")
         .select("id, status, version, subtotal_cents, shipping_cents, total_cents, "
-                "shipping_meta, requires_requote, contact_id")
+                "shipping_meta, requires_requote, contact_id, "
+                "coupon_id, coupon_code, discount_cents")
         .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .eq("status", "open")
@@ -112,7 +288,8 @@ def get_cart_with_items(
     cart_res = (
         supabase.table("conversation_carts")
         .select("id, status, version, subtotal_cents, shipping_cents, total_cents, "
-                "shipping_meta, requires_requote, contact_id")
+                "shipping_meta, requires_requote, contact_id, "
+                "coupon_id, coupon_code, discount_cents, payment_method")
         .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .eq("status", "open")
@@ -201,9 +378,18 @@ def add_item(
     """Invoca RPC cart_add_item (UPSERT atómico) + invalida shipping.
 
     Si el cart ya tiene esta variation, suma la quantity (RPC lo maneja).
+
+    Plan A.0.1 / ADR-0011: si la conversación tiene una orden
+    `pending_payment` activa, antes del cambio se invalida (cancela orden
+    + voided payments). El campo `order_invalidated` en el payload retornado
+    señaliza al caller (orchestrator) para que informe al cliente que el
+    link anterior ya no es válido.
     """
     if quantity < 1:
         raise ValueError("add_item: quantity debe ser >= 1")
+    invalidated = invalidate_pending_order_on_cart_change(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_added",
+    )
     res = supabase.rpc(
         "cart_add_item",
         {
@@ -219,7 +405,22 @@ def add_item(
     payload = (res.data or [None])[0] if isinstance(res.data, list) else res.data
     if not payload:
         raise RuntimeError(f"add_item: RPC no devolvió payload (cart={cart_id})")
-    invalidate_shipping(supabase, cart_id=cart_id, reason="item_added")
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="item_added",
+        payload={
+            "product_id": product_id,
+            "variation_id": variation_id,
+            "quantity": int(quantity),
+            "unit_price_cents": int(unit_price_cents),
+        },
+    )
+    invalidate_shipping(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_added",
+    )
+    if isinstance(payload, dict) and invalidated:
+        payload["order_invalidated"] = invalidated
     return payload
 
 
@@ -270,7 +471,14 @@ def remove_item(
     tenant_id: str,
     variation_id: str,
 ) -> dict:
-    """Borra el item del carrito + recalcula totals + invalida shipping."""
+    """Borra el item del carrito + recalcula totals + invalida shipping.
+
+    Plan A.0.1 / ADR-0011: si la conversación tiene orden `pending_payment`
+    activa, se invalida antes del cambio (ver add_item).
+    """
+    invalidated = invalidate_pending_order_on_cart_change(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_removed",
+    )
     supabase.table("conversation_cart_items").delete().eq(
         "cart_id", cart_id
     ).eq("variation_id", variation_id).execute()
@@ -290,8 +498,22 @@ def remove_item(
         "subtotal_cents": new_subtotal,
         "total_cents": new_subtotal,  # shipping queda invalidado abajo
     }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
-    invalidate_shipping(supabase, cart_id=cart_id, reason="item_removed")
-    return {"cart_id": cart_id, "new_subtotal_cents": new_subtotal}
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="item_removed",
+        payload={
+            "variation_id": variation_id,
+            "new_subtotal_cents": new_subtotal,
+        },
+    )
+    invalidate_shipping(
+        supabase, cart_id=cart_id, tenant_id=tenant_id, reason="item_removed",
+    )
+    result = {"cart_id": cart_id, "new_subtotal_cents": new_subtotal}
+    if invalidated:
+        result["order_invalidated"] = invalidated
+    return result
 
 
 # ─── Shipping computation ────────────────────────────────────────────────────
@@ -409,10 +631,13 @@ def set_shipping_meta(
     detecta selección post-quote, y luego enriquecerla si shipping_quote_tool
     corre con datos completos. El total siempre se recalcula coherente.
     """
-    # Leer subtotal actual para recomputar total.
+    # Leer subtotal + shipping_meta actual para preservar quoted_options
+    # y demás campos extendidos (rev. 107: bug runtime KAIU 94b0078c —
+    # set_shipping_meta sobrescribía shipping_meta perdiendo quoted_options,
+    # rompiendo el fuzzy match de select_carrier en re-selecciones).
     cur = (
         supabase.table("conversation_carts")
-        .select("subtotal_cents")
+        .select("subtotal_cents, shipping_meta, discount_cents")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -421,9 +646,18 @@ def set_shipping_meta(
     if not cur.data:
         raise RuntimeError(f"set_shipping_meta: cart {cart_id} no encontrado")
     subtotal = int(cur.data[0].get("subtotal_cents") or 0)
-    new_total = subtotal + int(shipping_cents)
+    # Rev. 109 fix UAT live BUG 34 — preservar descuento de cupón ya
+    # aplicado. Sin este max(), set_shipping_meta sobrescribía total_cents
+    # ignorando discount_cents → cliente perdía el descuento al elegir
+    # carrier post-cupón.
+    discount = int(cur.data[0].get("discount_cents") or 0)
+    new_total = max(0, subtotal + int(shipping_cents) - discount)
+    existing_meta = cur.data[0].get("shipping_meta") or {}
 
+    # Merge: actualizar campos canónicos del carrier seleccionado +
+    # preservar quoted_options (lista de opciones cotizadas para re-select).
     shipping_meta = {
+        **existing_meta,
         "carrier": carrier,
         "service_level": service_level,
         "rate_id": rate_id,
@@ -449,6 +683,23 @@ def set_shipping_meta(
         "[CART] shipping_meta set cart=%s carrier=%s service=%s shipping=%s subtotal=%s total=%s",
         cart_id[:8], carrier, service_level, shipping_cents, subtotal, new_total,
     )
+    # Evento canónico: carrier_selected — el cliente eligió Económica/Rápida.
+    # Si shipping_cents=0 (quote inicial sin selección aún) emitimos shipping_quoted
+    # en su lugar; cuando llega selección real, el call siguiente reemite.
+    _evt = "carrier_selected" if int(shipping_cents) > 0 else "shipping_quoted"
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type=_evt,
+        payload={
+            "carrier": carrier,
+            "service_level": service_level,
+            "rate_id": rate_id,
+            "city": city,
+            "shipping_cents": int(shipping_cents),
+            "total_cents": new_total,
+        },
+    )
     # Devolvemos el snapshot computado, no la fila del UPDATE — el caller
     # solo necesita los nuevos totales y la meta para mostrar al cliente.
     return {
@@ -461,17 +712,238 @@ def set_shipping_meta(
     }
 
 
+def set_shipping_recipient(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    name: str | None = None,
+    document_type: str | None = None,
+    document_number: str | None = None,
+    phone: str | None = None,
+    address: dict | None = None,
+) -> dict:
+    """Persiste destinatario alterno (regalo / envío a tercero) en
+    cart.shipping_meta.recipient_* — NO sobrescribe contact del titular.
+
+    Rev. 109 fix UAT live BUG 37 (Habeas Data Ley 1581) — cuando el
+    cliente compra para otra persona ("es para mi mamá") los datos del
+    receptor deben vivir en el cart (orden específica) NO en el contact
+    del titular WhatsApp. Sin esto, el bot sobrescribía Cristian → María
+    en contacts table → violación Habeas Data + UX rota.
+
+    Cualquier campo en None se preserva del valor anterior (parcial-merge).
+    Para borrar el recipient completo, pasar todos los campos vacíos o
+    invocar clear_shipping_recipient.
+    """
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta")
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        raise RuntimeError(f"set_shipping_recipient: cart {cart_id} no encontrado")
+    existing_meta = cur.data[0].get("shipping_meta") or {}
+    existing_recipient = existing_meta.get("recipient") or {}
+
+    new_recipient = {
+        "name": (name if name is not None
+                 else existing_recipient.get("name")),
+        "document_type": (document_type if document_type is not None
+                          else existing_recipient.get("document_type")),
+        "document_number": (document_number if document_number is not None
+                            else existing_recipient.get("document_number")),
+        "phone": (phone if phone is not None
+                  else existing_recipient.get("phone")),
+        "address": (address if address is not None
+                    else existing_recipient.get("address")),
+    }
+    new_meta = {**existing_meta, "recipient": new_recipient}
+
+    supabase.table("conversation_carts").update({
+        "shipping_meta": new_meta,
+    }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
+
+    logger.info(
+        "[CART] shipping_recipient set cart=%s name=%s doc=%s phone=%s",
+        cart_id[:8], new_recipient.get("name"),
+        new_recipient.get("document_number"),
+        new_recipient.get("phone"),
+    )
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="shipping_recipient_set",
+        payload={"recipient": new_recipient},
+    )
+    return {"cart_id": cart_id, "recipient": new_recipient}
+
+
+def set_quoted_options(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    options: list[dict],
+) -> dict:
+    """Persiste en cart.shipping_meta.quoted_options el array completo de
+    opciones cotizadas (rate_id + carrier + service + price + eta).
+
+    Rev. 106 — fix bug `RATE_ID_NOT_CACHED` (conv 2eb3bb48, 2026-05-22):
+    el cache de opciones vivía solo en ctx.extras (memoria volátil que se
+    resetea cada turn). Cuando el legacy cotizaba (fallback) y el agentic
+    intentaba seleccionar carrier en turn siguiente, no tenía rate_ids.
+
+    DB-first (Plan A.0.2): ambos paths (legacy + agentic) leen del mismo
+    lugar canónico. No toca carrier/service/cents — solo añade las opciones
+    disponibles para que `select_carrier` pueda resolverlas.
+
+    Args:
+        options: lista de dicts {rate_id, carrier, service_level,
+            price_cents, eta_date, currency}.
+
+    Returns:
+        dict snapshot del shipping_meta actualizado.
+    """
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta")
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        raise RuntimeError(f"set_quoted_options: cart {cart_id} no encontrado")
+
+    existing_meta = cur.data[0].get("shipping_meta") or {}
+    # Sanitizar opciones — solo persistir campos canónicos.
+    sanitized = []
+    for opt in options or []:
+        if not isinstance(opt, dict):
+            continue
+        rid = str(opt.get("rate_id") or opt.get("id") or "").strip()
+        if not rid:
+            continue
+        sanitized.append({
+            "rate_id": rid,
+            "carrier": str(opt.get("carrier") or "").strip(),
+            "service_level": str(
+                opt.get("service_level") or opt.get("service") or ""
+            ).strip(),
+            "price_cents": int(opt.get("price_cents") or 0),
+            "eta_date": str(opt.get("eta_date") or opt.get("eta") or "").strip(),
+            "currency": str(opt.get("currency") or "COP").strip(),
+        })
+    if not sanitized:
+        logger.warning(
+            "[CART] set_quoted_options: array vacío post-sanitize cart=%s",
+            cart_id[:8],
+        )
+        return {"id": cart_id, "shipping_meta": existing_meta}
+
+    new_meta = dict(existing_meta)
+    new_meta["quoted_options"] = sanitized
+    (
+        supabase.table("conversation_carts")
+        .update({"shipping_meta": new_meta})
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    logger.info(
+        "[CART] quoted_options persisted cart=%s n=%d rate_ids=%s",
+        cart_id[:8], len(sanitized),
+        [o["rate_id"][:8] for o in sanitized[:3]],
+    )
+    return {"id": cart_id, "shipping_meta": new_meta}
+
+
+def set_shipping_city(
+    supabase: Client,
+    *,
+    cart_id: str,
+    new_city: str,
+    new_dane_code: str | None = None,
+    tenant_id: str | None = None,
+) -> dict:
+    """Rev. 104 (F0-3 / BUG-1): registra cambio de ciudad post-cotización.
+
+    Cuando el cliente dice "cambia el envío a Medellín" tras haber cotizado
+    a Bogotá, el cart debe:
+      • Marcar `requires_requote=True` (cotización vieja inválida).
+      • Registrar la nueva `city` (y `dane_code` si se conoce) en
+        `shipping_meta` para que el next quote tenga el destino correcto.
+      • Limpiar `shipping_cents=0` y carrier (la próxima quote los re-llena).
+
+    El bot debe llamar esto ANTES de la nueva cotización; el `_persist_cart_shipping_if_needed`
+    posterior actualizará todos los campos cuando el cliente seleccione carrier.
+    """
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta, subtotal_cents, discount_cents")
+        .eq("id", cart_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        return {"cart_id": cart_id, "updated": False}
+    row = cur.data[0]
+    meta = row.get("shipping_meta") or {}
+    # Reset campos de quote vieja (carrier, service, rate_id) y override city.
+    new_meta = {
+        "city": new_city,
+        "dane_code": new_dane_code or meta.get("dane_code"),
+        "address_line": meta.get("address_line"),
+        "weight_inputs": meta.get("weight_inputs"),
+        "city_changed_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+    }
+    # Rev. 109 fix UAT live BUG 34 — preservar discount aplicado por cupón.
+    _disc = int(row.get("discount_cents") or 0)
+    new_total = max(0, int(row.get("subtotal_cents") or 0) - _disc)
+    supabase.table("conversation_carts").update({
+        "shipping_cents": 0,
+        "shipping_meta": new_meta,
+        "total_cents": new_total,
+        "requires_requote": True,
+    }).eq("id", cart_id).execute()
+    logger.info(
+        "[CART] shipping_city=%s cart=%s — requires_requote=True, prev city=%s",
+        new_city, cart_id[:8], meta.get("city"),
+    )
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="city_changed",
+        payload={
+            "prev_city": meta.get("city"),
+            "new_city": new_city,
+            "new_dane_code": new_dane_code,
+        },
+    )
+    return {
+        "cart_id": cart_id, "updated": True,
+        "new_city": new_city, "prev_city": meta.get("city"),
+    }
+
+
 def invalidate_shipping(
     supabase: Client,
     *,
     cart_id: str,
     reason: str = "item_changed",
+    tenant_id: str | None = None,
 ) -> dict:
     """Setea requires_requote=true + reset shipping_cents=0. Conserva
     address en shipping_meta para que el bot no tenga que repreguntar."""
     cur = (
         supabase.table("conversation_carts")
-        .select("shipping_meta, subtotal_cents")
+        .select("shipping_meta, subtotal_cents, discount_cents")
         .eq("id", cart_id)
         .limit(1)
         .execute()
@@ -487,7 +959,9 @@ def invalidate_shipping(
         if meta.get(k)
     }
     preserved["invalidated_reason"] = reason
-    new_total = int(row.get("subtotal_cents") or 0)
+    # Rev. 109 fix UAT live BUG 34 — preservar discount aplicado.
+    _disc = int(row.get("discount_cents") or 0)
+    new_total = max(0, int(row.get("subtotal_cents") or 0) - _disc)
     supabase.table("conversation_carts").update({
         "shipping_cents": 0,
         "shipping_meta": preserved,
@@ -495,4 +969,10 @@ def invalidate_shipping(
         "requires_requote": True,
     }).eq("id", cart_id).execute()
     logger.info("[CART] shipping invalidated cart=%s reason=%s", cart_id[:8], reason)
+    _emit_cart_event(
+        supabase,
+        cart_id=cart_id, tenant_id=tenant_id,
+        event_type="shipping_invalidated",
+        payload={"reason": reason, "preserved_city": preserved.get("city")},
+    )
     return {"cart_id": cart_id, "invalidated": True, "reason": reason}

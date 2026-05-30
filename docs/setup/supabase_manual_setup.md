@@ -19,7 +19,7 @@ No des por sentado ningún conocimiento técnico, sigue estos movimientos de rat
 
 2. **Creación de la Agrupación (Organization):**
    - Una vez dentro, en la pantalla central o esquina superior izquierda, asegúrate de pertenecer a una "Organization", si no la tienes, te saldrá un prompt preguntando "Create Organization".
-   - **Name:** Nómbrala como tu empresa (ej. *Commerce Ops Corp*).
+   - **Name:** Nómbrala como tu empresa (ej. *Konvi Corp*).
    - **Type:** Selecciona la categoría que representa este proyecto. Para evitar flujos agresivos de validación de ventas, te sugiero seleccionar **"Company"** o **"Startup"**. Si es un proyecto de laboratorio tuyo, sirve **"Personal"**.
    - **Plan:** Escoge "Free Plan" (o "Hobby Plan", dependiendo de cómo lo nombren en la interfaz).
 

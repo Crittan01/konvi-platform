@@ -1,20 +1,19 @@
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import { Store, ExternalLink } from 'lucide-react'
 import MarketplaceManager from './_components/marketplace-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 export default async function MarketplacePage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
+  // Sem 5 perf: cached.
+  const user = await getCachedUser()
   if (!user) redirect('/login')
 
+  const supabase = createClient()
   // getUser() ya validó el usuario. getSession() solo extrae el token para llamar la API interna.
   const { data: { session } } = await supabase.auth.getSession()
-  const meta     = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role     = meta.role ?? 'operator'
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = ['owner', 'manager'].includes(role)
 
   // ── Estado integración MeLi desde DB (fuente local) ───────────────────────

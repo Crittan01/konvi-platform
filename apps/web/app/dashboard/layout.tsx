@@ -1,29 +1,64 @@
 import * as React from "react"
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import {
+  getCachedUser, getCachedTenantMeta, getCachedTenantName,
+} from '@/utils/supabase/cached-user'
 import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
 import SidebarClient from './sidebar-client'
+
+/**
+ * Browser title tenant-centric (Sem 7 F2 cierre — segregación Konvi/tenant).
+ *
+ * Cada página dashboard provee solo el segmento (`title: 'Pedidos'`) y
+ * Next.js completa con el template `'%s — {tenantName}'`. Páginas sin
+ * metadata propia caen en el `default` (solo el nombre del tenant).
+ *
+ * Pre-auth (login, forgot-password, etc.) mantiene "Konvi" porque vive
+ * fuera del layout dashboard.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const tenantName = (await getCachedTenantName()) ?? 'Tu tienda'
+  return {
+    title: {
+      template: `%s — ${tenantName}`,
+      default: tenantName,
+    },
+  }
+}
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sem 5 perf: getCachedUser comparte resultado con page server
+  // components anidados via React.cache. Ahorra 1 round-trip por
+  // navegación (~640ms en VM Colombia → Supabase US-East).
+  const user = await getCachedUser()
 
   if (!user) redirect('/login')
 
-  const meta = (user?.app_metadata ?? {}) as { role?: string; tenant_id?: string }
-  const role = meta.role ?? 'operator'
-  const tenantId = meta.tenant_id
+  const { role, tenantId } = await getCachedTenantMeta()
+  const supabase = createClient()
 
   const logoutAction = async () => {
     'use server'
     const supabase = createClient()
     await supabase.auth.signOut()
+    // Rev. 109 J.2.4.3 — limpiar cookie de recovery bypass al cerrar sesión.
+    // Si el user usó recovery code en esta sesión, la cookie HttpOnly debe
+    // borrarse para que el próximo login REQUIERA TOTP o nuevo recovery.
+    const { cookies } = await import('next/headers')
+    cookies().delete('mfa_recovery_session')
     redirect('/login')
   }
+
+  // Rev. 109 J.2.4.3 — detectar si el user entró vía recovery code
+  // para mostrar banner urgente: regenerar TOTP idealmente esta sesión.
+  const { cookies: cookieStore } = await import('next/headers')
+  const usedRecoveryCode = cookieStore().get('mfa_recovery_session')?.value === '1'
 
   // ── Ronda 2: todas las queries del tenant en paralelo ─────────────────────
   let tenantName: string | null = null
@@ -32,14 +67,17 @@ export default async function DashboardLayout({
   let meliBadge = 0
   let planCode = 'enterprise'
   const planCapabilities: Record<string, boolean> = {}
-  const integrations = { whatsapp: false, envia: false, mercadolibre: false }
+  // Rev. 107 — `shipping` es abstracción multi-provider: true si CUALQUIER
+  // provider shipping (envia | aveonline) está connected. Habilita el
+  // módulo Cotizador del sidebar independiente del provider activo.
+  const integrations = { whatsapp: false, shipping: false, mercadolibre: false }
 
   if (tenantId) {
     const [tenantRes, inboxRes, meliRes, integRes, subRes] = await Promise.all([
       supabase.from('tenants').select('name, logo_url').eq('id', tenantId).single(),
       supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover'),
       supabase.from('marketplace_listings').select('status').eq('tenant_id', tenantId).eq('provider', 'mercadolibre'),
-      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'envia', 'mercadolibre']),
+      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'envia', 'aveonline', 'mercadolibre']),
       supabase.from('tenant_subscriptions').select('plan_code').eq('tenant_id', tenantId).maybeSingle(),
     ])
 
@@ -53,7 +91,8 @@ export default async function DashboardLayout({
       const provider  = (row as { provider?: string }).provider
       const connected = (row as { status?: string }).status === 'connected'
       if (provider === 'whatsapp')     integrations.whatsapp     = connected
-      if (provider === 'envia')        integrations.envia        = connected
+      if (provider === 'envia')        integrations.shipping     ||= connected
+      if (provider === 'aveonline')    integrations.shipping     ||= connected
       if (provider === 'mercadolibre') integrations.mercadolibre = connected
     }
 
@@ -103,6 +142,22 @@ export default async function DashboardLayout({
             <span className="hidden sm:inline">Live</span>
           </div>
         </div>
+
+        {/* Rev. 109 J.2.4.3 — Banner urgente si sesión vía recovery code */}
+        {usedRecoveryCode && (
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 rounded-lg border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            <div className="flex-1">
+              <p className="font-medium">Sesión iniciada con código de respaldo</p>
+              <p className="text-xs mt-1 text-amber-800">
+                Esto significa que perdiste tu authenticator. Te recomendamos
+                regenerar tu MFA + nuevos códigos de respaldo en{' '}
+                <a href="/dashboard/settings/security" className="underline font-medium">Configuración → Seguridad</a>
+                {' '}antes de que esta sesión expire (24h).
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Page content */}
         <div className="p-4 sm:p-6 lg:p-8">

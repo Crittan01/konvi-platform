@@ -3,9 +3,12 @@ Tool determinístico de generación de link de pago Wompi para el Orchestrator.
 
 Flujo cuando se activa:
   1. Detecta intent=order_acknowledgment con datos completos en context
-  2. Llama Core API POST /api/v1/orders (payment_link=True → pending_payment)
-  3. Llama Core API POST /api/v1/orders/{id}/payment-link
-  4. Retorna checkout_url para enviar al cliente por WhatsApp
+  2. Idempotencia transaccional: si la conversación ya tiene una orden
+     pending_payment con link Wompi vigente (≤ TTL), reutiliza ese link
+     en vez de crear una orden duplicada.
+  3. Llama Core API POST /api/v1/orders (payment_link=True → pending_payment)
+  4. Llama Core API POST /api/v1/orders/{id}/payment-link
+  5. Retorna checkout_url para enviar al cliente por WhatsApp
 
 REGLA: El LLM provee total_in_cents como suma de precios reales del contexto.
        El tool valida mínimo ($1.500 COP = 150.000 cents) antes de proceder.
@@ -14,6 +17,7 @@ REGLA: El LLM provee total_in_cents como suma de precios reales del contexto.
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -27,6 +31,13 @@ SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 WOMPI_MIN_AMOUNT_CENTS = 150_000  # $1.500 COP — mínimo Wompi Agregador
 WOMPI_MAX_AMOUNT_CENTS = 10_000_000_000  # $100M COP — cap de sanidad
+# TTL del link Wompi (validez del checkout_url). Debe coincidir con
+# services/api/routers/orders.py:WOMPI_PAYMENT_LINK_TTL_MINUTES (Core API
+# usa este valor para el `expires_at` que se manda a Wompi). Si los dos
+# valores divergen, el guard del bucket (a)/(b) miente: o reusaríamos un
+# link ya expirado en Wompi, o regeneraríamos uno aún vigente.
+# Detalles: docs/adr/0011-payment-link-lifecycle.md.
+WOMPI_LINK_TTL_MINUTES = 30
 
 
 @dataclass
@@ -45,6 +56,146 @@ def _extract_first_name(full_name: Optional[str]) -> Optional[str]:
     if not tokens:
         return None
     return tokens[0].title()
+
+
+def _find_pending_order(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+) -> Optional[dict]:
+    """Busca la orden `pending_payment` más reciente de la conversación y
+    determina si tiene link Wompi vigente.
+
+    Retorna dict con:
+      {
+        "order_id": str,
+        "total_amount": float,
+        "active_link": {checkout_url, amount_in_cents, created_at} | None,
+      }
+    o None si no hay ninguna orden `pending_payment` para la conversación.
+
+    Plan A.0.1 (cart-as-SoT): una conversación + cart abierto = una orden
+    activa. Este lookup es el primer eslabón de la idempotencia
+    transaccional del tool. El caller decide:
+      • active_link presente   → reutilizar link (cliente lo perdió o
+        confirmó "sigamos" antes del TTL).
+      • active_link=None       → mismo `order_id`, regenerar link sobre
+        la orden existente (cliente volvió tras vencimiento del TTL).
+      • retorno None           → no hay orden activa, crear desde cero.
+
+    La consulta es defensiva: si falla por cualquier razón retorna None y
+    el caller degrada al comportamiento legacy (crear orden + link nuevos).
+    """
+    try:
+        orders_resp = (
+            supabase.table("orders")
+            .select("id, total_amount, status, created_at")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .eq("status", "pending_payment")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        # Validación estricta de tipo: Supabase devuelve list[dict]. Si el
+        # cliente está mockeado sin spec retornaría MagicMock (truthy) y el
+        # lookup produciría datos sintéticos. Aceptar solo listas reales.
+        orders_data = orders_resp.data if isinstance(orders_resp.data, list) else []
+        if not orders_data:
+            return None
+        ord_row = orders_data[0]
+        if not isinstance(ord_row, dict) or not ord_row.get("id"):
+            return None
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(minutes=WOMPI_LINK_TTL_MINUTES)
+        ).isoformat()
+        pay_resp = (
+            supabase.table("payments")
+            .select("checkout_url, wompi_link_id, status, created_at, amount_in_cents")
+            .eq("tenant_id", tenant_id)
+            .eq("order_id", ord_row["id"])
+            .eq("status", "pending")
+            .gte("created_at", cutoff)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        pay_data = pay_resp.data if isinstance(pay_resp.data, list) else []
+        active_link: Optional[dict] = None
+        if pay_data and isinstance(pay_data[0], dict) and pay_data[0].get("checkout_url"):
+            p = pay_data[0]
+            active_link = {
+                "checkout_url": p["checkout_url"],
+                "amount_in_cents": int(p.get("amount_in_cents") or 0),
+                "created_at": p.get("created_at") or "",
+            }
+        return {
+            "order_id": ord_row["id"],
+            "total_amount": float(ord_row.get("total_amount") or 0),
+            "active_link": active_link,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[PAYMENT_LINK] idempotencia lookup falló conv=%s: %s — procediendo a crear",
+            conversation_id, exc,
+        )
+    return None
+
+
+async def _regenerate_link_on_existing_order(
+    *,
+    order_id: str,
+    headers: dict,
+) -> Optional[tuple[str, str]]:
+    """Llama `POST /orders/{order_id}/payment-link` para generar un nuevo
+    link Wompi sobre una orden `pending_payment` existente cuyo link
+    anterior expiró.
+
+    El endpoint Core API (services/api/routers/orders.py) acepta órdenes
+    en estado `pending|pending_payment` y persiste una nueva fila en
+    `payments` por cada llamada — soporte explícito de re-emisión.
+
+    Retorna tupla (checkout_url, expires_at) o None si falla.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    f"{API_URL}/api/v1/orders/{order_id}/payment-link",
+                    headers=headers,
+                )
+                if resp.status_code == 503:
+                    logger.warning(
+                        "[PAYMENT_LINK] Wompi no configurado al regenerar order=%s",
+                        order_id,
+                    )
+                    return None
+                resp.raise_for_status()
+                data = resp.json()
+                url = data.get("checkout_url")
+                if url:
+                    return (url, data.get("expires_at", ""))
+        except httpx.RequestError as e:
+            last_exc = e
+            logger.warning(
+                "[PAYMENT_LINK] regenerate transient attempt=%d order=%s err=%s",
+                attempt + 1, order_id, e,
+            )
+        except Exception as e:
+            logger.error(
+                "[PAYMENT_LINK] error regenerando link order=%s: %s",
+                order_id, e,
+            )
+            return None
+    if last_exc:
+        logger.error(
+            "[PAYMENT_LINK] regenerate sin éxito tras reintentos order=%s last_err=%s",
+            order_id, last_exc,
+        )
+    return None
 
 
 def _build_api_auth_token(tenant_id: str) -> Optional[str]:
@@ -107,19 +258,101 @@ async def handle_payment_link_if_applicable(
         )
         return None
 
+    # ── 1.5. Idempotencia transaccional (Plan A.0.1) ──────────────────────────
+    # Una conversación + cart abierto = una orden activa. Antes de crear,
+    # buscamos si la conversación ya tiene una `orders.status='pending_payment'`.
+    # Tres escenarios:
+    #   (a) orden + link vigente (≤ TTL)     → reutilizar link existente.
+    #   (b) orden sin link vigente (> TTL)   → mismo order_id, regenerar link.
+    #   (c) sin orden activa                 → flujo normal: crear desde cero.
+    #
+    # Caso runtime motivador (a) — S06[known] 2026-05-04: cliente recibió
+    # link, dijo "Sigamos"; el bypass disparó payment_link otra vez → sin
+    # guard, orden #2 con link #2 (duplicado).
+    # Caso (b): cliente vuelve al chat 31+ min después → sin este branch,
+    # quedaría orden #1 zombie (`pending_payment` con link muerto) +
+    # orden #2 nueva. Plan A.0.1 lo prohíbe.
+    pending_order = _find_pending_order(
+        supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+    )
+
     token = _build_api_auth_token(tenant_id)
     if not token:
         logger.error("[PAYMENT_LINK] SUPABASE_JWT_SECRET no configurado — fallback a human")
         return None
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    if pending_order:
+        order_id_existing = pending_order["order_id"]
+        first_name = _extract_first_name(contact_name)
+        name_part = f" *{first_name}*" if first_name else ""
+        short_id = order_id_existing[:8].upper()
+
+        # (a) Link vigente → reutilizar
+        if pending_order["active_link"]:
+            link = pending_order["active_link"]
+            response_text = (
+                f"Tu pedido *#{short_id}* ya tiene link de pago activo{name_part}.\n\n"
+                f"*Paga aquí:*\n{link['checkout_url']}\n\n"
+                f"> Si ya pagaste, recibirás la confirmación por este chat. "
+                f"El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos desde su generación."
+            )
+            logger.info(
+                "[PAYMENT_LINK] idempotencia — reutilizando link vigente orden=%s conv=%s",
+                order_id_existing, conversation_id,
+            )
+            return PaymentLinkResult(
+                checkout_url=link["checkout_url"],
+                order_id=order_id_existing,
+                amount_in_cents=link["amount_in_cents"],
+                expires_at="",
+                response_text=response_text,
+            )
+
+        # (b) Orden activa sin link vigente → regenerar sobre misma orden
+        logger.info(
+            "[PAYMENT_LINK] orden=%s sin link vigente — regenerando sobre misma orden conv=%s",
+            order_id_existing, conversation_id,
+        )
+        regen = await _regenerate_link_on_existing_order(
+            order_id=order_id_existing, headers=headers,
+        )
+        if regen:
+            new_url, new_expires = regen
+            existing_amount = int(round(float(pending_order["total_amount"]) * 100))
+            response_text = (
+                f"Tu link anterior expiró. Aquí va el nuevo para *#{short_id}*{name_part}.\n\n"
+                f"*Paga aquí:*\n{new_url}\n\n"
+                f"> El link es válido por {WOMPI_LINK_TTL_MINUTES} minutos. "
+                f"Una vez confirmado el pago recibirás la confirmación por este chat."
+            )
+            return PaymentLinkResult(
+                checkout_url=new_url,
+                order_id=order_id_existing,
+                amount_in_cents=existing_amount,
+                expires_at=new_expires,
+                response_text=response_text,
+            )
+        # Si regenerar falló, NO crear orden duplicada: degrada a None
+        # (caller decide: human handoff o reintento). Plan A.0.1 prima sobre
+        # disponibilidad — preferimos handoff a basura transaccional.
+        logger.error(
+            "[PAYMENT_LINK] regenerar link falló orden=%s — fallback a human conv=%s",
+            order_id_existing, conversation_id,
+        )
+        return None
     total_amount = total_in_cents / 100
     shipping_cost = (shipping_cost_cents or 0) / 100
     products_amount = total_amount - shipping_cost
 
     # Formato Colombia: separador miles punto, sin centavos.
     _total_co = f"${int(round(total_amount)):,}".replace(",", ".")
-    order_notes = notes or f"Pedido conversacional — Total: {_total_co} COP"
+    # Sem 7 F2 cierre — description Wompi profesional. Antes decía
+    # "Pedido conversacional — Total: $X COP" que sonaba técnico al
+    # cliente en el checkout Wompi. Ahora: "Total a pagar: $X COP"
+    # combina bien con el `name` ya formateado como "Pedido #XXXX — {cliente}".
+    order_notes = notes or f"Total a pagar: {_total_co} COP"
 
     # ── 2. Construir ítems del pedido ─────────────────────────────────────────
     # Multi-producto (rev. 71): si verified_ctx tiene 'items' (lista), persistir
@@ -157,8 +390,11 @@ async def handle_payment_link_if_applicable(
             line_item["variation_id"] = verified_ctx["variation_id"]
         items_to_persist.append(line_item)
     else:
+        # Sem 7 F2 cierre — fallback title profesional (antes "Pedido
+        # conversacional"). Solo se usa cuando NO hay verified_ctx (caso
+        # warning loggeado abajo). Stock NO se decrementa en este caso.
         items_to_persist.append({
-            "title": "Pedido conversacional",
+            "title": "Pedido vía WhatsApp",
             "unit_price": max(products_amount, 0.01),
             "quantity": 1,
         })
@@ -168,10 +404,35 @@ async def handle_payment_link_if_applicable(
             tenant_id,
         )
 
-    # ── 2.5. Pre-validación de stock (Bug 26 — soft-check antes de generar link) ──
-    # No es soft-reserve atómica (eso requeriría tabla stock_reservations + lock),
-    # pero al menos rechaza el link si en este momento alguna variante tiene
-    # stock < quantity. Reduce el riesgo de oversell por checkout simultáneo.
+    # ── 2.5. Soft-reserve atómica (Rev. 108) ──────────────────────────────────
+    # Stripe Checkout pattern: reservamos stock ANTES de crear orden + link
+    # Wompi. Si 2 clientes piden el último item al mismo tiempo, solo el
+    # primero en llegar al rpc_stock_reserve consigue link — el segundo
+    # recibe respuesta "sin stock" sin que se haya generado checkout falso.
+    #
+    # TTL 35 min alineado con PENDING_PAYMENT_TTL_MINUTES + 5 min buffer
+    # sobre el TTL del link Wompi (30 min) — el cliente debe tener tiempo
+    # de pagar antes de que la reserva venza.
+    #
+    # Rollback: si una variation falla, liberamos las reservas previas en
+    # ese mismo loop para no dejar "trozos" reservados.
+    cart_id_for_reserve: Optional[str] = None
+    try:
+        cart_lookup = (
+            supabase.table("conversation_carts")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("conversation_id", conversation_id)
+            .in_("status", ["open", "checkout"])
+            .order("created_at", desc=True)
+            .limit(1).execute()
+        )
+        if cart_lookup.data:
+            cart_id_for_reserve = cart_lookup.data[0]["id"]
+    except Exception as exc:
+        logger.warning("[PAYMENT_LINK] cart_id lookup falló conv=%s err=%s", conversation_id, exc)
+
+    reservation_ids: list[str] = []
     insufficient: list[str] = []
     for it in items_to_persist:
         var_id = it.get("variation_id")
@@ -179,17 +440,60 @@ async def handle_payment_link_if_applicable(
         if not var_id or qty_needed <= 0:
             continue
         try:
-            r = supabase.table("product_variations").select(
-                "sku, stock_quantity"
-            ).eq("id", var_id).single().execute()
-            if r.data and int(r.data.get("stock_quantity") or 0) < qty_needed:
-                sku = r.data.get("sku") or var_id[:8]
-                insufficient.append(
-                    f"{sku} (pediste {qty_needed}, hay {r.data.get('stock_quantity')})"
+            res = supabase.rpc("rpc_stock_reserve", {
+                "p_tenant_id": tenant_id,
+                "p_variation_id": var_id,
+                "p_qty": qty_needed,
+                "p_cart_id": cart_id_for_reserve,
+                "p_conversation_id": conversation_id,
+                "p_ttl_minutes": 35,
+            }).execute()
+            rows = res.data or []
+            first = rows[0] if rows else None
+            rid = first.get("reservation_id") if first else None
+            if rid:
+                reservation_ids.append(rid)
+            else:
+                logger.warning(
+                    "[PAYMENT_LINK] rpc_stock_reserve sin reservation_id var=%s rsp=%s",
+                    var_id, rows,
                 )
         except Exception as exc:
-            logger.warning("[PAYMENT_LINK] No pude validar stock variation=%s: %s", var_id, exc)
+            # Detectar insufficient_stock por message (Postgres P0001).
+            msg = str(exc).lower()
+            if "insufficient_stock" in msg or "p0001" in msg:
+                # Lookup current available para mensaje informativo.
+                try:
+                    r = supabase.table("product_variations").select(
+                        "sku, stock_quantity"
+                    ).eq("id", var_id).single().execute()
+                    sku = (r.data or {}).get("sku") or var_id[:8]
+                    have = (r.data or {}).get("stock_quantity") or 0
+                    insufficient.append(
+                        f"{sku} (pediste {qty_needed}, disponibles ~{have})"
+                    )
+                except Exception:
+                    insufficient.append(f"{var_id[:8]} (pediste {qty_needed})")
+            else:
+                logger.warning(
+                    "[PAYMENT_LINK] rpc_stock_reserve error var=%s err=%s",
+                    var_id, exc,
+                )
+                insufficient.append(f"{var_id[:8]} (error al reservar)")
+
     if insufficient:
+        # Rollback: liberar reservas creadas en este intento.
+        for rid in reservation_ids:
+            try:
+                supabase.rpc(
+                    "rpc_stock_reservation_release",
+                    {"p_reservation_id": rid},
+                ).execute()
+            except Exception as exc:
+                logger.warning(
+                    "[PAYMENT_LINK] rollback release reservation=%s falló: %s",
+                    rid, exc,
+                )
         return PaymentLinkResult(
             checkout_url="",
             order_id="",
@@ -201,14 +505,41 @@ async def handle_payment_link_if_applicable(
                 + "\n\n¿Quieres ajustar las cantidades o ver alternativas?"
             ),
         )
+    if reservation_ids:
+        logger.info(
+            "[PAYMENT_LINK] soft-reserve OK conv=%s cart=%s reservations=%d ttl=35min",
+            conversation_id, cart_id_for_reserve, len(reservation_ids),
+        )
 
-    # ── 3. Crear orden en Core API (pending_payment) ──────────────────────────
+    # ── 2.7. Detectar payment_method del cart (Rev. 108 Fase B) ──────────────
+    # cod_intent_resolver pre-LLM puede haber marcado cart.payment_method=cod.
+    # Si es cod, payload distinto: payment_link=false + payment_method=cod →
+    # orden creada directo confirmed sin Wompi link.
+    cart_payment_method = "credit"
+    if cart_id_for_reserve:
+        try:
+            cm_q = (
+                supabase.table("conversation_carts")
+                .select("payment_method")
+                .eq("id", cart_id_for_reserve).single().execute()
+            )
+            cart_payment_method = (
+                (cm_q.data or {}).get("payment_method") or "credit"
+            ).lower()
+        except Exception as exc:
+            logger.warning(
+                "[PAYMENT_LINK] no pude leer cart.payment_method cart=%s err=%s",
+                cart_id_for_reserve, exc,
+            )
+
+    # ── 3. Crear orden en Core API ────────────────────────────────────────────
     order_payload = {
         "contact_id": contact_id,
         "conversation_id": conversation_id,
         "shipping_cost": shipping_cost,
         "notes": order_notes,
-        "payment_link": True,  # → status=pending_payment
+        "payment_link": cart_payment_method != "cod",  # COD no requiere link
+        "payment_method": cart_payment_method,  # 'credit' | 'cod'
         "items": items_to_persist,
     }
 
@@ -230,7 +561,138 @@ async def handle_payment_link_if_applicable(
         logger.error("[PAYMENT_LINK] Core API no retornó order_id")
         return None
 
-    logger.info("[PAYMENT_LINK] Orden %s creada (pending_payment) tenant=%s", order_id, tenant_id)
+    logger.info(
+        "[PAYMENT_LINK] Orden %s creada method=%s tenant=%s",
+        order_id, cart_payment_method, tenant_id,
+    )
+
+    # ── 3.5. COD branch: orden ya está confirmed sin link Wompi ───────────────
+    # Rev. 108 Fase B. La API creó orden con status='confirmed' + consumió
+    # reservas stock (path COD en orders.py:create_order). No hay link de
+    # pago — el courier recauda al entregar. Retornamos PaymentLinkResult
+    # con response_text COD y checkout_url vacío.
+    if cart_payment_method == "cod":
+        contact_name_first = _extract_first_name(contact_name) or ""
+        name_part = f" *{contact_name_first}*" if contact_name_first else ""
+        short_id = order_id[:8].upper()
+        # Carrier name del cart (shipping_meta) para mostrar al cliente.
+        carrier_name = ""
+        try:
+            cart_meta = (
+                supabase.table("conversation_carts")
+                .select("shipping_meta")
+                .eq("id", cart_id_for_reserve).single().execute()
+            )
+            carrier_name = (
+                (cart_meta.data or {}).get("shipping_meta", {}).get("carrier")
+                or ""
+            ).strip()
+        except Exception:
+            carrier_name = ""
+        carrier_part = f" con *{carrier_name}*" if carrier_name else ""
+
+        _total_co = f"${int(round(total_amount)):,}".replace(",", ".")
+
+        # ── 3.5.1. Auto-disparo guía Aveonline (Rev. 108 Fase B parte 2) ─────
+        # Tras crear orden COD, intentamos generar la guía Aveonline
+        # inline (~10-15s). Best-effort: si falla, cliente recibe etapa 1
+        # sin tracking y operador puede generar manual desde Inbox.
+        # El response_text se adapta al resultado.
+        tracking_number = ""
+        try:
+            async with httpx.AsyncClient(timeout=40) as ship_client:
+                ship_resp = await ship_client.post(
+                    f"{API_URL}/api/v1/orders/{order_id}/generate-shipping-guide",
+                    headers=headers,
+                )
+                if ship_resp.status_code == 200:
+                    ship_data = ship_resp.json()
+                    if ship_data.get("ok"):
+                        sh = ship_data.get("shipment") or {}
+                        tracking_number = sh.get("tracking_number") or ""
+                        logger.info(
+                            "[PAYMENT_LINK] COD auto-guía OK order=%s "
+                            "tracking=%s",
+                            order_id, tracking_number,
+                        )
+                    else:
+                        logger.warning(
+                            "[PAYMENT_LINK] COD auto-guía rechazada order=%s "
+                            "msg=%s — operador puede generar manual",
+                            order_id, ship_data.get("error", "?"),
+                        )
+                else:
+                    logger.warning(
+                        "[PAYMENT_LINK] COD auto-guía http=%s order=%s — "
+                        "operador puede generar manual",
+                        ship_resp.status_code, order_id,
+                    )
+        except Exception as ship_exc:
+            logger.warning(
+                "[PAYMENT_LINK] COD auto-guía exception order=%s: %s — "
+                "operador puede generar manual",
+                order_id, ship_exc,
+            )
+
+        # Response text ADAPTADO al resultado del auto-disparo.
+        if tracking_number:
+            # Guía generada → mensaje completo con tracking.
+            # Etapa 2 (WhatsApp + email "Guía asignada") YA se disparó
+            # desde el endpoint /generate-shipping-guide, por lo que aquí
+            # solo retornamos confirmación pago COD (etapa 1).
+            response_text = (
+                f"¡Listo{name_part}! Pedido *#{short_id}* registrado para "
+                f"contraentrega{carrier_part}.\n\n"
+                f"💵 *Pagas {_total_co} COP al recibir tu paquete.*\n\n"
+                f"En un momento te mando el número de guía por aquí mismo."
+            )
+        else:
+            # Auto-guía falló → mensaje sin tracking, operador genera manual.
+            response_text = (
+                f"¡Listo{name_part}! Pedido *#{short_id}* registrado para "
+                f"contraentrega{carrier_part}.\n\n"
+                f"💵 *Pagas {_total_co} COP al recibir tu paquete.*\n\n"
+                f"Estamos preparando tu envío. Te confirmo aquí mismo "
+                f"con el número de guía apenas esté listo."
+            )
+
+        logger.info(
+            "[PAYMENT_LINK] COD orden=%s tenant=%s amount=%s carrier=%s "
+            "auto_guide=%s",
+            order_id, tenant_id, total_in_cents, carrier_name or "?",
+            "ok" if tracking_number else "manual_needed",
+        )
+
+        # Emit cart_event para audit (similar al payment_link_created).
+        try:
+            from tools.cart_tool import get_cart_with_items
+            from cart.events import emit as _emit_event
+            _cart_for_evt = get_cart_with_items(
+                supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+            )
+            if _cart_for_evt and _cart_for_evt.get("id"):
+                _emit_event(
+                    supabase,
+                    cart_id=_cart_for_evt["id"], tenant_id=tenant_id,
+                    event_type="cod_order_confirmed",
+                    payload={
+                        "order_id": order_id,
+                        "amount_cents": int(total_in_cents),
+                        "carrier": carrier_name,
+                    },
+                )
+        except Exception as _evt_exc:
+            logger.debug(
+                "[CART_EVENT] cod_order_confirmed emit falló: %s", _evt_exc,
+            )
+
+        return PaymentLinkResult(
+            checkout_url="",  # COD no tiene checkout
+            order_id=order_id,
+            amount_in_cents=int(total_in_cents),
+            expires_at="",
+            response_text=response_text,
+        )
 
     # ── 4. Generar link de pago Wompi ─────────────────────────────────────────
     # Rev. 103+: reintento único ante transient (Wompi sandbox a veces tarda
@@ -277,7 +739,31 @@ async def handle_payment_link_if_applicable(
 
     logger.info("[PAYMENT_LINK] Link generado order=%s: %s", order_id, checkout_url)
 
-    # ── 5. Construir mensaje para el cliente ──────────────────────────────────
+    # ── 5. Emisión cart_events.payment_link_created (F1-6, best-effort) ──────
+    # Localiza el cart abierto de la conversación para anclar el evento.
+    # Si falla (cart cerrado/inexistente), swallow + log debug.
+    try:
+        from tools.cart_tool import get_cart_with_items
+        from cart.events import emit as _emit_event
+        _cart_for_evt = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+        if _cart_for_evt and _cart_for_evt.get("id"):
+            _emit_event(
+                supabase,
+                cart_id=_cart_for_evt["id"], tenant_id=tenant_id,
+                event_type="payment_link_created",
+                payload={
+                    "order_id": order_id,
+                    "amount_cents": int(total_in_cents),
+                    "checkout_url": checkout_url,
+                    "expires_at": expires_at,
+                },
+            )
+    except Exception as _evt_exc:  # noqa: BLE001
+        logger.debug("[CART_EVENT] payment_link_created emit falló: %s", _evt_exc)
+
+    # ── 6. Construir mensaje para el cliente ──────────────────────────────────
     first_name = _extract_first_name(contact_name)
     name_part = f" *{first_name}*" if first_name else ""
     short_id = order_id[:8].upper()

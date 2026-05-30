@@ -168,25 +168,60 @@ async def _cmd_estado(conv_id: str) -> str:
 
 def _send_telegram_reply(chat_id: int, text: str, update: dict) -> None:
     """
-    Envía respuesta al asesor en Telegram.
-    Usa el bot_token del primer tenant activo con Telegram configurado.
+    Envía respuesta al asesor en Telegram usando el bot_token del tenant
+    propietario del chat_id.
+
+    Rev. 105 Sem 2 F.12 (MA-10) — antes tomaba "primer tenant activo" lo que
+    causaba cross-talk silencioso al haber 2+ tenants con Telegram. Ahora
+    resuelve el tenant vía `tenant_provider_identity` (chat_id como
+    provider_internal_id). Fallback al patrón legacy SOLO si la identidad
+    no está registrada (warning explícito) — esto se removerá tras backfill
+    completo de identidades.
     """
     supabase = _get_service_client()
     try:
-        settings_res = (
-            supabase.table("notification_settings")
-            .select("config")
-            .eq("channel", "telegram")
-            .eq("enabled", True)
-            .limit(1)
-            .execute()
-        )
+        from lib.identity_registry import resolve_tenant_id
+
+        tenant_id = resolve_tenant_id(supabase, "telegram", chat_id)
+
+        if tenant_id:
+            # Camino correcto: lookup config del tenant específico.
+            settings_res = (
+                supabase.table("notification_settings")
+                .select("config")
+                .eq("tenant_id", tenant_id)
+                .eq("channel", "telegram")
+                .eq("enabled", True)
+                .limit(1)
+                .execute()
+            )
+        else:
+            # Fallback legacy temporal — pre-backfill identity registry.
+            # Cuando todos los tenants estén registrados, este branch debe
+            # removerse y el chat_id sin identidad rechazarse explícitamente.
+            logger.warning(
+                "[TG_WH] chat_id=%s sin identidad en tenant_provider_identity, "
+                "usando fallback 'primer tenant activo' (legacy pre-backfill)",
+                chat_id,
+            )
+            settings_res = (
+                supabase.table("notification_settings")
+                .select("config")
+                .eq("channel", "telegram")
+                .eq("enabled", True)
+                .limit(1)
+                .execute()
+            )
+
         config = (settings_res.data or [{}])[0].get("config") or {}
         from vault_helper import VaultHelper, resolve_secret
         token = resolve_secret(VaultHelper(supabase), dict(config), "bot_token") or ""
         token = token.strip()
         if not token:
-            logger.warning("[TG_WH] Sin bot_token en notification_settings para responder")
+            logger.warning(
+                "[TG_WH] Sin bot_token (tenant=%s, chat=%s)",
+                tenant_id or "legacy", chat_id,
+            )
             return
 
         with httpx.Client(timeout=10) as client:

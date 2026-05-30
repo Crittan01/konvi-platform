@@ -1,0 +1,79 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "**/venv",
+    "scratch",
+    "scripts/debug",
+    "supabase/migrations",
+    "packages/db/migrations",
+]
+
+[tool.ruff.lint]
+# Reglas conservadoras para arrancar (evitamos churn en codebase existente).
+# Ampliar gradualmente: I (isort), B (bugbear), UP (pyupgrade) en iteraciones futuras.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (unused imports, undefined names)
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "E501",  # line-too-long (manejado por formatter, line-length=120)
+    "E402",  # module-level import not at top of file
+    "E731",  # lambda assignment
+    "E741",  # ambiguous variable name (l, I, O)
+    # ── Tolerancia inicial al codebase existente (rev. 105 baseline ruff). ──
+    # Tightening incremental: limpiar archivo-por-archivo en sesiones futuras
+    # y remover el ignore correspondiente cuando esté limpio.
+    "W291",  # trailing whitespace (cosmético, ~5 archivos afectados)
+    "W293",  # blank line contains whitespace (cosmético)
+    "F541",  # f-string sin placeholders (cosmético, refactor mecánico)
+    "F841",  # variable local asignada pero no usada (puede ser intencional debug; revisar caso por caso)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests pueden tener fixtures con imports no usados aparentes.
+"tests/*" = ["F401", "F811"]
+"**/__init__.py" = ["F401"]
+# Orchestrator en refactor strangler-fig (Sem 1-3): imports residuales
+# de módulos extraídos. Remover F401 cuando el refactor cierre (Sem 3+).
+"services/ai-orchestrator/orchestrator.py" = ["F401"]
+"services/ai-orchestrator/outbound/validator.py" = ["F401"]
+
+[tool.pytest.ini_options]
+# Filtros para suite limpia (0 warnings):
+#   • PydanticDeprecatedSince212 viene del paquete EXTERNO `google.genai.types`
+#     (línea 9906). Nuestro código NO usa el patrón deprecated. Se resolverá
+#     cuando Google publique versión google-genai con Pydantic V3-compat.
+filterwarnings = [
+    "ignore::pydantic.PydanticDeprecatedSince212",
+]
+
+[tool.coverage.run]
+source = ["services"]
+branch = false
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/.venv/*",
+    "scratch/*",
+    "scripts/debug/*",
+]
+
+[tool.coverage.report]
+# Mínimo de cobertura se aplica vía validate.sh (COVERAGE_MIN env var, default 70).
+# No fallar aquí — el gate está en validate.sh para flexibilidad.
+skip_empty = true
+skip_covered = false
+show_missing = false
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

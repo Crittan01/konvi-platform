@@ -1,0 +1,30 @@
+S11 new: → ✅ PASS
+S11 known: → ✅ PASS
+S12 new: (no result line) rc=124
+S12 known: → ✅ PASS
+S13 new: → ✅ PASS
+S13 known: → ✅ PASS
+S14 new: → ✅ PASS
+S14 known: → ✅ PASS
+S15 new: (no result line) rc=124
+S15 known: → ✅ PASS
+S16 new: → ✅ PASS
+S16 known: (no result line) rc=0
+S17 new: → ✅ PASS
+S17 known: (no result line) rc=0
+S18 new: → ✅ PASS
+S18 known: (no result line) rc=0
+S19 new: → ✅ PASS
+S19 known: (no result line) rc=0
+S20 new: → ✅ PASS
+S20 known: (no result line) rc=0
+S21 new: → ✅ PASS
+S21 known: (no result line) rc=0
+S22 new: → ✅ PASS
+S22 known: (no result line) rc=0
+S23 new: → ✅ PASS
+S23 known: (no result line) rc=0
+S24 new: (no result line) rc=0
+S24 known: → ❌ FAIL
+S25 new: → ✅ PASS
+S25 known: → ✅ PASS

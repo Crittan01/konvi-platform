@@ -117,33 +117,75 @@ def validate_document(doc_type: Optional[str], doc_number: Optional[str]) -> Opt
     return None
 
 
-# ── Address structured (rev. 68) ────────────────────────────────────────────
+# ── Address structured (rev. 68 · simplificado Sem 7 F2 cierre 2026-05-19) ──
+#
+# Decisión arquitectónica founder 2026-05-19 (Opción 1 SIMPLIFY): eliminar
+# `delivery_context` ortogonal. Era confuso al usuario tener 2 ejes
+# (building_type + delivery_context). Mejor un solo eje con 4 escenarios
+# reales del usuario colombiano:
+#
+#   building_type ∈ {casa, edificio, conjunto, oficina}
+#
+#   - casa: street + city + barrio.
+#   - edificio: + apartment (+ floor opcional).
+#   - conjunto: + conjunto_type ∈ {torres, casas}:
+#       - torres: tower + apartment.
+#       - casas: apartment (alias semántico "casa #X").
+#   - oficina: + apartment (= oficina #) + floor opcional + company_name opcional.
+#
+# Floor es opcional en TODO caso. Si el cliente lo da, mejora el render.
 
-BUILDING_TYPES = frozenset({"casa", "edificio", "conjunto"})
+BUILDING_TYPES = frozenset({"casa", "edificio", "conjunto", "oficina"})
+CONJUNTO_TYPES = frozenset({"torres", "casas"})
 
 
-def address_required_fields(building_type: Optional[str]) -> list[str]:
-    """Campos requeridos según building_type.
+def address_required_fields(
+    building_type: Optional[str],
+    conjunto_type: Optional[str] = None,
+) -> list[str]:
+    """Campos requeridos según building_type + conjunto_type.
 
     Casa: street, neighborhood, city, state, dane_code.
     Edificio: + apartment.
-    Conjunto: + tower, apartment.
+    Conjunto torres (default si conjunto_type ausente): + tower, apartment.
+    Conjunto casas: + apartment (alias "casa #X" — sin torre).
+    Oficina: + apartment (= oficina #). NO exige neighborhood.
+
+    Sem 7 F2 cierre 2026-05-20 — P6 founder UAT (acuerdo opción C):
+    `neighborhood` es OBLIGATORIO en residencial (casa/edificio/conjunto)
+    porque las transportadoras CO (Coordinadora, Servientrega) lo usan
+    para sub-zonificar tarifa + ETA. En OFICINA (edificio empresarial
+    en zona céntrica) el barrio no aplica naturalmente — opcional.
+
+    `floor` y `company_name` son SIEMPRE opcionales — no entran en required.
     """
-    base = ["street", "neighborhood", "city", "state", "dane_code"]
+    base_residencial = ["street", "neighborhood", "city", "state", "dane_code"]
+    base_oficina = ["street", "city", "state", "dane_code"]  # sin neighborhood
+    if building_type == "oficina":
+        return base_oficina + ["apartment"]
     if building_type == "edificio":
-        return base + ["apartment"]
+        return base_residencial + ["apartment"]
     if building_type == "conjunto":
-        return base + ["tower", "apartment"]
-    return base  # casa o no especificado
+        if conjunto_type == "casas":
+            return base_residencial + ["apartment"]
+        # Default + 'torres': comportamiento legacy (back-compat).
+        return base_residencial + ["tower", "apartment"]
+    return base_residencial  # casa o no especificado
 
 
 def is_address_complete(address: Optional[dict]) -> tuple[bool, list[str]]:
-    """Retorna (completa, faltantes). Si address es None o vacío → False, lista total."""
+    """Retorna (completa, faltantes). Si address es None o vacío → False, lista total.
+
+    `floor` y `company_name` NO son obligatorios — son metadata informativa.
+    """
     if not address:
         return False, address_required_fields("casa")
     bt = (address.get("building_type") or "").strip().lower() or None
     if bt and bt not in BUILDING_TYPES:
         return False, [f"building_type inválido (debe ser uno de {sorted(BUILDING_TYPES)})"]
-    required = address_required_fields(bt)
+    ct = (address.get("conjunto_type") or "").strip().lower() or None
+    if ct and ct not in CONJUNTO_TYPES:
+        return False, [f"conjunto_type inválido (debe ser uno de {sorted(CONJUNTO_TYPES)})"]
+    required = address_required_fields(bt, ct)
     missing = [f for f in required if not (address.get(f) or "").strip()]
     return (not missing), missing

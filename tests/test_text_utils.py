@@ -96,14 +96,17 @@ class FormatPesosTests(unittest.TestCase):
 
 
 class FormatCentsCopTests(unittest.TestCase):
+    """Sem 7 F2 cierre 2026-05-20 — P5: formato sin sufijo " COP".
+    `$X` ya implica pesos en WhatsApp commerce CO."""
+
     def test_converts_cents_to_pesos(self):
-        self.assertEqual(format_cents_cop(1_350_000), "$13.500 COP")
+        self.assertEqual(format_cents_cop(1_350_000), "$13.500")
 
     def test_zero(self):
-        self.assertEqual(format_cents_cop(0), "$0 COP")
+        self.assertEqual(format_cents_cop(0), "$0")
 
     def test_handles_none_like_zero(self):
-        self.assertEqual(format_cents_cop(None), "$0 COP")  # type: ignore[arg-type]
+        self.assertEqual(format_cents_cop(None), "$0")  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

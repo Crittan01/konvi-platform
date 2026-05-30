@@ -45,6 +45,7 @@ def _contact_known() -> dict:
             "city": "Bogotá",
             "state": "Bogotá D.C.",
             "dane_code": "11001",
+            "neighborhood": "Olaya",  # P6 opción C: obligatorio en residencial.
             "building_type": "casa",
         },
     }
