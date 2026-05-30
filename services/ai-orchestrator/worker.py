@@ -602,20 +602,45 @@ class OrchestratorWorker:
             to_phone = str(payload.get("customer_phone") or "").strip()
             text = str(payload.get("text") or "").strip()
             message_id = str(payload.get("message_id") or "").strip()
+            # Rev. 109 P0-2 — soporte attachments imagen outbound humano.
+            # Si hay image_link, text se vuelve OPCIONAL (servirá como caption).
+            image_link = str(payload.get("image_link") or "").strip() or None
+            image_caption = str(payload.get("image_caption") or "").strip() or None
 
-            if not tenant_id or not to_phone or not text or not message_id:
+            # Validación: tenant+phone+message_id obligatorios SIEMPRE.
+            # text obligatorio SOLO si NO hay image_link (modo legacy texto).
+            if not tenant_id or not to_phone or not message_id:
                 logger.error("Payload outbound incompleto msg_id=%s payload=%s", msg_id, payload)
+                self._mark_outbound_failed(tenant_id, message_id, "invalid_outbound_payload")
+                self._ack_whatsapp_outbound_message(msg_id)
+                continue
+            if not text and not image_link:
+                logger.error(
+                    "Payload outbound sin text ni image_link msg_id=%s payload=%s",
+                    msg_id, payload,
+                )
                 self._mark_outbound_failed(tenant_id, message_id, "invalid_outbound_payload")
                 self._ack_whatsapp_outbound_message(msg_id)
                 continue
 
             try:
-                meta_message_id = await send_whatsapp_message(
-                    tenant_id=tenant_id,
-                    supabase=self.supabase,
-                    to_phone=to_phone,
-                    text=text,
-                )
+                # Si hay image_link → tipo imagen Meta. Caption opcional = text si existe.
+                # Si NO hay image_link → texto plain (modo legacy preservado).
+                if image_link:
+                    meta_message_id = await send_whatsapp_message(
+                        tenant_id=tenant_id,
+                        supabase=self.supabase,
+                        to_phone=to_phone,
+                        image_link=image_link,
+                        image_caption=image_caption or (text if text else None),
+                    )
+                else:
+                    meta_message_id = await send_whatsapp_message(
+                        tenant_id=tenant_id,
+                        supabase=self.supabase,
+                        to_phone=to_phone,
+                        text=text,
+                    )
             except Exception as exc:
                 logger.error("Error enviando outbound msg_id=%s: %s", msg_id, exc, exc_info=True)
                 meta_message_id = None
