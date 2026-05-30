@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class HealthMetric:
     """Snapshot de una métrica para upsert en tenant_provider_health."""
-    provider: str          # whatsapp | wompi | envia | meli | telegram | aveonline
+    provider: str          # whatsapp | wompi | aveonline | meli | telegram
     metric: str            # quality_rating | declined_rate_24h | etc.
     value: str             # representación textual (cast en UI)
     threshold: Optional[str] = None  # contexto para tooltip UI
@@ -259,9 +259,13 @@ def collect_wompi(supabase: Any, tenant_id: str) -> list[HealthMetric]:
     )]
 
 
-def collect_envia(supabase: Any, tenant_id: str) -> list[HealthMetric]:
-    """Envia — count shipments stale (labeled hace >5d sin tracking update)."""
-    if not _is_provider_connected(supabase, tenant_id, "envia"):
+def collect_aveonline(supabase: Any, tenant_id: str) -> list[HealthMetric]:
+    """Aveonline — count shipments stale (labeled hace >5d sin tracking update).
+
+    Rev. 109 (post-pivote Envia → Aveonline): provider único shipping
+    activo. Para futuros couriers ver ADR-0023.
+    """
+    if not _is_provider_connected(supabase, tenant_id, "aveonline"):
         return []
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
@@ -277,7 +281,7 @@ def collect_envia(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         stale_count = len(res.data or [])
     except Exception as exc:
         return [HealthMetric(
-            provider="envia",
+            provider="aveonline",
             metric="stale_shipments_count",
             value="error",
             status="unknown",
@@ -292,7 +296,7 @@ def collect_envia(supabase: Any, tenant_id: str) -> list[HealthMetric]:
         status = "healthy"
 
     return [HealthMetric(
-        provider="envia",
+        provider="aveonline",
         metric="stale_shipments_count",
         value=str(stale_count),
         threshold="<3 deseado · ≥10 crítico",
@@ -439,7 +443,7 @@ def collect_meli(supabase: Any, tenant_id: str) -> list[HealthMetric]:
 PROVIDER_COLLECTORS = {
     "whatsapp": collect_whatsapp,
     "wompi": collect_wompi,
-    "envia": collect_envia,
+    "aveonline": collect_aveonline,
     "telegram": collect_telegram,
     "meli": collect_meli,
 }

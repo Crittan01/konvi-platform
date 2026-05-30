@@ -10,23 +10,23 @@ Componentes para clientes HTTP outbound multi-tenant con:
 
 Uso típico cuando se refactoricen clientes existentes (Sem 4-5 P0 integraciones):
 
-    class EnviaClient(IntegrationClient):
-        provider = "envia"
+    class AveonlineClient(IntegrationClient):
+        provider = "aveonline"
 
         def get_base_url(self):
-            return "https://api.envia.com/"
+            return "https://api.aveonline.co/"
 
         def get_auth_headers(self):
             return {"Authorization": f"Bearer {self.api_key}"}
 
         def validate_response(self, status, body):
-            if status == 200 and body.get("meta") == "error":
+            if status == 200 and body.get("numbererror", 0) < 0:
                 raise ResponseValidationError(
-                    f"Envia 200 OK pero meta=error: {body}",
+                    f"Aveonline 200 OK pero numbererror={body.get('numbererror')}: {body}",
                     response_body=body,
                 )
 
-NO consumidores aún. Existing clients (services/api/integrations/envia_client.py,
+NO consumidores aún. Existing clients (services/api/integrations/aveonline_client.py,
 wompi_client.py, meli_client.py) siguen funcionando sin cambios.
 """
 from .base import IntegrationClient

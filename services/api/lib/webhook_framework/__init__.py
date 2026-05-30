@@ -18,14 +18,14 @@ Uso típico (cuando se refactorice un webhook existente, ej. Sem 4 Envia):
     from lib.webhook_framework.idempotency import GenericIdempotency
     from lib.webhook_framework.rate_limit import TokenBucketRule
 
-    class EnviaWebhookHandler(WebhookHandler):
-        integration = "envia"
+    class AveonlineWebhookHandler(WebhookHandler):
+        integration = "aveonline"
         signature_strategy = URLSecretTokenStrategy()
         idempotency_strategy = GenericIdempotency()
         rate_limit = TokenBucketRule(capacity=60, refill_per_sec=1)
 
         async def normalize(self, payload: dict) -> dict:
-            # Mapear payload Envia → schema interno cart_events.shipment_*
+            # Mapear payload Aveonline → schema interno shipment_tracking_events
             return {...}
 
         async def enqueue(self, normalized: dict) -> None:

@@ -24,8 +24,6 @@ interface Props {
   // Sem 7 F2 — métricas plantillas WhatsApp aprobadas para mostrar en card.
   templatesApproved?: number
   templatesTotal?: number
-  enviaInt: Integration
-  enviaConnected: boolean
   aveonlineInt: Integration
   aveonlineConnected: boolean
   meliInt: Integration
@@ -44,17 +42,13 @@ interface Props {
   tgMsg?: string
   waTest?: string
   waMsg?: string
-  enviaTest?: string
-  enviaMsg?: string
   aveTest?: string
   aveMsg?: string
-  saveEnviaKey: (fd: FormData) => Promise<void>
-  disconnectEnvia: () => Promise<void>
   saveAveonline: (fd: FormData) => Promise<void>
   disconnectAveonline: () => Promise<void>
   testAveonline: () => Promise<void>
-  // (Sem 7 F2 cierre) Envia carriers + capabilities movidos al panel
-  // dedicado /integrations/envia (tabs Carriers + Capacidades).
+  // Aveonline carriers + capabilities movidos al panel dedicado
+  // /integrations/aveonline (tabs Carriers + Capacidades).
   disconnectMeli: () => Promise<void>
   saveWompi: (fd: FormData) => Promise<void>
   disconnectWompi: () => Promise<void>
@@ -62,7 +56,6 @@ interface Props {
   disconnectTelegram: () => Promise<void>
   testTelegram: () => Promise<void>
   testWhatsApp: () => Promise<void>
-  testEnvia:    () => Promise<void>
   saveWhatsApp: (fd: FormData) => Promise<void>
   disconnectWhatsApp: () => Promise<void>
 }
@@ -76,8 +69,8 @@ const TABS: { key: Category; label: string }[] = [
   { key: 'notificaciones', label: 'Notificaciones' },
 ]
 
-// WhatsApp, Envia, MercadoLibre, Wompi, Telegram
-const TOTAL_CONNECTORS = 6
+// WhatsApp, Aveonline, MercadoLibre, Wompi, Telegram
+const TOTAL_CONNECTORS = 5
 
 const COMING_SOON = [
   { name: 'Shopify', category: 'canal' as Category },
@@ -118,19 +111,18 @@ function MetaPill({ label, value, className }: { label: string; value: string; c
 export function IntegrationsManager(props: Props) {
   const {
     waInt, waConnected, templatesApproved, templatesTotal,
-    enviaInt, enviaConnected, aveonlineInt, aveonlineConnected,
+    aveonlineInt, aveonlineConnected,
     meliInt, meliConnected,
     wompiInt, wompiConnected,
     tgConfig, tgConnected, connectedCount,
     isOwner, canWrite, connectedParam, errorParam, meliSameUser,
-    tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
+    tgTest, tgMsg, waTest, waMsg,
     aveTest, aveMsg,
-    saveEnviaKey, disconnectEnvia,
     saveAveonline, disconnectAveonline, testAveonline,
     disconnectMeli,
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
-    testWhatsApp, testEnvia,
+    testWhatsApp,
     saveWhatsApp, disconnectWhatsApp,
   } = props
 
@@ -139,11 +131,11 @@ export function IntegrationsManager(props: Props) {
 
   // Limpiar params de test/conexión de la URL después de 4 segundos
   useEffect(() => {
-    const hasResult = waTest || enviaTest || aveTest || tgTest || connectedParam
+    const hasResult = waTest || aveTest || tgTest || connectedParam
     if (!hasResult) return
     const t = setTimeout(() => router.replace(pathname), 4000)
     return () => clearTimeout(t)
-  }, [waTest, enviaTest, aveTest, tgTest, connectedParam, router, pathname])
+  }, [waTest, aveTest, tgTest, connectedParam, router, pathname])
 
   const [activeFilter, setActiveFilter] = useState<Category>('todas')
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -191,14 +183,13 @@ export function IntegrationsManager(props: Props) {
 
   const cardCategories: Record<string, Category> = {
     whatsapp: 'canal',
-    envia: 'logistica',
     aveonline: 'logistica',
     mercadolibre: 'marketplace',
     wompi: 'pagos',
     telegram: 'notificaciones',
   }
 
-  const allCards = ['whatsapp', 'envia', 'aveonline', 'mercadolibre', 'wompi', 'telegram']
+  const allCards = ['whatsapp', 'aveonline', 'mercadolibre', 'wompi', 'telegram']
   const visibleCards = activeFilter === 'todas'
     ? allCards
     : allCards.filter(c => cardCategories[c] === activeFilter)
@@ -292,23 +283,6 @@ export function IntegrationsManager(props: Props) {
           <div>
             <p className="font-medium">Error al probar WhatsApp</p>
             {waMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(waMsg)}</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Banners Envia test */}
-      {enviaTest === 'success' && (
-        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          Envia verificado — API key válida y carriers disponibles. Las cotizaciones de envío funcionarán correctamente.
-        </div>
-      )}
-      {enviaTest === 'error' && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium">Error al probar Envia</p>
-            {enviaMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(enviaMsg)}</p>}
           </div>
         </div>
       )}
@@ -484,85 +458,12 @@ export function IntegrationsManager(props: Props) {
           </div>
         )}
 
-        {/* ── Envia (INHABILITADO rev. 107 — founder decision 2026-05-24) ───── */}
+        {/* ── Aveonline (provider único activo shipping, ADR-0019) ──────────── */}
         {/*
-          Backend: agentic/tools/shipping.py rechaza active_provider="envia"
-          con ENVIA_DISABLED. UI debe reflejar esto: nada de form de conexión
-          nuevo. Si tenant tiene Envia conectado de antes, se permite
-          desconectar para limpiar estado. CTA principal apunta a Aveonline.
-        */}
-        {visibleCards.includes('envia') && (
-          <div className="rounded-xl border bg-card overflow-hidden flex flex-col border-border opacity-90">
-            <div className="px-4 py-3.5 border-b border-border bg-muted/30">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-muted border border-border flex items-center justify-center shrink-0">
-                    <Package className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-sm text-muted-foreground">Envia</p>
-                    <p className="text-[11px] text-muted-foreground/70 truncate">Shipping & Logistics</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
-                  <AlertCircle className="h-3 w-3" />
-                  Inhabilitado
-                </div>
-              </div>
-            </div>
-            <div className="px-4 py-3.5 space-y-3 flex-1">
-              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
-                <p className="text-[11px] text-amber-400 leading-relaxed">
-                  Envia está <strong className="font-semibold">inhabilitado en esta plataforma</strong>. Usa
-                  {' '}<strong className="font-semibold">Aveonline</strong> como provider de envío — cubre los
-                  mismos carriers en Colombia con COD nativo.
-                </p>
-              </div>
-              {enviaConnected ? (
-                <div className="space-y-2.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <MetaPill label="Token" value={enviaInt.meta?.token_preview ?? '***'} />
-                    <MetaPill
-                      label="Entorno"
-                      value={enviaInt.meta?.environment === 'sandbox' ? 'Sandbox' : 'Producción'}
-                    />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    Tu cuenta sigue conectada por compatibilidad histórica, pero las cotizaciones
-                    se rechazan en runtime. Desconecta para limpiar el estado.
-                  </p>
-                  {isOwner && (
-                    <DisconnectIntegrationButton
-                      provider="envia" providerLabel="Envia"
-                      action={disconnectEnvia}
-                      className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                    />
-                  )}
-                </div>
-              ) : null}
-              <a
-                href="/dashboard/integrations#aveonline"
-                className="flex items-center justify-between rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-medium text-cyan-400 hover:bg-cyan-500/10 transition-colors group"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Package className="h-3 w-3" />
-                  Configurar Aveonline
-                </span>
-                <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
-                  →
-                </span>
-              </a>
-            </div>
-          </div>
-        )}
-
-        {/* ── Aveonline ─────────────────────────────────────────────────────── */}
-        {/*
-          Provider alternativo a Envia (ADR-0019). Tarjeta paritaria con
-          Envia/Wompi/WhatsApp: cuando connected muestra meta + acciones
-          Probar/Desconectar. Cuando disconnected expone form inline con
-          usuario + password. Config avanzada (auth_version, tiempo_token)
-          vive en /integrations/aveonline.
+          Tarjeta paritaria con Wompi/WhatsApp: cuando connected muestra
+          meta + acciones Probar/Desconectar. Cuando disconnected expone
+          form inline con usuario + password. Config avanzada (auth_version,
+          tiempo_token) vive en /integrations/aveonline.
         */}
         {visibleCards.includes('aveonline') && (
           <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-500/30' : 'border-border'}`}>
@@ -1053,8 +954,8 @@ export function IntegrationsManager(props: Props) {
       </div>
       </div>{/* ── /SECCIÓN 1 Conectores ── */}
 
-      {/* SECCIÓN 2 (Configuración avanzada Envía) movida al panel
-          /integrations/envia (tabs Carriers + Capacidades) — Sem 7 F2 cierre. */}
+      {/* SECCIÓN 2 (Configuración avanzada Aveonline) movida al panel
+          /integrations/aveonline (tabs Carriers + Capacidades). */}
 
       {/* ── SECCIÓN 3 (futura): tab "Todas" — info contextual ────────────── */}
       {activeFilter === 'todas' && (

@@ -47,7 +47,7 @@ export default async function AiAgentsPage() {
     supabase.from('tenant_integrations')
       .select('provider, status')
       .eq('tenant_id', tenantId)
-      .in('provider', ['wompi', 'envia']),
+      .in('provider', ['wompi', 'aveonline']),
   ])
 
   const kbDocs     = (kbStats ?? []) as Array<{ is_active: boolean; embedding: string | null; category: string }>
@@ -92,7 +92,7 @@ export default async function AiAgentsPage() {
   const hasIdentidadLegal = !!(tenant?.nit || tenant?.email_contacto || tenant?.telefono_contacto)
   const integrationsRows = (integrations ?? []) as Array<{ provider: string; status: string }>
   const wompiConnected = integrationsRows.some(i => i.provider === 'wompi' && i.status === 'connected')
-  const enviaConnected = integrationsRows.some(i => i.provider === 'envia' && i.status === 'connected')
+  const aveonlineConnected = integrationsRows.some(i => i.provider === 'aveonline' && i.status === 'connected')
 
   // ─── Server actions consolidadas (CRUD agente) ──────────────────────
   // Rev. 109 ADR-0017 cierre — antes había 2 server actions duplicadas
@@ -281,7 +281,7 @@ export default async function AiAgentsPage() {
         agentName={agent.name}
         hasPrompt={!!agent.role_description && agent.role_description.length > 20}
         wompiConnected={wompiConnected}
-        enviaConnected={enviaConnected}
+        aveonlineConnected={aveonlineConnected}
         hasIdentidadLegal={hasIdentidadLegal}
         kbCriticalCoverage={kbCriticalCoverage}
       />
