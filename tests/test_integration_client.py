@@ -197,73 +197,73 @@ class CircuitBreakerTests(unittest.TestCase):
         ))
 
     def test_closed_inicialmente(self):
-        self.assertEqual(self.cb.get_state("envia"), circuit.CircuitState.CLOSED)
+        self.assertEqual(self.cb.get_state("aveonline"), circuit.CircuitState.CLOSED)
 
     def test_threshold_de_fallos_abre(self):
         for _ in range(3):
-            self.cb.before_request("envia")  # OK CLOSED
-            self.cb.record_failure("envia")
-        self.assertEqual(self.cb.get_state("envia"), circuit.CircuitState.OPEN)
+            self.cb.before_request("aveonline")  # OK CLOSED
+            self.cb.record_failure("aveonline")
+        self.assertEqual(self.cb.get_state("aveonline"), circuit.CircuitState.OPEN)
 
     def test_open_levanta_circuit_open(self):
         for _ in range(3):
-            self.cb.before_request("envia")
-            self.cb.record_failure("envia")
+            self.cb.before_request("aveonline")
+            self.cb.record_failure("aveonline")
         with self.assertRaises(errors.CircuitOpenError):
-            self.cb.before_request("envia")
+            self.cb.before_request("aveonline")
 
     def test_success_cierra_circuit(self):
-        self.cb.before_request("envia")
-        self.cb.record_failure("envia")
-        self.cb.before_request("envia")
-        self.cb.record_success("envia")
+        self.cb.before_request("aveonline")
+        self.cb.record_failure("aveonline")
+        self.cb.before_request("aveonline")
+        self.cb.record_success("aveonline")
         # Tras success contador a 0, sigue CLOSED
-        self.assertEqual(self.cb.get_state("envia"), circuit.CircuitState.CLOSED)
+        self.assertEqual(self.cb.get_state("aveonline"), circuit.CircuitState.CLOSED)
 
     def test_half_open_tras_timeout(self):
         cb = circuit.CircuitBreaker(circuit.CircuitBreakerConfig(
             failure_threshold=1, open_duration_seconds=0.05
         ))
-        cb.before_request("envia")
-        cb.record_failure("envia")
+        cb.before_request("aveonline")
+        cb.record_failure("aveonline")
         # Ahora OPEN.
         with self.assertRaises(errors.CircuitOpenError):
-            cb.before_request("envia")
+            cb.before_request("aveonline")
         # Esperar a que pase open_duration.
         time.sleep(0.1)
         # Ahora before_request transición a HALF_OPEN.
-        cb.before_request("envia")  # No raise
+        cb.before_request("aveonline")  # No raise
         # Estado HALF_OPEN tras transición.
         # Success cierra circuit.
-        cb.record_success("envia")
-        self.assertEqual(cb.get_state("envia"), circuit.CircuitState.CLOSED)
+        cb.record_success("aveonline")
+        self.assertEqual(cb.get_state("aveonline"), circuit.CircuitState.CLOSED)
 
     def test_half_open_fallo_vuelve_a_open(self):
         cb = circuit.CircuitBreaker(circuit.CircuitBreakerConfig(
             failure_threshold=1, open_duration_seconds=0.05
         ))
-        cb.before_request("envia")
-        cb.record_failure("envia")
+        cb.before_request("aveonline")
+        cb.record_failure("aveonline")
         time.sleep(0.1)
-        cb.before_request("envia")  # → HALF_OPEN
-        cb.record_failure("envia")
-        self.assertEqual(cb.get_state("envia"), circuit.CircuitState.OPEN)
+        cb.before_request("aveonline")  # → HALF_OPEN
+        cb.record_failure("aveonline")
+        self.assertEqual(cb.get_state("aveonline"), circuit.CircuitState.OPEN)
 
     def test_buckets_independientes_per_provider(self):
         for _ in range(3):
-            self.cb.before_request("envia")
-            self.cb.record_failure("envia")
+            self.cb.before_request("aveonline")
+            self.cb.record_failure("aveonline")
         # envia OPEN, wompi sigue CLOSED.
-        self.assertEqual(self.cb.get_state("envia"), circuit.CircuitState.OPEN)
+        self.assertEqual(self.cb.get_state("aveonline"), circuit.CircuitState.OPEN)
         self.assertEqual(self.cb.get_state("wompi"), circuit.CircuitState.CLOSED)
         self.cb.before_request("wompi")  # No raise.
 
     def test_reset_borra_estado(self):
         for _ in range(3):
-            self.cb.before_request("envia")
-            self.cb.record_failure("envia")
-        self.cb.reset("envia")
-        self.assertEqual(self.cb.get_state("envia"), circuit.CircuitState.CLOSED)
+            self.cb.before_request("aveonline")
+            self.cb.record_failure("aveonline")
+        self.cb.reset("aveonline")
+        self.assertEqual(self.cb.get_state("aveonline"), circuit.CircuitState.CLOSED)
 
 
 # ─── Idempotency hash ────────────────────────────────────────────────────────
@@ -331,7 +331,7 @@ class _FakeHttpClient:
 
 
 class _StubClient(base.IntegrationClient):
-    provider = "envia"
+    provider = "aveonline"
 
     def get_base_url(self):
         return "https://api.envia.com/"
@@ -518,15 +518,15 @@ class IdempotencyCacheTests(unittest.TestCase):
         sb = _FakeSupabase()
         h = idemp.hash_request("POST", "https://a.com/", {"x": 1})
         # Miss inicial.
-        self.assertIsNone(idemp.lookup(sb, "envia", "tenant-A", h))
+        self.assertIsNone(idemp.lookup(sb, "aveonline", "tenant-A", h))
         # Register.
         ok = idemp.register(
-            sb, "envia", "tenant-A", h,
+            sb, "aveonline", "tenant-A", h,
             status=201, body={"label": "L1"}, headers={"x": "y"},
         )
         self.assertTrue(ok)
         # Lookup ahora hit.
-        cached = idemp.lookup(sb, "envia", "tenant-A", h)
+        cached = idemp.lookup(sb, "aveonline", "tenant-A", h)
         self.assertIsNotNone(cached)
         self.assertEqual(cached.status, 201)
         self.assertEqual(cached.body["label"], "L1")
@@ -534,9 +534,9 @@ class IdempotencyCacheTests(unittest.TestCase):
     def test_register_duplicado_retorna_false(self):
         sb = _FakeSupabase()
         h = idemp.hash_request("POST", "https://a.com/", {"x": 1})
-        idemp.register(sb, "envia", "A", h, status=201, body={})
+        idemp.register(sb, "aveonline", "A", h, status=201, body={})
         # Segundo register con mismo hash → False.
-        ok = idemp.register(sb, "envia", "A", h, status=201, body={})
+        ok = idemp.register(sb, "aveonline", "A", h, status=201, body={})
         self.assertFalse(ok)
 
 
@@ -550,7 +550,7 @@ class IntegrationClientWithIdempotencyTests(unittest.TestCase):
             url = "https://api.envia.com/ship/"
             h = idemp.hash_request("POST", url, {"x": 1})
             idemp.register(
-                sb, "envia", "A", h,
+                sb, "aveonline", "A", h,
                 status=201, body={"label": "CACHED"},
             )
 
@@ -637,7 +637,7 @@ class IntegrationClientRateLimitTests(unittest.TestCase):
                 self.assertEqual(r["status"], 200)
             # Bucket: 5 - 3 = 2 tokens restantes.
             remaining = limiter.get_remaining(
-                tenant_id="A", integration="envia", rule=rule,
+                tenant_id="A", integration="aveonline", rule=rule,
             )
             self.assertGreaterEqual(remaining, 1.9)
             self.assertLessEqual(remaining, 2.1)
@@ -665,7 +665,7 @@ class IntegrationClientRateLimitTests(unittest.TestCase):
             # 3er request: bucket vacío → RateLimitLocalError.
             with self.assertRaises(errors.RateLimitLocalError) as ctx:
                 await client.execute(method="POST", path="/x/", body={})
-            self.assertEqual(ctx.exception.provider, "envia")
+            self.assertEqual(ctx.exception.provider, "aveonline")
             self.assertGreaterEqual(ctx.exception.retry_after_seconds, 1)
             self.assertEqual(ctx.exception.http_status, 429)
             # Solo 2 HTTP calls (la 3ra ni se intentó).
@@ -730,7 +730,7 @@ class IntegrationClientRateLimitTests(unittest.TestCase):
             with self.assertRaises(errors.RateLimitLocalError):
                 await client.execute(method="POST", path="/x/", body={})
             # CB sigue CLOSED (los 2 bloqueos no contaron como provider failure).
-            self.assertEqual(cb.get_state("envia").name, "CLOSED")
+            self.assertEqual(cb.get_state("aveonline").name, "CLOSED")
         asyncio.run(go())
 
     def test_default_limiter_global_se_usa_si_no_inyectado(self):
@@ -749,40 +749,8 @@ class IntegrationClientRateLimitTests(unittest.TestCase):
             _reset_global_limiter()
 
 
-# ─── H.2.1 wiring smoke (verificación de fix _get_envia_client) ──────────────
-
-class EnviaClientWiringTests(unittest.TestCase):
-    """Audit Plan K detectó: _get_envia_client() no pasaba supabase+tenant_id,
-    dejando idempotency Envia INACTIVA en runtime pese a estar implementada.
-
-    Este test asegura que `_get_envia_client` SÍ pasa ambos parámetros
-    para que la cache outbound_idempotency_cache funcione."""
-
-    def test_get_envia_client_propaga_supabase_y_tenant_id(self):
-        """Smoke del fix H.2.1: instancia EnviaClient con idempotency_enabled=True."""
-        import importlib.util as iutil
-        # Cargo shipping.py via importlib (mismo patrón que el test loader).
-        shipping_path = REPO_ROOT / "services" / "api" / "routers" / "shipping.py"
-        # Solo validamos que la signature del call contenga supabase_client + tenant_id.
-        # Leemos el source directo — el fix es de 4 líneas, inspección estática es
-        # suficiente como gate de no-regresión.
-        source = shipping_path.read_text(encoding="utf-8")
-        # Localizar la función _get_envia_client.
-        start = source.index("def _get_envia_client(")
-        end = source.index("\n\ndef ", start)
-        fn_body = source[start:end]
-        self.assertIn(
-            "supabase_client=supabase",
-            fn_body,
-            "_get_envia_client debe pasar supabase_client=supabase a EnviaClient "
-            "(H.2.1 idempotency wiring).",
-        )
-        self.assertIn(
-            "tenant_id=tenant_id",
-            fn_body,
-            "_get_envia_client debe pasar tenant_id=tenant_id a EnviaClient "
-            "(H.2.1 idempotency wiring).",
-        )
+# Nota rev. 109: EnviaClientWiringTests eliminado con el pivote a Aveonline.
+# El smoke test de wiring H.2.1 ya no aplica — Envia eliminado del runtime.
 
 
 if __name__ == "__main__":

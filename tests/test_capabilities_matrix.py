@@ -104,21 +104,21 @@ class ValidationTests(unittest.TestCase):
 
     def test_capability_no_canonica_levanta(self):
         with self.assertRaises(cm.CapabilityError):
-            cm._validate("envia", "feature_inventada")
+            cm._validate("aveonline", "feature_inventada")
 
     def test_capability_canonica_lowercase(self):
-        p, c = cm._validate("ENVIA", "INSURANCE")
-        self.assertEqual(p, "envia")
-        self.assertEqual(c, "insurance")
+        p, c = cm._validate("AVEONLINE", "LABEL_GENERATION")
+        self.assertEqual(p, "aveonline")
+        self.assertEqual(c, "label_generation")
 
     def test_capabilities_per_provider_completas(self):
         # Garantiza que las 6 providers canónicas tienen capabilities.
         self.assertEqual(
             set(cm.CAPABILITIES_BY_PROVIDER.keys()),
-            {"envia", "wompi", "meta", "meli", "telegram", "resend"},
+            {"aveonline", "wompi", "meta", "meli", "telegram", "resend"},
         )
         # Algunas capabilities críticas presentes.
-        self.assertIn("insurance", cm.CAPABILITIES_BY_PROVIDER["envia"])
+        self.assertIn("label_generation", cm.CAPABILITIES_BY_PROVIDER["aveonline"])
         self.assertIn("hsm_templates", cm.CAPABILITIES_BY_PROVIDER["meta"])
         self.assertIn("payment_method_card", cm.CAPABILITIES_BY_PROVIDER["wompi"])
         self.assertIn("qna_reply", cm.CAPABILITIES_BY_PROVIDER["meli"])
@@ -127,33 +127,33 @@ class ValidationTests(unittest.TestCase):
 class IsEnabledTests(unittest.TestCase):
     def test_no_existe_retorna_default_false(self):
         client = _FakeSupabase()
-        result = cm.is_capability_enabled(client, "tenant-A", "envia", "insurance")
+        result = cm.is_capability_enabled(client, "tenant-A", "aveonline", "label_generation")
         self.assertFalse(result)
 
     def test_no_existe_default_personalizado(self):
         client = _FakeSupabase()
         result = cm.is_capability_enabled(
-            client, "tenant-A", "envia", "insurance", default=True
+            client, "tenant-A", "aveonline", "label_generation", default=True
         )
         self.assertTrue(result)
 
     def test_enabled_true_retorna_true(self):
         client = _FakeSupabase()
         cm.upsert_capability(
-            client, "tenant-A", "envia", "insurance",
+            client, "tenant-A", "aveonline", "label_generation",
             enabled=True, config={"carriers": ["servientrega"]}
         )
         self.assertTrue(
-            cm.is_capability_enabled(client, "tenant-A", "envia", "insurance")
+            cm.is_capability_enabled(client, "tenant-A", "aveonline", "label_generation")
         )
 
     def test_enabled_false_retorna_false(self):
         client = _FakeSupabase()
         cm.upsert_capability(
-            client, "tenant-A", "envia", "insurance", enabled=False
+            client, "tenant-A", "aveonline", "label_generation", enabled=False
         )
         self.assertFalse(
-            cm.is_capability_enabled(client, "tenant-A", "envia", "insurance")
+            cm.is_capability_enabled(client, "tenant-A", "aveonline", "label_generation")
         )
 
 
@@ -161,19 +161,19 @@ class GetConfigTests(unittest.TestCase):
     def test_disabled_retorna_dict_vacio(self):
         client = _FakeSupabase()
         cm.upsert_capability(
-            client, "tenant-A", "envia", "insurance",
+            client, "tenant-A", "aveonline", "label_generation",
             enabled=False, config={"carriers": ["x"]}
         )
-        cfg = cm.get_capability_config(client, "tenant-A", "envia", "insurance")
+        cfg = cm.get_capability_config(client, "tenant-A", "aveonline", "label_generation")
         self.assertEqual(cfg, {})
 
     def test_enabled_retorna_config(self):
         client = _FakeSupabase()
         cm.upsert_capability(
-            client, "tenant-A", "envia", "insurance",
+            client, "tenant-A", "aveonline", "label_generation",
             enabled=True, config={"carriers": ["servientrega"], "fee": 2.5}
         )
-        cfg = cm.get_capability_config(client, "tenant-A", "envia", "insurance")
+        cfg = cm.get_capability_config(client, "tenant-A", "aveonline", "label_generation")
         self.assertEqual(cfg["carriers"], ["servientrega"])
         self.assertEqual(cfg["fee"], 2.5)
 
@@ -192,11 +192,11 @@ class UpsertTests(unittest.TestCase):
     def test_upsert_actualiza_si_existe(self):
         client = _FakeSupabase()
         cm.upsert_capability(
-            client, "tenant-A", "envia", "insurance",
+            client, "tenant-A", "aveonline", "label_generation",
             enabled=False, config={"v": 1}
         )
         rec2 = cm.upsert_capability(
-            client, "tenant-A", "envia", "insurance",
+            client, "tenant-A", "aveonline", "label_generation",
             enabled=True, config={"v": 2}
         )
         self.assertTrue(rec2.enabled)
@@ -211,21 +211,21 @@ class UpsertTests(unittest.TestCase):
 class ListTests(unittest.TestCase):
     def test_list_todas_de_un_tenant(self):
         client = _FakeSupabase()
-        cm.upsert_capability(client, "A", "envia", "insurance", True)
+        cm.upsert_capability(client, "A", "aveonline", "label_generation", True)
         cm.upsert_capability(client, "A", "wompi", "payment_method_card", True)
-        cm.upsert_capability(client, "B", "envia", "insurance", True)
+        cm.upsert_capability(client, "B", "aveonline", "label_generation", True)
 
         ids_a = cm.list_capabilities_for_tenant(client, "A")
         self.assertEqual(len(ids_a), 2)
 
     def test_list_filtra_por_provider(self):
         client = _FakeSupabase()
-        cm.upsert_capability(client, "A", "envia", "insurance", True)
-        cm.upsert_capability(client, "A", "envia", "label_generation", False)
+        cm.upsert_capability(client, "A", "aveonline", "label_generation", True)
+        cm.upsert_capability(client, "A", "aveonline", "pickup", False)
         cm.upsert_capability(client, "A", "wompi", "payment_method_card", True)
 
-        ids_envia = cm.list_capabilities_for_tenant(client, "A", "envia")
-        self.assertEqual(len(ids_envia), 2)
+        ids_aveonline = cm.list_capabilities_for_tenant(client, "A", "aveonline")
+        self.assertEqual(len(ids_aveonline), 2)
 
     def test_list_provider_invalido_levanta(self):
         client = _FakeSupabase()

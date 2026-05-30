@@ -140,12 +140,12 @@ class CacheTests(unittest.TestCase):
         client = _FakeSupabase()
         client._tables["tenant_integrations"].append({
             "tenant_id": "tenant-A",
-            "provider": "envia",
+            "provider": "aveonline",
             "credentials": {"api_key": "ENVIA-XYZ"},
         })
         facade = cf.TenantCredentialsFacade(client, service_name="api")
 
-        facade.get("tenant-A", "envia", "api_key")
+        facade.get("tenant-A", "aveonline", "api_key")
         audit = client._tables["credential_access_log"]
         self.assertEqual(len(audit), 1)
         self.assertEqual(audit[0]["cache_hit"], False)
@@ -155,13 +155,13 @@ class CacheTests(unittest.TestCase):
         client = _FakeSupabase()
         client._tables["tenant_integrations"].append({
             "tenant_id": "tenant-A",
-            "provider": "envia",
+            "provider": "aveonline",
             "credentials": {"api_key": "K"},
         })
         facade = cf.TenantCredentialsFacade(client, service_name="api")
 
-        facade.get("tenant-A", "envia", "api_key")  # miss
-        facade.get("tenant-A", "envia", "api_key")  # hit
+        facade.get("tenant-A", "aveonline", "api_key")  # miss
+        facade.get("tenant-A", "aveonline", "api_key")  # hit
         audit = client._tables["credential_access_log"]
         self.assertEqual(len(audit), 2)
         self.assertEqual(audit[0]["cache_hit"], False)
@@ -178,7 +178,7 @@ class CacheTests(unittest.TestCase):
         client._tables["tenant_integrations"].extend([
             {"tenant_id": "tenant-A", "provider": "wompi",
              "credentials": {"private_key": "PRV-A"}},
-            {"tenant_id": "tenant-A", "provider": "envia",
+            {"tenant_id": "tenant-A", "provider": "aveonline",
              "credentials": {"api_key": "ENV-A"}},
             {"tenant_id": "tenant-B", "provider": "wompi",
              "credentials": {"private_key": "PRV-B"}},
@@ -186,7 +186,7 @@ class CacheTests(unittest.TestCase):
         facade = cf.TenantCredentialsFacade(client, service_name="api")
 
         facade.get("tenant-A", "wompi", "private_key")
-        facade.get("tenant-A", "envia", "api_key")
+        facade.get("tenant-A", "aveonline", "api_key")
         facade.get("tenant-B", "wompi", "private_key")
         self.assertEqual(cf._global_cache_size(), 3)
 
@@ -199,12 +199,12 @@ class CacheTests(unittest.TestCase):
         client._tables["tenant_integrations"].extend([
             {"tenant_id": "A", "provider": "wompi",
              "credentials": {"k": "v"}},
-            {"tenant_id": "A", "provider": "envia",
+            {"tenant_id": "A", "provider": "aveonline",
              "credentials": {"k": "v"}},
         ])
         facade = cf.TenantCredentialsFacade(client, service_name="api")
         facade.get("A", "wompi", "k")
-        facade.get("A", "envia", "k")
+        facade.get("A", "aveonline", "k")
         self.assertEqual(cf._global_cache_size(), 2)
 
         n = facade.invalidate("A", "wompi")

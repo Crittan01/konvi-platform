@@ -128,13 +128,13 @@ class IntegrationValidationTests(unittest.TestCase):
             wsm._validate_integration("FACEBOOK")
 
     def test_integration_canonica_lowercase(self):
-        self.assertEqual(wsm._validate_integration("ENVIA"), "envia")
+        self.assertEqual(wsm._validate_integration("AVEONLINE"), "aveonline")
         self.assertEqual(wsm._validate_integration(" Wompi "), "wompi")
 
-    def test_supported_integrations_6(self):
-        # Rev. 108 — añadido 'aveonline'.
-        self.assertEqual(len(wsm.SUPPORTED_INTEGRATIONS), 6)
-        for i in ("envia", "wompi", "meta", "meli", "telegram", "aveonline"):
+    def test_supported_integrations_5(self):
+        # Rev. 109 — eliminado 'envia', quedan 5 integraciones.
+        self.assertEqual(len(wsm.SUPPORTED_INTEGRATIONS), 5)
+        for i in ("aveonline", "wompi", "meta", "meli", "telegram"):
             self.assertIn(i, wsm.SUPPORTED_INTEGRATIONS)
 
 
@@ -164,7 +164,7 @@ class RotationTests(unittest.TestCase):
     def test_creacion_inicial_persiste_solo_hash(self):
         client = _FakeSupabase()
         result = wsm.rotate_secret(
-            client, "tenant-A", "envia", actor_id="user-1", reason="onboarding"
+            client, "tenant-A", "aveonline", actor_id="user-1", reason="onboarding"
         )
 
         # Plaintext fue retornado en RotationResult.
@@ -187,11 +187,11 @@ class RotationTests(unittest.TestCase):
 
     def test_rotacion_existente_mueve_current_a_previous(self):
         client = _FakeSupabase()
-        first = wsm.rotate_secret(client, "tenant-A", "envia")
+        first = wsm.rotate_secret(client, "tenant-A", "aveonline")
         first_hash = client._tables["tenant_webhook_secrets"][0]["secret_hash"]
 
         second = wsm.rotate_secret(
-            client, "tenant-A", "envia", reason="quarterly"
+            client, "tenant-A", "aveonline", reason="quarterly"
         )
 
         # Plaintexts diferentes.
@@ -211,49 +211,49 @@ class RotationTests(unittest.TestCase):
 
     def test_verify_inbound_acepta_current(self):
         client = _FakeSupabase()
-        result = wsm.rotate_secret(client, "tenant-A", "envia")
+        result = wsm.rotate_secret(client, "tenant-A", "aveonline")
         self.assertTrue(
             wsm.verify_inbound_secret(
-                client, "tenant-A", "envia", result.plaintext_secret
+                client, "tenant-A", "aveonline", result.plaintext_secret
             )
         )
 
     def test_verify_inbound_acepta_previous_en_grace(self):
         client = _FakeSupabase()
-        first = wsm.rotate_secret(client, "tenant-A", "envia")
-        second = wsm.rotate_secret(client, "tenant-A", "envia")  # rota inmediatamente
+        first = wsm.rotate_secret(client, "tenant-A", "aveonline")
+        second = wsm.rotate_secret(client, "tenant-A", "aveonline")  # rota inmediatamente
         # Ambos plaintext son aceptados durante grace period.
         self.assertTrue(
-            wsm.verify_inbound_secret(client, "tenant-A", "envia", second.plaintext_secret)
+            wsm.verify_inbound_secret(client, "tenant-A", "aveonline", second.plaintext_secret)
         )
         self.assertTrue(
-            wsm.verify_inbound_secret(client, "tenant-A", "envia", first.plaintext_secret)
+            wsm.verify_inbound_secret(client, "tenant-A", "aveonline", first.plaintext_secret)
         )
 
     def test_verify_inbound_rechaza_secret_invalido(self):
         client = _FakeSupabase()
-        wsm.rotate_secret(client, "tenant-A", "envia")
+        wsm.rotate_secret(client, "tenant-A", "aveonline")
         self.assertFalse(
-            wsm.verify_inbound_secret(client, "tenant-A", "envia", "hacker_guess")
+            wsm.verify_inbound_secret(client, "tenant-A", "aveonline", "hacker_guess")
         )
 
     def test_verify_inbound_rechaza_fuera_de_grace(self):
         client = _FakeSupabase()
-        first = wsm.rotate_secret(client, "tenant-A", "envia")
-        wsm.rotate_secret(client, "tenant-A", "envia")
+        first = wsm.rotate_secret(client, "tenant-A", "aveonline")
+        wsm.rotate_secret(client, "tenant-A", "aveonline")
         # Forzar grace expirado en el store.
         row = client._tables["tenant_webhook_secrets"][0]
         past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         row["grace_period_until"] = past
         # First debe ser rechazado ahora.
         self.assertFalse(
-            wsm.verify_inbound_secret(client, "tenant-A", "envia", first.plaintext_secret)
+            wsm.verify_inbound_secret(client, "tenant-A", "aveonline", first.plaintext_secret)
         )
 
     def test_verify_inbound_no_existe_retorna_false(self):
         client = _FakeSupabase()
         self.assertFalse(
-            wsm.verify_inbound_secret(client, "tenant-A", "envia", "anything")
+            wsm.verify_inbound_secret(client, "tenant-A", "aveonline", "anything")
         )
 
 
@@ -264,7 +264,7 @@ class CleanupTests(unittest.TestCase):
         past = "2020-01-01T00:00:00+00:00"
         future = "2099-01-01T00:00:00+00:00"
         client._tables["tenant_webhook_secrets"].extend([
-            {"id": 1, "tenant_id": "A", "integration": "envia",
+            {"id": 1, "tenant_id": "A", "integration": "aveonline",
              "secret_hash": "h1", "previous_secret_hash": "p1",
              "grace_period_until": past, "audit_log": [],
              "rotated_at": past, "expires_at": future,
@@ -287,7 +287,7 @@ class CleanupTests(unittest.TestCase):
 class GracePeriodPropertyTests(unittest.TestCase):
     def test_record_is_in_grace_period_sin_previous_es_false(self):
         record = wsm.WebhookSecretRecord(
-            id=1, tenant_id="A", integration="envia",
+            id=1, tenant_id="A", integration="aveonline",
             secret_hash="h", previous_secret_hash=None,
             grace_period_until=None,
             rotated_at="2026-01-01T00:00:00+00:00",
@@ -301,7 +301,7 @@ class GracePeriodPropertyTests(unittest.TestCase):
     def test_record_grace_futuro_es_true(self):
         future = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
         record = wsm.WebhookSecretRecord(
-            id=1, tenant_id="A", integration="envia",
+            id=1, tenant_id="A", integration="aveonline",
             secret_hash="h", previous_secret_hash="p",
             grace_period_until=future,
             rotated_at="2026-01-01T00:00:00+00:00",
