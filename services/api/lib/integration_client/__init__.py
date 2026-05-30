@@ -4,6 +4,7 @@ Componentes para clientes HTTP outbound multi-tenant con:
   - Retry exponential backoff + jitter (retry.py)
   - Circuit breaker state machine (circuit.py)
   - Outbound idempotency cache (idempotency.py + MA-1 migration)
+  - Rate limiting per (tenant_id, provider) via TokenBucket de F.1
   - Error mapping tipado (errors.py)
   - Template-method execute() flow (base.py)
 
@@ -35,6 +36,7 @@ from .errors import (
     IntegrationClientError,
     ProviderRejectedError,
     ProviderUnavailableError,
+    RateLimitLocalError,
     ResponseValidationError,
     RetryBudgetExceededError,
 )
@@ -53,6 +55,12 @@ __all__ = [
     "ProviderUnavailableError",
     "ProviderRejectedError",
     "CircuitOpenError",
+    "RateLimitLocalError",
     "RetryBudgetExceededError",
     "ResponseValidationError",
 ]
+
+# Re-exports de F.1 lazy (top-level import romperia test loader raw que
+# carga sin sys.path setup). Caller importa explícitamente:
+#   from lib.webhook_framework.rate_limit import TokenBucketRule
+# o usa: integration_client.get_token_bucket_classes() helper si se prefiere.
