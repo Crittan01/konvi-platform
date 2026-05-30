@@ -83,8 +83,8 @@ export const STATUS_CONFIG = {
 //   4) Escape hatch ver todo → Todas.
 export const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
   { value: 'active',     label: 'Activas' },
-  { value: 'sla_breach', label: '⏰ SLA breach' },
-  { value: 'opted_out',  label: 'Opt-out' },
+  { value: 'sla_breach', label: '⏰ Vencidas' },
+  { value: 'opted_out',  label: 'No contactar' },
   { value: 'all',        label: 'Todas' },
 ]
 
