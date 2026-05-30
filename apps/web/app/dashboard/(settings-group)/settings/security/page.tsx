@@ -16,8 +16,12 @@
  *   4. Si enrolled: opciones "Regenerar recovery codes" / "Desactivar MFA".
  */
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { KeyRound } from 'lucide-react'
+import SetPasswordForm from '@/app/set-password/set-password-form'
 import { SecurityForm } from './_components/security-form'
 
 export const dynamic = 'force-dynamic'
@@ -63,20 +67,82 @@ async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
   }
 }
 
-export default async function SecurityPage() {
+export default async function SecurityPage({
+  searchParams,
+}: {
+  searchParams: { pwd_success?: string; pwd_error?: string }
+}) {
   const { state, userId } = await getMfaState()
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  // Server action: cambiar contraseña (movido desde /dashboard/account).
+  async function changePassword(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    if (!u) redirect('/login')
+
+    const password = (formData.get('password') as string)?.trim()
+    if (!password || password.length < 8) {
+      redirect('/dashboard/settings/security?pwd_error=' + encodeURIComponent('La contraseña debe tener al menos 8 caracteres.'))
+    }
+
+    const { error } = await sb.auth.updateUser({ password })
+    if (error) {
+      redirect(`/dashboard/settings/security?pwd_error=${encodeURIComponent(error.message)}`)
+    }
+
+    revalidatePath('/dashboard/settings/security')
+    redirect('/dashboard/settings/security?pwd_success=1')
+  }
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Seguridad</h1>
         <p className="text-sm text-muted-foreground">
-          Activa la autenticación de dos factores (MFA TOTP) para proteger
-          tu cuenta. Compatible con Google Authenticator, Authy, 1Password.
+          Gestiona tu contraseña y autenticación de dos factores (MFA TOTP) para
+          proteger tu cuenta personal: <code className="text-xs">{user.email}</code>.
         </p>
       </header>
 
-      <SecurityForm initialState={state} userId={userId} />
+      {/* ── Sección 1: Cambiar contraseña ────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base inline-flex items-center gap-2">
+            <KeyRound className="h-4 w-4" /> Contraseña
+          </CardTitle>
+          <CardDescription>
+            Actualiza tu contraseña de acceso. Requerido: mínimo 8 caracteres.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {searchParams.pwd_success && (
+            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+              Contraseña actualizada correctamente.
+            </p>
+          )}
+          {searchParams.pwd_error && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+              {decodeURIComponent(searchParams.pwd_error)}
+            </p>
+          )}
+          <SetPasswordForm action={changePassword} submitLabel="Actualizar contraseña" />
+        </CardContent>
+      </Card>
+
+      {/* ── Sección 2: MFA TOTP ─────────────────────────────────────────── */}
+      <div className="border-t border-border pt-6 space-y-3">
+        <header className="space-y-1">
+          <h2 className="text-lg font-semibold">Autenticación de dos factores (MFA)</h2>
+          <p className="text-sm text-muted-foreground">
+            Compatible con Google Authenticator, Authy, 1Password.
+          </p>
+        </header>
+        <SecurityForm initialState={state} userId={userId} />
+      </div>
 
       <footer className="text-xs text-muted-foreground border-t border-border pt-4 space-y-1">
         <p>
