@@ -1,18 +1,19 @@
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import DashboardClient from './dashboard-client'
 
 export default async function DashboardPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sem 5 perf: getCachedUser/Meta comparten cache con DashboardLayout
+  // (mismo render tree). Ahorra 1 round-trip auth.getUser.
+  const user = await getCachedUser()
   if (!user) redirect('/login')
 
-  const meta = (user.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
-  let tenantName = 'Commerce Ops'
+  let tenantName = 'Tu tienda'
   let stats = { conversations: 0, orders: 0, contacts: 0, products: 0 }
   let ops = { activeConversations: 0, humanTakeovers: 0, pendingOrders: 0, lowStockCount: 0 }
   let messagesPerDay: { day: string; total: number }[] = []
@@ -68,7 +69,7 @@ export default async function DashboardPage() {
       supabase.from('orders').select('status').eq('tenant_id', tenantId),
     ])
 
-    tenantName = tenantRes.data?.name ?? 'Commerce Ops'
+    tenantName = tenantRes.data?.name ?? 'Tu tienda'
 
     stats = {
       conversations: convRes.count ?? 0,

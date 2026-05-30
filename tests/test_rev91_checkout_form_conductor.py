@@ -213,6 +213,7 @@ class S12ConjuntoBuildingTypeTests(unittest.TestCase):
             "document_type": "CC", "document_number": "12345678",
             "address": {
                 "street": "Calle 1 #2-3", "city": "Bogotá",
+                "neighborhood": "Chapinero",  # P6 opción C: residencial.
                 "building_type": "casa",
             },
         }

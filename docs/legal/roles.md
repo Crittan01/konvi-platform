@@ -1,6 +1,6 @@
 # Roles legales — Responsable vs Encargado del Tratamiento
 
-**Aplicable a:** Commerce Ops Platform (rev. ≥ 99)
+**Aplicable a:** Konvi Platform (rev. ≥ 99)
 **Marco legal:** Ley 1581/2012 Colombia (Habeas Data) + Decreto 1377/2013
 
 ---
@@ -11,7 +11,7 @@
 |---|---|---|
 | **Titular** | Persona natural cuyos datos son objeto de tratamiento | El cliente final que interactúa con el negocio del tenant vía WhatsApp |
 | **Responsable** | Decide sobre la finalidad y tratamiento de los datos | **El tenant** (e.g., KAIU) — recibe consent del titular, define qué hacer con sus datos |
-| **Encargado** | Realiza el tratamiento por cuenta del Responsable | **Commerce Ops Platform** — procesa datos siguiendo instrucciones del tenant |
+| **Encargado** | Realiza el tratamiento por cuenta del Responsable | **Konvi Platform** — procesa datos siguiendo instrucciones del tenant |
 
 ---
 

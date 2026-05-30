@@ -34,7 +34,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
         missing = _missing_address_fields({})
         self.assertIn("Calle y número", missing)
         self.assertIn("Ciudad", missing)
-        self.assertIn("Tipo de vivienda (casa, edificio o conjunto)", missing)
+        self.assertIn("Tipo de vivienda (casa, edificio, conjunto u oficina)", missing)
 
     def test_street_city_only_still_missing_building_type(self):
         """Caso real reportado: bot avanzaba con solo street+city."""
@@ -42,16 +42,19 @@ class MissingAddressFieldsTests(unittest.TestCase):
             "street": "Calle 3 sur # 70-84",
             "city": "Bogotá D.C.",
         })
-        self.assertIn("Tipo de vivienda (casa, edificio o conjunto)", missing)
+        self.assertIn("Tipo de vivienda (casa, edificio, conjunto u oficina)", missing)
         self.assertFalse(_has_real_address_data({
             "street": "Calle 3 sur # 70-84",
             "city": "Bogotá D.C.",
         }))
 
     def test_casa_complete_with_street_city_type(self):
+        # Sem 7 F2 cierre 2026-05-20 — P6 opción C: barrio obligatorio
+        # en residencial. Address completa requiere neighborhood.
         addr = {
             "street": "Calle 10 # 5-23",
             "city": "Bogotá",
+            "neighborhood": "Chapinero",
             "building_type": "casa",
         }
         self.assertEqual(_missing_address_fields(addr), [])
@@ -61,25 +64,152 @@ class MissingAddressFieldsTests(unittest.TestCase):
         addr = {"street": "Calle 100", "city": "Bogotá", "building_type": "edificio"}
         self.assertIn("Apartamento", _missing_address_fields(addr))
 
-    def test_conjunto_requires_tower_and_apartment(self):
-        """Caso real: cliente dijo 'Es un conjunto residencial' sin dar torre/apto."""
+    def test_conjunto_requires_conjunto_type_first(self):
+        """Sem 7 F2 cierre — conjunto sin conjunto_type pide clarificación
+        antes de torre/apto (puede ser conjunto de torres o de casas)."""
         addr = {
             "street": "CL 3 SUR 70-84",
             "city": "Bogotá D.C.",
             "building_type": "conjunto",
         }
         missing = _missing_address_fields(addr)
-        self.assertIn("Torre", missing)
-        self.assertIn("Apartamento", missing)
+        self.assertIn("Tipo de conjunto (torres o casas)", missing)
         self.assertFalse(_has_real_address_data(addr))
 
-    def test_conjunto_complete_with_tower_apt(self):
+    def test_conjunto_torres_requires_tower_and_apartment(self):
+        """Conjunto de torres exige torre + apartamento."""
         addr = {
             "street": "CL 3 SUR 70-84",
             "city": "Bogotá D.C.",
             "building_type": "conjunto",
+            "conjunto_type": "torres",
+        }
+        missing = _missing_address_fields(addr)
+        self.assertIn("Torre", missing)
+        self.assertIn("Apartamento", missing)
+        self.assertFalse(_has_real_address_data(addr))
+
+    def test_conjunto_torres_complete_with_tower_apt(self):
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",  # P6 opción C: obligatorio en residencial.
+            "building_type": "conjunto",
+            "conjunto_type": "torres",
             "tower": "5",
             "apartment": "502",
+        }
+        self.assertEqual(_missing_address_fields(addr), [])
+
+    def test_conjunto_casas_requires_only_house_number(self):
+        """Sem 7 F2 cierre — conjunto de casas pide solo casa # (apartment
+        como alias semántico). NO pide torre."""
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+        }
+        missing = _missing_address_fields(addr)
+        self.assertIn("Número de casa", missing)
+        self.assertNotIn("Torre", missing)
+
+    def test_conjunto_casas_complete_with_house_number(self):
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",  # P6 opción C: obligatorio en residencial.
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",  # alias semántico de "casa #12"
+        }
+        self.assertEqual(_missing_address_fields(addr), [])
+
+    def test_conjunto_casas_render_with_manzana(self):
+        """Sem 7 F2 cierre 2026-05-20 (D4) — manzana/bloque opcional en
+        conjunto_casas. Reusa `tower` semánticamente: "Manzana X".
+        """
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",
+            "tower": "A",  # cliente dijo "Manzana A"
+            "complex_name": "Conjunto Los Almendros",
+        }
+        # Address completa pese a `tower` presente (no es obligatoria).
+        self.assertEqual(_missing_address_fields(addr), [])
+        # Render del summary: "Manzana A" + "Casa #12".
+        rendered = _format_address_for_summary(addr)
+        self.assertIn("Manzana A", rendered)
+        self.assertIn("Casa #12", rendered)
+        # NO debe decir "Torre".
+        self.assertNotIn("Torre", rendered)
+
+    def test_conjunto_casas_render_sin_manzana(self):
+        """Conjunto casas sin manzana — renderiza solo Casa #X."""
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",
+        }
+        rendered = _format_address_for_summary(addr)
+        self.assertIn("Casa #12", rendered)
+        self.assertNotIn("Manzana", rendered)
+        self.assertNotIn("Torre", rendered)
+
+    def test_conjunto_casas_render_manzana_con_prefijo(self):
+        """Si el cliente ya dijo "Manzana A" literal, render preserva sin
+        prefijar otra vez."""
+        addr = {
+            "street": "CL 3 SUR 70-84",
+            "city": "Bogotá D.C.",
+            "neighborhood": "Olaya",
+            "building_type": "conjunto",
+            "conjunto_type": "casas",
+            "apartment": "12",
+            "tower": "Manzana A",
+        }
+        rendered = _format_address_for_summary(addr)
+        # Debe haber EXACTAMENTE 1 ocurrencia de "Manzana A" (no "Manzana Manzana A").
+        self.assertEqual(rendered.count("Manzana A"), 1)
+        self.assertNotIn("Manzana Manzana", rendered)
+
+    def test_oficina_requires_office_number(self):
+        """Sem 7 F2 cierre — building_type='oficina' pide número de oficina
+        (= apartment alias). floor + company_name son opcionales."""
+        addr = {
+            "street": "Cra 7 # 80-50",
+            "city": "Bogotá D.C.",
+            "building_type": "oficina",
+        }
+        missing = _missing_address_fields(addr)
+        self.assertIn("Número de oficina", missing)
+
+    def test_oficina_complete_with_apartment(self):
+        """Oficina con solo apartment (número oficina) ya es completa."""
+        addr = {
+            "street": "Cra 7 # 80-50",
+            "city": "Bogotá D.C.",
+            "building_type": "oficina",
+            "apartment": "502",
+        }
+        self.assertEqual(_missing_address_fields(addr), [])
+
+    def test_oficina_with_floor_and_company_is_complete(self):
+        """floor + company_name son opcionales — los aceptamos pero no bloquean."""
+        addr = {
+            "street": "Cra 7 # 80-50",
+            "city": "Bogotá D.C.",
+            "building_type": "oficina",
+            "apartment": "502",
+            "floor": "5",
+            "company_name": "Acme S.A.S.",
         }
         self.assertEqual(_missing_address_fields(addr), [])
 
@@ -105,6 +235,7 @@ class MissingAddressFieldsTests(unittest.TestCase):
             "address": {
                 "street": "Calle 1",
                 "city": "Bogotá",
+                "neighborhood": "Chapinero",  # P6 opción C.
                 "building_type": "casa",
             },
         }

@@ -65,6 +65,24 @@ const remotePatterns = [
     protocol: 'https',
     hostname: 'mlstatic.com',
   },
+  // Rev. 107 fix runtime KAIU 2026-05-24: 16 productos KAIU poblados con
+  // cover_image_url apuntando a placeholders HTTPS por defecto cuando
+  // tenant no sube imágenes reales.
+  //
+  // placehold.co retorna SVG sin XML prolog → Next.js detectContentType()
+  // no lo reconoce (espera bytes mágicos `<?xml`) → rechaza con "isn't a
+  // valid image" aunque dangerouslyAllowSVG=true (bug detección Next.js).
+  //
+  // dummyimage.com retorna PNG real → pasa por el optimizer sin problema.
+  // Mantenemos placehold.co como host whitelisted para compat retro.
+  {
+    protocol: 'https',
+    hostname: 'placehold.co',
+  },
+  {
+    protocol: 'https',
+    hostname: 'dummyimage.com',
+  },
 ]
 if (supabaseStorageHost) {
   remotePatterns.unshift({
@@ -134,8 +152,24 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  // Sem 5 perf (rev. 105 2026-05-07): activa gzip en respuestas Next.
+  // Reduce 3-4x el tamaño de bundles JS (.js dev son 6.5MB sin
+  // comprimir; con gzip ~1.5-2MB). Crítico para devs accediendo via
+  // SSH port-forward a VM remota: sin compress, cada page load
+  // descargaba MB de bundles dev por el túnel.
+  // Producción Render no se afecta (static assets ya van por CDN).
+  compress: true,
+
   images: {
     remotePatterns,
+    // Rev. 107 fix runtime KAIU 2026-05-24 web.log:
+    // placehold.co retorna content-type=image/svg+xml (legítimo, su API
+    // genera SVG dinámico). Next.js Image bloquea SVG por defecto (riesgo
+    // XSS si fuente no confiable). placehold.co está en remotePatterns
+    // (whitelisted hostname) → safe para nuestro caso. CSP estricta
+    // adicional para defensa en profundidad.
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
 
   async headers() {
@@ -149,4 +183,36 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+// ── Sentry wrapper (Rev. 109 J.2.7.4) ──────────────────────────────────────
+// Wrap con withSentryConfig para que @sentry/nextjs auto-inject:
+//   - sentry.client.config.ts en el browser bundle
+//   - sentry.server.config.ts en el server runtime Node
+//   - sentry.edge.config.ts si hay middleware/route edge (no usado hoy)
+//   - source maps upload en build (require SENTRY_AUTH_TOKEN)
+//   - tunnel route /monitoring para evadir ad-blockers (opcional)
+//
+// Si NEXT_PUBLIC_SENTRY_DSN no está configurado, Sentry queda inert
+// (enabled: false en cada config). Build sigue funcionando.
+
+const { withSentryConfig } = require('@sentry/nextjs')
+
+module.exports = withSentryConfig(
+  nextConfig,
+  {
+    // Suppress logs de upload en build (no romper CI si falta auth token).
+    silent: true,
+    // Org + project se leen de env. Sin estos, source map upload se salta.
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    // Auth token NUNCA va en el bundle — solo en build env.
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+  },
+  {
+    // Hide source maps del bundle público (privacy).
+    hideSourceMaps: true,
+    // Disable logger output en runtime (logs vienen del Sentry SDK init).
+    disableLogger: true,
+    // Auto-instrumentation de fetch + DB clients ya viene en el SDK.
+    automaticVercelMonitors: false,  // not on Vercel
+  },
+)

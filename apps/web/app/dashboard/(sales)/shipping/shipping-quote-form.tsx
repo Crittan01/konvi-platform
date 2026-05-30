@@ -24,6 +24,23 @@ interface Rate {
   total_price?: number
   currency?: string
   delivery_date?: string
+  // Rev. 107 — campos extendidos Aveonline (opcionales; Envia los ignora).
+  delivery_days?: number | null
+  delivery_estimate?: string
+  carrier_logo_url?: string | null
+  carrier_logo_url_alt?: string | null
+  route_type?: string | null
+  weight_real_kg?: number | null
+  weight_volumetric_kg?: number | null
+  units?: number | null
+  declared_value_cop?: number | null
+  valuation_percent?: number | null
+  freight_total_cop?: number | null
+  handling_cop?: number | null
+  cod_extras_cop?: number | null
+  subtotal_cop?: number | null
+  cod_supported?: boolean
+  provider?: string
   [key: string]: unknown
 }
 
@@ -539,15 +556,93 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                     </span>
                   </div>
                 )}
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
-                    <p className="text-xs text-muted-foreground">{String(rate.service ?? 'Servicio estándar')}</p>
-                    {rate.delivery_date && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Entrega: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    {/* Logo carrier (Rev. 107 Aveonline) */}
+                    {rate.carrier_logo_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={rate.carrier_logo_url}
+                        alt={`${rate.carrier} logo`}
+                        className="h-10 w-10 rounded-md object-contain bg-white border border-border shrink-0"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                      />
                     )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center flex-wrap gap-1.5">
+                        <p className="text-sm font-medium">{String(rate.carrier ?? 'Carrier')}</p>
+                        {/* COD badge */}
+                        {rate.cod_supported && (
+                          <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border bg-amber-700/15 text-amber-700 border-amber-700/30 font-medium">
+                            COD
+                          </span>
+                        )}
+                        {/* ETA días badge */}
+                        {rate.delivery_days != null && (
+                          <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full border bg-primary/10 text-primary border-primary/30 font-medium">
+                            {rate.delivery_days}d
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {String(rate.service ?? 'Servicio estándar')}
+                        {rate.route_type ? ` · ${rate.route_type}` : ''}
+                      </p>
+                      {rate.delivery_date && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Entrega: {new Date(rate.delivery_date as string).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </p>
+                      )}
+                      {/* Breakdown costos Aveonline (si disponible).
+                          stopPropagation: el div padre tiene onClick que
+                          selecciona el rate; sin esto el click en "Ver
+                          desglose" caería en el card y NO expandiría. */}
+                      {(rate.freight_total_cop != null || rate.handling_cop != null) && (
+                        <details
+                          className="mt-1.5 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <summary
+                            className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors select-none"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Ver desglose
+                          </summary>
+                          <dl className="mt-1.5 space-y-0.5 pl-2 border-l-2 border-border">
+                            {rate.freight_total_cop != null && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-muted-foreground">Flete</dt>
+                                <dd className="font-mono">${Number(rate.freight_total_cop).toLocaleString('es-CO')}</dd>
+                              </div>
+                            )}
+                            {rate.handling_cop != null && rate.handling_cop > 0 && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-muted-foreground">Manejo</dt>
+                                <dd className="font-mono">${Number(rate.handling_cop).toLocaleString('es-CO')}</dd>
+                              </div>
+                            )}
+                            {rate.valuation_percent != null && rate.valuation_percent > 0 && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-muted-foreground">
+                                  Valoración {rate.valuation_percent}% sobre ${Number(rate.declared_value_cop ?? 0).toLocaleString('es-CO')}
+                                </dt>
+                                <dd className="font-mono">—</dd>
+                              </div>
+                            )}
+                            {rate.weight_real_kg != null && rate.weight_volumetric_kg != null && (
+                              <div className="flex justify-between gap-3 pt-1 border-t border-border/50 mt-1">
+                                <dt className="text-muted-foreground">
+                                  Peso real / volumétrico
+                                </dt>
+                                <dd className="font-mono">
+                                  {rate.weight_real_kg}kg / {rate.weight_volumetric_kg}kg
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
+                        </details>
+                      )}
+                    </div>
                   </div>
                   <div className="text-left sm:text-right shrink-0">
                     {rate.total_price != null && (

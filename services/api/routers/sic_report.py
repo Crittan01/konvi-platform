@@ -115,7 +115,7 @@ def _build_sic_payload(
             "role": "Responsable del Tratamiento (Ley 1581/2012)",
         },
         "platform": {
-            "name": "Commerce Ops Platform",
+            "name": "Konvi Platform",
             "role": "Encargado del Tratamiento",
             "subprocessors_doc": "docs/legal/subprocessors.md",
         },

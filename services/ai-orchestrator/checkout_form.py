@@ -194,6 +194,15 @@ class CheckoutFormConductor:
             enriched["document"] = (
                 regex_slots["document_type"], regex_slots["document_number"]
             )
+        else:
+            # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv 099bb891):
+            # Slot-filling secuencial. Si solo viene el tipo (sin número),
+            # persistirlo. El prompt contextual del FSM pide solo el
+            # número en el siguiente turno.
+            if (regex_slots.get("document_type")
+                    and not getattr(parsed, "extracted_document_type", None)):
+                parsed.extracted_document_type = regex_slots["document_type"]
+                enriched["document_type"] = regex_slots["document_type"]
 
         # Address: mergeamos con lo que el LLM ya extrajo (sin pisar valores).
         regex_addr = regex_slots.get("address") or {}
@@ -247,14 +256,34 @@ class CheckoutFormConductor:
         if name:
             sim["name"] = " ".join(str(name).split())
 
+        # Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv 099bb891):
+        # Slot-filling secuencial para documento. ANTES: atómico (ambos o
+        # ninguno). AHORA: parcial. Cliente puede dar tipo en un turno
+        # ("Cédula de Ciudadanía") y número en otro ("1032414179"). El
+        # FSM sigue en NEEDS_DOCUMENT hasta que ambos estén; el prompt
+        # contextual del orchestrator pide solo lo que falta.
         doc_t = getattr(parsed, "extracted_document_type", None)
         doc_n = getattr(parsed, "extracted_document_number", None)
-        if doc_t and doc_n:
+        if doc_t:
             doc_t_norm = str(doc_t).strip().upper()
-            doc_n_norm = re.sub(r"[\s.]", "", str(doc_n).strip())
-            if doc_t_norm in {"CC", "CE", "NIT", "PP", "TI", "OTHER"} and doc_n_norm:
+            if doc_t_norm in {"CC", "CE", "NIT", "PP", "TI", "OTHER"}:
                 sim["document_type"] = doc_t_norm
+        if doc_n:
+            doc_n_norm = re.sub(r"[\s.]", "", str(doc_n).strip())
+            if doc_n_norm:
                 sim["document_number"] = doc_n_norm
+
+        # Auto-asignación de número cuando tipo ya está y cliente responde
+        # solo dígitos. Conservador: requiere que sim ya tenga document_type
+        # (persistido en turno previo) Y inbound sea EXCLUSIVAMENTE dígitos
+        # válidos (6-12 chars). Evita interpretar dígitos en otro contexto
+        # (ej. ciudad numérica, teléfonos) como documento. El guard
+        # contextual lo provee el conductor — solo invoca enrich cuando
+        # display_state ∈ NEEDS_X (incluye NEEDS_DOCUMENT).
+        if sim.get("document_type") and not sim.get("document_number"):
+            inbound_digits = re.sub(r"[\s.]", "", inbound or "")
+            if inbound_digits.isdigit() and 6 <= len(inbound_digits) <= 12:
+                sim["document_number"] = inbound_digits
 
         addr = getattr(parsed, "extracted_direction", None)
         if isinstance(addr, dict) and any(v for v in addr.values() if v):

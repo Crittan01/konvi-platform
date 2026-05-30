@@ -64,6 +64,68 @@ Callback rechaza state faltante/inválido/expirado/reutilizado.
 Fuente única: `tenant_integrations` por `tenant_id` (`provider='whatsapp'`).  
 No hay fallback a `META_ACCESS_TOKEN` ni `WHATSAPP_PHONE_ID` en env vars.
 
+### 7.1 Modelo arquitectónico (verificado 2026-05-08)
+
+Hay UNA SOLA Meta App propiedad del Business Portfolio de la plataforma.
+Cada tenant conecta su WABA + Phone Number a esa App vía System User token
+generado en su propio Business Manager. Ver detalle completo en
+`docs/research/meta-app-architecture-2026-05-08.md`.
+
+**Variables globales** (Render env-var del servicio `connector-whatsapp`):
+
+| Var | Origen | Uso |
+|---|---|---|
+| `META_APP_SECRET` | App Secret de la Meta App de la plataforma | HMAC SHA-256 verify de TODOS los webhooks inbound |
+| `META_VERIFY_TOKEN` | Verify Token configurado en developers.facebook.com | GET handshake `hub.challenge` |
+
+**NO existen `app_secret` ni `verify_token` per-tenant** — sería arquitectura
+multi-app (raro, requiere que cada tenant tenga su propia Meta App). El modelo
+actual de Konvi es 1 Meta App + N tenants conectados.
+
+### 7.2 Schema canónico `tenant_integrations.credentials` (provider='whatsapp')
+
+```jsonc
+{
+  // Identificadores públicos (NO sensitive — plaintext OK)
+  "phone_number_id": "990364...1295",        // requerido outbound /messages + multiplex inbound
+  "waba_id": "215905...8202272",             // requerido templates CRUD F2 (POST /{WABA_ID}/message_templates)
+  "display_phone_number": "+57 311 5678910", // opcional, solo display
+
+  // Secretos del tenant (Vault preferido)
+  "access_token_secret_id": "<vault_uuid>",  // System User token Bearer Graph API
+  "access_token": "...",                      // (legacy fallback, migrar a Vault)
+
+  // Metadata operativa (synced via webhook phone_number_quality_update)
+  "tier": "TIER_250",                         // TIER_50|250|1K|10K|100K|UNLIMITED
+  "quality_rating": "GREEN"                   // GREEN|YELLOW|RED
+}
+```
+
+**Notas**:
+- `access_token` lo genera el tenant en SU `business.facebook.com` (System User
+  con permisos sobre SU WABA). Es Bearer token de larga duración (no caduca).
+- `access_token` se usa por `services/ai-orchestrator/whatsapp_sender.py` para
+  outbound `/messages` y por `MetaBusinessManagementClient` (F2) para CRUD
+  templates `POST /{WABA_ID}/message_templates`.
+- `tier` + `quality_rating` se actualizan automáticamente cuando Meta envía
+  `phone_number_quality_update` (suscripción F2 pendiente Sem 7).
+
+### 7.3 HMAC verification + tenant forensics (rev. 106 Sem 6 simplificado)
+
+`services/connector-whatsapp/dependencies/meta.py`:
+
+1. Lee raw_body + header `X-Hub-Signature-256: sha256=<hex>`.
+2. HMAC SHA-256 verify constant-time contra `META_APP_SECRET` global. Si falla → 403.
+3. (Forensics) extrae `phone_number_id` del payload, lookup `tenant_integrations`
+   → loguea `tenant_id` + `phone_number_id` en cada webhook OK. Auditoría Habeas
+   Data + debugging multi-tenant. NO bloquea ni cambia el HMAC.
+4. Cache TTL 5min para `phone_number_id → tenant_id` (incluye negativos).
+
+Razón de NO usar F.1 webhook framework: `connector-whatsapp` es deploy unit
+independiente Render (`rootDir: services/connector-whatsapp`) — no puede importar
+de `services/api/lib/`. Ver `docs/research/f1-f2-meta-gap-audit-2026-05-08.md`
+§7.bis. F.1 sigue siendo canónico para webhooks dentro de `services/api/`.
+
 ## 8) Seguridad multi-tenant (service_role)
 
 `service_role` bypasea RLS → el aislamiento depende de filtros explícitos `tenant_id` en cada query.  

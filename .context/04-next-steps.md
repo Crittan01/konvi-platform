@@ -1,4 +1,124 @@
-# Próximos Pasos — Estado 2026-05-03 (rev. 103)
+# Próximos Pasos — Estado 2026-05-08 (rev. 106 — cierre Sem 5)
+
+**Reporte de cierre**: [`docs/reports/rev106_sem5_envia_p1_complete.md`](../docs/reports/rev106_sem5_envia_p1_complete.md).
+**Estado branch**: `phase-0-pre-prod` (107 commits ahead, sin commits a `develop`/`main`).
+**Suite tests**: 1867 verde · 0 fail · 0 flaky.
+
+---
+
+## 🗺️ Roadmap pendientes consolidado (2026-05-29)
+
+**Documento canónico**: [`docs/refactor/0006-roadmap-pending-sessions.md`](../docs/refactor/0006-roadmap-pending-sessions.md).
+
+Lee ese doc PRIMERO al retomar el proyecto — consolida:
+- 10 PRs abiertos pendientes de review + orden de merge
+- Bloqueantes humanos externos (V.3 legal · V.4 DPO · V.5 pen testing · V.7 dominio)
+- Próximas 5 sesiones priorizadas con esfuerzo + objetivos
+- Items diferidos a Platform Console + Storefront
+- Decisiones diferidas (hard-delete cron activación, Sentry trigger, etc.)
+
+**Plan K avance**: 16 / 18 IMPLEMENTED (89%) tras sesión 2026-05-29.
+
+**Próxima sesión recomendada**: cierre validaciones humanas + Sem 6 HSM templates.
+
+---
+
+## Platform Console — Items diferidos (vista cross-tenant)
+
+Decisión arquitectónica founder 2026-05-29: features con vista **cross-tenant**
+NO se construyen en Tenant Console; se documentan como pendientes Platform
+Console (NO existe — bloqueante OQ-P01).
+
+Tenant Console (apps/web actual) construye vista **PER-TENANT** de:
+- J.2.11 Health dashboard providers — el tenant ve la salud de SUS integraciones
+- I.8 Billing aggregator — el tenant ve SUS costos del mes
+- J.2.4.3 MFA TOTP — cada user activa MFA en su Settings
+- I.7 Onboarding Wizard — guía 5-7 pasos al tenant nuevo
+
+Platform Console (DIFERIDO ~6 meses post-deploy) tendrá vista cross-tenant de
+estos features (reusando backend) + features 100% nuevas (tenant CRUD admin,
+audit log global, subscription billing platform-level).
+
+Detalle completo + roadmap: [`docs/refactor/0005-platform-console-pending-items.md`](../docs/refactor/0005-platform-console-pending-items.md).
+
+**Trigger activación Platform Console**: 50+ tenants, founder pide vista global,
+compliance externa, o pricing tier complejo. Esfuerzo total estimado ~20-25d.
+
+**Excepción Sentry tracing (J.2.7.4)**: NO requiere UI propia — usa
+sentry.io/organizations/konvi/ directamente. Solo founder accede. SDK
+instrumentation se implementa AHORA en backend (sirve a ambos consoles).
+
+---
+
+## Prioridades post-rev106 (orden recomendado)
+
+### P0 — Sem 6: Re-uso framework común para HSM templates (~2-3 días)
+
+Pre-requisito de F2 WhatsApp HSM templates. Validar que:
+- `IntegrationClient` (F.2) cubre Meta Cloud API quirks (rate-limits per WABA, Idempotency-Key not server-side, retry policy).
+- `WebhookHandler` (F.1) maneja `message_template_status_update` payload + signature HMAC-SHA256 con `app_secret`.
+- Si gaps → completarlos antes de iniciar HSM.
+
+### P1 — Sem 7-8: F2 WhatsApp HSM templates (~11 días)
+
+**Trigger comercial**: 10 tenants en cola integración Platform Console; 6 de 10 requieren proactivos fuera CSW (`payment_reminder_v1`, `cart_abandonment_v1`, `delivery_notification_v1`, etc.). Sin templates aprobados, bot mudo fuera de CSW de 24h Meta.
+
+**Specs verificadas** + diseño 3 niveles modularidad: ver sección "Backlog rev. 103 — WhatsApp Templates HSM (F2-templates)" más abajo.
+
+**Dossier**: [`docs/research/whatsapp-meta-dossier-2026-05-05.md`](../docs/research/whatsapp-meta-dossier-2026-05-05.md).
+
+### P1 — UAT residual S10-S25 dual-mode (~3-5 días, paralelizable)
+
+16 escenarios pendientes (lista abajo). **Bloqueante constraint operacional vivo del plan K**: cero PRs a `main` sin estos UAT en 100% PASS dual-mode (`new` + `known`). Ejecutables por bloques entre items P1 mientras Meta revisa templates HSM (review window hasta 24h).
+
+### P2 — Sem 9: H.5 MeLi Q&A + messages topics (~5 días)
+
+Tras HSM. Trigger: tenants con presencia en MeLi necesitan auto-reply en preguntas + post-venta. Dossier MeLi listo.
+
+### P3 — Backlog largo (post-MVP producción)
+
+- Multi-agente per-tenant (I.5) — ADR-0014 nuevo.
+- Storefront base (I.1) — preparación arquitectónica solo (founder pidió diferir UI).
+- Channel Registry pluggable (I.3.1-I.3.4) para Messenger/Instagram.
+- MA-4 Onboarding Wizard.
+- MA-5 tenant_billing_aggregator + UI desglose costos.
+- MA-6 tenant_provider_health dashboard.
+- MA-8 logs forensics → Supabase tabla append-only.
+
+### 🆕 Camino D — "Konvi Studio" módulo personalización (decidido 2026-05-17)
+
+**Contexto**: la esposa del founder está construyendo Lucams_shop ([github.com/jullieth93/lucams](https://github.com/jullieth93/lucams)), eCommerce de imanes personalizados. Decisión estratégica: NO construir Lucams como repo separado; en su lugar Konvi extiende sus módulos para soportar tenants con productos personalizables (canvas + 3D + AI design assistant). Lucams entra como **tenant premium pilot** de Konvi.
+
+**Justificación comercial**:
+- Diferenciador SaaS B2B nicho (otros competidores Colombia no ofrecen módulo personalización integrado).
+- Aplicable a múltiples nichos personalizables: imanes, tazas, estampados, joyas, llaveros, etc.
+- Lucams es el primer caso comercial demostrable.
+
+**Items nuevos a sumar al roadmap K (post-Sem 14)**:
+- **Konvi Studio Editor** — editor canvas embeddable (react-konva: capas, plantillas, texto, fotos).
+- **Preview 3D** — Three.js + react-three-fiber (imán sobre nevera 3D rotable, taza con foto rotable, etc.).
+- **Claude API design assistant** — sugiere plantillas según ocasión + paleta. Reusa la infra de `services/ai-orchestrator` con tier separado.
+- **Storage buckets per-tenant** (3 buckets): `customer-uploads` privado, `design-previews` público, `production-assets` admin 300 DPI.
+- **`cart_items.custom_design JSONB` + `production_asset_url`** — extensión schema cart-as-SoT existente.
+- **Workflow producción**: admin descarga 300 DPI para impresión + marca orden ready-to-ship.
+
+**Estimado adicional**: ~6-8 semanas dev post-Konvi-base (Sem 14+).
+
+**Pre-requisito comercial**: Lucams debe validar demanda con flow manual (Instagram + WhatsApp + Wompi link directo + diseño a mano) hasta >30 órdenes/mes antes de invertir el dev del módulo Studio. NO arrancar antes.
+
+**Stack Lucams compatibilidad** (lo que YA reusa con Konvi sin trabajo):
+- Wompi (mismo provider ya en Konvi)
+- Supabase Auth + Storage + Postgres (mismo)
+- Cupones (ADR-0015 Konvi cubre)
+- Cart + Order + checkout flow (Konvi cubre)
+- Resend email transaccional (planeado Sem 11 plan K)
+
+**Stack Lucams diff** (lo que requiere desarrollo en Konvi):
+- Logística: Lucams usa Venndelo, Konvi usa Envia → sumar Venndelo como segundo provider opcional en `tenant_integrations`. Estimado: ~3 días.
+- Editor canvas + 3D + AI: módulo Konvi Studio entero (~6-8 sem).
+- Storefront público con catálogo personalizable: I.1 del plan K original (planeado).
+
+---
 
 ## ADRs activos
 
@@ -841,6 +961,74 @@ Pasos cuando se priorice:
 7. **Higiene final de entorno**
    - Retirar fallback legacy `NEXT_PUBLIC_API_URL` del código server-side cuando se cierre refactor de rutas restantes.
    - Mantener una sola vía canónica (`API_URL`) para evitar ambigüedad de configuración.
+
+9. **Tipos de descuento extendidos para cupones (P3 backlog)**
+   - **Motivación 2026-05-07** (consulta founder en sesión I.2.8): los 3
+     tipos actuales (`percent`, `fixed_amount`, `free_shipping`) cubren
+     casos comunes pero no permiten:
+     • `percent_on_total`: % sobre subtotal + envío conjuntamente
+       (caso "10% off de la compra completa").
+     • `percent_on_shipping`: % sobre solo el envío (ej. 50% del
+       transporte).
+     • Combos (productos + envío gratis simultáneos) — bloqueado por
+       ADR-0015 D3 (no combinables P1).
+   - **Decisión actual**: NO implementar hasta tener demanda real
+     comercial (al menos 2-3 tenants pidiendo el caso). Pattern actual
+     alineado con Shopify/WooCommerce (subtotal vs shipping separados)
+     simplifica facturación electrónica DIAN (base gravable IVA clara).
+   - **Trigger de implementación**: feedback de tenants productivos +
+     ADR nuevo extendiendo ADR-0015 con D11+ tipos.
+   - **Implicaciones técnicas**: extender enum `discount_type` en
+     migration, `compute_discount` en `services/api/lib/coupons.py`,
+     UI select + subtítulos explicativos.
+
+8. **Tenant de test dedicado (`tenant-test` / `kaiu-staging`)**
+   - **Motivación 2026-05-07**: hoy todos los UATs usan KAIU (tenant productivo).
+     Sembrar cupones de prueba (PRUEBA10), conversaciones de UAT, productos
+     fake, etc., contamina datos reales. Los UAT scenarios S01-S47 ejecutan
+     `hard_reset` que limpia conversaciones/contactos pero las redemptions
+     históricas y filas auxiliares sí quedan con `coupon_id` referenciando
+     coupons de test.
+   - **Decisión cuando llegue Platform Console (J.3.1 diferido)**: crear
+     tenant `kaiu-staging` o `platform-test` aislado para UATs.
+   - **Implicaciones**:
+     • Permite re-correr S01-S47 contra staging sin riesgo a data KAIU prod.
+     • Permite sembrar productos/cupones/conversaciones de UAT sin contaminar.
+     • Decoupling user-acceptance de production data.
+     • Soporta multi-environment future (dev/staging/prod por tenant).
+   - **Trigger de implementación**: cuando lleguen 5+ tenants productivos
+     o cuando se materialice Platform Console.
+   - **Workaround actual (hasta entonces)**: cupones/recursos de test se
+     desactivan post-UAT (`is_active=false`) en lugar de hard-delete para
+     preservar audit trail de redemptions UAT (Habeas Data ADR-0015 D6).
+     Ejemplo: PRUEBA10 desactivado el 2026-05-07 tras certificar S43-S47.
+
+10. **H.2.4 Cash on Delivery (COD) — PAUSADO 2026-05-07**
+    - **Decisión founder 2026-05-07**: aplicada regla "NO suposiciones,
+      solo data verificable". Pausa formal de H.2.4 hasta certificación
+      empírica de fees Ecart Pay + DANE Servientrega.
+    - **Lo certificado** (queda registrado para reanudación):
+      • V.2 — 4 carriers Colombia COD viables: servientrega, tcc,
+        fedex, dhl (evidencia
+        `docs/research/empirical-evidence/envia-cod-carriers-CO-2026-05-07.json`).
+      • V.3 — 5 webhook types reales en Envia (no existe webhook COD
+        dedicado).
+    - **Lo NO certificable** (bloqueante reanudación):
+      • V.1 — fees Ecart Pay Colombia ($5k voz vs $0 API). Sandbox
+        Ecart Pay activado solo MX. Requiere KYC Colombia + cuenta
+        producción + 1 charge real.
+      • V.4 — formato DANE Servientrega. Página help.envia.com 403.
+        Requiere account manager Envia por email/contrato.
+      • Coordinadora habilitación COD: sandbox retorna `1300 Service
+        Unavailable`. Asumimos TIER 1 erróneamente — verificar contrato.
+    - **Trigger reanudación**: KAIU completa KYC Ecart Pay CO +
+      reproducimos Prueba 3 producción + ejecutivo Envia confirma V.4
+      + Coordinadora.
+    - **Roadmap continúa SIN COD**: Multi-agente I.5, Observabilidad
+      F.6, dossier MeLi (~1d), Onboarding Wizard MA-4. KAIU comercial
+      sigue ofreciendo cotización + Wompi online sin COD.
+    - **Detalle completo**: `docs/research/envia-dossier-2026-05-05.md`
+      secciones L.11 + L.12.
 
 ## Migraciones pendientes de aplicar en Supabase
 

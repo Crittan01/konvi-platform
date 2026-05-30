@@ -155,7 +155,10 @@ class PaymentLinkToolWithVerifiedCtxTests(unittest.IsolatedAsyncioTestCase):
 
         item = captured["items"][0]
         self.assertIsNone(item.get("variation_id"))
-        self.assertEqual(item.get("title"), "Pedido conversacional")
+        # Sem 7 F2 cierre — fallback title cambió de "Pedido conversacional"
+        # a "Pedido vía WhatsApp" para mejor UX (suena menos técnico al
+        # cliente en checkout Wompi).
+        self.assertEqual(item.get("title"), "Pedido vía WhatsApp")
 
 
 if __name__ == "__main__":

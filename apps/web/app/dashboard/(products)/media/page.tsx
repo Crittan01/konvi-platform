@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { Image as ImageIcon, HardDrive } from 'lucide-react'
 import MediaClient from './media-client'
 
@@ -9,12 +10,11 @@ function formatBytesServer(bytes: number): string {
 }
 
 export default async function MediaPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  // Sem 5 perf: cached.
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>

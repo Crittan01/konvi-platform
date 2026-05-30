@@ -24,6 +24,7 @@ type Order = {
   created_at: string
   contacts: Contact | Contact[] | null
   order_items: OrderItem[]
+  payment_method?: string | null  // 'credit' | 'cod' (rev. 108 Fase B)
 }
 
 type Props = {
@@ -33,6 +34,11 @@ type Props = {
   role: string
   canWrite: boolean
   updateStatusAction: (fd: FormData) => Promise<void>
+  generateShippingGuideAction?: (fd: FormData) => Promise<{
+    ok: boolean
+    message?: string
+    tracking?: string
+  }>
 }
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -82,7 +88,63 @@ const ITEMS_PER_PAGE = 20
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
 
-function ActionButton({ 
+function GenerateGuideButton({
+  orderId,
+  action,
+}: {
+  orderId: string
+  action: (fd: FormData) => Promise<{
+    ok: boolean
+    message?: string
+    tracking?: string
+  }>
+}) {
+  const [isPending, startTransition] = useTransition()
+  const [result, setResult] = useState<{
+    ok: boolean
+    message?: string
+  } | null>(null)
+
+  const handle = () => {
+    if (!confirm(
+      'Generar guía Aveonline para este pedido COD? '
+      + 'Tarda ~10-15s. Si tu cuenta tiene AVEONLINE_GENERATE_REAL_GUIDES=true, '
+      + 'la guía será facturable.',
+    )) return
+    setResult(null)
+    startTransition(async () => {
+      const fd = new FormData()
+      fd.append('order_id', orderId)
+      const r = await action(fd)
+      setResult(r)
+    })
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={handle}
+        disabled={isPending}
+        className="inline-flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 border border-emerald-700/40 hover:border-emerald-700/60 bg-emerald-50 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50"
+        title="Genera guía Aveonline con contraentrega — el courier recauda al entregar"
+      >
+        {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}
+        {isPending ? 'Generando…' : 'Generar guía COD'}
+      </button>
+      {result && (
+        <span
+          className={`text-xs ${result.ok ? 'text-emerald-700' : 'text-red-700'}`}
+        >
+          {result.message}
+        </span>
+      )}
+    </div>
+  )
+}
+
+
+function ActionButton({
   orderId, nextStatus, originalStatus, updateStatusAction 
 }: { 
   orderId: string, nextStatus: string, originalStatus: string, updateStatusAction: (fd: FormData) => Promise<void> 
@@ -134,7 +196,7 @@ function ActionButton({
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
-export default function OrdersManager({ initialOrders, products, contacts, role, canWrite, updateStatusAction }: Props) {
+export default function OrdersManager({ initialOrders, products, contacts, role, canWrite, updateStatusAction, generateShippingGuideAction }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
@@ -293,10 +355,18 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                   <div key={o.id} className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 hover:shadow-sm transition-all focus-within:border-primary/50">
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3">
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${colorClass}`}>
                             {STATUS_LABELS[o.status] ?? o.status}
                           </span>
+                          {o.payment_method === 'cod' && (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                              title="Pago contraentrega — el courier recauda al entregar"
+                            >
+                              💵 COD
+                            </span>
+                          )}
                           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">
                             {o.id.split('-')[0].toUpperCase()}
                           </span>
@@ -338,7 +408,7 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2 mt-3">
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
                       {canWrite && nextStatus && (
                         <ActionButton orderId={o.id} originalStatus={o.status} nextStatus={nextStatus} updateStatusAction={updateStatusAction} />
                       )}
@@ -349,6 +419,15 @@ export default function OrdersManager({ initialOrders, products, contacts, role,
                         >
                           <Truck className="h-3 w-3" /> Cotizar envío
                         </Link>
+                      )}
+                      {canWrite
+                        && o.payment_method === 'cod'
+                        && o.status === 'confirmed'
+                        && generateShippingGuideAction && (
+                        <GenerateGuideButton
+                          orderId={o.id}
+                          action={generateShippingGuideAction}
+                        />
                       )}
                     </div>
                   </div>

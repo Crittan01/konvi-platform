@@ -2,7 +2,8 @@
 
 import { useState, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { ImageIcon, Loader2, X, Camera } from 'lucide-react'
+import { ImageIcon, Loader2, X, Camera, FolderOpen } from 'lucide-react'
+import { GalleryPickerModal } from './gallery-picker-modal'
 
 interface Props {
   name: string           // nombre del input hidden (para el form action)
@@ -17,6 +18,7 @@ export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', l
   const [url, setUrl]       = useState(defaultUrl)
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState<string | null>(null)
+  const [galleryOpen, setGalleryOpen] = useState(false)
   const inputRef            = useRef<HTMLInputElement>(null)
 
   const sizeClasses = {
@@ -80,19 +82,39 @@ export function ImageUploadBox({ name, defaultUrl = '', tenantId, size = 'md', l
           )}
         </button>
 
-        {/* Quitar imagen */}
-        {url && (
+        {/* Acciones secundarias: galería + quitar */}
+        <div className="flex flex-col gap-1.5">
           <button
             type="button"
-            onClick={() => { setUrl(''); onUrlChange?.('') }}
-            className="text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-0.5 transition-colors"
+            onClick={() => setGalleryOpen(true)}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-primary/40 bg-primary/5 text-[11px] font-medium text-primary hover:bg-primary/10 hover:border-primary/60 transition-colors whitespace-nowrap"
+            title="Seleccionar imagen ya subida al tenant"
           >
-            <X className="h-3 w-3" /> Quitar
+            <FolderOpen className="h-3.5 w-3.5" /> Galería
           </button>
-        )}
+          {url && (
+            <button
+              type="button"
+              onClick={() => { setUrl(''); onUrlChange?.('') }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors whitespace-nowrap"
+            >
+              <X className="h-3 w-3" /> Quitar
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <p className="text-[10px] text-destructive">{error}</p>}
+
+      <GalleryPickerModal
+        open={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        tenantId={tenantId}
+        onSelect={(publicUrl) => {
+          setUrl(publicUrl)
+          onUrlChange?.(publicUrl)
+        }}
+      />
     </div>
   )
 }

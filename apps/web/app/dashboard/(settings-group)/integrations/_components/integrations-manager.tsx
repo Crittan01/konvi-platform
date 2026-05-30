@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
-  MessageCircle, Settings2, ChevronUp, CreditCard,
+  MessageCircle, Settings2, ChevronUp, CreditCard, HelpCircle,
+  Loader2,
 } from 'lucide-react'
 
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'
@@ -20,8 +21,13 @@ type NotifSetting = { channel: string; enabled: boolean; config: Record<string, 
 interface Props {
   waInt: Integration
   waConnected: boolean
+  // Sem 7 F2 — métricas plantillas WhatsApp aprobadas para mostrar en card.
+  templatesApproved?: number
+  templatesTotal?: number
   enviaInt: Integration
   enviaConnected: boolean
+  aveonlineInt: Integration
+  aveonlineConnected: boolean
   meliInt: Integration
   meliConnected: boolean
   wompiInt: Integration
@@ -33,14 +39,22 @@ interface Props {
   canWrite: boolean
   connectedParam?: string
   errorParam?: string
+  meliSameUser?: string
   tgTest?: string
   tgMsg?: string
   waTest?: string
   waMsg?: string
   enviaTest?: string
   enviaMsg?: string
+  aveTest?: string
+  aveMsg?: string
   saveEnviaKey: (fd: FormData) => Promise<void>
   disconnectEnvia: () => Promise<void>
+  saveAveonline: (fd: FormData) => Promise<void>
+  disconnectAveonline: () => Promise<void>
+  testAveonline: () => Promise<void>
+  // (Sem 7 F2 cierre) Envia carriers + capabilities movidos al panel
+  // dedicado /integrations/envia (tabs Carriers + Capacidades).
   disconnectMeli: () => Promise<void>
   saveWompi: (fd: FormData) => Promise<void>
   disconnectWompi: () => Promise<void>
@@ -63,7 +77,7 @@ const TABS: { key: Category; label: string }[] = [
 ]
 
 // WhatsApp, Envia, MercadoLibre, Wompi, Telegram
-const TOTAL_CONNECTORS = 5
+const TOTAL_CONNECTORS = 6
 
 const COMING_SOON = [
   { name: 'Shopify', category: 'canal' as Category },
@@ -103,12 +117,17 @@ function MetaPill({ label, value, className }: { label: string; value: string; c
 
 export function IntegrationsManager(props: Props) {
   const {
-    waInt, waConnected, enviaInt, enviaConnected, meliInt, meliConnected,
+    waInt, waConnected, templatesApproved, templatesTotal,
+    enviaInt, enviaConnected, aveonlineInt, aveonlineConnected,
+    meliInt, meliConnected,
     wompiInt, wompiConnected,
     tgConfig, tgConnected, connectedCount,
-    isOwner, canWrite, connectedParam, errorParam,
+    isOwner, canWrite, connectedParam, errorParam, meliSameUser,
     tgTest, tgMsg, waTest, waMsg, enviaTest, enviaMsg,
-    saveEnviaKey, disconnectEnvia, disconnectMeli,
+    aveTest, aveMsg,
+    saveEnviaKey, disconnectEnvia,
+    saveAveonline, disconnectAveonline, testAveonline,
+    disconnectMeli,
     saveWompi, disconnectWompi,
     saveTelegram, disconnectTelegram, testTelegram,
     testWhatsApp, testEnvia,
@@ -120,11 +139,11 @@ export function IntegrationsManager(props: Props) {
 
   // Limpiar params de test/conexión de la URL después de 4 segundos
   useEffect(() => {
-    const hasResult = waTest || enviaTest || tgTest || connectedParam
+    const hasResult = waTest || enviaTest || aveTest || tgTest || connectedParam
     if (!hasResult) return
     const t = setTimeout(() => router.replace(pathname), 4000)
     return () => clearTimeout(t)
-  }, [waTest, enviaTest, tgTest, connectedParam, router, pathname])
+  }, [waTest, enviaTest, aveTest, tgTest, connectedParam, router, pathname])
 
   const [activeFilter, setActiveFilter] = useState<Category>('todas')
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -133,6 +152,22 @@ export function IntegrationsManager(props: Props) {
   const toggle = (id: string) => setOpen(p => ({ ...p, [id]: !p[id] }))
 
   const startMeliOAuth = async () => {
+    // Rev. 108 Layer B (founder 2026-05-27 — auto-loguea cuenta anterior):
+    // antes de redirigir a MeLi, confirmar con el tenant que conoce el
+    // comportamiento. Si quiere cambiar de cuenta, instruir paso explícito.
+    const confirmed = window.confirm(
+      '¿Listo para conectar Mercado Libre?\n\n' +
+      'Si tu navegador tiene una sesión activa de Mercado Libre, ' +
+      'MeLi puede conectarte automáticamente con esa cuenta. ' +
+      'Para cambiar de cuenta:\n\n' +
+      '1. Cancela este diálogo\n' +
+      '2. Cierra sesión en https://mercadolibre.com.co (ícono usuario → Salir)\n' +
+      '3. O usa una ventana de incógnito\n' +
+      '4. Vuelve aquí y haz click en "Conectar" otra vez\n\n' +
+      'Si ya cerraste sesión o es tu primera conexión, presiona "Aceptar".'
+    )
+    if (!confirmed) return
+
     setMeliStartError(null)
     setConnectingMeli(true)
     try {
@@ -157,12 +192,13 @@ export function IntegrationsManager(props: Props) {
   const cardCategories: Record<string, Category> = {
     whatsapp: 'canal',
     envia: 'logistica',
+    aveonline: 'logistica',
     mercadolibre: 'marketplace',
     wompi: 'pagos',
     telegram: 'notificaciones',
   }
 
-  const allCards = ['whatsapp', 'envia', 'mercadolibre', 'wompi', 'telegram']
+  const allCards = ['whatsapp', 'envia', 'aveonline', 'mercadolibre', 'wompi', 'telegram']
   const visibleCards = activeFilter === 'todas'
     ? allCards
     : allCards.filter(c => cardCategories[c] === activeFilter)
@@ -185,10 +221,31 @@ export function IntegrationsManager(props: Props) {
       </div>
 
       {/* Banners */}
-      {connectedParam && (
+      {connectedParam && !meliSameUser && (
         <div className="flex items-center gap-2 p-3 rounded-xl border border-green-500/30 bg-green-500/10 text-sm text-green-400">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {connectedParam === 'mercadolibre' ? 'Mercado Libre' : connectedParam} conectado exitosamente.
+        </div>
+      )}
+      {/* Rev. 108 Layer C — banner same-user reconnect */}
+      {connectedParam === 'mercadolibre' && meliSameUser === '1' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-medium">
+              Conectado con la MISMA cuenta de Mercado Libre que tenías antes
+            </p>
+            <p className="text-xs leading-relaxed">
+              MeLi te auto-confirmó usando la sesión activa de tu navegador.
+              Si querías cambiar de cuenta:
+            </p>
+            <ol className="text-xs leading-relaxed list-decimal list-inside ml-1 mt-1">
+              <li>Desconecta Mercado Libre aquí (botón Desconectar de la tarjeta MeLi).</li>
+              <li>Sal manualmente de mercadolibre.com.co (ícono usuario → Salir).</li>
+              <li>O usa una ventana de incógnito.</li>
+              <li>Vuelve a conectar.</li>
+            </ol>
+          </div>
         </div>
       )}
       {errorParam && (
@@ -256,6 +313,23 @@ export function IntegrationsManager(props: Props) {
         </div>
       )}
 
+      {/* Banners Aveonline test/connect */}
+      {aveTest === 'success' && (
+        <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Aveonline verificado — credenciales válidas. El bot puede cotizar con tus carriers asignados.
+        </div>
+      )}
+      {aveTest === 'error' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Error al conectar/probar Aveonline</p>
+            {aveMsg && <p className="text-xs text-red-400/80 mt-0.5">{decodeURIComponent(aveMsg)}</p>}
+          </div>
+        </div>
+      )}
+
       {/* Filter tabs */}
       <div className="flex gap-1 flex-wrap">
         {TABS.map(tab => (
@@ -272,6 +346,18 @@ export function IntegrationsManager(props: Props) {
           </button>
         ))}
       </div>
+
+      {/* ── SECCIÓN 1: Conectores (overview cards) ─────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Plug className="h-4 w-4 text-primary shrink-0" />
+          <h2 className="text-sm font-semibold text-foreground">Conectores</h2>
+          <span className="text-xs text-muted-foreground">
+            {activeFilter === 'todas'
+              ? '· Estado de cada integración disponible'
+              : `· ${visibleCards.length} en esta categoría`}
+          </span>
+        </div>
 
       {/* Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -302,6 +388,27 @@ export function IntegrationsManager(props: Props) {
                     <MetaPill label="Token" value={waInt.meta?.token_preview ?? '●●●●'} />
                   </div>
                   <MetaPill label="Phone Number ID" value={waInt.meta?.phone_id_preview ?? ''} />
+                  {typeof templatesTotal === 'number' && templatesTotal > 0 && (
+                    <MetaPill
+                      label="Plantillas"
+                      value={`${templatesApproved ?? 0}/${templatesTotal} aprobadas`}
+                    />
+                  )}
+                  {/* Gestionar panel completo (Sem 7 F2 — restructura Integraciones).
+                      Lleva a /integrations/whatsapp con tabs Setup + Plantillas +
+                      Calidad + Opt-outs. */}
+                  <a
+                    href="/dashboard/integrations/whatsapp"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <div className="flex gap-2">
                       <form action={testWhatsApp} className="flex-1">
@@ -377,25 +484,40 @@ export function IntegrationsManager(props: Props) {
           </div>
         )}
 
-        {/* ── Envia ─────────────────────────────────────────────────────────── */}
+        {/* ── Envia (INHABILITADO rev. 107 — founder decision 2026-05-24) ───── */}
+        {/*
+          Backend: agentic/tools/shipping.py rechaza active_provider="envia"
+          con ENVIA_DISABLED. UI debe reflejar esto: nada de form de conexión
+          nuevo. Si tenant tiene Envia conectado de antes, se permite
+          desconectar para limpiar estado. CTA principal apunta a Aveonline.
+        */}
         {visibleCards.includes('envia') && (
-          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${enviaConnected ? 'border-emerald-500/30' : 'border-border'}`}>
-            <div className={`px-4 py-3.5 border-b ${enviaConnected ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-muted/20'}`}>
+          <div className="rounded-xl border bg-card overflow-hidden flex flex-col border-border opacity-90">
+            <div className="px-4 py-3.5 border-b border-border bg-muted/30">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-orange-500/15 border border-orange-500/20 flex items-center justify-center shrink-0">
-                    <Package className="h-4 w-4 text-orange-400" />
+                  <div className="h-9 w-9 rounded-xl bg-muted border border-border flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm">Envia</p>
-                    <p className="text-[11px] text-muted-foreground truncate">Shipping & Logistics</p>
+                    <p className="font-semibold text-sm text-muted-foreground">Envia</p>
+                    <p className="text-[11px] text-muted-foreground/70 truncate">Shipping & Logistics</p>
                   </div>
                 </div>
-                <StatusBadge connected={enviaConnected} colorClass="bg-emerald-500/15 text-emerald-400 border-emerald-500/30" />
+                <div className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
+                  <AlertCircle className="h-3 w-3" />
+                  Inhabilitado
+                </div>
               </div>
             </div>
             <div className="px-4 py-3.5 space-y-3 flex-1">
-              <p className="text-xs text-muted-foreground">Cotiza envíos, genera etiquetas y haz tracking con múltiples carriers.</p>
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                <p className="text-[11px] text-amber-400 leading-relaxed">
+                  Envia está <strong className="font-semibold">inhabilitado en esta plataforma</strong>. Usa
+                  {' '}<strong className="font-semibold">Aveonline</strong> como provider de envío — cubre los
+                  mismos carriers en Colombia con COD nativo.
+                </p>
+              </div>
               {enviaConnected ? (
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-2">
@@ -403,59 +525,160 @@ export function IntegrationsManager(props: Props) {
                     <MetaPill
                       label="Entorno"
                       value={enviaInt.meta?.environment === 'sandbox' ? 'Sandbox' : 'Producción'}
-                      className={enviaInt.meta?.environment === 'sandbox' ? 'text-amber-400' : 'text-emerald-400'}
                     />
                   </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Tu cuenta sigue conectada por compatibilidad histórica, pero las cotizaciones
+                    se rechazan en runtime. Desconecta para limpiar el estado.
+                  </p>
                   {isOwner && (
+                    <DisconnectIntegrationButton
+                      provider="envia" providerLabel="Envia"
+                      action={disconnectEnvia}
+                      className="w-full h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                    />
+                  )}
+                </div>
+              ) : null}
+              <a
+                href="/dashboard/integrations#aveonline"
+                className="flex items-center justify-between rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-medium text-cyan-400 hover:bg-cyan-500/10 transition-colors group"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Package className="h-3 w-3" />
+                  Configurar Aveonline
+                </span>
+                <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                  →
+                </span>
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* ── Aveonline ─────────────────────────────────────────────────────── */}
+        {/*
+          Provider alternativo a Envia (ADR-0019). Tarjeta paritaria con
+          Envia/Wompi/WhatsApp: cuando connected muestra meta + acciones
+          Probar/Desconectar. Cuando disconnected expone form inline con
+          usuario + password. Config avanzada (auth_version, tiempo_token)
+          vive en /integrations/aveonline.
+        */}
+        {visibleCards.includes('aveonline') && (
+          <div className={`rounded-xl border bg-card overflow-hidden flex flex-col ${aveonlineConnected ? 'border-cyan-500/30' : 'border-border'}`}>
+            <div className={`px-4 py-3.5 border-b ${aveonlineConnected ? 'border-cyan-500/20 bg-cyan-500/5' : 'border-border bg-muted/20'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-cyan-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm">Aveonline</p>
+                    <p className="text-[11px] text-muted-foreground truncate">Shipping multi-carrier Colombia</p>
+                  </div>
+                </div>
+                <StatusBadge connected={aveonlineConnected} colorClass="bg-cyan-500/15 text-cyan-400 border-cyan-500/30" />
+              </div>
+            </div>
+            <div className="px-4 py-3.5 space-y-3 flex-1">
+              <p className="text-xs text-muted-foreground">Cotiza envíos multi-carrier en Colombia con COD nativo (Ecart Pay).</p>
+              {aveonlineConnected ? (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetaPill
+                      label="Empresa"
+                      value={String(aveonlineInt.meta?.empresa_id ?? '—')}
+                    />
+                    <MetaPill
+                      label="Auth"
+                      value={String(aveonlineInt.meta?.auth_version ?? 'v1.0')}
+                    />
+                  </div>
+                  {aveonlineInt.meta?.nombre_asesor && (
+                    <MetaPill
+                      label="Asesor logístico"
+                      value={String(aveonlineInt.meta.nombre_asesor)}
+                    />
+                  )}
+                  <a
+                    href="/dashboard/integrations/aveonline"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
+                  {(isOwner || canWrite) && (
                     <div className="flex gap-2">
-                      <form action={testEnvia} className="flex-1">
+                      <form action={testAveonline} className="flex-1">
                         <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
                           className="w-full h-8 text-xs gap-1.5">
                           <SendHorizonal className="h-3 w-3" /> Probar
                         </SubmitButton>
                       </form>
                       <DisconnectIntegrationButton
-                        provider="envia" providerLabel="Envia"
-                        action={disconnectEnvia}
+                        provider="aveonline" providerLabel="Aveonline"
+                        action={disconnectAveonline}
                         className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
                       />
                     </div>
                   )}
                 </div>
-              ) : isOwner ? (
+              ) : isOwner || canWrite ? (
                 <div className="space-y-3">
                   <div className="flex justify-end">
-                    <ConfigToggle open={!!open.envia} onToggle={() => toggle('envia')} />
+                    <ConfigToggle open={!!open.aveonline} onToggle={() => toggle('aveonline')} />
                   </div>
-                  {open.envia && (
+                  {open.aveonline && (
                     <>
-                      <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-2">
-                        <p className="text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Pasos de configuración</p>
+                      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Pasos de configuración</p>
                         <div className="space-y-2">
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">1</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Ve a <span className="font-mono text-foreground">ship.envia.com</span> (producción) o <span className="font-mono text-foreground">shipping-test.envia.com</span> (sandbox) → inicia sesión.
+                              Ingresa el <strong className="text-foreground font-medium">usuario y password</strong> de tu cuenta Aveonline (la misma que usas en <span className="font-mono text-foreground">app.aveonline.co</span>).
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <span className="h-4 w-4 rounded-full bg-orange-500/25 text-orange-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">2</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              <strong className="text-foreground font-medium">Desarrolladores → Acceso a API</strong> → genera un nuevo acceso → copia el token.
+                              Validamos contra <span className="font-mono text-[10px] text-foreground">autenticarusuario.php</span> antes de guardar. El password se almacena cifrado en Supabase Vault.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="h-4 w-4 rounded-full bg-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              ¿No tienes cuenta? Cuenta DEMO: <span className="font-mono text-foreground">demointegracion</span> / <span className="font-mono text-foreground">demointegra2021</span>.
                             </p>
                           </div>
                         </div>
                       </div>
-                      <form action={saveEnviaKey} className="space-y-2.5">
+                      <form action={saveAveonline} className="space-y-2.5">
                         <div className="space-y-1">
-                          <Label className="text-xs">API Token de Envia</Label>
-                          <Input type="password" name="api_token" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required autoComplete="off" className="h-8 text-xs font-mono" />
+                          <Label className="text-xs">Usuario</Label>
+                          <Input name="usuario" required minLength={3} placeholder="mi-empresa-ecommerce" autoComplete="username" className="h-8 text-xs font-mono" />
                         </div>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" name="sandbox" className="h-3.5 w-3.5 rounded" />
-                          <span className="text-xs text-muted-foreground">Usar entorno sandbox (pruebas)</span>
-                        </label>
-                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!" className="w-full h-8 text-xs">Conectar Envia</SubmitButton>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Password</Label>
+                          <Input type="password" name="password" required minLength={4} placeholder="••••••••" autoComplete="current-password" className="h-8 text-xs font-mono" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Versión de auth</Label>
+                          <select name="auth_version" defaultValue="v1.0"
+                            className="w-full h-8 rounded-md border border-input bg-background text-xs px-2 text-foreground">
+                            <option value="v1.0">v1.0 — legacy (recomendado)</option>
+                            <option value="v2.0">v2.0 — JWT 12h fijo</option>
+                          </select>
+                        </div>
+                        <SubmitButton size="sm" pendingText="Conectando..." savedText="¡Conectado!"
+                          className="w-full h-8 text-xs gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white">
+                          <Package className="h-3.5 w-3.5" /> Conectar Aveonline
+                        </SubmitButton>
                       </form>
                     </>
                   )}
@@ -499,6 +722,18 @@ export function IntegrationsManager(props: Props) {
               ) : meliConnected ? (
                 <div className="space-y-2.5">
                   <MetaPill label="Usuario MeLi ID" value={meliInt.meta?.user_id ?? '—'} />
+                  <a
+                    href="/dashboard/integrations/mercadolibre"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <DisconnectIntegrationButton
                       provider="mercadolibre" providerLabel="Mercado Libre"
@@ -590,6 +825,18 @@ export function IntegrationsManager(props: Props) {
                       className={wompiInt.meta?.environment === 'production' ? 'text-emerald-400' : 'text-amber-400'}
                     />
                   </div>
+                  <a
+                    href="/dashboard/integrations/wompi"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   {isOwner && (
                     <DisconnectIntegrationButton
                       provider="wompi" providerLabel="Wompi"
@@ -688,6 +935,18 @@ export function IntegrationsManager(props: Props) {
                   <div className="flex items-center gap-1.5 text-xs text-emerald-400">
                     <ShieldCheck className="h-3 w-3 shrink-0" /> Alertas habilitadas
                   </div>
+                  <a
+                    href="/dashboard/integrations/telegram"
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Settings2 className="h-3 w-3" />
+                      Gestionar panel completo
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  </a>
                   <div className="flex gap-2">
                     <form action={testTelegram} className="flex-1">
                       <SubmitButton size="sm" variant="outline" pendingText="Probando..." savedText="OK"
@@ -792,6 +1051,28 @@ export function IntegrationsManager(props: Props) {
         ))}
 
       </div>
+      </div>{/* ── /SECCIÓN 1 Conectores ── */}
+
+      {/* SECCIÓN 2 (Configuración avanzada Envía) movida al panel
+          /integrations/envia (tabs Carriers + Capacidades) — Sem 7 F2 cierre. */}
+
+      {/* ── SECCIÓN 3 (futura): tab "Todas" — info contextual ────────────── */}
+      {activeFilter === 'todas' && (
+        <div className="border-t border-border pt-4 mt-4">
+          <div className="rounded-md border border-border bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground flex items-start gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              <b className="text-foreground">¿Necesitas configuración detallada?</b>
+              {' '}Selecciona la categoría correspondiente arriba (Logística para Envía,
+              Canal para WhatsApp, Pagos para Wompi, etc.) — verás opciones avanzadas
+              específicas de cada conector.
+            </span>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
+
+

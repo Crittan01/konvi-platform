@@ -9,6 +9,7 @@ os.environ.setdefault("GEMINI_API_KEY", "test-key")
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
 
 import orchestrator
+from tools import inbound_dispatcher as _inbound_dispatcher
 
 
 class _Query:
@@ -198,7 +199,7 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
             patch.object(
-                orchestrator,
+                _inbound_dispatcher,
                 "handle_shipping_quote_if_applicable",
                 new_callable=AsyncMock,
                 return_value=types.SimpleNamespace(
@@ -249,7 +250,7 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
             patch.object(
-                orchestrator,
+                _inbound_dispatcher,
                 "handle_shipping_quote_if_applicable",
                 new_callable=AsyncMock,
                 return_value=types.SimpleNamespace(handled=False, response_text=None, requires_human=False),
@@ -292,7 +293,7 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(orchestrator, "_get_conversation_status", return_value="bot_active"),
             patch.object(
-                orchestrator,
+                _inbound_dispatcher,
                 "handle_shipping_quote_if_applicable",
                 new_callable=AsyncMock,
                 return_value=types.SimpleNamespace(

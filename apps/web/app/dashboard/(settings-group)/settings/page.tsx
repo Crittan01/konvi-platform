@@ -1,20 +1,23 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor } from './actions'
+import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor, savePaymentMethods } from './actions'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
 import {
   Settings, Truck, Building2, Globe, Clock,
-  CheckCircle2, XCircle, Sparkles, Bot,
+  CheckCircle2, XCircle, Sparkles, Bot, Wallet,
+  Shield, Activity, Scale, Archive, Trash2, ChevronRight,
 } from 'lucide-react'
+import Link from 'next/link'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
 import StorePresenceForm from './store-presence-form'
+import PaymentMethodsForm from './payment-methods-form'
 import { DaysSelector } from './days-selector'
 
 export const metadata = {
-  title: 'General — Configuración — Commerce Ops',
+  title: 'General — Configuración',
   description: 'Configuración general del negocio: datos, logo y dirección de despacho.',
 }
 
@@ -94,6 +97,16 @@ export default async function SettingsPage() {
       .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
       .eq('id', tenantId).single()
     tenant = data as Tenant
+  }
+
+  // Rev. 108 modular — payment methods config per-tenant.
+  let paymentMethods: Array<{ method: 'cod' | 'online_wompi'; enabled: boolean; display_label?: string | null; notes?: string | null }> = []
+  if (tenantId) {
+    const { data: pmRows } = await supabase
+      .from('tenant_payment_methods')
+      .select('method, enabled, display_label, notes')
+      .eq('tenant_id', tenantId)
+    paymentMethods = (pmRows ?? []) as typeof paymentMethods
   }
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -377,6 +390,17 @@ export default async function SettingsPage() {
               />
             </FormSection>
           )}
+
+          {/* Métodos de pago — modular per-tenant (rev. 108) */}
+          {isOwner && (
+            <FormSection id="section-payment-methods" icon={Wallet} title="Métodos de pago habilitados"
+              description="Configura qué métodos de pago aceptas. El bot solo ofrecerá lo que esté habilitado aquí; rechazará asertivamente lo deshabilitado.">
+              <PaymentMethodsForm
+                initialMethods={paymentMethods}
+                action={savePaymentMethods}
+              />
+            </FormSection>
+          )}
         </div>
 
         {/* ── Columna derecha ── */}
@@ -472,7 +496,107 @@ export default async function SettingsPage() {
             )
           })()}
 
+          {/* ── Más configuraciones (sub-secciones de Settings) ────────────────── */}
+          {/* Rev. 109 — links explícitos a las sub-páginas de settings que
+              antes no estaban descubribles desde aquí (J.2.4.3 Seguridad,
+              J.2.11 Salud, J.2.4.4 Cerrar cuenta, Habeas Data Legal/Retención). */}
+          <section className="mt-8 pt-6 border-t border-border">
+            <header className="mb-4">
+              <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+                <Settings className="h-5 w-5" /> Más configuraciones
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Seguridad personal, salud de integraciones, datos legales y cierre de cuenta.
+              </p>
+            </header>
 
+            <div className="grid sm:grid-cols-2 gap-3">
+              {/* Seguridad (todos los roles) */}
+              <Link
+                href="/dashboard/settings/security"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-emerald-50 text-emerald-700 inline-flex items-center justify-center shrink-0">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Seguridad</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Activar MFA (2FA) y gestionar códigos de respaldo.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Salud integraciones */}
+              <Link
+                href="/dashboard/settings/health"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-sky-50 text-sky-700 inline-flex items-center justify-center shrink-0">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Salud de integraciones</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Estado en tiempo real de WhatsApp, Wompi, Envia, MeLi, Telegram.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Legal */}
+              <Link
+                href="/dashboard/settings/legal"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0">
+                  <Scale className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Legal</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Términos, política de privacidad, click-wrap acceptance.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Retención datos */}
+              <Link
+                href="/dashboard/settings/retention"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0">
+                  <Archive className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Retención de datos</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Períodos de archivado y eliminación automática (Habeas Data Ley 1581).
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Cerrar cuenta (destructive, owner only) */}
+              <Link
+                href="/dashboard/settings/account-closure"
+                className="group sm:col-span-2 flex items-start gap-3 p-4 rounded-lg border border-red-200 bg-red-50/30 hover:border-red-400 hover:bg-red-50 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-red-100 text-red-700 inline-flex items-center justify-center shrink-0">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm text-red-900">Cerrar cuenta</p>
+                  <p className="text-xs text-red-700/80 mt-0.5">
+                    Exportar todos tus datos y solicitar eliminación permanente (30 días de gracia).
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-red-700/80 group-hover:text-red-700 shrink-0 mt-2" />
+              </Link>
+            </div>
+          </section>
 
         </div>
       </div>

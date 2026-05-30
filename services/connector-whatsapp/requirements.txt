@@ -5,3 +5,4 @@ supabase==2.28.3
 python-dotenv==1.2.1
 python-multipart==0.0.20
 httpx==0.28.1
+sentry-sdk[fastapi]==2.18.0

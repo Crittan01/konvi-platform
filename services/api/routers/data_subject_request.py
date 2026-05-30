@@ -220,7 +220,7 @@ def _build_export_payload(sb: Client, tenant_id: str, contact_id: str) -> dict:
         "legal_basis": {
             "law": "Ley 1581/2012 Colombia (Habeas Data)",
             "responsible": "Tenant",
-            "processor": "Plataforma Commerce Ops",
+            "processor": "Plataforma Konvi",
         },
     }
 
@@ -549,7 +549,7 @@ def _render_export_html(payload: dict) -> str:
 </table>
 
 <div class="footer">
-  Documento generado automáticamente por Commerce Ops Platform.
+  Documento generado automáticamente por Konvi Platform.
   El responsable del tratamiento es el tenant. Para preguntas sobre
   este reporte, contactar al responsable directamente.
   Este documento contiene PII; manejar conforme a Habeas Data Ley 1581/2012.

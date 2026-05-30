@@ -64,6 +64,71 @@ def extract_document(text: str) -> Optional[tuple[str, str]]:
     return None
 
 
+# Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (conv 099bb891):
+# Cliente dice "Cedula de Ciudadania" SIN número → `extract_document`
+# retorna None (regex exige par tipo+número). El LLM tampoco extrajo
+# por variante coloquial. Conductor no enriquece → flow re-pregunta
+# como si nada hubiera avanzado.
+#
+# Solución arquitectónica: extractor SEPARADO de tipo-solo. El conductor
+# lo invoca como fallback cuando `extract_document` (par) retorna None
+# y persiste parcialmente. El prompt contextual del FSM ya pide solo
+# número en el siguiente turno cuando tipo está pero number falta.
+
+# Variantes coloquiales de tipo (español CO).
+_DOC_TYPE_VARIANTS_REGEX = re.compile(
+    r"\b("
+    r"cedula\s+de\s+ciudadania"      # "Cédula de Ciudadanía"
+    r"|cedula\s+de\s+extranjeria"     # "Cédula de Extranjería"
+    r"|cedula\s+extranjera"            # variante
+    r"|tarjeta\s+de\s+identidad"       # TI completo
+    r"|cedula"                          # "Cédula" / "cedula"
+    r"|extranjeria"                    # "Extranjería" suelta
+    r"|pasaporte|passport"             # PP
+    r"|nit"                            # NIT
+    r"|cc|ce|ti|pp"                    # siglas
+    r")\b",
+    flags=re.IGNORECASE,
+)
+
+
+def extract_document_type_only(text: str) -> Optional[str]:
+    """Extrae SOLO el tipo de documento (sin número) si el cliente lo
+    menciona con variante coloquial o sigla.
+
+    Útil para slot-filling secuencial: cliente dice "Cédula" en un turno
+    → persistimos tipo; siguiente turno cliente da el número → completa.
+    El conductor invoca como fallback cuando `extract_document` (par
+    completo) retorna None.
+
+    Returns: "CC" | "CE" | "NIT" | "PP" | "TI" | None.
+    """
+    if not text:
+        return None
+    # Normalizar acentos para regex (idempotente).
+    import unicodedata
+    norm = unicodedata.normalize("NFKD", text)
+    norm = "".join(c for c in norm if not unicodedata.combining(c))
+    match = _DOC_TYPE_VARIANTS_REGEX.search(norm)
+    if not match:
+        return None
+    raw = match.group(1).lower().strip()
+    # Mapeo a tipos canónicos. Orden importa (más específico primero
+    # cuando hay solapamiento — ej. "cedula de extranjeria" debe vencer
+    # a "cedula" sola).
+    if "extranjer" in raw or raw == "ce":
+        return "CE"
+    if "tarjeta" in raw or raw == "ti":
+        return "TI"
+    if raw in {"pasaporte", "passport", "pp"}:
+        return "PP"
+    if raw == "nit":
+        return "NIT"
+    if "cedula" in raw or raw == "cc":
+        return "CC"
+    return None
+
+
 # ── Name (patrón "soy X" / "me llamo X") ──────────────────────────────────
 # Conservador: requiere preámbulo "soy" / "me llamo" / "mi nombre es"
 # seguido de 1-4 tokens capitalizados o lowercase. Evita falsos positivos
@@ -183,6 +248,15 @@ def extract_all_slots(text: str) -> dict:
     doc = extract_document(text)
     if doc:
         out["document_type"], out["document_number"] = doc
+    else:
+        # Sem 7 F2 cierre 2026-05-21 — slot-filling secuencial: si no hay
+        # par completo, intentar extraer SOLO el tipo (cliente dice
+        # "Cédula de Ciudadanía" sin número). El conductor persiste
+        # parcial; el prompt contextual pide solo el número en el
+        # siguiente turno.
+        doc_type_only = extract_document_type_only(text)
+        if doc_type_only:
+            out["document_type"] = doc_type_only
 
     city = extract_city(text)
     street = extract_street(text)

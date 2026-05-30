@@ -1,0 +1,125 @@
+{
+  "discovered_at": "2026-05-07T21:28:52Z",
+  "method": "POST /ship/rate/ con cash_on_delivery additional_service per carrier",
+  "tenant_id_origin": "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9",
+  "results": [
+    {
+      "carrier": "servientrega",
+      "cod_supported": true,
+      "totalPrice": 16200,
+      "service": "premier",
+      "cashOnDeliveryCommission": 0,
+      "cashOnDeliveryAmount": 0
+    },
+    {
+      "carrier": "serviEntrega",
+      "cod_supported": true,
+      "totalPrice": 16200,
+      "service": "premier",
+      "cashOnDeliveryCommission": 0,
+      "cashOnDeliveryAmount": 0
+    },
+    {
+      "carrier": "coordinadora",
+      "cod_supported": false,
+      "error_code": 1300,
+      "error_msg": "Error: Service Unavailable"
+    },
+    {
+      "carrier": "interRapidisimo",
+      "cod_supported": false,
+      "error_code": 1126,
+      "error_msg": "Unknown error in InterRapidisimo"
+    },
+    {
+      "carrier": "interrapidisimo",
+      "cod_supported": false,
+      "error_code": 1126,
+      "error_msg": "Unknown error in InterRapidisimo"
+    },
+    {
+      "carrier": "envia",
+      "cod_supported": false,
+      "error_code": 1125,
+      "error_msg": "Service provided not available or incorrect"
+    },
+    {
+      "carrier": "tcc",
+      "cod_supported": true,
+      "totalPrice": 13150,
+      "service": "mensajeria",
+      "cashOnDeliveryCommission": 0,
+      "cashOnDeliveryAmount": 0
+    },
+    {
+      "carrier": "deprisa",
+      "cod_supported": false,
+      "error_code": "exception",
+      "error_msg": "The read operation timed out"
+    },
+    {
+      "carrier": "mensajerosUrbanos",
+      "cod_supported": false,
+      "error_code": 1146,
+      "error_msg": "There is no coverage in the requested city"
+    },
+    {
+      "carrier": "mensajerosurbanos",
+      "cod_supported": false,
+      "error_code": 1146,
+      "error_msg": "There is no coverage in the requested city"
+    },
+    {
+      "carrier": "noventa9Minutos",
+      "cod_supported": false,
+      "error_code": 1125,
+      "error_msg": "Service provided not available or incorrect"
+    },
+    {
+      "carrier": "noventa9minutos",
+      "cod_supported": false,
+      "error_code": 1125,
+      "error_msg": "Service provided not available or incorrect"
+    },
+    {
+      "carrier": "fedex",
+      "cod_supported": true,
+      "totalPrice": 3060,
+      "service": "ground",
+      "cashOnDeliveryCommission": 0,
+      "cashOnDeliveryAmount": 0
+    },
+    {
+      "carrier": "dhl",
+      "cod_supported": true,
+      "totalPrice": 33740,
+      "service": "ground",
+      "cashOnDeliveryCommission": 0,
+      "cashOnDeliveryAmount": 0
+    },
+    {
+      "carrier": "cabify",
+      "cod_supported": false,
+      "error_code": 1105,
+      "error_msg": "Only local coverage is available in Bogotá and Medellín."
+    },
+    {
+      "carrier": "lastMile",
+      "cod_supported": false,
+      "error_code": 1129,
+      "error_msg": "Cobertura solo en bogotá"
+    },
+    {
+      "carrier": "lastmile",
+      "cod_supported": false,
+      "error_code": 1129,
+      "error_msg": "Cobertura solo en bogotá"
+    },
+    {
+      "carrier": "cainiao",
+      "cod_supported": false,
+      "error_code": 1101,
+      "error_msg": "Carrier provided is not supported or incorrect."
+    }
+  ]
+}

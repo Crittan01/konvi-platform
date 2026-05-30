@@ -16,7 +16,7 @@ Sigue estas casillas minuciosamente sin saltarte nada:
    - **Paso 2 (App Type):** Selecciona rigurosamente el recuadro que dice **"Business"** (Negocios). Esto es obligatorio para habilitar la API de WhatsApp sin fricción. Dale _Next_.
 
 3. **Llenado de Detalles:**
-   - **App Name:** Nómbrala `Commerce Ops App` (o el nombre de tu empresa). Meta no te dejará usar palabras con "WA" o "WhatsApp" en el nombre.
+   - **App Name:** Nómbrala `Konvi App` (o el nombre de tu empresa). Meta no te dejará usar palabras con "WA" o "WhatsApp" en el nombre.
    - **Contact Email:** Déjalo como está o usa el tuyo de trabajo.
    - **Business Account (Opcional por ahora):** Si tienes un "Business Manager", selecciónalo. Si no te sale o dice opcional, déjalo vacío y dale **"Create app"**. Es probable que te pida tu clave de Facebook personal para motivos de seguridad.
 
@@ -39,7 +39,7 @@ Sigue estas casillas minuciosamente sin saltarte nada:
 6. **Extracción del App Secret:**
    - Ahora, fíjate en el gran menú de navegación en la columna negra de la izquierda.
    - Haz clic en **"App Settings"** (Configuración de la app) -> **"Basic"** (Básico).
-   - Se abrirá una página con el nombre de tu app ("Commerce Ops App") en la parte superior.
+   - Se abrirá una página con el nombre de tu app ("Konvi App") en la parte superior.
    - Busca el campo llamado **"App Secret"** (Clave secreta de la aplicación).
    - Estará en blanco o con asteriscos `***`. Haz clic en el botón que dice **"Show"** (Mostrar). (Facebook volverá a pedir contraseña humana).
    - **Acción Humana 1:** Copia toda la cadena alfanumérica que se acaba de revelar. NO la pierdas.

@@ -2,9 +2,14 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { IntegrationsManager } from './_components/integrations-manager'
+import {
+  connectAveonline as connectAveonlineCore,
+  disconnectAveonline as disconnectAveonlineCore,
+  testAveonline as testAveonlineCore,
+} from '@/lib/aveonline-actions'
 
 export const metadata = {
-  title: 'Integraciones — Configuración — Commerce Ops',
+  title: 'Integraciones — Configuración',
   description: 'Conectores activos para tu negocio.',
 }
 
@@ -16,9 +21,11 @@ export default async function IntegrationsPage({
 }: {
   searchParams: {
     connected?: string; error?: string
+    meli_same_user?: string  // baseline 2026-05-29 — campo faltante en type detectado al validar `next build`
     tg_test?: string; tg_msg?: string
     wa_test?: string; wa_msg?: string
     envia_test?: string; envia_msg?: string
+    ave_test?: string; ave_msg?: string
   }
 }) {
   const supabase = createClient()
@@ -34,34 +41,48 @@ export default async function IntegrationsPage({
 
   let integrations: Integration[]  = []
   let notifications: NotifSetting[] = []
+  // (Sem 7 F2 cierre) — preferencias carriers + capabilities Envia movidas al
+  // panel dedicado /integrations/envia (tabs Carriers + Capacidades).
+
+  // Métricas para hub (Iter 2): WhatsApp templates count.
+  let templatesApproved = 0
+  let templatesTotal = 0
 
   if (tenantId) {
-    const [intRes, notifRes] = await Promise.all([
+    const [intRes, notifRes, tplRes] = await Promise.all([
       supabase.from('tenant_integrations').select('provider, status, meta').eq('tenant_id', tenantId),
       supabase.from('notification_settings').select('channel, enabled, config').eq('tenant_id', tenantId),
+      supabase.from('whatsapp_templates')
+        .select('status')
+        .eq('tenant_id', tenantId),
     ])
     integrations  = (intRes.data as Integration[])   || []
     notifications = (notifRes.data as NotifSetting[]) || []
+    const tplRows = (tplRes.data as Array<{ status: string }>) || []
+    templatesTotal = tplRows.length
+    templatesApproved = tplRows.filter(t => t.status === 'APPROVED').length
   }
 
-  const providers = ['envia', 'mercadolibre', 'whatsapp', 'wompi']
+  const providers = ['envia', 'aveonline', 'mercadolibre', 'whatsapp', 'wompi']
   const fullList: Integration[] = providers.map(p =>
     integrations.find(i => i.provider === p) ?? { provider: p, status: 'disconnected', meta: {} }
   )
 
-  const enviaInt  = fullList.find(i => i.provider === 'envia')!
-  const meliInt   = fullList.find(i => i.provider === 'mercadolibre')!
-  const waInt     = fullList.find(i => i.provider === 'whatsapp')!
-  const wompiInt  = fullList.find(i => i.provider === 'wompi')!
-  const tgConfig  = notifications.find(n => n.channel === 'telegram')
+  const enviaInt      = fullList.find(i => i.provider === 'envia')!
+  const aveonlineInt  = fullList.find(i => i.provider === 'aveonline')!
+  const meliInt       = fullList.find(i => i.provider === 'mercadolibre')!
+  const waInt         = fullList.find(i => i.provider === 'whatsapp')!
+  const wompiInt      = fullList.find(i => i.provider === 'wompi')!
+  const tgConfig      = notifications.find(n => n.channel === 'telegram')
 
   const enviaConnected = enviaInt.status === 'connected'
+  const aveonlineConnected = aveonlineInt.status === 'connected'
   const meliConnected  = meliInt.status === 'connected'
   const waConnected    = waInt.status === 'connected'
   const wompiConnected = wompiInt.status === 'connected'
   // bot_token_secret_id (vault) o bot_token (texto plano legacy) indican que el token está configurado
   const tgConnected    = !!(tgConfig?.enabled && (tgConfig?.config?.bot_token_secret_id || tgConfig?.config?.bot_token) && tgConfig?.config?.chat_id)
-  const connectedCount = [enviaConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
+  const connectedCount = [enviaConnected, aveonlineConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
 
   // ── Server Actions ────────────────────────────────────────────────────────
 
@@ -184,12 +205,17 @@ export default async function IntegrationsPage({
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
 
-    const { data: notif } = await sb
-      .from('notification_settings').select('config')
-      .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').single()
+    const [notifRes, tenantRes] = await Promise.all([
+      sb.from('notification_settings').select('config')
+        .eq('tenant_id', m.tenant_id).eq('channel', 'telegram').single(),
+      sb.from('tenants').select('name').eq('id', m.tenant_id).maybeSingle(),
+    ])
 
-    const cfg    = (notif?.config ?? {}) as Record<string, string>
+    const cfg    = (notifRes.data?.config ?? {}) as Record<string, string>
     const chatId = cfg.chat_id
+    // Tenant-centric: el mensaje test va desde el bot del tenant, no el de
+    // Konvi. Cliente final = operador del tenant → ve la marca de SU tienda.
+    const tenantName = (tenantRes.data?.name ?? 'Tu tienda').trim()
     // Leer token desde Vault
     const { data: token } = cfg.bot_token_secret_id
       ? await sb.rpc('pgsec_read_secret', { p_id: cfg.bot_token_secret_id })
@@ -208,7 +234,7 @@ export default async function IntegrationsPage({
         const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: 'Commerce Ops — Conexión Telegram verificada.' }),
+          body: JSON.stringify({ chat_id: chatId, text: `${tenantName} — Conexión Telegram verificada.` }),
           signal: controller.signal,
         })
         clearTimeout(timeout)
@@ -264,7 +290,7 @@ export default async function IntegrationsPage({
       const controller = new AbortController()
       const timeout    = setTimeout(() => controller.abort(), 10000)
       try {
-        const res  = await fetch(`https://graph.facebook.com/v21.0/${phoneId}`, {
+        const res  = await fetch(`https://graph.facebook.com/v22.0/${phoneId}`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         })
@@ -464,12 +490,65 @@ export default async function IntegrationsPage({
     revalidatePath('/dashboard/integrations')
   }
 
+  // ── Aveonline (rev. 107 — hub paridad con resto de cards) ─────────────────
+  // Lógica core en lib/aveonline-actions.ts. Estos wrappers solo agregan
+  // verificación de permisos + redirect con flags ave_test/ave_msg.
+
+  async function saveAveonline(formData: FormData) {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const result = await connectAveonlineCore(sb, m.tenant_id, u?.email, {
+      usuario: (formData.get('usuario') as string) || '',
+      password: (formData.get('password') as string) || '',
+      authVersion: (formData.get('auth_version') as string) || 'v1.0',
+      tiempoToken: 100000,
+    })
+    revalidatePath('/dashboard/integrations')
+    if (!result.ok) {
+      redirect(
+        `/dashboard/integrations?ave_test=error&ave_msg=${encodeURIComponent(result.error ?? 'Error desconocido')}`,
+      )
+    }
+  }
+
+  async function disconnectAveonline() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    await disconnectAveonlineCore(sb, m.tenant_id)
+    revalidatePath('/dashboard/integrations')
+  }
+
+  async function testAveonline() {
+    'use server'
+    const sb = createClient()
+    const { data: { user: u } } = await sb.auth.getUser()
+    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    const result = await testAveonlineCore(sb, m.tenant_id)
+    if (!result.ok) {
+      redirect(
+        `/dashboard/integrations?ave_test=error&ave_msg=${encodeURIComponent(result.error ?? 'Error desconocido')}`,
+      )
+    }
+    redirect('/dashboard/integrations?ave_test=success')
+  }
+
   return (
     <IntegrationsManager
       waInt={waInt}
+      templatesApproved={templatesApproved}
+      templatesTotal={templatesTotal}
       waConnected={waConnected}
       enviaInt={enviaInt}
       enviaConnected={enviaConnected}
+      aveonlineInt={aveonlineInt}
+      aveonlineConnected={aveonlineConnected}
       meliInt={meliInt}
       meliConnected={meliConnected}
       wompiInt={wompiInt}
@@ -481,14 +560,20 @@ export default async function IntegrationsPage({
       canWrite={canWrite}
       connectedParam={searchParams.connected}
       errorParam={searchParams.error}
+      meliSameUser={searchParams.meli_same_user}
       tgTest={searchParams.tg_test}
       tgMsg={searchParams.tg_msg}
       waTest={searchParams.wa_test}
       waMsg={searchParams.wa_msg}
       enviaTest={searchParams.envia_test}
       enviaMsg={searchParams.envia_msg}
+      aveTest={searchParams.ave_test}
+      aveMsg={searchParams.ave_msg}
       saveEnviaKey={saveEnviaKey}
       disconnectEnvia={disconnectEnvia}
+      saveAveonline={saveAveonline}
+      disconnectAveonline={disconnectAveonline}
+      testAveonline={testAveonline}
       disconnectMeli={disconnectMeli}
       saveWompi={saveWompi}
       disconnectWompi={disconnectWompi}

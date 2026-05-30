@@ -1,22 +1,23 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
+import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import FinanceDashboard from './_components/finance-dashboard'
 import { Landmark } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
 export default async function FinancePage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sem 5 perf: cached deduplica auth.getUser entre layout/page.
+  const user = await getCachedUser()
   if (!user) redirect('/login')
 
-  const meta = user.app_metadata as { tenant_id?: string; role?: string }
-  if (!meta.tenant_id) {
+  const { tenantId, role } = await getCachedTenantMeta()
+  if (!tenantId) {
     return <div className="p-8 text-center text-destructive">Error: Usuario no asociado a ningún tenant.</div>
   }
-
-  const role = meta.role ?? 'operator'
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
+  const meta = user.app_metadata as { tenant_id?: string; role?: string }
 
   // Fetch Orders
   const { data: oRes } = await supabase

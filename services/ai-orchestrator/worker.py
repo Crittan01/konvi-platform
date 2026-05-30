@@ -5,9 +5,15 @@ import time
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
+from agentic.dispatcher import dispatch_message as _agentic_dispatch_message
 from conversation_contract import PROCESSING_STATUS_PROCESSING
 from notifications import dispatch_human_takeover_event
-from whatsapp_sender import send_whatsapp_message
+from whatsapp_sender import (
+    send_whatsapp_message,
+    send_whatsapp_template,
+    TEMPLATE_ERR_TEMPLATE_NOT_APPROVED,
+    TEMPLATE_ERR_TEMPLATE_NOT_FOUND,
+)
 
 logger = logging.getLogger("orchestrator.worker")
 
@@ -37,6 +43,15 @@ PENDING_PAYMENT_RELEASE_ENABLED = os.getenv("PENDING_PAYMENT_RELEASE_ENABLED", "
     "1", "true", "yes", "on"
 }
 PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS = int(os.getenv("PENDING_PAYMENT_RELEASE_INTERVAL_SECONDS", "600"))
+# TTL antes de que el cron cancele una orden `pending_payment` sin pago.
+# Diseñado intencionalmente 5 min POR ENCIMA de WOMPI_PAYMENT_LINK_TTL_MINUTES
+# (30 min) para dejar una ventana de regeneración:
+#   • 0–30 min: link Wompi vigente (bucket a en payment_link_tool reutiliza).
+#   • 30–35 min: link expirado pero orden viva (bucket b regenera).
+#   • > 35 min sin nuevo intent: cron cancela.
+# Si esta constante baja del TTL del link, el cron cerraría órdenes mientras
+# el link aún está vivo. Mantener relación: PENDING_PAYMENT_TTL_MINUTES >=
+# WOMPI_PAYMENT_LINK_TTL_MINUTES + 5. Detalles: docs/adr/0011-payment-link-lifecycle.md.
 PENDING_PAYMENT_TTL_MINUTES = int(os.getenv("PENDING_PAYMENT_TTL_MINUTES", "35"))
 # Rev. 103 F1 — Recordatorio de pago dentro de la CSW (24h Meta).
 # Solo dispara free-form si la ventana sigue abierta. Sin template messages,
@@ -55,6 +70,45 @@ PAYMENT_REMINDER_WINDOW_MINUTES = int(os.getenv("PAYMENT_REMINDER_WINDOW_MINUTES
 # Ventana CSW de Meta — fuente: developers.facebook.com (24h tras último
 # mensaje del cliente). Si cambia el SLA de Meta, ajustar aquí.
 META_CSW_HOURS = int(os.getenv("META_CSW_HOURS", "24"))
+
+# Sem 7 F2 item 6.b — Cron HSM cart_abandoned_24h MARKETING fuera CSW.
+# Dispara template MARKETING cart_abandoned_24h_v1 a carritos sin actividad
+# >24h cuyo cliente tiene consent_given=TRUE (Habeas Data Ley 1581).
+# Costo: ~$0.025 USD/msg (MARKETING tier). ROI esperado positivo por recovery.
+# Rev. 109 P1 #1 — Polling backup Wompi (MA-9 universal pattern).
+# Si Wompi nunca envía el webhook `transaction.updated` con status=VOIDED
+# (visto en sandbox UAT 2026-05-28), el cron lo detecta consultando GET
+# /transactions/{id} para órdenes canceladas con refund_method=
+# wompi_void_auto cuya payment local sigue marcada APPROVED. Garantiza
+# que el cliente reciba notificación de refund aún si webhook falla.
+WOMPI_VOID_POLL_ENABLED = os.getenv("WOMPI_VOID_POLL_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+WOMPI_VOID_POLL_INTERVAL_SECONDS = int(
+    os.getenv("WOMPI_VOID_POLL_INTERVAL_SECONDS", "1800"),  # 30 min default
+)
+WOMPI_VOID_POLL_LOOKBACK_HOURS = int(
+    os.getenv("WOMPI_VOID_POLL_LOOKBACK_HOURS", "48"),
+)
+
+CART_ABANDONED_REMINDER_ENABLED = os.getenv("CART_ABANDONED_REMINDER_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+CART_ABANDONED_REMINDER_INTERVAL_SECONDS = int(
+    os.getenv("CART_ABANDONED_REMINDER_INTERVAL_SECONDS", "300")  # cada 5min
+)
+# Mínimo de horas desde última actividad del carrito para disparar el HSM.
+# Debe ser > META_CSW_HOURS porque dentro CSW free-form ya cubrió (cero costo).
+CART_ABANDONED_THRESHOLD_HOURS = int(
+    os.getenv("CART_ABANDONED_THRESHOLD_HOURS", "24")
+)
+# Tope superior para no enviar recordatorios infinitos (carrito >7d se abandona).
+CART_ABANDONED_MAX_AGE_HOURS = int(
+    os.getenv("CART_ABANDONED_MAX_AGE_HOURS", "72")
+)
+# Descuento default que ofrece el template MARKETING (placeholder {{3}}).
+# Tenants pueden override per-tenant en futuro. Hoy 10% por default.
+CART_ABANDONED_DISCOUNT_LABEL = os.getenv("CART_ABANDONED_DISCOUNT_LABEL", "10%")
 # Anti-hibernación Render Free: ping al propio endpoint /health para prevenir que
 # el servicio web se hiberne. Solo necesario en plan Free (sin keep-alive nativo).
 ANTI_HIBERNATION_ENABLED = os.getenv("ANTI_HIBERNATION_ENABLED", "false").lower() in {
@@ -62,8 +116,90 @@ ANTI_HIBERNATION_ENABLED = os.getenv("ANTI_HIBERNATION_ENABLED", "false").lower(
 }
 ANTI_HIBERNATION_PING_URL = os.getenv("ANTI_HIBERNATION_PING_URL", "")
 ANTI_HIBERNATION_INTERVAL_SECONDS = int(os.getenv("ANTI_HIBERNATION_INTERVAL_SECONDS", "840"))  # 14 min
+
+# Rev. 109 founder 2026-05-28 — SLA tracker para human_takeover sin
+# respuesta humana. Cierra el loop "super delicado" del escalado: si el
+# bot promete especialista y nadie responde, alerta al operador.
+HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS", "600")  # 10 min
+)
+HUMAN_TAKEOVER_SLA_HOURS = int(
+    os.getenv("HUMAN_TAKEOVER_SLA_HOURS", "2")  # threshold 2h por defecto
+)
+
+# Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron.
+TENANT_HARD_DELETE_ENABLED = os.getenv(
+    "TENANT_HARD_DELETE_ENABLED", "false"
+).lower() in {"1", "true", "yes", "on"}
+TENANT_HARD_DELETE_INTERVAL_SECONDS = int(
+    os.getenv("TENANT_HARD_DELETE_INTERVAL_SECONDS", "21600")  # 6h default
+)
+TENANT_HARD_DELETE_BATCH_SIZE = int(
+    os.getenv("TENANT_HARD_DELETE_BATCH_SIZE", "10")  # 10 tenants per ciclo
+)
+
+# Rev. 109 J.2.11 — Tenant provider health metrics cron.
+HEALTH_METRICS_ENABLED = os.getenv(
+    "HEALTH_METRICS_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+HEALTH_METRICS_INTERVAL_SECONDS = int(
+    os.getenv("HEALTH_METRICS_INTERVAL_SECONDS", "300")  # 5 min default
+)
+
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+def _round_robin_dequeue_by_tenant(
+    pending: list[dict], max_total: int,
+) -> list[dict]:
+    """Reordena pending messages round-robin por `tenant_id` para fairness.
+
+    Sem 7 F2 cierre 2026-05-21 — pregunta arquitectónica founder UAT:
+    "Esta pensando para encolamiento de mensajes... entre tenants?".
+
+    ANTES: el worker tomaba `limit(10) order(created_at)` global → FIFO
+    estricto. Si tenant A tenía 100 msgs y tenant B tenía 1, el msg de
+    B esperaba hasta que A se vaciara (en práctica: 10 ciclos de poll
+    a 3s = 30s de latencia para B). Fairness ROTA.
+
+    AHORA: round-robin entre tenants disponibles. Cada vuelta agrega 1
+    mensaje del FIFO interno de cada tenant. Con tenants A(100) y B(1)
+    → output: [A1, B1, A2, A3, A4, ...] — B no espera, intercala.
+
+    Si solo hay 1 tenant activo (caso KAIU hoy), comportamiento idéntico
+    al legacy (FIFO de ese tenant).
+
+    Args:
+        pending: lista de mensajes ya ordenada por created_at asc.
+        max_total: cap de mensajes a devolver.
+
+    Returns:
+        Lista de hasta `max_total` mensajes intercalados por tenant.
+    """
+    if not pending:
+        return []
+    # Preservar orden FIFO dentro de cada tenant (pending viene asc por
+    # created_at).
+    by_tenant: dict[str, list[dict]] = {}
+    tenant_order: list[str] = []  # mantiene orden de primer-visto
+    for msg in pending:
+        tid = str(msg.get("tenant_id") or "")
+        if tid not in by_tenant:
+            by_tenant[tid] = []
+            tenant_order.append(tid)
+        by_tenant[tid].append(msg)
+
+    out: list[dict] = []
+    while len(out) < max_total and any(by_tenant[tid] for tid in tenant_order):
+        for tid in tenant_order:
+            queue = by_tenant[tid]
+            if not queue:
+                continue
+            out.append(queue.pop(0))
+            if len(out) >= max_total:
+                break
+    return out
 
 
 class OrchestratorWorker:
@@ -88,8 +224,23 @@ class OrchestratorWorker:
         self._last_release_at = 0.0
         self._reminder_enabled = PAYMENT_REMINDER_ENABLED
         self._last_reminder_at = 0.0
+        self._cart_abandoned_enabled = CART_ABANDONED_REMINDER_ENABLED
+        self._last_cart_abandoned_at = 0.0
+        # Rev. 109 P1 #1 — Polling backup Wompi VOIDED.
+        self._wompi_void_poll_enabled = WOMPI_VOID_POLL_ENABLED
+        self._last_wompi_void_poll_at = 0.0
+        self._last_sla_check_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
+        # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron timestamps.
+        self._tenant_hard_delete_enabled = TENANT_HARD_DELETE_ENABLED
+        self._last_tenant_hard_delete_at = 0.0
+        # Rev. 109 J.2.11 — health metrics cron timestamps.
+        self._health_metrics_enabled = HEALTH_METRICS_ENABLED
+        self._last_health_metrics_at = 0.0
+        # Snapshot del último status per (tenant, provider, metric) para
+        # detectar transiciones healthy → warning/critical (alerta Telegram).
+        self._health_status_snapshot: dict[tuple[str, str, str], str] = {}
         self._metrics = {
             "poll_cycles": 0,
             "inbound_seen": 0,
@@ -103,6 +254,14 @@ class OrchestratorWorker:
             "expired_orders_cancelled": 0,
             "payment_reminders_sent": 0,
             "payment_reminders_skipped_csw_closed": 0,
+            # Sem 7 F2 item 6.b: HSM templates fallback fuera CSW
+            "payment_reminders_sent_via_hsm": 0,
+            "payment_reminders_hsm_failed": 0,
+            "payment_reminders_hsm_not_approved": 0,
+            "cart_abandoned_reminders_sent": 0,
+            "cart_abandoned_reminders_skipped_no_consent": 0,
+            "cart_abandoned_reminders_hsm_failed": 0,
+            "cart_abandoned_reminders_hsm_not_approved": 0,
         }
 
     def stop(self):
@@ -128,8 +287,13 @@ class OrchestratorWorker:
         await self._poll_whatsapp_outbound_messages()
         await self._run_idempotency_cleanup_if_due()
         await self._send_payment_reminders_if_due()
+        await self._send_cart_abandoned_reminders_if_due()
         await self._release_expired_pending_payment_orders()
+        await self._poll_wompi_pending_voids_if_due()
         await self._anti_hibernation_ping_if_due()
+        await self._check_human_takeover_sla_if_due()
+        await self._run_tenant_hard_delete_if_due()
+        await self._collect_health_metrics_if_due()
 
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
         """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente.
@@ -231,19 +395,31 @@ class OrchestratorWorker:
         input al LLM. Evita que el último mensaje (típicamente "Hola"
         o follow-up corto) domine el contexto y haga al bot perder el
         flujo previo.
+
+        Sem 7 F2 cierre 2026-05-21 — Bug founder UAT (pregunta arquitectónica):
+        Encolamiento por tenant — fairness round-robin. ANTES: FIFO global
+        ordenado por created_at, top 10. Si tenant A tiene 100 msgs y tenant
+        B tiene 1, B esperaba 10 ciclos de poll (~30s) para ser procesado
+        porque A monopolizaba la cola.
+        AHORA: traer ventana mayor (50 mensajes top-FIFO), aplicar round-robin
+        por tenant_id para que cada tenant reciba al menos 1 turn por ciclo
+        cuando tenga mensajes pendientes. Reordena los 10 finales que se
+        procesarán este ciclo. Con N=1 tenant activo el comportamiento es
+        idéntico al legacy (FIFO).
         """
-        # Selección de mensajes pendientes — hasta 10 por ciclo para no saturar
+        # Selección amplia (50) para muestrear varios tenants; luego
+        # round-robin filtra a 10 procesables.
         result = (
             self.supabase.table("messages")
             .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
             .eq("direction", "inbound")
             .eq("processing_status", "pending")
             .order("created_at", desc=False)
-            .limit(10)
+            .limit(50)
             .execute()
         )
 
-        pending = result.data or []
+        pending = _round_robin_dequeue_by_tenant(result.data or [], max_total=10)
         if not pending:
             return
         self._metrics["inbound_seen"] += len(pending)
@@ -288,15 +464,12 @@ class OrchestratorWorker:
                     )
                     continue
 
-                # Rev. 75 — V2 cancelado, llamada directa al orquestador único.
-                # Razón: V2 modular era experimento de 22h (commit b153054)
-                # con dependencias cruzadas hacia el monolito V1 maduro
-                # (22 días + 37 commits + fixes rev. 70-73). Quedarse con
-                # ambos era deuda incremental sin payoff claro. Cuando se
-                # quiera modularidad, se refactoriza V1 orgánicamente sobre
-                # código probado.
-                await build_and_run_orchestration(
-                    supabase=self.supabase,
+                # ADR-0018 Fase B+C: dispatcher decide legacy/agentic/shadow
+                # según flags (tenant_integrations.meta.agentic_enabled +
+                # AGENTIC_SHADOW_ENABLED env). Sin flags activos →
+                # comportamiento legacy idéntico al pre-refactor.
+                await _agentic_dispatch_message(
+                    self.supabase,
                     message_id=msg["id"],
                     tenant_id=msg["tenant_id"],
                     conversation_id=msg["conversation_id"],
@@ -429,20 +602,45 @@ class OrchestratorWorker:
             to_phone = str(payload.get("customer_phone") or "").strip()
             text = str(payload.get("text") or "").strip()
             message_id = str(payload.get("message_id") or "").strip()
+            # Rev. 109 P0-2 — soporte attachments imagen outbound humano.
+            # Si hay image_link, text se vuelve OPCIONAL (servirá como caption).
+            image_link = str(payload.get("image_link") or "").strip() or None
+            image_caption = str(payload.get("image_caption") or "").strip() or None
 
-            if not tenant_id or not to_phone or not text or not message_id:
+            # Validación: tenant+phone+message_id obligatorios SIEMPRE.
+            # text obligatorio SOLO si NO hay image_link (modo legacy texto).
+            if not tenant_id or not to_phone or not message_id:
                 logger.error("Payload outbound incompleto msg_id=%s payload=%s", msg_id, payload)
+                self._mark_outbound_failed(tenant_id, message_id, "invalid_outbound_payload")
+                self._ack_whatsapp_outbound_message(msg_id)
+                continue
+            if not text and not image_link:
+                logger.error(
+                    "Payload outbound sin text ni image_link msg_id=%s payload=%s",
+                    msg_id, payload,
+                )
                 self._mark_outbound_failed(tenant_id, message_id, "invalid_outbound_payload")
                 self._ack_whatsapp_outbound_message(msg_id)
                 continue
 
             try:
-                meta_message_id = await send_whatsapp_message(
-                    tenant_id=tenant_id,
-                    supabase=self.supabase,
-                    to_phone=to_phone,
-                    text=text,
-                )
+                # Si hay image_link → tipo imagen Meta. Caption opcional = text si existe.
+                # Si NO hay image_link → texto plain (modo legacy preservado).
+                if image_link:
+                    meta_message_id = await send_whatsapp_message(
+                        tenant_id=tenant_id,
+                        supabase=self.supabase,
+                        to_phone=to_phone,
+                        image_link=image_link,
+                        image_caption=image_caption or (text if text else None),
+                    )
+                else:
+                    meta_message_id = await send_whatsapp_message(
+                        tenant_id=tenant_id,
+                        supabase=self.supabase,
+                        to_phone=to_phone,
+                        text=text,
+                    )
             except Exception as exc:
                 logger.error("Error enviando outbound msg_id=%s: %s", msg_id, exc, exc_info=True)
                 meta_message_id = None
@@ -495,6 +693,15 @@ class OrchestratorWorker:
             self.supabase.rpc("cleanup_expired_meli_webhook_dedup").execute()
         except Exception:
             pass  # La función puede no existir si la migración rev. 69 no está aplicada
+
+        # Rev. 109 (F.10 cierre / MA-2) — cleanup grace period expirado en
+        # tenant_webhook_secrets. NULL-out previous_secret_hash + grace_period_until
+        # cuando grace_period_until < NOW(). Defense-in-depth: el verify_inbound_secret()
+        # Python ya chequea timestamp, pero borrar el hash zombie reduce surface.
+        try:
+            self.supabase.rpc("fn_cleanup_webhook_secrets").execute()
+        except Exception:
+            pass  # La función puede no existir si la migración 20260614110000 no está aplicada
 
         # Rev. 71 — cleanup del bot_source_log (TTL 30 días, append-only).
         try:
@@ -560,6 +767,159 @@ class OrchestratorWorker:
                     logger.debug("[PING] %s → %s", url, resp.status_code)
             except Exception as exc:
                 logger.warning("[PING] Error haciendo ping a %s: %s", url, exc)
+
+    async def _check_human_takeover_sla_if_due(self) -> None:
+        """Rev. 109 founder 2026-05-28 — SLA tracker para escalaciones.
+
+        Cierra el loop "super delicado": el bot promete especialista,
+        cambia status a human_takeover, notifica vía Telegram… pero ¿qué
+        pasa si nadie responde en X horas? El cliente queda esperando.
+
+        Este check:
+          1. Cada N min (default 10), busca convs `status='human_takeover'`.
+          2. Para cada una, identifica `escalated_at` (último audit row
+             `content_type='escalation_audit'`).
+          3. Verifica si hubo respuesta humana después (outbound text
+             post-escalación).
+          4. Si NO Y han pasado >SLA_HOURS desde escalated_at → notifica
+             Telegram al operador del tenant.
+          5. Idempotencia: inserta audit row `content_type='sla_breach_audit'`
+             para no re-alertar (append-only flag).
+
+        Esto NO requiere migration — usa la tabla `messages` existente
+        como sistema de eventos.
+        """
+        now = time.time()
+        if now - self._last_sla_check_at < max(60, HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS):
+            return
+        self._last_sla_check_at = now
+
+        sla_cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=HUMAN_TAKEOVER_SLA_HOURS)
+        ).isoformat()
+
+        try:
+            # Convs en human_takeover desde hace ≥ SLA_HOURS.
+            convs_res = (
+                self.supabase.table("conversations")
+                .select("id, tenant_id, customer_phone, last_interaction_at")
+                .eq("status", "human_takeover")
+                .lt("last_interaction_at", sla_cutoff)
+                .limit(50)
+                .execute()
+            )
+            convs = convs_res.data or []
+        except Exception as exc:
+            logger.warning("[SLA] error consultando convs takeover: %s", exc)
+            return
+
+        if not convs:
+            return
+
+        logger.info("[SLA] %d conv(s) takeover potencialmente sin respuesta", len(convs))
+
+        for conv in convs:
+            conv_id = conv.get("id")
+            tenant_id = conv.get("tenant_id")
+            customer_phone = conv.get("customer_phone") or "?"
+            if not (conv_id and tenant_id):
+                continue
+
+            try:
+                # 1. Encontrar escalated_at — último escalation_audit.
+                escalation_audit = (
+                    self.supabase.table("messages")
+                    .select("created_at")
+                    .eq("conversation_id", conv_id)
+                    .eq("content_type", "escalation_audit")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if not escalation_audit.data:
+                    # Sin audit row, no podemos calcular SLA. Skip.
+                    continue
+                escalated_at_iso = escalation_audit.data[0]["created_at"]
+
+                # 2. ¿Ya alertamos previamente esta breach?
+                breach_audit = (
+                    self.supabase.table("messages")
+                    .select("id")
+                    .eq("conversation_id", conv_id)
+                    .eq("content_type", "sla_breach_audit")
+                    .gt("created_at", escalated_at_iso)
+                    .limit(1)
+                    .execute()
+                )
+                if breach_audit.data:
+                    # Ya notificada — skip idempotencia.
+                    continue
+
+                # 3. ¿Hubo respuesta humana post-escalación?
+                # Outbound 'text' (no escalation_audit, no degraded, etc.)
+                # creado después de escalated_at = operador respondió.
+                human_response = (
+                    self.supabase.table("messages")
+                    .select("id")
+                    .eq("conversation_id", conv_id)
+                    .eq("direction", "outbound")
+                    .eq("content_type", "text")
+                    .gt("created_at", escalated_at_iso)
+                    .limit(1)
+                    .execute()
+                )
+                if human_response.data:
+                    # Operador respondió — no es breach.
+                    continue
+
+                # 4. SLA breach. Enviar notif Telegram + audit row.
+                logger.warning(
+                    "[SLA] BREACH conv=%s tenant=%s — sin respuesta humana "
+                    "hace ≥%dh desde escalación %s",
+                    conv_id[:8], tenant_id[:8], HUMAN_TAKEOVER_SLA_HOURS,
+                    escalated_at_iso,
+                )
+
+                try:
+                    from telegram_notifications import notify_escalation_async
+                    await notify_escalation_async(
+                        self.supabase,
+                        tenant_id=tenant_id,
+                        conversation_id=conv_id,
+                        reason=(
+                            f"⏰ SLA BREACH — cliente {customer_phone} sin "
+                            f"respuesta humana hace ≥{HUMAN_TAKEOVER_SLA_HOURS}h. "
+                            f"Conversación escalada el {escalated_at_iso}. "
+                            f"Por favor responder lo antes posible."
+                        ),
+                        severity="critical",
+                    )
+                except Exception as exc:
+                    logger.warning("[SLA] notify Telegram falló conv=%s: %s", conv_id, exc)
+
+                # 5. Audit row para idempotencia (no re-notificar).
+                try:
+                    self.supabase.table("messages").insert({
+                        "conversation_id": conv_id,
+                        "tenant_id": tenant_id,
+                        "direction": "outbound",
+                        "content_type": "sla_breach_audit",
+                        "content": "",
+                        "payload": {
+                            "escalated_at": escalated_at_iso,
+                            "sla_threshold_hours": HUMAN_TAKEOVER_SLA_HOURS,
+                            "notified_at": datetime.now(timezone.utc).isoformat(),
+                            "source": "worker_sla_check",
+                        },
+                        "processed": True,
+                        "processing_status": "processed",
+                    }).execute()
+                except Exception as exc:
+                    logger.warning("[SLA] audit insert falló conv=%s: %s", conv_id, exc)
+
+            except Exception as exc:
+                logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
+                continue
 
     async def _sweep_stale_messages_on_startup(self) -> None:
         """
@@ -700,19 +1060,34 @@ class OrchestratorWorker:
                 and (last_inbound_rows[0].get("created_at") or "") >= csw_cutoff
             )
             if not csw_open:
-                # Fuera de CSW: free-form bloqueado por Meta. Mark como
-                # salteado para no reintentar; F2 (templates) lo manejará.
+                # Fuera de CSW: free-form bloqueado por Meta. Intentar HSM
+                # template payment_reminder_v1 (Sem 7 F2 item 6.b).
+                # Si template no APPROVED → marcar skipped + métrica.
+                # Si HSM envía OK → marcar sent_via_hsm + métrica.
                 self._metrics["payment_reminders_skipped_csw_closed"] += 1
-                try:
-                    self.supabase.table("orders").update({
-                        "payment_reminder_sent_at": now_dt.isoformat(),
-                    }).eq("id", order_id).is_("payment_reminder_sent_at", "null").execute()
-                except Exception:
-                    pass
-                logger.info(
-                    "[REMINDER] CSW cerrada — order=%s skip (F2 pendiente: HSM template)",
-                    order_id[:8],
+                hsm_handled = await self._try_send_payment_reminder_hsm(
+                    order_id=order_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    customer_phone=customer_phone,
+                    now_dt=now_dt,
                 )
+                if not hsm_handled:
+                    # HSM no aplicó (template no aprobado o falló). Igualmente
+                    # marcamos idempotencia para no reintentar — el cron solo
+                    # debería disparar 1 vez por orden.
+                    try:
+                        self.supabase.table("orders").update({
+                            "payment_reminder_sent_at": now_dt.isoformat(),
+                        }).eq("id", order_id).is_(
+                            "payment_reminder_sent_at", "null",
+                        ).execute()
+                    except Exception:
+                        pass
+                    logger.info(
+                        "[REMINDER] CSW cerrada — order=%s skip (HSM no disponible)",
+                        order_id[:8],
+                    )
                 continue
 
             short_id = str(order_id)[:8].upper()
@@ -774,6 +1149,500 @@ class OrchestratorWorker:
                 logger.warning("[REMINDER] No pude marcar idempotencia order=%s: %s",
                                order_id[:8], exc)
 
+    # ── Sem 7 F2 item 6.b — HSM payment_reminder fuera CSW ──────────────────
+
+    async def _try_send_payment_reminder_hsm(
+        self,
+        *,
+        order_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        customer_phone: str,
+        now_dt: datetime,
+    ) -> bool:
+        """Intenta enviar HSM template payment_reminder_v1 cuando CSW está
+        cerrada. Retorna True si HSM envió OK (marcado idempotente + persistido
+        outbound). False si template no APPROVED, falló o data incompleta —
+        caller marca skipped.
+
+        Costo: ~$0.004 USD/msg (UTILITY tier fuera CSW). Compensa con creces
+        si recupera al menos 1 de cada 10 pedidos abandonados (ROI ~200x).
+        """
+        # Fetch datos completos de la orden para hidratar template
+        try:
+            order_res = (
+                self.supabase.table("orders")
+                .select("id, total_amount, contact_id")
+                .eq("id", order_id)
+                .limit(1)
+                .execute()
+            )
+            order_rows = order_res.data or []
+        except Exception as exc:
+            logger.error("[REMINDER_HSM] error fetch order=%s: %s",
+                         order_id[:8], exc)
+            return False
+        if not order_rows:
+            return False
+        order = order_rows[0]
+        total_amount = float(order.get("total_amount") or 0)
+
+        # Resolver nombre cliente via contacts si disponible
+        customer_name = "cliente"
+        contact_id = order.get("contact_id")
+        if contact_id:
+            try:
+                contact_res = (
+                    self.supabase.table("contacts")
+                    .select("first_name, full_name")
+                    .eq("id", contact_id)
+                    .limit(1)
+                    .execute()
+                )
+                contact_rows = contact_res.data or []
+                if contact_rows:
+                    first = (contact_rows[0].get("first_name") or "").strip()
+                    full = (contact_rows[0].get("full_name") or "").strip()
+                    customer_name = first or (full.split(" ")[0] if full else "cliente")
+            except Exception:
+                pass
+
+        # Resolver checkout_url del payment más reciente
+        checkout_url = ""
+        try:
+            pay_res = (
+                self.supabase.table("payments")
+                .select("checkout_url, created_at")
+                .eq("order_id", order_id)
+                .eq("tenant_id", tenant_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            pay_rows = pay_res.data or []
+            if pay_rows:
+                checkout_url = (pay_rows[0].get("checkout_url") or "").strip()
+        except Exception:
+            pass
+        if not checkout_url:
+            logger.warning(
+                "[REMINDER_HSM] order=%s sin checkout_url — no se puede armar template",
+                order_id[:8],
+            )
+            return False
+
+        # Format total: $87.500 (entero, punto cada 3).
+        # Sem 7 F2 cierre 2026-05-20 — P5: sin sufijo " COP" (UX limpio).
+        try:
+            pesos = int(total_amount)  # total_amount ya está en pesos en orders schema
+            total_str = f"${pesos:,}".replace(",", ".")
+        except Exception:
+            total_str = "$0"
+
+        order_number = str(order_id)[:8].upper()
+
+        body_params = [customer_name, order_number, total_str, checkout_url]
+
+        msg_id, err = await send_whatsapp_template(
+            tenant_id=tenant_id,
+            supabase=self.supabase,
+            to_phone=customer_phone,
+            template_name="payment_reminder_v1",
+            language="es_CO",
+            body_params=body_params,
+        )
+
+        if err in (TEMPLATE_ERR_TEMPLATE_NOT_APPROVED, TEMPLATE_ERR_TEMPLATE_NOT_FOUND):
+            self._metrics["payment_reminders_hsm_not_approved"] += 1
+            logger.info(
+                "[REMINDER_HSM] order=%s template payment_reminder_v1 no disponible "
+                "(err=%s). Submitear via scripts/admin/submit_template_to_meta.py",
+                order_id[:8], err,
+            )
+            return False
+
+        if err:
+            self._metrics["payment_reminders_hsm_failed"] += 1
+            logger.warning(
+                "[REMINDER_HSM] order=%s falló HSM send: %s",
+                order_id[:8], err,
+            )
+            return False
+
+        # OK: marcar idempotencia + persistir outbound en messages
+        try:
+            self.supabase.table("messages").insert({
+                "tenant_id": tenant_id,
+                "conversation_id": conversation_id,
+                "direction": "outbound",
+                "content_type": "template",
+                "content": (
+                    f"[TEMPLATE payment_reminder_v1] {customer_name}, recordatorio "
+                    f"pago orden {order_number} por {total_str}"
+                ),
+                "meta_message_id": msg_id,
+                "processing_status": "processed",
+                "processed": True,
+                "processed_at": now_dt.isoformat(),
+            }).execute()
+        except Exception as exc:
+            logger.warning("[REMINDER_HSM] no pude persistir outbound order=%s: %s",
+                           order_id[:8], exc)
+
+        try:
+            self.supabase.table("orders").update({
+                "payment_reminder_sent_at": now_dt.isoformat(),
+            }).eq("id", order_id).is_(
+                "payment_reminder_sent_at", "null",
+            ).execute()
+        except Exception:
+            pass
+
+        self._metrics["payment_reminders_sent_via_hsm"] += 1
+        logger.info(
+            "[REMINDER_HSM] ✓ order=%s template payment_reminder_v1 enviado "
+            "to=%s meta_msg_id=%s",
+            order_id[:8], customer_phone, msg_id,
+        )
+        return True
+
+    async def _send_cart_abandoned_reminders_if_due(self) -> None:
+        """Sem 7 F2 item 6.b — Cron HSM cart_abandoned_24h_v1 MARKETING.
+
+        Detecta carritos sin actividad >CART_ABANDONED_THRESHOLD_HOURS (24h
+        default) y <CART_ABANDONED_MAX_AGE_HOURS (72h default) cuyo cliente:
+          - Tiene customer_phone
+          - Tiene consent_given=TRUE en contacts (Habeas Data Ley 1581)
+          - NO recibió abandoned_reminder previo (idempotencia)
+        y dispara template MARKETING cart_abandoned_24h_v1.
+
+        Costo: ~$0.025 USD/msg. Compensa con recovery de carritos
+        abandonados que de otra forma se perderían 100%.
+
+        NO cubre carritos dentro CSW <24h — el bot conversacional + F1
+        recordatorios free-form ya los cubren gratis. Este cron es
+        complementario para los que se fueron y no volvieron.
+        """
+        if not self._cart_abandoned_enabled:
+            return
+        now = time.time()
+        if now - self._last_cart_abandoned_at < max(
+            60, CART_ABANDONED_REMINDER_INTERVAL_SECONDS,
+        ):
+            return
+        self._last_cart_abandoned_at = now
+
+        now_dt = datetime.now(timezone.utc)
+        upper_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_THRESHOLD_HOURS)).isoformat()
+        lower_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_MAX_AGE_HOURS)).isoformat()
+
+        # Buscar carritos en open/abandoned con updated_at en rango [24h, 72h]
+        # sin recordatorio enviado.
+        try:
+            carts_res = (
+                self.supabase.table("conversation_carts")
+                .select(
+                    "id, tenant_id, conversation_id, contact_id, status, "
+                    "updated_at, conversations(customer_phone)"
+                )
+                .in_("status", ["open", "abandoned"])
+                .is_("abandoned_reminder_sent_at", "null")
+                .lt("updated_at", upper_cutoff)
+                .gte("updated_at", lower_cutoff)
+                .limit(50)
+                .execute()
+            )
+            carts = carts_res.data or []
+        except Exception as exc:
+            logger.error("[CART_ABANDONED] error consultando carts: %s", exc)
+            return
+
+        if not carts:
+            return
+
+        for cart in carts:
+            cart_id = cart.get("id")
+            tenant_id = cart.get("tenant_id")
+            conversation_id = cart.get("conversation_id")
+            contact_id = cart.get("contact_id")
+            conv = cart.get("conversations") or {}
+            customer_phone = conv.get("customer_phone") if isinstance(conv, dict) else None
+
+            if not (cart_id and tenant_id and conversation_id and customer_phone):
+                continue
+
+            # Habeas Data Ley 1581: necesita consent_given=TRUE explícito
+            # para enviar MARKETING. Sin consent → skip.
+            consent_ok = False
+            customer_name = "cliente"
+            if contact_id:
+                try:
+                    contact_res = (
+                        self.supabase.table("contacts")
+                        .select("consent_given, first_name, full_name")
+                        .eq("id", contact_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    contact_rows = contact_res.data or []
+                    if contact_rows:
+                        consent_ok = bool(contact_rows[0].get("consent_given"))
+                        first = (contact_rows[0].get("first_name") or "").strip()
+                        full = (contact_rows[0].get("full_name") or "").strip()
+                        customer_name = first or (full.split(" ")[0] if full else "cliente")
+                except Exception:
+                    pass
+
+            if not consent_ok:
+                self._metrics["cart_abandoned_reminders_skipped_no_consent"] += 1
+                # Marcar idempotencia igualmente — no reintentar
+                try:
+                    self.supabase.table("conversation_carts").update({
+                        "abandoned_reminder_sent_at": now_dt.isoformat(),
+                    }).eq("id", cart_id).is_(
+                        "abandoned_reminder_sent_at", "null",
+                    ).execute()
+                except Exception:
+                    pass
+                logger.info(
+                    "[CART_ABANDONED] cart=%s skipped (sin consent_given marketing — "
+                    "Habeas Data Ley 1581)",
+                    str(cart_id)[:8],
+                )
+                continue
+
+            # Items del carrito — resumen corto
+            cart_summary = "tu carrito"
+            try:
+                items_res = (
+                    self.supabase.table("conversation_cart_items")
+                    .select("product_title, quantity")
+                    .eq("cart_id", cart_id)
+                    .limit(3)
+                    .execute()
+                )
+                items = items_res.data or []
+                if items:
+                    parts = []
+                    for it in items:
+                        title = (it.get("product_title") or "").strip()
+                        qty = int(it.get("quantity") or 1)
+                        if title:
+                            parts.append(f"{title} x{qty}" if qty > 1 else title)
+                    if parts:
+                        cart_summary = ", ".join(parts[:3])
+                        if len(items) > 3:
+                            cart_summary += " y más"
+            except Exception:
+                pass
+
+            body_params = [customer_name, cart_summary, CART_ABANDONED_DISCOUNT_LABEL]
+
+            msg_id, err = await send_whatsapp_template(
+                tenant_id=tenant_id,
+                supabase=self.supabase,
+                to_phone=customer_phone,
+                template_name="cart_abandoned_24h_v1",
+                language="es_CO",
+                body_params=body_params,
+            )
+
+            if err in (TEMPLATE_ERR_TEMPLATE_NOT_APPROVED, TEMPLATE_ERR_TEMPLATE_NOT_FOUND):
+                self._metrics["cart_abandoned_reminders_hsm_not_approved"] += 1
+                # Idempotencia: si template no está aprobado, no reintentar
+                # cada 5min. Mark + skip.
+                try:
+                    self.supabase.table("conversation_carts").update({
+                        "abandoned_reminder_sent_at": now_dt.isoformat(),
+                    }).eq("id", cart_id).is_(
+                        "abandoned_reminder_sent_at", "null",
+                    ).execute()
+                except Exception:
+                    pass
+                logger.info(
+                    "[CART_ABANDONED] cart=%s template no disponible (err=%s)",
+                    str(cart_id)[:8], err,
+                )
+                continue
+
+            if err:
+                self._metrics["cart_abandoned_reminders_hsm_failed"] += 1
+                logger.warning(
+                    "[CART_ABANDONED] cart=%s HSM falló: %s",
+                    str(cart_id)[:8], err,
+                )
+                continue
+
+            # OK: persistir outbound + marcar idempotencia
+            try:
+                self.supabase.table("messages").insert({
+                    "tenant_id": tenant_id,
+                    "conversation_id": conversation_id,
+                    "direction": "outbound",
+                    "content_type": "template",
+                    "content": (
+                        f"[TEMPLATE cart_abandoned_24h_v1] {customer_name}, "
+                        f"recordatorio carrito: {cart_summary}"
+                    ),
+                    "meta_message_id": msg_id,
+                    "processing_status": "processed",
+                    "processed": True,
+                    "processed_at": now_dt.isoformat(),
+                }).execute()
+            except Exception as exc:
+                logger.warning("[CART_ABANDONED] no pude persistir outbound cart=%s: %s",
+                               str(cart_id)[:8], exc)
+
+            try:
+                self.supabase.table("conversation_carts").update({
+                    "abandoned_reminder_sent_at": now_dt.isoformat(),
+                }).eq("id", cart_id).is_(
+                    "abandoned_reminder_sent_at", "null",
+                ).execute()
+            except Exception:
+                pass
+
+            self._metrics["cart_abandoned_reminders_sent"] += 1
+            logger.info(
+                "[CART_ABANDONED] ✓ cart=%s template cart_abandoned_24h_v1 enviado "
+                "to=%s meta_msg_id=%s",
+                str(cart_id)[:8], customer_phone, msg_id,
+            )
+
+    async def _poll_wompi_pending_voids_if_due(self) -> None:
+        """Rev. 109 P1 #1 — Polling backup Wompi VOIDED (Plan MA-9).
+
+        Detecta payments cuya orden está cancelled con refund_method=
+        wompi_void_auto pero el local wompi_status sigue APPROVED (porque
+        Wompi nunca envió el webhook transaction.updated). Consulta GET
+        /transactions/{id} a Wompi; si retorna VOIDED, actualiza local
+        + dispara notify_client_refund_completed.
+
+        Ventana lookback configurable (default 48h). Frecuencia
+        configurable (default 30min).
+        """
+        if not self._wompi_void_poll_enabled:
+            return
+        now = time.time()
+        interval = max(60, WOMPI_VOID_POLL_INTERVAL_SECONDS)
+        if now - self._last_wompi_void_poll_at < interval:
+            return
+        self._last_wompi_void_poll_at = now
+
+        try:
+            # Buscar payments approved cuya orden está cancelled con
+            # refund_method=wompi_void_auto en últimas LOOKBACK_HOURS.
+            cutoff_iso = (
+                datetime.now(timezone.utc)
+                - timedelta(hours=WOMPI_VOID_POLL_LOOKBACK_HOURS)
+            ).isoformat()
+            # Schema PostgREST: 2 FKs entre orders y order_cancellations.
+            # Especificamos orders_cancellation_id_fkey (la 1:1 vía link).
+            res = (
+                self.supabase.table("payments")
+                .select(
+                    "id, tenant_id, order_id, wompi_txn_id, amount_in_cents, "
+                    "wompi_status, orders(status, cancellation_id, "
+                    "order_cancellations!orders_cancellation_id_fkey"
+                    "(refund_method, refund_status))",
+                )
+                .eq("wompi_status", "APPROVED")
+                .gte("updated_at", cutoff_iso)
+                .limit(50)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("[WOMPI_POLL] query candidates falló: %s", exc)
+            return
+
+        candidates = res.data or []
+        if not candidates:
+            return
+
+        # Filter only those linked to cancelled+wompi_void_auto.
+        eligible = []
+        for p in candidates:
+            order = p.get("orders") or {}
+            if (order.get("status") or "").lower() != "cancelled":
+                continue
+            cancellations = order.get("order_cancellations") or []
+            if isinstance(cancellations, list):
+                # PostgREST embed retorna lista para 1:1 via FK.
+                cr = cancellations[0] if cancellations else {}
+            else:
+                cr = cancellations
+            if (cr or {}).get("refund_method") != "wompi_void_auto":
+                continue
+            eligible.append(p)
+
+        if not eligible:
+            return
+
+        logger.info(
+            "[WOMPI_POLL] %d candidatos void pendientes (lookback=%dh)",
+            len(eligible), WOMPI_VOID_POLL_LOOKBACK_HOURS,
+        )
+
+        # Para cada uno: GET txn a Wompi. Si VOIDED, actualizar + notif.
+        for p in eligible:
+            txn_id = p.get("wompi_txn_id")
+            tenant_id = p.get("tenant_id")
+            order_id = p.get("order_id")
+            amount = int(p.get("amount_in_cents") or 0)
+            if not (txn_id and tenant_id and order_id):
+                continue
+            try:
+                from integrations.wompi_client import (
+                    get_tenant_wompi_creds, wompi_base_url,
+                )
+                pk, _, env = get_tenant_wompi_creds(self.supabase, tenant_id)
+                if not pk:
+                    continue
+                import httpx
+                url = f"{wompi_base_url(env or 'sandbox')}/transactions/{txn_id}"
+                with httpx.Client(timeout=10.0) as client:
+                    r = client.get(
+                        url, headers={"Authorization": f"Bearer {pk}"},
+                    )
+                if r.status_code >= 400:
+                    continue
+                data = (r.json() or {}).get("data") or {}
+                if (data.get("status") or "").upper() != "VOIDED":
+                    continue
+                # VOIDED en Wompi pero local sigue APPROVED → sync.
+                self.supabase.table("payments").update({
+                    "wompi_status": "VOIDED",
+                }).eq("wompi_txn_id", txn_id).execute()
+                logger.info(
+                    "[WOMPI_POLL] sync VOIDED txn=%s order=%s tenant=%s",
+                    txn_id, order_id[:8], tenant_id[:8],
+                )
+                # Notif cliente (reusa el path del webhook handler).
+                try:
+                    import sys as _sys
+                    from pathlib import Path as _Path
+                    _api_routers = (
+                        _Path(__file__).resolve().parents[1] / "api" / "routers"
+                    )
+                    if str(_api_routers) not in _sys.path:
+                        _sys.path.insert(0, str(_api_routers))
+                    from wompi_webhook import (
+                        _notify_client_refund_completed,
+                    )
+                    _notify_client_refund_completed(
+                        self.supabase, order_id=order_id,
+                        amount_in_cents=amount,
+                    )
+                except Exception as _notif_exc:
+                    logger.warning(
+                        "[WOMPI_POLL] notif refund falló order=%s: %s",
+                        order_id[:8], _notif_exc,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[WOMPI_POLL] check txn=%s falló: %s", txn_id, exc,
+                )
+
     async def _release_expired_pending_payment_orders(self) -> None:
         """
         Cancela pedidos en pending_payment que superaron el TTL sin recibir pago.
@@ -782,6 +1651,26 @@ class OrchestratorWorker:
         pending_payment = stock NO decrementado todavía → cancelar no requiere
         reversar stock; solo cambia el estado para liberar la "reserva conceptual"
         y limpiar el backlog de pedidos sin cobrar.
+
+        Lifecycle de payment links (Plan A.0.1, ADR-0011):
+
+          ─── 0 min ──── 30 min ───── 35 min ─────────────────────►
+              link #1   bucket(a)→   bucket(b)→     cron cancela
+              vivo      reusa link   regenera link  si NO hay payment
+                                     test_G77I9U    activo
+                                     test_8yaKgJ    último
+
+        El cron NO cancela una orden si tiene un `payments.pending` reciente.
+        Esa regla preserva el bucket (b) de payment_link_tool: si el cliente
+        regenera el link a t=33min, el último payment es fresco y la orden
+        sigue viva. Solo cuando el último payment supera el TTL (35min sin
+        nuevo intent) la orden se cancela.
+
+        Sin esta regla, había una race condition (caso runtime 2026-05-05
+        order #3E10CB92): bucket (b) regeneró link a 08:35:32; cron canceló
+        orden a 08:36:06 (34s después) → cliente recibió link válido pero
+        contra orden cancelled → si pagaba, webhook Wompi llegaba a estado
+        inconsistente.
         """
         if not self._release_enabled:
             return
@@ -791,8 +1680,9 @@ class OrchestratorWorker:
             return
         self._last_release_at = now
 
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(minutes=PENDING_PAYMENT_TTL_MINUTES)
+        now_dt = datetime.now(timezone.utc)
+        cutoff_iso = (
+            now_dt - timedelta(minutes=PENDING_PAYMENT_TTL_MINUTES)
         ).isoformat()
 
         try:
@@ -800,7 +1690,7 @@ class OrchestratorWorker:
                 self.supabase.table("orders")
                 .select("id, tenant_id")
                 .eq("status", "pending_payment")
-                .lt("created_at", cutoff)
+                .lt("created_at", cutoff_iso)
                 .limit(50)
                 .execute()
             )
@@ -810,6 +1700,36 @@ class OrchestratorWorker:
 
             cancelled = 0
             for order in stale:
+                # Guard: no cancelar si hay payment pending fresco (cliente
+                # regeneró link recientemente vía bucket (b)).
+                try:
+                    fresh_pay_res = (
+                        self.supabase.table("payments")
+                        .select("id, created_at")
+                        .eq("order_id", order["id"])
+                        .eq("status", "pending")
+                        .gte("created_at", cutoff_iso)
+                        .limit(1)
+                        .execute()
+                    )
+                    if fresh_pay_res.data:
+                        # Hay intent de pago activo (≤ TTL min) — no cancelar.
+                        logger.debug(
+                            "[RELEASE] order=%s skip — payment fresco %s",
+                            order["id"][:8],
+                            fresh_pay_res.data[0].get("created_at"),
+                        )
+                        continue
+                except Exception as exc:
+                    # Si el lookup falla, conservador: no cancelar (mejor un
+                    # zombie que cancelar una orden válida con cliente
+                    # esperando pago).
+                    logger.warning(
+                        "[RELEASE] lookup payments falló order=%s: %s — skip",
+                        order["id"][:8], exc,
+                    )
+                    continue
+
                 res = (
                     self.supabase.table("orders")
                     .update({
@@ -902,6 +1822,87 @@ class OrchestratorWorker:
             )
         return False
 
+    async def _run_tenant_hard_delete_if_due(self) -> None:
+        """Rev. 109 J.2.4.4 Fase 2 — Hard-delete tenants cuyo grace period expiró.
+
+        Cron interval (default 6h). Process batch (default 10 tenants/ciclo).
+        Cada tenant: snapshot ARCHIVE_BEFORE_HARD_DELETE a Storage bucket
+        'offboarding-archive' → invoca RPC fn_hard_delete_tenant atómica.
+
+        Idempotente: ya marcados deleted_at se saltan automáticamente vía
+        fn_list_tenants_pending_hard_delete (filtra deleted_at IS NULL).
+        Tolerante a errores: 1 tenant que falla NO detiene los demás.
+
+        DESACTIVADO por default (TENANT_HARD_DELETE_ENABLED=false). Founder
+        debe habilitar en Render env tras validar Fase 2 en staging.
+        """
+        if not self._tenant_hard_delete_enabled:
+            return
+        if not hasattr(self.supabase, "rpc"):
+            return
+
+        now = time.time()
+        if (
+            self._last_tenant_hard_delete_at
+            and (now - self._last_tenant_hard_delete_at) < max(60, TENANT_HARD_DELETE_INTERVAL_SECONDS)
+        ):
+            return
+        self._last_tenant_hard_delete_at = now
+
+        # Lazy import — evita circular si el lib no está cargado al boot.
+        # Fix audit 2026-05-29: usar Path relativo en lugar de hardcoded VM
+        # path (que solo existía en la VM de dev, NO en Render → ImportError
+        # silente + cron 0 deletes en producción).
+        # Pattern canónico usado en worker.py:1582 con _Path(__file__).resolve().
+        try:
+            from pathlib import Path as _Path  # noqa: PLC0415
+            _api_root = _Path(__file__).resolve().parents[1] / "api"
+            if str(_api_root) not in sys.path:
+                sys.path.insert(0, str(_api_root))
+            from lib.tenant_offboarding import (  # noqa: PLC0415
+                hard_delete_tenant,
+                list_tenants_pending_hard_delete,
+                TenantOffboardingError,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "[OFFBOARDING-CRON] No se pudo importar lib.tenant_offboarding: %s. "
+                "Hard-delete cron desactivado en este proceso.",
+                exc,
+            )
+            self._tenant_hard_delete_enabled = False
+            return
+
+        pending = list_tenants_pending_hard_delete(self.supabase, limit=TENANT_HARD_DELETE_BATCH_SIZE)
+        if not pending:
+            return
+
+        logger.info("[OFFBOARDING-CRON] %s tenant(s) pending hard-delete", len(pending))
+
+        for row in pending:
+            tenant_id = row.get("tenant_id")
+            if not tenant_id:
+                continue
+            try:
+                result = hard_delete_tenant(self.supabase, str(tenant_id))
+                logger.info(
+                    "[OFFBOARDING-CRON] Hard-deleted tenant=%s archive=%s rows=%s",
+                    tenant_id, result.get("archive_path"), result.get("total_archived_rows"),
+                )
+                self._metrics.setdefault("tenant_hard_delete_count", 0)
+                self._metrics["tenant_hard_delete_count"] += 1
+            except TenantOffboardingError as exc:
+                logger.warning(
+                    "[OFFBOARDING-CRON] Skip tenant=%s (no elegible): %s",
+                    tenant_id, exc,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[OFFBOARDING-CRON] Error hard-delete tenant=%s: %s. "
+                    "Continuando con próximos tenants.",
+                    tenant_id, exc, exc_info=True,
+                )
+
     def _mark_outbound_failed(self, tenant_id: str, message_id: str, reason: str) -> None:
         if not tenant_id or not message_id:
             return
@@ -919,3 +1920,107 @@ class OrchestratorWorker:
             .eq("tenant_id", tenant_id)
             .execute()
         )
+
+    async def _collect_health_metrics_if_due(self) -> None:
+        """Rev. 109 J.2.11 — Refresca métricas de salud de las 5 integraciones
+        per-tenant cada N segundos (default 5min). UPSERTea en
+        tenant_provider_health. Detecta transiciones healthy → warning/critical
+        y notifica al operador via Telegram (reusa notify_escalation_async).
+
+        Errores per provider NO bloquean los demás. Si lib no carga, gate self.
+        """
+        if not self._health_metrics_enabled:
+            return
+        now = time.time()
+        if (
+            self._last_health_metrics_at
+            and (now - self._last_health_metrics_at) < max(60, HEALTH_METRICS_INTERVAL_SECONDS)
+        ):
+            return
+        self._last_health_metrics_at = now
+
+        try:
+            from health_metrics import collect_all_for_tenant, upsert_metrics  # noqa: PLC0415
+        except ImportError as exc:
+            logger.warning("[HEALTH] health_metrics module no disponible: %s", exc)
+            self._health_metrics_enabled = False
+            return
+
+        # Listar tenants activos (con al menos 1 integration connected).
+        try:
+            res = (
+                self.supabase.table("tenant_integrations")
+                .select("tenant_id")
+                .eq("status", "connected")
+                .execute()
+            )
+            tenant_rows = res.data or []
+            tenant_ids = sorted({r.get("tenant_id") for r in tenant_rows if r.get("tenant_id")})
+        except Exception as exc:
+            logger.warning("[HEALTH] Error listando tenants activos: %s", exc)
+            return
+
+        if not tenant_ids:
+            return
+
+        for tenant_id in tenant_ids:
+            try:
+                metrics = collect_all_for_tenant(self.supabase, str(tenant_id))
+                upsert_metrics(self.supabase, str(tenant_id), metrics)
+                # Detectar transiciones para alertar Telegram operador.
+                await self._notify_health_transitions(str(tenant_id), metrics)
+            except Exception as exc:
+                logger.error(
+                    "[HEALTH] Error en tenant=%s: %s", tenant_id, exc, exc_info=True,
+                )
+
+    async def _notify_health_transitions(
+        self, tenant_id: str, metrics: list,
+    ) -> None:
+        """Detecta transiciones HEALTHY → WARNING/CRITICAL y notifica al
+        operador del tenant via Telegram (reusa notify_escalation_async)."""
+        try:
+            from telegram_notifications import notify_escalation_async  # noqa: PLC0415
+        except ImportError:
+            return
+
+        transitions = []
+        for m in metrics:
+            key = (tenant_id, m.provider, m.metric)
+            prev_status = self._health_status_snapshot.get(key)
+            self._health_status_snapshot[key] = m.status
+            # Notificar solo si transicionó hacia peor (no en cada ciclo).
+            if prev_status in {None, "healthy", "unknown"} and m.status in {"warning", "critical"}:
+                transitions.append(m)
+
+        if not transitions:
+            return
+
+        critical_count = sum(1 for m in transitions if m.status == "critical")
+        warning_count = sum(1 for m in transitions if m.status == "warning")
+        lines = [
+            f"🚨 *Alerta salud integraciones* tenant={tenant_id[:8]}",
+            f"{critical_count} crítica · {warning_count} advertencia",
+            "",
+        ]
+        for m in transitions[:5]:
+            icon = "🔴" if m.status == "critical" else "🟡"
+            lines.append(f"{icon} {m.provider}.{m.metric} = {m.value}")
+        if len(transitions) > 5:
+            lines.append(f"… +{len(transitions) - 5} más")
+
+        # Fix audit 2026-05-29: la firma real de notify_escalation_async es
+        # (supabase, *, tenant_id, conversation_id=None, reason, severity).
+        # Antes pasaba title/body/priority que NO existen — TypeError silente.
+        try:
+            await notify_escalation_async(
+                self.supabase,
+                tenant_id=tenant_id,
+                reason="\n".join(lines),
+                severity="critical" if critical_count else "warning",
+            )
+        except Exception as exc:
+            logger.warning(
+                "[HEALTH] notify_escalation_async falló tenant=%s: %s",
+                tenant_id, exc,
+            )

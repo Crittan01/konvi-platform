@@ -108,6 +108,54 @@ export async function savePresenciaDigital(formData: FormData) {
   revalidatePath('/dashboard/settings')
 }
 
+/**
+ * Rev. 108 modular — Métodos de pago per-tenant (tenant_payment_methods).
+ * Founder feedback 2026-05-27: "este sea totalmente modular".
+ *
+ * Persiste en tabla `tenant_payment_methods` (whitelist constrained:
+ * 'cod', 'online_wompi'). Upsert per método. Server action invocada
+ * desde apps/web/app/dashboard/(settings-group)/settings/payment-methods-form.tsx.
+ */
+export async function savePaymentMethods(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const tenantId = await getOwnerTenantId()
+    const sb = createClient()
+
+    const codEnabled = formData.get('cod_enabled') === '1'
+    const onlineEnabled = formData.get('online_wompi_enabled') === '1'
+
+    // Validación: al menos uno habilitado.
+    if (!codEnabled && !onlineEnabled) {
+      return {
+        ok: false,
+        error: 'Debes habilitar al menos un método de pago.',
+      }
+    }
+
+    // Upsert per método. UNIQUE(tenant_id, method) en tabla.
+    const rows = [
+      { tenant_id: tenantId, method: 'cod', enabled: codEnabled },
+      { tenant_id: tenantId, method: 'online_wompi', enabled: onlineEnabled },
+    ]
+    const { error } = await sb
+      .from('tenant_payment_methods')
+      .upsert(rows, { onConflict: 'tenant_id,method' })
+
+    if (error) {
+      return { ok: false, error: `Error guardando: ${error.message}` }
+    }
+    revalidatePath('/dashboard/settings')
+    return { ok: true }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'Error desconocido',
+    }
+  }
+}
+
 export async function saveShippingOrigin(formData: FormData) {
   const tenantId = await getOwnerTenantId()
 

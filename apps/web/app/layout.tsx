@@ -2,7 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Commerce Ops Platform',
+  title: 'Konvi Platform',
   description: 'Multi-Tenant Backoffice for WhatsApp Commerce',
 }
 

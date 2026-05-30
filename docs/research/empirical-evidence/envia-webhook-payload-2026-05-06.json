@@ -1,0 +1,54 @@
+{
+  "discovered_at": "2026-05-07T03:21:24Z",
+  "method": "POST /ship/webhooktest/ → endpoint capture (envia_webhook_capture_log)",
+  "tracking_used": "794813020143",
+  "carrier": "fedex",
+  "tenant_id": "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9",
+  "envia_source_ip": "3.211.106.119",
+  "envia_user_agent": "Envia-Carriers",
+  "captures_count": 5,
+  "all_payloads_identical": true,
+  "canonical_payload": {
+    "carrier": "fedex",
+    "tracking_number": "794813020143",
+    "shipment_status": "Created"
+  },
+  "key_findings": [
+    "Payload usa snake_case (tracking_number, shipment_status) — opuesto al body de /ship/webhooktest/ que requiere camelCase",
+    "User-Agent oficial = 'Envia-Carriers' (útil para defensa adicional al secret-token)",
+    "Los 5 tipos de webhook (onShipmentStatusUpdate, statusUpdateWithEcommerceInfo, simpleTracking, ecommerceTracking, surcharge) NO se diferencian por payload — todos tienen el mismo shape de 3 campos",
+    "La diferenciación se hace via URL registrada en panel Envia per type_id, NO por contenido del payload",
+    "Shape mínimo garantizado: {carrier, tracking_number, shipment_status}",
+    "Cuando shipment avance status_parent_id en lifecycle real, el payload probablemente extienda con eventHistory[], deliveredAt, signedBy, etc. (basado en /ship/generaltrack/ schema empírico)"
+  ],
+  "implications_for_phase_b": [
+    "Parser canónico debe leer snake_case (no camelCase)",
+    "Status discrimination: usar `shipment_status` string ('Created'|'Delivered'|...) o consultar /ship/generaltrack/ para detalles cuando status terminal",
+    "Para distinguir tipos de webhook: leer URL path o registrar URLs distintas per type en panel y enrutar internamente",
+    "Header User-Agent='Envia-Carriers' como defensa secundaria si la firma URL secret-token fuera comprometida"
+  ],
+  "raw_capture_evidence": {
+    "5_captures_identical": true,
+    "raw_body_template": "{\"carrier\":\"fedex\",\"tracking_number\":\"794813020143\",\"shipment_status\":\"Created\"}",
+    "body_len_bytes": 80,
+    "headers_observed": [
+      "accept",
+      "accept-encoding",
+      "authorization",
+      "content-length",
+      "content-type",
+      "host",
+      "traceparent",
+      "tracestate",
+      "user-agent (Envia-Carriers)",
+      "x-datadog-parent-id",
+      "x-datadog-sampling-priority",
+      "x-datadog-tags",
+      "x-datadog-trace-id",
+      "x-forwarded-for",
+      "x-forwarded-host",
+      "x-forwarded-proto"
+    ],
+    "datadog_headers_imply": "Envia usa Datadog para tracing interno; podemos correlar issues con sus reportes via traceparent header"
+  }
+}

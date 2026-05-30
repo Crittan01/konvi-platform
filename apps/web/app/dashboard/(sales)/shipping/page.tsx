@@ -48,15 +48,16 @@ export default async function ShippingPage({
     return digits.slice(0, 5)
   }
 
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-  const tenantId = meta.tenant_id
-  const role = meta.role ?? 'operator'
+  // Sem 5 perf: cached.
+  const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
+  await getCachedUser()
+  const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
+  const supabase = createClient()
 
   let shipments: Shipment[] = []
-  let enviaConnected = false
+  let activeProvider: 'envia' | 'aveonline' = 'envia'
+  let activeProviderConnected = false
   let shippingOrigin: ShippingOrigin | null = null
   let destDefaults: Record<string, string> | null = null
 
@@ -65,6 +66,11 @@ export default async function ShippingPage({
   let deliveredCount = 0
 
   if (tenantId) {
+    // Rev. 107: query AMBOS providers shipping (envia + aveonline) +
+    // tenant_shipping_provider_config para resolver cuál está activo y
+    // si ESE está conectado. Coherente con ADR-0019: 1 provider activo
+    // per tenant + el módulo Cotizador muestra status del provider
+    // que realmente se va a usar al cotizar.
     const baseQueries = Promise.all([
       supabase
         .from('shipments')
@@ -74,24 +80,41 @@ export default async function ShippingPage({
         .limit(50),
       supabase
         .from('tenant_integrations')
-        .select('status')
+        .select('provider, status')
         .eq('tenant_id', tenantId)
-        .eq('provider', 'envia')
-        .maybeSingle(),
+        .in('provider', ['envia', 'aveonline']),
       supabase
         .from('tenants')
         .select('shipping_origin')
         .eq('id', tenantId)
         .single(),
+      supabase
+        .from('tenant_shipping_provider_config')
+        .select('active_provider')
+        .eq('tenant_id', tenantId)
+        .maybeSingle(),
     ])
 
-    const [shipmentsRes, integrationRes, tenantRes] = await baseQueries
+    const [shipmentsRes, integrationsRes, tenantRes, providerCfgRes] = await baseQueries
 
     shipments      = (shipmentsRes.data as Shipment[]) || []
-    enviaConnected = integrationRes.data?.status === 'connected'
     shippingOrigin = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
     inTransitCount = shipments.filter(s => s.status === 'in_transit').length
     deliveredCount = shipments.filter(s => s.status === 'delivered').length
+
+    // Resolver provider activo (default 'envia' si no hay row config).
+    const cfgProvider = providerCfgRes.data?.active_provider as
+      | 'envia' | 'aveonline' | undefined
+    activeProvider = cfgProvider === 'aveonline' ? 'aveonline' : 'envia'
+
+    // ¿Está conectado el provider activo?
+    const integrationsList = (integrationsRes.data ?? []) as Array<{
+      provider: string; status: string
+    }>
+    const activeProviderRow = integrationsList.find(
+      i => i.provider === activeProvider,
+    )
+    activeProviderConnected = activeProviderRow?.status === 'connected'
 
     // Si viene de un pedido, buscar la dirección del contacto
     if (searchParams?.order) {
@@ -135,16 +158,24 @@ export default async function ShippingPage({
         </div>
       </div>
 
-      {/* Banner Envia desconectado */}
-      {!enviaConnected && (
+      {/* Banner provider activo desconectado (Rev. 107 — dinámico por active_provider). */}
+      {!activeProviderConnected && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10">
           <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-amber-400">Envia no está conectado</p>
+            <p className="text-sm font-medium text-amber-400">
+              {activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'} no está conectado
+            </p>
             <p className="text-xs text-amber-400/80 mt-0.5">
               Ve a{' '}
-              <Link href="/dashboard/integrations" className="underline font-medium">Integraciones</Link>
-              {' '}para configurar tu API key de Envia antes de cotizar envíos.
+              <Link
+                href={`/dashboard/integrations/${activeProvider}`}
+                className="underline font-medium"
+              >
+                Integraciones → {activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'}
+              </Link>
+              {' '}para configurar tus credenciales antes de cotizar envíos. Tu provider
+              activo es <span className="font-mono">{activeProvider}</span>.
             </p>
           </div>
         </div>
@@ -168,8 +199,8 @@ export default async function ShippingPage({
         </div>
       )}
 
-      {/* Formulario de cotización */}
-      {enviaConnected && canWrite && (
+      {/* Formulario de cotización — habilitado si provider activo está connected. */}
+      {activeProviderConnected && canWrite && (
         <ShippingQuoteForm
           shippingOrigin={shippingOrigin}
           orderId={searchParams?.order ?? null}
@@ -186,7 +217,9 @@ export default async function ShippingPage({
           <div className="flex flex-col items-center py-16 rounded-xl border border-dashed border-border text-center">
             <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
             <p className="text-muted-foreground text-sm">
-              {enviaConnected ? 'No hay envíos aún. Usa el formulario de cotización.' : 'Conecta Envia para comenzar a crear envíos.'}
+              {activeProviderConnected
+                ? 'No hay envíos aún. Usa el formulario de cotización.'
+                : `Conecta ${activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'} para comenzar a crear envíos.`}
             </p>
           </div>
         ) : (

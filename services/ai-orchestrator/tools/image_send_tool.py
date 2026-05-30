@@ -154,6 +154,12 @@ def is_image_request_query(text: str) -> bool:
     de imagen y transaccionales (comprar + foto), prioriza imagen — el
     cliente pidió explícitamente ver antes de comprar. Si solo hay tokens
     transaccionales, no dispara (dejar al flujo de compra).
+
+    Rev. 104 (F1-7 / BUG-6): NEGATIVE OVERRIDE — si la query contiene
+    "link"/"checkout"/"pago" + verbo de envío ("mándame"/"envíame"), es
+    pedido de PAYMENT LINK, NO de imagen. Caso recurrente S24 known:
+    "perfecto, confirmo, mándame el link" → antes false-positive como
+    imagen → "Aún no tengo foto". Ahora se descarta.
     """
     if not text:
         return False
@@ -161,11 +167,31 @@ def is_image_request_query(text: str) -> bool:
     if not normalized:
         return False
     tokens = set(re.findall(r"[a-z0-9ñ]+", normalized))
+
     # Rev. 82: matching de frases con word-boundary (evita que "como es"
     # matchee dentro de "como estan").
+    _explicit_image_tokens = tokens & {"foto", "fotos", "imagen", "imagenes",
+                                        "muestrame", "muestra", "mostrar",
+                                        "ver", "verla", "verlo"}
     has_image_tokens = bool(tokens & _IMAGE_REQUEST_TOKENS) or any(
         _phrase_matches_with_boundary(p, normalized) for p in _IMAGE_REQUEST_PHRASES
     )
+
+    # Rev. 104 (F1-7 / BUG-6) — NEGATIVE override:
+    # Si el cliente menciona "link"/"checkout"/"pago"/"wompi" + verbo de envío
+    # ("mandame"/"enviame") y NO tiene un token EXPLÍCITO de imagen
+    # ("foto"/"imagen"/"muestrame"/"ver"), entonces es pedido de PAYMENT LINK,
+    # no de imagen. Caso recurrente S24 known: "perfecto, confirmo, mándame el link".
+    # Si tiene token explícito de imagen ("ya pago, mándame la foto"), gana imagen.
+    _PAYMENT_LINK_TOKENS = {"link", "checkout", "wompi"}
+    _PAYMENT_PAY_TOKENS = {"pago", "pagar", "paga"}
+    _SEND_VERB_TOKENS = {"mandame", "enviame", "manda", "envia"}
+    _has_explicit_image = bool(_explicit_image_tokens)
+    _has_payment_signal = bool(tokens & _PAYMENT_LINK_TOKENS) or (
+        bool(tokens & _PAYMENT_PAY_TOKENS) and bool(tokens & _SEND_VERB_TOKENS)
+    )
+    if _has_payment_signal and not _has_explicit_image:
+        return False
     has_transactional = bool(tokens & _TRANSACTIONAL_OVERRIDE_TOKENS)
     # Prioridad imagen cuando ambos están — cliente quiere ver antes de comprar.
     return has_image_tokens or False  # transactional-only no dispara
@@ -222,7 +248,7 @@ def _get_tenant_products_with_images(supabase: Client, tenant_id: str) -> list[d
     return res.data or []
 
 
-# Meta v21.0 limita caption a 1024 chars. Dejamos margen para CTA + título.
+# Meta Graph API limita caption a 1024 chars. Dejamos margen para CTA + título.
 _MAX_DESCRIPTION_IN_CAPTION = 600
 
 

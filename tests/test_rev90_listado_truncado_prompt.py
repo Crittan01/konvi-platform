@@ -19,11 +19,18 @@ sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-o
 class ListadoTruncadoPromptRuleTests(unittest.TestCase):
 
     def setUp(self):
-        with open(
+        # Rev. 104 (F1-4) — el cuerpo del system prompt vive ahora en
+        # `prompt/builder.py`. Concatenamos ambos archivos para que los
+        # asserts por substring sigan validando contenido sin importar
+        # en qué módulo aterrizó tras la extracción.
+        sources = []
+        for path in (
             "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/orchestrator.py",
-            encoding="utf-8",
-        ) as fh:
-            self.src = fh.read()
+            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/prompt/builder.py",
+        ):
+            with open(path, encoding="utf-8") as fh:
+                sources.append(fh.read())
+        self.src = "\n".join(sources)
 
     def test_catalogo_amplio_rule_present(self):
         # Rev. 103 — sustituye "LISTADO TRUNCADO" por "LISTADO DE CATÁLOGO AMPLIO".

@@ -181,8 +181,9 @@ class VerifiedOrderContextTests(unittest.TestCase):
         self.assertGreater(result["shipping_cost_cents"], 0)
 
     def test_format_cop(self):
-        self.assertEqual(orchestrator._format_cop(3500000), "$35.000 COP")
-        self.assertEqual(orchestrator._format_cop(100), "$1 COP")
+        # Sem 7 F2 cierre 2026-05-20 — P5: sin sufijo " COP".
+        self.assertEqual(orchestrator._format_cop(3500000), "$35.000")
+        self.assertEqual(orchestrator._format_cop(100), "$1")
 
 
 if __name__ == "__main__":

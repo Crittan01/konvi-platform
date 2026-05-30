@@ -23,6 +23,11 @@ export interface Product {
   cover_image_url: string | null
   platform_category_id: string | null
   product_variations: Variation[]
+  // Rev. 109 backlog #1 — Retracto categories multi-tenant.
+  // Tenant marca productos excluidos del Art. 47 Ley 1480 parágrafo
+  // (cosmética abierta, software descargable, perecederos, etc.).
+  retracto_excluded?: boolean | null
+  retracto_excluded_reason?: string | null
 }
 
 export interface Category {

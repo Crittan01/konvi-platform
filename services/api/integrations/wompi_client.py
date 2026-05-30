@@ -13,12 +13,24 @@ Algoritmo de firma webhook: SHA256 simple sobre string concatenado
 
 Credenciales: por-tenant en tenant_integrations (provider='wompi'),
 almacenadas en Supabase Vault. No se usan env vars globales.
+
+H.3.1 — Estado de exposición HTTP (cierre 2026-05-29):
+    Las funciones get_transaction_sync(), get_transaction() async y
+    get_transaction_with_resilience() son API INTERNA lista para callers
+    Python (cron de reconciliation, scripts admin, background jobs).
+    NO existe endpoint HTTP público GET /api/v1/wompi/transactions/{id} —
+    decisión arquitectónica Sem 4 (2026-05-06) + cierre 2026-05-29 documentado
+    en docs/reports/h31_wompi_get_transaction_closure.md. NO eliminar estas
+    funciones: son contract estable para cuando se diseñe la UI
+    "Reconciliar pago" o el cron de reconciliación background.
 """
 import hashlib
 import logging
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import httpx
+
+from lib.phone import to_canonical as _phone_to_canonical, is_valid_co as _phone_is_valid_co  # rev. 104 F0-4
 
 logger = logging.getLogger(__name__)
 
@@ -152,16 +164,26 @@ _WOMPI_LEGAL_ID_TYPES_ACCEPTED = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
 def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
     """Construye el bloque customer_data Wompi a partir del contacto.
 
-    Reglas (rev. 68, validadas en producción):
-      - Solo se incluyen claves con valor (Wompi devuelve 422 ante nulls
-        explícitos en strings).
-      - ``legal_id_type`` se envía tal cual el cliente lo dió, dentro del
-        set aceptado por el repo. Si el tipo no está en el set, no se
-        envía documento (mejor que pre-mapear a otro tipo y mentirle al
-        merchant en su backoffice).
-      - ``phone_number_prefix`` separado (ej. ``+57``) según schema oficial.
+    ⚠️ NO USAR EN /v1/payment_links (Sem 7 F2 cierre, 2026-05-19).
 
-    Ref: https://docs.wompi.co/docs/colombia/widget-checkout-web/
+    Reconfirmado en doc oficial Wompi
+    (https://docs.wompi.co/en/docs/colombia/links-de-pago/): el campo
+    ``customer_data`` del endpoint ``POST /v1/payment_links`` SOLO acepta
+    ``customer_references`` (array máx 2 de ``{label, is_required}``)
+    para campos custom adicionales. NO acepta email/full_name/phone_number/
+    legal_id para pre-poblar el formulario del checkout hosted — Wompi
+    ignora silenciosamente cualquier otra clave.
+
+    Este builder queda preservado para FUTURA migración a:
+      - Widget & Checkout Web (JS embebido en página propia, requiere
+        storefront I.1 — diferido por decisión founder 2026-05-05).
+      - POST /v1/transactions directo (Third-Party Payments API, requiere
+        cerrar gap Habeas Data H.3.8 acceptance_token).
+
+    Reglas (rev. 68, validadas contra schema teórico de Widget/Transactions):
+      - Solo se incluyen claves con valor.
+      - ``legal_id_type`` se envía tal cual dentro del set aceptado.
+      - ``phone_number_prefix`` separado (ej. ``+57``).
     """
     if not contact:
         return None
@@ -176,17 +198,21 @@ def _build_customer_data(contact: Optional[dict]) -> Optional[dict]:
     if full_name:
         cd["full_name"] = full_name
 
-    # Teléfono Wompi: split prefix + number. WhatsApp guarda con + (ej. +573001234567).
-    phone = (contact.get("phone") or "").strip()
-    if phone:
-        digits = phone.lstrip("+").lstrip("0")
-        if digits.startswith("57") and len(digits) >= 12:
+    # Teléfono Wompi: requiere split prefix + number según schema oficial
+    # (https://docs.wompi.co/docs/colombia/widget-checkout-web/).
+    # Rev. 104 (F0-4): leemos canon (digits-only, alineado con DB) y
+    # convertimos a la forma que Wompi espera. `to_canonical` tolera tanto
+    # legacy '+57...' como nuevo '57...'.
+    raw_phone = contact.get("phone") or ""
+    canonical = _phone_to_canonical(raw_phone)
+    if canonical:
+        if _phone_is_valid_co(canonical):
             cd["phone_number_prefix"] = "+57"
-            cd["phone_number"] = digits[2:]
+            cd["phone_number"] = canonical[2:]  # quita '57'
         else:
-            # Fallback: solo number sin prefix. Wompi puede aceptarlo o ignorarlo
-            # según el método. No agregar prefix=null porque Wompi rechaza nulls.
-            cd["phone_number"] = digits
+            # No-CO: Wompi puede aceptarlo sin prefix o rechazar; entregamos
+            # los dígitos tal cual y dejamos que Wompi valide.
+            cd["phone_number"] = canonical
 
     # Documento: ambos juntos o ninguno (regla Wompi).
     doc_type_raw = (contact.get("document_type") or "").strip().upper()
@@ -212,7 +238,13 @@ def create_payment_link_sync(
 ) -> dict:
     """
     Versión síncrona de create_payment_link — para BackgroundTasks y webhooks síncronos.
-    Rev. 68 — recibe `contact` opcional para pre-poblar customer_data en checkout.
+
+    Param ``contact``: aceptado por compat con caller (rev. 68 lo pasaba para
+    pre-poblar customer_data en checkout). Sem 7 F2 cierre 2026-05-19: doc
+    oficial Wompi confirma que /v1/payment_links NO pre-popula comprador desde
+    ``customer_data`` (ese campo solo acepta ``customer_references`` custom).
+    El parámetro permanece en la firma por estabilidad de callers; el dato
+    queda preservado para futura migración a Widget Web / /transactions.
     """
     if not private_key:
         raise ValueError("private_key Wompi no configurada para este tenant")
@@ -230,18 +262,13 @@ def create_payment_link_sync(
     }
     if redirect_url:
         payload["redirect_url"] = redirect_url
-    customer_data = _build_customer_data(contact)
-    if customer_data:
-        payload["customer_data"] = customer_data
-        logger.info(
-            "[WOMPI] payment_link customer_data fields=%s",
-            sorted(customer_data.keys()),
-        )
-    else:
-        logger.warning(
-            "[WOMPI] payment_link sin customer_data — checkout pedirá datos al cliente. order=%s",
-            order_id,
-        )
+    # Sem 7 F2 cierre — NO enviar customer_data al endpoint /v1/payment_links.
+    # Doc oficial Wompi confirma que ese campo solo acepta customer_references
+    # (campos custom), NO pre-popula comprador. Cliente tipea email/nombre/
+    # celular en el checkout hosted (~10s friction aceptable para WhatsApp
+    # commerce). Builder _build_customer_data preservado para futura
+    # migración a Widget Web / /transactions directo.
+    # Ver docstring de _build_customer_data para detalles.
 
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = client.post(
@@ -279,7 +306,13 @@ async def create_payment_link(
 
     Campos requeridos por Wompi: name, description, single_use, collect_shipping.
     Correlación orden↔pago: order_id en campo `sku` (UUID v4 = 36 chars exactos).
-    Rev. 68 — pre-popula `customer_data` desde el contacto para checkout sin re-tipear.
+
+    Param ``contact``: aceptado por compat con caller (rev. 68 lo pasaba para
+    pre-poblar customer_data en checkout). Sem 7 F2 cierre 2026-05-19: doc
+    oficial Wompi confirma que /v1/payment_links NO pre-popula comprador desde
+    ``customer_data`` (ese campo solo acepta ``customer_references`` custom).
+    El parámetro permanece en la firma por estabilidad de callers; el dato
+    queda preservado para futura migración a Widget Web / /transactions.
 
     Returns dict con:
       - link_id: str (id del payment link)
@@ -303,19 +336,8 @@ async def create_payment_link(
     }
     if redirect_url:
         payload["redirect_url"] = redirect_url
-    customer_data = _build_customer_data(contact)
-    if customer_data:
-        payload["customer_data"] = customer_data
-        logger.info(
-            "[WOMPI] payment_link customer_data fields=%s order=%s",
-            sorted(customer_data.keys()),
-            order_id,
-        )
-    else:
-        logger.warning(
-            "[WOMPI] payment_link sin customer_data — checkout pedirá datos al cliente. order=%s",
-            order_id,
-        )
+    # Sem 7 F2 cierre — NO enviar customer_data al endpoint /v1/payment_links.
+    # (Ver docstring de _build_customer_data para justificación completa.)
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = await client.post(
@@ -334,3 +356,405 @@ async def create_payment_link(
         "amount_in_cents": data.get("amount_in_cents"),
         "expires_at": data.get("expires_at"),
     }
+
+
+# ─── Rev. 105 Sem 4 H.3.1 — GET transaction (audit + reconciliation) ─────────
+# Permite consultar directamente el estado de una transacción a Wompi sin
+# depender del webhook. Cierra el riesgo P0 documentado en dossier Wompi
+# 2026-05-05 sec. 6: Wompi reintenta webhooks 30min/3h/24h pero NO garantiza
+# delivery. Si los retries fallan (red caída del lado nuestro), la orden
+# queda en PENDING aunque el cliente sí pagó. Este endpoint permite
+# reconciliar estado consultando Wompi directamente.
+#
+# Endpoint Wompi: GET /transactions/{id} — pública, requiere Bearer pub_key
+# o prv_key. Documentación: https://docs.wompi.co/docs/colombia/transacciones/
+
+def get_transaction_sync(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+) -> dict:
+    """Consulta una transacción Wompi por ID. Síncrona — para scripts admin
+    y reconciliation desde BackgroundTasks.
+
+    Retorna el objeto transaction completo de Wompi:
+        {
+            "id": "01-1538687528-49201",
+            "amount_in_cents": 4490000,
+            "reference": "MZQ3X2",
+            "customer_email": "...",
+            "currency": "COP",
+            "payment_method_type": "NEQUI",
+            "redirect_url": "...",
+            "status": "APPROVED" | "DECLINED" | "VOIDED" | "ERROR" | "PENDING",
+            "status_message": "...",
+            ...
+        }
+
+    Levanta httpx.HTTPStatusError si Wompi 4xx/5xx (caller decide manejo).
+    Wompi 404 = transaction_id inválido o no existe en este merchant.
+    """
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id no puede ser vacío")
+
+    base_url = wompi_base_url(environment)
+    url = f"{base_url}/transactions/{transaction_id.strip()}"
+
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = client.get(
+            url,
+            headers={"Authorization": f"Bearer {private_key}"},
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "[WOMPI] GET /transactions/%s %d: %s",
+                transaction_id, response.status_code, response.text[:300],
+            )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        if not isinstance(data, dict):
+            logger.warning(
+                "[WOMPI] GET transaction %s: data no es dict: %s",
+                transaction_id, type(data).__name__,
+            )
+            return {}
+        return data
+
+
+async def get_transaction(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+) -> dict:
+    """Async version para llamadas desde request handlers FastAPI."""
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id no puede ser vacío")
+
+    base_url = wompi_base_url(environment)
+    url = f"{base_url}/transactions/{transaction_id.strip()}"
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {private_key}"},
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "[WOMPI] GET /transactions/%s %d: %s",
+                transaction_id, response.status_code, response.text[:300],
+            )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        if not isinstance(data, dict):
+            return {}
+        return data
+
+
+# ─── Rev. 109 — Wompi void (anulación pre-settlement) ───────────────────────
+#
+# POST /v1/transactions/{id}/void
+# Documentación: docs/research/wompi-dossier-2026-05-05.md sec H.3.2.
+#
+# REALIDAD CRUDA:
+#   • Wompi NO tiene API de refund pública. Solo `void`.
+#   • Void aplica SOLO a tarjetas (CARD) ANTES de settlement (~24-48h).
+#   • NEQUI, PSE, Bancolombia: NO se pueden voidear (fondos ya transferidos).
+#   • Post-settlement: refund manual dashboard Wompi o soporte Bancolombia.
+#
+# Esta función intenta el void. Si no aplica (método ≠ CARD o ventana vencida),
+# Wompi retorna 4xx — el caller debe marcar refund_pending_manual + notificar
+# operador. NO se debe insistir.
+
+
+def void_transaction_sync(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+) -> dict:
+    """Intenta anular una transacción Wompi (pre-settlement, solo CARD).
+
+    Args:
+        private_key: clave prv_* del tenant.
+        environment: 'sandbox' | 'production'.
+        transaction_id: ID Wompi de la transacción a anular.
+
+    Returns:
+        dict con respuesta Wompi:
+            {
+                "id": "01-1538687528-49201",
+                "status": "VOIDED",      # o el status actual si rechaza
+                "amount_in_cents": ...,
+                "voided_at": "...",
+            }
+
+    Raises:
+        ValueError si args inválidos.
+        httpx.HTTPStatusError si Wompi rechaza:
+          • 422 Unprocessable Entity — método ≠ CARD o post-settlement.
+          • 404 — transaction_id no existe.
+          • 401 — private_key inválida.
+        Caller debe interpretar el código:
+          • 422 → fallback refund manual (operador dashboard).
+          • 5xx → retry posible vía void_transaction_sync_with_resilience.
+    """
+    if not private_key:
+        raise ValueError("private_key Wompi no configurada para este tenant")
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id no puede ser vacío")
+
+    base_url = wompi_base_url(environment)
+    url = f"{base_url}/transactions/{transaction_id.strip()}/void"
+
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {private_key}",
+                "Content-Type": "application/json",
+            },
+            json={},  # Wompi void no requiere payload, pero acepta body vacío.
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "[WOMPI] POST /transactions/%s/void %d: %s",
+                transaction_id, response.status_code, response.text[:300],
+            )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        if not isinstance(data, dict):
+            logger.warning(
+                "[WOMPI] void %s: data no es dict: %s",
+                transaction_id, type(data).__name__,
+            )
+            return {}
+        logger.info(
+            "[WOMPI] void OK txn=%s new_status=%s",
+            transaction_id, data.get("status", "?"),
+        )
+        return data
+
+
+def is_void_eligible(payment_method_type: str, paid_at_iso: str | None) -> bool:
+    """Heurística pre-call: ¿este pago es elegible para void?
+
+    Reglas (dossier Wompi sec H.3.2):
+      • Método debe ser CARD (Visa/Mastercard/Amex).
+      • Tiempo desde captura < 24h (settlement window típico Bancolombia).
+
+    NO es garantía — Wompi puede rechazar igual si captura cerró antes.
+    Sirve como GATE PRE-CALL para evitar 422 cuando ya sabemos que no aplica.
+
+    Args:
+        payment_method_type: 'CARD' | 'NEQUI' | 'PSE' | 'BANCOLOMBIA_TRANSFER'
+        paid_at_iso: cuando se aprobó el pago (ISO 8601). None si desconocido.
+
+    Returns:
+        True si TODOS los gates pasan; False si claramente no aplica.
+    """
+    if (payment_method_type or "").upper() != "CARD":
+        return False
+    if not paid_at_iso:
+        # Sin timestamp = optimista, intentamos.
+        return True
+    try:
+        from datetime import datetime, timezone, timedelta
+        paid_at = datetime.fromisoformat(paid_at_iso.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        # Ventana conservadora 23h para no llegar al borde de settlement.
+        return (now - paid_at) < timedelta(hours=23)
+    except Exception:
+        return True  # Defensive: intentar si no podemos parsear timestamp.
+
+
+# ─── Rev. 105 Sem 4 H.3.2 — Retry + Circuit Breaker (resilience) ─────────────
+# Wrappers opt-in sobre create_payment_link / get_transaction / etc. que
+# agregan:
+#   - Retry exponential backoff + jitter (3 intentos default) ante 5xx /
+#     network / timeout
+#   - Circuit breaker per-tenant (opcional, evita gastar tiempo si Wompi
+#     está caído)
+#
+# NO modifica los wrappers originales — callers actuales siguen funcionando.
+# Para activar resilience en una callsite, cambiar:
+#   create_payment_link_sync(...)  →  create_payment_link_sync_with_resilience(...)
+#
+# Cierra riesgo P0 dossier Wompi 2026-05-05 sec. 6: outages temporales de
+# Wompi causaban falla inmediata en primer intento; con retry el flow se
+# recupera; con CB damos UX claro al cliente cuando Wompi está caído real.
+
+from typing import Callable as _Callable, TypeVar as _TypeVar  # noqa: E402
+
+_T = _TypeVar("_T")
+
+
+def _is_retriable_wompi(error: Exception) -> bool:
+    """5xx + network + timeout → retry. 4xx (validación) → no retry."""
+    # httpx.HTTPStatusError tiene .response.status_code
+    if hasattr(error, "response"):
+        try:
+            status = error.response.status_code  # type: ignore
+            if 500 <= status < 600:
+                return True
+            return False  # 4xx no retriable
+        except AttributeError:
+            pass
+    # Otros errores (timeout, connection, etc.) → retry.
+    return True
+
+
+def create_payment_link_sync_with_resilience(
+    *,
+    private_key: str,
+    environment: str,
+    order_id: str,
+    name: str,
+    description: str,
+    amount_in_cents: int,
+    expires_at: str,
+    redirect_url: Optional[str] = None,
+    contact: Optional[dict] = None,
+    max_attempts: int = 3,
+    circuit_breaker: Optional[Any] = None,
+) -> dict:
+    """Versión resiliente de create_payment_link_sync con retry + opcional
+    circuit breaker. Para callsites que toleran latencia adicional (BackgroundTasks).
+
+    circuit_breaker: instancia opcional de
+        services.api.lib.integration_client.CircuitBreaker. Si pasada, abre
+        tras N fallos consecutivos y levanta CircuitOpenError; caller debe
+        manejar (mostrar error UX-claro al cliente, encolar pgmq, etc.).
+    """
+    from lib.integration_client.retry import RetryPolicy, retry_sync  # noqa: PLC0415
+
+    if circuit_breaker is not None:
+        circuit_breaker.before_request("wompi")
+
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay_seconds=1.0,
+        max_delay_seconds=15.0,
+        jitter_seconds=0.5,
+    )
+
+    def _do() -> dict:
+        return create_payment_link_sync(
+            private_key=private_key,
+            environment=environment,
+            order_id=order_id,
+            name=name,
+            description=description,
+            amount_in_cents=amount_in_cents,
+            expires_at=expires_at,
+            redirect_url=redirect_url,
+            contact=contact,
+        )
+
+    try:
+        result = retry_sync(_do, policy=policy, is_retriable=_is_retriable_wompi)
+        if circuit_breaker is not None:
+            circuit_breaker.record_success("wompi")
+        return result
+    except Exception:
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure("wompi")
+        raise
+
+
+async def create_payment_link_with_resilience(
+    *,
+    private_key: str,
+    environment: str,
+    order_id: str,
+    name: str,
+    description: str,
+    amount_in_cents: int,
+    expires_at: str,
+    redirect_url: Optional[str] = None,
+    contact: Optional[dict] = None,
+    max_attempts: int = 3,
+    circuit_breaker: Optional[Any] = None,
+) -> dict:
+    """Versión async resiliente. Mismo contrato que create_payment_link
+    con retry + opcional circuit breaker."""
+    from lib.integration_client.retry import RetryPolicy, retry_async  # noqa: PLC0415
+
+    if circuit_breaker is not None:
+        circuit_breaker.before_request("wompi")
+
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay_seconds=1.0,
+        max_delay_seconds=15.0,
+        jitter_seconds=0.5,
+    )
+
+    async def _do() -> dict:
+        return await create_payment_link(
+            private_key=private_key,
+            environment=environment,
+            order_id=order_id,
+            name=name,
+            description=description,
+            amount_in_cents=amount_in_cents,
+            expires_at=expires_at,
+            redirect_url=redirect_url,
+            contact=contact,
+        )
+
+    try:
+        result = await retry_async(_do, policy=policy, is_retriable=_is_retriable_wompi)
+        if circuit_breaker is not None:
+            circuit_breaker.record_success("wompi")
+        return result
+    except Exception:
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure("wompi")
+        raise
+
+
+async def get_transaction_with_resilience(
+    *,
+    private_key: str,
+    environment: str,
+    transaction_id: str,
+    max_attempts: int = 3,
+    circuit_breaker: Optional[Any] = None,
+) -> dict:
+    """Versión resiliente de get_transaction. Útil para reconciliation
+    background jobs donde puede tolerarse algo más de latencia ante
+    outages."""
+    from lib.integration_client.retry import RetryPolicy, retry_async  # noqa: PLC0415
+
+    if circuit_breaker is not None:
+        circuit_breaker.before_request("wompi")
+
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay_seconds=1.0,
+        max_delay_seconds=10.0,
+        jitter_seconds=0.5,
+    )
+
+    async def _do() -> dict:
+        return await get_transaction(
+            private_key=private_key,
+            environment=environment,
+            transaction_id=transaction_id,
+        )
+
+    try:
+        result = await retry_async(_do, policy=policy, is_retriable=_is_retriable_wompi)
+        if circuit_breaker is not None:
+            circuit_breaker.record_success("wompi")
+        return result
+    except Exception:
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure("wompi")
+        raise
