@@ -86,7 +86,7 @@ class PrivacyPolicyTests(unittest.TestCase):
         self.assertIn("SIC", self.privacy)
 
     def test_lists_subprocessors(self):
-        for sub in ("Wompi", "WhatsApp", "Supabase", "Envia"):
+        for sub in ("Wompi", "WhatsApp", "Supabase", "Aveonline"):
             self.assertIn(sub, self.privacy)
 
 
@@ -97,7 +97,7 @@ class SubprocessorsTests(unittest.TestCase):
         cls.subs = _read(os.path.join(LEGAL_DIR, "subprocessors.md"))
 
     def test_lists_core_subprocessors(self):
-        for sub in ("Supabase", "Meta", "Wompi", "Envia.com",
+        for sub in ("Supabase", "Meta", "Wompi", "Aveonline",
                     "Resend", "Render"):
             self.assertIn(sub, self.subs)
 

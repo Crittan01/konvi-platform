@@ -56,47 +56,37 @@ class QuoteShippingRoutingTests(unittest.TestCase):
             supabase=sb, extras={}, logger=MagicMock(),
         )
 
-    def test_active_provider_envia_retorna_envia_disabled(self):
-        """Rev. 107 founder 2026-05-24: Envia INHABILITADO en plataforma.
-
-        Si un tenant tiene active_provider='envia' configurado, el tool
-        DEBE retornar error explícito ENVIA_DISABLED y NO invocar el
-        adapter Envia silenciosamente (no fallback, sin "errores blandos").
+    def test_active_provider_envia_retorna_provider_not_supported(self):
+        """Rev. 109: Envia eliminado del runtime (ADR-0019). Si un tenant
+        tiene active_provider='envia' configurado (legacy row residual), el
+        tool DEBE retornar error PROVIDER_NOT_SUPPORTED y NO invocar
+        ningún adapter silenciosamente.
         """
         sb = _mock_supabase_with_provider("envia")
         import agentic.legacy_adapters as la
 
-        called = {"envia": False, "aveonline": False}
-
-        async def fake_envia(sb, **kw):
-            called["envia"] = True
-            return {"ok": True, "options": []}
+        called = {"aveonline": False}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
             return {"ok": True, "options": []}
 
-        with patch.object(la, "quote_shipping_for_cart", fake_envia), \
-             patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
+        with patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
             args = self.tool.args_schema(city="Bogotá")
             result = _run(self.tool.execute(args, self._make_ctx(sb)))
 
         # Ningún adapter invocado: guard cortó antes.
-        self.assertFalse(called["envia"])
         self.assertFalse(called["aveonline"])
         self.assertFalse(result.success)
-        self.assertEqual(result.data.get("code"), "ENVIA_DISABLED")
+        self.assertEqual(result.data.get("code"), "PROVIDER_NOT_SUPPORTED")
 
     def test_active_provider_aveonline_invoca_adapter_aveonline(self):
         """active_provider='aveonline' → quote_shipping_for_cart_aveonline."""
         sb = _mock_supabase_with_provider("aveonline")
         import agentic.legacy_adapters as la
 
-        called = {"envia": False, "aveonline": False}
+        called = {"aveonline": False}
 
-        async def fake_envia(sb, **kw):
-            called["envia"] = True
-            return {"ok": True, "options": []}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
@@ -112,13 +102,11 @@ class QuoteShippingRoutingTests(unittest.TestCase):
                 "provider": "aveonline",
             }
 
-        with patch.object(la, "quote_shipping_for_cart", fake_envia), \
-             patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
+        with patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
             args = self.tool.args_schema(city="Medellín")
             result = _run(self.tool.execute(args, self._make_ctx(sb)))
 
         self.assertTrue(called["aveonline"])
-        self.assertFalse(called["envia"])
         self.assertTrue(result.success)
         self.assertEqual(len(result.data["options"]), 1)
         self.assertEqual(result.data["options"][0]["carrier"], "COORDINADORA")
@@ -130,11 +118,8 @@ class QuoteShippingRoutingTests(unittest.TestCase):
         sb = _mock_supabase_with_provider(None)  # No row.
         import agentic.legacy_adapters as la
 
-        called = {"envia": False, "aveonline": False}
+        called = {"aveonline": False}
 
-        async def fake_envia(sb, **kw):
-            called["envia"] = True
-            return {"ok": True, "options": []}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
@@ -150,12 +135,10 @@ class QuoteShippingRoutingTests(unittest.TestCase):
                 "provider": "aveonline",
             }
 
-        with patch.object(la, "quote_shipping_for_cart", fake_envia), \
-             patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
+        with patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
             args = self.tool.args_schema(city="Bogotá")
             _run(self.tool.execute(args, self._make_ctx(sb)))
 
-        self.assertFalse(called["envia"])
         self.assertTrue(called["aveonline"])
 
     def test_db_falla_default_aveonline(self):
@@ -167,11 +150,8 @@ class QuoteShippingRoutingTests(unittest.TestCase):
         sb.table.side_effect = Exception("DB unreachable")
         import agentic.legacy_adapters as la
 
-        called = {"envia": False, "aveonline": False}
+        called = {"aveonline": False}
 
-        async def fake_envia(sb, **kw):
-            called["envia"] = True
-            return {"ok": True, "options": []}
 
         async def fake_aveonline(sb, **kw):
             called["aveonline"] = True
@@ -187,13 +167,11 @@ class QuoteShippingRoutingTests(unittest.TestCase):
                 "provider": "aveonline",
             }
 
-        with patch.object(la, "quote_shipping_for_cart", fake_envia), \
-             patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
+        with patch.object(la, "quote_shipping_for_cart_aveonline", fake_aveonline):
             args = self.tool.args_schema(city="Bogotá")
             _run(self.tool.execute(args, self._make_ctx(sb)))
 
         # Fallback graceful: Aveonline, no propaga la excepción de DB.
-        self.assertFalse(called["envia"])
         self.assertTrue(called["aveonline"])
 
 

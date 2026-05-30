@@ -56,7 +56,7 @@ export default async function ShippingPage({
   const supabase = createClient()
 
   let shipments: Shipment[] = []
-  const activeProvider: 'aveonline' = 'aveonline'
+  const activeProvider = 'aveonline' as const
   let activeProviderConnected = false
   let shippingOrigin: ShippingOrigin | null = null
   let destDefaults: Record<string, string> | null = null

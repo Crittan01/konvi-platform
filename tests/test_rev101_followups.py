@@ -294,7 +294,8 @@ class MainPyRoutersTests(unittest.TestCase):
 
     def test_sic_router_registered(self):
         self.assertIn("from routers import sic_report as _sic", self.code)
-        self.assertIn('app.include_router(_sic.router, prefix="/api/v1")', self.code)
+        # Rev. 109: _OFFBOARDING_GATE añadido a todos los routers mutación.
+        self.assertIn('app.include_router(_sic.router, prefix="/api/v1"', self.code)
 
 
 # ─── F2 — defer documentado ──────────────────────────────────────────────────
