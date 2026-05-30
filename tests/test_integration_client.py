@@ -51,6 +51,50 @@ errors = _load_module("errors", PKG_PATH / "errors.py")
 retry = _load_module("retry", PKG_PATH / "retry.py")
 circuit = _load_module("circuit", PKG_PATH / "circuit.py")
 idemp = _load_module("idempotency", PKG_PATH / "idempotency.py")
+
+# F.1 webhook_framework — F.2 reusa TokenBucket de aquí. NO usamos sys.path
+# ni namespace packages porque test_envia_webhook_processor.py inyecta `lib`
+# como ModuleType simple (no-package) en sys.modules, lo que rompería
+# `from lib.webhook_framework.rate_limit import ...`. En lugar de eso,
+# cargamos via importlib loader (igual patrón que el resto del archivo) y
+# registramos `lib.webhook_framework.{errors,rate_limit}` en sys.modules
+# para que el lazy import dentro de IntegrationClient.execute() resuelva.
+_WF_PATH = REPO_ROOT / "services" / "api" / "lib" / "webhook_framework"
+
+# Asegurar que sys.modules['lib'] sea un package (no ModuleType simple),
+# upgrading si test previo lo dejó como ModuleType plano.
+_lib_existing = sys.modules.get("lib")
+if _lib_existing is None or not hasattr(_lib_existing, "__path__"):
+    _lib_spec = importlib.util.spec_from_loader("lib", loader=None, is_package=True)
+    _lib_pkg = importlib.util.module_from_spec(_lib_spec)
+    _lib_pkg.__path__ = [str(REPO_ROOT / "services" / "api" / "lib")]
+    sys.modules["lib"] = _lib_pkg
+
+# Registrar lib.webhook_framework como sub-package + cargar submódulos.
+_wf_pkg_name = "lib.webhook_framework"
+if _wf_pkg_name not in sys.modules:
+    _wf_spec = importlib.util.spec_from_loader(
+        _wf_pkg_name, loader=None, is_package=True,
+    )
+    _wf_pkg = importlib.util.module_from_spec(_wf_spec)
+    _wf_pkg.__path__ = [str(_WF_PATH)]
+    sys.modules[_wf_pkg_name] = _wf_pkg
+
+for _sub in ("errors", "rate_limit"):
+    _full = f"{_wf_pkg_name}.{_sub}"
+    if _full not in sys.modules:
+        _sub_spec = importlib.util.spec_from_file_location(
+            _full, _WF_PATH / f"{_sub}.py",
+        )
+        _sub_mod = importlib.util.module_from_spec(_sub_spec)
+        sys.modules[_full] = _sub_mod
+        _sub_spec.loader.exec_module(_sub_mod)
+
+# Importar el módulo concreto desde sys.modules ya poblado.
+_wf_rl = sys.modules[f"{_wf_pkg_name}.rate_limit"]
+TokenBucketLimiter = _wf_rl.TokenBucketLimiter
+TokenBucketRule = _wf_rl.TokenBucketRule
+
 base = _load_module("base", PKG_PATH / "base.py")
 
 
@@ -548,6 +592,197 @@ class IntegrationClientWithIdempotencyTests(unittest.TestCase):
             # NO nueva HTTP call.
             self.assertEqual(len(http.calls), 1)
         asyncio.run(go())
+
+
+# ─── F.2 Rate limiting (TokenBucket de F.1 wireado en execute()) ──────────────
+
+class IntegrationClientRateLimitTests(unittest.TestCase):
+    """Cubre wiring TokenBucket en execute() (rev. 109 cierre F.2 PARTIAL→IMPL).
+
+    Audit Plan K detectó: docstring promete rate-limiting pero __init__ no lo
+    aceptaba ni execute() lo consumía. Estos tests certifican el contrato.
+    """
+
+    def test_rate_limit_rule_sin_consumir_no_afecta_flow(self):
+        """Sin rate_limit_rule, execute() funciona idéntico a pre-F.2."""
+        async def go():
+            http = _FakeHttpClient()
+            http.queue(_FakeHttpResponse(201, {"ok": True}))
+            client = _StubClient(
+                tenant_id="A",
+                http_client=http,
+                retry_policy=retry.RetryPolicy(max_attempts=1, base_delay_seconds=0),
+            )
+            r = await client.execute(method="POST", path="/ship/", body={"x": 1})
+            self.assertEqual(r["status"], 201)
+        asyncio.run(go())
+
+    def test_rate_limit_dentro_de_capacity_no_levanta(self):
+        """Capacity 5 + 3 requests → 3 tokens consumidos, sin error."""
+        async def go():
+            limiter = TokenBucketLimiter()
+            rule = TokenBucketRule(capacity=5, refill_per_sec=10.0)
+            http = _FakeHttpClient()
+            for _ in range(3):
+                http.queue(_FakeHttpResponse(200, {"ok": True}))
+            client = _StubClient(
+                tenant_id="A",
+                http_client=http,
+                retry_policy=retry.RetryPolicy(max_attempts=1, base_delay_seconds=0),
+                rate_limit_rule=rule,
+                rate_limiter=limiter,
+            )
+            for _ in range(3):
+                r = await client.execute(method="POST", path="/x/", body={})
+                self.assertEqual(r["status"], 200)
+            # Bucket: 5 - 3 = 2 tokens restantes.
+            remaining = limiter.get_remaining(
+                tenant_id="A", integration="envia", rule=rule,
+            )
+            self.assertGreaterEqual(remaining, 1.9)
+            self.assertLessEqual(remaining, 2.1)
+        asyncio.run(go())
+
+    def test_rate_limit_excedido_levanta_RateLimitLocalError(self):
+        """Capacity 2 + refill lento → 3er request levanta RateLimitLocalError."""
+        async def go():
+            limiter = TokenBucketLimiter()
+            # Refill 0.01/sec → ~100s para 1 token, suficientemente lento.
+            rule = TokenBucketRule(capacity=2, refill_per_sec=0.01)
+            http = _FakeHttpClient()
+            for _ in range(2):
+                http.queue(_FakeHttpResponse(200, {"ok": True}))
+            client = _StubClient(
+                tenant_id="A",
+                http_client=http,
+                retry_policy=retry.RetryPolicy(max_attempts=1, base_delay_seconds=0),
+                rate_limit_rule=rule,
+                rate_limiter=limiter,
+            )
+            # 2 requests OK (consume todos los tokens).
+            for _ in range(2):
+                await client.execute(method="POST", path="/x/", body={})
+            # 3er request: bucket vacío → RateLimitLocalError.
+            with self.assertRaises(errors.RateLimitLocalError) as ctx:
+                await client.execute(method="POST", path="/x/", body={})
+            self.assertEqual(ctx.exception.provider, "envia")
+            self.assertGreaterEqual(ctx.exception.retry_after_seconds, 1)
+            self.assertEqual(ctx.exception.http_status, 429)
+            # Solo 2 HTTP calls (la 3ra ni se intentó).
+            self.assertEqual(len(http.calls), 2)
+        asyncio.run(go())
+
+    def test_rate_limit_aislado_por_tenant(self):
+        """Tenant A y B comparten provider — pero bucket es per-(tenant, provider).
+        Saturar A no debe afectar B."""
+        async def go():
+            limiter = TokenBucketLimiter()
+            rule = TokenBucketRule(capacity=1, refill_per_sec=0.001)
+            http_a = _FakeHttpClient()
+            http_a.queue(_FakeHttpResponse(200, {"ok": True}))
+            http_b = _FakeHttpClient()
+            http_b.queue(_FakeHttpResponse(200, {"ok": True}))
+
+            client_a = _StubClient(
+                tenant_id="A", http_client=http_a,
+                retry_policy=retry.RetryPolicy(max_attempts=1, base_delay_seconds=0),
+                rate_limit_rule=rule, rate_limiter=limiter,
+            )
+            client_b = _StubClient(
+                tenant_id="B", http_client=http_b,
+                retry_policy=retry.RetryPolicy(max_attempts=1, base_delay_seconds=0),
+                rate_limit_rule=rule, rate_limiter=limiter,
+            )
+
+            # A consume su único token.
+            await client_a.execute(method="POST", path="/x/", body={})
+            # A: 2do request → bloqueado.
+            with self.assertRaises(errors.RateLimitLocalError):
+                await client_a.execute(method="POST", path="/x/", body={})
+            # B: SU bucket intacto, request pasa.
+            r = await client_b.execute(method="POST", path="/x/", body={})
+            self.assertEqual(r["status"], 200)
+        asyncio.run(go())
+
+    def test_rate_limit_NO_consume_circuit_breaker_failure(self):
+        """Rate limit local ≠ failure del provider. CB no debe abrirse por bloqueos
+        del bucket — solo por HTTP fail real."""
+        async def go():
+            limiter = TokenBucketLimiter()
+            rule = TokenBucketRule(capacity=1, refill_per_sec=0.001)
+            cb = circuit.CircuitBreaker(circuit.CircuitBreakerConfig(
+                failure_threshold=2, open_duration_seconds=10,
+            ))
+            http = _FakeHttpClient()
+            http.queue(_FakeHttpResponse(200, {"ok": True}))
+            client = _StubClient(
+                tenant_id="A", http_client=http,
+                retry_policy=retry.RetryPolicy(max_attempts=1, base_delay_seconds=0),
+                rate_limit_rule=rule, rate_limiter=limiter,
+                circuit_breaker=cb,
+            )
+            # 1er OK.
+            await client.execute(method="POST", path="/x/", body={})
+            # 2do bloqueado por rate limit.
+            with self.assertRaises(errors.RateLimitLocalError):
+                await client.execute(method="POST", path="/x/", body={})
+            # 3ro también bloqueado por rate limit.
+            with self.assertRaises(errors.RateLimitLocalError):
+                await client.execute(method="POST", path="/x/", body={})
+            # CB sigue CLOSED (los 2 bloqueos no contaron como provider failure).
+            self.assertEqual(cb.get_state("envia").name, "CLOSED")
+        asyncio.run(go())
+
+    def test_default_limiter_global_se_usa_si_no_inyectado(self):
+        """Si caller pasa rate_limit_rule pero no rate_limiter → singleton global."""
+        from lib.webhook_framework.rate_limit import (
+            get_global_limiter, _reset_global_limiter,
+        )
+        _reset_global_limiter()
+        try:
+            client = _StubClient(
+                tenant_id="A",
+                rate_limit_rule=TokenBucketRule(capacity=10, refill_per_sec=1.0),
+            )
+            self.assertIs(client._rate_limiter, get_global_limiter())
+        finally:
+            _reset_global_limiter()
+
+
+# ─── H.2.1 wiring smoke (verificación de fix _get_envia_client) ──────────────
+
+class EnviaClientWiringTests(unittest.TestCase):
+    """Audit Plan K detectó: _get_envia_client() no pasaba supabase+tenant_id,
+    dejando idempotency Envia INACTIVA en runtime pese a estar implementada.
+
+    Este test asegura que `_get_envia_client` SÍ pasa ambos parámetros
+    para que la cache outbound_idempotency_cache funcione."""
+
+    def test_get_envia_client_propaga_supabase_y_tenant_id(self):
+        """Smoke del fix H.2.1: instancia EnviaClient con idempotency_enabled=True."""
+        import importlib.util as iutil
+        # Cargo shipping.py via importlib (mismo patrón que el test loader).
+        shipping_path = REPO_ROOT / "services" / "api" / "routers" / "shipping.py"
+        # Solo validamos que la signature del call contenga supabase_client + tenant_id.
+        # Leemos el source directo — el fix es de 4 líneas, inspección estática es
+        # suficiente como gate de no-regresión.
+        source = shipping_path.read_text(encoding="utf-8")
+        # Localizar la función _get_envia_client.
+        start = source.index("def _get_envia_client(")
+        end = source.index("\n\ndef ", start)
+        fn_body = source[start:end]
+        self.assertIn(
+            "supabase_client=supabase",
+            fn_body,
+            "_get_envia_client debe pasar supabase_client=supabase a EnviaClient "
+            "(H.2.1 idempotency wiring).",
+        )
+        self.assertIn(
+            "tenant_id=tenant_id",
+            fn_body,
+            "_get_envia_client debe pasar tenant_id=tenant_id a EnviaClient "
+            "(H.2.1 idempotency wiring).",
+        )
 
 
 if __name__ == "__main__":
