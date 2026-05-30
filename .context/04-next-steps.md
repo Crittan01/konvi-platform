@@ -6,20 +6,20 @@
 
 ---
 
-## Plan K Sesión 2026-05-29 — items cerrados
+## 🗺️ Roadmap pendientes consolidado (2026-05-29)
 
-Audit exhaustivo del Plan K (workflow 22 agents paralelos) detectó 4 items
-PARTIAL del foundation layer. Cerrados:
+**Documento canónico**: [`docs/refactor/0006-roadmap-pending-sessions.md`](../docs/refactor/0006-roadmap-pending-sessions.md).
 
-- **F.2** rate-limiting `TokenBucket` en `IntegrationClient.execute()` — PR #2
-- **H.2.1** Envia idempotency wireado en runtime — PR #2
-- **F.10** `fn_cleanup_webhook_secrets()` RPC + worker hourly invoke — PR #3 — migration aplicada remote 2026-05-29
-- **H.3.1** Wompi `GET /transactions/{id}` — **CLOSED-AS-DEFERRED** ([reporte](../docs/reports/h31_wompi_get_transaction_closure.md))
-- **J.2.4.4** Tenant offboarding Fase 1 backend — PR #4 — migration aplicada remote 2026-05-29. Fase 2 (cron + UI + middleware) pendiente sesión siguiente
+Lee ese doc PRIMERO al retomar el proyecto — consolida:
+- 10 PRs abiertos pendientes de review + orden de merge
+- Bloqueantes humanos externos (V.3 legal · V.4 DPO · V.5 pen testing · V.7 dominio)
+- Próximas 5 sesiones priorizadas con esfuerzo + objetivos
+- Items diferidos a Platform Console + Storefront
+- Decisiones diferidas (hard-delete cron activación, Sentry trigger, etc.)
 
-**Plan K avance: 10 → 15 IMPLEMENTED** (83%).
+**Plan K avance**: 16 / 18 IMPLEMENTED (89%) tras sesión 2026-05-29.
 
-Re-abrir H.3.1 como `H.3.1.1` si: founder prioriza UI "Reconciliar pago" en Tenant Console, o se diseña cron de reconciliación background (que NO requiere endpoint HTTP, solo invoca `WompiClient.get_transaction_with_resilience()` directamente).
+**Próxima sesión recomendada**: cierre validaciones humanas + Sem 6 HSM templates.
 
 ---
 
