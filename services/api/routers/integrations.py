@@ -1,13 +1,15 @@
 """
-Router de Integraciones — Gestión de conexiones MeLi y Envia por tenant.
+Router de Integraciones — Gestión de conexiones MeLi y Aveonline por tenant.
 
 Endpoints:
-  GET    /api/v1/integrations/              — estado de todas las integraciones del tenant
-  POST   /api/v1/integrations/envia         — guardar API key de Envia  [owner]
-  DELETE /api/v1/integrations/envia         — desconectar Envia          [owner]
-  GET    /api/v1/integrations/meli/auth-url — URL OAuth para iniciar flujo MeLi [owner]
-  GET    /api/v1/integrations/meli/callback — callback OAuth (browser redirect) — NO requiere JWT
-  DELETE /api/v1/integrations/meli          — desconectar MeLi            [owner]
+  GET    /api/v1/integrations/                — estado de todas las integraciones del tenant
+  GET    /api/v1/integrations/meli/auth-url   — URL OAuth para iniciar flujo MeLi [owner]
+  GET    /api/v1/integrations/meli/callback   — callback OAuth (browser redirect) — NO requiere JWT
+  DELETE /api/v1/integrations/meli            — desconectar MeLi            [owner]
+  POST   /api/v1/integrations/aveonline/*     — gestión Aveonline (provider único shipping, ADR-0019)
+
+Post-rev. 109: Envia eliminado del runtime. Para añadir Courier N+1 seguir
+ADR-0023 (Shipping Provider Integration Pattern).
 """
 import logging
 import os
@@ -32,22 +34,9 @@ FRONTEND_INTEGRATIONS_URL = f"{FRONTEND_BASE_URL}/dashboard/integrations"
 
 # ─── Modelos ─────────────────────────────────────────────────────────────────
 
-class EnviaConnect(BaseModel):
-    api_token: str = Field(..., min_length=10)
-    sandbox: bool = Field(default=False)
-
-
-class EnviaCarrierUpsert(BaseModel):
-    """Sem 5 H.2.7 — preferencias de carriers per-tenant.
-
-    Nota rev. 2026-05-08: `supports_insurance` removido. Insurance es
-    decisión del carrier (no opt-in tenant) — ver `lib/insurance.py`.
-    """
-    carrier_code: str = Field(..., min_length=2, max_length=64)
-    enabled: bool = Field(default=True)
-    display_label: Optional[str] = Field(default=None, max_length=120)
-    priority: int = Field(default=100, ge=0, le=999)
-    notes: Optional[str] = Field(default=None, max_length=500)
+# Nota rev. 109: EnviaConnect + EnviaCarrierUpsert eliminados con el pivote
+# a Aveonline (ADR-0019). Aveonline tiene sus propios models en endpoints
+# /aveonline/* más abajo.
 
 
 class AveonlineCarrierItem(BaseModel):
@@ -107,9 +96,8 @@ async def list_integrations(
         else:
             meli_row["platform_configured"] = meli_client.is_configured()
 
-        envia_row = next((r for r in rows if r["provider"] == "envia"), None)
-        if not envia_row:
-            rows.append({"provider": "envia", "status": "disconnected", "meta": {}})
+        # Nota rev. 109: Envia eliminado del listado (ADR-0019).
+        # Aveonline aparece automáticamente vía rows si está conectado.
 
         return rows
     except Exception as e:
@@ -117,184 +105,9 @@ async def list_integrations(
         raise HTTPException(status_code=500, detail="Error al obtener integraciones")
 
 
-# ── Envia ──────────────────────────────────────────────────────────────────
-
-@router.post("/envia", response_model=dict, status_code=201)
-@audit_log(entity_type="integration", action="connected")
-async def connect_envia(
-    body: EnviaConnect,
-    request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
-):
-    """
-    Guarda la API key de Envia para el tenant. Solo owner.
-    La API key nunca se retorna en GET para no exponerla.
-    """
-    if role != "owner":
-        raise HTTPException(status_code=403, detail="Solo el owner puede conectar integraciones")
-    try:
-        vault = VaultHelper(supabase)
-
-        # Leer secret_id existente para actualizar en lugar de crear uno nuevo
-        existing = (
-            supabase.table("tenant_integrations")
-            .select("credentials")
-            .eq("tenant_id", tenant_id).eq("provider", "envia")
-            .maybe_single().execute()
-        )
-        existing_creds = (existing.data or {}).get("credentials", {})
-        existing_sid = existing_creds.get("api_token_secret_id")
-
-        if existing_sid:
-            vault.update_secret(existing_sid, body.api_token)
-            secret_id = existing_sid
-        else:
-            secret_id = vault.create_secret(
-                body.api_token, f"{tenant_id}/envia/api_token", "Envia API token"
-            )
-        if not secret_id:
-            raise HTTPException(status_code=500, detail="Error cifrando API key en Vault")
-
-        result = supabase.table("tenant_integrations").upsert({
-            "tenant_id": tenant_id,
-            "provider": "envia",
-            "status": "connected",
-            "credentials": {"api_token_secret_id": secret_id, "sandbox": body.sandbox},
-            "meta": {
-                "token_preview": _mask_token(body.api_token),
-                "environment": "sandbox" if body.sandbox else "production",
-            },
-        }, on_conflict="tenant_id,provider").execute()
-
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Error al guardar integración")
-
-        data = result.data[0]
-        data.pop("credentials", None)
-        return data
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error conectando Envia tenant %s: %s", tenant_id, e)
-        raise HTTPException(status_code=500, detail="Error al conectar Envia")
-
-
-@router.delete("/envia", status_code=204)
-@audit_log(entity_type="integration", action="disconnected")
-async def disconnect_envia(
-    request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
-):
-    """Desconecta Envia borrando credenciales y el secreto en Vault. Solo owner."""
-    if role != "owner":
-        raise HTTPException(status_code=403, detail="Solo el owner puede desconectar integraciones")
-    creds_res = (
-        supabase.table("tenant_integrations").select("credentials")
-        .eq("tenant_id", tenant_id).eq("provider", "envia").maybe_single().execute()
-    )
-    creds = (creds_res.data or {}).get("credentials", {})
-    VaultHelper(supabase).delete_secret(creds.get("api_token_secret_id"))
-    supabase.table("tenant_integrations").update({
-        "status": "disconnected", "credentials": {},
-    }).eq("tenant_id", tenant_id).eq("provider", "envia").execute()
-
-
-# ── Sem 5 H.2.7 — Envia carriers preferences per-tenant ──────────────────────
-
-
-@router.get("/envia/carriers", response_model=list)
-async def list_envia_carriers(
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-):
-    """Lista preferencias de carriers Envia del tenant. Cualquier rol.
-
-    Retorna lista (puede estar vacía si tenant no configuró aún → quote
-    devuelve todos los carriers globales por default open).
-    """
-    from lib.tenant_carriers import list_preferences
-    prefs = list_preferences(supabase, tenant_id, "envia")
-    return [
-        {
-            "carrier_code": p.carrier_code,
-            "enabled": p.enabled,
-            "display_label": p.display_label,
-            "priority": p.priority,
-            "notes": p.notes,
-        }
-        for p in prefs
-    ]
-
-
-@router.put("/envia/carriers", response_model=dict)
-@audit_log(entity_type="integration", action="updated")
-async def upsert_envia_carrier(
-    body: EnviaCarrierUpsert,
-    request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
-):
-    """Upsert preferencia carrier Envia. Solo owner+manager.
-
-    Idempotente vía UNIQUE constraint (tenant_id, provider, carrier_code).
-    """
-    if role not in ("owner", "manager"):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo owner o manager pueden gestionar carriers.",
-        )
-    try:
-        from lib.tenant_carriers import upsert_preference
-        pref = upsert_preference(
-            supabase, tenant_id, "envia",
-            carrier_code=body.carrier_code,
-            enabled=body.enabled,
-            display_label=body.display_label,
-            priority=body.priority,
-            notes=body.notes,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        logger.error("[CARRIERS] upsert error tenant=%s: %s", tenant_id, exc)
-        raise HTTPException(status_code=500, detail="Error guardando preferencia")
-    return {
-        "carrier_code": pref.carrier_code,
-        "enabled": pref.enabled,
-        "display_label": pref.display_label,
-        "priority": pref.priority,
-        "notes": pref.notes,
-    }
-
-
-@router.delete("/envia/carriers/{carrier_code}", status_code=204)
-@audit_log(entity_type="integration", action="updated")
-async def delete_envia_carrier(
-    carrier_code: str,
-    request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
-):
-    """Borra preferencia de un carrier (vuelve a default global).
-    Solo owner+manager.
-    """
-    if role not in ("owner", "manager"):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo owner o manager pueden gestionar carriers.",
-        )
-    code = (carrier_code or "").strip()
-    if not code:
-        raise HTTPException(status_code=400, detail="carrier_code requerido")
-    supabase.table("tenant_carriers").delete().eq(
-        "tenant_id", tenant_id,
-    ).eq("provider", "envia").eq("carrier_code", code).execute()
+# Nota rev. 109: bloque Envia eliminado (ADR-0019). Endpoints `/envia`,
+# `/envia/carriers/*` removidos junto con sus models. Aveonline tiene
+# endpoints equivalentes en `/aveonline/*` más abajo.
 
 
 # ── MeLi ───────────────────────────────────────────────────────────────────

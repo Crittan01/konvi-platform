@@ -1545,7 +1545,11 @@ async def _request_shipping_quote(tenant_id: str, payload: dict) -> tuple[int, d
 def _build_quote_failure_response(detail: str, status_code: int) -> tuple[str, bool]:
     normalized = _normalize_text(detail)
 
-    if "envia no esta conectado" in normalized or "api token de envia no encontrado" in normalized:
+    if (
+        "aveonline no esta conectado" in normalized
+        or "aveonline no autenticado" in normalized
+        or "provider shipping" in normalized
+    ):
         return (
             "En este momento no tengo habilitada la cotización automática de envío. Te paso con un asesor experto.",
             True,

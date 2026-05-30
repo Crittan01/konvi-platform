@@ -5,12 +5,12 @@ clientes outbound multi-tenant. Cierra estructuralmente el bug "primer tenant
 activo" del Telegram dossier (`telegram_webhook._send_telegram_reply`).
 
 Ejemplos canónicos de identidades por provider:
-  - whatsapp: phone_number_id (WABA business phone identifier)
-  - wompi:    merchant_id
-  - envia:    account_id
-  - meli:     user_id (Mercado Libre)
-  - telegram: chat_id (str del operador) o bot_username
-  - resend:   verified_domain
+  - whatsapp:  phone_number_id (WABA business phone identifier)
+  - wompi:     merchant_id
+  - aveonline: account_id (provider único shipping post-ADR-0019)
+  - meli:      user_id (Mercado Libre)
+  - telegram:  chat_id (str del operador) o bot_username
+  - resend:    verified_domain
 
 UNIQUE(provider, provider_internal_id) en DB garantiza que el mapeo es 1:1
 desde la identidad externa hacia un único tenant. Esta lib es el helper
@@ -26,7 +26,7 @@ from typing import Any, Optional
 SUPPORTED_PROVIDERS = frozenset({
     "whatsapp",
     "wompi",
-    "envia",
+    "aveonline",
     "meli",
     "telegram",
     "resend",

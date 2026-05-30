@@ -14,7 +14,7 @@ Workflow de rotación:
      previous_secret_hash si grace_period_until > NOW.
   5. Tras grace_period (7d default): previous_secret_hash se borra.
 
-Providers cubiertos: envia, wompi, meta, meli, telegram. Para wompi/meta
+Providers cubiertos: aveonline, wompi, meta, meli, telegram. Para wompi/meta
 este secret es defensa-en-profundidad complementaria a sus firmas nativas.
 """
 from __future__ import annotations
@@ -25,11 +25,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 # Lazy import bcrypt — solo en operaciones reales, evita peso al cargar lib.
-# bcrypt está en supabase deps tier (no requiere agregar al requirements.txt
-# del API; viene transitivo).
 
 SUPPORTED_INTEGRATIONS = frozenset({
-    "envia", "wompi", "meta", "meli", "telegram", "aveonline",
+    "wompi", "meta", "meli", "telegram", "aveonline",
 })
 
 # Defaults (configurables vía env si se necesita en el futuro).
