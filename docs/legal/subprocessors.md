@@ -18,7 +18,7 @@ subprocesador (al email registrado en `notification_settings`).
 | **Meta Platforms (WhatsApp Business)** | Mensajería WhatsApp Cloud API v21 | Phone, contenido de mensajes, multimedia | USA / EU | SOC 2, [Meta DPA](https://www.facebook.com/legal/terms/dataprocessing) |
 | **Google Cloud (Gemini API)** | LLM generativo (gemini-2.5-flash) | Texto de mensajes inbound (NO PII estructurada) | USA | SOC 1/2/3, ISO 27001/27017/27018 |
 | **Wompi (Bancolombia Group)** | Procesamiento de pagos | Phone, doc, name, email, total, currency | Colombia | PCI-DSS L1, vigilado SFC |
-| **Envia.com** | Cotización de envíos / etiquetas | Address, phone, name | Colombia / México | Política propia |
+| **Aveonline** | Cotización de envíos + generación de guías + tracking | Address, phone, name, document | Colombia | Política propia · Bancolombia partner |
 | **Resend** | Envío de email transaccional | Email del operador (tenant), phone hash, contenido del template | USA / EU | SOC 2 in progress |
 | **Render Inc.** | Hospedaje de servicios (web, api, orchestrator, connector) | Logs operativos (sin PII directa) | USA | SOC 2 Type II |
 
