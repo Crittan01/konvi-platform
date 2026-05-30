@@ -47,8 +47,18 @@ export default async function DashboardLayout({
     'use server'
     const supabase = createClient()
     await supabase.auth.signOut()
+    // Rev. 109 J.2.4.3 — limpiar cookie de recovery bypass al cerrar sesión.
+    // Si el user usó recovery code en esta sesión, la cookie HttpOnly debe
+    // borrarse para que el próximo login REQUIERA TOTP o nuevo recovery.
+    const { cookies } = await import('next/headers')
+    cookies().delete('mfa_recovery_session')
     redirect('/login')
   }
+
+  // Rev. 109 J.2.4.3 — detectar si el user entró vía recovery code
+  // para mostrar banner urgente: regenerar TOTP idealmente esta sesión.
+  const { cookies: cookieStore } = await import('next/headers')
+  const usedRecoveryCode = cookieStore().get('mfa_recovery_session')?.value === '1'
 
   // ── Ronda 2: todas las queries del tenant en paralelo ─────────────────────
   let tenantName: string | null = null
@@ -132,6 +142,22 @@ export default async function DashboardLayout({
             <span className="hidden sm:inline">Live</span>
           </div>
         </div>
+
+        {/* Rev. 109 J.2.4.3 — Banner urgente si sesión vía recovery code */}
+        {usedRecoveryCode && (
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 rounded-lg border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            <div className="flex-1">
+              <p className="font-medium">Sesión iniciada con código de respaldo</p>
+              <p className="text-xs mt-1 text-amber-800">
+                Esto significa que perdiste tu authenticator. Te recomendamos
+                regenerar tu MFA + nuevos códigos de respaldo en{' '}
+                <a href="/dashboard/settings/security" className="underline font-medium">Configuración → Seguridad</a>
+                {' '}antes de que esta sesión expire (24h).
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Page content */}
         <div className="p-4 sm:p-6 lg:p-8">
