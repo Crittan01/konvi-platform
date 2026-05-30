@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { KeyRound } from 'lucide-react'
 import SetPasswordForm from '@/app/set-password/set-password-form'
 import { SecurityForm } from './_components/security-form'
+import { RecoveryChangePassword } from './_components/recovery-change-password'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,7 +78,18 @@ export default async function SecurityPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Server action: cambiar contraseña (movido desde /dashboard/account).
+  // Rev. 109 J.2.4.3 — detectar sesión recovery (cookie HttpOnly seteada
+  // por /api/mfa/recovery-codes/verify cuando user usó recovery code).
+  // En esa sesión, AAL=1 y operaciones AAL2-required (changePassword,
+  // unenroll) deben pasar por endpoints backend que validan recovery code
+  // adicional + admin API bypass.
+  const { cookies: cookieStore } = await import('next/headers')
+  const isRecoverySession = cookieStore().get('mfa_recovery_session')?.value === '1'
+
+  // Server action: cambiar contraseña.
+  // - Si AAL2 (sesión normal): usa supabase.auth.updateUser directo.
+  // - Si AAL1 + recovery: NO disponible aquí — UI cliente lo maneja con
+  //   dialog que pide recovery code y llama al endpoint backend.
   async function changePassword(formData: FormData) {
     'use server'
     const sb = createClient()
@@ -91,7 +103,11 @@ export default async function SecurityPage({
 
     const { error } = await sb.auth.updateUser({ password })
     if (error) {
-      redirect(`/dashboard/settings/security?pwd_error=${encodeURIComponent(error.message)}`)
+      // Si el error es AAL2-related (sesión recovery) → guiar al user.
+      const friendlyError = error.message.includes('AAL2')
+        ? 'Necesitas verificación adicional. Usa "Cambiar contraseña con código de respaldo" debajo.'
+        : error.message
+      redirect(`/dashboard/settings/security?pwd_error=${encodeURIComponent(friendlyError)}`)
     }
 
     revalidatePath('/dashboard/settings/security')
@@ -116,6 +132,12 @@ export default async function SecurityPage({
           </CardTitle>
           <CardDescription>
             Actualiza tu contraseña de acceso. Requerido: mínimo 8 caracteres.
+            {isRecoverySession && (
+              <span className="block mt-2 text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                ⚠️ Estás en sesión de recuperación. Para cambiar la contraseña
+                necesitas verificación con código de respaldo (ver abajo).
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -129,7 +151,11 @@ export default async function SecurityPage({
               {decodeURIComponent(searchParams.pwd_error)}
             </p>
           )}
-          <SetPasswordForm action={changePassword} submitLabel="Actualizar contraseña" />
+          {!isRecoverySession ? (
+            <SetPasswordForm action={changePassword} submitLabel="Actualizar contraseña" />
+          ) : (
+            <RecoveryChangePassword />
+          )}
         </CardContent>
       </Card>
 
@@ -141,7 +167,7 @@ export default async function SecurityPage({
             Compatible con Google Authenticator, Authy, 1Password.
           </p>
         </header>
-        <SecurityForm initialState={state} userId={userId} />
+        <SecurityForm initialState={state} userId={userId} isRecoverySession={isRecoverySession} />
       </div>
 
       <footer className="text-xs text-muted-foreground border-t border-border pt-4 space-y-1">
