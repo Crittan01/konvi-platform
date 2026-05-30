@@ -5,6 +5,7 @@ Jerarquía:
     ├── ProviderUnavailableError    — provider 5xx / network / timeout
     ├── ProviderRejectedError       — provider 4xx (validación, auth, etc.)
     ├── CircuitOpenError            — circuit breaker abierto, no se intenta
+    ├── RateLimitLocalError         — bucket local agotado (no se intenta)
     ├── RetryBudgetExceededError    — agotó retries sin éxito
     └── ResponseValidationError     — provider 200 pero body indica error
 """
@@ -39,6 +40,22 @@ class ProviderRejectedError(IntegrationClientError):
         super().__init__(message)
         self.http_status = status
         self.response_body = response_body
+
+
+class RateLimitLocalError(IntegrationClientError):
+    """Bucket local agotado pre-request. Distinto de ProviderRejectedError 429
+    (que sería el remoto). Caller decide si encolar, alertar o retornar
+    degraded al usuario. NO retriable inmediato — sugiere retry_after."""
+    retriable = False
+    http_status = 429
+
+    def __init__(self, provider: str, retry_after_seconds: int):
+        self.provider = provider
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            f"Rate limit local agotado para {provider}, "
+            f"reintentar en ~{retry_after_seconds}s"
+        )
 
 
 class CircuitOpenError(IntegrationClientError):

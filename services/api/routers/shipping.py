@@ -309,7 +309,12 @@ def _get_envia_client(tenant_id: str, supabase: Client) -> EnviaClient:
         raise HTTPException(status_code=400, detail="API token de Envia no encontrado")
 
     sandbox = creds.get("sandbox", False)
-    return EnviaClient(api_token=api_token, sandbox=sandbox)
+    return EnviaClient(
+        api_token=api_token,
+        sandbox=sandbox,
+        supabase_client=supabase,
+        tenant_id=tenant_id,
+    )
 
 
 # ─── Aveonline routing helper (Rev. 107 M.x — Cotizador Console) ─────────

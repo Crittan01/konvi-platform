@@ -13,6 +13,16 @@ Algoritmo de firma webhook: SHA256 simple sobre string concatenado
 
 Credenciales: por-tenant en tenant_integrations (provider='wompi'),
 almacenadas en Supabase Vault. No se usan env vars globales.
+
+H.3.1 — Estado de exposición HTTP (cierre 2026-05-29):
+    Las funciones get_transaction_sync(), get_transaction() async y
+    get_transaction_with_resilience() son API INTERNA lista para callers
+    Python (cron de reconciliation, scripts admin, background jobs).
+    NO existe endpoint HTTP público GET /api/v1/wompi/transactions/{id} —
+    decisión arquitectónica Sem 4 (2026-05-06) + cierre 2026-05-29 documentado
+    en docs/reports/h31_wompi_get_transaction_closure.md. NO eliminar estas
+    funciones: son contract estable para cuando se diseñe la UI
+    "Reconciliar pago" o el cron de reconciliación background.
 """
 import hashlib
 import logging

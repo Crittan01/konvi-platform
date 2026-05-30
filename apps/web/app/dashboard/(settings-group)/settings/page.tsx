@@ -7,7 +7,9 @@ import { SubmitButton } from '@/components/ui/submit-button'
 import {
   Settings, Truck, Building2, Globe, Clock,
   CheckCircle2, XCircle, Sparkles, Bot, Wallet,
+  Shield, Activity, Scale, Archive, Trash2, ChevronRight,
 } from 'lucide-react'
+import Link from 'next/link'
 import LogoUpload from './logo-upload'
 import ShippingOriginForm from './shipping-origin-form'
 import StorePresenceForm from './store-presence-form'
@@ -494,7 +496,107 @@ export default async function SettingsPage() {
             )
           })()}
 
+          {/* ── Más configuraciones (sub-secciones de Settings) ────────────────── */}
+          {/* Rev. 109 — links explícitos a las sub-páginas de settings que
+              antes no estaban descubribles desde aquí (J.2.4.3 Seguridad,
+              J.2.11 Salud, J.2.4.4 Cerrar cuenta, Habeas Data Legal/Retención). */}
+          <section className="mt-8 pt-6 border-t border-border">
+            <header className="mb-4">
+              <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+                <Settings className="h-5 w-5" /> Más configuraciones
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Seguridad personal, salud de integraciones, datos legales y cierre de cuenta.
+              </p>
+            </header>
 
+            <div className="grid sm:grid-cols-2 gap-3">
+              {/* Seguridad (todos los roles) */}
+              <Link
+                href="/dashboard/settings/security"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-emerald-50 text-emerald-700 inline-flex items-center justify-center shrink-0">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Seguridad</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Activar MFA (2FA) y gestionar códigos de respaldo.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Salud integraciones */}
+              <Link
+                href="/dashboard/settings/health"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-sky-50 text-sky-700 inline-flex items-center justify-center shrink-0">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Salud de integraciones</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Estado en tiempo real de WhatsApp, Wompi, Envia, MeLi, Telegram.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Legal */}
+              <Link
+                href="/dashboard/settings/legal"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0">
+                  <Scale className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Legal</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Términos, política de privacidad, click-wrap acceptance.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Retención datos */}
+              <Link
+                href="/dashboard/settings/retention"
+                className="group flex items-start gap-3 p-4 rounded-lg border border-border bg-card hover:border-foreground/30 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0">
+                  <Archive className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Retención de datos</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Períodos de archivado y eliminación automática (Habeas Data Ley 1581).
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
+              </Link>
+
+              {/* Cerrar cuenta (destructive, owner only) */}
+              <Link
+                href="/dashboard/settings/account-closure"
+                className="group sm:col-span-2 flex items-start gap-3 p-4 rounded-lg border border-red-200 bg-red-50/30 hover:border-red-400 hover:bg-red-50 transition-colors"
+              >
+                <div className="h-9 w-9 rounded-md bg-red-100 text-red-700 inline-flex items-center justify-center shrink-0">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm text-red-900">Cerrar cuenta</p>
+                  <p className="text-xs text-red-700/80 mt-0.5">
+                    Exportar todos tus datos y solicitar eliminación permanente (30 días de gracia).
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-red-700/80 group-hover:text-red-700 shrink-0 mt-2" />
+              </Link>
+            </div>
+          </section>
 
         </div>
       </div>

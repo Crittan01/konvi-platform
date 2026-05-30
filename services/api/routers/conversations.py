@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import Client
-from dependencies.auth import get_current_tenant, get_service_client
+from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
@@ -871,3 +871,320 @@ async def send_agent_message(
         abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
         logger.error("Error enviando mensaje de agente en conversación %s: %s", conversation_id, e)
         raise HTTPException(status_code=500, detail="Error al enviar el mensaje")
+
+
+# ─── Notas privadas del operador (Rev. 109 founder 2026-05-29 P0-1) ─────────
+
+
+class NoteCreate(BaseModel):
+    content: str
+    is_pinned: bool = False
+
+
+class NotePatch(BaseModel):
+    content: Optional[str] = None
+    is_pinned: Optional[bool] = None
+
+
+def _extract_user_id(request: Request) -> str:
+    """Extrae sub (user_id) del JWT — inline para no tocar auth.py shared."""
+    from dependencies.auth import _extract_jwt_payload  # noqa: PLC0415
+    payload = _extract_jwt_payload(request)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token sin user_id")
+    return user_id
+
+
+@router.get("/{conversation_id}/notes", response_model=List[dict])
+async def list_conversation_notes(
+    conversation_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """Lista notas privadas de la conversación (pinned primero, luego created_at desc).
+
+    Soft-delete via deleted_at — solo retornamos las NO eliminadas.
+    """
+    # Validar que la conv pertenezca al tenant (defensa en profundidad).
+    conv_check = (
+        supabase.table("conversations")
+        .select("id")
+        .eq("id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_check.data:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    res = (
+        supabase.table("conversation_notes")
+        .select("id, content, is_pinned, author_user_id, created_at, updated_at")
+        .eq("conversation_id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .is_("deleted_at", "null")
+        .order("is_pinned", desc=True)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
+@router.post("/{conversation_id}/notes", response_model=dict, status_code=201)
+async def create_conversation_note(
+    conversation_id: str,
+    body: NoteCreate,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Crea nota privada per conversación. RBAC: owner/manager/operator (require_write_role)."""
+    user_id = _extract_user_id(request)
+
+    text = (body.content or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="La nota no puede estar vacía")
+    if len(text) > 2000:
+        raise HTTPException(status_code=422, detail="Máximo 2000 caracteres")
+
+    # Validar conv pertenece al tenant.
+    conv_check = (
+        supabase.table("conversations")
+        .select("id")
+        .eq("id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_check.data:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    res = (
+        supabase.table("conversation_notes")
+        .insert({
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+            "author_user_id": user_id,
+            "content": text,
+            "is_pinned": bool(body.is_pinned),
+        })
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=500, detail="No se pudo crear la nota")
+    return res.data[0]
+
+
+@router.patch("/{conversation_id}/notes/{note_id}", response_model=dict)
+async def patch_conversation_note(
+    conversation_id: str,
+    note_id: str,
+    patch: NotePatch,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Actualiza nota (content / is_pinned).
+    Solo el autor (o owner/manager) pueden editar — el ON UPDATE policy RLS
+    también lo aplica, pero validamos explícito al usar service_role."""
+    user_id = _extract_user_id(request)
+
+    # Validar nota pertenece a conv + tenant + es del autor o role>=manager.
+    note_res = (
+        supabase.table("conversation_notes")
+        .select("id, author_user_id")
+        .eq("id", note_id)
+        .eq("conversation_id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .is_("deleted_at", "null")
+        .limit(1)
+        .execute()
+    )
+    if not note_res.data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+
+    from dependencies.auth import get_current_role  # noqa: PLC0415
+    role = await get_current_role(request)
+    note = note_res.data[0]
+    is_author = note["author_user_id"] == user_id
+    is_privileged = role in {"owner", "manager"}
+    if not (is_author or is_privileged):
+        raise HTTPException(status_code=403, detail="Solo el autor o owner/manager pueden editar la nota")
+
+    update: dict = {}
+    if patch.content is not None:
+        text = patch.content.strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="La nota no puede quedar vacía")
+        if len(text) > 2000:
+            raise HTTPException(status_code=422, detail="Máximo 2000 caracteres")
+        update["content"] = text
+    if patch.is_pinned is not None:
+        update["is_pinned"] = bool(patch.is_pinned)
+
+    if not update:
+        raise HTTPException(status_code=422, detail="Nada que actualizar")
+
+    res = (
+        supabase.table("conversation_notes")
+        .update(update)
+        .eq("id", note_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar la nota")
+    return res.data[0]
+
+
+@router.delete("/{conversation_id}/notes/{note_id}", status_code=204)
+async def delete_conversation_note(
+    conversation_id: str,
+    note_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Soft-delete (deleted_at = NOW). Conserva audit trail Habeas Data."""
+    user_id = _extract_user_id(request)
+
+    note_res = (
+        supabase.table("conversation_notes")
+        .select("author_user_id")
+        .eq("id", note_id)
+        .eq("conversation_id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .is_("deleted_at", "null")
+        .limit(1)
+        .execute()
+    )
+    if not note_res.data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+
+    from dependencies.auth import get_current_role  # noqa: PLC0415
+    role = await get_current_role(request)
+    is_author = note_res.data[0]["author_user_id"] == user_id
+    is_privileged = role in {"owner", "manager"}
+    if not (is_author or is_privileged):
+        raise HTTPException(status_code=403, detail="Solo el autor o owner/manager pueden eliminar la nota")
+
+    supabase.table("conversation_notes").update({
+        "deleted_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", note_id).eq("tenant_id", tenant_id).execute()
+
+    return None
+
+
+# ─── Rerun IA — re-procesar último turno del bot (P0-3 founder 2026-05-29) ───
+
+
+@router.post("/{conversation_id}/rerun", response_model=dict, status_code=202)
+async def rerun_last_inbound(
+    conversation_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Re-procesa el último inbound del cliente. El bot generará nuevo outbound.
+
+    Casos de uso (P0-3 backlog):
+      - Bot dio respuesta mala / con typo → operador quiere segunda toma.
+      - Operador actualizó catálogo/cupón/prompt y quiere ver el bot con
+        el nuevo contexto sin esperar al cliente.
+
+    Implementación:
+      1. Validar conv pertenece al tenant + está en bot_active (si está en
+         human_takeover, el rerun no tiene sentido — el operador ya tomó
+         control).
+      2. Encontrar el último inbound del cliente (direction='inbound', not
+         processing_status='skipped').
+      3. Clonar el inbound: nuevo UUID + processing_status='pending'.
+         NO modificar el original (audit trail).
+      4. Worker lo procesa naturalmente — genera nuevo outbound.
+
+    Sin Idempotency-Key intencional: cada rerun es operación distinta
+    (operador puede querer N reruns). Si se requiere dedup, el operador
+    debe limitar manualmente desde UI (botón deshabilitado durante 5s
+    post-clic, por ejemplo).
+    """
+    # 1. Validar conv del tenant + status bot_active.
+    conv_res = (
+        supabase.table("conversations")
+        .select("id, status")
+        .eq("id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_res.data:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    conv = conv_res.data[0]
+    if conv["status"] != "bot_active":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Rerun solo permitido cuando la conv está en bot_active "
+                f"(status actual: {conv['status']})."
+            ),
+        )
+
+    # 2. Buscar último inbound (no context_snapshot ni skipped).
+    last_inbound_res = (
+        supabase.table("messages")
+        .select("id, content, content_type, media_url, created_at")
+        .eq("conversation_id", conversation_id)
+        .eq("tenant_id", tenant_id)
+        .eq("direction", "inbound")
+        .neq("content_type", "context_snapshot")
+        .neq("processing_status", "skipped")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not last_inbound_res.data:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay mensajes inbound previos del cliente para re-procesar.",
+        )
+    last_inbound = last_inbound_res.data[0]
+
+    # 3. Clonar como nuevo inbound pending.
+    clone_payload = {
+        "conversation_id": conversation_id,
+        "tenant_id": tenant_id,
+        "direction": "inbound",
+        "content": last_inbound["content"],
+        "content_type": last_inbound["content_type"],
+        "media_url": last_inbound.get("media_url"),
+        "processing_status": "pending",
+        "processed": False,
+        # Audit: payload metadata explícita para distinguir reruns en logs
+        # post-mortem.
+        "payload": {
+            "_rerun": True,
+            "_rerun_source_msg_id": last_inbound["id"],
+            "_rerun_triggered_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+    insert_res = supabase.table("messages").insert(clone_payload).execute()
+    if not insert_res.data:
+        raise HTTPException(status_code=500, detail="No se pudo encolar rerun")
+
+    new_msg = insert_res.data[0]
+    logger.info(
+        "[RERUN] tenant=%s conv=%s source_msg=%s new_msg=%s",
+        tenant_id[:8], conversation_id[:8],
+        last_inbound["id"][:8], new_msg["id"][:8],
+    )
+    return {
+        "rerun_message_id": new_msg["id"],
+        "source_message_id": last_inbound["id"],
+        "status": "queued",
+        "note": "El bot procesará el inbound nuevamente en segundos.",
+    }

@@ -11,7 +11,7 @@
 **Documento canónico**: [`docs/refactor/0006-roadmap-pending-sessions.md`](../docs/refactor/0006-roadmap-pending-sessions.md).
 
 Lee ese doc PRIMERO al retomar el proyecto — consolida:
-- 6 PRs abiertos pendientes de review + orden de merge
+- 10 PRs abiertos pendientes de review + orden de merge
 - Bloqueantes humanos externos (V.3 legal · V.4 DPO · V.5 pen testing · V.7 dominio)
 - Próximas 5 sesiones priorizadas con esfuerzo + objetivos
 - Items diferidos a Platform Console + Storefront
@@ -19,7 +19,34 @@ Lee ese doc PRIMERO al retomar el proyecto — consolida:
 
 **Plan K avance**: 16 / 18 IMPLEMENTED (89%) tras sesión 2026-05-29.
 
-**Próxima sesión recomendada**: J.2.11 Health dashboard providers PER-TENANT (3.5d).
+**Próxima sesión recomendada**: cierre validaciones humanas + Sem 6 HSM templates.
+
+---
+
+## Platform Console — Items diferidos (vista cross-tenant)
+
+Decisión arquitectónica founder 2026-05-29: features con vista **cross-tenant**
+NO se construyen en Tenant Console; se documentan como pendientes Platform
+Console (NO existe — bloqueante OQ-P01).
+
+Tenant Console (apps/web actual) construye vista **PER-TENANT** de:
+- J.2.11 Health dashboard providers — el tenant ve la salud de SUS integraciones
+- I.8 Billing aggregator — el tenant ve SUS costos del mes
+- J.2.4.3 MFA TOTP — cada user activa MFA en su Settings
+- I.7 Onboarding Wizard — guía 5-7 pasos al tenant nuevo
+
+Platform Console (DIFERIDO ~6 meses post-deploy) tendrá vista cross-tenant de
+estos features (reusando backend) + features 100% nuevas (tenant CRUD admin,
+audit log global, subscription billing platform-level).
+
+Detalle completo + roadmap: [`docs/refactor/0005-platform-console-pending-items.md`](../docs/refactor/0005-platform-console-pending-items.md).
+
+**Trigger activación Platform Console**: 50+ tenants, founder pide vista global,
+compliance externa, o pricing tier complejo. Esfuerzo total estimado ~20-25d.
+
+**Excepción Sentry tracing (J.2.7.4)**: NO requiere UI propia — usa
+sentry.io/organizations/konvi/ directamente. Solo founder accede. SDK
+instrumentation se implementa AHORA en backend (sirve a ambos consoles).
 
 ---
 

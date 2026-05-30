@@ -11,6 +11,7 @@ import {
   Menu, X, ChevronDown, TrendingUp, Building2,
   Wallet, DollarSign, AlertCircle, Bot, Lock, KeyRound,
   Store, Crown, Briefcase, Headphones, Tag,
+  Shield, Activity, Scale, Archive, Trash2,
 } from 'lucide-react'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -113,11 +114,21 @@ const NAV_ITEMS: NavItem[] = [
   //
   //  Reglas de Negocio: pendiente funcional — no existe base real. No se expone.
   {
-    kind: 'group', id: 'configuracion', label: 'Configuración', icon: Settings, roles: ['owner', 'manager'],
+    kind: 'group', id: 'configuracion', label: 'Configuración', icon: Settings, roles: ['owner', 'manager', 'operator'],
     children: [
-      { kind: 'leaf', href: '/dashboard/settings',     label: 'General',            icon: Building2, roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/team',         label: 'Usuarios y Acceso',  icon: Users,     roles: ['owner'] },
-      { kind: 'leaf', href: '/dashboard/integrations', label: 'Integraciones',      icon: Plug,      roles: ['owner', 'manager'] },
+      { kind: 'leaf', href: '/dashboard/settings',                  label: 'General',           icon: Building2, roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/team',                      label: 'Usuarios y Acceso', icon: Users,     roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/integrations',              label: 'Integraciones',     icon: Plug,      roles: ['owner', 'manager'] },
+      // Rev. 109 J.2.4.3 — Seguridad per-user (MFA TOTP + recovery codes).
+      // Accesible para TODOS los roles porque MFA es de la cuenta personal.
+      { kind: 'leaf', href: '/dashboard/settings/security',         label: 'Seguridad',         icon: Shield,    roles: ['owner', 'manager', 'operator'] },
+      // Rev. 109 J.2.11 — Salud integraciones per-tenant.
+      { kind: 'leaf', href: '/dashboard/settings/health',           label: 'Salud integraciones', icon: Activity, roles: ['owner', 'manager'] },
+      // Rev. 102 — Habeas Data per-tenant.
+      { kind: 'leaf', href: '/dashboard/settings/legal',            label: 'Legal',             icon: Scale,     roles: ['owner'] },
+      { kind: 'leaf', href: '/dashboard/settings/retention',        label: 'Retención datos',   icon: Archive,   roles: ['owner'] },
+      // Rev. 109 J.2.4.4 — Cerrar cuenta (owner-only, destructive).
+      { kind: 'leaf', href: '/dashboard/settings/account-closure',  label: 'Cerrar cuenta',     icon: Trash2,    roles: ['owner'] },
     ],
   },
 ]
@@ -434,15 +445,15 @@ export default function SidebarClient({
                 >
                   <div className="p-1">
                     <Link
-                      href="/dashboard/account"
+                      href="/dashboard/settings/security"
                       onClick={() => setUserMenuOpen(false)}
                       className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors"
                       style={{ color: 'hsl(156 20% 70%)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'hsl(168 14% 16%)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
-                      <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      Cambiar contraseña
+                      <Shield className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                      Seguridad y contraseña
                     </Link>
                     <div className="my-1 mx-2" style={{ borderTop: '1px solid hsl(156 30% 18%)' }} />
                     <form action={logoutAction}>
