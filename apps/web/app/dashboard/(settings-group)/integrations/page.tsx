@@ -24,7 +24,6 @@ export default async function IntegrationsPage({
     meli_same_user?: string  // baseline 2026-05-29 — campo faltante en type detectado al validar `next build`
     tg_test?: string; tg_msg?: string
     wa_test?: string; wa_msg?: string
-    envia_test?: string; envia_msg?: string
     ave_test?: string; ave_msg?: string
   }
 }) {
@@ -41,8 +40,7 @@ export default async function IntegrationsPage({
 
   let integrations: Integration[]  = []
   let notifications: NotifSetting[] = []
-  // (Sem 7 F2 cierre) — preferencias carriers + capabilities Envia movidas al
-  // panel dedicado /integrations/envia (tabs Carriers + Capacidades).
+  // Aveonline carriers + capabilities en panel dedicado /integrations/aveonline.
 
   // Métricas para hub (Iter 2): WhatsApp templates count.
   let templatesApproved = 0
@@ -63,75 +61,29 @@ export default async function IntegrationsPage({
     templatesApproved = tplRows.filter(t => t.status === 'APPROVED').length
   }
 
-  const providers = ['envia', 'aveonline', 'mercadolibre', 'whatsapp', 'wompi']
+  const providers = ['aveonline', 'mercadolibre', 'whatsapp', 'wompi']
   const fullList: Integration[] = providers.map(p =>
     integrations.find(i => i.provider === p) ?? { provider: p, status: 'disconnected', meta: {} }
   )
 
-  const enviaInt      = fullList.find(i => i.provider === 'envia')!
   const aveonlineInt  = fullList.find(i => i.provider === 'aveonline')!
   const meliInt       = fullList.find(i => i.provider === 'mercadolibre')!
   const waInt         = fullList.find(i => i.provider === 'whatsapp')!
   const wompiInt      = fullList.find(i => i.provider === 'wompi')!
   const tgConfig      = notifications.find(n => n.channel === 'telegram')
 
-  const enviaConnected = enviaInt.status === 'connected'
   const aveonlineConnected = aveonlineInt.status === 'connected'
   const meliConnected  = meliInt.status === 'connected'
   const waConnected    = waInt.status === 'connected'
   const wompiConnected = wompiInt.status === 'connected'
   // bot_token_secret_id (vault) o bot_token (texto plano legacy) indican que el token está configurado
   const tgConnected    = !!(tgConfig?.enabled && (tgConfig?.config?.bot_token_secret_id || tgConfig?.config?.bot_token) && tgConfig?.config?.chat_id)
-  const connectedCount = [enviaConnected, aveonlineConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
+  const connectedCount = [aveonlineConnected, meliConnected, waConnected, tgConnected, wompiConnected].filter(Boolean).length
 
   // ── Server Actions ────────────────────────────────────────────────────────
 
-  async function saveEnviaKey(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    const token   = formData.get('api_token') as string
-    const sandbox = formData.get('sandbox') === 'on'
-
-    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
-      .eq('tenant_id', m.tenant_id).eq('provider', 'envia').maybeSingle()
-    const existingSid = (existing?.credentials as Record<string, string>)?.api_token_secret_id
-
-    let secretId: string | null = null
-    if (existingSid) {
-      await sb.rpc('pgsec_update_secret', { p_id: existingSid, p_secret: token })
-      secretId = existingSid
-    } else {
-      const { data } = await sb.rpc('pgsec_upsert_secret', {
-        p_secret: token, p_name: `${m.tenant_id}/envia/api_token`, p_description: 'Envia API token',
-      })
-      secretId = data as string | null
-    }
-
-    await sb.from('tenant_integrations').upsert({
-      tenant_id: m.tenant_id, provider: 'envia', status: 'connected',
-      credentials: { api_token_secret_id: secretId, sandbox },
-      meta: { token_preview: `${token.slice(0, 6)}...${token.slice(-4)}`, environment: sandbox ? 'sandbox' : 'production' },
-    }, { onConflict: 'tenant_id,provider' })
-    revalidatePath('/dashboard/integrations')
-  }
-
-  async function disconnectEnvia() {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-    const { data: existing } = await sb.from('tenant_integrations').select('credentials')
-      .eq('tenant_id', m.tenant_id).eq('provider', 'envia').maybeSingle()
-    const sid = (existing?.credentials as Record<string, string>)?.api_token_secret_id
-    if (sid) await sb.rpc('pgsec_delete_secret', { p_id: sid })
-    await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {} })
-      .eq('tenant_id', m.tenant_id).eq('provider', 'envia')
-    revalidatePath('/dashboard/integrations')
-  }
+  // Nota rev. 109: saveEnviaKey + disconnectEnvia eliminados. Aveonline tiene
+  // sus propios server actions en /integrations/aveonline/.
 
   async function disconnectMeli() {
     'use server'
@@ -312,55 +264,8 @@ export default async function IntegrationsPage({
     redirect('/dashboard/integrations?wa_test=success')
   }
 
-  async function testEnvia() {
-    'use server'
-    const sb = createClient()
-    const { data: { user: u } } = await sb.auth.getUser()
-    const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
-
-    const { data: enviaRow } = await sb.from('tenant_integrations')
-      .select('credentials, meta').eq('tenant_id', m.tenant_id).eq('provider', 'envia').maybeSingle()
-
-    const secretId  = (enviaRow?.credentials as Record<string, string>)?.api_token_secret_id
-    const isSandbox = (enviaRow?.meta as Record<string, string>)?.environment === 'sandbox'
-    const baseUrl   = isSandbox ? 'https://queries-test.envia.com' : 'https://queries.envia.com'
-
-    const { data: token, error: vaultErr } = secretId
-      ? await sb.rpc('pgsec_read_secret', { p_id: secretId })
-      : { data: null, error: null }
-
-    if (!token) {
-      const msg = vaultErr ? `Vault error: ${vaultErr.message}` : 'API key no encontrada. Reconecta Envia.'
-      redirect(`/dashboard/integrations?envia_test=error&envia_msg=${encodeURIComponent(msg)}`)
-    }
-
-    // Patrón correcto: redirect() fuera del try/catch
-    let enviaError: string | null = null
-    try {
-      const controller = new AbortController()
-      const timeout    = setTimeout(() => controller.abort(), 15000)
-      try {
-        const res = await fetch(`${baseUrl}/available-carrier/CO/0`, {
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          signal: controller.signal,
-        })
-        clearTimeout(timeout)
-        if (!res.ok) {
-          enviaError = res.status === 401 ? 'API key inválida o expirada' : `Error ${res.status}`
-        }
-      } finally {
-        clearTimeout(timeout)
-      }
-    } catch (err) {
-      enviaError = err instanceof Error ? err.message : 'No se pudo conectar con Envia'
-    }
-
-    if (enviaError) {
-      redirect(`/dashboard/integrations?envia_test=error&envia_msg=${encodeURIComponent(enviaError)}`)
-    }
-    redirect('/dashboard/integrations?envia_test=success')
-  }
+  // Nota rev. 109: testEnvia eliminado. Aveonline tiene test endpoint en
+  // /integrations/aveonline (panel dedicado).
 
   async function saveWhatsApp(formData: FormData) {
     'use server'
@@ -545,8 +450,6 @@ export default async function IntegrationsPage({
       templatesApproved={templatesApproved}
       templatesTotal={templatesTotal}
       waConnected={waConnected}
-      enviaInt={enviaInt}
-      enviaConnected={enviaConnected}
       aveonlineInt={aveonlineInt}
       aveonlineConnected={aveonlineConnected}
       meliInt={meliInt}
@@ -565,12 +468,8 @@ export default async function IntegrationsPage({
       tgMsg={searchParams.tg_msg}
       waTest={searchParams.wa_test}
       waMsg={searchParams.wa_msg}
-      enviaTest={searchParams.envia_test}
-      enviaMsg={searchParams.envia_msg}
       aveTest={searchParams.ave_test}
       aveMsg={searchParams.ave_msg}
-      saveEnviaKey={saveEnviaKey}
-      disconnectEnvia={disconnectEnvia}
       saveAveonline={saveAveonline}
       disconnectAveonline={disconnectAveonline}
       testAveonline={testAveonline}
@@ -581,7 +480,6 @@ export default async function IntegrationsPage({
       disconnectTelegram={disconnectTelegram}
       testTelegram={testTelegram}
       testWhatsApp={testWhatsApp}
-      testEnvia={testEnvia}
       saveWhatsApp={saveWhatsApp}
       disconnectWhatsApp={disconnectWhatsApp}
     />

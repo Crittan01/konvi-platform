@@ -11,11 +11,11 @@ SHA256 hex sobre canonical (method + url + sorted_body) es suficiente.
 Uso típico (dentro de IntegrationClient.execute):
 
     hash = hash_request("POST", url, body)
-    cached = lookup(client, "envia", tenant_id, hash)
+    cached = lookup(client, "aveonline", tenant_id, hash)
     if cached:
         return cached  # devuelve response cacheado, no se hace POST
     response = await http.post(url, json=body)
-    register(client, "envia", tenant_id, hash, response, ttl_seconds=86400)
+    register(client, "aveonline", tenant_id, hash, response, ttl_seconds=86400)
     return response
 """
 from __future__ import annotations

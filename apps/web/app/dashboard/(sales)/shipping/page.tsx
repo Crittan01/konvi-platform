@@ -56,7 +56,7 @@ export default async function ShippingPage({
   const supabase = createClient()
 
   let shipments: Shipment[] = []
-  let activeProvider: 'envia' | 'aveonline' = 'envia'
+  const activeProvider: 'aveonline' = 'aveonline'
   let activeProviderConnected = false
   let shippingOrigin: ShippingOrigin | null = null
   let destDefaults: Record<string, string> | null = null
@@ -66,11 +66,8 @@ export default async function ShippingPage({
   let deliveredCount = 0
 
   if (tenantId) {
-    // Rev. 107: query AMBOS providers shipping (envia + aveonline) +
-    // tenant_shipping_provider_config para resolver cuál está activo y
-    // si ESE está conectado. Coherente con ADR-0019: 1 provider activo
-    // per tenant + el módulo Cotizador muestra status del provider
-    // que realmente se va a usar al cotizar.
+    // Rev. 109: Aveonline es el provider único activo (ADR-0019).
+    // Envia eliminado del runtime. Para agregar Courier N+1 ver ADR-0023.
     const baseQueries = Promise.all([
       supabase
         .from('shipments')
@@ -82,39 +79,28 @@ export default async function ShippingPage({
         .from('tenant_integrations')
         .select('provider, status')
         .eq('tenant_id', tenantId)
-        .in('provider', ['envia', 'aveonline']),
+        .eq('provider', 'aveonline'),
       supabase
         .from('tenants')
         .select('shipping_origin')
         .eq('id', tenantId)
         .single(),
-      supabase
-        .from('tenant_shipping_provider_config')
-        .select('active_provider')
-        .eq('tenant_id', tenantId)
-        .maybeSingle(),
     ])
 
-    const [shipmentsRes, integrationsRes, tenantRes, providerCfgRes] = await baseQueries
+    const [shipmentsRes, integrationsRes, tenantRes] = await baseQueries
 
     shipments      = (shipmentsRes.data as Shipment[]) || []
     shippingOrigin = (tenantRes.data?.shipping_origin as ShippingOrigin) ?? null
     inTransitCount = shipments.filter(s => s.status === 'in_transit').length
     deliveredCount = shipments.filter(s => s.status === 'delivered').length
 
-    // Resolver provider activo (default 'envia' si no hay row config).
-    const cfgProvider = providerCfgRes.data?.active_provider as
-      | 'envia' | 'aveonline' | undefined
-    activeProvider = cfgProvider === 'aveonline' ? 'aveonline' : 'envia'
-
-    // ¿Está conectado el provider activo?
+    // ¿Está conectado Aveonline?
     const integrationsList = (integrationsRes.data ?? []) as Array<{
       provider: string; status: string
     }>
-    const activeProviderRow = integrationsList.find(
-      i => i.provider === activeProvider,
+    activeProviderConnected = integrationsList.some(
+      i => i.provider === 'aveonline' && i.status === 'connected',
     )
-    activeProviderConnected = activeProviderRow?.status === 'connected'
 
     // Si viene de un pedido, buscar la dirección del contacto
     if (searchParams?.order) {
@@ -158,24 +144,23 @@ export default async function ShippingPage({
         </div>
       </div>
 
-      {/* Banner provider activo desconectado (Rev. 107 — dinámico por active_provider). */}
+      {/* Banner Aveonline desconectado (provider único shipping ADR-0019). */}
       {!activeProviderConnected && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10">
           <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-amber-400">
-              {activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'} no está conectado
+              Aveonline no está conectado
             </p>
             <p className="text-xs text-amber-400/80 mt-0.5">
               Ve a{' '}
               <Link
-                href={`/dashboard/integrations/${activeProvider}`}
+                href="/dashboard/integrations/aveonline"
                 className="underline font-medium"
               >
-                Integraciones → {activeProvider === 'aveonline' ? 'Aveonline' : 'Envia'}
+                Integraciones → Aveonline
               </Link>
-              {' '}para configurar tus credenciales antes de cotizar envíos. Tu provider
-              activo es <span className="font-mono">{activeProvider}</span>.
+              {' '}para configurar tus credenciales antes de cotizar envíos.
             </p>
           </div>
         </div>
