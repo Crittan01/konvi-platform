@@ -55,6 +55,27 @@ services:
       # El cálculo de embeddings KB se delegó al API service (POST /api/v1/knowledge-base).
       # Si este servicio se redeploya con la var todavía configurada en el dashboard de
       # Render, basta con eliminarla manualmente — no hay código que la use.
+      # Rev. 109 J.2.7.4 — Sentry tracing E2E. 4 vars: 2 server + 2 browser bundle.
+      - key: SENTRY_DSN
+        sync: false                              # konvi-web project DSN
+      - key: SENTRY_TRACES_RATE
+        value: "0.1"
+      - key: SENTRY_ENV
+        value: production
+      - key: NEXT_PUBLIC_SENTRY_DSN              # MISMO valor que SENTRY_DSN (bundle)
+        sync: false
+      - key: NEXT_PUBLIC_SENTRY_TRACES_RATE
+        value: "0.1"
+      - key: NEXT_PUBLIC_SENTRY_ENV
+        value: production
+      # Build-time: source map upload + release tagging. Sin esto Sentry
+      # muestra stack traces minified — debugging produccion limitado.
+      - key: SENTRY_ORG
+        value: konvi
+      - key: SENTRY_PROJECT
+        value: konvi-web
+      - key: SENTRY_AUTH_TOKEN
+        sync: false                              # sntrys_... con scope project:releases
     healthCheckPath: /
     autoDeploy: false
 
@@ -82,6 +103,13 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      # Rev. 109 J.2.7.4 — Sentry tracing (konvi-connector project DSN).
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_RATE
+        value: "0.1"
+      - key: SENTRY_ENV
+        value: production
     healthCheckPath: /health
     autoDeploy: false
 
@@ -164,6 +192,13 @@ services:
       # ── Wompi — credenciales por-tenant en Supabase Vault (tenant_integrations) ──
       # Las llaves de Wompi se ingresan por tenant en Ajustes → Integraciones → Wompi.
       # No se necesitan env vars globales para Wompi.
+      # Rev. 109 J.2.7.4 — Sentry tracing (konvi-api project DSN).
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_RATE
+        value: "0.1"
+      - key: SENTRY_ENV
+        value: production
     healthCheckPath: /health
     autoDeploy: false
 
@@ -298,6 +333,13 @@ services:
         sync: false                              # Configurar en Render Dashboard
       - key: RESEND_FROM_EMAIL
         value: "Konvi <noreply@commerce-ops.local>"
+      # Rev. 109 J.2.7.4 — Sentry tracing (konvi-orchestrator project DSN).
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_RATE
+        value: "0.1"
+      - key: SENTRY_ENV
+        value: production
     healthCheckPath: /health
     # Rev. 92.b: auto-deploy desactivado para iterar el orchestrator
     # localmente sin que cada push a develop lance redeploy en Render.

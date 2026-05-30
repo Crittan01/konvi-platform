@@ -78,6 +78,8 @@ Ledger sync verificado vía `supabase migration list --linked` — ambas columna
 | I.8 | Billing aggregator per-tenant (Tenant Console) | 12d | Producto · pricing tier informed |
 | - | 9 tests pre-existentes (cleanup deuda) | 2-3h | Deuda técnica · documentado en [0004](0004-test-debt-pre-existing.md) |
 | - | **Platform Console** (Next.js separada · cross-tenant founder) | 20-25d | Cuando >50 tenants o trigger compliance · doc en [0005](0005-platform-console-pending-items.md) |
+| **MFA-B** | **Auto-logout por inactividad** (60min owner/manager, 4h operator) | 4h | Cierra escenario "B cierra browser sin logout → A entra como B" — detectado founder 2026-05-29 PR #10 |
+| **MFA-C** | **Step-up auth** (re-pedir password para acciones críticas: eliminar tenant, cambiar email, regenerar codes MFA) | 1d | Defense in depth para operaciones sensibles · pattern bancario |
 
 ---
 
