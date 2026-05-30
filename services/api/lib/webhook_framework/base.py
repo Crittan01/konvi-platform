@@ -1,7 +1,7 @@
 """WebhookHandler abstract base (rev. 105 Sem 2 F.1).
 
 Template-method para webhooks inbound. Subclass concreta provee:
-  - integration: str            (canónico: 'wompi'|'meli'|'meta'|'envia'|'telegram')
+  - integration: str            (canónico: 'wompi'|'meli'|'meta'|'aveonline'|'telegram')
   - signature_strategy
   - idempotency_strategy
   - rate_limit (opcional)

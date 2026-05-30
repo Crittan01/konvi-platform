@@ -23,13 +23,9 @@ from agentic.tools.registry import register_tool
 
 logger = logging.getLogger(__name__)
 
-# Rev. 107 founder decision 2026-05-24: Envia INHABILITADO en plataforma.
-# Si un tenant tiene `tenant_shipping_provider_config.active_provider='envia'`,
-# `quote_shipping` retorna error explícito ENVIA_DISABLED en lugar de
-# invocar Envia. Para re-habilitar: cambiar a False + remover guard +
-# config tenant migra a 'aveonline'. Mantener legacy code path en
-# `legacy_adapters/envia.py` por si Envia retorna en el futuro.
-_ENVIA_DISABLED = True
+# Rev. 109 (2026-05-30) — Envia eliminado completamente del runtime
+# (ADR-0019). Aveonline es el provider único activo. Para agregar
+# Courier N+1 ver ADR-0023 (Shipping Provider Integration Pattern).
 
 
 # ─── Resolver rate_id con tolerancia a variaciones del LLM ─────────────────
@@ -211,23 +207,15 @@ class QuoteShippingTool:
     async def execute(self, args: QuoteShippingArgs, ctx: ToolContext) -> ToolResult:
         """Routing por tenant_shipping_provider_config.active_provider.
 
-        Rev. 107 M.5 — soporta multi-provider (Envia O Aveonline,
-        sin fallback automático per ADR-0019).
-
-        Rev. 107 founder 2026-05-24: **Envia INHABILITADO**. Default
-        provider es `aveonline`. Si un tenant tiene `active_provider=
-        'envia'` configurado, el tool retorna error explícito en lugar
-        de invocar Envia silenciosamente. Para re-habilitar Envia,
-        cambiar `_ENVIA_DISABLED=False` en este módulo + decisión
-        explícita del founder.
+        Rev. 109 (2026-05-30): Aveonline es el único provider activo
+        (ADR-0019). Para agregar Courier N+1 ver ADR-0023 (Shipping
+        Provider Integration Pattern).
         """
         from agentic.legacy_adapters import (
-            quote_shipping_for_cart,
             quote_shipping_for_cart_aveonline,
         )
 
-        # Resolver provider activo del tenant. Default Aveonline
-        # (Envia inhabilitado rev. 107 — founder decision 2026-05-24).
+        # Resolver provider activo del tenant. Default Aveonline.
         active_provider = "aveonline"
         try:
             cfg_res = (
@@ -252,32 +240,24 @@ class QuoteShippingTool:
             ctx.tenant_id[:8], active_provider, args.city,
         ) if ctx.logger else None
 
-        # Guard rev. 107: Envia inhabilitado por decisión operativa.
-        if active_provider == "envia" and _ENVIA_DISABLED:
+        # Rev. 109: provider único Aveonline (ADR-0019). Cualquier otro
+        # valor en active_provider retorna error explícito para que el
+        # operador configure el provider correcto.
+        if active_provider != "aveonline":
             return tool_failure(
-                "Envia está inhabilitado en esta plataforma. Configura "
-                "Aveonline como provider de envío para este tenant desde "
-                "el panel de integraciones.",
-                code="ENVIA_DISABLED",
+                f"Provider shipping '{active_provider}' no soportado. "
+                "Configura Aveonline como provider de envío en el panel "
+                "de integraciones (Settings → Integraciones → Aveonline).",
+                code="PROVIDER_NOT_SUPPORTED",
             )
 
-        if active_provider == "aveonline":
-            result = await quote_shipping_for_cart_aveonline(
-                ctx.supabase,
-                conversation_id=ctx.conversation_id,
-                tenant_id=ctx.tenant_id,
-                contact_id=ctx.contact_id,
-                city_query=args.city,
-            )
-        else:
-            # Path Envia (cuando _ENVIA_DISABLED=False y tenant tiene envia).
-            result = await quote_shipping_for_cart(
-                ctx.supabase,
-                conversation_id=ctx.conversation_id,
-                tenant_id=ctx.tenant_id,
-                contact_id=ctx.contact_id,
-                city_query=args.city,
-            )
+        result = await quote_shipping_for_cart_aveonline(
+            ctx.supabase,
+            conversation_id=ctx.conversation_id,
+            tenant_id=ctx.tenant_id,
+            contact_id=ctx.contact_id,
+            city_query=args.city,
+        )
         if not result.get("ok"):
             return tool_failure(
                 result.get("error", "Error cotizando envío."),

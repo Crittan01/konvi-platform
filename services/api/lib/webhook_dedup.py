@@ -12,11 +12,11 @@ Uso típico (idempotency at-least-once safe):
 
     from lib.webhook_dedup import is_duplicate, mark_processed
 
-    if is_duplicate(supabase, "envia", event_uid, tenant_id=tenant_id):
+    if is_duplicate(supabase, "aveonline", event_uid, tenant_id=tenant_id):
         return JSONResponse({"ok": True, "duplicate": True}, status_code=200)
     try:
         process_event(...)
-        mark_processed(supabase, "envia", event_uid)
+        mark_processed(supabase, "aveonline", event_uid)
     except Exception:
         # No marcar processed_at — provider re-enviará y volveremos a intentar.
         raise
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Set canónico de integraciones soportadas en webhook_events_seen genérica.
 # wompi/meli están aquí pero usan tablas específicas hasta refactor (rev. 105+).
 SUPPORTED_INTEGRATIONS = frozenset({
-    "wompi", "meli", "meta", "envia", "telegram",
+    "wompi", "meli", "meta", "aveonline", "telegram",
 })
 
 

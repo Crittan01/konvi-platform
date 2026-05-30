@@ -9,13 +9,13 @@ Política default: si el tenant NO tiene NINGUNA fila en
 compat con tenants pre-rev105). Si tiene ≥1 fila, solo los `enabled=true`
 aparecen.
 
-Uso típico desde `routers/shipping.py:_resolve_carriers_for_quote`:
+Uso típico desde routers shipping:
 
     from lib.tenant_carriers import filter_enabled_carriers
 
     dynamic = await client.get_available_carriers(...)
     carriers = filter_enabled_carriers(
-        supabase, tenant_id, "envia", dynamic_carrier_codes,
+        supabase, tenant_id, "aveonline", dynamic_carrier_codes,
     )
     # → solo carriers que el tenant tiene enabled (o todos si no
     #   configuró preferencias).
@@ -29,7 +29,9 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-VALID_PROVIDERS = frozenset({"envia", "aveonline"})
+# Provider único activo post-rev. 109 (ADR-0019). Para agregar Courier N+1
+# ver ADR-0023 (Shipping Provider Integration Pattern).
+VALID_PROVIDERS = frozenset({"aveonline"})
 
 
 @dataclass(frozen=True)

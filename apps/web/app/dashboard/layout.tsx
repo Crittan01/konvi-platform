@@ -77,7 +77,7 @@ export default async function DashboardLayout({
       supabase.from('tenants').select('name, logo_url').eq('id', tenantId).single(),
       supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'human_takeover'),
       supabase.from('marketplace_listings').select('status').eq('tenant_id', tenantId).eq('provider', 'mercadolibre'),
-      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'envia', 'aveonline', 'mercadolibre']),
+      supabase.from('tenant_integrations').select('provider, status').eq('tenant_id', tenantId).in('provider', ['whatsapp', 'aveonline', 'mercadolibre']),
       supabase.from('tenant_subscriptions').select('plan_code').eq('tenant_id', tenantId).maybeSingle(),
     ])
 
@@ -91,8 +91,7 @@ export default async function DashboardLayout({
       const provider  = (row as { provider?: string }).provider
       const connected = (row as { status?: string }).status === 'connected'
       if (provider === 'whatsapp')     integrations.whatsapp     = connected
-      if (provider === 'envia')        integrations.shipping     ||= connected
-      if (provider === 'aveonline')    integrations.shipping     ||= connected
+      if (provider === 'aveonline')    integrations.shipping     = connected
       if (provider === 'mercadolibre') integrations.mercadolibre = connected
     }
 

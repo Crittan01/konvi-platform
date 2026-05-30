@@ -24,7 +24,7 @@ interface Rate {
   total_price?: number
   currency?: string
   delivery_date?: string
-  // Rev. 107 — campos extendidos Aveonline (opcionales; Envia los ignora).
+  // Rev. 107 — campos extendidos Aveonline (provider único activo, ADR-0019).
   delivery_days?: number | null
   delivery_estimate?: string
   carrier_logo_url?: string | null
@@ -274,7 +274,7 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
   const getErrorDetail = async (res: Response, fallback: string) => {
     const payload = await res.json().catch(() => ({} as Record<string, unknown>))
     const detail = typeof payload.detail === 'string' ? payload.detail : fallback
-    if (res.status === 503 && detail.includes('ENVIA_PHASE2_ENABLED')) {
+    if (res.status === 503 || res.status === 404) {
       setPhase2Disabled(true)
     }
     return detail
@@ -700,13 +700,16 @@ export default function ShippingQuoteForm({ shippingOrigin, orderId = null, dest
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Operaciones post-cotización</p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Genera etiqueta, consulta tracking, agenda pickup o cancela. Estas acciones usan endpoints Fase 2 de Envia.
+                        Aveonline maneja estados de guía vía webhook automático. Para
+                        operaciones manuales avanzadas (regenerar etiqueta, agendar pickup,
+                        cancelar) usa el panel directo de Aveonline.
                       </p>
                     </div>
 
                     {phase2Disabled && (
                       <p className="text-xs text-amber-400">
-                        Fase 2 está deshabilitada en backend. Activa `ENVIA_PHASE2_ENABLED=true` en API para habilitar estas acciones.
+                        Estas acciones no están disponibles en Konvi. Usa el panel
+                        de Aveonline directamente para gestionar la guía.
                       </p>
                     )}
                     {phase2Error && <p className="text-xs text-red-400">{phase2Error}</p>}

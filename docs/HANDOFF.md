@@ -167,6 +167,10 @@ pnpm --filter web lint
 
 - SMTP propio (cuando exista dominio)
 - Alerting/observabilidad operacional centralizada
-- Envia Fase 2: validaciones carrier-específicas + webhooks async de tracking
+- Aveonline: webhooks async de tracking + polling backup (provider único shipping, ADR-0019)
+
+Nota rev. 109: Envia eliminado del runtime (pivote ADR-0019). Tag git
+`archive/envia-investigacion-rev106-2026-05-08` preserva investigación
+histórica. Para Courier N+1 ver [`docs/adr/0023-shipping-provider-integration-pattern.md`](adr/0023-shipping-provider-integration-pattern.md).
 
 El backlog funcional/técnico vive en `.context/04-next-steps.md`.

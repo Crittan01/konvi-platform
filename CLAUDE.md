@@ -47,7 +47,7 @@ supabase/migrations/          # fuente canónica de esquema
 
 ## Leer solo cuando la tarea lo requiera (on-demand)
 
-- `.context/06-contracts.md` — contratos de runtime: estados de conversación, procesamiento, FSM Inbox, Wompi, Envia.
+- `.context/06-contracts.md` — contratos de runtime: estados de conversación, procesamiento, FSM Inbox, Wompi, Aveonline.
   Leer si tocas: Orchestrator, API, Connector, Worker, lógica de pedidos/pagos.
 - `docs/HANDOFF.md` — estado operativo de infra Render + migraciones aplicadas.
   Leer si tocas: deployment, infra, migraciones pendientes.

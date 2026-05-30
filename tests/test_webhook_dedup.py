@@ -89,30 +89,30 @@ class IntegrationValidationTests(unittest.TestCase):
         client = _FakeSupabase()
         # No levanta.
         wd.is_duplicate(client, "WOMPI", "uid-1")
-        wd.is_duplicate(client, " Envia ", "uid-2")
+        wd.is_duplicate(client, " Aveonline ", "uid-2")
 
     def test_supported_5_integraciones(self):
-        for i in ("wompi", "meli", "meta", "envia", "telegram"):
+        for i in ("wompi", "meli", "meta", "aveonline", "telegram"):
             self.assertIn(i, wd.SUPPORTED_INTEGRATIONS)
 
 
 class IsDuplicateTests(unittest.TestCase):
     def test_primera_vez_es_false(self):
         client = _FakeSupabase()
-        result = wd.is_duplicate(client, "envia", "evt-001", tenant_id="A")
+        result = wd.is_duplicate(client, "aveonline", "evt-001", tenant_id="A")
         self.assertFalse(result)
 
     def test_segunda_vez_mismo_uid_es_true(self):
         client = _FakeSupabase()
-        first = wd.is_duplicate(client, "envia", "evt-001")
-        second = wd.is_duplicate(client, "envia", "evt-001")
+        first = wd.is_duplicate(client, "aveonline", "evt-001")
+        second = wd.is_duplicate(client, "aveonline", "evt-001")
         self.assertFalse(first)
         self.assertTrue(second)
 
     def test_uids_distintos_son_false_independientemente(self):
         client = _FakeSupabase()
-        a = wd.is_duplicate(client, "envia", "evt-A")
-        b = wd.is_duplicate(client, "envia", "evt-B")
+        a = wd.is_duplicate(client, "aveonline", "evt-A")
+        b = wd.is_duplicate(client, "aveonline", "evt-B")
         self.assertFalse(a)
         self.assertFalse(b)
 
@@ -121,16 +121,16 @@ class IsDuplicateTests(unittest.TestCase):
         # son entidades distintas.
         client = _FakeSupabase()
         a = wd.is_duplicate(client, "wompi", "evt-X")
-        b = wd.is_duplicate(client, "envia", "evt-X")
+        b = wd.is_duplicate(client, "aveonline", "evt-X")
         self.assertFalse(a)
         self.assertFalse(b)
 
     def test_event_uid_vacio_levanta(self):
         client = _FakeSupabase()
         with self.assertRaises(wd.WebhookDedupError):
-            wd.is_duplicate(client, "envia", "")
+            wd.is_duplicate(client, "aveonline", "")
         with self.assertRaises(wd.WebhookDedupError):
-            wd.is_duplicate(client, "envia", "   ")
+            wd.is_duplicate(client, "aveonline", "   ")
 
     def test_args_pasados_correctamente_al_rpc(self):
         client = _FakeSupabase()
@@ -151,20 +151,20 @@ class IsDuplicateTests(unittest.TestCase):
 class MarkProcessedTests(unittest.TestCase):
     def test_mark_processed_existente_es_true(self):
         client = _FakeSupabase()
-        wd.is_duplicate(client, "envia", "evt-1")  # registra
-        result = wd.mark_processed(client, "envia", "evt-1")
+        wd.is_duplicate(client, "aveonline", "evt-1")  # registra
+        result = wd.mark_processed(client, "aveonline", "evt-1")
         self.assertTrue(result)
 
     def test_mark_processed_inexistente_es_false(self):
         client = _FakeSupabase()
-        result = wd.mark_processed(client, "envia", "no-existe")
+        result = wd.mark_processed(client, "aveonline", "no-existe")
         self.assertFalse(result)
 
     def test_mark_processed_doble_es_false_la_segunda(self):
         client = _FakeSupabase()
-        wd.is_duplicate(client, "envia", "evt-1")
-        first = wd.mark_processed(client, "envia", "evt-1")
-        second = wd.mark_processed(client, "envia", "evt-1")
+        wd.is_duplicate(client, "aveonline", "evt-1")
+        first = wd.mark_processed(client, "aveonline", "evt-1")
+        second = wd.mark_processed(client, "aveonline", "evt-1")
         self.assertTrue(first)
         self.assertFalse(second)
 

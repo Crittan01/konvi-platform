@@ -27,7 +27,7 @@ interface Props {
   hasSedesHorario?:   boolean
   hasCatalog?:        boolean
   wompiConnected?:    boolean
-  enviaConnected?:    boolean
+  aveonlineConnected?: boolean
   // Rev. 71 — checks ampliados a 10
   hasIdentidadLegal?: boolean   // NIT / email_contacto / telefono_contacto
   kbCriticalCoverage?: {
@@ -40,7 +40,7 @@ interface Props {
 export function ReadinessCard({
   hasFilosofia, totalDocs, activeDocs, indexedDocs, agentName, hasPrompt,
   hasTono = false, hasSedesHorario = false, hasCatalog = false,
-  wompiConnected = false, enviaConnected = false,
+  wompiConnected = false, aveonlineConnected = false,
   hasIdentidadLegal = false,
   kbCriticalCoverage = { politicas: 0, envios: 0, pagos: 0 },
 }: Props) {
@@ -125,15 +125,15 @@ export function ReadinessCard({
     },
     {
       label: 'Pasarela y courier',
-      ok: wompiConnected && enviaConnected,
-      detail: wompiConnected && enviaConnected
-        ? 'Wompi y Envia conectados'
-        : !wompiConnected && !enviaConnected
-          ? 'Wompi y Envia sin conectar — el bot no puede generar links de pago ni cotizar envío'
+      ok: wompiConnected && aveonlineConnected,
+      detail: wompiConnected && aveonlineConnected
+        ? 'Wompi y Aveonline conectados'
+        : !wompiConnected && !aveonlineConnected
+          ? 'Wompi y Aveonline sin conectar — el bot no puede generar links de pago ni cotizar envío'
           : !wompiConnected
             ? 'Falta conectar Wompi (links de pago)'
-            : 'Falta conectar Envia (cotizar envío)',
-      tooltip: 'El bot necesita Wompi para generar links de pago y Envia para cotizar envíos. Sin estos, el flujo conversacional se queda sin cierre transaccional.',
+            : 'Falta conectar Aveonline (cotizar envío)',
+      tooltip: 'El bot necesita Wompi para generar links de pago y Aveonline para cotizar envíos. Sin estos, el flujo conversacional se queda sin cierre transaccional.',
       link: '/dashboard/integrations',
     },
   ]

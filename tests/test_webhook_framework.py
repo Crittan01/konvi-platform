@@ -318,35 +318,35 @@ class TokenBucketLimiterTests(unittest.TestCase):
     def test_consume_dentro_de_capacidad_ok(self):
         for _ in range(5):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         # 5to consumo OK (capacity=5).
 
     def test_consume_excediendo_levanta(self):
         for _ in range(5):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         with self.assertRaises(errors.RateLimitExceededError) as ctx:
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         self.assertGreaterEqual(ctx.exception.retry_after_seconds, 1)
 
     def test_buckets_independientes_per_tenant(self):
         for _ in range(5):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         # Tenant B no debe verse afectado.
         self.limiter.consume(
-            tenant_id="B", integration="envia", rule=self.rule
+            tenant_id="B", integration="aveonline", rule=self.rule
         )
 
     def test_buckets_independientes_per_integration(self):
         for _ in range(5):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         # Mismo tenant otra integración → bucket separado.
         self.limiter.consume(
@@ -356,10 +356,10 @@ class TokenBucketLimiterTests(unittest.TestCase):
     def test_get_remaining_lee_sin_consumir(self):
         for _ in range(3):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         remaining = self.limiter.get_remaining(
-            tenant_id="A", integration="envia", rule=self.rule
+            tenant_id="A", integration="aveonline", rule=self.rule
         )
         self.assertLessEqual(remaining, 2.5)
         self.assertGreaterEqual(remaining, 1.5)
@@ -367,13 +367,13 @@ class TokenBucketLimiterTests(unittest.TestCase):
     def test_reset_borra_buckets(self):
         for _ in range(5):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
         self.limiter.reset(tenant_id="A")
         # Tras reset, A vuelve a tener capacidad full.
         for _ in range(5):
             self.limiter.consume(
-                tenant_id="A", integration="envia", rule=self.rule
+                tenant_id="A", integration="aveonline", rule=self.rule
             )
 
 
@@ -408,7 +408,7 @@ class _FakeSignature(signature.SignatureStrategy):
 
 
 class _TestHandler(base.WebhookHandler):
-    integration = "envia"
+    integration = "aveonline"
     enqueue_called: list[dict] = []  # type: ignore[assignment]
 
     def __init__(self, sig=None, idem=None, rate_rule=None, limiter=None):
@@ -443,8 +443,8 @@ class WebhookHandlerHappyPathTests(unittest.TestCase):
         self.assertEqual(result["ok"], True)
         self.assertEqual(result["event_uid"], "evt-1")
         self.assertEqual(len(h.enqueue_called), 1)
-        self.assertIn(("envia", "evt-1"), h.idempotency_strategy.seen)
-        self.assertIn(("envia", "evt-1"), h.idempotency_strategy.processed)
+        self.assertIn(("aveonline", "evt-1"), h.idempotency_strategy.seen)
+        self.assertIn(("aveonline", "evt-1"), h.idempotency_strategy.processed)
 
 
 class WebhookHandlerErrorTests(unittest.TestCase):
@@ -501,12 +501,12 @@ class ToHttpResponseTests(unittest.TestCase):
         self.assertFalse(r["payload"]["ok"])
 
     def test_duplicate_es_200_silente(self):
-        e = errors.DuplicateEventError("envia", "evt-1")
+        e = errors.DuplicateEventError("aveonline", "evt-1")
         r = base.to_http_response(e)
         self.assertEqual(r["status"], 200)
         self.assertTrue(r["payload"]["ok"])
         self.assertTrue(r["payload"]["duplicate"])
-        self.assertEqual(r["payload"]["integration"], "envia")
+        self.assertEqual(r["payload"]["integration"], "aveonline")
 
     def test_rate_limit_es_429_con_retry_after(self):
         e = errors.RateLimitExceededError(retry_after_seconds=42)
