@@ -167,8 +167,7 @@ services:
         value: "600"
       - key: PLAN_ENFORCEMENT_ENABLED
         value: "true"
-      - key: ENVIA_PHASE2_ENABLED
-        value: "false"
+      # Nota rev. 109: ENVIA_PHASE2_ENABLED eliminado con pivote a Aveonline (ADR-0019).
       - key: API_RATE_LIMIT_ENABLED
         value: "true"
       - key: API_RATE_LIMIT_WRITE_PER_MINUTE

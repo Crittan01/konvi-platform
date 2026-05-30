@@ -47,7 +47,7 @@ Subprocesadores aprobados (lista en `subprocessors.md` de la plataforma):
 
 - **Pasarela de pagos** (Wompi) — para procesar tu pago.
 - **Mensajería** (Meta WhatsApp) — para entregarte mensajes.
-- **Logística** (Envia.com / transportadora) — para el envío.
+- **Logística** (Aveonline / transportadoras vinculadas) — para el envío.
 - **Hosting** (Supabase, Render) — almacenamiento técnico.
 
 NO vendemos tus datos a terceros para publicidad.
