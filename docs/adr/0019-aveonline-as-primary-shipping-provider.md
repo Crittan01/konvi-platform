@@ -3,7 +3,7 @@
 **Estado:** PROPUESTO (pre-implementación rev. 107).
 **Fecha:** 2026-05-21.
 **Branch target:** `feat/rev107-aveonline-primary` (a crear post-aprobación founder).
-**Punto de partida:** `phase-1-orchestrator-refactor` @ commit `acf2592` (Sem 1.3 cerrada).
+**Punto de partida histórico:** tag `archive/phase-1-strangler-fig-sem1` @ commit `acf2592` (Sem 1.3 strangler-fig cerrada — branch original eliminada post-pivot, ver ADR-0018).
 **Documento maestro:** [`docs/research/aveonline-dossier.md`](../research/aveonline-dossier.md) (versión 101% — 2015 líneas).
 
 ## Contexto

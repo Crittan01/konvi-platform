@@ -47,7 +47,7 @@ Documento arquitectónico completo: [`docs/architecture/agentic-orchestrator.md`
 
 Seguir cazando bugs reportados por founder UAT con más detectores. Cada bug nuevo añade 50-200 LOC al monolito. Costo bajo a corto plazo, deuda exponencial.
 
-### B. Refactor strangler-fig 8 semanas (PAUSADA — `phase-1-orchestrator-refactor`)
+### B. Refactor strangler-fig 8 semanas (ABANDONADA — tag `archive/phase-1-strangler-fig-sem1` @ commit `acf2592`)
 
 Organizar el monolito en pipeline de stages + state handlers. Llega a orchestrator.py ≤1,500 LOC en 8 semanas. PERO **mismo paradigma** (LLM redactor + Python decide). Bugs como el de hoy seguirán apareciendo en casos borde nuevos.
 
@@ -110,10 +110,9 @@ Cierre Fase 2 (Cutover total):
 
 ## Branching
 
-- **`phase-2-agentic-rewrite`** (branch dedicada).
-- **`phase-0-pre-prod`** sigue siendo productiva. Hotfixes ahí + rebase semanal a `phase-2`.
-- **`phase-1-orchestrator-refactor`** queda preservada como referencia (handlers extraídos siguen siendo válidos como diseño, pero el paradigma cambió).
-- Merge `phase-2` → `phase-0-pre-prod` solo al cierre Fase 3 con todos los criterios done.
+- **`develop`** integra el trabajo de `phase-2-agentic-rewrite` (mergeada 2026-05-30 via PR #13).
+- **`main`** anclada en rev. 103 (último estado certificado Habeas Data); se mueve al cumplir bloqueantes humanos V.3-V.21.
+- **Strangler-fig refactor (Sem 1.1-1.3, 2026-05-21)**: tag `archive/phase-1-strangler-fig-sem1` @ commit `acf2592`. Branch `phase-1-orchestrator-refactor` eliminada post-pivot — el tag preserva el commit referenciado para trazabilidad. Los 4 handlers extraídos (`READY_FOR_SUMMARY`, `NEEDS_CONSENT`, etc.) no aplican a la arquitectura agentic actual; el aprendizaje del intento queda documentado en este ADR.
 
 ## Referencias
 
