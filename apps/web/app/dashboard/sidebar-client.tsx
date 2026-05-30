@@ -445,15 +445,15 @@ export default function SidebarClient({
                 >
                   <div className="p-1">
                     <Link
-                      href="/dashboard/account"
+                      href="/dashboard/settings/security"
                       onClick={() => setUserMenuOpen(false)}
                       className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors"
                       style={{ color: 'hsl(156 20% 70%)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'hsl(168 14% 16%)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
-                      <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      Cambiar contraseña
+                      <Shield className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                      Seguridad y contraseña
                     </Link>
                     <div className="my-1 mx-2" style={{ borderTop: '1px solid hsl(156 30% 18%)' }} />
                     <form action={logoutAction}>

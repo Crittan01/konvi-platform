@@ -159,6 +159,46 @@ export function SecurityForm({ initialState, userId }: Props) {
     setFeedback('Códigos copiados al portapapeles.')
   }
 
+  // ── Re-enroll TOTP (cambiar authenticator) ─────────────────────────
+  // Caso uso: user perdió phone con autenticador, entró con recovery code,
+  // ahora quiere asociar un nuevo autenticador. Mismo flow que enroll
+  // inicial pero sin requerir "Activar MFA" desde 0.
+
+  const reEnrollMfa = async () => {
+    if (!state.factorId) return
+    if (!confirm(
+      '¿Cambiar autenticador? Vamos a desactivar tu MFA actual y guiarte ' +
+      'para escanear un nuevo QR con otra app. Tu cuenta quedará ' +
+      'temporalmente sin MFA hasta que verifiques el nuevo código.'
+    )) {
+      return
+    }
+    setError(null)
+    setBusy('disable')
+    const sb = createClient()
+    try {
+      // 1. Unenroll factor actual.
+      const { error: unenrollErr } = await sb.auth.mfa.unenroll({ factorId: state.factorId })
+      if (unenrollErr) throw new Error(unenrollErr.message)
+      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0 })
+      setFeedback('Autenticador anterior desactivado. Escanea el nuevo QR con tu authenticator.')
+
+      // 2. Iniciar enrollment nuevo automáticamente.
+      const { data, error: e } = await sb.auth.mfa.enroll({ factorType: 'totp' })
+      if (e || !data) throw new Error(e?.message || 'Error al iniciar nuevo MFA')
+      setEnrollment({
+        factorId: data.id,
+        qrCode: data.totp.qr_code,
+        secret: data.totp.secret,
+        code: '',
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error desconocido')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // ── Unenroll MFA ───────────────────────────────────────────────────
 
   const disableMfa = async () => {
@@ -392,6 +432,20 @@ export function SecurityForm({ initialState, userId }: Props) {
                     <RefreshCw className="h-4 w-4" />
                   )}
                   Regenerar códigos de respaldo
+                </button>
+                <button
+                  type="button"
+                  onClick={reEnrollMfa}
+                  disabled={busy === 'disable'}
+                  title="Vincular un nuevo authenticator (perdiste el actual o quieres cambiarlo)"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-amber-700 text-amber-800 hover:bg-amber-50 disabled:opacity-50 text-sm"
+                >
+                  {busy === 'disable' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Shield className="h-4 w-4" />
+                  )}
+                  Cambiar autenticador
                 </button>
                 <button
                   type="button"
