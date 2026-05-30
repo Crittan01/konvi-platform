@@ -19,6 +19,8 @@ PARTIAL del foundation layer. Cerrados:
 
 **Plan K avance: 10 → 15 IMPLEMENTED** (83%).
 
+Re-abrir H.3.1 como `H.3.1.1` si: founder prioriza UI "Reconciliar pago" en Tenant Console, o se diseña cron de reconciliación background (que NO requiere endpoint HTTP, solo invoca `WompiClient.get_transaction_with_resilience()` directamente).
+
 ---
 
 ## Platform Console — Items diferidos (vista cross-tenant)

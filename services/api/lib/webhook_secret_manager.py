@@ -248,8 +248,19 @@ def rotate_secret(
 
 
 def cleanup_expired_grace_periods(supabase_client: Any) -> int:
-    """Cron job — borra previous_secret_hash de filas con grace expirado.
-    Retorna número de filas actualizadas."""
+    """Limpieza Python (utility/fallback) — borra previous_secret_hash de filas
+    con grace expirado. Retorna número de filas actualizadas.
+
+    NOTA F.10 (rev. 109): el cleanup automático corre via RPC
+    `fn_cleanup_webhook_secrets` invocada hourly desde
+    services/ai-orchestrator/worker.py (migration 20260614110000). Esta
+    función Python queda disponible para:
+      - Scripts admin / one-off manual cleanup.
+      - Tests de integración.
+      - Emergencia si la migration de la función SQL no está aplicada.
+
+    NO eliminar — sigue siendo API estable para callers programáticos.
+    """
     now = datetime.now(timezone.utc).isoformat()
     res = (
         supabase_client.table("tenant_webhook_secrets")
