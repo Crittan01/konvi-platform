@@ -126,6 +126,15 @@ HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS = int(
 HUMAN_TAKEOVER_SLA_HOURS = int(
     os.getenv("HUMAN_TAKEOVER_SLA_HOURS", "2")  # threshold 2h por defecto
 )
+
+# Rev. 109 J.2.11 — Tenant provider health metrics cron.
+HEALTH_METRICS_ENABLED = os.getenv(
+    "HEALTH_METRICS_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
+HEALTH_METRICS_INTERVAL_SECONDS = int(
+    os.getenv("HEALTH_METRICS_INTERVAL_SECONDS", "300")  # 5 min default
+)
+
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
@@ -212,6 +221,12 @@ class OrchestratorWorker:
         self._last_sla_check_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
+        # Rev. 109 J.2.11 — health metrics cron timestamps.
+        self._health_metrics_enabled = HEALTH_METRICS_ENABLED
+        self._last_health_metrics_at = 0.0
+        # Snapshot del último status per (tenant, provider, metric) para
+        # detectar transiciones healthy → warning/critical (alerta Telegram).
+        self._health_status_snapshot: dict[tuple[str, str, str], str] = {}
         self._metrics = {
             "poll_cycles": 0,
             "inbound_seen": 0,
@@ -263,6 +278,7 @@ class OrchestratorWorker:
         await self._poll_wompi_pending_voids_if_due()
         await self._anti_hibernation_ping_if_due()
         await self._check_human_takeover_sla_if_due()
+        await self._collect_health_metrics_if_due()
 
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
         """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente.
@@ -1783,3 +1799,107 @@ class OrchestratorWorker:
             .eq("tenant_id", tenant_id)
             .execute()
         )
+
+    async def _collect_health_metrics_if_due(self) -> None:
+        """Rev. 109 J.2.11 — Refresca métricas de salud de las 5 integraciones
+        per-tenant cada N segundos (default 5min). UPSERTea en
+        tenant_provider_health. Detecta transiciones healthy → warning/critical
+        y notifica al operador via Telegram (reusa notify_escalation_async).
+
+        Errores per provider NO bloquean los demás. Si lib no carga, gate self.
+        """
+        if not self._health_metrics_enabled:
+            return
+        now = time.time()
+        if (
+            self._last_health_metrics_at
+            and (now - self._last_health_metrics_at) < max(60, HEALTH_METRICS_INTERVAL_SECONDS)
+        ):
+            return
+        self._last_health_metrics_at = now
+
+        try:
+            from health_metrics import collect_all_for_tenant, upsert_metrics  # noqa: PLC0415
+        except ImportError as exc:
+            logger.warning("[HEALTH] health_metrics module no disponible: %s", exc)
+            self._health_metrics_enabled = False
+            return
+
+        # Listar tenants activos (con al menos 1 integration connected).
+        try:
+            res = (
+                self.supabase.table("tenant_integrations")
+                .select("tenant_id")
+                .eq("status", "connected")
+                .execute()
+            )
+            tenant_rows = res.data or []
+            tenant_ids = sorted({r.get("tenant_id") for r in tenant_rows if r.get("tenant_id")})
+        except Exception as exc:
+            logger.warning("[HEALTH] Error listando tenants activos: %s", exc)
+            return
+
+        if not tenant_ids:
+            return
+
+        for tenant_id in tenant_ids:
+            try:
+                metrics = collect_all_for_tenant(self.supabase, str(tenant_id))
+                upsert_metrics(self.supabase, str(tenant_id), metrics)
+                # Detectar transiciones para alertar Telegram operador.
+                await self._notify_health_transitions(str(tenant_id), metrics)
+            except Exception as exc:
+                logger.error(
+                    "[HEALTH] Error en tenant=%s: %s", tenant_id, exc, exc_info=True,
+                )
+
+    async def _notify_health_transitions(
+        self, tenant_id: str, metrics: list,
+    ) -> None:
+        """Detecta transiciones HEALTHY → WARNING/CRITICAL y notifica al
+        operador del tenant via Telegram (reusa notify_escalation_async)."""
+        try:
+            from telegram_notifications import notify_escalation_async  # noqa: PLC0415
+        except ImportError:
+            return
+
+        transitions = []
+        for m in metrics:
+            key = (tenant_id, m.provider, m.metric)
+            prev_status = self._health_status_snapshot.get(key)
+            self._health_status_snapshot[key] = m.status
+            # Notificar solo si transicionó hacia peor (no en cada ciclo).
+            if prev_status in {None, "healthy", "unknown"} and m.status in {"warning", "critical"}:
+                transitions.append(m)
+
+        if not transitions:
+            return
+
+        critical_count = sum(1 for m in transitions if m.status == "critical")
+        warning_count = sum(1 for m in transitions if m.status == "warning")
+        lines = [
+            f"🚨 *Alerta salud integraciones* tenant={tenant_id[:8]}",
+            f"{critical_count} crítica · {warning_count} advertencia",
+            "",
+        ]
+        for m in transitions[:5]:
+            icon = "🔴" if m.status == "critical" else "🟡"
+            lines.append(f"{icon} {m.provider}.{m.metric} = {m.value}")
+        if len(transitions) > 5:
+            lines.append(f"… +{len(transitions) - 5} más")
+
+        # Fix audit 2026-05-29: la firma real de notify_escalation_async es
+        # (supabase, *, tenant_id, conversation_id=None, reason, severity).
+        # Antes pasaba title/body/priority que NO existen — TypeError silente.
+        try:
+            await notify_escalation_async(
+                self.supabase,
+                tenant_id=tenant_id,
+                reason="\n".join(lines),
+                severity="critical" if critical_count else "warning",
+            )
+        except Exception as exc:
+            logger.warning(
+                "[HEALTH] notify_escalation_async falló tenant=%s: %s",
+                tenant_id, exc,
+            )
