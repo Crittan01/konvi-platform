@@ -4,9 +4,12 @@
  * Security form — orquesta los 3 sub-flows del MFA:
  *   1. Enroll TOTP (mostrar QR + verificar 6-digit code)
  *   2. Mostrar recovery codes UNA VEZ con descarga .txt
- *   3. Estado enrolled: regenerar codes / desactivar MFA
+ *   3. Estado enrolled: regenerar codes / cambiar autenticador / desactivar
  *
- * Rev. 109 J.2.4.3.
+ * Rev. 109 J.2.4.3 — incluye flow recovery-session AAL2 bypass:
+ *   Si user entró con recovery code (isRecoverySession=true), las
+ *   operaciones AAL2-required (unenroll, change password) usan backend
+ *   endpoints que validan recovery code adicional + admin API bypass.
  */
 import { useState } from 'react'
 import {
@@ -14,6 +17,14 @@ import {
   CheckCircle2, X, Loader2, KeyRound, RefreshCw, Trash2,
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 interface MfaState {
   totpEnrolled: boolean
@@ -24,9 +35,12 @@ interface MfaState {
 interface Props {
   initialState: MfaState
   userId: string
+  /** Rev. 109 J.2.4.3 — Si user entró con recovery code, AAL=1 y los
+   *  flujos de change-password / unenroll requieren bypass backend. */
+  isRecoverySession?: boolean
 }
 
-export function SecurityForm({ initialState, userId }: Props) {
+export function SecurityForm({ initialState, userId, isRecoverySession }: Props) {
   const [state, setState] = useState(initialState)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -42,6 +56,11 @@ export function SecurityForm({ initialState, userId }: Props) {
 
   // Recovery codes display state (mostrados UNA VEZ).
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
+
+  // ── Dialogos custom (app-styled, no confirm() nativo del browser) ──
+  type DialogKind = 'reenroll' | 'disable' | 'recovery-reenroll' | null
+  const [openDialog, setOpenDialog] = useState<DialogKind>(null)
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState('')
 
   // ── Enroll flow ──────────────────────────────────────────────────────
 
@@ -164,26 +183,26 @@ export function SecurityForm({ initialState, userId }: Props) {
   // ahora quiere asociar un nuevo autenticador. Mismo flow que enroll
   // inicial pero sin requerir "Activar MFA" desde 0.
 
-  const reEnrollMfa = async () => {
+  // Abre el dialog correcto según tipo de sesión.
+  const openReEnrollDialog = () => {
+    setError(null)
+    setRecoveryCodeInput('')
+    setOpenDialog(isRecoverySession ? 'recovery-reenroll' : 'reenroll')
+  }
+
+  // Flow normal (AAL2): unenroll directo + auto-enroll nuevo.
+  const performReEnroll = async () => {
     if (!state.factorId) return
-    if (!confirm(
-      '¿Cambiar autenticador? Vamos a desactivar tu MFA actual y guiarte ' +
-      'para escanear un nuevo QR con otra app. Tu cuenta quedará ' +
-      'temporalmente sin MFA hasta que verifiques el nuevo código.'
-    )) {
-      return
-    }
     setError(null)
     setBusy('disable')
+    setOpenDialog(null)
     const sb = createClient()
     try {
-      // 1. Unenroll factor actual.
       const { error: unenrollErr } = await sb.auth.mfa.unenroll({ factorId: state.factorId })
       if (unenrollErr) throw new Error(unenrollErr.message)
       setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0 })
       setFeedback('Autenticador anterior desactivado. Escanea el nuevo QR con tu authenticator.')
 
-      // 2. Iniciar enrollment nuevo automáticamente.
       const { data, error: e } = await sb.auth.mfa.enroll({ factorType: 'totp' })
       if (e || !data) throw new Error(e?.message || 'Error al iniciar nuevo MFA')
       setEnrollment({
@@ -199,15 +218,69 @@ export function SecurityForm({ initialState, userId }: Props) {
     }
   }
 
-  // ── Unenroll MFA ───────────────────────────────────────────────────
-
-  const disableMfa = async () => {
-    if (!state.factorId) return
-    if (!confirm('¿Desactivar MFA? Tu cuenta quedará protegida solo con contraseña.')) {
+  // Flow recovery session: requiere recovery code adicional + backend bypass.
+  const performRecoveryReEnroll = async () => {
+    if (recoveryCodeInput.trim().length < 4) {
+      setError('Ingresa un código de respaldo válido.')
       return
     }
     setError(null)
     setBusy('disable')
+    const sb = createClient()
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      if (!session) throw new Error('Sesión expirada — inicia sesión de nuevo.')
+
+      // 1. Backend valida recovery code + elimina factor TOTP via admin API.
+      const res = await fetch('/api/mfa/recovery/reset-totp', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recovery_code: recoveryCodeInput.trim() }),
+      })
+      let data: { ok?: boolean; detail?: string }
+      try {
+        data = await res.json()
+      } catch {
+        throw new Error(`Error inesperado HTTP ${res.status}`)
+      }
+      if (!res.ok || !data.ok) throw new Error(data.detail || 'Código inválido o expirado')
+
+      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0 })
+      setFeedback('Autenticador anterior desactivado. Escanea el nuevo QR.')
+      setOpenDialog(null)
+      setRecoveryCodeInput('')
+
+      // 2. Enroll nuevo (no requiere AAL2 ya que no hay factor verified).
+      const { data: enrollData, error: e } = await sb.auth.mfa.enroll({ factorType: 'totp' })
+      if (e || !enrollData) throw new Error(e?.message || 'Error iniciando enrollment')
+      setEnrollment({
+        factorId: enrollData.id,
+        qrCode: enrollData.totp.qr_code,
+        secret: enrollData.totp.secret,
+        code: '',
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error desconocido')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ── Unenroll MFA ───────────────────────────────────────────────────
+
+  const openDisableDialog = () => {
+    setError(null)
+    setOpenDialog('disable')
+  }
+
+  const performDisableMfa = async () => {
+    if (!state.factorId) return
+    setError(null)
+    setBusy('disable')
+    setOpenDialog(null)
     const sb = createClient()
     try {
       const { error: e } = await sb.auth.mfa.unenroll({ factorId: state.factorId })
@@ -435,7 +508,7 @@ export function SecurityForm({ initialState, userId }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={reEnrollMfa}
+                  onClick={openReEnrollDialog}
                   disabled={busy === 'disable'}
                   title="Vincular un nuevo authenticator (perdiste el actual o quieres cambiarlo)"
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-amber-700 text-amber-800 hover:bg-amber-50 disabled:opacity-50 text-sm"
@@ -449,7 +522,7 @@ export function SecurityForm({ initialState, userId }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={disableMfa}
+                  onClick={openDisableDialog}
                   disabled={busy === 'disable'}
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-red-700 text-red-700 hover:bg-red-50 disabled:opacity-50 text-sm"
                 >
@@ -465,6 +538,130 @@ export function SecurityForm({ initialState, userId }: Props) {
           </div>
         </section>
       )}
+
+      {/* ── Dialog: Cambiar autenticador (sesión normal AAL2) ────────── */}
+      <Dialog open={openDialog === 'reenroll'} onOpenChange={open => !open && setOpenDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="inline-flex items-center gap-2">
+              <Shield className="h-5 w-5" /> Cambiar autenticador
+            </DialogTitle>
+            <DialogDescription>
+              Vamos a desactivar tu MFA actual y guiarte para escanear un nuevo
+              QR con otra app. Tu cuenta quedará temporalmente sin MFA hasta que
+              verifiques el nuevo código.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setOpenDialog(null)}
+              className="px-4 py-2 rounded-md border border-border hover:bg-accent text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={performReEnroll}
+              className="px-4 py-2 rounded-md bg-amber-700 text-white hover:bg-amber-800 text-sm inline-flex items-center gap-1.5"
+            >
+              <Shield className="h-4 w-4" /> Continuar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Cambiar autenticador (recovery session) — requiere otro code ─ */}
+      <Dialog open={openDialog === 'recovery-reenroll'} onOpenChange={open => !open && setOpenDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="inline-flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-700" /> Verificación adicional
+            </DialogTitle>
+            <DialogDescription>
+              Estás en sesión de recuperación. Para vincular un nuevo authenticator
+              necesitamos otro código de respaldo como prueba de identidad.
+              Cada código sirve UNA VEZ.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 my-2">
+            <label className="block text-sm font-medium">Código de respaldo</label>
+            <input
+              type="text"
+              value={recoveryCodeInput}
+              onChange={e => setRecoveryCodeInput(e.target.value.toUpperCase())}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && recoveryCodeInput.trim().length >= 4) {
+                  performRecoveryReEnroll()
+                }
+              }}
+              placeholder="XXXX-XXXX-XXXX-XXXX"
+              autoFocus
+              disabled={busy === 'disable'}
+              className="w-full px-3 py-2 rounded-md border border-border bg-background font-mono text-base text-center"
+            />
+            {error && (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                {error}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => { setOpenDialog(null); setRecoveryCodeInput(''); setError(null) }}
+              disabled={busy === 'disable'}
+              className="px-4 py-2 rounded-md border border-border hover:bg-accent text-sm disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={performRecoveryReEnroll}
+              disabled={busy === 'disable' || recoveryCodeInput.trim().length < 4}
+              className="px-4 py-2 rounded-md bg-amber-700 text-white hover:bg-amber-800 text-sm inline-flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {busy === 'disable' ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Verificando…</>
+              ) : (
+                <><Shield className="h-4 w-4" /> Verificar y continuar</>
+              )}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Desactivar MFA ──────────────────────────────────── */}
+      <Dialog open={openDialog === 'disable'} onOpenChange={open => !open && setOpenDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="inline-flex items-center gap-2 text-red-700">
+              <Trash2 className="h-5 w-5" /> Desactivar MFA
+            </DialogTitle>
+            <DialogDescription>
+              ¿Estás seguro? Tu cuenta quedará protegida solo con contraseña.
+              Los códigos de respaldo también se eliminarán. Podrás reactivar
+              MFA después, pero requerirá enrolar un nuevo authenticator desde cero.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setOpenDialog(null)}
+              className="px-4 py-2 rounded-md border border-border hover:bg-accent text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={performDisableMfa}
+              className="px-4 py-2 rounded-md bg-red-700 text-white hover:bg-red-800 text-sm inline-flex items-center gap-1.5"
+            >
+              <Trash2 className="h-4 w-4" /> Desactivar MFA
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

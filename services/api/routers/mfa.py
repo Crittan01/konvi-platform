@@ -68,6 +68,15 @@ class VerifyCodeBody(BaseModel):
     code: str = Field(..., min_length=4, max_length=64)
 
 
+class RecoveryResetTotpBody(BaseModel):
+    recovery_code: str = Field(..., min_length=4, max_length=64)
+
+
+class RecoveryChangePasswordBody(BaseModel):
+    recovery_code: str = Field(..., min_length=4, max_length=64)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 # ─── Endpoints ──────────────────────────────────────────────────────────────
 
 
@@ -168,3 +177,121 @@ async def clear_recovery_codes(
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"ok": True, "deleted": deleted}
+
+
+# ─── Recovery session AAL2 bypass endpoints ─────────────────────────────────
+# Caso uso: user entró con recovery code (sesión AAL1 + cookie bypass). Quiere
+# hacer operaciones que Supabase Auth requiere AAL2 (changePassword, unenroll
+# TOTP). Estos endpoints requieren OTRO recovery code adicional como prueba
+# de identidad + usan service_role admin API para bypass del AAL2 check.
+#
+# Defense in depth: dos recovery codes consumidos (uno en login + uno acá)
+# para acciones destructive.
+
+
+def _list_user_mfa_factors(sb: Client, user_id: str) -> list[dict]:
+    """Lista factores MFA del user vía admin API."""
+    try:
+        # Supabase Python admin: sb.auth.admin.list_factors(user_id)
+        # Disponible desde supabase-py 2.x
+        res = sb.auth.admin.mfa.list_factors({"user_id": user_id})
+        return res.factors if hasattr(res, "factors") else (res or [])
+    except Exception as exc:
+        logger.warning("[MFA] No se pudieron listar factores user=%s: %s", user_id, exc)
+        return []
+
+
+@router.post("/recovery/reset-totp", dependencies=[Depends(RL_WRITE_DEFAULT)])
+async def recovery_reset_totp(
+    body: RecoveryResetTotpBody,
+    request: Request,
+    sb: Client = Depends(get_service_client),
+):
+    """Elimina el factor TOTP del user para que pueda enrollar uno nuevo.
+
+    Requiere recovery code adicional como prueba de identidad. Después de
+    OK, el frontend puede iniciar enroll de nuevo TOTP factor normal (no
+    requiere AAL2 ya que no hay factor verified).
+    """
+    user_id = _get_user_id(request)
+
+    # 1. Validar recovery code (consume one-time).
+    ok = verify_and_consume(sb, user_id, body.recovery_code)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Código de respaldo inválido o ya usado.",
+        )
+
+    # 2. Eliminar factor(s) TOTP via admin API (bypass AAL2 check).
+    factors = _list_user_mfa_factors(sb, user_id)
+    deleted_count = 0
+    for f in factors:
+        factor_type = getattr(f, "factor_type", None) or (
+            f.get("factor_type") if isinstance(f, dict) else None
+        )
+        if factor_type != "totp":
+            continue
+        factor_id = getattr(f, "id", None) or (
+            f.get("id") if isinstance(f, dict) else None
+        )
+        if not factor_id:
+            continue
+        try:
+            sb.auth.admin.mfa.delete_factor({"id": factor_id, "user_id": user_id})
+            deleted_count += 1
+        except Exception as exc:
+            logger.error(
+                "[MFA] Error eliminando factor=%s user=%s: %s",
+                factor_id, user_id, exc,
+            )
+
+    if deleted_count == 0:
+        # No había factor o no se pudo borrar — informar pero no error fatal,
+        # el user puede continuar con enroll de un nuevo factor.
+        logger.warning("[MFA] No se eliminó ningún factor TOTP user=%s", user_id)
+
+    # 3. Limpiar recovery codes restantes (el user va a regenerar tras enroll).
+    try:
+        clear_all_for_user(sb, user_id)
+    except Exception as exc:
+        logger.warning("[MFA] Error limpiando codes user=%s: %s", user_id, exc)
+
+    return {"ok": True, "deleted_factors": deleted_count}
+
+
+@router.post("/recovery/change-password", dependencies=[Depends(RL_WRITE_DEFAULT)])
+async def recovery_change_password(
+    body: RecoveryChangePasswordBody,
+    request: Request,
+    sb: Client = Depends(get_service_client),
+):
+    """Cambia password via admin API (bypass AAL2).
+
+    Requiere recovery code adicional. Útil cuando el user perdió su
+    authenticator y debe rotar password también por precaución.
+    """
+    user_id = _get_user_id(request)
+
+    # 1. Validar recovery code.
+    ok = verify_and_consume(sb, user_id, body.recovery_code)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Código de respaldo inválido o ya usado.",
+        )
+
+    # 2. Cambiar password via admin API (bypassa AAL2 check).
+    try:
+        sb.auth.admin.update_user_by_id(
+            user_id,
+            {"password": body.new_password},
+        )
+    except Exception as exc:
+        logger.error("[MFA] Error cambiando password user=%s: %s", user_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo actualizar la contraseña: {exc}",
+        )
+
+    return {"ok": True}
