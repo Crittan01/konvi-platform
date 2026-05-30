@@ -1879,13 +1879,15 @@ class OrchestratorWorker:
         if len(transitions) > 5:
             lines.append(f"… +{len(transitions) - 5} más")
 
+        # Fix audit 2026-05-29: la firma real de notify_escalation_async es
+        # (supabase, *, tenant_id, conversation_id=None, reason, severity).
+        # Antes pasaba title/body/priority que NO existen — TypeError silente.
         try:
             await notify_escalation_async(
                 self.supabase,
                 tenant_id=tenant_id,
-                title="Alerta salud integraciones",
-                body="\n".join(lines),
-                priority="high" if critical_count else "normal",
+                reason="\n".join(lines),
+                severity="critical" if critical_count else "warning",
             )
         except Exception as exc:
             logger.warning(
