@@ -48,6 +48,18 @@ class AgentMessageRequest(BaseModel):
     text: str
 
 
+class AgentImageRequest(BaseModel):
+    """Rev. 109 P0-2 — outbound humano con imagen.
+
+    Meta Cloud API v22.0 requiere HTTPS link + MIME image/jpeg|png|webp.
+    El operador sube primero al bucket Supabase Storage 'tenant-media'
+    (vía supabase-js client desde el frontend) y nos pasa el URL público
+    resultante.
+    """
+    image_url: str  # HTTPS pública del bucket tenant-media
+    caption: str | None = None  # Opcional, máx ~1024 chars Meta
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/stats")
@@ -1188,3 +1200,185 @@ async def rerun_last_inbound(
         "status": "queued",
         "note": "El bot procesará el inbound nuevamente en segundos.",
     }
+
+
+# ─── Rev. 109 P0-2 — Attachment imagen outbound humano ────────────────────────
+
+
+@router.post("/{conversation_id}/send-image", response_model=dict)
+async def send_agent_image(
+    conversation_id: str,
+    body: AgentImageRequest,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _plan: object = Depends(PLAN_CONVERSATIONS_SEND),
+    _rl: None = Depends(RL_SEND_MESSAGE),
+):
+    """Encola un mensaje con imagen outbound desde agente humano.
+
+    Pre-condición: el frontend ya subió la imagen al bucket Supabase Storage
+    'tenant-media' (vía supabase-js client del operador con session), y nos
+    pasa la URL pública resultante.
+
+    Validaciones:
+    - URL debe ser HTTPS (Meta Cloud API v22.0 lo exige).
+    - Conversación debe estar en human_takeover + dentro ventana 24h.
+    - Caption opcional, máx 1024 chars (Meta limit para image.caption).
+    - Tamaño / MIME se validan en el frontend ANTES del upload (5MB,
+      image/jpeg|png|webp). Meta rechazará silenciosamente si no cumple.
+
+    Persistimos message con content_type='image' + media_url=image_url +
+    content=caption. La cola pgmq lleva image_link + image_caption al worker.
+    """
+    image_url = body.image_url.strip()
+    caption = (body.caption or "").strip() or None
+
+    if not image_url.startswith("https://"):
+        raise HTTPException(
+            status_code=422,
+            detail="image_url debe ser HTTPS (Meta Cloud API v22.0 lo exige).",
+        )
+    if caption and len(caption) > 1024:
+        raise HTTPException(
+            status_code=422,
+            detail="caption excede el límite de 1024 caracteres (Meta).",
+        )
+
+    idem_session = None
+    try:
+        request_hash = payload_fingerprint(
+            {"conversation_id": conversation_id, "image_url": image_url, "caption": caption}
+        )
+        idem_session, replay = begin_idempotency(
+            request=request,
+            supabase=supabase,
+            tenant_id=tenant_id,
+            request_hash=request_hash,
+        )
+        if replay:
+            return JSONResponse(
+                status_code=replay["status_code"],
+                content=replay["body"],
+                headers={"Idempotency-Replayed": "true"},
+            )
+
+        # 1. Verificar conversación + status human_takeover.
+        conv_result = (
+            supabase.table("conversations")
+            .select("id, customer_phone, status, tenant_id")
+            .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not conv_result.data:
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+        conv = conv_result.data
+        if conv["status"] != "human_takeover":
+            raise HTTPException(
+                status_code=400,
+                detail="Solo se puede responder cuando la conversación está en 'human_takeover'. "
+                       "Toma el control antes de enviar la imagen.",
+            )
+
+        # 2. Compliance Meta ventana 24h.
+        _check_24h_window_or_raise(supabase, tenant_id, conversation_id)
+
+        # 3. Persistir mensaje outbound tipo imagen.
+        client_message_id = str(uuid4())
+        msg_insert = (
+            supabase.table("messages")
+            .insert({
+                "conversation_id": conversation_id,
+                "tenant_id": tenant_id,
+                "direction": "outbound",
+                "content_type": "image",
+                "content": caption or "[imagen]",
+                "media_url": image_url,
+                "processed": True,
+                "processing_status": "processed",
+                "last_error": None,
+                "skip_reason": None,
+            })
+            .execute()
+        )
+        if not msg_insert.data:
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo persistir el mensaje outbound (imagen).",
+            )
+        new_msg = msg_insert.data[0]
+
+        # 4. Encolar con payload extendido (image_link + image_caption).
+        queue_payload = {
+            "event_type": "whatsapp.outbound.send",
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+            "message_id": new_msg["id"],
+            "customer_phone": conv["customer_phone"],
+            "image_link": image_url,
+            "image_caption": caption,
+            "client_message_id": client_message_id,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        }
+        queue_res = supabase.rpc(
+            "enqueue_whatsapp_outbound_message",
+            {"p_message": queue_payload, "p_delay": 0},
+        ).execute()
+        queue_data = queue_res.data
+        if isinstance(queue_data, list):
+            raw_queue_msg_id = queue_data[0] if queue_data else 0
+            if isinstance(raw_queue_msg_id, dict):
+                raw_queue_msg_id = next(iter(raw_queue_msg_id.values()), 0)
+            queue_msg_id = int(raw_queue_msg_id or 0)
+        else:
+            queue_msg_id = int(queue_data or 0)
+
+        if queue_msg_id <= 0:
+            (
+                supabase.table("messages")
+                .update({
+                    "processing_status": "failed",
+                    "processed": True,
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": "queue_enqueue_failed",
+                })
+                .eq("id", new_msg["id"])
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            raise HTTPException(
+                status_code=502, detail="No se pudo encolar la imagen para envío.",
+            )
+
+        logger.info(
+            "Imagen humana encolada | conv=%s | msg_id=%s | q_msg_id=%s | caption_len=%s",
+            conversation_id, new_msg["id"], queue_msg_id, len(caption or ""),
+        )
+        response_body = {
+            "sent": False,
+            "queued": True,
+            "queue_message_id": queue_msg_id,
+            "message": new_msg,
+        }
+        finalize_idempotency(
+            supabase=supabase,
+            tenant_id=tenant_id,
+            session=idem_session,
+            status_code=200,
+            body=response_body,
+        )
+        return response_body
+
+    except HTTPException:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
+        raise
+    except Exception as e:
+        abort_idempotency(supabase=supabase, tenant_id=tenant_id, session=idem_session)
+        logger.error(
+            "Error enviando imagen de agente en conversación %s: %s",
+            conversation_id, e,
+        )
+        raise HTTPException(status_code=500, detail="Error al enviar la imagen")
