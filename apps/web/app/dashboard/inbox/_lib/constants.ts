@@ -72,18 +72,20 @@ export const STATUS_CONFIG = {
 //   + Fallback drill-down → Todas (incluye cerradas).
 //
 // Eliminados:
-// Rev. 109 founder 2026-05-29 (post-audit) — RESTAURADOS los 7 chips
-// originales tras feedback del founder. La simplificación inicial 7→4 fue
-// decisión UX no autorizada. Backward-compat completa con el monolito original:
-// cada chip mapea a un valor exacto del type FilterStatus.
+// Rev. 109 founder 2026-05-30 — re-confirmados 4 chips canónicos.
+// Bot/Agente/Cerradas eliminados como redundantes:
+//   - Bot/Agente: el operador ya ve agentic_state per conversación.
+//   - Cerradas: cubierto por toggle "Ver archivadas" (>90d) + filtro Todas.
+// 4 chips reflejan las 4 mentalidades distintas del operador:
+//   1) "Lo que tengo que atender HOY" → Activas (default).
+//   2) "Lo que me está rompiendo SLA AHORA" → ⏰ SLA breach.
+//   3) "Compliance/auditoría puntual" → Opt-out.
+//   4) Escape hatch ver todo → Todas.
 export const FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
-  { value: 'active',         label: 'Activas' },
-  { value: 'sla_breach',     label: '⏰ SLA breach' },
-  { value: 'all',            label: 'Todas' },
-  { value: 'bot_active',     label: 'Bot' },
-  { value: 'human_takeover', label: 'Agente' },
-  { value: 'closed',         label: 'Cerradas' },
-  { value: 'opted_out',      label: 'Opt-out' },
+  { value: 'active',     label: 'Activas' },
+  { value: 'sla_breach', label: '⏰ SLA breach' },
+  { value: 'opted_out',  label: 'Opt-out' },
+  { value: 'all',        label: 'Todas' },
 ]
 
 // Rev. 109 — agentic_state badge UI (Day 5).
