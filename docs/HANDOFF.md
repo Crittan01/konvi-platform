@@ -120,14 +120,28 @@ No asumir que frontend o RLS por sí solos aíslan cuando se usa `service_role`.
   - backfill de `conversations.last_interaction_at` desde `messages.created_at`
   - trigger DB para mantener recencia de Inbox consistente en nuevos mensajes
 
-- `20260614110000_webhook_secrets_cron_cleanup.sql` ⚠️ **PENDIENTE APPLY EN REMOTE**
+- `20260614110000_webhook_secrets_cron_cleanup.sql` ✅ APLICADA 2026-05-29
   - función `fn_cleanup_webhook_secrets()` cierra item F.10 del Plan K
   - invocada hourly desde `services/ai-orchestrator/worker.py` (patrón canónico,
     igual a `cleanup_expired_meli_webhook_dedup`)
   - limpia `previous_secret_hash` + `grace_period_until` post-grace en
     `tenant_webhook_secrets` (NULL out, no delete row)
-  - **APLICAR via Supabase Dashboard SQL Editor antes de mergear PR a `main`**
   - GRANT EXECUTE solo a service_role; REVOKE de authenticated/anon
+
+- `20260616000000_tenant_offboarding.sql` ✅ APLICADA 2026-05-29
+  - J.2.4.4 Fase 1 — Tenant offboarding workflow (soft-delete + 30d grace)
+  - Columnas `deletion_*` en `tenants`, tabla `tenant_offboarding_log` append-only
+  - 3 RPCs SECURITY DEFINER: `fn_log_tenant_offboarding_event`,
+    `fn_request_tenant_deletion`, `fn_cancel_tenant_deletion`
+
+- `20260617000000_tenant_offboarding_phase2.sql` ✅ APLICADA 2026-05-29
+  - J.2.4.4 Fase 2 — Hard-delete + cold archive
+  - Storage bucket `offboarding-archive` (private, 50MB max, RLS service_role-only)
+  - 2 RPCs SECURITY DEFINER: `fn_hard_delete_tenant`, `fn_list_tenants_pending_hard_delete`
+  - Worker cron en `services/ai-orchestrator/worker.py` invoca hourly (DESACTIVADO
+    por default — habilitar con `TENANT_HARD_DELETE_ENABLED=true` en Render env
+    tras validar Fase 2 en staging)
+  - Habeas Data Ley 1581 Art. 16 + Art. 22 cumplimiento
 
 ---
 

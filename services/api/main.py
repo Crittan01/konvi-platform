@@ -11,7 +11,15 @@ from observability import init_sentry
 init_sentry(service_name="api")
 
 from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, envia_webhook, aveonline_webhook
-from dependencies.auth import get_current_tenant
+from dependencies.auth import get_current_tenant, reject_if_tenant_deleting
+from fastapi import Depends as _Depends
+
+# Rev. 109 J.2.4.4 Fase 2 — gate compartido para todos los routers de mutación.
+# Aplica `reject_if_tenant_deleting` que rechaza writes con HTTP 423 si el
+# tenant está en grace period de offboarding. Skip automático para GET/HEAD/
+# OPTIONS (read-only). Excluido en webhooks externos (sin JWT) y en
+# tenant_offboarding (cancel-deletion debe funcionar siempre durante grace).
+_OFFBOARDING_GATE = [_Depends(reject_if_tenant_deleting)]
 
 logger = logging.getLogger("api.startup")
 
@@ -91,37 +99,44 @@ async def security_headers_middleware(request: Request, call_next):
     )
     return response
 
-app.include_router(products.router, prefix="/api/v1/products")
-app.include_router(conversations.router, prefix="/api/v1/conversations")
-app.include_router(orders.router, prefix="/api/v1/orders")
-app.include_router(contacts.router, prefix="/api/v1/contacts")
+app.include_router(products.router, prefix="/api/v1/products", dependencies=_OFFBOARDING_GATE)
+app.include_router(conversations.router, prefix="/api/v1/conversations", dependencies=_OFFBOARDING_GATE)
+app.include_router(orders.router, prefix="/api/v1/orders", dependencies=_OFFBOARDING_GATE)
+app.include_router(contacts.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
 # Rev. 93 — Habeas Data: Subject Access Request (SAR / ARCO).
 from routers import data_subject_request as _dsr  # noqa: E402
-app.include_router(_dsr.router, prefix="/api/v1/contacts")
+app.include_router(_dsr.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
+# Rev. 109 J.2.4.4 — Tenant offboarding (export + soft-delete + cancel).
+# NO aplicar _OFFBOARDING_GATE — el owner debe poder cancelar dentro del grace.
+from routers import tenant_offboarding as _toff  # noqa: E402
+app.include_router(_toff.router, prefix="/api/v1/tenant/offboarding")
 # Rev. 109 J.2.4.3 — MFA TOTP recovery codes.
 from routers import mfa as _mfa  # noqa: E402
 app.include_router(_mfa.router, prefix="/api/v1/mfa")
 # Rev. 101 (F5) — SIC pre-cocinado.
 from routers import sic_report as _sic  # noqa: E402
-app.include_router(_sic.router, prefix="/api/v1")
-app.include_router(settings.router, prefix="/api/v1/settings")
-app.include_router(integrations.router, prefix="/api/v1/integrations")
-app.include_router(shipping.router, prefix="/api/v1/shipping")
-app.include_router(marketplace.router, prefix="/api/v1")
+app.include_router(_sic.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
+app.include_router(settings.router, prefix="/api/v1/settings", dependencies=_OFFBOARDING_GATE)
+app.include_router(integrations.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
+app.include_router(shipping.router, prefix="/api/v1/shipping", dependencies=_OFFBOARDING_GATE)
+app.include_router(marketplace.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
+# Webhooks externos NO usan _OFFBOARDING_GATE — no tienen JWT del tenant,
+# vienen autenticados por signature del provider. Si el tenant está siendo
+# eliminado, los webhooks fallarán en otros guards (RLS, FK, etc.).
 app.include_router(meli_webhook.router, prefix="/api/v1/meli")
 app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
 # Rev. 105 H.2.2 Fase A — Envia webhook capture endpoint (descubrimiento empírico)
 app.include_router(envia_webhook.router, prefix="/api/v1/webhooks/envia")
 # Rev. 108 — Aveonline webhook estados de guía (dossier §6.2)
 app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline")
-app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
+app.include_router(telegram_webhook.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
 # Rev. 109 ADR-0017 — Multi-agente per tenant (templates + AI suggest).
 from routers import ai_agents as _ai_agents  # noqa: E402
-app.include_router(_ai_agents.router, prefix="/api/v1")
+app.include_router(_ai_agents.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
-app.include_router(claims.router, prefix="/api/v1/claims")
-app.include_router(purchases.router, prefix="/api/v1/purchases")
-app.include_router(knowledge_base.router, prefix="/api/v1/knowledge-base")
+app.include_router(claims.router, prefix="/api/v1/claims", dependencies=_OFFBOARDING_GATE)
+app.include_router(purchases.router, prefix="/api/v1/purchases", dependencies=_OFFBOARDING_GATE)
+app.include_router(knowledge_base.router, prefix="/api/v1/knowledge-base", dependencies=_OFFBOARDING_GATE)
 
 @app.get("/health")
 def health_check():
