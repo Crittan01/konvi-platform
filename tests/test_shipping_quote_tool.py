@@ -181,7 +181,9 @@ class ShippingQuoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No pude cotizar el envío", result.response_text or "")
         self.assertNotIn("String is too long", result.response_text or "")
 
-    async def test_handle_shipping_quote_escalates_when_envia_not_connected(self):
+    async def test_handle_shipping_quote_escalates_when_aveonline_not_connected(self):
+        """Rev. 109: Aveonline es provider único activo (ADR-0019).
+        Si el provider no está conectado, escalar a humano."""
         supabase = _SupabaseStub(
             tenants={"shipping_origin": {"city": "Bogota D.C.", "state": "Bogota D.C.", "dane_code": "11001"}},
             conversations={"customer_phone": "573001112233"},
@@ -193,7 +195,7 @@ class ShippingQuoteToolTests(unittest.IsolatedAsyncioTestCase):
             shipping_quote_tool,
             "_request_shipping_quote",
             new_callable=AsyncMock,
-            return_value=(400, {"detail": "Envia no está conectado. Configura API key."}),
+            return_value=(400, {"detail": "Aveonline no autenticado. Reconecta en /dashboard/integrations/aveonline."}),
         ):
             result = await shipping_quote_tool.handle_shipping_quote_if_applicable(
                 supabase=supabase,
