@@ -1805,8 +1805,15 @@ class OrchestratorWorker:
         self._last_tenant_hard_delete_at = now
 
         # Lazy import — evita circular si el lib no está cargado al boot.
+        # Fix audit 2026-05-29: usar Path relativo en lugar de hardcoded VM
+        # path (que solo existía en la VM de dev, NO en Render → ImportError
+        # silente + cron 0 deletes en producción).
+        # Pattern canónico usado en worker.py:1582 con _Path(__file__).resolve().
         try:
-            sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+            from pathlib import Path as _Path  # noqa: PLC0415
+            _api_root = _Path(__file__).resolve().parents[1] / "api"
+            if str(_api_root) not in sys.path:
+                sys.path.insert(0, str(_api_root))
             from lib.tenant_offboarding import (  # noqa: PLC0415
                 hard_delete_tenant,
                 list_tenants_pending_hard_delete,

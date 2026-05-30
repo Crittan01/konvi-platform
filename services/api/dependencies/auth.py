@@ -155,6 +155,7 @@ async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Cl
 
 
 async def reject_if_tenant_deleting(
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
 ) -> str:
     """Rev. 109 J.2.4.4 Fase 2 — middleware lectura-solo durante offboarding.
@@ -163,18 +164,26 @@ async def reject_if_tenant_deleting(
     `deletion_requested_at IS NOT NULL` Y `deleted_at IS NULL` (en grace period).
 
     NO aplicar a:
+      - GET/HEAD/OPTIONS requests (read-only tolerable durante grace) —
+        skip automático sin DB query.
       - Endpoints de offboarding (cancel-deletion, status) — el owner DEBE
-        poder cancelar dentro del grace.
-      - GET endpoints (read-only ya tolerable durante grace).
+        poder cancelar dentro del grace. Se excluyen por NO aplicar este
+        Depends al router de tenant_offboarding.
 
-    APLICAR como Depends en routers de mutación (POST/PUT/PATCH/DELETE de
-    productos, pedidos, contactos, conversaciones, integrations, settings, etc.).
+    APLICAR como Depends en include_router() de routers de mutación
+    (orders, conversations, contacts, products, settings, integrations,
+    claims, purchases, marketplace, ai_agents, knowledge_base, shipping).
 
     Tras hard-delete (deleted_at NOT NULL), get_current_tenant ya retornaría
     error porque el JWT del usuario sigue válido pero la fila tenants no existe;
     Supabase queries con tenant_id=X fallan silently con 0 rows. Este middleware
     NO cubre ese caso post-delete (el JWT debería re-emitirse).
     """
+    # Fix audit 2026-05-29: skip GET/HEAD/OPTIONS automáticamente — no
+    # tiene sentido bloquear reads durante grace + ahorra 1 query per req.
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return tenant_id
+
     sb = _get_service_client()
     try:
         res = (
