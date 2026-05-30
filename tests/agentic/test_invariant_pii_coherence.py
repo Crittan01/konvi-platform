@@ -25,15 +25,45 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-def _make_sb_contact(name=None, email=None, document_number=None):
+def _make_sb_contact(name=None, email=None, document_number=None, recipient_name=None):
+    """Mock multi-tabla: contacts.single() retorna contact data,
+    conversation_carts.execute() retorna shipping_meta.recipient.
+
+    Rev. 109 BUG 42b — PIICoherenceInvariant lee recipient del cart para
+    detectar envío a tercero (no es mismatch del titular).
+    """
     sb = MagicMock()
-    chain = sb.table.return_value
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.single.return_value = chain
-    chain.execute.return_value = MagicMock(data={
-        "name": name, "email": email, "document_number": document_number,
-    })
+
+    def _table_router(table_name):
+        chain = MagicMock()
+        # contacts: chain.select().eq().single().execute() → contact data
+        # conversation_carts: chain.select().eq().eq().in_().order().limit().execute() → list
+        if table_name == "contacts":
+            chain.select.return_value = chain
+            chain.eq.return_value = chain
+            chain.single.return_value = chain
+            chain.execute.return_value = MagicMock(data={
+                "name": name,
+                "email": email,
+                "document_number": document_number,
+            })
+        elif table_name == "conversation_carts":
+            chain.select.return_value = chain
+            chain.eq.return_value = chain
+            chain.in_.return_value = chain
+            chain.order.return_value = chain
+            chain.limit.return_value = chain
+            recipient_data = {}
+            if recipient_name:
+                recipient_data = {
+                    "shipping_meta": {"recipient": {"name": recipient_name}},
+                }
+            chain.execute.return_value = MagicMock(
+                data=[recipient_data] if recipient_data else [],
+            )
+        return chain
+
+    sb.table.side_effect = _table_router
     return sb
 
 
