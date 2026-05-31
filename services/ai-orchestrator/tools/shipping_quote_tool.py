@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-import jwt
+# PyJWT removed in A0.2c — service-to-service auth via INTERNAL_SERVICE_SECRET header
 from supabase import Client
 
 logger = logging.getLogger("orchestrator.tools.shipping_quote")
 
 API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+# A0.2c 2026-05-31 — service-to-service auth header-based (reemplaza JWT HS256).
+INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
 
 DEFAULT_WEIGHT_KG = float(os.getenv("INBOX_SHIPPING_DEFAULT_WEIGHT_KG", "1"))
 DEFAULT_LENGTH_CM = float(os.getenv("INBOX_SHIPPING_DEFAULT_LENGTH_CM", "10"))
@@ -1331,24 +1332,16 @@ def _build_quote_response_text(
     return paragraph.join([lines[0], body, question])
 
 
-def _build_api_auth_token(tenant_id: str) -> Optional[str]:
-    if not SUPABASE_JWT_SECRET:
+def _build_internal_headers(tenant_id: str) -> Optional[dict]:
+    """Headers para auth service-to-service (A0.2c). Retorna None si secret falta."""
+    if not INTERNAL_SERVICE_SECRET:
         return None
-    now = datetime.now(timezone.utc)
-    payload = {
-        "aud": "authenticated",
-        "sub": "00000000-0000-0000-0000-000000000000",
-        "role": "authenticated",
-        "email": "orchestrator@system.local",
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=5)).timestamp()),
-        "app_metadata": {
-            "tenant_id": tenant_id,
-            "role": "owner",
-        },
-        "user_metadata": {},
+    return {
+        "X-Internal-Service-Secret": INTERNAL_SERVICE_SECRET,
+        "X-Tenant-Id": tenant_id,
+        "Content-Type": "application/json",
+        "Idempotency-Key": f"inbox-quote-{uuid.uuid4()}",
     }
-    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
 def _coerce_origin(raw: Optional[dict]) -> Optional[dict]:
@@ -1510,15 +1503,9 @@ async def _request_shipping_quote(tenant_id: str, payload: dict) -> tuple[int, d
     antes de devolver 504 (mapea a respuesta soft, NO escala a humano).
     Solo errores reales (4xx, falta config) escalan.
     """
-    token = _build_api_auth_token(tenant_id)
-    if not token:
-        return 500, {"detail": "SUPABASE_JWT_SECRET no configurado en orquestador."}
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Idempotency-Key": f"inbox-quote-{uuid.uuid4()}",
-    }
+    headers = _build_internal_headers(tenant_id)
+    if not headers:
+        return 500, {"detail": "INTERNAL_SERVICE_SECRET no configurado en orquestador."}
 
     timeout = httpx.Timeout(SHIPPING_REQUEST_TIMEOUT_SECONDS)
     last_exc: Exception | None = None

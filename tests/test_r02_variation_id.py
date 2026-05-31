@@ -9,7 +9,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
+os.environ.setdefault("INTERNAL_SERVICE_SECRET", "test-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
@@ -70,6 +70,7 @@ class VerifiedOrderContextWithIdsTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+@patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "test-secret")
 class PaymentLinkToolWithVerifiedCtxTests(unittest.IsolatedAsyncioTestCase):
 
     def _make_verified_ctx(self):
