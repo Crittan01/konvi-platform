@@ -20,13 +20,14 @@ Referencia oficial Supabase:
   https://supabase.com/docs/guides/auth/jwts
   https://supabase.com/docs/guides/auth/signing-keys
 """
-import os
 import logging
+import os
 from typing import Optional
-from fastapi import Request, HTTPException, Depends
+
 import jwt  # PyJWT 2.5+ con PyJWKClient
+from fastapi import Depends, HTTPException, Request
 from jwt import PyJWKClient
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 
