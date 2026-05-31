@@ -20,6 +20,41 @@ _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", re.IGNOR
 _DOC_TYPE_VALID = {"CC", "CE", "NIT", "PP", "TI", "OTHER"}
 
 
+def _build_address_dict(args) -> dict:
+    """Construye el dict `address` persistible en contacts.address (JSONB),
+    incluyendo `dane_code` resuelto desde city via DIVIPOLA (lib.dane_resolver).
+
+    El LLM NUNCA infiere DANE (rule "el LLM no decide verdad transaccional"),
+    el resolver es la única fuente. Si el catálogo no encuentra la ciudad,
+    omite el campo en lugar de persistir "" (caller fallback aún funciona).
+    """
+    address = {
+        "street": args.street,
+        "city": args.city,
+        "building_type": args.building_type,
+    }
+    if getattr(args, "apartment", None):
+        address["apartment"] = args.apartment
+    if getattr(args, "tower", None):
+        address["tower"] = args.tower
+    if getattr(args, "floor", None):
+        address["floor"] = args.floor
+    if getattr(args, "neighborhood", None):
+        address["neighborhood"] = args.neighborhood
+    if getattr(args, "reference", None):
+        address["reference"] = args.reference
+    # Rev. 109: persistir dane_code resuelto al save-time para que
+    # wompi_webhook + integrations.py no dependan del fallback runtime.
+    try:
+        from lib.dane_resolver import resolve_dane_from_city
+        dane = resolve_dane_from_city(args.city, getattr(args, "state", None))
+        if dane:
+            address["dane_code"] = dane
+    except Exception:
+        pass
+    return address
+
+
 # ─── get_contact_info (read-only) ──────────────────────────────────────────
 
 
@@ -584,21 +619,7 @@ class SaveAddressTool:
         consent_fail = await _verify_consent_or_fail(ctx)
         if consent_fail:
             return consent_fail
-        address = {
-            "street": args.street,
-            "city": args.city,
-            "building_type": args.building_type,
-        }
-        if args.apartment:
-            address["apartment"] = args.apartment
-        if args.tower:
-            address["tower"] = args.tower
-        if args.floor:
-            address["floor"] = args.floor
-        if args.neighborhood:
-            address["neighborhood"] = args.neighborhood
-        if args.reference:
-            address["reference"] = args.reference
+        address = _build_address_dict(args)
         return await _write_contact_update(ctx, {"address": address}, "address")
 
 
@@ -828,21 +849,7 @@ class SaveContactFieldTool:
                     floor=args.floor, neighborhood=args.neighborhood,
                     reference=args.reference,
                 )
-                address = {
-                    "street": validated.street,
-                    "city": validated.city,
-                    "building_type": validated.building_type,
-                }
-                if validated.apartment:
-                    address["apartment"] = validated.apartment
-                if validated.tower:
-                    address["tower"] = validated.tower
-                if validated.floor:
-                    address["floor"] = validated.floor
-                if validated.neighborhood:
-                    address["neighborhood"] = validated.neighborhood
-                if validated.reference:
-                    address["reference"] = validated.reference
+                address = _build_address_dict(validated)
                 return await _write_contact_update(ctx, {"address": address}, "address")
 
             if args.field == "shipping_phone":

@@ -1400,12 +1400,34 @@ async def _generate_shipping_guide_async(
         # formato canónico "BOGOTA(CUNDINAMARCA)". Aplicamos el mismo
         # normalizador del cotizador para coherencia origin/destination.
         from integrations.aveonline_client import to_aveonline_city_format
+        from lib.dane_resolver import resolve_dane_from_city
 
         origin_city_norm = to_aveonline_city_format(
             origin.get("city") or "", origin.get("state") or "",
         )
         dest_city_norm = to_aveonline_city_format(
             addr.get("city") or "", addr.get("state") or "",
+        )
+
+        # Bug fix rev. 109 (2026-05-31): Aveonline `generarGuia2` rechaza
+        # destino sin DANE numérico ("No se puede generar la guia").
+        # Precedencia destino:
+        #   1. cart.shipping_meta.dane_code — el bot lo resolvió al cotizar
+        #      (shipping_quote_tool._persist_destination_city_to_cart). Fuente
+        #      más reciente: el cliente acaba de declarar la ciudad este turn.
+        #   2. contact.address.dane_code — si el save_address tool lo persistió
+        #      (post-rev.109 lo hará; backwards-compat para addresses viejas).
+        #   3. DIVIPOLA via lib.dane_resolver — defensa final.
+        # Origin solo usa (1)+(3) porque tenants.shipping_origin_dane SÍ está
+        # garantizado al configurar Settings.
+        origin_dane = (
+            origin.get("dane_code")
+            or resolve_dane_from_city(origin.get("city") or "", origin.get("state"))
+        )
+        dest_dane = (
+            sm.get("dane_code")
+            or addr.get("dane_code")
+            or resolve_dane_from_city(addr.get("city") or "", addr.get("state"))
         )
 
         # Rev. 108 fix arquitectónico — ahora función async. Antes
@@ -1415,11 +1437,11 @@ async def _generate_shipping_guide_async(
         # FastAPI). Solución: función async, callers la awaitean directo.
         result = await cli.generate_guide(
             origin={
-                "dane": origin.get("dane_code") or "",
+                "dane": origin_dane,
                 "city": origin_city_norm or origin.get("city") or "",
             },
             destination={
-                "dane": "",
+                "dane": dest_dane,
                 "city": dest_city_norm or addr.get("city") or "",
             },
             package=package,
