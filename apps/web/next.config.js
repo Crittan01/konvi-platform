@@ -194,25 +194,31 @@ const nextConfig = {
 // Si NEXT_PUBLIC_SENTRY_DSN no está configurado, Sentry queda inert
 // (enabled: false en cada config). Build sigue funcionando.
 
+// Sentry build wrap condicional — Render Free 512 MB causa OOM heap si se
+// hace source-maps generation + Sentry build instrumentation. Solo aplicar
+// el wrap completo si hay SENTRY_AUTH_TOKEN (Render Starter o local con
+// presupuesto memoria). En Free sin token: SDK runtime sigue activo (capture
+// errors), solo sin source-map line-number mapping en stack traces Sentry.
 const { withSentryConfig } = require('@sentry/nextjs')
 
-module.exports = withSentryConfig(
-  nextConfig,
-  {
-    // Suppress logs de upload en build (no romper CI si falta auth token).
-    silent: true,
-    // Org + project se leen de env. Sin estos, source map upload se salta.
-    org: process.env.SENTRY_ORG,
-    project: process.env.SENTRY_PROJECT,
-    // Auth token NUNCA va en el bundle — solo en build env.
-    authToken: process.env.SENTRY_AUTH_TOKEN,
-  },
-  {
-    // Hide source maps del bundle público (privacy).
-    hideSourceMaps: true,
-    // Disable logger output en runtime (logs vienen del Sentry SDK init).
-    disableLogger: true,
-    // Auto-instrumentation de fetch + DB clients ya viene en el SDK.
-    automaticVercelMonitors: false,  // not on Vercel
-  },
-)
+const sentryBuildEnabled =
+  Boolean(process.env.SENTRY_AUTH_TOKEN) &&
+  Boolean(process.env.SENTRY_ORG) &&
+  Boolean(process.env.SENTRY_PROJECT)
+
+module.exports = sentryBuildEnabled
+  ? withSentryConfig(
+      nextConfig,
+      {
+        silent: true,
+        org: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+      },
+      {
+        hideSourceMaps: true,
+        disableLogger: true,
+        automaticVercelMonitors: false,
+      },
+    )
+  : nextConfig
