@@ -1,8 +1,14 @@
 """
 Dependencia de autenticación y contexto de tenant.
 
-Valida el JWT de Supabase, extrae tenant_id y role del custom claim app_metadata,
+Valida el JWT de Supabase (sistema NUEVO Asymmetric Signing Keys ES256, fallback
+opcional HS256 legacy), extrae tenant_id y role del custom claim app_metadata,
 y entrega un cliente service_role para operaciones de backend.
+
+A0.2b 2026-05-31 — migración a JWKS asymmetric:
+- Default: ES256 con JWKS endpoint público (sin shared secret).
+- Fallback HS256 con SUPABASE_JWT_SECRET legacy SOLO si la var está presente
+  (sesiones HS256 vigentes pre-migración). Sin la var, ES256-only.
 
 IMPORTANTE:
 - service_role puede bypassar RLS.
@@ -10,21 +16,37 @@ IMPORTANTE:
   en cada query sensible (defensa en profundidad).
 - app.current_tenant_id se mantiene para funciones SQL que lo utilizan.
 
-Referencia oficial Supabase JWT:
+Referencia oficial Supabase:
   https://supabase.com/docs/guides/auth/jwts
+  https://supabase.com/docs/guides/auth/signing-keys
 """
 import os
 import logging
 from typing import Optional
 from fastapi import Request, HTTPException, Depends
-import jwt  # PyJWT
+import jwt  # PyJWT 2.5+ con PyJWKClient
+from jwt import PyJWKClient
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+# Nuevo nombre canónico Publishable+Secret keys (fallback al legacy
+# SUPABASE_SERVICE_ROLE_KEY durante transición A0.2c).
+SUPABASE_SERVICE_KEY = (
+    os.getenv("SUPABASE_SECRET_KEY", "")
+    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+)
+# Legacy HS256 secret — opcional. Si está, se usa como fallback para sesiones
+# pre-migración. Si no, solo ES256 (sistema nuevo asymmetric).
+_LEGACY_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+
+# JWKS client — cache de signing keys, TTL 1h. Rotación de keys Supabase
+# es manejada automáticamente por PyJWKClient (re-fetch al miss kid).
+_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
+_jwks_client: Optional[PyJWKClient] = (
+    PyJWKClient(_JWKS_URL, cache_keys=True, lifespan=3600) if _JWKS_URL else None
+)
 
 # Roles runtime
 RUNTIME_ROLES = {"owner", "manager", "operator"}
@@ -34,41 +56,69 @@ WRITE_ROLES = {"owner", "manager"}
 
 
 def _get_service_client() -> Client:
-    """Cliente con service_role para operaciones que requieren bypass de RLS."""
+    """Cliente con service_role/secret para operaciones que requieren bypass de RLS."""
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
 def _decode_supabase_jwt(token: str) -> Optional[dict]:
+    """Valida JWT Supabase Auth.
+
+    Estrategia:
+      1. Inspeccionar header.alg.
+      2. Si ES256/RS256 (sistema NUEVO asymmetric): verificar con JWKS endpoint
+         + signing key (sin shared secret).
+      3. Si HS256 (sistema LEGACY): verificar con SUPABASE_JWT_SECRET shared.
+         Sin la var → reject (sesión legacy ya expirada o sistema migrado).
+
+    Retorna payload decodificado o None si inválido.
     """
-    Decodifica y valida el JWT. Si es HS256 (local/default) usa el SECRET.
-    Si es ES256 (nuevo default de Supabase Cloud), delega a supabase.auth.get_user
-    para confirmación criptográfica en su infraestructura y luego decodifica.
-    """
-    header = jwt.get_unverified_header(token)
-    alg = header.get("alg", "HS256")
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.InvalidTokenError as e:
+        logger.warning("JWT header no parseable: %s", e)
+        return None
+
+    alg = header.get("alg", "")
+
+    if alg in ("ES256", "RS256"):
+        if not _jwks_client:
+            logger.error(
+                "JWKS endpoint no configurado (NEXT_PUBLIC_SUPABASE_URL ausente)"
+            )
+            return None
+        try:
+            signing_key = _jwks_client.get_signing_key_from_jwt(token).key
+            return jwt.decode(
+                token,
+                signing_key,
+                algorithms=[alg],
+                audience="authenticated",
+            )
+        except Exception as e:
+            logger.warning("JWKS %s JWT inválido: %s", alg, e)
+            return None
 
     if alg == "HS256":
-        if not SUPABASE_JWT_SECRET:
-            logger.error("SUPABASE_JWT_SECRET no configurado")
+        if not _LEGACY_JWT_SECRET:
+            # Sistema migró a asymmetric — tokens HS256 viejos ya no se aceptan.
+            logger.info(
+                "HS256 token rechazado: SUPABASE_JWT_SECRET no configurado "
+                "(sistema migró a asymmetric keys)"
+            )
             return None
         try:
-            return jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+            return jwt.decode(
+                token,
+                _LEGACY_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
         except Exception as e:
-            logger.warning("HS256 JWT inválido: %s", e)
+            logger.warning("HS256 legacy JWT inválido: %s", e)
             return None
-    else:
-        # Para ES256 / RS256, delegamos validación al servidor de Supabase
-        sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) # admin client
-        try:
-            # Validates against Supabase server
-            user_res = sb.auth.get_user(token)
-            if not user_res.user:
-                return None
-            # Return unverified payload since Supabase just verified the real token
-            return jwt.decode(token, options={"verify_signature": False})
-        except Exception as e:
-            logger.warning("Validación delegada a Supabase falló para ES256: %s", e)
-            return None
+
+    logger.warning("Algoritmo JWT no soportado: %s", alg)
+    return None
 
 
 def _extract_jwt_payload(request: Request) -> dict:

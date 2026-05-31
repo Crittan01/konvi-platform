@@ -21,13 +21,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-import jwt
 from supabase import Client
 
 logger = logging.getLogger(__name__)
 
 API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+# A0.2c 2026-05-31 — service-to-service auth header-based.
+# Reemplaza el truco jwt.encode HS256 con SUPABASE_JWT_SECRET impersonando
+# usuario authenticated. Ahora orchestrator → api manda:
+#   X-Internal-Service-Secret: <openssl rand -hex 32>
+#   X-Tenant-Id: <uuid>
+# El endpoint api valida con dependencies/internal_auth.py.
+INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
 
 WOMPI_MIN_AMOUNT_CENTS = 150_000  # $1.500 COP — mínimo Wompi Agregador
 WOMPI_MAX_AMOUNT_CENTS = 10_000_000_000  # $100M COP — cap de sanidad
@@ -198,26 +203,15 @@ async def _regenerate_link_on_existing_order(
     return None
 
 
-def _build_api_auth_token(tenant_id: str) -> Optional[str]:
-    if not SUPABASE_JWT_SECRET:
+def _build_internal_headers(tenant_id: str) -> Optional[dict]:
+    """Headers para auth service-to-service (A0.2c). Retorna None si secret falta."""
+    if not INTERNAL_SERVICE_SECRET:
         return None
-    import time
-    from datetime import timedelta
-    now = int(time.time())
-    payload = {
-        "aud": "authenticated",
-        "sub": "orchestrator",
-        "role": "authenticated",
-        "email": "orchestrator@system.local",
-        "iat": now,
-        "exp": now + 300,
-        "app_metadata": {
-            "tenant_id": tenant_id,
-            "role": "owner",
-        },
-        "user_metadata": {},
+    return {
+        "X-Internal-Service-Secret": INTERNAL_SERVICE_SECRET,
+        "X-Tenant-Id": tenant_id,
+        "Content-Type": "application/json",
     }
-    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
 async def handle_payment_link_if_applicable(
@@ -276,12 +270,10 @@ async def handle_payment_link_if_applicable(
         supabase, tenant_id=tenant_id, conversation_id=conversation_id,
     )
 
-    token = _build_api_auth_token(tenant_id)
-    if not token:
-        logger.error("[PAYMENT_LINK] SUPABASE_JWT_SECRET no configurado — fallback a human")
+    headers = _build_internal_headers(tenant_id)
+    if not headers:
+        logger.error("[PAYMENT_LINK] INTERNAL_SERVICE_SECRET no configurado — fallback a human")
         return None
-
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     if pending_order:
         order_id_existing = pending_order["order_id"]

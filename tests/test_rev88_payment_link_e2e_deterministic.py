@@ -18,7 +18,7 @@ import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
+os.environ.setdefault("INTERNAL_SERVICE_SECRET", "internal-secret")
 os.environ.setdefault("API_URL", "http://localhost:8001")
 
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
@@ -146,6 +146,7 @@ def _supabase_with_stock(stock_per_variation: dict) -> MagicMock:
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 
+@patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "test-secret")
 class PaymentLinkHappyPathTests(unittest.IsolatedAsyncioTestCase):
     """Happy path: cart con 2 productos + datos completos → link Wompi
     generado, items persistidos, response humanizado."""
@@ -237,6 +238,7 @@ class PaymentLinkHappyPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("checkout.wompi.co/l/plink-9300000", result.response_text)
 
 
+@patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "test-secret")
 class PaymentLinkStockGuardTests(unittest.IsolatedAsyncioTestCase):
     """Pre-validación de stock previene oversell."""
 
@@ -271,6 +273,7 @@ class PaymentLinkStockGuardTests(unittest.IsolatedAsyncioTestCase):
         mock_client.assert_not_called()
 
 
+@patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "test-secret")
 class PaymentLinkWompiCustomerDataTests(unittest.IsolatedAsyncioTestCase):
     """Validación rev. 78 F4: customer_data prepoblado."""
 

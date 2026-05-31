@@ -4,7 +4,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
+os.environ.setdefault("INTERNAL_SERVICE_SECRET", "internal-secret")
 
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
 

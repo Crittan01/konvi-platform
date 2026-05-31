@@ -4,7 +4,7 @@ Tests del tool payment_link_tool del Orchestrator.
 Cubre:
 - total_in_cents menor a mínimo → None
 - total_in_cents mayor a cap de sanidad → None
-- SUPABASE_JWT_SECRET ausente → None
+- INTERNAL_SERVICE_SECRET ausente → None
 - Error 503 de Core API (Wompi no configurado) → None
 - Happy path: crea orden, genera link, retorna PaymentLinkResult
 - Verificación del response_text humanizado (primer nombre)
@@ -15,7 +15,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
+os.environ.setdefault("INTERNAL_SERVICE_SECRET", "internal-secret")
 os.environ.setdefault("API_URL", "http://localhost:8001")
 
 sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
@@ -50,7 +50,7 @@ class PaymentLinkToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result)
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "")
     async def test_missing_jwt_secret_returns_none(self):
         result = await payment_link_tool.handle_payment_link_if_applicable(
             tenant_id="tenant-1",
@@ -96,7 +96,7 @@ class PaymentLinkToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result)
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_happy_path_returns_result(self, mock_client_cls):
         mock_client = MagicMock()
@@ -139,7 +139,7 @@ class PaymentLinkToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Cristian", result.response_text)
         self.assertNotIn("Cristian Camilo Garzon Tamayo", result.response_text)
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_response_text_uses_first_name_only(self, mock_client_cls):
         mock_client = MagicMock()
@@ -178,7 +178,7 @@ class PaymentLinkToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Maria", result.response_text)
         self.assertNotIn("Maria Paula Rodriguez Lopez", result.response_text)
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_response_text_handles_whitespace_contact_name(self, mock_client_cls):
         mock_client = MagicMock()
@@ -267,7 +267,7 @@ class PaymentLinkIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         sb.table.side_effect = _table
         return sb
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_reuses_existing_link_when_pending_payment_active(self, mock_client_cls):
         sb = self._build_supabase_with_existing_link(
@@ -298,7 +298,7 @@ class PaymentLinkIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         # Short id (primeros 8 chars en mayúscula)
         self.assertIn("ORDER-EX", result.response_text)
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_creates_new_order_when_no_active_pending_payment(self, mock_client_cls):
         # Sin orden pending_payment activa → flujo normal
@@ -352,7 +352,7 @@ class PaymentLinkIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.order_id, "order-new-123")
         self.assertEqual(result.checkout_url, "https://checkout.wompi.co/l/plink-new")
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_supabase_lookup_failure_degrades_to_create(self, mock_client_cls):
         # Lookup explota → guard degrada y procede a crear (best-effort)
@@ -426,7 +426,7 @@ class PaymentLinkIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         sb.table.side_effect = _table
         return sb
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_regenerates_link_on_existing_order_when_link_expired(self, mock_client_cls):
         # Caso (b): orden pending_payment vive, link >TTL → regenerar sobre
@@ -475,7 +475,7 @@ class PaymentLinkIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         # amount_in_cents derivado de orders.total_amount (2531.0 → 253_100)
         self.assertEqual(result.amount_in_cents, 253_100)
 
-    @patch("tools.payment_link_tool.SUPABASE_JWT_SECRET", "jwt-secret")
+    @patch("tools.payment_link_tool.INTERNAL_SERVICE_SECRET", "internal-secret")
     @patch("tools.payment_link_tool.httpx.AsyncClient")
     async def test_regenerate_failure_returns_none_no_duplicate(self, mock_client_cls):
         # Si regenerar falla (Wompi 503 o transient), NO crear orden nueva
