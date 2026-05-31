@@ -11,7 +11,7 @@ solo el valor).
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from tools.shipping_quote_tool import _variation_label  # noqa: E402
 
@@ -63,7 +63,7 @@ class CaptionLogicSpecTests(unittest.TestCase):
 
     def setUp(self):
         with open(
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/tools/image_send_tool.py",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/tools/image_send_tool.py",
             encoding="utf-8",
         ) as fh:
             self.src = fh.read()

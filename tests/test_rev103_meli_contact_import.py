@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from pathlib import Path
 
-REPO = Path('/home/ansible/workspaces/commerce-ops-platform')
+REPO = Path('/home/ansible/workspaces/konvi-platform')
 sys.path.insert(0, str(REPO / 'services/api'))
 
 # Stub minimal para el módulo `integrations.meli_client` (evita aiohttp deps).

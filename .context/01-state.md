@@ -396,7 +396,7 @@ cerrados sin fixes aislados, en 5 bloques coherentes.
 ### Bloque 2 — Infra coherence (4 tests)
 
 - `RESEND_API_KEY` (sync: false) + `RESEND_FROM_EMAIL` agregados al
-  servicio `commerce-ops-orchestrator` en render.yaml.
+  servicio `konvi-orchestrator` en render.yaml.
 - `.env.example`: sección obsoleta SMTP/BREVO reemplazada por Resend.
 
 ### Bloque 3 — UI Tenant Console
@@ -788,7 +788,7 @@ bypaseaba la API. Cerrados los 4 drifts críticos + 2 moderados.
 
 - **D1 Reclamos**: nuevo `services/api/routers/claims.py` con CRUD + `@audit_log`. `apps/web/.../claims/actions.ts` ahora llama API en vez de Supabase directo.
 - **D2 Compras**: nuevo `services/api/routers/purchases.py` con suppliers + POs + WAC determinístico server-side al recibir. Idempotente. `apps/web/.../purchases/actions.ts` refactorizado.
-- **D3 Knowledge Base**: nuevo `services/api/routers/knowledge_base.py` con embedding server-side via `dependencies/embeddings.py`. `GEMINI_API_KEY` eliminada del scope `commerce-ops-web` (cierra riesgo de exposición). Movida a `commerce-ops-api`. Endpoint `/{id}/reindex` para reintento.
+- **D3 Knowledge Base**: nuevo `services/api/routers/knowledge_base.py` con embedding server-side via `dependencies/embeddings.py`. `GEMINI_API_KEY` eliminada del scope `konvi-web` (cierra riesgo de exposición). Movida a `konvi-api`. Endpoint `/{id}/reindex` para reintento.
 - **D4 Auditoría**: nuevo decorator `@audit_log(entity_type=..., action=...)` en `services/api/dependencies/audit.py`. Aplicado a 17+ endpoints de mutation (orders, contacts, products, variations, claims, purchases, kb, settings, team, integrations). Fire-and-forget — falla silente si DB cae.
 
 ### Drifts moderados cerrados (2 + 1 postpuesto)
@@ -973,7 +973,7 @@ Implementación de la variante accesible de F7 (cart abandonment) sin templates 
 |---|---|
 | `services/ai-orchestrator/orchestrator.py` | `_load_cart_recovery_block` + extensión `_load_customer_context_block` + tokens léxicos + helpers env |
 | `.env.example` | `CART_RECOVERY_ENABLED`, `CART_RECOVERY_LOOKBACK_DAYS` |
-| `render.yaml` | mismas dos vars en commerce-ops-orchestrator |
+| `render.yaml` | mismas dos vars en konvi-orchestrator |
 | `.env` | mismas dos vars |
 | `tests/test_cart_recovery_lite.py` | NUEVO (18 tests) |
 | `scripts/wipe_conversation.py` | NUEVO (utilidad multi-tenant aware) |
@@ -1057,7 +1057,7 @@ Total migraciones: 69 → 72.
 - `MELI_WEBHOOK_ALERT_THRESHOLD="5"`
 - `MELI_WEBHOOK_ALERT_WINDOW_SECONDS="300"`
 
-Configuradas en `.env.example`, `render.yaml` (commerce-ops-orchestrator + commerce-ops-api respectivamente), y `.env` local.
+Configuradas en `.env.example`, `render.yaml` (konvi-orchestrator + konvi-api respectivamente), y `.env` local.
 
 ### Tests nuevos (~23)
 

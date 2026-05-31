@@ -756,7 +756,7 @@ class OrchestratorWorker:
 
         Ejemplo de configuración:
           ANTI_HIBERNATION_ENABLED=true
-          ANTI_HIBERNATION_PING_URL=https://commerce-ops-web.onrender.com/api/health,https://commerce-ops-api.onrender.com/health
+          ANTI_HIBERNATION_PING_URL=https://konvi-web.onrender.com/api/health,https://konvi-api.onrender.com/health
         """
         if not self._anti_hibernation_enabled:
             return

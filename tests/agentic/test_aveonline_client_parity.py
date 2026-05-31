@@ -22,11 +22,11 @@ import unittest
 
 
 _MASTER_PATH = (
-    "/home/ansible/workspaces/commerce-ops-platform/"
+    "/home/ansible/workspaces/konvi-platform/"
     "services/api/integrations/aveonline_client.py"
 )
 _COPY_PATH = (
-    "/home/ansible/workspaces/commerce-ops-platform/"
+    "/home/ansible/workspaces/konvi-platform/"
     "services/ai-orchestrator/integrations/aveonline_client.py"
 )
 
@@ -68,7 +68,7 @@ class AveonlineClientParityTests(unittest.TestCase):
         # Importar master (api).
         sys.path.insert(
             0,
-            "/home/ansible/workspaces/commerce-ops-platform/services/api",
+            "/home/ansible/workspaces/konvi-platform/services/api",
         )
         import importlib
         if "integrations.aveonline_client" in sys.modules:
@@ -86,7 +86,7 @@ class AveonlineClientParityTests(unittest.TestCase):
         sys.path.pop(0)
         sys.path.insert(
             0,
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
         )
         copy_mod = importlib.import_module("integrations.aveonline_client")
         copy_api = {name for name in dir(copy_mod) if not name.startswith("_")}

@@ -103,7 +103,7 @@ bot dijo en turn N. Como un humano.
 ```python
 # Desde python3.11 REPL del agente:
 import sys
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform")
 from scripts.uat.live import helpers
 
 # Objetivo K1: cliente conocido happy path completo

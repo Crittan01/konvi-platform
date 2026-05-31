@@ -34,13 +34,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 sys.path.insert(
-    0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator",
+    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
 )
 
 
 def _load_env():
     """Carga .env del workspace si existe (para GEMINI_API_KEY)."""
-    env_path = Path("/home/ansible/workspaces/commerce-ops-platform/.env")
+    env_path = Path("/home/ansible/workspaces/konvi-platform/.env")
     if not env_path.exists():
         return
     for line in env_path.read_text().splitlines():

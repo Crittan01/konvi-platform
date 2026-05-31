@@ -11,7 +11,7 @@ import unittest
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/commerce-ops-platform/services/api",
+    0, "/home/ansible/workspaces/konvi-platform/services/api",
 )
 
 from routers.wompi_webhook import (

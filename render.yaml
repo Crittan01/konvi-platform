@@ -21,11 +21,11 @@ services:
 
   # ─────────────────────────────────────────────────────────────────────────
   # 1. FRONTEND — Next.js Backoffice
-  #    URL: https://commerce-ops-web.onrender.com
+  #    URL: https://konvi-web.onrender.com
   #    FIX: eliminadas dependencias workspace:* que rompían npm install en Render
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
-    name: commerce-ops-web
+    name: konvi-web
     runtime: node
     region: oregon
     plan: free
@@ -59,9 +59,9 @@ services:
       # URL pública del frontend — leida en runtime por Server Actions (invite flow)
       # SIN prefijo NEXT_PUBLIC_ para evitar bake-in en tiempo de build
       - key: APP_URL
-        value: https://commerce-ops-web.onrender.com
+        value: https://konvi-web.onrender.com
       - key: API_URL
-        value: https://commerce-ops-api.onrender.com
+        value: https://konvi-api.onrender.com
       # Rev. 72 — GEMINI_API_KEY ya NO se expone al servicio web (cierra drift D3).
       # El cálculo de embeddings KB se delegó al API service (POST /api/v1/knowledge-base).
       # Si este servicio se redeploya con la var todavía configurada en el dashboard de
@@ -92,11 +92,11 @@ services:
 
   # ─────────────────────────────────────────────────────────────────────────
   # 2. WHATSAPP CONNECTOR — FastAPI Webhook Gateway
-  #    URL: https://commerce-ops-connector.onrender.com
+  #    URL: https://konvi-connector.onrender.com
   #    Stack: FastAPI + supabase==2.28.3 + httpx==0.28.1
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
-    name: commerce-ops-connector
+    name: konvi-connector
     runtime: python
     region: oregon
     plan: free
@@ -130,11 +130,11 @@ services:
 
   # ─────────────────────────────────────────────────────────────────────────
   # 3. CORE API — FastAPI REST Gateway (Fase 6 ✅)
-  #    URL: https://commerce-ops-api.onrender.com
+  #    URL: https://konvi-api.onrender.com
   #    Stack: FastAPI + supabase==2.28.3 + PyJWT==2.10.1
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
-    name: commerce-ops-api
+    name: konvi-api
     runtime: python
     region: oregon
     plan: free
@@ -175,7 +175,7 @@ services:
         sync: false
       - key: MELI_REDIRECT_URI
         sync: false
-        # Valor: https://commerce-ops-api.onrender.com/api/v1/integrations/meli/callback
+        # Valor: https://konvi-api.onrender.com/api/v1/integrations/meli/callback
       - key: MELI_AUTH_URL
         sync: false
         # CO: https://auth.mercadolibre.com.co/authorization (default)
@@ -228,13 +228,13 @@ services:
 
   # ─────────────────────────────────────────────────────────────────────────
   # 4. AI ORCHESTRATOR — Web Service con worker en thread de fondo
-  #    URL: https://commerce-ops-orchestrator.onrender.com (solo /health y /status)
+  #    URL: https://konvi-orchestrator.onrender.com (solo /health y /status)
   #    FIX: type:worker no disponible en Free → type:web con server.py wrapper
   #    El OrchestratorWorker corre en un daemon thread dentro del mismo proceso.
   #    Referencia: https://render.com/docs/free#free-web-services
   # ─────────────────────────────────────────────────────────────────────────
   - type: web
-    name: commerce-ops-orchestrator
+    name: konvi-orchestrator
     runtime: python
     region: oregon
     plan: free
@@ -258,7 +258,7 @@ services:
       - key: INTERNAL_SERVICE_SECRET
         sync: false                              # openssl rand -hex 32 (NUEVO)
       - key: API_URL
-        value: https://commerce-ops-api.onrender.com
+        value: https://konvi-api.onrender.com
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
@@ -324,7 +324,7 @@ services:
       # ── Anti-hibernación Render Free (R-10) ───────────────────────────────
       # ANTI_HIBERNATION_PING_URL: configurar en Render Dashboard (sync: false)
       # Formato: URLs separadas por coma, ej:
-      #   https://commerce-ops-api.onrender.com/health,https://commerce-ops-connector.onrender.com/health
+      #   https://konvi-api.onrender.com/health,https://konvi-connector.onrender.com/health
       - key: ANTI_HIBERNATION_ENABLED
         value: "true"
       - key: ANTI_HIBERNATION_PING_URL

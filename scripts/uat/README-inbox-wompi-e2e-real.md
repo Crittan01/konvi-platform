@@ -62,7 +62,7 @@ Después de pagar, espera 5-15 segundos. El bot debería enviar automáticamente
 Verifica en el sistema:
 ```bash
 # En la VM, consulta la última orden del tenant
-cd /home/ansible/workspaces/commerce-ops-platform
+cd /home/ansible/workspaces/konvi-platform
 supabase db query --linked "SELECT id, status, total_amount FROM orders WHERE tenant_id = '0fb0777e-f3e4-48c7-89bf-a25aa201c0c9' ORDER BY created_at DESC LIMIT 3;"
 ```
 - La orden debe aparecer con `status = confirmed`.
@@ -77,7 +77,7 @@ El bot **no** debe enviar mensaje de confirmación. La orden debe quedar en `pen
 
 > Alternativa: usa el script de emulación para DECLINED sin repetir flujo completo:
 > ```bash
-> cd /home/ansible/workspaces/commerce-ops-platform
+> cd /home/ansible/workspaces/konvi-platform
 > python3.11 scripts/uat/inbox_wompi_e2e_simulated.py
 > ```
 

@@ -23,14 +23,14 @@ import unittest
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 
 # Validator API
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 from dependencies.contact_validators import (  # noqa: E402
     address_required_fields,
     is_address_complete,
 )
 
 # FSM + orchestrator render
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 from fsm.address import (  # noqa: E402
     missing_address_fields,
     has_real_address_data,

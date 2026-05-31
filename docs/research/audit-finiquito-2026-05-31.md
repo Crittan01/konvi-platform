@@ -1438,96 +1438,96 @@ Configuración está MAYORMENTE FUNCIONAL en producción. La estructura está mo
 ### Estado real (verificado en código)
 
 
-PARCIAL — Hay base sólida (RLS 73/73 tablas, HMAC Meta + Wompi constant-time, JWT validation, MFA TOTP en middleware, consent_audit_log append-only enforced por triggers, retention pg_cron registrado, SAR funcional con PII access log, rate-limit distribuido y headers de seguridad). PERO existen brechas serias de producción que contradicen la frase "siempre con las excelentes prácticas en todo sentido incluyendo seguridad": (1) H7 — secretos Supabase / Meta / Wompi siguen IDÉNTICOS a los expuestos en commit historic be739a4 (rotación documentada como P0 pendiente, NO ejecutada, ver .context/04-next-steps.md líneas 443-446 y .env actual versus git show be739a4:.env); (2) `TenantScopedClient` existe como `scoped_table()` pero se USA solo en 4 callsites contra 319 .table() raw — defensa-en-profundidad casi nunca activada; (3) routers críticos (marketplace 5 endpoints, ai_agents 2 endpoints, mfa) NO usan require_write_role/require_owner_role; (4) Telegram webhook hace `if x_tg_secret != SECRET:` (NO constant-time, timing attack); (5) Wompi y Aveonline y WhatsApp webhooks no tienen rate-limit (solo MeLi lo tiene); (6) `document_number` plaintext en `contacts` — tokenización es solo hash+last4 aditivos, NO se eliminó el plaintext (comment migration 20260506010000 dice "aditiva" / Wompi sigue consumiendo claro); (7) Wompi webhook NO tiene IP allowlist (single-layer defense vs MeLi que sí); (8) /ai-agents/templates totalmente público sin auth ni tenant; (9) frontend `apps/web/.env.local` y root `.env` contienen secretos reales sin gitignore-trip pero con riesgo alto de exposure por screenshot/leak (ya gitignored, no committed, pero rotación pendiente igual aplica).
+PARCIAL — Hay base sólida (RLS 73/73 tablas, HMAC Meta + Wompi constant-time, JWT validation, MFA TOTP en middleware, consent_audit_log append-only enforced por triggers, retention pg_cron registrado, SAR funcional con PII access log, rate-limit distribuido y headers de seguridad). PERO existen brechas serias de producción que contradicen la frase "siempre con las excelentes prácticas en todo sentido incluyendo seguridad": (1) H7 — secretos Supabase / Meta / Wompi siguen IDÉNTICOS a los expuestos en commit historic ***REDACTED-SHA*** (rotación documentada como P0 pendiente, NO ejecutada, ver .context/04-next-steps.md líneas 443-446 y .env actual versus git show ***REDACTED-SHA***:.env); (2) `TenantScopedClient` existe como `scoped_table()` pero se USA solo en 4 callsites contra 319 .table() raw — defensa-en-profundidad casi nunca activada; (3) routers críticos (marketplace 5 endpoints, ai_agents 2 endpoints, mfa) NO usan require_write_role/require_owner_role; (4) Telegram webhook hace `if x_tg_secret != SECRET:` (NO constant-time, timing attack); (5) Wompi y Aveonline y WhatsApp webhooks no tienen rate-limit (solo MeLi lo tiene); (6) `document_number` plaintext en `contacts` — tokenización es solo hash+last4 aditivos, NO se eliminó el plaintext (comment migration 20260506010000 dice "aditiva" / Wompi sigue consumiendo claro); (7) Wompi webhook NO tiene IP allowlist (single-layer defense vs MeLi que sí); (8) /ai-agents/templates totalmente público sin auth ni tenant; (9) frontend `apps/web/.env.local` y root `.env` contienen secretos reales sin gitignore-trip pero con riesgo alto de exposure por screenshot/leak (ya gitignored, no committed, pero rotación pendiente igual aplica).
 
 
 ### Bugs runtime (15)
 
 
-- 🔴 **[CRITICAL]** CRITICAL — Secretos Supabase service_role, Meta App Secret, Wompi sandbox keys, DB password y JWT secret quedaron en historia git pushed (commit be739a4 .env). El comentario .context/04-next-steps.md L443-446 marca H7 (rotación) como P0 pendiente y H8 (filter-repo) como opcional. Verificación: `git show be739a4:.env` muestra los MISMOS secretos que `cat .env` actual (SUPABASE_SERVICE_ROLE_KEY=sb_secret_8LiThl1j..., META_APP_SECRET=9d6ef4c20d8a..., WOMPI_PRIVATE_KEY_SANDBOX=prv_test_gXkW...). Founder reporta 'excelentes prácticas en seguridad' pero rotación NO está hecha. Cualquier persona con acceso al repo público (GitHub) puede leer historia y obtener credenciales válidas hoy. Fix: rotar TODAS las credenciales hoy + actualizar Render env + actualizar .env local. Considerar git filter-repo + force-push (destructivo, coordinable).
+- 🔴 **[CRITICAL]** CRITICAL — Secretos Supabase service_role, Meta App Secret, Wompi sandbox keys, DB password y JWT secret quedaron en historia git pushed (commit ***REDACTED-SHA*** .env). El comentario .context/04-next-steps.md L443-446 marca H7 (rotación) como P0 pendiente y H8 (filter-repo) como opcional. Verificación: `git show ***REDACTED-SHA***:.env` muestra los MISMOS secretos que `cat .env` actual (SUPABASE_SERVICE_ROLE_KEY=***SUPABASE_SECRET_REDACTED***, META_APP_SECRET=***META_APP_SECRET_REDACTED***, WOMPI_PRIVATE_KEY_SANDBOX=***WOMPI_PRIVATE_REDACTED***). Founder reporta 'excelentes prácticas en seguridad' pero rotación NO está hecha. Cualquier persona con acceso al repo público (GitHub) puede leer historia y obtener credenciales válidas hoy. Fix: rotar TODAS las credenciales hoy + actualizar Render env + actualizar .env local. Considerar git filter-repo + force-push (destructivo, coordinable).
 
-  - `/home/ansible/workspaces/commerce-ops-platform/.env (vivos hoy) vs git history be739a40314943d6c0dc7ef7fca04a750b2e327c:.env (committed 2026-04-06); .context/04-next-steps.md:443-446`
+  - `/home/ansible/workspaces/konvi-platform/.env (vivos hoy) vs git history ***REDACTED-SHA***:.env (committed 2026-04-06); .context/04-next-steps.md:443-446`
 
 - 🟠 **[HIGH]** HIGH — Routers `marketplace.py` con 5 endpoints mutating (POST /link, POST /import, DELETE /link/{id}, PATCH /{id}/status, PATCH /{id}/sync-stock) NO requieren rol owner/manager — cualquier usuario authenticado (incluso operator) puede crear/borrar/desincronizar listings MeLi del tenant. Los demás routers (products, contacts, orders, knowledge_base, conversations, settings, claims, purchases) sí usan require_write_role; marketplace fue olvidado.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/marketplace.py:264,353,377,432,550 — comparar con products.py:194 o contacts.py:266 que sí tienen `_role: str = Depends(require_write_role)``
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/marketplace.py:264,353,377,432,550 — comparar con products.py:194 o contacts.py:266 que sí tienen `_role: str = Depends(require_write_role)``
 
 - 🟠 **[HIGH]** HIGH — `ai_agents` router endpoint POST /api/v1/ai-agents/suggest no requiere role (solo tenant). Genera AI prompts personalizados leyendo contexto del tenant + invoca cascade LLM. Un operator puede consumir presupuesto LLM y extraer info de filosofía/catálogo del tenant. Endpoint GET /templates expuesto sin auth ('endpoint público (no requiere tenant — los templates son globales)' L87) — devuelve estructura interna de templates AI; debería al menos requerir get_current_tenant.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/ai_agents.py:84-97 y 100-105`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/ai_agents.py:84-97 y 100-105`
 
 - 🟠 **[HIGH]** HIGH — Telegram webhook hace comparación NO constant-time del secret: `if x_telegram_bot_api_secret_token != TELEGRAM_WEBHOOK_SECRET`. Toda otra signature en el codebase usa `hmac.compare_digest` (Meta, Wompi, MeLi). Vulnerable a timing attack sobre el secret. Fix: `if not hmac.compare_digest(x_telegram_bot_api_secret_token.encode(), TELEGRAM_WEBHOOK_SECRET.encode())`.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/telegram_webhook.py:52`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/telegram_webhook.py:52`
 
 - 🟠 **[HIGH]** HIGH — `scoped_table()` (lib defensa-en-profundidad anti olvido de tenant_id filter) usado solo en 4 callsites vs 319 invocaciones de `supabase.table(...)` directas. La promesa de Plan A.6 (`TenantScopedClient`) no se ejecutó. Aunque inspección manual muestra que la mayoría de queries SÍ aplican .eq('tenant_id', tenant_id) correctamente, no hay protección automática contra olvido futuro. Específicamente preocupa worker.py:455 (update messages by id sin tenant) — si message_id es controlado por externo, riesgo cross-tenant.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/dependencies/tenant_scope.py (TENANT_SCOPED_TABLES whitelist usado 4 veces); /home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/worker.py:439,455 (update por id sin tenant_id filter)`
+  - `/home/ansible/workspaces/konvi-platform/services/api/dependencies/tenant_scope.py (TENANT_SCOPED_TABLES whitelist usado 4 veces); /home/ansible/workspaces/konvi-platform/services/ai-orchestrator/worker.py:439,455 (update por id sin tenant_id filter)`
 
 - 🟠 **[HIGH]** HIGH — Wompi webhook no tiene IP allowlist ni rate-limit. La firma es defensa primaria, pero el handler hace varios SELECTs Supabase y, en caso de huérfano, levanta WARNING + escribe consent/audit logs. Un atacante con payload bien-formado pero secret-equivocado dispara load DB para cada POST (rejected_origin logging, audit insert tentativo, etc.). MeLi tiene `_verify_meli_origin` + `webhook_rate_limit_check`; Wompi y Aveonline y WhatsApp NO. Recomendación: agregar IPAllowlistStrategy (Wompi documentó ranges); para los demás, agregar webhook_rate_limit_check por IP.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/wompi_webhook.py:35-48 (no IP check); aveonline_webhook.py @router.post (no rate-limit); services/connector-whatsapp/routers/webhook.py:95-119 (no rate-limit)`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/wompi_webhook.py:35-48 (no IP check); aveonline_webhook.py @router.post (no rate-limit); services/connector-whatsapp/routers/webhook.py:95-119 (no rate-limit)`
 
 - 🟠 **[HIGH]** HIGH — `marketplace.py` rollback DELETEs no filtran tenant_id: en `import_meli_item()` los rollbacks tras INSERT fail hacen `supabase.table('products').delete().eq('id', product_id).execute()` sin `.eq('tenant_id', tenant_id)`. Producto recién creado SÍ pertenece al tenant pero el patrón viola defense-in-depth y, si `product_id` fuera referenciable post-rollback (race), un atacante de otro tenant podría aprovechar IDs adivinables. UUID v4 reduce el riesgo pero el patrón debe corregirse por consistencia.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/marketplace.py:648,660,684,685`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/marketplace.py:648,660,684,685`
 
 - 🟡 **[MEDIUM]** MEDIUM — Habeas Data tokenización PII: `document_number` se almacena PLAINTEXT en `public.contacts.document_number` con columnas aditivas `document_number_hash` y `document_number_last4`. Comentario migration 20260506010000_pii_tokenization.sql L1-8 explícitamente dice 'aditiva' porque 'Wompi consume document_number en claro'. Para Ley 1581 Art. 4 (minimización) la mejor práctica sería tokenizar en Vault + leer just-in-time para Wompi. Estado actual cumple LEGALMENTE pero no es 'excelentes prácticas'. PII tokenize lib (`lib/pii_tokenize.py`) solo expone normalize/hash/last4/mask — NO Vault tokenize. PII en Vault NO implementado para document_number.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/lib/pii_tokenize.py (solo hash+last4, sin Vault); /home/ansible/workspaces/commerce-ops-platform/supabase/migrations/20260506010000_pii_tokenization.sql:1-8 (aditiva, plaintext intacto)`
+  - `/home/ansible/workspaces/konvi-platform/services/api/lib/pii_tokenize.py (solo hash+last4, sin Vault); /home/ansible/workspaces/konvi-platform/supabase/migrations/20260506010000_pii_tokenization.sql:1-8 (aditiva, plaintext intacto)`
 
 - 🟡 **[MEDIUM]** MEDIUM — JWT ES256 fallback (auth.py:60-71): cuando el JWT no es HS256, se delega validación a `sb.auth.get_user(token)` y luego `jwt.decode(token, options={'verify_signature': False})`. La validación es legítima (Supabase confirma firma), pero después se hace decode sin signature verification + se confía en el payload. Si get_user retorna user pero el JWT fue manipulado en claims (ej. tenant_id, app_metadata) tras validación, el decode local no detecta. Supabase get_user retorna el user real basado en sub claim → claims forjados se ignoran efectivamente, pero el código local lee `app_metadata` desde el token decoded UNVERIFIED. Recomendación: leer app_metadata desde el user object retornado por sb.auth.get_user (autoritativo), no del JWT decoded sin verify.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/dependencies/auth.py:60-71`
+  - `/home/ansible/workspaces/konvi-platform/services/api/dependencies/auth.py:60-71`
 
 - 🟡 **[MEDIUM]** MEDIUM — Wompi webhook BackgroundTask: `_process_wompi_event` corre fuera del request → si lanza excepción tras 200 response, Wompi NO reintenta. La firma se verifica DENTRO del BackgroundTask, no en el endpoint. Esto significa que CUALQUIER atacante puede hacer POST → recibe 200 OK → consume CPU de BackgroundTask. Lo correcto sería verificar firma SÍNCRONA (antes del 200) y solo encolar BackgroundTask si la firma pasó. Hoy el sistema gasta DB lookups + cpu para invalid signatures.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/wompi_webhook.py:36-48 (response 200 antes de verify) vs L123 (verify dentro de BackgroundTask)`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/wompi_webhook.py:36-48 (response 200 antes de verify) vs L123 (verify dentro de BackgroundTask)`
 
 - 🟡 **[MEDIUM]** MEDIUM — `data_subject_request.py` endpoint HTML printable (GET /printable) inyecta `payload` via f-string en HTML. El helper `esc()` (L418-424) escapa &, <, > pero NO escapa `"` ni `'` — un valor como `address` con comilla doble podría romper atributos HTML. Aunque hoy no hay atributos generated-from-payload, el patrón es frágil. Fix: html.escape(s, quote=True).
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/data_subject_request.py:418-424 (función esc local)`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/data_subject_request.py:418-424 (función esc local)`
 
 - 🟡 **[MEDIUM]** MEDIUM — CORS configurado con `allow_origins=ALLOWED_ORIGINS` desde env. Si en Render no se configura ALLOWED_ORIGINS, el default es `http://localhost:3000`. En producción si admin olvida setearlo, los browsers de prod no podrán llamar la API → degradado funcional, no de seguridad. PERO: `allow_credentials=True` + posible `allow_origins=['*']` accidental sería brecha. Validar que en Render esté seteado al dominio web real.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/main.py:70-79`
+  - `/home/ansible/workspaces/konvi-platform/services/api/main.py:70-79`
 
 - ⚪ **[LOW]** LOW — No hay CSRF token protection. FastAPI + JWT Bearer en header mitiga CSRF (cookies SameSite no involucradas en API auth), pero el frontend usa cookies HttpOnly de Supabase para SSR. Server Actions de Next.js dependen del SameSite cookie default — verificar que createServerClient setee cookies con SameSite=Lax/Strict. El admin.ts comment menciona `Secure + SameSite=Strict + HttpOnly` solo en `/api/mfa/recovery-codes/verify` (L14). Cookies de auth principal heredan el default de Supabase SSR — revisar policy.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/apps/web/middleware.ts:11-55 (createServerClient sin set explícito de SameSite); /home/ansible/workspaces/commerce-ops-platform/apps/web/app/api/mfa/recovery-codes/verify/route.ts:14`
+  - `/home/ansible/workspaces/konvi-platform/apps/web/middleware.ts:11-55 (createServerClient sin set explícito de SameSite); /home/ansible/workspaces/konvi-platform/apps/web/app/api/mfa/recovery-codes/verify/route.ts:14`
 
 - ⚪ **[LOW]** LOW — MeLi webhook usa `_extract_request_ip` que prioriza `x-forwarded-for[0]`. En Render hay LB confiable, pero un cliente externo puede setear ese header → spoofing del IP allowlist es trivial si el server expone esto desde NGINX directo. Validar en Render que el proxy SOBREESCRIBE x-forwarded-for; si no, atacante puede pasar IP allowlist enviando `X-Forwarded-For: 54.88.218.97`.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/routers/meli_webhook.py:202-211`
+  - `/home/ansible/workspaces/konvi-platform/services/api/routers/meli_webhook.py:202-211`
 
 - ⚪ **[LOW]** LOW — `reject_if_tenant_deleting` (auth.py:184) skipea GET/HEAD/OPTIONS. Documentado intencional, pero significa que SAR GET printable y EXPORTS pueden hacerse durante grace period. Si tenant en offboarding sigue pudiendo exportar todo el dataset, podría usar grace para data exfil tras revocación de billing. Documentar política comercial explícita o cerrar.
 
-  - `/home/ansible/workspaces/commerce-ops-platform/services/api/dependencies/auth.py:184-186`
+  - `/home/ansible/workspaces/konvi-platform/services/api/dependencies/auth.py:184-186`
 
 
 
 ### Fuentes de verdad (uso real)
 
 
-- /home/ansible/workspaces/commerce-ops-platform/.env — secretos vivos hoy (idénticos a git history be739a4)
+- /home/ansible/workspaces/konvi-platform/.env — secretos vivos hoy (idénticos a git history ***REDACTED-SHA***)
 
-- git show be739a40314943d6c0dc7ef7fca04a750b2e327c:.env — historia pública GitHub con secretos plaintext
+- git show ***REDACTED-SHA***:.env — historia pública GitHub con secretos plaintext
 
-- /home/ansible/workspaces/commerce-ops-platform/.context/04-next-steps.md:443-446 — H7 rotación documentada como P0 pendiente
+- /home/ansible/workspaces/konvi-platform/.context/04-next-steps.md:443-446 — H7 rotación documentada como P0 pendiente
 
-- /home/ansible/workspaces/commerce-ops-platform/services/api/dependencies/tenant_scope.py — TenantScopedClient implementado pero infra-utilizado
+- /home/ansible/workspaces/konvi-platform/services/api/dependencies/tenant_scope.py — TenantScopedClient implementado pero infra-utilizado
 
-- /home/ansible/workspaces/commerce-ops-platform/services/api/dependencies/auth.py — JWT validation HS256/ES256 + reject_if_tenant_deleting + RUNTIME_ROLES whitelist
+- /home/ansible/workspaces/konvi-platform/services/api/dependencies/auth.py — JWT validation HS256/ES256 + reject_if_tenant_deleting + RUNTIME_ROLES whitelist
 
-- /home/ansible/workspaces/commerce-ops-platform/services/api/lib/webhook_framework/signature.py — strategies HMAC/Wompi/URLToken/IPAllowlist canónicas (subutilizadas)
+- /home/ansible/workspaces/konvi-platform/services/api/lib/webhook_framework/signature.py — strategies HMAC/Wompi/URLToken/IPAllowlist canónicas (subutilizadas)
 
-- /home/ansible/workspaces/commerce-ops-platform/services/api/lib/webhook_secret_manager.py — rotación bcrypt 90d + grace 7d (correcto)
+- /home/ansible/workspaces/konvi-platform/services/api/lib/webhook_secret_manager.py — rotación bcrypt 90d + grace 7d (correcto)
 
-- /home/ansible/workspaces/commerce-ops-platform/supabase/migrations/20260502010000_consent_audit_log.sql — append-only triggers correctos
+- /home/ansible/workspaces/konvi-platform/supabase/migrations/20260502010000_consent_audit_log.sql — append-only triggers correctos
 
-- /home/ansible/workspaces/commerce-ops-platform/supabase/migrations/20260505010000_retention_policies.sql + 20260605000000 — pg_cron retention OK
+- /home/ansible/workspaces/konvi-platform/supabase/migrations/20260505010000_retention_policies.sql + 20260605000000 — pg_cron retention OK
 
-- /home/ansible/workspaces/commerce-ops-platform/apps/web/middleware.ts:69-93 — MFA AAL2 enforcement /dashboard/* funcional con fail-open en outage
+- /home/ansible/workspaces/konvi-platform/apps/web/middleware.ts:69-93 — MFA AAL2 enforcement /dashboard/* funcional con fail-open en outage
 
 
 

@@ -6,7 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 import orchestrator
 from tools import inbound_dispatcher as _inbound_dispatcher

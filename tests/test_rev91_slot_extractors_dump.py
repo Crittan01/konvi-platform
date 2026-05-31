@@ -10,7 +10,7 @@ address.{city,street} en una sola pasada determinística.
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from slot_extractors import (  # noqa: E402
     extract_email,

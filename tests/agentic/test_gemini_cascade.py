@@ -22,7 +22,7 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 # fake, contaminaría tests E2E posteriores (golden conversations).
 
 sys.path.insert(
-    0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator",
+    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
 )
 
 

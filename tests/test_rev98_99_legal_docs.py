@@ -10,11 +10,11 @@ Tests estructurales (no E2E con DB).
 import os
 import unittest
 
-DOCS_DIR = "/home/ansible/workspaces/commerce-ops-platform/docs"
+DOCS_DIR = "/home/ansible/workspaces/konvi-platform/docs"
 LEGAL_DIR = os.path.join(DOCS_DIR, "legal")
 ADR_DIR = os.path.join(DOCS_DIR, "adr")
 MIGRATION_PATH = (
-    "/home/ansible/workspaces/commerce-ops-platform/supabase/migrations/"
+    "/home/ansible/workspaces/konvi-platform/supabase/migrations/"
     "20260507010000_tenant_legal_acceptance.sql"
 )
 

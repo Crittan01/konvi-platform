@@ -39,7 +39,7 @@ Tres productos de Google se confunden frecuentemente:
 
 ### Stack actual confirmado
 
-`commerce-ops-platform` usa **AI Studio API key en paid tier**, billed
+`konvi-platform` usa **AI Studio API key en paid tier**, billed
 via un GCP project linkeado. Tráfico actual: 1 tenant productivo
 con ~50 RPH (0.05% del techo de 90.000 RPH paid).
 

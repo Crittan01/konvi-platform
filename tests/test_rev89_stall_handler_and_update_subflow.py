@@ -14,7 +14,7 @@ import sys
 import unittest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import (  # noqa: E402
     _build_next_data_request_prompt,

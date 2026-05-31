@@ -23,7 +23,7 @@ os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from fastapi import HTTPException  # noqa: E402
 from routers import conversations  # noqa: E402
