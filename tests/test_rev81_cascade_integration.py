@@ -7,7 +7,7 @@ la integración por inspección estructural.
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 
 class CascadeIntegrationTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class CascadeIntegrationTests(unittest.TestCase):
         """orchestrator.py debe importar generate_with_cascade y
         degraded_response_text en el call site principal."""
         with open(
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/orchestrator.py",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/orchestrator.py",
             encoding="utf-8",
         ) as f:
             src = f.read()
@@ -51,7 +51,7 @@ class CascadeIntegrationTests(unittest.TestCase):
         estar en el call site principal (sigue existiendo en línea 626
         para audio transcription, eso es OK)."""
         with open(
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/orchestrator.py",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/orchestrator.py",
             encoding="utf-8",
         ) as f:
             src = f.read()

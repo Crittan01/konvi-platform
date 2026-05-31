@@ -149,9 +149,9 @@ URLs: `/cloudflare-for-platforms/cloudflare-for-saas/`, `.../start/getting-start
   1. Zona en Cloudflare (Free OK).
   2. Habilitar Cloudflare for SaaS en la zona.
   3. Crear `fallback origin`: A/AAAA/CNAME proxied apuntando al backend (en nuestro caso `*.onrender.com`).
-  4. Crear `cname target` (proxied), p.ej. `customers.commerce-ops-platform.com`.
+  4. Crear `cname target` (proxied), p.ej. `customers.konvi-platform.com`.
   5. Por tenant: crear `custom hostname` vía API/Dashboard (TLS min, CA, validación HTTP o TXT, wildcard sí/no).
-  6. Tenant crea CNAME `tienda.tenant-x.com` → `customers.commerce-ops-platform.com`.
+  6. Tenant crea CNAME `tienda.tenant-x.com` → `customers.konvi-platform.com`.
   7. Validación cert + hostname → **Active** → tráfico fluye.
 - Enterprise-only: custom CSR, mTLS enforcement, wildcard custom hostnames, custom firewall rulesets per hostname, Apex Proxying / BYOIP.
 
@@ -196,7 +196,7 @@ URL: `/network/`.
 ### 3.1 Custom hostnames per tenant
 **El feature killer** para Konvi es Cloudflare for SaaS:
 
-- Cada tenant crea CNAME desde su dominio (`tienda.tenant-x.com`) hacia nuestro `customers.commerce-ops-platform.com`.
+- Cada tenant crea CNAME desde su dominio (`tienda.tenant-x.com`) hacia nuestro `customers.konvi-platform.com`.
 - API REST permite: `POST /custom_hostnames` con `hostname`, `ssl.method`, `ssl.type`, `ssl.wildcard` → Cloudflare emite cert, valida (HTTP-01 o TXT), levanta el hostname.
 - El tenant **NO** necesita una cuenta Cloudflare. **NO** transfiere su DNS. Solo agrega el CNAME en su registrar.
 - 100 hostnames bundled en Pro → cubre los 5–20 tenants previstos sin add-on.

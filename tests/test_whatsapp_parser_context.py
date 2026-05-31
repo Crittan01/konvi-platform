@@ -1,7 +1,7 @@
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/connector-whatsapp")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/connector-whatsapp")
 
 from services.parser import parse_webhook_payload, parse_webhook_payloads
 

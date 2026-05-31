@@ -11,7 +11,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("PLAN_ENFORCEMENT_ENABLED", "true")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from dependencies import plans
 

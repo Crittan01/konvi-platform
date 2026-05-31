@@ -12,7 +12,7 @@
 
 ## Contrato por servicio (runtime)
 
-### `commerce-ops-web`
+### `konvi-web`
 - Requeridas:
   - `NEXT_PUBLIC_SUPABASE_URL`
   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -22,7 +22,7 @@
 - Opcional:
   - `NEXT_PUBLIC_API_URL` (compat legacy, deprecada)
 
-### `commerce-ops-connector`
+### `konvi-connector`
 - Requeridas:
   - `NEXT_PUBLIC_SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
@@ -30,7 +30,7 @@
   - `META_VERIFY_TOKEN`
   - `ALLOWED_ORIGINS`
 
-### `commerce-ops-api`
+### `konvi-api`
 - Requeridas:
   - `NEXT_PUBLIC_SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
@@ -47,7 +47,7 @@
   - `API_RATE_LIMIT_WRITE_PER_MINUTE`
   - `API_RATE_LIMIT_SEND_PER_MINUTE`
 
-### `commerce-ops-orchestrator`
+### `konvi-orchestrator`
 - Requeridas:
   - `NEXT_PUBLIC_SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`

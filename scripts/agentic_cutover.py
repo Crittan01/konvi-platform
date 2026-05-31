@@ -40,7 +40,7 @@ import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path("/home/ansible/workspaces/commerce-ops-platform")
+REPO_ROOT = Path("/home/ansible/workspaces/konvi-platform")
 sys.path.insert(0, str(REPO_ROOT / "services" / "ai-orchestrator"))
 
 

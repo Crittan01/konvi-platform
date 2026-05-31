@@ -104,7 +104,7 @@ Resultado: **NO-GO** al upgrade pago en este momento.
 ## 6) Arquitectura objetivo al pasar a pago
 
 1. Mantener `web`, `connector`, `api` como web services.
-2. Migrar `commerce-ops-orchestrator` de `type: web` a `type: worker`.
+2. Migrar `konvi-orchestrator` de `type: web` a `type: worker`.
 3. Revalidar colas `human_takeover` y `whatsapp_outbound` con worker nativo.
 
 ## 7) Plan de cutover (alto nivel)

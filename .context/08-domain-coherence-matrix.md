@@ -53,7 +53,7 @@ con cambio arquitectural significativo.
 
 ### D3 — Knowledge Base (resuelto)
 - **Antes**: `getGeminiEmbedding` corría en `apps/web/.../knowledge-base/page.tsx` con `GEMINI_API_KEY` en `apps/web/.env`. Riesgo de exposición.
-- **Ahora**: `services/api/routers/knowledge_base.py` calcula embedding server-side via `dependencies/embeddings.py`. `apps/web/.env` ya NO requiere `GEMINI_API_KEY` (eliminada de `render.yaml` en `commerce-ops-web`; agregada a `commerce-ops-api`).
+- **Ahora**: `services/api/routers/knowledge_base.py` calcula embedding server-side via `dependencies/embeddings.py`. `apps/web/.env` ya NO requiere `GEMINI_API_KEY` (eliminada de `render.yaml` en `konvi-web`; agregada a `konvi-api`).
 - **Endpoint reindex**: `POST /api/v1/knowledge-base/{id}/reindex` permite reintentar embedding fallido.
 - **Cap por tenant**: 30 docs (alineado con UI MAX_DOCS).
 - **Notas residuales**: `apps/web/app/api/insights` y `apps/web/app/api/ai/preview` aún usan `GEMINI_API_KEY` pero son SSR Routes Next.js (no client-side). Deuda técnica futura — no expone al browser.

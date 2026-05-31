@@ -71,7 +71,7 @@ Para cada proyecto: **Settings → Projects → {name} → Client Keys (DSN)** �
 
 En **Render Dashboard** para cada servicio (con `sync: false`, no commitear):
 
-#### commerce-ops-web (apps/web)
+#### konvi-web (apps/web)
 
 ```
 SENTRY_DSN              = <konvi-web DSN>
@@ -79,19 +79,19 @@ NEXT_PUBLIC_SENTRY_DSN  = <konvi-web DSN>   # MISMO valor — va al bundle brows
 SENTRY_AUTH_TOKEN       = sntrys_xxx        # ver paso 4
 ```
 
-#### commerce-ops-api (services/api)
+#### konvi-api (services/api)
 
 ```
 SENTRY_DSN              = <konvi-api DSN>
 ```
 
-#### commerce-ops-orchestrator (services/ai-orchestrator)
+#### konvi-orchestrator (services/ai-orchestrator)
 
 ```
 SENTRY_DSN              = <konvi-orchestrator DSN>
 ```
 
-#### commerce-ops-connector (services/connector-whatsapp)
+#### konvi-connector (services/connector-whatsapp)
 
 ```
 SENTRY_DSN              = <konvi-connector DSN>
@@ -105,7 +105,7 @@ Para que Sentry muestre stack traces **legibles** (con código original) en luga
 
 1. **Settings → Account → API → Auth Tokens → Create New Token**
 2. Scope mínimo: `project:releases` + `project:write` (org-level OK).
-3. Copiar el token `sntrys_...` y configurarlo como `SENTRY_AUTH_TOKEN` en Render Dashboard para `commerce-ops-web` (sync: false).
+3. Copiar el token `sntrys_...` y configurarlo como `SENTRY_AUTH_TOKEN` en Render Dashboard para `konvi-web` (sync: false).
 
 Sin este token: build sigue OK pero stack traces en Sentry muestran código minified (debugging produccion limitado).
 

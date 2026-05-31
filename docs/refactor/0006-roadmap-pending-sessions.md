@@ -194,7 +194,7 @@ Bloqueante OQ-P01. Diferido ~6 meses post-deploy. Trigger: >50 tenants, founder 
 Migration aplicada + worker code listo. Default `TENANT_HARD_DELETE_ENABLED=false`. Habilitar:
 1. Validar UI flow `/dashboard/settings/account-closure` en staging
 2. Test E2E con tenant sandbox (request-deletion → wait → verify hard-delete + archive)
-3. `TENANT_HARD_DELETE_ENABLED=true` en Render env `commerce-ops-orchestrator`
+3. `TENANT_HARD_DELETE_ENABLED=true` en Render env `konvi-orchestrator`
 4. Deploy → cron arranca cada 6h
 
 ### 4.4 Tests pre-existentes — fix vs deprecar

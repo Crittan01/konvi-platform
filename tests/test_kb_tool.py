@@ -10,7 +10,7 @@ os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from tools.kb_tool import (
     format_kb_for_prompt,

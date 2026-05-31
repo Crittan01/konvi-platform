@@ -14,8 +14,8 @@ import unittest
 from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from pydantic import ValidationError
 from routers.settings import TenantPatch

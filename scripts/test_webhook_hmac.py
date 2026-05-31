@@ -5,7 +5,7 @@ import hashlib
 from fastapi.testclient import TestClient
 
 # Carga manual del env para el test (DEBE OCURRIR ANTES DE ROUATERS)
-env_path = "/home/ansible/workspaces/commerce-ops-platform/.env"
+env_path = "/home/ansible/workspaces/konvi-platform/.env"
 try:
     with open(env_path, "r") as f:
         for line in f:
@@ -15,7 +15,7 @@ try:
 except Exception as e:
     print(f"Error reading .env: {e}")
 
-sys.path.append("/home/ansible/workspaces/commerce-ops-platform/services/connector-whatsapp")
+sys.path.append("/home/ansible/workspaces/konvi-platform/services/connector-whatsapp")
 
 from fastapi import FastAPI
 from routers.webhook import router

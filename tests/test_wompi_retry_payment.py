@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/tests")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
 
 from helpers.wompi_payload_builder import WompiPayloadBuilder
 

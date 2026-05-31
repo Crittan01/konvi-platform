@@ -146,7 +146,7 @@ pages_manage_metadata
 Un único endpoint recibe eventos de todos los canales Meta:
 
 ```
-POST https://commerce-ops-connector.onrender.com/api/v1/meta/webhook
+POST https://konvi-connector.onrender.com/api/v1/meta/webhook
 ```
 
 El conector rutea por canal según el campo del payload:
@@ -285,11 +285,11 @@ Dentro del Dashboard de tu App en developers.facebook.com:
 2. Activa **"Enable Embedded Signup"**.
 3. Configura la URL de redirección (donde Meta redirige al tenant tras autorizar):
    ```
-   https://commerce-ops-api.onrender.com/api/v1/integrations/meta/callback
+   https://konvi-api.onrender.com/api/v1/integrations/meta/callback
    ```
 4. Guarda los cambios.
 
-**Variables de entorno que debes agregar a Render (commerce-ops-api):**
+**Variables de entorno que debes agregar a Render (konvi-api):**
 ```
 META_APP_ID=<ID de la app — visible en el Dashboard>
 META_APP_SECRET=<App Secret — Settings > Basic > App Secret>
@@ -330,7 +330,7 @@ Una vez aprobado App Review:
 
 1. En tu App → **WhatsApp** → **"Configuration"** → sección **"Webhooks"**.
 2. Editar:
-   - **Callback URL:** `https://commerce-ops-connector.onrender.com/api/v1/meta/webhook`
+   - **Callback URL:** `https://konvi-connector.onrender.com/api/v1/meta/webhook`
    - **Verify Token:** genera un string aleatorio seguro y guárdalo como `META_VERIFY_TOKEN` en Render.
 3. Suscribir a los campos: `messages`, `message_deliveries`, `message_reads`.
 4. Verificar que Meta puede hacer el challenge GET exitosamente.
@@ -348,7 +348,7 @@ Una vez aprobado App Review:
 Los tokens de usuario expiran. Para producción se usa un System User Token sin expiración.
 
 1. [Meta Business Suite](https://business.facebook.com) → **Configuración del negocio** → **Usuarios** → **"Usuarios del sistema"**.
-2. Haz clic en **"Agregar"** → nombre: `commerce-ops-api` → rol: **Admin**.
+2. Haz clic en **"Agregar"** → nombre: `konvi-api` → rol: **Admin**.
 3. Haz clic en el usuario → **"Generar nuevo token"**.
 4. Selecciona tu App (`Konvi Platform`).
 5. Permisos a otorgar:

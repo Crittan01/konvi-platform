@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from lib.contact_cleanup import (  # noqa: E402
     purge_contact_completely,

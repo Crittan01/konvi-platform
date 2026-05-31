@@ -26,7 +26,7 @@ turn-a-turn evaluando coherencia global. Como un humano chateando.
 
 ```python
 import sys
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform")
 from scripts.uat.live import helpers
 
 # Estado limpio

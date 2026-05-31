@@ -20,7 +20,7 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 import orchestrator  # noqa: E402
 

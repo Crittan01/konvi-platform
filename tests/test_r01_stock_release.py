@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "http://localhost:54321")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from worker import OrchestratorWorker, PENDING_PAYMENT_TTL_MINUTES
 

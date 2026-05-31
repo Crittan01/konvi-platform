@@ -16,7 +16,7 @@ os.environ["MELI_AUTH_URL"] = "https://auth.mercadolibre.com.co/authorization"
 os.environ["MELI_OAUTH_STATE_SECRET"] = "test-super-secret"
 os.environ["MELI_OAUTH_STATE_TTL_SECONDS"] = "600"
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from integrations import meli_client as _meli_client
 from routers import integrations as integrations_router
