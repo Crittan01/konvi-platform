@@ -27,6 +27,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.internal_auth import (
+    get_tenant_id_internal_or_user,
+    require_write_internal_or_user,
+    get_service_client_internal_or_user,
+)
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
@@ -447,9 +452,11 @@ def _build_rate_highlights(rates: list[dict]) -> dict:
 async def quote_shipment(
     req: QuoteRequest,
     request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # A0.2c dual-auth: acepta JWT user (Tenant Console) o INTERNAL_SERVICE_SECRET
+    # header + X-Tenant-Id (orchestrator → api).
+    tenant_id: str = Depends(get_tenant_id_internal_or_user),
+    supabase: Client = Depends(get_service_client_internal_or_user),
+    _role: str = Depends(require_write_internal_or_user),
     _plan: object = Depends(PLAN_SHIPPING_QUOTE),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
