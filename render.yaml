@@ -30,7 +30,11 @@ services:
     region: oregon
     plan: free
     rootDir: apps/web
-    buildCommand: npm install --include=dev && NODE_OPTIONS='--max-old-space-size=460' npm run build
+    # Memory profile build: next build + Sentry instrumentation peak ~1.3 GB RSS.
+    # Render build container = más RAM que runtime (runtime free=512 MB; build
+    # container típicamente 2-4 GB en Free tier). 1500 MB Node heap deja margen.
+    # Si vuelve OOM: subir a 2048 o migrar el wrap Sentry (sin auth token skip).
+    buildCommand: npm install --include=dev && NODE_OPTIONS='--max-old-space-size=1500' npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
