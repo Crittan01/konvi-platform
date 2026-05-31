@@ -497,14 +497,38 @@ async def aveonline_guide_dry_run(
         AveonlineClient, AveonlineAuthError,
         AveonlineTransientError, AveonlinePermanentError,
     )
+    from lib.dane_resolver import resolve_dane_from_city
     client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
 
+    # Bug fix rev. 109 (2026-05-31): Aveonline `generarGuia2` rechaza destino
+    # sin DANE. Precedencia: shipping_meta.dane_code (resuelto al cotizar) →
+    # contact.address.dane_code (si save_address persistió) → DIVIPOLA fallback.
+    # zfill defensivo: tenant.shipping_origin_dane legacy puede estar como
+    # int "5001" (Bogotá sin leading zero) — Aveonline exige 5 dígitos.
+    def _normalize_dane5(raw: object) -> str:
+        digits = "".join(c for c in str(raw or "") if c.isdigit())
+        if len(digits) == 5: return digits
+        if len(digits) == 4: return digits.zfill(5)
+        return ""
     origin = {
-        "dane": str(tenant.get("shipping_origin_dane") or ""),
+        "dane": (
+            _normalize_dane5(tenant.get("shipping_origin_dane"))
+            or resolve_dane_from_city(
+                str(tenant.get("shipping_origin_city") or ""),
+                tenant.get("shipping_origin_state"),
+            )
+        ),
         "city": str(tenant.get("shipping_origin_city") or ""),
     }
     destination = {
-        "dane": "",  # caller no tiene DANE destino — uso city
+        "dane": (
+            str(shipping_meta.get("dane_code") or "")
+            or str(address.get("dane_code") or "")
+            or resolve_dane_from_city(
+                str(address.get("city") or ""),
+                address.get("state"),
+            )
+        ),
         "city": str(address.get("city") or ""),
     }
     # Peso/dimensiones por default si la order no los tiene.
