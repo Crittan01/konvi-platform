@@ -771,7 +771,7 @@ export function IntegrationsManager(props: Props) {
                           <div className="flex gap-2">
                             <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">https://commerce-ops-api.onrender.com/api/v1/webhooks/wompi</span>
+                              Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">https://konvi-api.onrender.com/api/v1/webhooks/wompi</span>
                             </p>
                           </div>
                         </div>

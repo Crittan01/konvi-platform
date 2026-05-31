@@ -12,7 +12,7 @@ Este script ejecuta el flujo completo de forma controlada:
 7. Cleanup al final.
 
 Uso:
-  cd /home/ansible/workspaces/commerce-ops-platform
+  cd /home/ansible/workspaces/konvi-platform
   python3.11 scripts/uat/inbox_wompi_e2e_v2.py
 """
 import asyncio
@@ -29,9 +29,9 @@ if os.path.exists(ENV_PATH):
                 val = val.strip().strip('"').strip("'")
                 os.environ.setdefault(key, val)
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/tests")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
 
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration

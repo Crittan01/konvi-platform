@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from dependencies.tenant_scope import scoped_table, TENANT_SCOPED_TABLES
 
@@ -91,7 +91,7 @@ class TenantIsolationAuditTests(unittest.TestCase):
         .eq("tenant_id", tenant_id)  # antes o después de la query
     """
 
-    ROUTERS_PATH = Path("/home/ansible/workspaces/commerce-ops-platform/services/api/routers")
+    ROUTERS_PATH = Path("/home/ansible/workspaces/konvi-platform/services/api/routers")
     CRITICAL_TABLES = {"orders", "order_items", "contacts", "conversations", "messages", "payments"}
 
     def _get_router_files(self):

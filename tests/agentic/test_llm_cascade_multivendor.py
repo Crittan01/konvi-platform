@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator",
+    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
 )
 
 from llm_cascade import cascade_invoke, CascadeOutcome, _vendor_of, _is_transient

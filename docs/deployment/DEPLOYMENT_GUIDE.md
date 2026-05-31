@@ -8,10 +8,10 @@ Esta guía reemplaza instructivos legacy y refleja el runtime actual del reposit
 
 - Infra IaC: `render.yaml` (raíz del repo)
 - Servicios activos:
-  - `commerce-ops-web`
-  - `commerce-ops-connector`
-  - `commerce-ops-api`
-  - `commerce-ops-orchestrator` (modo `web` en Free)
+  - `konvi-web`
+  - `konvi-connector`
+  - `konvi-api`
+  - `konvi-orchestrator` (modo `web` en Free)
 - Base de datos: Supabase (`supabase/migrations` como fuente canónica)
 
 ## 2) Principios operativos
@@ -28,10 +28,10 @@ Esta guía reemplaza instructivos legacy y refleja el runtime actual del reposit
 3. Verificar health checks:
 
 ```bash
-curl https://commerce-ops-web.onrender.com
-curl https://commerce-ops-connector.onrender.com/health
-curl https://commerce-ops-api.onrender.com/health
-curl https://commerce-ops-orchestrator.onrender.com/health
+curl https://konvi-web.onrender.com
+curl https://konvi-connector.onrender.com/health
+curl https://konvi-api.onrender.com/health
+curl https://konvi-orchestrator.onrender.com/health
 ```
 
 4. Verificar contratos críticos:

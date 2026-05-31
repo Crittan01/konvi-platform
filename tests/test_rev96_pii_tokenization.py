@@ -10,7 +10,7 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
 from lib.pii_tokenize import (  # noqa: E402
     normalize_document,

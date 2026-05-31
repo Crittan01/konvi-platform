@@ -11,7 +11,7 @@ Cubre:
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 
 def _make_product(pid, title, stock, price=100_000):

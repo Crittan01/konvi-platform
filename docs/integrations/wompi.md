@@ -95,7 +95,7 @@ Content-Type: application/json
   "amount_in_cents": 12000000,
   "currency": "COP",
   "expires_at": "2026-04-24T19:00:00.000Z",
-  "redirect_url": "https://commerce-ops-web.onrender.com/pedido/ABC123",
+  "redirect_url": "https://konvi-web.onrender.com/pedido/ABC123",
   "customer_data": {
     "customer_references": [
       {
@@ -325,7 +325,7 @@ Script en `scripts/uat/inbox_wompi_e2e_simulated.py` que ejecuta el flujo comple
 
 Ejecutar:
 ```bash
-cd /home/ansible/workspaces/commerce-ops-platform
+cd /home/ansible/workspaces/konvi-platform
 python3.11 scripts/uat/inbox_wompi_e2e_simulated.py
 ```
 

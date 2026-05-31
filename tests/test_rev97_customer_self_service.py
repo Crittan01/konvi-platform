@@ -13,7 +13,7 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import (  # noqa: E402
     _detect_data_export_intent,

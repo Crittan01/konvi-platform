@@ -54,10 +54,10 @@ tienen prioridad.
 
 | Servicio | URL | Estado |
 |---|---|---|
-| `commerce-ops-web` | `https://commerce-ops-web.onrender.com` | ✅ Live |
-| `commerce-ops-connector` | `https://commerce-ops-connector.onrender.com` | ✅ Live |
-| `commerce-ops-api` | `https://commerce-ops-api.onrender.com` | ✅ Live |
-| `commerce-ops-orchestrator` | worker en web service (`/health`) | ✅ Live |
+| `konvi-web` | `https://konvi-web.onrender.com` | ✅ Live |
+| `konvi-connector` | `https://konvi-connector.onrender.com` | ✅ Live |
+| `konvi-api` | `https://konvi-api.onrender.com` | ✅ Live |
+| `konvi-orchestrator` | worker en web service (`/health`) | ✅ Live |
 
 Supabase proyecto: `***SUPABASE_PROJECT_REF_REDACTED***`
 

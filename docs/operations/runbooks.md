@@ -5,10 +5,10 @@
 ## 1) Health check rápido
 
 ```bash
-curl https://commerce-ops-connector.onrender.com/health
-curl https://commerce-ops-api.onrender.com/health
-curl https://commerce-ops-orchestrator.onrender.com/health
-curl -I https://commerce-ops-web.onrender.com
+curl https://konvi-connector.onrender.com/health
+curl https://konvi-api.onrender.com/health
+curl https://konvi-orchestrator.onrender.com/health
+curl -I https://konvi-web.onrender.com
 ```
 
 ## 2) Reinicio controlado en Render

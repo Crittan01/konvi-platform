@@ -15,7 +15,7 @@ Si retorna ciudad, bypass del SKIP y forzar re-quote.
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import (  # noqa: E402
     _detect_shipping_location_change,

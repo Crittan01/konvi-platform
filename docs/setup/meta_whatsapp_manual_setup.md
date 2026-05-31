@@ -30,7 +30,7 @@ Sigue estas casillas minuciosamente sin saltarte nada:
    - En el menú izquierdo aparecerá automáticamente una sub-sección llamada "WhatsApp".
 
 5. **Entendiendo tu Verify Token:**
-   - Desplázate hacia tu Block de Notas local. El **META_VERIFY_TOKEN** no existe en ningún lado de Meta: _es un candado que tú creas de la nada_. Escribe o inventa una palabra secreta (Ejemplo: `***META_VERIFY_TOKEN_LEGACY_REDACTED***`). Copéala porque luego se la informaremos a Meta.
+   - Desplázate hacia tu Block de Notas local. El **META_VERIFY_TOKEN** no existe en ningún lado de Meta: _es un candado que tú creas de la nada_. Genera una palabra secreta con `openssl rand -base64 24` (NO uses valores literales en docs públicos). Copéala porque luego se la informaremos a Meta.
 
 ---
 
@@ -49,7 +49,7 @@ Sigue estas casillas minuciosamente sin saltarte nada:
 ## PARTE 4: Inyectarlo en la Arquitectura
 
 7. **Trasladar tus hallazgos a la Máquina Virtual:**
-   - Abre en tu editor actual el archivo `/home/ansible/workspaces/commerce-ops-platform/.env`.
+   - Abre en tu editor actual el archivo `/home/ansible/workspaces/konvi-platform/.env`.
    - Busca: `META_VERIFY_TOKEN="..."` y pon ahí dentro la clave que tú te inventaste en el **Paso 5**.
    - Busca: `META_APP_SECRET="..."` y pon ahí dentro la enorme clave secreta que expusiste en el **Paso 6**.
    - Guarda el archivo.

@@ -73,7 +73,7 @@
 | Business Portfolio "Kaiu Natural Living" | Existe + aloja KAIU + System User commerce-ops | Existe + aloja sólo KAIU (tenant) | Mover System User commerce-ops a Konvi portfolio? **Innecesario** — el System User es del tenant, queda en SU Business Portfolio (Kaiu Natural Living es el tenant) |
 | App Mode | Development | Live | Toggle post-App Review |
 | App Review whatsapp_business_messaging | Standard Access (limitado) | Advanced Access | Submit post Business Verification (1-2 sem Meta) |
-| `META_APP_SECRET` (Render) | ✅ presente en commerce-ops-connector | ✅ idem | Sin cambio |
+| `META_APP_SECRET` (Render) | ✅ presente en konvi-connector | ✅ idem | Sin cambio |
 | `META_VERIFY_TOKEN` (Render) | ✅ presente | ✅ idem | Sin cambio |
 | KAIU `tenant_integrations.credentials.waba_id` | ⚠️ NULL → ✅ corregido a `2159052118202272` (2026-05-08 C5) | ✅ presente | UPDATE aplicado |
 | KAIU `tenant_integrations.credentials.access_token_secret_id` | ✅ Vault | ✅ idem | Sin cambio |

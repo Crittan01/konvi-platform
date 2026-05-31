@@ -11,7 +11,7 @@
 - Alertas de stock bajo vía Telegram
 
 **Estado actual**: Las tareas periódicas del sistema corren como:
-- Polling del AI Orchestrator (daemon thread en `commerce-ops-orchestrator`)
+- Polling del AI Orchestrator (daemon thread en `konvi-orchestrator`)
 - No hay más jobs programados
 
 **Cuándo implementar**: Cuando una tarea programada no pueda resolver con el polling

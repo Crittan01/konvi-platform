@@ -14,7 +14,7 @@ Autenticación:
 
 INTERVENCION HUMANA REQUERIDA — configurar setWebhook:
   curl "https://api.telegram.org/bot{TOKEN}/setWebhook" \
-    -d "url=https://commerce-ops-api.onrender.com/api/v1/integrations/telegram/webhook" \
+    -d "url=https://konvi-api.onrender.com/api/v1/integrations/telegram/webhook" \
     -d "secret_token={TELEGRAM_WEBHOOK_SECRET}"
 
 Referencia Telegram Bot API: https://core.telegram.org/bots/api#setwebhook

@@ -2,7 +2,7 @@ import os
 import sys
 from supabase import create_client, Client
 
-env_path = "/home/ansible/workspaces/commerce-ops-platform/.env"
+env_path = "/home/ansible/workspaces/konvi-platform/.env"
 creds = {}
 try:
     with open(env_path, "r") as f:

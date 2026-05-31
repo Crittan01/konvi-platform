@@ -22,7 +22,7 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 sys.path.insert(
-    0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator",
+    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
 )
 
 import orchestrator  # noqa: E402

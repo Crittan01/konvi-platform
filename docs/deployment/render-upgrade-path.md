@@ -28,7 +28,7 @@ Gate formal operativo:
 ## Cambios técnicos esperados al migrar
 
 1. Ajustar `plan` por servicio en `render.yaml`.
-2. Migrar `commerce-ops-orchestrator` de `type: web` a `type: worker`.
+2. Migrar `konvi-orchestrator` de `type: web` a `type: worker`.
 3. Cambiar `startCommand` del orchestrator a `python3 main.py`.
 4. Revalidar health, colas y tiempos de respuesta end-to-end.
 
