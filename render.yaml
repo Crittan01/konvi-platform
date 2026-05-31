@@ -39,16 +39,23 @@ services:
         value: "1"
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
+      # ──── Supabase API keys ───────────────────────────────────────────────
+      # Sistema NUEVO (canónico): Publishable + Secret keys.
+      # Legacy ANON_KEY/SERVICE_ROLE_KEY se mantienen mientras código migra
+      # en A0.2b/A0.2c — eliminar legacy en sub-fase posterior.
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false                              # sb_publishable_* — cliente browser
+      - key: SUPABASE_SECRET_KEY
+        sync: false                              # sb_secret_* — SSR + auth.admin.*
+      # LEGACY (eliminar post A0.2b refactor apps/web/utils/supabase/*.ts)
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
+        sync: false                              # [DEPRECATED] reemplazado por PUBLISHABLE_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
       # URL pública del frontend — leida en runtime por Server Actions (invite flow)
       # SIN prefijo NEXT_PUBLIC_ para evitar bake-in en tiempo de build
       - key: APP_URL
         value: https://commerce-ops-web.onrender.com
-      # Service Role Key — requerida para auth.admin.inviteUserByEmail() en SSR
-      # NUNCA exponer con prefijo NEXT_PUBLIC_
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
       # Rev. 72 — GEMINI_API_KEY ya NO se expone al servicio web (cierra drift D3).
@@ -95,8 +102,12 @@ services:
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
+      # ──── Supabase Secret key (NEW canonical) + legacy SERVICE_ROLE_KEY ───
+      # Legacy se elimina post A0.2c (refactor services/connector-whatsapp/services/db_persistence.py).
+      - key: SUPABASE_SECRET_KEY
+        sync: false                              # sb_secret_*
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
+        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
       - key: META_APP_SECRET
         sync: false
       - key: META_VERIFY_TOKEN
@@ -129,10 +140,20 @@ services:
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
+      # ──── Supabase Secret key (NEW canonical) + legacy SERVICE_ROLE_KEY ───
+      # Legacy se elimina post A0.2c (refactor services/api/dependencies/auth.py + main.py).
+      - key: SUPABASE_SECRET_KEY
+        sync: false                              # sb_secret_*
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
+        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
+      # JWT secret (legacy HS256) — aún requerido por auth.py + payment_link_tool +
+      # shipping_quote_tool hasta refactor A0.2b (JWKS asymmetric) + A0.2c
+      # (INTERNAL_SERVICE_SECRET para service-to-service).
       - key: SUPABASE_JWT_SECRET
-        sync: false
+        sync: false                              # [TRANSITIONAL] eliminar post-A0.2b/c
+      # Service-to-service auth (orchestrator → api) post-A0.2c. Lee internal_auth.py.
+      - key: INTERNAL_SERVICE_SECRET
+        sync: false                              # openssl rand -hex 32 (NUEVO)
       - key: ALLOWED_ORIGINS
         sync: false
       # Rev. 72 — Embeddings KB ahora se calculan server-side aquí (cierra drift D3).
@@ -219,10 +240,19 @@ services:
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
+      # ──── Supabase Secret key (NEW canonical) + legacy SERVICE_ROLE_KEY ───
+      # Legacy se elimina post A0.2c (refactor worker.py + server.py + tools/).
+      - key: SUPABASE_SECRET_KEY
+        sync: false                              # sb_secret_*
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
+        sync: false                              # [DEPRECATED] reemplazado por SECRET_KEY
+      # JWT secret (legacy HS256) — aún requerido por payment_link_tool + shipping_quote_tool
+      # hasta refactor A0.2c (INTERNAL_SERVICE_SECRET header-based).
       - key: SUPABASE_JWT_SECRET
-        sync: false
+        sync: false                              # [TRANSITIONAL] eliminar post-A0.2c
+      # Service-to-service auth (orchestrator → api) post-A0.2c.
+      - key: INTERNAL_SERVICE_SECRET
+        sync: false                              # openssl rand -hex 32 (NUEVO)
       - key: API_URL
         value: https://commerce-ops-api.onrender.com
       - key: GEMINI_API_KEY
