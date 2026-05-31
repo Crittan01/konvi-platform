@@ -60,22 +60,28 @@ services:
       # SIN prefijo NEXT_PUBLIC_ para evitar bake-in en tiempo de build
       - key: APP_URL
         value: https://konvi-web.onrender.com
+      # NEXT_PUBLIC_APP_URL — bundle browser bake-in (cliente JS). Mismo valor que APP_URL.
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://konvi-web.onrender.com
       - key: API_URL
         value: https://konvi-api.onrender.com
-      # Rev. 72 — GEMINI_API_KEY ya NO se expone al servicio web (cierra drift D3).
-      # El cálculo de embeddings KB se delegó al API service (POST /api/v1/knowledge-base).
-      # Si este servicio se redeploya con la var todavía configurada en el dashboard de
-      # Render, basta con eliminarla manualmente — no hay código que la use.
+      - key: APP_ENV
+        value: production
+      # Rev. 72 — GEMINI_API_KEY se MOVERÁ del web al api (drift D3 cierre planeado).
+      # Hoy aún se lee en apps/web/app/api/{insights,ai/preview}/route.ts (deuda técnica).
+      # Mantener temporalmente hasta refactorizar esos 2 endpoints SSR al servicio api.
+      - key: GEMINI_API_KEY
+        sync: false
       # Rev. 109 J.2.7.4 — Sentry tracing E2E. 4 vars: 2 server + 2 browser bundle.
       - key: SENTRY_DSN
         sync: false                              # konvi-web project DSN
-      - key: SENTRY_TRACES_RATE
+      - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
       - key: SENTRY_ENV
         value: production
       - key: NEXT_PUBLIC_SENTRY_DSN              # MISMO valor que SENTRY_DSN (bundle)
         sync: false
-      - key: NEXT_PUBLIC_SENTRY_TRACES_RATE
+      - key: NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
       - key: NEXT_PUBLIC_SENTRY_ENV
         value: production
@@ -118,10 +124,12 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: APP_ENV
+        value: production
       # Rev. 109 J.2.7.4 — Sentry tracing (konvi-connector project DSN).
       - key: SENTRY_DSN
         sync: false
-      - key: SENTRY_TRACES_RATE
+      - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
       - key: SENTRY_ENV
         value: production
@@ -160,6 +168,23 @@ services:
         sync: false                              # openssl rand -hex 32 (NUEVO)
       - key: ALLOWED_ORIGINS
         sync: false
+      # URLs runtime para construir links absolutos (emails, OAuth callbacks).
+      - key: APP_URL
+        value: https://konvi-web.onrender.com
+      - key: APP_ENV
+        value: production
+      # URL pública del API para registrar webhooks de providers externos
+      # (Aveonline webhookEstadosGuias, futuro Envia, etc.). DEBE ser HTTPS.
+      - key: PUBLIC_WEBHOOK_URL
+        value: https://konvi-api.onrender.com
+      # Email transaccional Resend (notificaciones post-pago + Habeas Data).
+      # Sin la var, notifications.py loguea en lugar de enviar (fallback graceful).
+      - key: RESEND_API_KEY
+        sync: false
+      # Aveonline generación REAL de guías (true=factura) vs simulado (false=dry-run).
+      # Default false hasta que tenant confirme listo para prod facturar guías reales.
+      - key: AVEONLINE_GENERATE_REAL_GUIDES
+        value: "false"
       # Rev. 72 — Embeddings KB ahora se calculan server-side aquí (cierra drift D3).
       # Mover el valor desde el servicio web (donde estaba antes) a este.
       - key: GEMINI_API_KEY
@@ -219,7 +244,7 @@ services:
       # Rev. 109 J.2.7.4 — Sentry tracing (konvi-api project DSN).
       - key: SENTRY_DSN
         sync: false
-      - key: SENTRY_TRACES_RATE
+      - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
       - key: SENTRY_ENV
         value: production
@@ -259,10 +284,22 @@ services:
         sync: false                              # openssl rand -hex 32 (NUEVO)
       - key: API_URL
         value: https://konvi-api.onrender.com
+      - key: APP_ENV
+        value: production
+      # AVEONLINE generación REAL de guías (true=factura) vs simulado (false=dry-run).
+      - key: AVEONLINE_GENERATE_REAL_GUIDES
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      # LLM cascade tier 4 (rev. 109) — Claude rescue cuando Gemini falla cascada
+      # 3 tiers. Sin la var, cascade se queda en 3 tiers (degraded path → human).
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # LLM fallback adicional cuando Gemini + Claude no disponibles.
+      - key: OPENAI_API_KEY
+        sync: false
       - key: GEMINI_EMBEDDING_MODEL
         value: gemini-embedding-001
       - key: GEMINI_EMBEDDING_FALLBACK_MODEL
@@ -365,11 +402,11 @@ services:
       - key: RESEND_API_KEY
         sync: false                              # Configurar en Render Dashboard
       - key: RESEND_FROM_EMAIL
-        value: "Konvi <noreply@commerce-ops.local>"
+        value: "Konvi <noreply@konvi.local>"
       # Rev. 109 J.2.7.4 — Sentry tracing (konvi-orchestrator project DSN).
       - key: SENTRY_DSN
         sync: false
-      - key: SENTRY_TRACES_RATE
+      - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
       - key: SENTRY_ENV
         value: production
