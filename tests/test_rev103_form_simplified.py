@@ -22,7 +22,7 @@ Cobertura (lectura de fuente, no test de runtime):
 from pathlib import Path
 import unittest
 
-REPO = Path('/home/ansible/workspaces/commerce-ops-platform')
+REPO = Path('/home/ansible/workspaces/konvi-platform')
 PAGE_TSX = REPO / 'apps/web/app/dashboard/(sales)/contacts/page.tsx'
 MANAGER_TSX = REPO / 'apps/web/app/dashboard/(sales)/contacts/_components/contacts-manager.tsx'
 CONSENT_HELP_TS = REPO / 'apps/web/app/dashboard/(sales)/contacts/_components/helpers/consent-source-help.ts'

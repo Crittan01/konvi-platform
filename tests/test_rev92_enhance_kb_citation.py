@@ -7,7 +7,7 @@ schema de KB no tiene URL pública del documento.
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import _enhance_kb_citation, _format_whatsapp_response_text  # noqa: E402
 

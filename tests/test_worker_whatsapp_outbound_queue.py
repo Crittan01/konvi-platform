@@ -9,7 +9,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 os.environ.setdefault("MAX_PROCESSING_ATTEMPTS", "3")
 os.environ.setdefault("WHATSAPP_OUTBOUND_MAX_ATTEMPTS", "3")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 import worker
 

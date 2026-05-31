@@ -12,9 +12,9 @@ import sys
 import unittest
 from unittest.mock import patch, AsyncMock
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/tests")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
 
 from test_wompi_webhook import (  # noqa: E402
     WompiPayloadBuilder,

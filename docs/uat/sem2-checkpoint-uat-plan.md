@@ -259,7 +259,7 @@ Luego abrir GitHub → Actions tab → el workflow `CI` debe correr y pasar:
 ## 6. Suite test local (1 min)
 
 ```bash
-cd /home/ansible/workspaces/commerce-ops-platform
+cd /home/ansible/workspaces/konvi-platform
 bash scripts/validate.sh
 ```
 

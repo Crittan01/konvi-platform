@@ -260,7 +260,7 @@ Jerarquía: document > phone > UUID. PDF muestra banner verde prominente al inic
 
 - **Tip:** `f496dad` (post este reporte: TBD).
 - Todos los cambios pusheados a `origin/develop`.
-- Render auto-deploy activo para `commerce-ops-web` y `commerce-ops-api`.
+- Render auto-deploy activo para `konvi-web` y `konvi-api`.
 - VM local: requiere reinicio de API tras cambios server-side (`make -C /home/ansible/commerce-ops-local restart-api`).
 
 ## INTERVENCION HUMANA todavía pendiente

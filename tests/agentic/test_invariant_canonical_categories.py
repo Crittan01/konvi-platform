@@ -6,7 +6,7 @@ import unittest
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(
-    0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator",
+    0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator",
 )
 
 from agentic.invariants import CanonicalCategoriesInvariant, InvariantOutcome

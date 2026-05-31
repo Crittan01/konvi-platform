@@ -11,7 +11,7 @@ NOTA: El envío real a Meta API está mockeado (no se necesita token activo).
 El test sí requiere Supabase activo (NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).
 
 USO:
-    cd /home/ansible/workspaces/commerce-ops-platform
+    cd /home/ansible/workspaces/konvi-platform
     export $(grep -v '^#' .env | sed 's/="\\(.*\\)"/=\\1/' | xargs)
     python3 scripts/test_worker_e2e.py
 """
@@ -22,7 +22,7 @@ import sys
 from unittest.mock import AsyncMock, patch
 
 # Cargar .env si existe
-env_path = "/home/ansible/workspaces/commerce-ops-platform/.env"
+env_path = "/home/ansible/workspaces/konvi-platform/.env"
 try:
     with open(env_path, "r") as f:
         for line in f:
@@ -34,7 +34,7 @@ except Exception:
     pass
 
 # Apuntar al orchestrator canónico
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from supabase import create_client
 

@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from tools import kb_tool
 from llm_embed import EmbedResult

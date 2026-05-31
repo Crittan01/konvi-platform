@@ -11,7 +11,7 @@ Cubre los 6 fixes derivados del log 2026-04-29 conv 615a9902:
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import (  # noqa: E402
     _resolve_display_state,

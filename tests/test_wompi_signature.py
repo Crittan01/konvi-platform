@@ -11,8 +11,8 @@ Cubre:
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/api")
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/tests")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
 
 from integrations.wompi_client import verify_event_signature
 from helpers.wompi_payload_builder import WompiPayloadBuilder, TEST_EVENTS_KEY

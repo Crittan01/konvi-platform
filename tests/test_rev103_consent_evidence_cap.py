@@ -9,7 +9,7 @@ JSONB soporta MB pero un cap preventivo a 50 entries:
 from pathlib import Path
 import unittest
 
-REPO = Path('/home/ansible/workspaces/commerce-ops-platform')
+REPO = Path('/home/ansible/workspaces/konvi-platform')
 PAGE_TSX = REPO / 'apps/web/app/dashboard/(sales)/contacts/page.tsx'
 
 

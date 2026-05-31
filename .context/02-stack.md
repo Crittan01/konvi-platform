@@ -67,6 +67,6 @@ Render se mantiene en **freeze** hasta que se retome producción. Toda prueba co
 
 - Logs: `/home/ansible/commerce-ops-local/logs/{orchestrator,api,connector,web}.log`
 - PIDs: `/home/ansible/commerce-ops-local/pids/`
-- `.env` que cargan los servicios: `/home/ansible/workspaces/commerce-ops-platform/.env` (raíz del repo)
+- `.env` que cargan los servicios: `/home/ansible/workspaces/konvi-platform/.env` (raíz del repo)
 
 **Importante** — cambios de código en `services/ai-orchestrator/*.py` requieren reiniciar el orchestrator. Cambios en `.env` (env vars) son leídos al inicio del proceso, **excepto los flags hot-reload** (ver `USE_NEW_ORCHESTRATOR` que se relee por cada llamada).

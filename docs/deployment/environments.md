@@ -6,17 +6,17 @@
 
 | Entorno | URL | Rama | Auto-deploy |
 |---|---|---|---|
-| Producción/Lab compartido | `https://commerce-ops-web.onrender.com` | `develop` | Sí |
+| Producción/Lab compartido | `https://konvi-web.onrender.com` | `develop` | Sí |
 | Local | `http://localhost:3000` + servicios Python locales | N/A | Manual |
 
 > Si la rama de auto-deploy cambia en Render, `docs/HANDOFF.md` debe actualizarse en la misma sesión.
 
 ## Servicios de producción/lab
 
-- `commerce-ops-web`
-- `commerce-ops-connector`
-- `commerce-ops-api`
-- `commerce-ops-orchestrator`
+- `konvi-web`
+- `konvi-connector`
+- `konvi-api`
+- `konvi-orchestrator`
 
 ## Staging
 

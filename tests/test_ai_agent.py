@@ -12,7 +12,7 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 os.environ.setdefault("API_URL", "http://localhost:8001")
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import _get_tenant_ai_agent
 

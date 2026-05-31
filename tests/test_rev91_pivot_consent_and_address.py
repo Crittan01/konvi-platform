@@ -7,7 +7,7 @@ no condicionado al estado FSM.
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 from orchestrator import (  # noqa: E402
     CONSENT_QUESTION_TEMPLATE,
@@ -87,7 +87,7 @@ class AddressReconciliationContractTests(unittest.TestCase):
         de reconciliación de building_type en la capa de persistencia
         (no condicionada al FSM state)."""
         with open(
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/orchestrator.py",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/orchestrator.py",
             encoding="utf-8",
         ) as fh:
             src = fh.read()

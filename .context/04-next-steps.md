@@ -548,7 +548,7 @@ Total suite: **709 tests OK** (681 → 709, +28 nuevos rev. 74).
 
 1. **Confirmar flag en `.env`:**
    ```bash
-   grep USE_NEW_ORCHESTRATOR /home/ansible/workspaces/commerce-ops-platform/.env
+   grep USE_NEW_ORCHESTRATOR /home/ansible/workspaces/konvi-platform/.env
    # Debe imprimir: USE_NEW_ORCHESTRATOR=true
    ```
 

@@ -135,7 +135,7 @@ Un bot Telegram **es una entidad globalmente única** (`@username` reservado en 
 ```http
 POST https://api.telegram.org/bot{TENANT_TOKEN}/setWebhook
 {
-  "url": "https://commerce-ops-api.onrender.com/api/v1/integrations/telegram/webhook",
+  "url": "https://konvi-api.onrender.com/api/v1/integrations/telegram/webhook",
   "secret_token": "{generated_per_tenant_secret}",
   "allowed_updates": ["message", "callback_query"],
   "drop_pending_updates": true,

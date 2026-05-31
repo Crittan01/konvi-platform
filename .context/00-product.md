@@ -98,7 +98,7 @@ No tiene implementación. Bloqueante OQ-P01 sin resolver.
 ## 5. Tree Interno del Sistema (Físico)
 
 ```text
-commerce-ops-platform/
+konvi-platform/
 ├── apps/web/                    # Next.js 14.2.35 — Tenant Console
 │   └── app/dashboard/
 │       ├── (sales)/             # Route Group → /dashboard/{orders,contacts,shipping,claims}

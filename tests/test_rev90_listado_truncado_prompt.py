@@ -13,7 +13,7 @@ clave estén presentes y no se hayan removido por accidente.
 import sys
 import unittest
 
-sys.path.insert(0, "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator")
+sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
 
 class ListadoTruncadoPromptRuleTests(unittest.TestCase):
@@ -25,8 +25,8 @@ class ListadoTruncadoPromptRuleTests(unittest.TestCase):
         # en qué módulo aterrizó tras la extracción.
         sources = []
         for path in (
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/orchestrator.py",
-            "/home/ansible/workspaces/commerce-ops-platform/services/ai-orchestrator/prompt/builder.py",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/orchestrator.py",
+            "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator/prompt/builder.py",
         ):
             with open(path, encoding="utf-8") as fh:
                 sources.append(fh.read())
