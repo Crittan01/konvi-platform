@@ -20,6 +20,12 @@ from pydantic import BaseModel, Field
 from supabase import Client
 from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role, get_current_role
+from dependencies.internal_auth import (
+    get_tenant_id_internal_or_user,
+    require_write_internal_or_user,
+    get_role_internal_or_user,
+    get_service_client_internal_or_user,
+)
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
@@ -124,9 +130,11 @@ async def list_orders(
 async def create_order(
     order: OrderCreate,
     request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # A0.2c dual-auth: acepta JWT user (Tenant Console) o INTERNAL_SERVICE_SECRET
+    # header + X-Tenant-Id (orchestrator → api).
+    tenant_id: str = Depends(get_tenant_id_internal_or_user),
+    supabase: Client = Depends(get_service_client_internal_or_user),
+    _role: str = Depends(require_write_internal_or_user),
     _plan: object = Depends(PLAN_ORDERS_CREATE),
     _rl: None = Depends(RL_WRITE_DEFAULT),
 ):
@@ -350,9 +358,10 @@ async def patch_order(
 async def create_payment_link(
     order_id: str,
     request: Request,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    _role: str = Depends(require_write_role),
+    # A0.2c dual-auth (orchestrator → api)
+    tenant_id: str = Depends(get_tenant_id_internal_or_user),
+    supabase: Client = Depends(get_service_client_internal_or_user),
+    _role: str = Depends(require_write_internal_or_user),
 ):
     """
     Genera un link de pago Wompi para un pedido en estado pending o pending_payment.
@@ -711,9 +720,10 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
 @router.post("/{order_id}/generate-shipping-guide", response_model=dict)
 async def generate_shipping_guide_endpoint(
     order_id: str,
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-    role: str = Depends(get_current_role),
+    # A0.2c dual-auth (orchestrator → api)
+    tenant_id: str = Depends(get_tenant_id_internal_or_user),
+    supabase: Client = Depends(get_service_client_internal_or_user),
+    role: str = Depends(get_role_internal_or_user),
 ):
     """Genera guía Aveonline para una orden — manual desde Inbox.
 

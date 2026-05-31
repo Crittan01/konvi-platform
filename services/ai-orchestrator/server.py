@@ -78,7 +78,8 @@ def agentic_metrics(tenant_id: str | None = None, since_hours: int = 24):
     from supabase import create_client
 
     url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy.
+    key = os.getenv("SUPABASE_SECRET_KEY", "") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     if not url or not key:
         return JSONResponse(
             status_code=503,

@@ -43,10 +43,23 @@ def _validate_startup_config() -> None:
     # ── Variables críticas de Supabase ────────────────────────────────────────
     if not os.getenv("NEXT_PUBLIC_SUPABASE_URL", "").startswith("https://"):
         errors.append("NEXT_PUBLIC_SUPABASE_URL no configurada o inválida")
-    if not os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""):
-        errors.append("SUPABASE_SERVICE_ROLE_KEY no configurada")
-    if not os.getenv("SUPABASE_JWT_SECRET", ""):
-        errors.append("SUPABASE_JWT_SECRET no configurada — el Orchestrator no podrá generar links de pago")
+    # Aceptar el nombre nuevo (SECRET_KEY) o el legacy (SERVICE_ROLE_KEY) durante
+    # transición A0.2c. Cleanup del legacy en commit final post-migración código.
+    if not (
+        os.getenv("SUPABASE_SECRET_KEY", "")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    ):
+        errors.append(
+            "SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy) no configurada"
+        )
+    # A0.2b/c: SUPABASE_JWT_SECRET dejó de ser bloqueante. auth.py usa JWKS
+    # asymmetric (ES256) sin shared secret. payment_link_tool + shipping_quote_tool
+    # usan INTERNAL_SERVICE_SECRET header-based.
+    if not os.getenv("INTERNAL_SERVICE_SECRET", ""):
+        errors.append(
+            "INTERNAL_SERVICE_SECRET no configurada — el Orchestrator no podrá llamar al "
+            "Core API (payment_link + shipping_quote requieren header X-Internal-Service-Secret)"
+        )
 
     if errors:
         for err in errors:
