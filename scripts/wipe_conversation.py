@@ -369,9 +369,10 @@ def main():
 
     creds = _load_env()
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL")
-    key = creds.get("SUPABASE_SERVICE_ROLE_KEY")
+    # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.
+    key = creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
-        print("ERROR: falta NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env",
+        print("ERROR: falta NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY legacy) en .env",
               file=sys.stderr)
         sys.exit(1)
 
