@@ -1,7 +1,63 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-06-22 (rev. 110 · Model B Direct Provider per-tenant cierre dev)
-**Branch activo**: `develop` (post-A0 + Model B refactor).
+**Última actualización**: 2026-06-23 (rev. 111 · Inbox crónico cura raíz Fase 0+1+2+3 + ADR-0024)
+**Branch activo**: `develop` (post-A0 + Model B + finiquito Inbox crónico Fase 0-3).
+
+---
+
+## Rev. 111 (2026-06-23 — CIERRE DEV) — Cura raíz crónica Inbox/Orchestrator (Fase 0+1+2+3 finiquito)
+
+**Disparador**: founder reportó *"este tema o sección nos ha dado un dolor de cabeza el desarrollo y no ha sido 100% acertivo"* tras UAT live 2026-06-23 que reveló bot improvisando shipping_origin + horario aún post-A2 commit. Pidió investigación arquitectónica profunda en vez de parches.
+
+**Auditoría exhaustiva 12-agent workflow `wujbdgrhk`** (trace runtime + V1/V2/V3 divergence + bug history + invariants + tests gaps + Flows feasibility + LLM behavior + arch options + 3 adversarial + synthesis):
+- Causa raíz NO es 1 sino 4 ortogonales: **P1** contrato datos→prompt incompleto en path PRIMARIO V3 per-state · **P2** tool contract permite UUIDs free-text · **P3** schema drift contact.address · **P4** Gemini Flash improvisa con dato presente (transversal training-data bias).
+- Hallazgo CRÍTICO: existen **3 builders coexistiendo** (no 2 como se asumía): V1 monolito (`prompt/builder.py`), V2 monolito agentic (`agentic/system_prompt.py`), **V3 per-state agentic (`agentic/prompt/builder.py` rev. 109 día 2)**. V3 es PRIMARIO en 100% happy path.
+- A2 commit 2026-06-22 había inyectado business_ops solo en V2 (dispatcher.py:645) PERO dispatcher.py:1969 sobreescribe ese prompt con V3 per-state que NO recibía los kwargs → bot improvisaba.
+
+**Decisiones Q1+Q2+Q3 selladas (founder OK quality-first)**:
+- Q1: Fase 0→4 secuencial estricta (NO paralelizar Phase 5 Wompi UX hasta cerrar crónico)
+- Q2: ADR-0024 adoptado — criterio "invariant solo si verificación binaria/determinística"
+- Q3: business_ops en 4 estados conversacionales (GREETING+EXPLORING+CART_BUILDING+POST_PAYMENT)
+
+**Fases ejecutadas (commits develop)**:
+
+| Fase | Commit | Resumen |
+|---|---|---|
+| 0 | `3b429d2f` | V3 per-state recibe 6 kwargs business_ops. `business_ops_section()` en `blocks.py` reutiliza `_render_business_ops_block` V2 (SST). `build_prompt_for_state` extiende firma + `_BUSINESS_OPS_STATES` frozenset. Tests capstone 14/14 PASS. |
+| 1 | hereda A2 `00d3a08e` | V3 lee canonical address vía reuse `_render_contact_block` (single source of truth — no drift). |
+| ADR | `bcf47d1a` | ADR-0024 sellado: criterio binario/determinístico para `apply_invariants`. Rechaza por construcción `BusinessOpsTruthfulnessInvariant` + `ContactAddressTruthfulnessInvariant` (requieren parser NLP O(N²)). |
+| 2 | `bcf47d1a` | `ToolIdReferentialIntegrityInvariant` pre-tool (novedad arquitectónica vs 13 post-LLM). Cierra BUG-CART-1: UUID inventado → BLOCK con code MUST_LIST_CATALOG_FIRST. 15/15 tests adversariales PASS. |
+| 3 | `5b8fc14d` | XML tags `<business_ops priority="factual_truth">` + regla ANTI-IMPROVISATION + REORDEN (business_ops antes del mini-prompt estado para anchor temprano). Cura P4 transversal. |
+
+**Gate UAT live evidencia post-cura (Cristian KAIU productivo)**:
+
+| Pregunta | Pre-cura | Post-cura |
+|---|---|---|
+| ¿de dónde despachan? | "a todo Colombia" genérico | **"Bogotá D.C."** literal DB |
+| ¿horario de atención? | "lunes-viernes 9-6, sáb 9-1" inventado | **"Lun a Sáb de 08:00 a 18:00"** literal DB con `*bold*` |
+| ¿redes sociales? | (no testeado pre) | Facebook + Instagram literales DB |
+
+**Mea culpa A2 (lección sistémica)**:
+1. Declaré A2 cerrado sin trace runtime — violé `feedback_local_logs.md`
+2. Asumí 2 builders cuando hay 3 — falta de mapeo cross-layer (`feedback_anticipate_cross_layer_catches`)
+3. Optimicé scope estrecho sobre cobertura correcta — invertí `feedback_quality_first_over_effort` (esa memoria se creó precisamente como lección de este fallo)
+
+**Nuevas memorias creadas en sesión**:
+- `feedback_quality_first_over_effort.md` (founder reframe explícito)
+
+**Tests totales sesión**: 40 nuevos (14 capstone + 15 invariant binario + 11 business_ops V2 anteriores). Suite global: 13 OK / 0 errors / 2354 tests verde.
+
+**Commits push develop**:
+- `3b429d2f` fix(finiquito-fase-0): V3 per-state recibe business_ops kwargs
+- `bcf47d1a` feat(finiquito-fase-2): invariant binario ToolIdReferentialIntegrity + ADR-0024
+- `5b8fc14d` fix(finiquito-fase-3): XML tags + reorden anti-improvisation business_ops
+
+**Pendiente próximas sesiones (OLA 1 NIVEL 2-7 finiquito A6-A11)**:
+- NIVEL 2 — A6 scoped_table propagation 4/319 → 319/319 (~5d) + A7 RBAC marketplace (0.5d)
+- NIVEL 3 — A5 Save-PII Habeas Data audit log (~2d)
+- NIVEL 4 — A8 multi-agente router + A9 contactos drift + A10 escalation (~3d, incluye 4 bugs smoke 2026-06-01 ya parcialmente cubiertos por BUG-CART-1 fix Fase 2)
+- NIVEL 5 — A3 cotizador + A4 reclamos paralelos (~1d)
+- NIVEL 7 — A11 UAT live analítico dual-mode cierre (~1.5h founder)
 
 ---
 
