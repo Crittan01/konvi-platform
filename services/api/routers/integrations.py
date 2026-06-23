@@ -557,7 +557,9 @@ async def aveonline_guide_dry_run(
     recipient = {
         "doc": str(contact.get("document_number") or ""),
         "nombre": str(contact.get("name") or ""),
-        "direccion": str(address.get("line1") or ""),
+        # A2 finiquito 2026-06-23: schema canónico `street` (rev. 110).
+        # Fallback `line1` defensivo durante ventana migración (regla #4).
+        "direccion": str(address.get("street") or address.get("line1") or ""),
         "barrio": "",
         "telefono": str(contact.get("shipping_phone") or contact.get("phone") or ""),
         "celular": str(contact.get("shipping_phone") or contact.get("phone") or ""),

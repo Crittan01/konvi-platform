@@ -1292,10 +1292,11 @@ async def _generate_shipping_guide_async(
         return False
 
     addr = contact.get("address") or {}
-    # Bug runtime KAIU 2026-05-24: schema mismatch — contacts.address usa
-    # `line1` (canónico), tenants.shipping_origin usa `street`. Aquí
-    # tomamos `line1` con fallback a `street` para tolerar ambos.
-    addr_street = addr.get("line1") or addr.get("street") or ""
+    # A2 finiquito 2026-06-23: schema canónico `street` (rev. 110).
+    # Audit live 2026-06-23: 5/5 contactos productivos KAIU usan `street`.
+    # Fallback `line1` preservado 30 días defensivo por retries de webhooks
+    # legacy con snapshot serializado pre-deploy (adversarial #12).
+    addr_street = addr.get("street") or addr.get("line1") or ""
     if not addr.get("city") or not addr_street:
         logger.info(
             "[WOMPI][AVEONLINE] order=%s sin dirección — skip guía "

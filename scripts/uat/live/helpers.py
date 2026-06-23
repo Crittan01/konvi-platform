@@ -150,8 +150,17 @@ def reset_known_customer(
     city: str = "Bogotá",
     state: str = "Cundinamarca",
     address_line: str = "Calle 100 #50-25",
+    neighborhood: str = "Chapinero",
+    dane_code: str = "11001000",
+    building_type: str = "casa",
 ) -> str:
-    """Cliente CONOCIDO completo — consent + PII + address. Retorna conv_id."""
+    """Cliente CONOCIDO completo — consent + PII + address. Retorna conv_id.
+
+    A2 finiquito 2026-06-23: shape canónico contacts.address rev. 110.
+    Antes persistía `line1` (legacy, audit live 0/5 contactos productivos
+    lo tenían) → corrupta DB UAT cada ejecución. Fix: usar `street` +
+    building_type + neighborhood + dane_code (defaults Bogotá si no provee).
+    """
     close_active_convs()
     contact = SB.table("contacts").select("id").eq(
         "phone", TEST_PHONE,
@@ -162,7 +171,13 @@ def reset_known_customer(
             "phone", TEST_PHONE,
         ).eq("tenant_id", TENANT_ID).execute().data
     address_jsonb = {
-        "line1": address_line, "city": city, "state": state, "country": "CO",
+        "street": address_line,
+        "city": city,
+        "state": state,
+        "country": "CO",
+        "building_type": building_type,
+        "neighborhood": neighborhood,
+        "dane_code": dane_code,
     }
     SB.table("contacts").update({
         "consent_given": True,
