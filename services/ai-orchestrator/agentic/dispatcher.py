@@ -1976,6 +1976,17 @@ async def _run_agentic_full(
                 carriers=carriers_caps,
                 payment_methods=payment_methods_cfg,
                 active_coupons=active_coupons,
+                # Fase 0 finiquito 2026-06-23 — V3 per-state recibe los 6 kwargs
+                # business_ops (root-cause analysis wujbdgrhk). Cierra bug verificado
+                # runtime trace 2026-06-23T17:39 HAS_BUSINESS_OPS_MARKER:False — bot
+                # improvisaba horarios/despacho/sedes/redes porque V3 NO los recibía.
+                # Inyectados solo en _BUSINESS_OPS_STATES (decisión Q3).
+                shipping_origin=tenant_shipping_origin,
+                store_locations=tenant_store_locations,
+                store_type=tenant_store_type,
+                support_schedule=tenant_support_schedule,
+                social_links=tenant_social_links,
+                after_hours_message=tenant_after_hours_message,
             )
             _allowed_tools = set(tools_for_state(_resolved_state))
             logger.info(

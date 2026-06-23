@@ -32,6 +32,7 @@ from agentic.prompt.blocks import (
     carriers_section,
     payment_methods_section,
     coupons_section,
+    business_ops_section,
 )
 from agentic.prompt.states import (
     greeting_prompt,
@@ -107,6 +108,21 @@ _NO_COUPONS_STATES = frozenset({
 })
 
 
+# Business ops block (shipping_origin + store_locations + support_schedule + social_links)
+# se inyecta en estados conversacionales donde el cliente típicamente pregunta
+# "¿de dónde despachan? / ¿tienen tienda física? / ¿horario? / ¿redes?". Excluye
+# estados transaccionales puros donde el bloque agrega ruido sin uso (PII/SHIPPING/
+# CARRIER/PAYMENT/HANDOFF). Decisión Q3 ADR-0024 (root-cause analysis wujbdgrhk —
+# robustez sobre footprint: ~3-5KB tokens extra es aceptable, cero improvisación
+# en preguntas comunes prima).
+_BUSINESS_OPS_STATES = frozenset({
+    AgenticState.GREETING,
+    AgenticState.EXPLORING,
+    AgenticState.CART_BUILDING,
+    AgenticState.POST_PAYMENT,
+})
+
+
 def build_prompt_for_state(
     *,
     state: AgenticState,
@@ -120,6 +136,15 @@ def build_prompt_for_state(
     payment_methods: Optional[dict] = None,
     server_greeting: Optional[str] = None,
     active_coupons: Optional[list[dict]] = None,
+    # Fase 0 finiquito 2026-06-23 — business_ops kwargs (audit-finiquito
+    # root-cause analysis wujbdgrhk). Sin estos, V3 per-state genera prompt
+    # sin SOBRE LA TIENDA y bot improvisa horarios/despacho/sedes.
+    shipping_origin: Optional[dict] = None,
+    store_locations: Optional[list[dict]] = None,
+    store_type: Optional[str] = None,
+    support_schedule: Optional[dict] = None,
+    social_links: Optional[dict] = None,
+    after_hours_message: Optional[str] = None,
 ) -> str:
     """Construye el system prompt específico para un estado.
 
@@ -128,10 +153,12 @@ def build_prompt_for_state(
       2. time_greeting_block (solo GREETING + EXPLORING + POST_PAYMENT)
       3. customer_section
       4. state-specific mini-prompt
-      5. catalog (si aplica al estado)
-      6. carriers (si aplica)
-      7. payment_methods (si aplica)
-      8. safety + style (universal)
+      5. business_ops_section (solo _BUSINESS_OPS_STATES — Fase 0 finiquito)
+      6. catalog (si aplica al estado)
+      7. carriers (si aplica)
+      8. payment_methods (si aplica)
+      9. coupons (si aplica)
+      10. safety + style (universal)
     """
     pitch = tenant_pitch or f"asesora de {tenant_name}"
     tone = tenant_tone or "cordial y profesional, en español Colombia"
@@ -156,6 +183,21 @@ def build_prompt_for_state(
     state_fn = _STATE_PROMPT_MAP.get(state)
     if state_fn:
         parts.append(state_fn(tenant_name))
+
+    # Business ops (operaciones del negocio) — solo estados conversacionales
+    # donde el cliente típicamente pregunta. Decisión Q3 ADR-0024.
+    if state in _BUSINESS_OPS_STATES:
+        ops_block = business_ops_section(
+            tenant_name=tenant_name,
+            shipping_origin=shipping_origin,
+            store_locations=store_locations,
+            store_type=store_type,
+            support_schedule=support_schedule,
+            social_links=social_links,
+            after_hours_message=after_hours_message,
+        )
+        if ops_block:
+            parts.append(ops_block)
 
     # Catálogo solo donde el cliente lo necesita (browsing/cart).
     if state not in _NO_CATALOG_STATES:

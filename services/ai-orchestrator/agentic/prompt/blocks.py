@@ -14,12 +14,16 @@ from __future__ import annotations
 from typing import Any, Optional
 
 # Reutilizamos los renderers del monolito (catalog, carriers, payment_methods,
-# contact, server_greeting) — son funciones puras testeadas en producción.
+# contact, server_greeting, business_ops) — son funciones puras testeadas en
+# producción. Fase 0 finiquito 2026-06-23: business_ops_block migrado a per-state
+# (audit-finiquito root cause analysis wujbdgrhk — V3 per-state es path primario,
+# antes business_ops solo vivía en V2 monolito).
 from agentic.system_prompt import (
     _render_catalog_block,
     _render_carriers_block,
     _render_payment_methods_block,
     _render_contact_block,
+    _render_business_ops_block,
     _co_time_of_day_greeting,
 )
 
@@ -156,3 +160,44 @@ CUPONES / PROMOCIONES (fuente de verdad — DB)
 
 {_render_coupons_block(active_coupons)}
 """
+
+
+def business_ops_section(
+    *,
+    tenant_name: str,
+    shipping_origin: Optional[dict] = None,
+    store_locations: Optional[list[dict]] = None,
+    store_type: Optional[str] = None,
+    support_schedule: Optional[dict] = None,
+    social_links: Optional[dict] = None,
+    after_hours_message: Optional[str] = None,
+) -> str:
+    """Sección OPERACIONES DEL NEGOCIO (Fase 0 finiquito 2026-06-23 — V3 per-state).
+
+    Cierra causa raíz P1 root-cause analysis wujbdgrhk: bot improvisaba
+    horarios/despacho/sedes/redes porque V3 per-state path (build_prompt_for_state)
+    NO recibía los kwargs business_ops — A2 commit 2026-06-22 los puso solo en
+    V2 monolito (dispatcher.py:645) pero V3 sobreescribe ese prompt en línea 1969.
+
+    Reutiliza `_render_business_ops_block` de V2 (single source of truth — NO
+    duplica lógica de formateo). Si todos los datos están vacíos, retorna
+    string vacío (no inyecta header sin contenido).
+
+    Para qué estados aplica: ver agentic/prompt/builder.py _BUSINESS_OPS_STATES
+    (decisión Q3: GREETING + EXPLORING + CART_BUILDING + POST_PAYMENT).
+    """
+    rendered = _render_business_ops_block(
+        tenant_name=tenant_name,
+        shipping_origin=shipping_origin,
+        store_locations=store_locations,
+        store_type=store_type,
+        support_schedule=support_schedule,
+        social_links=social_links,
+        after_hours_message=after_hours_message,
+    )
+    if not rendered.strip():
+        return ""
+    # Asegurar que el bloque viene precedido por separador visual consistente
+    # con otros sections per-state (el render de V2 ya incluye `\nSOBRE LA
+    # TIENDA...` pero el rest of per-state usa `═══...`). Normalizamos:
+    return rendered if rendered.startswith("\n") else "\n" + rendered
