@@ -172,12 +172,23 @@ def business_ops_section(
     social_links: Optional[dict] = None,
     after_hours_message: Optional[str] = None,
 ) -> str:
-    """Sección OPERACIONES DEL NEGOCIO (Fase 0 finiquito 2026-06-23 — V3 per-state).
+    """Sección OPERACIONES DEL NEGOCIO (Fase 0/3 finiquito 2026-06-23 — V3 per-state).
 
     Cierra causa raíz P1 root-cause analysis wujbdgrhk: bot improvisaba
     horarios/despacho/sedes/redes porque V3 per-state path (build_prompt_for_state)
     NO recibía los kwargs business_ops — A2 commit 2026-06-22 los puso solo en
     V2 monolito (dispatcher.py:645) pero V3 sobreescribe ese prompt en línea 1969.
+
+    Fase 3 finiquito 2026-06-23 — ataque P4 (LLM improvisa con dato presente,
+    ej. horario "9-6 L-V" vs DB "Lun-Sáb 08:00-18:00"):
+
+    1. XML tags `<business_ops>...</business_ops>` para clear attention closure.
+       Anthropic prompting guide + Google Gemini 3 ("strictly grounded") + OpenAI
+       structured prompts recomiendan XML para datos críticos que el modelo NO
+       debe parafrasear/improvisar — el delimitador anchor reduce sesgo training-data
+       (e.g. "9-6 horario común Colombia" attractor).
+    2. Instrucción explícita ANTI-IMPROVISATION dentro del wrapper: "USA EXACTAMENTE
+       estos valores literales — NUNCA aproximes, NUNCA inventes alternativas".
 
     Reutiliza `_render_business_ops_block` de V2 (single source of truth — NO
     duplica lógica de formateo). Si todos los datos están vacíos, retorna
@@ -197,7 +208,17 @@ def business_ops_section(
     )
     if not rendered.strip():
         return ""
-    # Asegurar que el bloque viene precedido por separador visual consistente
-    # con otros sections per-state (el render de V2 ya incluye `\nSOBRE LA
-    # TIENDA...` pero el rest of per-state usa `═══...`). Normalizamos:
-    return rendered if rendered.startswith("\n") else "\n" + rendered
+
+    # Fase 3 — XML wrapper + anti-improvisation hard rule.
+    # Posición: builder.py inserta este bloque ANTES del mini-prompt del
+    # estado (post identity + customer) para que sea anchor temprano del
+    # contexto factual del negocio antes de la lógica de estado.
+    return (
+        "\n<business_ops priority=\"factual_truth\">\n"
+        "REGLA CRÍTICA — USA EXACTAMENTE los valores literales de este bloque.\n"
+        "NUNCA aproximes, parafrasees ni inventes alternativas (ej. si dice\n"
+        "'Lun a Sáb de 08:00 a 18:00', NO digas '9-6 L-V'). Si el cliente\n"
+        "pregunta horario/despacho/sedes/redes, cita textualmente abajo:\n"
+        f"{rendered.lstrip()}\n"
+        "</business_ops>\n"
+    )

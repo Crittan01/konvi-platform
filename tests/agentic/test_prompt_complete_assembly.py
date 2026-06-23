@@ -183,8 +183,10 @@ class BusinessOpsCornerCasesTests(unittest.TestCase):
         )
         self.assertIn("SOBRE LA TIENDA", p)
         self.assertIn("Bogotá D.C.", p)
-        # No schedule rendered → no "08:00"
-        self.assertNotIn("08:00", p)
+        # No schedule rendered → no "Horario de atención" line
+        # (NB: el XML wrapper Fase 3 menciona '08:00' como ejemplo en la regla
+        # anti-improvisation, así que validamos el field específico, no el value).
+        self.assertNotIn("Horario de atención", p)
 
     def test_contact_canonical_address_appears(self):
         """Smoke — el contact_record canonical (street) llega al prompt."""
@@ -207,6 +209,43 @@ class BusinessOpsStatesAlignmentTests(unittest.TestCase):
             AgenticState.POST_PAYMENT,
         }
         self.assertEqual(_BUSINESS_OPS_STATES, expected)
+
+
+class Phase3AntiImprovisationTests(unittest.TestCase):
+    """Fase 3 finiquito 2026-06-23 — ataque P4: XML tags + reorden anti-improvisation."""
+
+    def test_business_ops_wrapped_in_xml_tags(self):
+        """Wrapper <business_ops> presente para anchor attention Gemini/Claude."""
+        p = _build(AgenticState.EXPLORING)
+        self.assertIn('<business_ops priority="factual_truth">', p)
+        self.assertIn("</business_ops>", p)
+
+    def test_anti_improvisation_rule_in_wrapper(self):
+        """Wrapper incluye regla explícita anti-paráfrasis del horario."""
+        p = _build(AgenticState.EXPLORING)
+        self.assertIn("REGLA CRÍTICA", p)
+        self.assertIn("USA EXACTAMENTE los valores literales", p)
+        self.assertIn("NUNCA aproximes", p)
+        # Ejemplo concreto del horario en la regla (sesgo training-data conocido)
+        self.assertIn("9-6 L-V", p)
+
+    def test_business_ops_before_state_mini_prompt(self):
+        """Reorden Fase 3 — business_ops aparece ANTES del ESTADO ACTUAL del mini-prompt
+        (anchor temprano de contexto factual antes de lógica de estado)."""
+        p = _build(AgenticState.EXPLORING)
+        pos_business = p.find("<business_ops")
+        pos_state = p.find("ESTADO ACTUAL")
+        self.assertGreater(pos_business, 0, "business_ops missing")
+        self.assertGreater(pos_state, 0, "state mini-prompt missing")
+        self.assertLess(pos_business, pos_state,
+                        "business_ops debe aparecer ANTES de ESTADO ACTUAL (anchor temprano)")
+
+    def test_business_ops_after_customer_section(self):
+        """business_ops viene DESPUÉS de CONTEXTO_CLIENTE (orden: identity → time → customer → business_ops → state)."""
+        p = _build(AgenticState.EXPLORING)
+        pos_customer = p.find("CONTEXTO_CLIENTE")
+        pos_business = p.find("<business_ops")
+        self.assertLess(pos_customer, pos_business)
 
 
 if __name__ == "__main__":
