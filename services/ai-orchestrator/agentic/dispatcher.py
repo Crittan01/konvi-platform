@@ -520,12 +520,22 @@ async def _run_agentic_full(
     tenant_pitch = None
     tenant_tone = None
     tenant_philosophy: Optional[dict] = None
+    # A2 finiquito 2026-06-23 — business_ops block source.
+    tenant_shipping_origin: Optional[dict] = None
+    tenant_store_locations: Optional[list[dict]] = None
+    tenant_store_type: Optional[str] = None
+    tenant_support_schedule: Optional[dict] = None
+    tenant_social_links: Optional[dict] = None
+    tenant_after_hours_message: Optional[str] = None
     try:
         ten_row = (
             supabase.table("tenants")
             .select(
                 "name, business_pitch, tono_comunicacion, "
-                "mision, vision, valores",
+                "mision, vision, valores, "
+                # A2 finiquito 2026-06-23 — business_ops block.
+                "shipping_origin, store_locations, store_type, "
+                "support_schedule, social_links, after_hours_message",
             )
             .eq("id", tenant_id).single().execute()
         )
@@ -540,6 +550,13 @@ async def _run_agentic_full(
                 "vision": td.get("vision"),
                 "valores": td.get("valores"),
             }
+        # A2 finiquito — business_ops fields.
+        tenant_shipping_origin = td.get("shipping_origin") or None
+        tenant_store_locations = td.get("store_locations") or None
+        tenant_store_type = td.get("store_type") or None
+        tenant_support_schedule = td.get("support_schedule") or None
+        tenant_social_links = td.get("social_links") or None
+        tenant_after_hours_message = td.get("after_hours_message") or None
     except Exception:
         pass
 
@@ -637,6 +654,13 @@ async def _run_agentic_full(
         tenant_philosophy=tenant_philosophy,
         agent_role_description=_agent.get("role_description"),
         active_coupons=active_coupons,
+        # A2 finiquito 2026-06-23 — business_ops block (cierra Bug #1 audit §1).
+        shipping_origin=tenant_shipping_origin,
+        store_locations=tenant_store_locations,
+        store_type=tenant_store_type,
+        support_schedule=tenant_support_schedule,
+        social_links=tenant_social_links,
+        after_hours_message=tenant_after_hours_message,
     )
 
     # ── Pre-LLM resolver determinístico: variant selection continuation ──

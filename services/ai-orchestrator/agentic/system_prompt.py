@@ -352,6 +352,104 @@ def _render_philosophy_block(philosophy: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
+def _render_business_ops_block(
+    tenant_name: str = "el negocio",
+    shipping_origin: Optional[dict] = None,
+    store_locations: Optional[list[dict]] = None,
+    store_type: Optional[str] = None,
+    support_schedule: Optional[dict] = None,
+    social_links: Optional[dict] = None,
+    after_hours_message: Optional[str] = None,
+) -> str:
+    """Renderiza OPERACIONES DEL NEGOCIO (A2 finiquito 2026-06-23).
+
+    Cierra Bug #1 audit-finiquito-2026-05-31 §1 Inbox: bot debe poder
+    responder "¿desde dónde despachan?" / "¿tienda física?" / "¿horario?"
+    / "¿redes?" sin escalar a humano.
+
+    Reutiliza `orchestrator._build_store_info_section` (lazy import) como
+    fuente única de formateo — evita drift con prompt monolito V1
+    (adversarial #1 + #19). Si import falla (tests unit sin orchestrator
+    cargado), fallback a renderizado inline mínimo.
+
+    Devolución/cut-off NO viven aquí — vienen de knowledge_base vía kb_query.
+    """
+    if not any([shipping_origin, store_locations, store_type, support_schedule, social_links]):
+        return ""
+
+    # Lazy import para evitar circular import (adversarial #10).
+    # `orchestrator` importa de `agentic.*`; `system_prompt` está bajo
+    # `agentic/` — top-level import rompería tests unit sin Supabase mock.
+    try:
+        from orchestrator import _build_store_info_section
+        return _build_store_info_section(
+            tenant_name=tenant_name,
+            store_type=store_type or "",
+            shipping_origin=shipping_origin or {},
+            social_links=social_links or {},
+            store_locations=store_locations or [],
+            support_schedule=support_schedule,
+        ) + ("\n" if after_hours_message else "")
+    except Exception:
+        # Fallback inline mínimo (tests sin orchestrator). NO duplica
+        # lógica de formatos sofisticados — solo asegura datos basicos
+        # presentes en el prompt para que el LLM tenga contexto.
+        lines: list[str] = [
+            f"\nSOBRE LA TIENDA — INFORMACIÓN COMERCIAL DE {tenant_name.upper()}:"
+        ]
+        if shipping_origin and isinstance(shipping_origin, dict):
+            city = shipping_origin.get("city") or ""
+            state = shipping_origin.get("state") or ""
+            if city:
+                loc = city if not state or state == city else f"{city}, {state}"
+                lines.append(f"- Origen de despacho (bodega): {loc}")
+        if store_type:
+            type_map = {
+                "fisica": "atención presencial en sedes (consulta horario).",
+                "virtual": "solo tienda virtual (sin sedes físicas al público).",
+                "fisica_virtual": "atención presencial en sedes y venta online.",
+            }
+            lines.append(f"- Modo de operación: {type_map.get(store_type, store_type)}")
+        if store_locations and isinstance(store_locations, list):
+            sedes = [s for s in store_locations if s.get("city") or s.get("street")]
+            # Adversarial #5 — fallback si ningún is_primary marcado.
+            primary = [s for s in sedes if s.get("is_primary")]
+            others = [s for s in sedes if not s.get("is_primary")]
+            ordered = (primary + others) if primary else sedes
+            for sede in ordered[:5]:
+                name = sede.get("name") or "Sede"
+                if sede.get("is_primary"):
+                    name = f"{name} (principal)"
+                city = sede.get("city") or ""
+                street = sede.get("street") or ""
+                line = f"  · {name}: {street}, {city}" if street else f"  · {name}: {city}"
+                lines.append(line)
+        if support_schedule and isinstance(support_schedule, dict):
+            days = support_schedule.get("days") or []
+            open_h = support_schedule.get("open") or ""
+            close_h = support_schedule.get("close") or ""
+            if days and open_h and close_h:
+                day_labels = {1: "Lun", 2: "Mar", 3: "Mié", 4: "Jue",
+                              5: "Vie", 6: "Sáb", 7: "Dom"}
+                sd = sorted({int(d) for d in days if 1 <= int(d) <= 7})
+                if sd:
+                    is_contig = all(sd[i] - sd[i-1] == 1 for i in range(1, len(sd)))
+                    if is_contig and len(sd) >= 2:
+                        labels = f"{day_labels[sd[0]]} a {day_labels[sd[-1]]}"
+                    else:
+                        labels = ", ".join(day_labels[d] for d in sd)
+                    lines.append(f"- Horario de atención: {labels} de {open_h} a {close_h}")
+        # Adversarial #18 — iterar TODAS las keys no-vacías de social_links.
+        if social_links and isinstance(social_links, dict):
+            active = {k: v for k, v in social_links.items() if v}
+            if active:
+                parts = ", ".join(f"{k.capitalize()}: {v}" for k, v in active.items())
+                lines.append(f"- Redes y canales digitales: {parts}")
+        if len(lines) == 1:
+            return ""
+        return "\n".join(lines)
+
+
 def _render_contact_block(
     contact_record: Optional[dict],
     tenant_name: str = "el negocio",
@@ -379,15 +477,21 @@ def _render_contact_block(
     has_address = bool(contact_record.get("address"))
     is_known = consent and name and has_email and has_doc and has_address
     if is_known:
-        # Bug runtime KAIU 2026-05-24 conv 022f87d3 turn 5: bot puso
-        # "[Dirección de Cristian]" placeholder en el resumen porque el
-        # contact_block solo decía "ver contact.address" sin valores
-        # concretos. Fix: inyectar address.line1 + city + state literales
-        # para que el LLM pueda referenciar directamente.
+        # A2 finiquito 2026-06-23 — schema canónico `street` (rev. 110).
+        # Bug original KAIU 2026-05-24 conv 022f87d3 turn 5: bot puso
+        # "[Dirección de Cristian]" placeholder porque el código leía
+        # `address.line1` que NUNCA se persistía (audit live 5/5 = street).
+        # Fix: leer `street` (canónico) con fallback defensivo a `line1`
+        # por compatibilidad con cualquier registro legacy residual
+        # durante la ventana de deploy (regla #4 ejecución).
         addr = contact_record.get("address") or {}
         addr_parts = []
-        if addr.get("line1"):
-            addr_parts.append(str(addr["line1"]))
+        # Canónico `street`; legacy fallback `line1` (defensivo, 30 días).
+        street_value = addr.get("street") or addr.get("line1")
+        if street_value:
+            addr_parts.append(str(street_value))
+        if addr.get("neighborhood"):
+            addr_parts.append(str(addr["neighborhood"]))
         if addr.get("city"):
             addr_parts.append(str(addr["city"]))
         if addr.get("state"):
@@ -460,6 +564,13 @@ def build_system_prompt(
     tenant_philosophy: Optional[dict] = None,
     agent_role_description: Optional[str] = None,
     active_coupons: Optional[list[dict]] = None,
+    # A2 finiquito 2026-06-23 — business_ops block (cierra Bug #1 audit §1).
+    shipping_origin: Optional[dict] = None,
+    store_locations: Optional[list[dict]] = None,
+    store_type: Optional[str] = None,
+    support_schedule: Optional[dict] = None,
+    social_links: Optional[dict] = None,
+    after_hours_message: Optional[str] = None,
 ) -> str:
     """Construye el system prompt agentic.
 
@@ -494,6 +605,16 @@ def build_system_prompt(
     philosophy_block = _render_philosophy_block(tenant_philosophy)
     agent_persona_block = _render_agent_persona_block(agent_role_description)
     coupons_block = _render_coupons_block(active_coupons)
+    # A2 finiquito 2026-06-23 — bloque operaciones del negocio.
+    business_ops_block = _render_business_ops_block(
+        tenant_name=tenant_name,
+        shipping_origin=shipping_origin,
+        store_locations=store_locations,
+        store_type=store_type,
+        support_schedule=support_schedule,
+        social_links=social_links,
+        after_hours_message=after_hours_message,
+    )
     if server_greeting is None:
         server_greeting, _ = _co_time_of_day_greeting()
 
@@ -514,6 +635,8 @@ mensaje.
 {philosophy_block}
 
 {agent_persona_block}
+
+{business_ops_block}
 
 ═══════════════════════════════════════════════════════════════════
 REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)

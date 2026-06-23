@@ -27,6 +27,10 @@ def _build_address_dict(args) -> dict:
     El LLM NUNCA infiere DANE (rule "el LLM no decide verdad transaccional"),
     el resolver es la única fuente. Si el catálogo no encuentra la ciudad,
     omite el campo en lugar de persistir "" (caller fallback aún funciona).
+
+    A2 finiquito 2026-06-23: incluir `state`, `country`, `complex_name`,
+    `company_name` cuando vienen presentes en args. `state` real se pasa
+    al resolver DIVIPOLA (antes era siempre None — bug audit §1 #8).
     """
     address = {
         "street": args.street,
@@ -43,15 +47,32 @@ def _build_address_dict(args) -> dict:
         address["neighborhood"] = args.neighborhood
     if getattr(args, "reference", None):
         address["reference"] = args.reference
+    # A2 finiquito: campos opcionales canónicos rev. 110.
+    state_value = getattr(args, "state", None)
+    if state_value:
+        address["state"] = state_value
+    country_value = getattr(args, "country", None)
+    if country_value:
+        address["country"] = country_value
+    if getattr(args, "complex_name", None):
+        address["complex_name"] = args.complex_name
+    if getattr(args, "company_name", None):
+        address["company_name"] = args.company_name
     # Rev. 109: persistir dane_code resuelto al save-time para que
     # wompi_webhook + integrations.py no dependan del fallback runtime.
-    try:
-        from lib.dane_resolver import resolve_dane_from_city
-        dane = resolve_dane_from_city(args.city, getattr(args, "state", None))
-        if dane:
-            address["dane_code"] = dane
-    except Exception:
-        pass
+    # A2 finiquito: si el LLM ya pasó dane_code (raro, fuente confiable
+    # externa), lo respetamos; si no, resolver vía DIVIPOLA.
+    dane_value = getattr(args, "dane_code", None)
+    if dane_value:
+        address["dane_code"] = str(dane_value)
+    else:
+        try:
+            from lib.dane_resolver import resolve_dane_from_city
+            dane = resolve_dane_from_city(args.city, state_value)
+            if dane:
+                address["dane_code"] = dane
+        except Exception:
+            pass
     return address
 
 
@@ -572,6 +593,17 @@ class SaveDocumentTool:
 
 
 class SaveAddressArgs(BaseModel):
+    """Schema canónico contacts.address rev. 110 (A2 finiquito 2026-06-23).
+
+    Single-source-of-truth: ESTE modelo + migration
+    `supabase/migrations/20260429000000_contacts_document_and_address.sql`.
+
+    Política Pydantic: campos NUEVOS (state, country, complex_name,
+    company_name, dane_code) son OPCIONALES para NO romper el contrato
+    tool de Gemini (cambiar 3 a 6 required forzaría loops de re-prompt
+    al LLM si pide datos en 1 turn). state/dane_code se resuelven
+    server-side via DIVIPOLA (`lib.dane_resolver`) cuando no llegan.
+    """
     street: str = Field(
         ..., min_length=3, max_length=200,
         description="Calle y número (ej. 'Calle 36A # 6-87').",
@@ -602,6 +634,29 @@ class SaveAddressArgs(BaseModel):
     reference: Optional[str] = Field(
         default=None, max_length=200,
         description="Punto de referencia opcional.",
+    )
+    # A2 finiquito 2026-06-23 — campos opcionales canónicos.
+    state: Optional[str] = Field(
+        default=None, max_length=80,
+        description="Departamento Colombia (ej. 'Cundinamarca', 'Antioquia'). "
+                    "Opcional — si no llega, se resuelve vía city → DIVIPOLA.",
+    )
+    country: Optional[str] = Field(
+        default=None, max_length=3,
+        description="Código país ISO (default 'CO'). Opcional.",
+    )
+    complex_name: Optional[str] = Field(
+        default=None, max_length=120,
+        description="Nombre del conjunto/complejo (opcional, solo conjunto/edificio).",
+    )
+    company_name: Optional[str] = Field(
+        default=None, max_length=120,
+        description="Nombre de empresa (opcional, solo si building_type=oficina).",
+    )
+    dane_code: Optional[str] = Field(
+        default=None, max_length=8,
+        description="Código DIVIPOLA 5-8 dígitos. Opcional — server-side "
+                    "resuelve desde city si no llega.",
     )
 
 
@@ -765,6 +820,27 @@ class SaveContactFieldArgs(BaseModel):
         default=None,
         description="Para field=address: punto de referencia (opcional).",
     )
+    # A2 finiquito 2026-06-23 — opcionales canónicos rev. 110.
+    state: Optional[str] = Field(
+        default=None,
+        description="Para field=address: departamento (opcional).",
+    )
+    country: Optional[str] = Field(
+        default=None,
+        description="Para field=address: código país ISO (default CO).",
+    )
+    complex_name: Optional[str] = Field(
+        default=None,
+        description="Para field=address: nombre del conjunto/complejo.",
+    )
+    company_name: Optional[str] = Field(
+        default=None,
+        description="Para field=address: nombre empresa (solo si building_type=oficina).",
+    )
+    dane_code: Optional[str] = Field(
+        default=None,
+        description="Para field=address: código DIVIPOLA opcional (server-side resuelve si falta).",
+    )
 
 
 class SaveContactFieldTool:
@@ -848,6 +924,11 @@ class SaveContactFieldTool:
                     apartment=args.apartment, tower=args.tower,
                     floor=args.floor, neighborhood=args.neighborhood,
                     reference=args.reference,
+                    # A2 finiquito 2026-06-23 — propagar opcionales canónicos.
+                    state=args.state, country=args.country,
+                    complex_name=args.complex_name,
+                    company_name=args.company_name,
+                    dane_code=args.dane_code,
                 )
                 address = _build_address_dict(validated)
                 return await _write_contact_update(ctx, {"address": address}, "address")
