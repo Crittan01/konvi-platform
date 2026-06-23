@@ -1,3 +1,13 @@
+"""UAT helper script — webhook end-to-end persistence smoke test.
+
+[LEGACY per ADR-0023 Model B — Rev. 110 2026-06-22]
+Este script usa META_APP_SECRET del .env (modelo global pre-Model B).
+Funcionalmente sólo válido contra Konvi Dev tenant (self-tenant). Para
+validación per-tenant moderna ver tests/test_meta_hmac_model_b.py
+y scripts/uat/e2e_chat.py.
+
+Mantenido para UAT manual de Konvi Dev únicamente.
+"""
 import sys
 import os
 import hmac

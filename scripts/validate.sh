@@ -253,6 +253,9 @@ if $FULL; then
   fi
 
   _hdr "Variables críticas en .env local"
+  # META_APP_SECRET y META_VERIFY_TOKEN: DEPRECATED per ADR-0023 Model B (Rev. 110).
+  # Solo usadas one-shot por scripts/admin/seed_konvi_dev_app_secret_vault.py.
+  # Connector runtime lee desde tenant_integrations + Vault per-tenant.
   if [ -f ".env" ]; then
     env_missing=()
     for var in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SUPABASE_JWT_SECRET \

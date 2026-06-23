@@ -1,3 +1,13 @@
+"""UAT helper script — webhook HMAC manual smoke test.
+
+[LEGACY per ADR-0023 Model B — Rev. 110 2026-06-22]
+Este script usa META_APP_SECRET del .env (modelo global pre-Model B).
+Funcionalmente sólo válido contra Konvi Dev tenant (self-tenant) cuyo
+app_secret coincide históricamente con la env var. Para validar HMAC
+per-tenant moderno usar tests/test_meta_hmac_model_b.py.
+
+Mantenido para UAT manual de Konvi Dev únicamente.
+"""
 import sys
 import os
 import hmac
