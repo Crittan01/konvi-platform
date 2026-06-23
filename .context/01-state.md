@@ -1,7 +1,62 @@
 # Current Scope — Estado Real de Implementación
 
-**Última actualización**: 2026-05-27 (rev. 109 · Día 1 — Agentic State Machine skeleton)
-**Branch activo**: `phase-2-agentic-rewrite` (refactor 10 días en curso).
+**Última actualización**: 2026-06-22 (rev. 110 · Model B Direct Provider per-tenant cierre dev)
+**Branch activo**: `develop` (post-A0 + Model B refactor).
+
+---
+
+## Rev. 110 (2026-06-22 — CIERRE DEV) — Meta WhatsApp Model B Direct Provider per-tenant (ADR-0023)
+
+**Disparador**: post-A0 founder identificó arquitectónicamente que Konvi NUNCA será Partner Meta. Click "Integrate with API" (no "Become a Partner") = cada tenant es Direct Provider con SU PROPIA Meta App, igual pattern Wompi/Aveonline/Telegram/MeLi. WhatsApp era el outlier con global `META_APP_SECRET` env-var.
+
+**Auditoría exhaustiva 9-agent workflow `wyr6c8f2i`** (7 paralelos + adversarial + plan synthesis):
+- Hallazgos sorpresa: KAIU webhook ya apuntaba a `kaiu-api.onrender.com` DEAD; `saveWhatsApp` server action sobrescribía credentials; `vault_helper.py` ausente del connector deploy unit; HMAC validation ocurría antes del path param tenant_id.
+- ADR-0023 sellado con 10 decisiones bloqueantes Q1-Q10.
+
+**Refactor completado en sesión 2026-06-22**:
+
+| Phase | Cambios | Status |
+|---|---|---|
+| 1 | `supabase/migrations/20260622_whatsapp_model_b_backfill_konvi_dev.sql` + `scripts/admin/seed_konvi_dev_app_secret_vault.py`. DB Konvi Dev backfilled con verify_token + integration_role/type + webhook_url_path_segment. Vault seed Konvi App secret → uuid `318d3e7b-f073-43ef-8b3a-17959412bb11` | ✅ |
+| 2 | `services/connector-whatsapp/lib/vault_helper.py` copiado de `services/api/vault_helper.py` | ✅ |
+| 3 | `services/connector-whatsapp/dependencies/meta.py` MAJOR REWRITE (multi-secret per-tenant + cache 300s + single-flight `threading.Event` + métricas + cross-tenant invariant defense) | ✅ |
+| 3 | `services/connector-whatsapp/routers/webhook.py` MAJOR REWRITE (path `/webhook/{tenant_id}` + `/health/metrics` endpoint público) | ✅ |
+| 4 | `tests/test_meta_hmac_model_b.py` 10 casos: app_secret resolve OK/unknown, HMAC valid, wrong secret 403, missing sig 403, unknown tenant 403, cache hit avoids vault, cross-tenant invariant 403, verify_token lookup, 2 tenants paralelo. **10/10 PASS en 0.25s** | ✅ |
+| 5 | `scripts/uat/e2e_chat.py` ahora resuelve app_secret desde Vault per-tenant y POSTea a `/webhook/{tenant_id}` | ✅ |
+| 6 | `apps/web/.../integrations/page.tsx:297-307` `saveWhatsApp` merge no-destructivo | ✅ |
+| 7 | Founder Meta actions (regenerar tokens + actualizar webhooks) | ⏳ pending founder |
+| 8 | ADR-0023 + `.context/01-state.md` rev. 110 + CLAUDE.md | ✅ |
+
+**Smoke local verificado**:
+- POST `/webhook/{KONVI_DEV_TENANT_ID}` HMAC firmado con Vault secret → 200, `hmac_ok=1`, `vault_hits=1`
+- POST HMAC inválido → 403
+- GET handshake verify_token correcto → echo challenge
+- GET verify_token incorrecto → 403
+
+**Pendiente founder** (~5h interactivo):
+1. Regenerar System User token Konvi App + actualizar webhook URL Meta → `<ngrok>/api/v1/whatsapp/webhook/6115474f-...`
+2. Regenerar System User token KAIU Chat App + cambiar webhook URL Meta de `kaiu-api.onrender.com` DEAD → `<ngrok>/api/v1/whatsapp/webhook/0fb0777e-...`
+3. Smoke E2E real ambos tenants
+
+**Compatibility breaks**: `META_APP_SECRET` env-var ya NO se lee en `services/connector-whatsapp/` (grep verifica 0 hits). Tests legacy `test_meta_hmac_per_tenant.py` FAIL (modelo global obsoleto) — reemplazados por `test_meta_hmac_model_b.py`. UI `saveWhatsApp` form NO refactorizado a Aveonline-style (diferido a finiquito A8 per Q4 ADR-0023).
+
+**Suite tests**: `tests/test_meta_hmac_model_b.py` 10/10 PASS · `tests/test_meta_hmac_per_tenant.py` 10 fails esperados (modelo global obsoleto, pendiente migrar ParserDispatcherTests 12 que sí siguen válidos + `git rm` del legacy).
+
+**Outstanding (dev cierre)**:
+1. Migrar `ParserDispatcherTests` (12 tests OK) de `tests/test_meta_hmac_per_tenant.py` → `tests/test_meta_hmac_model_b.py` y `git rm` del legacy (desbloquea `validate.sh`).
+2. HYG-1: `UPDATE tenants SET meta_waba_id='2774038286296634' WHERE id='6115474f-...'` Konvi Dev (parche quirúrgico; refactor a `tenant_integrations.credentials.waba_id` queda follow-up A6 finiquito).
+3. Commit refactor en grupos lógicos (founder autoriza per `feedback_supabase_migrations`).
+
+**Outstanding (founder, bloqueante producción)**: Phase 7 Meta dashboards (ver bloque "Pendiente founder" arriba).
+
+**Archivos modificados / nuevos**:
+- DB: `supabase/migrations/20260622_whatsapp_model_b_backfill_konvi_dev.sql` (nuevo)
+- Admin: `scripts/admin/seed_konvi_dev_app_secret_vault.py` (nuevo)
+- Connector: `services/connector-whatsapp/lib/vault_helper.py` (nuevo, copy known-debt), `services/connector-whatsapp/dependencies/meta.py` (rewrite), `services/connector-whatsapp/routers/webhook.py` (rewrite)
+- Tests: `tests/test_meta_hmac_model_b.py` (nuevo)
+- UAT: `scripts/uat/e2e_chat.py` (per-tenant routing)
+- UI: `apps/web/app/dashboard/(settings-group)/integrations/page.tsx` (merge no-destructivo)
+- Docs: `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md` (nuevo), `docs/research/whatsapp-meta-dossier-2026-05-05.md`, `docs/research/meta-app-architecture-2026-05-08.md`, `docs/research/audit-finiquito-2026-05-31.md`, `.context/01-state.md`, `CLAUDE.md`
 
 ---
 

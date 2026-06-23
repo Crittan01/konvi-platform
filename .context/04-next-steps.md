@@ -6,6 +6,22 @@
 
 ---
 
+## 🚨 CIERRE REV. 110 — 2026-06-22 — ADR-0023 Model B Direct Provider per-tenant
+
+**Cierre dev completo** Phases 1-6+8 refactor WhatsApp connector a modelo `Direct Provider per-tenant`
+(Konvi NUNCA Partner Meta). Cada tenant trae su Meta App + Vault per-tenant. Trace: ADR-0023 + `.context/01-state.md` rev.110.
+
+**⏳ Phase 7 PENDING founder (~5h interactivo, bloquea producción real)**:
+1. Regenerar System User tokens never-expires en Konvi App (Konvi BM) + KAIU Chat App (KAIU BM).
+2. Actualizar webhook URLs en ambas Meta Apps a `/api/v1/whatsapp/webhook/{tenant_id}` per-tenant.
+3. Smoke E2E real: WhatsApp → bot responde ambos tenants (Konvi Dev + KAIU).
+
+Sin Phase 7, inbound WhatsApp ambos tenants estará silenciosamente roto en Render prod cuando se despliegue.
+
+Detalle playbook: ver ADR-0023 §Plan implementación + `.context/01-state.md` rev.110 Outstanding.
+
+---
+
 ## 🗺️ Roadmap pendientes consolidado (2026-05-30)
 
 **Documento canónico**: [`docs/refactor/0006-roadmap-pending-sessions.md`](../docs/refactor/0006-roadmap-pending-sessions.md).

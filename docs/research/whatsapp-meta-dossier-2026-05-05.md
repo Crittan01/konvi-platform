@@ -487,3 +487,138 @@ Auditoría contra `services/connector-whatsapp/` + `services/ai-orchestrator/wha
 - [Flowcall — Country rates 2026](https://www.flowcall.co/blog/whatsapp-business-api-pricing-2026)
 - [Wati — API rate limits](https://www.wati.io/en/blog/whatsapp-business-api/whatsapp-api-rate-limits/)
 - [Woztell — 2026 Updates (Pacing, 100K limits, Usernames)](https://woztell.com/whatsapp-api-2026-updates-pacing-limits-usernames/)
+
+---
+
+# Refresh 2026-06-01 — Verificación contra docs Meta vigentes
+
+
+**Disparador**: founder solicitó paso a paso para crear Meta App bajo Konvi BM. Antes de redactarlo, se verificó dossier 2026-05-05 + `meta-app-architecture-2026-05-08.md` contra docs Meta Developers vigentes (developers.facebook.com + Meta Business Help Center + Tech Provider docs). Hallazgos:
+
+
+## R.1 Estado general del dossier al 2026-06-01
+
+**Veredicto**: dossier **vigente al 90%+**. Ninguna sección requiere rewrite estructural. Todas las cifras (pricing PMP, tier limits Q1-Q2 2026, BSUID H2 2026, v22.0 cutoff Sep-2025) siguen alineadas con doc vigente.
+
+Los items P0 siguen pendientes en código (no hubo trabajo en STOP detector ni bump v21→v22 entre 2026-05-05 y 2026-06-01):
+- 🔴 **P0-1 STOP detector**: 0 progreso
+- 🔴 **P0-2 Graph API v22.0**: 0 progreso (`META_API_VERSION = "v21.0"` aún en código)
+
+
+## R.2 Clarificaciones añadidas por verificación 2026-06-01
+
+### R.2.1 Path UI canónico para transferir App (App-side, NO BP-side)
+
+El dossier no detalla este path. La fuente oficial vigente ([developers.facebook.com/docs/development/create-an-app/transfer-an-app](https://developers.facebook.com/docs/development/create-an-app/transfer-an-app/)) documenta el flujo **desde el lado de la App**, no desde el Business Portfolio:
+
+```
+developers.facebook.com → My Apps → seleccionar App (ID 819229210624423)
+  → App Settings → Basic (Configuración de la app → Básica)
+  → sección "Business Portfolio Ownership" (Propiedad del portfolio comercial)
+  → click "+ Business Portfolio" / "+ portfolio comercial"
+  → seleccionar Konvi BP del popup
+  → submit (envía asset claim request al inbox "Requests/Solicitudes" del BP destino)
+  → desde Konvi BP, admin acepta el request
+```
+
+**Quién puede iniciar**: usuarios con rol **admin** sobre la App.
+
+**Acción irreversible** (cita literal Meta): *"esta acción no se puede deshacer"*. Una vez aceptado, la App es organization-owned y la cuenta personal del founder pierde rol owner.
+
+### R.2.2 Comportamiento de App Secret + tokens post-transferencia (NO documentado por Meta)
+
+La documentación oficial vigente **NO aborda explícitamente** qué pasa con `META_APP_SECRET`, `App ID`, ni `System User access tokens` post-transferencia. Plausibilidad alta de que se preserven (App ID es la identidad inmutable), pero **sin confirmación documental Meta**.
+
+**Mitigación operativa obligatoria**:
+1. **Smoke test E2E inmediato post-transferencia**: founder envía mensaje real a WhatsApp KAIU; bot debe responder + logs `services/connector-whatsapp` sin errores HMAC.
+2. **Plan contingencia listo**: si smoke falla, rotación de `META_APP_SECRET` + `META_VERIFY_TOKEN` + per-tenant `access_token` en Vault + Render env. ~1h dev work, idempotente.
+
+### R.2.3 Tech Provider Program — armonización con `meta-app-architecture-2026-05-08.md`
+
+Detectada contradicción entre los dos docs canónicos del repo:
+
+| Doc | Postura |
+|---|---|
+| Este dossier §1 línea 17 | "Tech Provider — **figura aplicable a Konvi Platform** — somos plataforma B2B SaaS multi-tenant" |
+| `meta-app-architecture-2026-05-08.md` §3.1 | "Tech Provider Program — **No lo necesitamos** — onboarding manual funciona" |
+
+**Veredicto verificación 2026-06-01**: ambos son ciertos en planos distintos. Armonización oficial:
+
+| Escenario | Modelo aplicable | Tech Provider Program requerido |
+|---|---|---|
+| 1-5 tenants, onboarding manual founder/ops | "Direct Provider de facto" (System User token per-tenant) | ❌ NO |
+| 5+ tenants, onboarding self-service UI-driven | Tech Provider + Embedded Signup | ✅ SÍ |
+| Solution Partner (con línea crédito Meta + facturación directa) | Solution Partner Program | Aplicación separada |
+
+**Confirmado por docs vigentes**:
+- Embedded Signup específicamente requiere ser **Tech Provider o Solution Partner**. Fuente: [Onboarding business customers as a Tech Provider](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider/).
+- Advanced access a `whatsapp_business_management` es **required to access clients' WABAs** — sin esto, API calls retornan **error code 200** (no error 200 OK; código de error 200 dentro de Meta's error system). Aplica a ambos modelos (Direct + Tech Provider).
+
+**Recomendación post-verificación**:
+1. **Hoy y próximos 6 meses** (1-3 tenants pipeline: KAIU + Lucams + 1 potencial): Direct Provider manual. NO solicitar Tech Provider Program todavía.
+2. **Cuando llegue señal demanda real ≥5 tenants self-service**: arrancar paperwork Tech Provider (proceso 2-6 semanas calendar Meta).
+
+### R.2.4 Distinción tipos de access token (refinamiento §2.1 dossier)
+
+Docs vigentes diferencian:
+
+| Tipo | Uso | Rol Konvi |
+|---|---|---|
+| **Temporary user token (24h)** | Solo dev/test | No producción |
+| **System User Access Token** (long-lived) | Producción standard. Asignado al System User del Business Portfolio del **tenant**. Scopes `whatsapp_business_messaging` + `whatsapp_business_management` | ✅ Modelo actual KAIU |
+| **System User Access Token** del partner (compartido) | Solution Partners para compartir línea de crédito Meta con tenants onboardeados | ❌ NO aplica (no somos Solution Partner) |
+| **Business Integration System User access token** ("business token") | Scoped a customer onboardeado individual. Usado por Tech Providers + Solution Partners post-Embedded Signup | 🟡 Futuro (post-Tech Provider enrollment) |
+
+Esta distinción no estaba clara en §2.1 del dossier original. Modelo actual KAIU usa **System User Access Token estándar generado en el BM del tenant** — correcto.
+
+
+## R.3 Items P0+P1 del dossier (estado al 2026-06-01)
+
+| # | Item | Estado 2026-06-01 |
+|---|---|---|
+| P0-1 | STOP/opt-out detector | 🔴 0% — no implementado, sigue siendo bloqueante compliance |
+| P0-2 | Bump Graph API v21→v22 | 🔴 0% — `META_API_VERSION = "v21.0"` aún en `whatsapp_sender.py:9` (verificado en código actual) |
+| P1-1 | HSM Templates (F2 / H.4.2) | 🟡 parcial — `whatsapp_templates` table existe; `payment_reminder_v1` activo + `cart_abandoned_v1` seeded NO en cron (per `docs/research/audit-finiquito-2026-05-31.md` §1) |
+| P1-2 | Tier-based rate limit per-tenant | 🔴 0% |
+| P1-3 | Persistir delivery receipts | 🔴 0% |
+| P1 | Suscribir webhook fields adicionales | 🔴 0% — `messages` suscrito; `message_template_status_update` + quality + phone_number_quality NO |
+
+**Conclusión**: P0+P1 del dossier permanecen abiertos. La auditoría finiquito (2026-05-31) los mapea como items Fase A8 (Inbox refactor) y H.4.* (integraciones).
+
+
+## R.4 Cross-reference con audit-finiquito-2026-05-31.md
+
+Items del dossier mapeados a Fase A del audit finiquito:
+
+| Dossier | Audit finiquito | Severidad |
+|---|---|---|
+| P0-1 STOP detector | A8 Multi-agente router + addenda §13 del audit | 🔴 CRITICAL |
+| P0-2 v21→v22 bump | NO mapeado en audit — addenda recomendada | 🟡 HIGH (riesgo continuidad) |
+| P1-1 HSM Templates | B2 (Plan finiquito Fase B "WhatsApp Flows Phase 1") + parte de H.4 plan K | 🟡 HIGH |
+| P1-2 Tier rate limit | H.4.3 Plan K | 🟡 HIGH |
+| P1-3 Delivery receipts | H.4.4 Plan K | 🟡 HIGH |
+| §3.3 Tech Provider migration | A12 NUEVO (addenda §14 audit 2026-06-01) | 🔴 CRITICAL bloqueante multi-tenant |
+
+
+## R.5 Fuentes verificadas en este refresh (2026-06-01)
+
+- [Transfer Ownership — App Development with Meta](https://developers.facebook.com/docs/development/create-an-app/transfer-an-app/) — pasos transfer App
+- [Create an App with Meta](https://developers.facebook.com/docs/development/create-an-app/) — creación App
+- [Become a Tech Provider — WhatsApp Business Platform](https://developers.facebook.com/docs/whatsapp/solution-providers/get-started-for-tech-providers/) — Tech Provider eligibility
+- [Become a Solution Partner — WhatsApp Business Platform](https://developers.facebook.com/docs/whatsapp/solution-providers/get-started-for-solution-partners/) — Solution Partner diferencias
+- [Embedded Signup Overview](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview/) — Embedded Signup flow
+- [Onboarding business customers as a Tech Provider](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider/) — multi-tenant onboarding
+- [Transfer App Ownership — Meta Business Help Center](https://www.facebook.com/business/help/236817717885919) — Help Center alternative path
+- [Create a Business Portfolio — Meta Business Help Center](https://www.facebook.com/business/help/1710077379203657) — crear BP
+- [DIAN RUT 2026 consultation](https://dian.com.co/consultar-rut-dian-2026/) — RUT Colombia (persona natural + entidad)
+
+
+## R.6 Próximo refresh sugerido
+
+**Trigger refresh**: cualquiera de:
+1. Cierre de A12 audit finiquito (transferencia App + Business Verification).
+2. Cierre de P0-1 + P0-2 del dossier (STOP + v22 bump).
+3. 3 meses transcurridos (próximo: 2026-09-01).
+4. Cambio mayor anunciado por Meta (Embedded Signup deprecation, PMP rate hike, tier model overhaul).
+
+Política `changelog-watch.md` aplica: re-investigar cada 3 meses WhatsApp/Meta o ante cambio mayor.

@@ -53,6 +53,8 @@ supabase/migrations/          # fuente canónica de esquema
   Leer si tocas: deployment, infra, migraciones pendientes.
 - `.context/05-doc-policy.md` — política documental.
   Leer solo si actualizas documentación.
+- `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md` — Konvi NUNCA será Partner Meta. Cada tenant Direct Provider con SU PROPIA Meta App + HMAC per-tenant.
+  Leer si tocas: connector WhatsApp, integración Meta, onboarding tenants, webhook routing.
 
 ## NO leer (reduce tokens ~50%)
 

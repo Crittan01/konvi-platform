@@ -2140,3 +2140,349 @@ Cuando un item se descubra ser inválido o ya cerrado: marcar `~~tachado~~` con 
 
 
 **Re-auditar**: cada 3 meses o tras cierre de fase mayor, re-correr el workflow `exhaustive-konvi-audit-finiquito` y comparar deltas.
+
+---
+
+# Adendas (post 2026-05-31)
+
+
+## A0.1 — Cierre sesión A0 (2026-05-31 → 2026-06-01)
+
+
+Items audit cerrados o re-alineados:
+
+- ✅ **A1 — Rotación secrets + Vault audit** — RESUELTO en sesión A0 (2026-05-31 → 2026-06-01). Rotadas: Supabase publishable + secret (sistema nuevo `sb_*`), Meta App Secret + Verify Token, Wompi sandbox keys, DB password, JWT secret legacy, INTERNAL_SERVICE_SECRET, ngrok tokens. Refactor adicional NO previsto en audit: `auth.py` migrado a JWKS ES256 asimétrico (Supabase Signing Keys nuevas), service-to-service auth migrado a `X-Internal-Service-Secret` header (no JWT HS256). Rename repo `commerce-ops-platform` → `konvi-platform`, history limpiada con git filter-repo v2 (literals exactos). Stack reorganizado a `/home/ansible/workspaces/konvi-platform/.local/`.
+
+
+## §13 — Smoke E2E empírico 2026-06-01 (evidencia post-A0)
+
+
+Smoke conversación dinámica WhatsApp con cliente CONOCIDO (Cristian García + tenant KAIU). Objetivo: validar A0 NO introdujo regresiones.
+
+**Veredicto A0**: ✅ NO introdujo regresiones. Greeting + cart con qty + variantes + agentic state transitions OK.
+
+**4 bugs pre-existentes detectados** (evidencia empírica reforzando hallazgos §1 Inbox CORE del audit):
+
+| ID empírico | Síntoma | Root cause código | Severidad | Mapea a item Fase A |
+|---|---|---|---|---|
+| BUG-CATALOG-1 | "muéstrame el catálogo completo" → bot envía foto de UN producto en vez de listar | `tools/image_send_tool.py:173` `is_image_request_query` matchea "muestrame" sin negative override "catálogo/listado/completo" | 🔴 ALTA | A8 (Multi-agente router) |
+| BUG-CATALOG-2 | Outbound image enviado a Meta (wamid OK) pero NO persistido en `messages` | `whatsapp_sender.py:120-126` `send_whatsapp_message` con image_link NO inserta en DB; asimetría vs `_send_outbound_text` | 🔴 ALTA | A8 + auditar persistencia outbound |
+| BUG-CATALOG-3 | `image_send_tool` elige producto al azar cuando query genérica | Falta disambiguation step "¿de cuál producto querés foto?" | 🟡 MEDIA | A8 |
+| BUG-CART-1 | LLM hallucina UUIDs en `add_to_cart` (2/2 con UUIDs distintos: `3976a0a9-…` + `b2e7b0c0-…`). Tool valida correctamente y retorna INVALID_PRODUCT_ID. LLM NO auto-recovera vía `list_catalog` | Falta regla post-INVALID_PRODUCT_ID en system prompt + ausencia de fallback estructural en dispatcher | 🔴 ALTA | A8 (refactor dispatcher) + opcional ADR nuevo: tools accept semantic refs |
+
+**Latencias observadas** (target Plan K J.5: P95 ≤3s / mediana ≤4s):
+- Turnos texto-only sin tools reales: 15-45s (3.8x–11x sobre target)
+- Turnos con tool real (cart_add): 11s (mejor pero alto)
+- Acción: registrar como hallazgo separado de observabilidad — investigar pipeline pgmq + LLM inference + outbound send. NO bloqueante go-live; sí mandatorio antes de marketing proactivo de Konvi.
+
+**Decisión 2026-06-01**: NO fixear estos bugs ad-hoc. Caen en Fase A8 finiquito. UAT pose A8 debe re-cubrir estos 4 turnos exactos como regression suite empírica.
+
+
+## §14 — Adenda Meta App ownership (NUEVO 2026-06-01, REVISADO 2026-06-01 v2 tras verificación docs Meta vigentes)
+
+
+> ⚠️ **Versión v1 de este §14 (escrita 2026-06-01 temprano) contenía 2 errores corregidos en v2**: (a) afirmaba "Meta NO permite mover App entre BMs" — incorrecto, Meta SÍ documenta el transfer flow; (b) usaba "Tech Provider model" como sinónimo de "1 App + N tenants" — impreciso, Tech Provider es un programa Meta específico requerido sólo para Embedded Signup (no para el modelo arquitectónico básico).
+
+**Estado actual**: Meta App "Commerce Ops App" (ID `819229210624423`) registrada en **cuenta personal Facebook del founder** (NO en un Business Portfolio). El Business Portfolio "Kaiu Natural Living" existe y aloja el **System User commerce-ops** + WABA + phone number de KAIU — pero **NO es owner de la App**. Verificado contra `docs/research/meta-app-architecture-2026-05-08.md` §2.
+
+**Estado objetivo**: Meta App **transferida** a un Business Portfolio nuevo llamado **"Konvi"** (con NIT del founder persona natural, o NIT de entidad jurídica Konvi si se constituye). WABAs per-tenant (KAIU, Lucams, futuros) permanecen bajo sus respectivos BMs, conectadas a la App Konvi via System User access tokens (manual hoy; Embedded Signup futuro si se enrola en Tech Provider Program).
+
+**Por qué crítico**:
+1. **Identidad legal correcta**: Business Verification se ejecuta sobre el BM owner de la App. Hoy = cuenta personal = no productizable. Target = BP Konvi = identidad SaaS coherente.
+2. **App Review permissions**: `whatsapp_business_messaging` + `whatsapp_business_management` con Advanced access se solicitan bajo el BM owner. Debe ser Konvi.
+3. **Multi-tenant escala**: para onboardear Lucams (Sem 14+ per `[[lucams-camino-d]]`) y 3er tenant con onboarding ergonómico, eventualmente Tech Provider + Embedded Signup. Pre-requisito: BM Konvi con BV approved.
+4. **System User long-lived tokens**: hoy se emiten desde el BM del tenant (Kaiu Natural Living para KAIU). Correcto — sin cambios.
+
+**Procedimiento migración** (CORREGIDO 2026-06-01 v2 — verificado contra [Meta Transfer Ownership docs](https://developers.facebook.com/docs/development/create-an-app/transfer-an-app/)):
+
+1. Founder crea Business Portfolio nuevo "Konvi" en business.facebook.com (30 min). NIT = personal o entidad según H0.
+2. En developers.facebook.com → My Apps → App `819229210624423` → **App Settings → Basic** → sección **"Business Portfolio Ownership"** → click **"+ Business Portfolio"** → seleccionar Konvi del popup.
+3. Acción envía **asset claim request** al inbox "Requests/Solicitudes" del BP Konvi.
+4. Founder acepta request desde BP Konvi.
+5. ⚠️ **Acción irreversible** según doc oficial Meta ("esta acción no se puede deshacer").
+6. Rename App: Settings → Basic → App Display Name = "Konvi App". App ID NO cambia.
+7. **Smoke test E2E mandatorio**: founder envía mensaje real WhatsApp a KAIU → bot responde → logs sin errores HMAC. Si falla → activar plan contingencia.
+8. **Plan contingencia** (App Secret behavior post-transfer NO documentado oficialmente por Meta): si smoke falla, rotar `META_APP_SECRET` + `META_VERIFY_TOKEN` en Render + `.env` + per-tenant `access_token` en Vault. ~1h dev.
+
+**Esfuerzo**: 30 min trámite Meta + smoke test. Total ~1h founder + 1h dev (si smoke pasa) ó 2h dev (si requiere rotación).
+
+**Pre-requisito legal (H0)**: founder decide entre persona natural con NIT personal (cédula+DV) o entidad jurídica (SAS / EU / etc.). Meta acepta ambos. **NO asumir SAS** — corrección 2026-06-01 v2.
+
+**Tech Provider Program — NO incluido en A12**:
+- Hoy KAIU funciona en modelo "Direct Provider de facto" (manual System User per tenant). Válido para 1-5 tenants.
+- Tech Provider Program es **gating de Embedded Signup automatizado** + 1 App Review única para todos los tenants. Útil cuando pipeline ≥5 tenants self-service.
+- **Iniciar paperwork Tech Provider sólo cuando exista pipeline real ≥3 tenants** (no en A12 — diferido a Fase B/C según roadmap).
+
+**Severidad**: 🔴 CRÍTICA BLOQUEANTE multi-tenant productivo. Sin BM Konvi + Business Verification, App Review producción es no-ejecutable bajo identidad Konvi correcta.
+
+**Posicionamiento finiquito**: A12 en Fase A — paralelo a A8/A9/A10 (NO toca código de aplicación; solo config Meta externa + smoke test). Espera Meta BV: 1-3 semanas calendar.
+
+
+## §14b — Adenda Mode B canonical (REVISADO 2026-06-02 v3 tras ejecución H2.2 + lecciones aprendidas sesión)
+
+
+### Mode A vs Mode B (clarificación crítica post-H2.2)
+
+| Modelo | Arquitectura | Aplica a Konvi? |
+|---|---|---|
+| **Mode A — Single-tenant legacy** | Cada tenant tiene su propio App + WABA + System User token autoreferenciados en su propio BP. Funciona para 1 tenant. | NO — es lo que tenía KAIU pre-H2.2. Regresivo respecto al target multi-tenant. |
+| **Mode B — Multi-tenant SaaS canónico** | 1 sola App (Konvi App en Konvi BP) + N tenants delegan SUS WABAs vía Embedded Signup. Cada tenant aporta credentials propias en `tenant_integrations.meta`. **Modelo documentado en `meta-app-architecture-2026-05-08.md`**. | SÍ — destino arquitectónico de Konvi. |
+
+### Lecciones aprendidas ejecución H2.2 (sesión 2026-06-02)
+
+Durante la ejecución de H2.2 (transferencia App Kaiu BP → Konvi BP) surgieron caminos transitorios que se evaluaron y descartaron:
+
+1. **Partner business assignment manual (BP Kaiu ↔ BP Konvi sobre WABA)** — intentado, falló con "Unable to assign partner". Hipótesis: Meta requiere BV approved en al menos 1 BP para partner assignment cross-BP. Descartado por bloqueo Meta + por ser Mode A workaround.
+2. **Rollback H2.2** (volver App a Kaiu BP) — innecesario; founder argumentó correctamente que la transferencia se ejecutó OK.
+3. **Reconfigurar KAIU Chat App (ID `2024793711712790`, en Kaiu BP) como App productiva KAIU** — propuesta evaluada pero descartada. Era regresión a Mode A: configurar Konvi para single-tenant con 1 App por tenant. Opuesto al target Mode B documentado.
+4. **Cambiar `META_APP_SECRET` en `.env` a secret de KAIU Chat** — ejecutado pero revertido. Era coherente con Mode A regresivo, incorrecto para Mode B.
+
+**Camino correcto Mode B confirmado**:
+1. App `819229210624423` (Konvi App) ya está en Konvi BP ✅ (post-H2.2)
+2. `.env META_APP_SECRET` = secret de Konvi App ✅ (revertido a valor original `41eb550c0dad8118ba389fb6822ab2f6`)
+3. Pursue **H3 Business Verification** Konvi BP (1-3 sem Meta)
+4. Post-BV: **H4 App Review** Konvi App con Advanced Access `whatsapp_business_messaging` + `whatsapp_business_management` (1-2 sem Meta)
+5. Post-App Review: **Tech Provider Program enrollment** (1-3 sem Meta)
+6. Post-Tech Provider: implementar **Embedded Signup** en Konvi web UI (~5-7d dev)
+7. **KAIU se onboardea a Konvi App vía Embedded Signup** — flow self-service desde Konvi web Settings → "Conectar WhatsApp" → popup Meta → autoriza Konvi App a usar WABA KAIU → backend recibe token Business Integration System User → almacena en `tenant_integrations.meta` per tenant
+8. **Tenants futuros** (Lucams, etc.) hacen el mismo flow self-service automatizado
+
+### Estado intermedio aceptable (~6-8 sem espera Meta)
+
+- KAIU bot **inactivo** durante la espera Meta. Es aceptable porque KAIU = dev/test environment (founder confirmó 2026-06-02 NO producción real con clientes externos).
+- Konvi App + Test Phone Number gratis (Meta asigna automáticamente al agregar producto WhatsApp Cloud API) sirve para development Konvi web Mode B durante este período.
+- KAIU Chat App (ID `2024793711712790`) preservada intacta — NO tocar mientras Mode B en curso. Cuando KAIU migre a Konvi App vía Embedded Signup, KAIU Chat queda obsoleta (deferida a delete decision posterior).
+- Documentación playbook tenants futuros (`docs/onboarding/tenant-whatsapp-onboarding-konvi.md`) se escribe en paralelo durante la espera Meta.
+
+### Posicionamiento finiquito A12 actualizado
+
+**A12 = MODE B PATH COMPLETO**:
+- A12.1 = H3 BV Konvi BP (1-3 sem Meta, paralelo a A2/A6 finiquito)
+- A12.2 = H4 App Review Konvi App (1-2 sem Meta, secuencial post-BV)
+- A12.3 = Tech Provider Program enrollment (1-3 sem Meta, secuencial post-App Review)
+- A12.4 = Konvi web Embedded Signup implementation (5-7d dev, secuencial post-Tech Provider)
+- A12.5 = Migrar KAIU a Konvi App + onboard tenants futuros vía Embedded Signup (1d dev + documentación playbook)
+
+**Total esfuerzo A12 v3**: ~6-9 sem calendar Meta + ~6-8d dev. KAIU inactiva durante la espera Meta es aceptable.
+
+
+## §15 — Reorden Fase A recomendado por dependencias arquitectónicas
+
+
+El orden A1→A11 del audit es secuencial por número. Por análisis de dependencias reales, se recomienda ejecutar por NIVEL arquitectónico (data → security → compliance → inbox → ui → meta → uat) para evitar refactor doble cuando capa inferior cambia después.
+
+```
+NIVEL 0 — FOUNDATION ✅ DONE (A0 2026-05-31 → 2026-06-01)
+   A1 Rotación secrets + Konvi rename + JWKS ES256 + S2S auth
+
+NIVEL 1 — DATA LAYER (~1.5d)
+   A2 Schema drift contact.address (line1 vs street)
+
+NIVEL 2 — SECURITY CROSS-CUTTING (~5d)
+   A6 scoped_table propagation 4/319 → 319/319
+   A7 RBAC marketplace/ai_agents + Telegram constant-time
+
+NIVEL 3 — COMPLIANCE LEGAL (~2d)
+   A5 Save-PII Habeas Data audit log
+
+NIVEL 4 — INBOX REFACTOR (~3d, incorpora 4 bugs §13)
+   A8 Multi-agente router orden carga + fsm_states_allowed
+   A10 FakeEscalationInvariant side-effects
+   A9 Contactos drift server actions → fetch API
+
+NIVEL 5 — BUSINESS-OPS BUGS (paralelos, ~1d)
+   A3 Cotizador drop columns + drop historial
+   A4 Reclamos status alignment API↔UI
+
+NIVEL 6 — INFRA META (NUEVO, ~3-4d humano + 1d dev, paralelo con NIVEL 4-5)
+   A12 Meta App KAIU BM → Konvi BM + Business Verification (ver §14)
+
+NIVEL 7 — VALIDACIÓN (~1.5h founder)
+   A11 UAT live analítico dual-mode (DESPUÉS de A8 — si no, repite §13 bugs)
+```
+
+**Total Fase A reordenada**: ~14-17 días-dev + ~5-10 días humanos (Meta + legal V.3-V.5).
+
+**Razón principal**: A6 scoped_table toca 319 archivos. Si se ejecuta tarde, todo refactor previo (A3/A4/A8/A9) se reescribe. Llevarlo a NIVEL 2 (temprano) lo evita.
+
+
+## §14c — REVISIÓN MAYOR 2026-06-03 — Konvi NO es Partner, Direct Provider per-tenant
+
+
+**Disparador**: founder identificó que en Meta dashboard la opción elegida fue "Integrate with API" (NO "Become a Partner"). Esto invalida toda la trayectoria Tech Provider que las versiones previas de §14/§14b asumían.
+
+
+### Decisión arquitectónica definitiva (sesión 2026-06-03)
+
+**Konvi NUNCA será Partner Meta**. Modelo final = **Direct Provider per-tenant**: cada tenant trae su propia Meta App + WABA + Phone Number + System User token. Konvi connector es infraestructura multi-tenant que recibe webhooks de N Meta Apps distintas y enruta por phone_number_id → tenant_id.
+
+Esto es **consistente con cómo Konvi ya maneja Wompi/Aveonline/Telegram**: cada tenant aporta SUS credentials, Konvi backend solo orquesta API calls.
+
+
+### Tabla A12 reescrita
+
+| # original | Item | Estado bajo nuevo modelo | Acción |
+|---|---|---|---|
+| A12.1 | H3 BV Konvi BP | ❌ **CANCELADO** — no necesario (Konvi no Partner) | Skip salvo que Konvi quiera su propio Live mode test |
+| A12.2 | H4 App Review Konvi App | ❌ **CANCELADO** — solo Konvi Dev test, no para servir tenants | Skip salvo Konvi Live test |
+| A12.3 | Tech Provider Program enrollment | ❌ **CANCELADO** — decisión definitiva NO Partner | Skip |
+| A12.4 | Konvi web Embedded Signup implementation | ❌ **CANCELADO** — no aplica sin Tech Provider | Skip |
+| A12.5 | Migrar KAIU a Konvi App | ❌ **CANCELADO** — KAIU se queda con su KAIU Chat App permanentemente | Skip |
+| **A12-NUEVO** | **Refactor connector multi-secret + per-tenant webhook URL** | ✅ NECESARIO | 1-2 días dev |
+| **A12-NUEVO** | **Documentar playbook tenant onboarding Direct Provider** (`docs/onboarding/tenant-whatsapp-direct-provider.md`) | ✅ NECESARIO | medio día doc |
+| **A12-NUEVO** | **Configurar dominio estable `api.konvi.co` para webhook tenant** | ✅ NECESARIO para producción real | 30 min (Cloudflare DNS + Render Starter reactivación) |
+
+
+### Plan ejecutable Model B
+
+#### Fase 1 — Restore KAIU tenant_integrations con KAIU Chat creds (yo, ~5 min)
+- phone_number_id: `990364080831295`
+- waba_id: `2159052118202272`
+- app_id: `2024793711712790` (KAIU Chat App)
+- app_secret: `1895ac2113e77866574486dbb438e3dd` (KAIU Chat secret, en Vault)
+- access_token: regenerar de commerce-ops System User → KAIU Chat App
+- verify_token: ej. `konvi-kaiu-direct-2026`
+- status: connected
+
+#### Fase 2 — Founder: configurar webhook KAIU Chat (~10 min)
+- developers.facebook.com → KAIU Chat → WhatsApp → Configuration → Edit webhook
+- Callback URL: ngrok dev (HOY) o `https://api.konvi.co/api/v1/whatsapp/webhook/kaiu` (PROD)
+- Verify token: el que se persistió en Fase 1
+- Subscribe `messages` field
+
+#### Fase 3 — Founder: regenerar System User token (~5 min)
+- BP Kaiu Natural Living → System Users → commerce-ops → Generate Token con KAIU Chat App seleccionada → permisos `whatsapp_business_messaging` + `whatsapp_business_management` → never expires
+
+#### Fase 4 — Refactor connector code multi-secret (yo, ~1-2 días dev)
+- `services/connector-whatsapp/dependencies/meta.py`:
+  - Eliminar `META_APP_SECRET` global env-var
+  - Per-tenant `app_secret_secret_id` lookup en Vault
+- `services/connector-whatsapp/routers/webhook.py`:
+  - Endpoint path: `/api/v1/whatsapp/webhook/{tenant_id}`
+- Tests + smoke E2E
+- Consistente con `services/api/integrations/wompi_client.py` pattern
+
+#### Fase 5 — Playbook tenant onboarding (yo, ~medio día)
+`docs/onboarding/tenant-whatsapp-direct-provider.md` con 10-12 pasos para tenant nuevo:
+1. Crear cuenta Meta Developer
+2. Crear Meta App + product WhatsApp Cloud API
+3. Configurar webhook URL (Konvi le proporciona)
+4. Generar System User token
+5. Pasar credentials a Konvi vía Tenant Console UI
+6. Smoke test
+
+#### Fase 6 — Pre-producción: dominio estable api.konvi.co (yo + founder, ~30 min)
+- Reactivar Render Starter para connector ($7/mes)
+- Cloudflare DNS → CNAME `api.konvi.co` → Render endpoint
+- Update webhook URLs tenants de ngrok → api.konvi.co/.../webhook/{tenant_id}
+- Tenants futuros configuran solo URL permanente
+
+
+### Trade-offs aceptados (sesión 2026-06-03)
+
+| Pro | Con |
+|---|---|
+| Konvi NUNCA paperwork Meta extenso | Cada tenant pasa SU OWN BV + App Review (1-3 sem + 1-2 sem Meta) |
+| Consistente con patrón Konvi de Wompi/Aveonline/Telegram | Onboarding tenant ~10-12 pasos manual |
+| Independencia total tenants | Konvi blind a cambios config tenant en Meta |
+| 0 dependencia Tech Provider enrollment | Custodia App Secret tenant requiere DPA |
+| No SPOF Tech Provider | Multi-secret HMAC = refactor real (~1-2d dev) |
+
+Founder acepta estos conscientemente.
+
+
+### Estado dossiers / docs canónicos post-decisión
+
+- `docs/research/meta-app-architecture-2026-05-08.md` — actualizado con §0 Adenda 2026-06-03
+- `docs/research/whatsapp-meta-dossier-2026-05-05.md` Refresh 2026-06-01 R.2.3 — outdated en parte (sigue mencionando Tech Provider como destino). Re-leer con lente §14c del audit.
+- `memory/project_meta_app_ownership.md` — reescrito 2026-06-03
+- `memory/feedback_konvi_not_partner_direct_provider.md` — nuevo, regla operativa
+
+
+### Referencias
+
+- Workflow profundo 2026-06-03 verificación Model B feasibility (8 agents) — output en `/tmp/claude-1000/.../tasks/wyoyzacnz.output`
+- Sesión 2026-06-02/03 documentada en transcript jsonl
+
+**Total esfuerzo §14c Model B**: ~3-4 días dev + ~1h founder + (futuro) reactivación Render. **Ahorra ~6-12 semanas calendar Meta de Tech Provider Program path original**.
+
+
+## §14d — Plan ejecutable Model B aterrizado (post-audit 9-agent 2026-06-03)
+
+**Trigger**: founder solicitó auditoría exhaustiva pre-refactor. Workflow `wyr6c8f2i` con 7 audits paralelos + adversarial verify + plan synthesis confirmó estado real, identificó hallazgos sorprendentes, produjo plan file-by-file con tiempos realistas. **NO suposición** — cada cambio tiene archivo + línea + evidencia.
+
+**Decisión Q1-Q10 sellada en ADR-0023** (`docs/adr/0023-meta-model-b-direct-provider-per-tenant.md`).
+
+### Hallazgos sorprendentes (verificados live)
+
+| Hallazgo | Evidencia |
+|---|---|
+| KAIU webhook YA apuntaba a `kaiu-api.onrender.com` (DEAD) — bot KAIU lleva down más de lo pensado | Audit 5 Graph live debug_token |
+| Konvi Dev access_token Vault EXPIRADO 2026-06-03 (era temp 24h) | Audit 5 debug_token |
+| `saveWhatsApp` server action SOBRESCRIBE credentials (no merge) — destruiría Model B fields si owner KAIU edita | `apps/web/.../integrations/page.tsx:301` |
+| `vault_helper.py` NO existe en `services/connector-whatsapp/lib/` (solo `phone.py`) — deploy unit aislado | `ls services/connector-whatsapp/lib/` |
+| `status='connected'` filter hace KAIU `pending_token` INVISIBLE al lookup | `dependencies/meta.py:148-149` |
+| HMAC validation ocurre ANTES de poder extraer `tenant_id` del path | FastAPI `Depends(verify_meta_signature)` evaluado pre-route handler |
+| `tenant_provider_identity` table EXISTE pero está VACÍA (0 filas) | Migration 20260514 nunca poblada |
+
+### Plan de fases (orden estricto)
+
+| Phase | Archivos | Horas dev | Founder | Idempotente | Bloquea |
+|---|---|---|---|---|---|
+| **0** | `docs/adr/0023-*.md` (Q1-Q10 sellado) | 0.5h | 0.5h review | N/A | TODO downstream |
+| **1** | `supabase/migrations/20260622_whatsapp_model_b_backfill_konvi_dev.sql` (NEW) + `scripts/admin/seed_konvi_dev_app_secret_vault.py` (NEW) | 2h | 0 | ✅ Sí (`NOT (credentials ? 'verify_token')`) | Phase 3 |
+| **2** | `services/connector-whatsapp/lib/vault_helper.py` (NEW, copy de `services/api/vault_helper.py`) | 0.5h | 0 | ✅ Sí (file copy) | Phase 3 |
+| **3** | `services/connector-whatsapp/dependencies/meta.py` (MAJOR REWRITE) + `services/connector-whatsapp/routers/webhook.py` (MAJOR REWRITE) | 28h | 0 | ❌ Atomic deploy | Phase 4-7 |
+| **4** | `tests/test_meta_hmac_model_b.py` (NEW reemplaza `test_meta_hmac_per_tenant.py`) | 6h | 0 | N/A | Phase 7 |
+| **5** | `scripts/uat/e2e_chat.py` (UPDATE) | 2h | 0 | N/A | Phase 7C/F |
+| **6** | `apps/web/.../integrations/page.tsx:297-307` (UPDATE) | 1h | 0 | ✅ Sí (additive) | — |
+| **7** | Meta dashboards Konvi App + KAIU Chat (callback URL + tokens + smoke E2E) | 1h asistencia | 5h | ❌ Punto no retorno | Phase 8 |
+| **8** | `docs/adr/0023-*.md` (finalizado) + `.context/01-state.md` (rev. 110) + `CLAUDE.md` (referencia ADR) | 4h | 0.5h review | N/A | — |
+
+**Total**: ~44h dev + ~6h founder. Realista: 8-12h sostenidas con paralelización Phases 1+2+6.
+
+### Migrations / scripts a aplicar
+
+```sql
+-- supabase/migrations/20260622_whatsapp_model_b_backfill_konvi_dev.sql
+BEGIN;
+UPDATE public.tenant_integrations
+SET credentials = credentials
+  || jsonb_build_object(
+       'verify_token', 'konvi-dev-direct-2026',
+       'integration_role', 'tenant_internal',
+       'integration_type', 'direct_provider',
+       'webhook_url_path_segment', 'konvi-dev'
+     )
+WHERE tenant_id = '6115474f-7046-44a8-88ad-182dbf7626a6'
+  AND provider = 'whatsapp'
+  AND NOT (credentials ? 'verify_token');
+COMMIT;
+```
+
+Python scripts (one-shot):
+1. `scripts/admin/seed_konvi_dev_app_secret_vault.py` — crea Vault secret con `META_APP_SECRET` env + UPDATE `tenant_integrations.credentials.app_secret_secret_id`.
+2. `scripts/admin/update_vault_secret.py` — utility rotación tokens.
+3. `scripts/admin/seed_kaiu_access_token_vault.py` — Vault create + UPDATE KAIU `access_token_secret_id` + `status='connected'`.
+
+### Compatibility breaks documentados
+
+| Componente | Estado durante refactor | Cuándo se restaura |
+|---|---|---|
+| KAIU bot | DOWN (ya, webhook stale) | Phase 7E + F |
+| Konvi Dev bot | DOWN desde Phase 3 deploy | Phase 7B |
+| UAT `e2e_chat.py` | ROTO desde Phase 3 | Phase 5 |
+| Tests `test_meta_hmac_per_tenant.py` | FAIL Phase 3 | Phase 4 reemplazo |
+| UI `saveWhatsApp` form | sigue funcionando (Phase 6 additive) | — |
+
+**Punto de no retorno**: Phase 3 deploy + Phase 7B (webhook Meta dashboards apuntando a nueva URL).
+
+### Criterios de éxito (definición de DONE)
+
+Ver ADR-0023 §10 "Criterios éxito" — 10 checks específicos verificables.
+
+### Referencias
+
+- ADR-0023: `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md`
+- Workflow audit 9-agent: `/tmp/claude-1000/.../tasks/wyr6c8f2i.output`
+- Memoria `feedback_konvi_not_partner_direct_provider.md`
