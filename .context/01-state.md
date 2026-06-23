@@ -38,9 +38,17 @@
 2. Regenerar System User token KAIU Chat App + cambiar webhook URL Meta de `kaiu-api.onrender.com` DEAD → `<ngrok>/api/v1/whatsapp/webhook/0fb0777e-...`
 3. Smoke E2E real ambos tenants
 
-**Compatibility breaks**: `META_APP_SECRET` env-var ya NO se lee en `services/connector-whatsapp/` (grep verifica 0 hits). Tests legacy `test_meta_hmac_per_tenant.py` FAIL (modelo global obsoleto) — reemplazados por `test_meta_hmac_model_b.py`. UI `saveWhatsApp` form NO refactorizado a Aveonline-style (diferido a finiquito A8 per Q4 ADR-0023).
+**Compatibility breaks**: `META_APP_SECRET` env-var ya NO se lee en `services/connector-whatsapp/` (grep verifica 0 hits). Tests legacy `test_meta_hmac_per_tenant.py` ELIMINADO post-cleanup (12 ParserDispatcherTests migrados a `test_meta_hmac_model_b.py`). UI `saveWhatsApp` form NO refactorizado a Aveonline-style (diferido a finiquito A8 per Q4 ADR-0023).
 
-**Suite tests**: `tests/test_meta_hmac_model_b.py` 10/10 PASS · `tests/test_meta_hmac_per_tenant.py` 10 fails esperados (modelo global obsoleto, pendiente migrar ParserDispatcherTests 12 que sí siguen válidos + `git rm` del legacy).
+**Suite tests**: `tests/test_meta_hmac_model_b.py` **22/22 PASS** (10 HMAC Model B + 12 Parser migrados). `validate.sh` ALL GREEN: **13 OK / 0 errors / 2309 tests verde**.
+
+**Post-cleanup 2026-06-22 (workflow `wyq562tvg` 8-agent)**:
+- Konvi Dev tenant fixture (id `6115474f-...`) ELIMINADO (founder aclaró Konvi NO es comercio). Vault secrets `318d3e7b` + `8553f4ba` borrados.
+- Row huérfana MeLi (KAIU disconnected) ELIMINADA.
+- KAIU `tenant_integrations.credentials.notes` actualizado con info token vigente.
+- Comentarios deprecation env vars (`.env.example`, `validate.sh`, scripts UAT).
+- Memorias actualizadas + nueva `reference_vault_uuids_whatsapp`.
+- 6 commits lógicos a `develop`.
 
 **Outstanding (dev cierre)**:
 1. Migrar `ParserDispatcherTests` (12 tests OK) de `tests/test_meta_hmac_per_tenant.py` → `tests/test_meta_hmac_model_b.py` y `git rm` del legacy (desbloquea `validate.sh`).
