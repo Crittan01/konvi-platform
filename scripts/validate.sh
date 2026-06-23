@@ -134,6 +134,30 @@ else
   _warn "pnpm no disponible — omitiendo TypeScript"
 fi
 
+# ─── 4.5 Tenant filter lint (AST) — A6.1 finiquito NIVEL 2 ───────────────────
+# Detecta `.table(X).select(...)` sin `.eq("tenant_id", ...)` o `.insert/update/
+# upsert(payload)` sin tenant_id en payload. Reemplaza el wrapper tenant_scope.py
+# (empíricamente muerto, 0 adopción) con lint estático. ADR-0025 (post-A6 cierre).
+# Modo baseline: solo falla si introduce gaps NUEVOS vs baseline conocido.
+# Ver: scripts/audit_tenant_filter.py + tests/test_audit_tenant_filter.py
+_hdr "Tenant filter AST lint (multi-tenant safety)"
+if [ -f "${SCRIPT_DIR:-scripts}/audit_tenant_filter.py" ] || \
+   [ -f "scripts/audit_tenant_filter.py" ]; then
+  baseline_file="gaps_tenant_filter_baseline.csv"
+  if [ -f "$baseline_file" ]; then
+    if python3.11 scripts/audit_tenant_filter.py --baseline "$baseline_file" --quiet 2>&1; then
+      baseline_count=$(($(wc -l < "$baseline_file") - 1))
+      _ok "Tenant filter lint: 0 gaps NEW vs baseline ($baseline_count known)"
+    else
+      _err "Tenant filter lint detectó gaps NUEVOS vs baseline (ver scripts/audit_tenant_filter.py)"
+    fi
+  else
+    _warn "Tenant filter lint: baseline missing — corre 'python3.11 scripts/audit_tenant_filter.py --csv gaps_tenant_filter_baseline.csv'"
+  fi
+else
+  _warn "Tenant filter lint script ausente (scripts/audit_tenant_filter.py)"
+fi
+
 # ─── 5. Next.js Lint ─────────────────────────────────────────────────────────
 _hdr "Next.js ESLint (apps/web)"
 
