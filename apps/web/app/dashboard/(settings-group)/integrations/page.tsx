@@ -294,11 +294,24 @@ export default async function IntegrationsPage({
       secretId = data as string | null
     }
 
+    // ADR-0023 Phase 6: merge no-destructivo de credentials.
+    // Preserva campos Model B Direct Provider per-tenant (app_id, app_secret_secret_id,
+    // verify_token, integration_role, integration_type, webhook_url_path_segment,
+    // business_id, notes) que el form actual NO captura pero existen en DB.
+    // Sin esto, owner editando WABA + Phone + Token desde panel principal
+    // SOBRESCRIBÍA toda credentials, destruyendo el shape Model B.
+    const existingCredentials = (existing?.credentials as Record<string, unknown>) ?? {}
+    const mergedCredentials = {
+      ...existingCredentials,
+      access_token_secret_id: secretId,
+      phone_number_id: phoneId,
+      waba_id: wabaId,
+    }
     await sb.from('tenant_integrations').upsert({
       tenant_id:   m.tenant_id,
       provider:    'whatsapp',
       status:      'connected',
-      credentials: { access_token_secret_id: secretId, phone_number_id: phoneId },
+      credentials: mergedCredentials,
       meta: {
         waba_id:          wabaId,
         phone_id_preview: `${phoneId.slice(0, 6)}...${phoneId.slice(-4)}`,

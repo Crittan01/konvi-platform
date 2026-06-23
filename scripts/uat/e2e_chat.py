@@ -9,7 +9,10 @@ Uso:
 
 Default: número +573125835649, tenant KAIU. Override con --phone / --tenant-id.
 
-POST al webhook local con firma HMAC válida calculada con META_APP_SECRET.
+Model B Direct Provider per-tenant (ADR-0023):
+  - Webhook URL incluye tenant_id en path: /api/v1/whatsapp/webhook/{tenant_id}
+  - Firma HMAC se calcula con app_secret per-tenant resuelto via Vault
+    (tenant_integrations.credentials.app_secret_secret_id → pgsec_read_secret).
 """
 import argparse
 import hashlib
@@ -29,7 +32,44 @@ DEFAULT_PHONE = "+573125835649"
 DEFAULT_TENANT_ID = "0fb0777e-f3e4-48c7-89bf-a25aa201c0c9"
 DEFAULT_META_WABA_ID = "2159052118202272"
 DEFAULT_DEST_PHONE_ID = "990364080831295"
-WEBHOOK_URL = "http://localhost:8000/api/v1/whatsapp/webhook"
+WEBHOOK_BASE = "http://localhost:8000/api/v1/whatsapp/webhook"
+
+
+def _resolve_app_secret_from_vault(tenant_id: str) -> Optional[str]:
+    """Lee app_secret per-tenant desde Vault (Model B ADR-0023)."""
+    creds = _load_env()
+    sb_url = creds.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    sb_key = (creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
+              or os.environ.get("SUPABASE_SECRET_KEY"))
+    if not (sb_url and sb_key):
+        return None
+    try:
+        from supabase import create_client
+    except ImportError:
+        return None
+    sb = create_client(sb_url, sb_key)
+    try:
+        row = (sb.table("tenant_integrations")
+               .select("credentials")
+               .eq("tenant_id", tenant_id)
+               .eq("provider", "whatsapp")
+               .maybe_single()
+               .execute())
+    except Exception as e:
+        print(f"ERROR consultando tenant_integrations: {e}", file=sys.stderr)
+        return None
+    credentials = (row.data or {}).get("credentials") if row else None
+    if not credentials:
+        return None
+    secret_id = credentials.get("app_secret_secret_id")
+    if not secret_id:
+        return None
+    try:
+        res = sb.rpc("pgsec_read_secret", {"p_id": secret_id}).execute()
+        return res.data if res else None
+    except Exception as e:
+        print(f"ERROR leyendo Vault secret: {e}", file=sys.stderr)
+        return None
 
 
 def _load_env() -> dict:
@@ -88,9 +128,10 @@ def _supabase():
     creds = _load_env()
     from supabase import create_client
     url = creds.get("NEXT_PUBLIC_SUPABASE_URL")
-    key = creds.get("SUPABASE_SERVICE_ROLE_KEY")
+    # A0.2c: SUPABASE_SECRET_KEY canónico con fallback legacy SERVICE_ROLE_KEY.
+    key = creds.get("SUPABASE_SECRET_KEY") or creds.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
-        print("ERROR: faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env",
+        print("ERROR: faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY (ni legacy SERVICE_ROLE_KEY) en .env",
               file=sys.stderr)
         sys.exit(1)
     return create_client(url, key)
@@ -140,10 +181,15 @@ def _print_messages(msgs: list[dict]):
 
 
 def cmd_send(args):
-    creds = _load_env()
-    secret = creds.get("META_APP_SECRET", "")
+    # Model B: app_secret per-tenant desde Vault (NO META_APP_SECRET global env).
+    secret = _resolve_app_secret_from_vault(args.tenant_id)
     if not secret:
-        print("ERROR: META_APP_SECRET vacío en .env", file=sys.stderr)
+        print(
+            f"ERROR: no se pudo resolver app_secret per-tenant desde Vault para "
+            f"tenant_id={args.tenant_id}. Verificar que tenant_integrations.credentials "
+            f"tenga app_secret_secret_id válido.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     payload = _build_meta_payload(
@@ -155,9 +201,12 @@ def cmd_send(args):
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     sig = _hmac_signature(body, secret)
 
+    # URL Model B: path con tenant_id
+    url = args.url or f"{WEBHOOK_BASE}/{args.tenant_id}"
+
     import urllib.request
     req = urllib.request.Request(
-        args.url,
+        url,
         data=body,
         method="POST",
         headers={
@@ -264,7 +313,8 @@ def main():
     ap.add_argument("--tenant-id", default=DEFAULT_TENANT_ID)
     ap.add_argument("--meta-waba-id", default=DEFAULT_META_WABA_ID)
     ap.add_argument("--dest-phone-id", default=DEFAULT_DEST_PHONE_ID)
-    ap.add_argument("--url", default=WEBHOOK_URL)
+    ap.add_argument("--url", default=None,
+                    help=f"URL completa. Default: {WEBHOOK_BASE}/<tenant_id>")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p_send = sub.add_parser("send")
