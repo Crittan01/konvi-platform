@@ -436,17 +436,35 @@ async def run_agentic_turn(
                         "code": "INVALID_ARGS",
                     }
                 else:
-                    try:
-                        result = await tool.execute(args_model, ctx)
-                        result_data = result.data if result.success else {
-                            "error": result.data.get("error", "tool failed"),
-                            "code": result.data.get("code", "TOOL_ERROR"),
-                        }
-                    except Exception as exc:
-                        result_data = {
-                            "error": f"Ejecución falló: {exc}",
-                            "code": "EXECUTION_ERROR",
-                        }
+                    # Fase 2 finiquito 2026-06-23 — Pre-tool invariant binario
+                    # `tool_id_referential_integrity` (ADR-0024). Cierra BUG-CART-1:
+                    # LLM hallucinaba UUIDs en add_to_cart/update_cart_item_quantity/
+                    # remove_cart_item. Esta capa bloquea ANTES de tool.execute si el
+                    # ID no está en el catalog inyectado al prompt, retornando un
+                    # error con code MUST_LIST_CATALOG_FIRST que fuerza al LLM a
+                    # auto-recuperarse via list_catalog.
+                    from agentic.invariants.tool_id_referential_integrity import (
+                        check_tool_id_referential_integrity,
+                    )
+                    _pre_tool_block = check_tool_id_referential_integrity(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        catalog=catalog,
+                    )
+                    if _pre_tool_block is not None:
+                        result_data = _pre_tool_block
+                    else:
+                        try:
+                            result = await tool.execute(args_model, ctx)
+                            result_data = result.data if result.success else {
+                                "error": result.data.get("error", "tool failed"),
+                                "code": result.data.get("code", "TOOL_ERROR"),
+                            }
+                        except Exception as exc:
+                            result_data = {
+                                "error": f"Ejecución falló: {exc}",
+                                "code": "EXECUTION_ERROR",
+                            }
 
             tool_call_log.append({
                 "turn": turn_idx,
