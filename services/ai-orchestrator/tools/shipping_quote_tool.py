@@ -302,6 +302,7 @@ def is_shipping_quote_query(text: str) -> bool:
 
 def _get_recent_conversation_messages(
     supabase: Client,
+    tenant_id: str,
     conversation_id: str,
     limit: int = 8,
 ) -> list[dict]:
@@ -309,6 +310,7 @@ def _get_recent_conversation_messages(
         supabase.table("messages")
         .select("direction, content, created_at")
         .eq("conversation_id", conversation_id)
+        .eq("tenant_id", tenant_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -1797,7 +1799,7 @@ async def handle_shipping_quote_if_applicable(
     conversation_id: str,
     query_text: str,
 ) -> ShippingQuoteResult:
-    recent_messages = _get_recent_conversation_messages(supabase, conversation_id)
+    recent_messages = _get_recent_conversation_messages(supabase, tenant_id, conversation_id)
     if not _is_shipping_followup_query(query_text, recent_messages):
         return ShippingQuoteResult(handled=False)
 

@@ -229,7 +229,7 @@ async def create_contact(
             "consent_revoked_at": now_iso if not contact.consent_given and contact.consent_revoked_reason else None,
         }
 
-        result = supabase.table("contacts").insert(payload).execute()
+        result = supabase.table("contacts").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
         if not result.data:
             raise HTTPException(status_code=500, detail="Error al crear contacto")

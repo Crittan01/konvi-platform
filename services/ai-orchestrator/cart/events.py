@@ -183,6 +183,7 @@ def emit_item_proposal(
 def find_unresolved_proposal(
     supabase: Any,
     *,
+    tenant_id: str,
     cart_id: str,
     product_id: str,
     max_lookback: int = 20,
@@ -200,6 +201,7 @@ def find_unresolved_proposal(
             supabase.table("cart_events")
             .select("id, event_type, event_payload, created_at")
             .eq("cart_id", cart_id)
+            .eq("tenant_id", tenant_id)
             .in_("event_type", [EVT_ITEM_PROPOSED, EVT_ITEM_PROPOSAL_RESOLVED])
             .order("created_at", desc=True)
             .limit(max_lookback)

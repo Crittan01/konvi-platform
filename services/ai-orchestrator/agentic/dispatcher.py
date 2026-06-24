@@ -106,8 +106,8 @@ async def dispatch_message(
     # agentic dispatcher saltaba al `_run_agentic_full` SIN verificar.
     # Resultado: bot respondía a mensajes en conv human_takeover/closed
     # sobre-escribiendo la intervención del operador.
-    if _should_skip_for_conv_status(supabase, conversation_id):
-        _mark_message_skipped(supabase, message_id)
+    if _should_skip_for_conv_status(supabase, tenant_id, conversation_id):
+        _mark_message_skipped(supabase, tenant_id, message_id)
         return
 
     # Rev. 109 founder 2026-05-29 — Opt-out STOP gate (Habeas Data Ley 1581 ART. 9 +
@@ -127,7 +127,7 @@ async def dispatch_message(
         # Si el detector procesó el opt-out, _handle_optout_if_keyword marca
         # el message como processed y retorna True. Verificamos status conv
         # post-handle: si quedó opted_out, no avanzar al LLM.
-        post_handle_status = _get_conversation_status_safe(supabase, conversation_id)
+        post_handle_status = _get_conversation_status_safe(supabase, tenant_id, conversation_id)
         if post_handle_status == "opted_out":
             return
     except Exception as exc:
@@ -2610,7 +2610,7 @@ def _persist_turn_audit(
             "system_prompt_chars": system_prompt_chars,
             "history_turns": history_turns,
         }
-        supabase.table("agentic_shadow_log").insert(row).execute()
+        supabase.table("agentic_shadow_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
         logger.warning(
             "[AGENTIC_AUDIT] persist falló mode=%s conv=%s: %s",
@@ -2624,7 +2624,7 @@ def _persist_turn_audit(
 _SKIP_STATUSES = frozenset({"human_takeover", "closed", "opted_out"})
 
 
-def _should_skip_for_conv_status(supabase: Any, conversation_id: str) -> bool:
+def _should_skip_for_conv_status(supabase: Any, tenant_id: str, conversation_id: str) -> bool:
     """True si la conv está en estado donde el bot NO debe responder.
 
     Estados de skip:
@@ -2645,6 +2645,7 @@ def _should_skip_for_conv_status(supabase: Any, conversation_id: str) -> bool:
             supabase.table("conversations")
             .select("status")
             .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )
@@ -2661,7 +2662,7 @@ def _should_skip_for_conv_status(supabase: Any, conversation_id: str) -> bool:
         return False
 
 
-def _mark_message_skipped(supabase: Any, message_id: str) -> None:
+def _mark_message_skipped(supabase: Any, tenant_id: str, message_id: str) -> None:
     """Marca el message como skipped por status conv (human_takeover /
     closed / opted_out). Mismo behavior que el path legacy."""
     try:
@@ -2669,7 +2670,7 @@ def _mark_message_skipped(supabase: Any, message_id: str) -> None:
             "processing_status": "skipped",
             "skip_reason": "conv_status_no_bot",
             "processed": True,
-        }).eq("id", message_id).execute()
+        }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
         logger.info(
             "[AGENTIC_DISPATCH] msg=%s skipped (conv status no-bot)",
             message_id[:8],
@@ -2684,13 +2685,14 @@ def _mark_message_skipped(supabase: Any, message_id: str) -> None:
 # ─── Opt-out gate (Rev. 109 founder 2026-05-29) ─────────────────────────────
 
 
-def _get_conversation_status_safe(supabase: Any, conversation_id: str) -> str:
+def _get_conversation_status_safe(supabase: Any, tenant_id: str, conversation_id: str) -> str:
     """Lee status conv silencioso — usado por opt-out gate post-handle."""
     try:
         res = (
             supabase.table("conversations")
             .select("status")
             .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )

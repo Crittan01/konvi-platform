@@ -63,7 +63,7 @@ def log_pii_access(
     if user_agent:
         row["user_agent"] = user_agent[:500]  # truncar para evitar bloat
     try:
-        supabase.table("pii_access_log").insert(row).execute()
+        supabase.table("pii_access_log").insert(row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
         logger.warning(
             "[PII_AUDIT] insert failed tenant=%s contact=%s purpose=%s err=%s",

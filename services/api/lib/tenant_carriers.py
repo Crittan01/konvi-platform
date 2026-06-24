@@ -173,7 +173,7 @@ def upsert_preference(
         "supports_cod": bool(supports_cod),
     }
     res = (
-        supabase_client.table("tenant_carriers")
+        supabase_client.table("tenant_carriers")  # tenant_filter:exempt:upsert_on_conflict_tenant_id
         .upsert(payload, on_conflict="tenant_id,provider,carrier_code")
         .execute()
     )

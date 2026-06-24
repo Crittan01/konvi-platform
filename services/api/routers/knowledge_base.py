@@ -146,7 +146,7 @@ async def create_kb_doc(
         payload["embedding"] = _embedding_to_pgvector(vec)
 
     res = (
-        supabase.table("kb_documents")
+        supabase.table("kb_documents")  # tenant_filter:exempt:payload_includes_tenant_id
         .insert(payload)
         .select("id, title, content, category, is_active, created_at, updated_at, embedding")
         .single()

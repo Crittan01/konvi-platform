@@ -351,7 +351,7 @@ def update_status_from_webhook(
         # meta_template_id es el ID GLOBAL único de Meta — el webhook de Meta
         # (message_template_status_update) NO trae tenant_id; se resuelve por
         # este id que Meta garantiza único cross-tenant.
-        supabase_client.table("whatsapp_templates")
+        supabase_client.table("whatsapp_templates")  # tenant_filter:exempt:webhook_resolution_by_meta_template_id_global
         .update(update_fields)
         .eq("meta_template_id", meta_template_id)
         .execute()
@@ -384,7 +384,7 @@ def update_quality_from_webhook(
     res = (
         # tenant_filter:exempt:webhook_resolution_by_meta_template_id_global
         # meta_template_id global de Meta (message_template_quality_update webhook).
-        supabase_client.table("whatsapp_templates")
+        supabase_client.table("whatsapp_templates")  # tenant_filter:exempt:webhook_resolution_by_meta_template_id_global
         .update({"quality_rating": new_quality_rating})
         .eq("meta_template_id", meta_template_id)
         .execute()

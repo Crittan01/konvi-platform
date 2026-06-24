@@ -38,7 +38,7 @@ def record_api_security_event(
         "metadata": metadata or {},
     }
     try:
-        supabase.table("api_security_events").insert(payload).execute()
+        supabase.table("api_security_events").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
         # Nunca romper el request por un fallo de observabilidad.
         logger.warning("No se pudo registrar api_security_event (%s): %s", event_type, exc)

@@ -43,30 +43,30 @@ class DispatcherStatusGateTests(unittest.TestCase):
     def test_skip_si_conv_human_takeover(self):
         from agentic.dispatcher import _should_skip_for_conv_status
         sb = _make_sb("human_takeover")
-        self.assertTrue(_should_skip_for_conv_status(sb, "conv-1"))
+        self.assertTrue(_should_skip_for_conv_status(sb, "t1", "conv-1"))
 
     def test_skip_si_conv_closed(self):
         from agentic.dispatcher import _should_skip_for_conv_status
         sb = _make_sb("closed")
-        self.assertTrue(_should_skip_for_conv_status(sb, "conv-1"))
+        self.assertTrue(_should_skip_for_conv_status(sb, "t1", "conv-1"))
 
     def test_no_skip_si_conv_bot_active(self):
         from agentic.dispatcher import _should_skip_for_conv_status
         sb = _make_sb("bot_active")
-        self.assertFalse(_should_skip_for_conv_status(sb, "conv-1"))
+        self.assertFalse(_should_skip_for_conv_status(sb, "t1", "conv-1"))
 
     def test_no_skip_si_conv_no_existe(self):
         """Si conv no existe (caso raro), no skipea — deja al legacy fallar."""
         from agentic.dispatcher import _should_skip_for_conv_status
         sb = _make_sb("")  # data vacía
-        self.assertFalse(_should_skip_for_conv_status(sb, "conv-1"))
+        self.assertFalse(_should_skip_for_conv_status(sb, "t1", "conv-1"))
 
     def test_no_skip_si_db_falla(self):
         """Error leyendo conv → no skipea (default permisivo)."""
         from agentic.dispatcher import _should_skip_for_conv_status
         sb = MagicMock()
         sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.side_effect = Exception("db down")
-        self.assertFalse(_should_skip_for_conv_status(sb, "conv-1"))
+        self.assertFalse(_should_skip_for_conv_status(sb, "t1", "conv-1"))
 
     def test_dispatch_message_human_takeover_NO_llama_agentic_NI_legacy(self):
         """End-to-end: dispatch_message en conv human_takeover NO debe invocar

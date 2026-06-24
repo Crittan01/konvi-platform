@@ -6052,7 +6052,7 @@ def _bot_log_available(supabase) -> bool:
     if _BOT_LOG_AVAILABLE is False and (now - _BOT_LOG_LAST_CHECK) < _BOT_LOG_RECHECK_SECONDS:
         return False
     try:
-        supabase.table("bot_source_log").select("id").limit(1).execute()
+        supabase.table("bot_source_log").select("id").limit(1).execute()  # tenant_filter:exempt:resolution_lookup_by_table_existence
         _BOT_LOG_AVAILABLE = True
         logger.info("[BOT_LOG] Tabla bot_source_log disponible — logging activado.")
     except Exception as exc:
@@ -6131,7 +6131,7 @@ def _log_bot_sources(
         "requires_human":               bool(requires_human),
     }
     try:
-        supabase.table("bot_source_log").insert(payload).execute()
+        supabase.table("bot_source_log").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as exc:
         # Si el insert falla con "relation does not exist", invalidamos cache
         # — la migración pudo haber sido revertida. Cooldown re-evalúa en 15 min.
@@ -8578,6 +8578,7 @@ async def build_and_run_orchestration(
                     if int(_item.get("quantity") or 1) <= 1:
                         _proposal = find_unresolved_proposal(
                             supabase,
+                            tenant_id=tenant_id,
                             cart_id=_cart["id"],
                             product_id=_item["product_id"],
                         )

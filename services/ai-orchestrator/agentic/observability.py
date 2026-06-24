@@ -72,8 +72,10 @@ def compute_agentic_metrics(
     since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
     since_iso = since.isoformat()
 
+    # Analytics: filtra por tenant si se pasa tenant_id (línea ~86); cuando es
+    # None agrega cross-tenant POR DISEÑO (dashboard admin de métricas agentic).
     query = (
-        supabase.table("agentic_shadow_log")
+        supabase.table("agentic_shadow_log")  # tenant_filter:exempt:analytics_optional_tenant_filter
         .select(
             "tenant_id, mode, truncated, truncated_reason, error, "
             "tool_calls_executed, tool_call_log, elapsed_seconds, "

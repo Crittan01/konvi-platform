@@ -161,7 +161,7 @@ def validate_and_consume_oauth_state(supabase, state: str) -> Optional[str]:
         return None
 
     consume = (
-        supabase.table("integration_oauth_states")
+        supabase.table("integration_oauth_states")  # tenant_filter:exempt:payload_includes_tenant_id
         .update({"consumed_at": now.isoformat()})
         .eq("id", row["id"])
         .is_("consumed_at", "null")

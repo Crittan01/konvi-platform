@@ -352,7 +352,7 @@ class OrchestratorWorker:
             await asyncio.sleep(wait_more)
             # Re-fetch tras la espera para capturar nuevos pendings.
             re_result = (
-                self.supabase.table("messages")
+                self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_inbound_polling
                 .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
                 .eq("direction", "inbound")
                 .eq("processing_status", "pending")
@@ -417,7 +417,7 @@ class OrchestratorWorker:
         # Selección amplia (50) para muestrear varios tenants; luego
         # round-robin filtra a 10 procesables.
         result = (
-            self.supabase.table("messages")
+            self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_inbound_polling
             .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
             .eq("direction", "inbound")
             .eq("processing_status", "pending")
@@ -808,7 +808,7 @@ class OrchestratorWorker:
         try:
             # Convs en human_takeover desde hace ≥ SLA_HOURS.
             convs_res = (
-                self.supabase.table("conversations")
+                self.supabase.table("conversations")  # tenant_filter:exempt:cron_cross_tenant_sla_check
                 .select("id, tenant_id, customer_phone, last_interaction_at")
                 .eq("status", "human_takeover")
                 .lt("last_interaction_at", sla_cutoff)
@@ -836,7 +836,7 @@ class OrchestratorWorker:
                 # 1. Encontrar escalated_at — último escalation_audit.
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
                 escalation_audit = (
-                    self.supabase.table("messages")
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
                     .select("created_at")
                     .eq("conversation_id", conv_id)
                     .eq("content_type", "escalation_audit")
@@ -852,7 +852,7 @@ class OrchestratorWorker:
                 # 2. ¿Ya alertamos previamente esta breach?
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
                 breach_audit = (
-                    self.supabase.table("messages")
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
                     .select("id")
                     .eq("conversation_id", conv_id)
                     .eq("content_type", "sla_breach_audit")
@@ -869,7 +869,7 @@ class OrchestratorWorker:
                 # creado después de escalated_at = operador respondió.
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
                 human_response = (
-                    self.supabase.table("messages")
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
                     .select("id")
                     .eq("conversation_id", conv_id)
                     .eq("direction", "outbound")
@@ -949,7 +949,7 @@ class OrchestratorWorker:
 
         try:
             stale_res = (
-                self.supabase.table("messages")
+                self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_startup_recovery
                 .select("id, processing_attempts")
                 .eq("direction", "inbound")
                 .in_("processing_status", ["pending", "processing"])
@@ -972,12 +972,12 @@ class OrchestratorWorker:
                         "processed": True,
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                         "last_error": "abandoned_at_startup_max_attempts",
-                    }).eq("id", msg["id"]).execute()
+                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).execute()
                     abandoned += 1
                 else:
                     self.supabase.table("messages").update({
                         "processing_status": "pending",
-                    }).eq("id", msg["id"]).in_("processing_status", ["pending", "processing"]).execute()
+                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).in_("processing_status", ["pending", "processing"]).execute()
                     recovered += 1
 
             logger.info(
@@ -1018,7 +1018,7 @@ class OrchestratorWorker:
 
         try:
             stale_res = (
-                self.supabase.table("orders")
+                self.supabase.table("orders")  # tenant_filter:exempt:cron_cross_tenant_payment_reminder
                 .select("id, tenant_id, conversation_id, created_at, "
                         "conversations(customer_phone)")
                 .eq("status", "pending_payment")
@@ -1050,9 +1050,8 @@ class OrchestratorWorker:
                 continue
 
             try:
-                # tenant_filter:exempt:cron_cross_tenant_payment_reminder
                 last_in_res = (
-                    self.supabase.table("messages")
+                    self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_payment_reminder
                     .select("created_at")
                     .eq("conversation_id", conversation_id)
                     .eq("direction", "inbound")
@@ -1354,7 +1353,7 @@ class OrchestratorWorker:
         # sin recordatorio enviado.
         try:
             carts_res = (
-                self.supabase.table("conversation_carts")
+                self.supabase.table("conversation_carts")  # tenant_filter:exempt:cron_cross_tenant_cart_abandoned_cleanup
                 .select(
                     "id, tenant_id, conversation_id, contact_id, status, "
                     "updated_at, conversations(customer_phone)"
@@ -1555,7 +1554,7 @@ class OrchestratorWorker:
             # Schema PostgREST: 2 FKs entre orders y order_cancellations.
             # Especificamos orders_cancellation_id_fkey (la 1:1 vía link).
             res = (
-                self.supabase.table("payments")
+                self.supabase.table("payments")  # tenant_filter:exempt:cron_cross_tenant_wompi_void_polling
                 .select(
                     "id, tenant_id, order_id, wompi_txn_id, amount_in_cents, "
                     "wompi_status, orders(status, cancellation_id, "
@@ -1628,7 +1627,7 @@ class OrchestratorWorker:
                 # VOIDED en Wompi pero local sigue APPROVED → sync.
                 self.supabase.table("payments").update({
                     "wompi_status": "VOIDED",
-                }).eq("wompi_txn_id", txn_id).execute()
+                }).eq("wompi_txn_id", txn_id).eq("tenant_id", tenant_id).execute()
                 logger.info(
                     "[WOMPI_POLL] sync VOIDED txn=%s order=%s tenant=%s",
                     txn_id, order_id[:8], tenant_id[:8],
@@ -1703,7 +1702,7 @@ class OrchestratorWorker:
 
         try:
             stale_res = (
-                self.supabase.table("orders")
+                self.supabase.table("orders")  # tenant_filter:exempt:cron_cross_tenant_pending_payment_release
                 .select("id, tenant_id")
                 .eq("status", "pending_payment")
                 .lt("created_at", cutoff_iso)
@@ -1967,7 +1966,7 @@ class OrchestratorWorker:
         # Listar tenants activos (con al menos 1 integration connected).
         try:
             res = (
-                self.supabase.table("tenant_integrations")
+                self.supabase.table("tenant_integrations")  # tenant_filter:exempt:cron_cross_tenant_health_metrics
                 .select("tenant_id")
                 .eq("status", "connected")
                 .execute()

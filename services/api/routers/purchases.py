@@ -140,7 +140,7 @@ async def create_supplier(
         "phone":          body.phone,
         "lead_time_days": body.lead_time_days or 0,
     }
-    res = supabase.table("suppliers").insert(payload).execute()
+    res = supabase.table("suppliers").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     if not res.data:
         raise HTTPException(status_code=500, detail="No fue posible crear el proveedor")
     return res.data[0]
@@ -204,7 +204,7 @@ async def create_purchase_order(
         "quantity":     i.quantity,
         "unit_cost":    i.unit_cost,
     } for i in body.items]
-    supabase.table("purchase_order_items").insert(items_payload).execute()
+    supabase.table("purchase_order_items").insert(items_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
     return po
 

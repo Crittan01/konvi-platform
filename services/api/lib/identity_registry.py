@@ -101,8 +101,10 @@ def resolve_tenant_id(
     """
     p = _validate_provider(provider)
     iid = _normalize_internal_id(provider_internal_id)
+    # ESTA es la función de resolución: encuentra QUÉ tenant posee una
+    # identidad externa (provider, internal_id). Cross-tenant por definición.
     res = (
-        supabase_client.table("tenant_provider_identity")
+        supabase_client.table("tenant_provider_identity")  # tenant_filter:exempt:resolution_lookup_by_provider_internal_id
         .select("tenant_id")
         .eq("provider", p)
         .eq("provider_internal_id", iid)
@@ -121,8 +123,9 @@ def get_identity(
     """Versión completa de resolve_tenant_id que devuelve la fila completa."""
     p = _validate_provider(provider)
     iid = _normalize_internal_id(provider_internal_id)
+    # Resolución por identidad externa (provider, internal_id) → cross-tenant.
     res = (
-        supabase_client.table("tenant_provider_identity")
+        supabase_client.table("tenant_provider_identity")  # tenant_filter:exempt:resolution_lookup_by_provider_internal_id
         .select("*")
         .eq("provider", p)
         .eq("provider_internal_id", iid)
@@ -187,7 +190,7 @@ def register_identity(
         if mark_verified:
             update_payload["verified_at"] = "now()"
         res = (
-            supabase_client.table("tenant_provider_identity")
+            supabase_client.table("tenant_provider_identity")  # tenant_filter:exempt:payload_includes_tenant_id
             .update(update_payload)
             .eq("id", existing.id)
             .execute()
@@ -205,7 +208,7 @@ def register_identity(
     }
     if mark_verified:
         payload["verified_at"] = "now()"
-    res = supabase_client.table("tenant_provider_identity").insert(payload).execute()
+    res = supabase_client.table("tenant_provider_identity").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     rows = res.data or []
     if not rows:
         raise IdentityRegistryError(
@@ -223,8 +226,10 @@ def revoke_identity(
     Retorna True si había fila, False si no existía."""
     p = _validate_provider(provider)
     iid = _normalize_internal_id(provider_internal_id)
+    # Revoke por identidad externa (provider, internal_id) — la UNIQUE(provider,
+    # internal_id) garantiza 1 fila; cross-tenant por diseño (offboarding/transfer).
     res = (
-        supabase_client.table("tenant_provider_identity")
+        supabase_client.table("tenant_provider_identity")  # tenant_filter:exempt:resolution_lookup_by_provider_internal_id
         .delete()
         .eq("provider", p)
         .eq("provider_internal_id", iid)

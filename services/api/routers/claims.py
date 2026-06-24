@@ -147,7 +147,7 @@ async def create_claim(
     if body.resolution_notes:
         payload["resolution_notes"] = body.resolution_notes.strip()
 
-    res = supabase.table("claims").insert(payload).execute()
+    res = supabase.table("claims").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     if not res.data:
         raise HTTPException(status_code=500, detail="No fue posible crear el reclamo")
     return res.data[0]

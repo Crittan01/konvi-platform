@@ -1254,12 +1254,12 @@ class TestOptOutGate:
                 return FakeTable(self._status)
 
         # opted_out → skip TRUE (lo que el founder pidió "en cualquier situación")
-        assert _should_skip_for_conv_status(FakeSupabase("opted_out"), "any-uuid") is True
+        assert _should_skip_for_conv_status(FakeSupabase("opted_out"), "t1", "any-uuid") is True
         # human_takeover, closed → skip TRUE (pre-existente)
-        assert _should_skip_for_conv_status(FakeSupabase("human_takeover"), "any-uuid") is True
-        assert _should_skip_for_conv_status(FakeSupabase("closed"), "any-uuid") is True
+        assert _should_skip_for_conv_status(FakeSupabase("human_takeover"), "t1", "any-uuid") is True
+        assert _should_skip_for_conv_status(FakeSupabase("closed"), "t1", "any-uuid") is True
         # bot_active → skip FALSE (bot procesa)
-        assert _should_skip_for_conv_status(FakeSupabase("bot_active"), "any-uuid") is False
+        assert _should_skip_for_conv_status(FakeSupabase("bot_active"), "t1", "any-uuid") is False
 
     def test_coupons_block_min_subtotal_se_muestra(self):
         from agentic.system_prompt import build_system_prompt

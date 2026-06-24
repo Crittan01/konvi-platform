@@ -45,8 +45,10 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
     Items con status 'closed' en MeLi son ignorados (estado final — PUT rechazado por API).
     """
     try:
+        # Resolución: sync_meli_stock recibe variation_id (sin tenant en firma);
+        # el tenant se DESCUBRE de la fila listing. variation_id es UUID PK propio.
         listing_res = (
-            supabase.table("marketplace_listings")
+            supabase.table("marketplace_listings")  # tenant_filter:exempt:resolution_lookup_by_variation_id
             .select("id, external_id, tenant_id, meli_variation_id")
             .eq("variation_id", variation_id)
             .eq("provider", "mercadolibre")
@@ -320,7 +322,7 @@ async def link_listing(
         if meli_variation_id is not None:
             insert_data["meli_variation_id"] = int(meli_variation_id)
 
-        res = supabase.table("marketplace_listings").insert(insert_data).execute()
+        res = supabase.table("marketplace_listings").insert(insert_data).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
         # Enriquecer inmediatamente con datos pull desde MeLi
         if res.data:
@@ -622,7 +624,7 @@ async def import_from_meli(
     if cover_image_url:
         prod_payload["cover_image_url"] = cover_image_url
 
-    prod_res = supabase.table("products").insert(prod_payload).execute()
+    prod_res = supabase.table("products").insert(prod_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
     if not prod_res.data:
         raise HTTPException(status_code=500, detail="Error al crear producto en catálogo")
@@ -642,7 +644,7 @@ async def import_from_meli(
         var_payload["compare_at_price"] = compare_at_price
 
     try:
-        var_res = supabase.table("product_variations").insert(var_payload).execute()
+        var_res = supabase.table("product_variations").insert(var_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     except Exception as e:
         # Rollback producto creado (A6.2.7: tenant filter defensa cross-tenant)
         supabase.table("products").delete().eq("id", product_id).eq("tenant_id", tenant_id).execute()

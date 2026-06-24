@@ -199,7 +199,7 @@ def rotate_secret(
             "expires_at": expires_at,
             "audit_log": [audit_entry],
         }
-        res = supabase_client.table("tenant_webhook_secrets").insert(payload).execute()
+        res = supabase_client.table("tenant_webhook_secrets").insert(payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
         rows = res.data or []
         if not rows:
             raise WebhookSecretError(
@@ -229,7 +229,7 @@ def rotate_secret(
         "audit_log": new_audit_log,
     }
     res = (
-        supabase_client.table("tenant_webhook_secrets")
+        supabase_client.table("tenant_webhook_secrets")  # tenant_filter:exempt:payload_includes_tenant_id
         .update(update_payload)
         .eq("id", existing.id)
         .execute()

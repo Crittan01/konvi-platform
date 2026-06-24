@@ -135,7 +135,7 @@ class CartProposalsTests(unittest.TestCase):
             product_id="p-coco", title="Jabón Coco", quantity=2,
         )
         found = self.mod.find_unresolved_proposal(
-            self.sb, cart_id="c1", product_id="p-coco",
+            self.sb, tenant_id="t1", cart_id="c1", product_id="p-coco",
         )
         self.assertIsNotNone(found)
         self.assertEqual(found["quantity"], 2)
@@ -151,7 +151,7 @@ class CartProposalsTests(unittest.TestCase):
             proposed_event_id=evt_id, variation_id="v-60g", final_quantity=2,
         )
         found = self.mod.find_unresolved_proposal(
-            self.sb, cart_id="c1", product_id="p-coco",
+            self.sb, tenant_id="t1", cart_id="c1", product_id="p-coco",
         )
         self.assertIsNone(found, "Propuesta resuelta no debe re-aparecer")
 
@@ -161,7 +161,7 @@ class CartProposalsTests(unittest.TestCase):
             product_id="p-coco", title="Jabón Coco", quantity=2,
         )
         found = self.mod.find_unresolved_proposal(
-            self.sb, cart_id="c1", product_id="p-aceite",
+            self.sb, tenant_id="t1", cart_id="c1", product_id="p-aceite",
         )
         self.assertIsNone(found)
 
@@ -175,7 +175,7 @@ class CartProposalsTests(unittest.TestCase):
             product_id="p-coco", title="Jabón Coco", quantity=2,
         )
         found = self.mod.find_unresolved_proposal(
-            self.sb, cart_id="c1", product_id="p-coco",
+            self.sb, tenant_id="t1", cart_id="c1", product_id="p-coco",
         )
         self.assertEqual(found["quantity"], 2,
                          "Propuesta más reciente gana (cliente cambió de opinión)")
@@ -198,7 +198,7 @@ class CartProposalsTests(unittest.TestCase):
         )
         # Sérum sigue pendiente.
         found_serum = self.mod.find_unresolved_proposal(
-            self.sb, cart_id="c1", product_id="p-serum",
+            self.sb, tenant_id="t1", cart_id="c1", product_id="p-serum",
         )
         self.assertIsNotNone(found_serum)
         self.assertEqual(found_serum["quantity"], 3)
@@ -206,7 +206,7 @@ class CartProposalsTests(unittest.TestCase):
 
         # Coco ya resuelto.
         found_coco = self.mod.find_unresolved_proposal(
-            self.sb, cart_id="c1", product_id="p-coco",
+            self.sb, tenant_id="t1", cart_id="c1", product_id="p-coco",
         )
         self.assertIsNone(found_coco)
 

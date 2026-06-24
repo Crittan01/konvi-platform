@@ -570,10 +570,11 @@ def _upsert_payment_record(
     """
     existing = None
     # 1) Lookup por wompi_txn_id (replay del mismo evento).
+    # Webhook resolution: Wompi sólo trae sus refs globales (txn_id/link_id); el
+    # tenant se DESCUBRE de la fila resuelta. No hay tenant_id que filtrar aún.
     if wompi_txn_id:
-        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
-            supabase.table("payments")
+            supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("id, tenant_id")
             .eq("wompi_txn_id", wompi_txn_id)
             .limit(1)
@@ -584,9 +585,8 @@ def _upsert_payment_record(
     # 2) Si no encontró por txn_id, buscar por wompi_link_id (fila pre-existente
     #    creada por payment_link_tool con txn_id NULL — primer webhook APPROVED).
     if not existing and wompi_link_id and order_id:
-        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
-            supabase.table("payments")
+            supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("id, tenant_id, wompi_txn_id")
             .eq("order_id", order_id)
             .eq("wompi_link_id", wompi_link_id)
@@ -605,16 +605,16 @@ def _upsert_payment_record(
         }
         if wompi_txn_id and not existing.get("wompi_txn_id"):
             update_payload["wompi_txn_id"] = wompi_txn_id
-        supabase.table("payments").update(update_payload).eq("id", existing["id"]).execute()
+        supabase.table("payments").update(update_payload).eq("id", existing["id"]).eq("tenant_id", existing["tenant_id"]).execute()
         return True  # replay o complete-pre-existing
 
     if not order_id:
         logger.warning("[WOMPI] sin_order_id_para_insert txn_id=%s — payment no registrado", wompi_txn_id)
         return False
 
-    # tenant_filter:exempt:webhook_resolution_lookup
+    # Webhook resolution: descubre el tenant del order para el INSERT del payload.
     order_res = (
-        supabase.table("orders")
+        supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
         .select("tenant_id")
         .eq("id", order_id)
         .limit(1)
@@ -643,9 +643,8 @@ def _upsert_payment_record(
 def _get_order_id_by_link(supabase, wompi_link_id: str):
     """Resuelve order_id desde wompi_link_id via tabla payments."""
     try:
-        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
-            supabase.table("payments")
+            supabase.table("payments")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("order_id")
             .eq("wompi_link_id", wompi_link_id)
             .limit(1)
@@ -660,9 +659,8 @@ def _get_order_id_by_link(supabase, wompi_link_id: str):
 
 def _get_order_by_id(supabase, order_id: str):
     try:
-        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
-            supabase.table("orders")
+            supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("id, tenant_id, status, conversation_id, contact_id")
             .eq("id", order_id)
             .limit(1)
@@ -742,9 +740,9 @@ def _is_post_cancel_void(supabase, *, order_id: str) -> bool:
     donde sí queremos ofrecer retry.
     """
     try:
-        # tenant_filter:exempt:webhook_resolution_lookup
+        # Webhook processing: resuelve estado del order por su id (ref del webhook).
         row = (
-            supabase.table("orders")
+            supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("status, cancellation_id")
             .eq("id", order_id).single().execute()
         ).data
@@ -756,9 +754,8 @@ def _is_post_cancel_void(supabase, *, order_id: str) -> bool:
         cid = row.get("cancellation_id")
         if not cid:
             return False
-        # tenant_filter:exempt:webhook_resolution_lookup
         cancel_row = (
-            supabase.table("order_cancellations")
+            supabase.table("order_cancellations")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("refund_method")
             .eq("id", cid).single().execute()
         ).data
@@ -783,9 +780,9 @@ def _notify_client_refund_completed(
     Envía WhatsApp + email + actualiza audit refund_completed_at.
     """
     try:
-        # tenant_filter:exempt:webhook_resolution_lookup
+        # Webhook processing: descubre el tenant del order (ref del webhook).
         order = (
-            supabase.table("orders")
+            supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
             .select("tenant_id, conversation_id, cancellation_id")
             .eq("id", order_id).single().execute()
         ).data

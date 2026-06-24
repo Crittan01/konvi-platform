@@ -319,6 +319,7 @@ def _get_order_tracking(
 
 def _get_conversation_phone(
     supabase: Client,
+    tenant_id: str,
     conversation_id: str,
 ) -> Optional[str]:
     try:
@@ -326,6 +327,7 @@ def _get_conversation_phone(
             supabase.table("conversations")
             .select("customer_phone")
             .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
             .single()
             .execute()
         )
@@ -366,7 +368,7 @@ async def handle_order_status_if_applicable(
 
         # 2) Si no hay, intentar por contact_id (mismo número en otras convs).
         if not order:
-            phone = _get_conversation_phone(supabase, conversation_id)
+            phone = _get_conversation_phone(supabase, tenant_id, conversation_id)
             if phone:
                 contact_id = _get_contact_id_by_phone(supabase, tenant_id, phone)
                 if contact_id:

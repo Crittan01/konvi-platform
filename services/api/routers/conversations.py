@@ -1188,7 +1188,7 @@ async def rerun_last_inbound(
         },
     }
 
-    insert_res = supabase.table("messages").insert(clone_payload).execute()
+    insert_res = supabase.table("messages").insert(clone_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
     if not insert_res.data:
         raise HTTPException(status_code=500, detail="No se pudo encolar rerun")
 

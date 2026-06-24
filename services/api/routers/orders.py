@@ -208,7 +208,7 @@ async def create_order(
             }
             for item in order.items
         ]
-        supabase.table("order_items").insert(items_data).execute()
+        supabase.table("order_items").insert(items_data).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
         response_body = {**order_result.data[0], "items": items_data}
 

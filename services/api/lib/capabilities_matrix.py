@@ -242,13 +242,13 @@ def upsert_capability(
     }
     if existing is None:
         res = (
-            supabase_client.table("tenant_provider_capabilities")
+            supabase_client.table("tenant_provider_capabilities")  # tenant_filter:exempt:payload_includes_tenant_id
             .insert(payload)
             .execute()
         )
     else:
         res = (
-            supabase_client.table("tenant_provider_capabilities")
+            supabase_client.table("tenant_provider_capabilities")  # tenant_filter:exempt:payload_includes_tenant_id
             .update(payload)
             .eq("id", existing.id)
             .execute()
