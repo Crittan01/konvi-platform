@@ -314,17 +314,23 @@ async def _quote_via_aveonline(
             "cod_supported": opt.cod_supported,
         })
 
-    # Persistir shipment row (mismo patrón Envia para que /history funcione).
+    # Persistir shipment row para que /history funcione.
+    # A3 finiquito (audit §3 BUG#1 CRITICAL): antes insertaba columnas `provider`
+    # y `rates_snapshot` que NO existen en el schema real de `shipments` (verificado
+    # en DB remota 2026-06-24) → el insert fallaba 100% (try/except silenciaba el
+    # 400 'column does not exist') y el historial del Cotizador quedaba VACÍO tras
+    # el pivote Envia→Aveonline. Fix: `provider` se elimina (no hay columna; el
+    # provider es implícito Aveonline post-ADR-0019) y los rates van a la columna
+    # canónica `quote_response`.
     shipment_id = None
     try:
         shipment_result = supabase.table("shipments").insert({
             "tenant_id": tenant_id,
             "status": "quoted",
-            "provider": "aveonline",
             "origin_address": req.origin.model_dump(exclude_none=True),
             "destination_address": req.destination.model_dump(exclude_none=True),
             "parcels": [p.model_dump() for p in req.parcels],
-            "rates_snapshot": rates,
+            "quote_response": rates,
         }).execute()
         if shipment_result.data:
             shipment_id = shipment_result.data[0]["id"]

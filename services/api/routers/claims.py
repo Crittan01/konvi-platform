@@ -36,7 +36,13 @@ from dependencies.auth import (
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Claims"])
 
-VALID_STATUSES = {"open", "in_progress", "resolved", "closed", "cancelled"}
+# A4 finiquito (audit §3 BUG#2 CRITICAL) — vocabulario canónico alineado con la UI
+# (claims-manager.tsx STATUS_MAP + botones Investigando/Reembolsar/Rechazar). Antes
+# el API tenía {in_progress, closed} que la UI NO usaba, y rechazaba 422 los
+# {investigating, refunded, rejected} de los botones → 3 botones rotos. 0 claims en
+# DB al alinear (sin migración de datos). Mismo set en el tool agentic
+# (tools/claims.py) + CHECK constraint DB (migración 20260624010000).
+VALID_STATUSES = {"open", "investigating", "resolved", "refunded", "rejected", "cancelled"}
 
 # Razones canónicas. Free-form reason aceptado pero validado en Pydantic.
 # Estos son los más comunes — se documentan para facilitar UI dropdowns.

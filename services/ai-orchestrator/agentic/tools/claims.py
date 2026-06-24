@@ -49,7 +49,8 @@ from agentic.tools.registry import register_tool
 # Single source of truth: `services/api/routers/claims.py:VALID_STATUSES`.
 # Importarlo causaría circular dep tool→api; redeclaramos pero con comentario
 # que apunta al canónico. Si cambian allá, change-here-test catches it.
-_VALID_STATUSES = frozenset({"open", "in_progress", "resolved", "closed", "cancelled"})
+# A4 finiquito — alineado con el API router (claims.py VALID_STATUSES) + UI.
+_VALID_STATUSES = frozenset({"open", "investigating", "resolved", "refunded", "rejected", "cancelled"})
 
 
 # ─── Args schemas ───────────────────────────────────────────────────────────
