@@ -1,0 +1,19 @@
+# CODEOWNERS — Konvi Platform
+#
+# A6.2.4 finiquito 2026-06-23 (super-audit worwkgukx HIGH gap): el baseline
+# del lint multi-tenant + el propio lint son guardrails de seguridad. Sin
+# CODEOWNERS, cualquier PR podía agregar un gap de aislamiento cross-tenant
+# + regenerar el baseline en el mismo PR, vaciando el guardrail sin review.
+# Estos paths requieren aprobación explícita del owner.
+
+# ── Guardrail multi-tenant (A6 finiquito) ──────────────────────────────────
+/gaps_tenant_filter_baseline.csv          @Crittan01
+/scripts/audit_tenant_filter.py           @Crittan01
+/services/api/dependencies/tenant_scope.py @Crittan01
+
+# ── Decisiones arquitectónicas selladas ────────────────────────────────────
+/docs/adr/                                @Crittan01
+
+# ── Seguridad / secrets / Vault ────────────────────────────────────────────
+/services/connector-whatsapp/dependencies/meta.py  @Crittan01
+/supabase/migrations/                     @Crittan01

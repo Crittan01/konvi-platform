@@ -47,66 +47,83 @@ from pathlib import Path
 # este set debe mantenerse aquí mismo como replacement. Lista extendida
 # vs el set original de tenant_scope.py — incluye tablas críticas que el
 # helper original NO contemplaba.
-TENANT_SCOPED_TABLES_EXTENDED: frozenset[str] = frozenset({
-    # Originales del helper tenant_scope.py
-    "orders",
-    "order_items",
-    "order_tracking",
-    "contacts",
-    "conversations",
-    "messages",
-    "payments",
-    "products",
-    "product_variations",
-    "stock_movements",
-    "marketplace_listings",
-    "api_security_events",
-    "idempotency_keys",
-    "tenant_usage_events",
-    "tenant_usage_counters",
-    "ai_agents",
-    "tenant_integrations",
-    # Adicionales críticas multi-tenant (Fase A6.1 audit extended)
-    "conversation_carts",
-    "cart_items",
-    "cart_events",
-    "consent_audit_log",
-    "consent_versions",
-    "contact_consent_audit_log",
-    "pii_access_log",
-    "data_subject_requests",
-    "habeas_data_audit_log",
-    "claims",
-    "claim_messages",
-    "purchases",
-    "purchase_items",
-    "purchase_order_items",
-    "suppliers",
-    "shipments",
-    "shipment_events",
-    "coupons",
-    "coupon_redemptions",
-    "knowledge_base_entries",
-    "tenant_provider_capabilities",
-    "tenant_provider_health",
-    "tenant_provider_identity",
-    "tenant_billing_events",
-    "tenant_carriers",
-    "tenant_payment_methods",
-    "notification_settings",
-    "outbound_message_queue",
-    "review_queue",
-    "agentic_shadow_log",
-    "whatsapp_templates",
-    "whatsapp_template_quality_events",
-    "tool_call_log",
-    "outbound_idempotency_cache",
-    "tenant_webhook_secrets",
-    "credential_access_log",
-    "audit_log_forensics",
-    "scheduled_jobs",
-    "agentic_telemetry",
+# A6.2.2 finiquito 2026-06-23 (super-audit worwkgukx HIGH gap): el set
+# hardcoded previo (56 tablas) tenía DRIFT vs schema real — 27 tablas con
+# columna `tenant_id` NO estaban listadas (false negatives no auditados) +
+# 17 tablas inventadas que NO existen en migrations. Ahora el set se DERIVA
+# AUTOMÁTICAMENTE de `supabase/migrations/*.sql` parseando qué tablas tienen
+# columna `tenant_id`. Fallback estático mínimo si migrations no accesibles
+# (CI deploy unit sin el dir). El test de coherencia
+# `test_tenant_scoped_tables_matches_migrations` falla si hay drift futuro.
+
+# Fallback estático mínimo — solo las tablas core P0 garantizadas. Usado SOLO
+# si el scan de migrations falla (dir ausente). En operación normal el set
+# completo se deriva de migrations.
+_FALLBACK_TENANT_SCOPED_TABLES: frozenset[str] = frozenset({
+    "orders", "order_items", "order_tracking", "contacts", "conversations",
+    "messages", "payments", "products", "product_variations", "stock_movements",
+    "marketplace_listings", "ai_agents", "tenant_integrations",
+    "conversation_carts", "cart_events", "consent_audit_log", "pii_access_log",
+    "claims", "coupons", "coupon_redemptions", "shipments", "suppliers",
 })
+
+# Tablas globales (sin tenant_id por diseño) que NUNCA deben flaguearse aunque
+# aparezcan en queries — evita falsos positivos si una migration las renombra.
+_GLOBAL_TABLES_NEVER_SCOPED: frozenset[str] = frozenset({
+    "tenants",  # la tabla raíz — su PK ES el tenant
+    "divipola_dane_codes",  # catálogo geográfico global Colombia
+    "schema_migrations",
+})
+
+
+def discover_tenant_scoped_tables_from_migrations(
+    migrations_dir: "Path | None" = None,
+) -> frozenset[str]:
+    """Parsea `supabase/migrations/*.sql` detectando tablas con columna
+    `tenant_id` (vía CREATE TABLE con tenant_id en el body, o ALTER TABLE
+    ADD COLUMN tenant_id). Source of truth dinámica — elimina el drift del
+    set hardcoded previo.
+
+    Retorna fallback estático si el dir no existe (CI deploy aislado).
+    """
+    import re as _re
+
+    if migrations_dir is None:
+        migrations_dir = Path(__file__).resolve().parents[1] / "supabase" / "migrations"
+    if not migrations_dir.exists():
+        return _FALLBACK_TENANT_SCOPED_TABLES
+
+    found: set[str] = set()
+    create_re = _re.compile(
+        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?["]?(\w+)["]?\s*\((.*?)\)\s*;',
+        _re.IGNORECASE | _re.DOTALL,
+    )
+    alter_re = _re.compile(
+        r'ALTER\s+TABLE\s+(?:public\.)?["]?(\w+)["]?\s+ADD\s+COLUMN\s+'
+        r'(?:IF\s+NOT\s+EXISTS\s+)?["]?tenant_id["]?',
+        _re.IGNORECASE,
+    )
+    tenant_col_re = _re.compile(r'\btenant_id\b', _re.IGNORECASE)
+
+    for sql_file in sorted(migrations_dir.glob("*.sql")):
+        try:
+            text = sql_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in create_re.finditer(text):
+            if tenant_col_re.search(m.group(2)):
+                found.add(m.group(1))
+        for m in alter_re.finditer(text):
+            found.add(m.group(1))
+
+    found -= _GLOBAL_TABLES_NEVER_SCOPED
+    if not found:
+        return _FALLBACK_TENANT_SCOPED_TABLES
+    return frozenset(found)
+
+
+# Set efectivo usado por el lint — derivado de migrations en import time.
+TENANT_SCOPED_TABLES_EXTENDED: frozenset[str] = discover_tenant_scoped_tables_from_migrations()
 
 
 # Métodos de write que requieren tenant_id en el payload (no en chain).
@@ -150,6 +167,9 @@ class FileVisitor(ast.NodeVisitor):
     file_path: str
     source_lines: list[str]
     gaps: list[Gap] = field(default_factory=list)
+    # A6.2.3 — strict por default: payload variable no-verificable se flaguea
+    # (kind=unverifiable_payload_*). lenient=False asume OK (legacy behavior).
+    strict_payload: bool = True
 
     def _is_exempted(self, lineno: int) -> bool:
         """Comprueba si la línea o la línea anterior tiene marker exempt."""
@@ -219,17 +239,31 @@ class FileVisitor(ast.NodeVisitor):
         # Buscar write con payload que incluya 'tenant_id'
         for method_name, method_call in chain_methods:
             if method_name in _WRITE_METHODS:
-                if self._payload_has_tenant_id(method_call):
-                    return  # OK — payload incluye tenant_id
-                # Si es write SIN tenant_id en payload → gap específico
-                self.gaps.append(Gap(
-                    file=self.file_path,
-                    line=lineno,
-                    col=col,
-                    table=table_name,
-                    kind=f"missing_payload_key_{method_name}",
-                    snippet=self._get_snippet(lineno),
-                ))
+                status = self._payload_tenant_id_status(method_call)
+                if status == "present":
+                    return  # OK — payload incluye tenant_id literal
+                if status == "absent":
+                    # Dict literal SIN tenant_id → gap definitivo.
+                    self.gaps.append(Gap(
+                        file=self.file_path, line=lineno, col=col,
+                        table=table_name,
+                        kind=f"missing_payload_key_{method_name}",
+                        snippet=self._get_snippet(lineno),
+                    ))
+                    return
+                # status == "unverifiable" (payload es variable, no Dict literal).
+                # A6.2.3 finiquito 2026-06-23: ANTES retornaba "OK" silencioso
+                # (false-negative — no se podía verificar pero se asumía bien).
+                # Ahora en strict mode (default) lo flaguea con kind distinto
+                # para que el triage sepa que requiere revisión manual o
+                # exemption marker. En lenient mode se asume OK (legacy).
+                if self.strict_payload:
+                    self.gaps.append(Gap(
+                        file=self.file_path, line=lineno, col=col,
+                        table=table_name,
+                        kind=f"unverifiable_payload_{method_name}",
+                        snippet=self._get_snippet(lineno),
+                    ))
                 return
 
         # Sin .eq ni write detectado → asumir read sin filter
@@ -298,35 +332,52 @@ class FileVisitor(ast.NodeVisitor):
                 return False
         return False
 
-    def _payload_has_tenant_id(self, write_call: ast.Call) -> bool:
-        """¿El primer arg de `.insert(payload)` / `.upsert(payload)` /
-        `.update(payload)` contiene clave 'tenant_id' literal?
-        Best-effort: solo detecta Dict literal. Si payload es variable,
-        retorna False (conservative — flag como potencial gap)."""
+    def _payload_tenant_id_status(self, write_call: ast.Call) -> str:
+        """Estado del tenant_id en el payload de un write call.
+
+        Retorna:
+          'present'      — Dict literal con clave 'tenant_id', o kwarg tenant_id=.
+          'absent'       — Dict literal SIN clave 'tenant_id' (gap definitivo).
+          'unverifiable' — payload es variable / no inspeccionable estáticamente.
+
+        A6.2.3 finiquito 2026-06-23: el método previo `_payload_has_tenant_id`
+        colapsaba 'unverifiable' a 'present' (return True), creando un
+        false-negative sistemático. Ahora se distingue para que el caller
+        decida según strict_payload mode.
+        """
         if not write_call.args:
-            return False
+            # `.update()` sin args posicional — raro, tratamos como absent
+            # (kwargs-only no es patrón supabase-py para payload).
+            for kw in write_call.keywords:
+                if kw.arg == "tenant_id":
+                    return "present"
+            return "absent"
         first = write_call.args[0]
         if isinstance(first, ast.Dict):
             for key in first.keys:
                 if isinstance(key, ast.Constant) and key.value == "tenant_id":
-                    return True
-            return False
-        # Variable/no-Dict — best-effort: chequear si en kwargs aparece
+                    return "present"
+            return "absent"
+        # Variable / comprehension / call result — no inspeccionable.
         for kw in write_call.keywords:
             if kw.arg == "tenant_id":
-                return True
-        # Conservative: si payload es variable, asumimos OK (no flagueamos
-        # falsos positivos masivos). Si querés ser estricto, cambiar a False.
-        return True
+                return "present"
+        return "unverifiable"
 
     @classmethod
-    def analyze(cls, file_path: str, source: str) -> list[Gap]:
+    def analyze(
+        cls, file_path: str, source: str, *, strict_payload: bool = True,
+    ) -> list[Gap]:
         """Entry point — parsea source + corre visitor."""
         try:
             tree = ast.parse(source, filename=file_path)
         except SyntaxError:
             return []
-        visitor = cls(file_path=file_path, source_lines=source.splitlines())
+        visitor = cls(
+            file_path=file_path,
+            source_lines=source.splitlines(),
+            strict_payload=strict_payload,
+        )
         # Pre-collect all Call nodes for chain traversal
         visitor._all_calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
         visitor.visit(tree)
@@ -362,7 +413,18 @@ def main() -> int:
         "--quiet", action="store_true",
         help="No imprimir gaps a stdout (útil cuando --csv o --json)",
     )
+    parser.add_argument(
+        "--lenient-payload-variables", action="store_true",
+        help="(A6.2.3) Asume OK los .insert/.update(variable) no inspeccionables "
+             "estáticamente. Default: strict (flaguea kind=unverifiable_payload_*).",
+    )
+    parser.add_argument(
+        "--max-gaps", type=int, default=None,
+        help="(A6.2.4) Ratchet: falla si total gaps > N. Fuerza decrecer el "
+             "baseline. CI usa BASELINE_MAX env var.",
+    )
     args = parser.parse_args()
+    strict_payload = not args.lenient_payload_variables
 
     repo_root = Path(args.root) if args.root else Path(__file__).resolve().parents[1]
     targets = [
@@ -382,7 +444,7 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             continue
         rel = str(fp.relative_to(repo_root))
-        gaps = FileVisitor.analyze(rel, source)
+        gaps = FileVisitor.analyze(rel, source, strict_payload=strict_payload)
         all_gaps.extend(gaps)
 
     all_gaps.sort(key=lambda g: (g.file, g.line, g.col))
@@ -410,6 +472,20 @@ def main() -> int:
                       file=sys.stderr)
         else:
             print("[lint] ✅ No gaps detected.", file=sys.stderr)
+
+    # A6.2.4 — Ratchet decreciente: el total de gaps NO debe exceder --max-gaps.
+    # Fuerza que el baseline solo BAJE con el tiempo (cada fix A6.2.7 reduce el
+    # número; nunca puede subir sin bump explícito + review CODEOWNERS).
+    if args.max_gaps is not None and len(all_gaps) > args.max_gaps:
+        if not args.quiet:
+            print(
+                f"\n[lint] ❌ RATCHET: {len(all_gaps)} gaps > max permitido "
+                f"{args.max_gaps}. El baseline solo puede DECRECER. Si un fix "
+                f"redujo gaps, baja --max-gaps. Si agregaste gaps legítimos, "
+                f"requiere review CODEOWNERS + bump explícito.",
+                file=sys.stderr,
+            )
+        return 1
 
     # CI mode — baseline comparison
     if args.baseline:

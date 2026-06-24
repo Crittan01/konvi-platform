@@ -198,5 +198,91 @@ def fn():
         self.assertEqual(gaps, [])
 
 
+class StrictPayloadTests(unittest.TestCase):
+    """A6.2.3 — payload variable no-verificable: strict flaguea, lenient no."""
+
+    SRC_VARIABLE_PAYLOAD = '''
+def fn():
+    payload = build_order(...)
+    supabase.table("orders").insert(payload).execute()
+'''
+
+    def test_strict_default_flags_unverifiable_payload(self):
+        """Default strict → payload variable es gap kind=unverifiable_payload_insert."""
+        gaps = FileVisitor.analyze("t.py", self.SRC_VARIABLE_PAYLOAD)  # strict default
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(gaps[0].kind, "unverifiable_payload_insert")
+        self.assertEqual(gaps[0].table, "orders")
+
+    def test_lenient_skips_unverifiable_payload(self):
+        """lenient → payload variable se asume OK (legacy behavior)."""
+        gaps = FileVisitor.analyze(
+            "t.py", self.SRC_VARIABLE_PAYLOAD, strict_payload=False,
+        )
+        self.assertEqual(gaps, [])
+
+    def test_dict_literal_with_tenant_id_ok_in_both_modes(self):
+        src = '''
+def fn():
+    supabase.table("orders").insert({"tenant_id": tid, "x": 1}).execute()
+'''
+        self.assertEqual(FileVisitor.analyze("t.py", src), [])
+        self.assertEqual(
+            FileVisitor.analyze("t.py", src, strict_payload=False), [])
+
+    def test_dict_literal_without_tenant_id_gap_in_both_modes(self):
+        """Dict literal SIN tenant_id es gap definitivo (absent), no unverifiable."""
+        src = '''
+def fn():
+    supabase.table("orders").insert({"x": 1, "y": 2}).execute()
+'''
+        strict = FileVisitor.analyze("t.py", src)
+        lenient = FileVisitor.analyze("t.py", src, strict_payload=False)
+        self.assertEqual(len(strict), 1)
+        self.assertEqual(strict[0].kind, "missing_payload_key_insert")
+        self.assertEqual(len(lenient), 1)  # absent NO depende de strict
+        self.assertEqual(lenient[0].kind, "missing_payload_key_insert")
+
+
+class SchemaDiscoveryTests(unittest.TestCase):
+    """A6.2.2 — TENANT_SCOPED_TABLES_EXTENDED derivado de migrations reales."""
+
+    def test_discovery_returns_known_critical_tables(self):
+        from audit_tenant_filter import discover_tenant_scoped_tables_from_migrations
+        tables = discover_tenant_scoped_tables_from_migrations()
+        # Tablas core garantizadas en cualquier estado del schema.
+        for critical in ("orders", "contacts", "conversations", "messages",
+                         "payments", "conversation_carts"):
+            self.assertIn(critical, tables, f"{critical} debe estar en discovery")
+
+    def test_discovery_fallback_when_dir_missing(self):
+        from audit_tenant_filter import (
+            discover_tenant_scoped_tables_from_migrations,
+            _FALLBACK_TENANT_SCOPED_TABLES,
+        )
+        result = discover_tenant_scoped_tables_from_migrations(Path("/nonexistent_xyz"))
+        self.assertEqual(result, _FALLBACK_TENANT_SCOPED_TABLES)
+
+    def test_discovery_excludes_global_tables(self):
+        """`tenants` (raíz) NO debe estar en el set scoped."""
+        from audit_tenant_filter import TENANT_SCOPED_TABLES_EXTENDED
+        self.assertNotIn("tenants", TENANT_SCOPED_TABLES_EXTENDED)
+        self.assertNotIn("schema_migrations", TENANT_SCOPED_TABLES_EXTENDED)
+
+    def test_effective_set_matches_migrations_no_drift(self):
+        """COHERENCIA: el set efectivo == discovery actual. Falla si alguien
+        hardcodea una tabla no presente en migrations o viceversa (drift)."""
+        from audit_tenant_filter import (
+            TENANT_SCOPED_TABLES_EXTENDED,
+            discover_tenant_scoped_tables_from_migrations,
+        )
+        fresh = discover_tenant_scoped_tables_from_migrations()
+        self.assertEqual(
+            TENANT_SCOPED_TABLES_EXTENDED, fresh,
+            "DRIFT: el set efectivo difiere de migrations. Si agregaste una "
+            "migration con tabla tenant_scoped, regenera el baseline.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

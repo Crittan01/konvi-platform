@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -316,6 +317,90 @@ async def _emit_degraded_response_and_escalate(
     )
 
 
+# ─── Tenant prompt context loader (A6.2.1 finiquito 2026-06-23) ─────────────
+
+
+@dataclass
+class TenantPromptContext:
+    """Datos del tenant inyectados al system_prompt (identity + philosophy +
+    business_ops). Extraído de `_run_agentic_full` (super-audit worwkgukx HIGH
+    gap) para hacer testeable el manejo de error del lookup DB — antes vivía
+    inline con `except Exception: pass` que silenciaba fallos y reintroducía
+    la causa raíz P1 (bot improvisa) sin señal."""
+
+    name: str = "el negocio"
+    pitch: Optional[str] = None
+    tone: Optional[str] = None
+    philosophy: Optional[dict] = None
+    shipping_origin: Optional[dict] = None
+    store_locations: Optional[list] = None
+    store_type: Optional[str] = None
+    support_schedule: Optional[dict] = None
+    social_links: Optional[dict] = None
+    after_hours_message: Optional[str] = None
+
+
+def _load_tenant_prompt_context(
+    supabase: Any,
+    tenant_id: str,
+    *,
+    default_name: str = "el negocio",
+) -> TenantPromptContext:
+    """Carga identity + philosophy + business_ops del tenant para el prompt.
+
+    Degradación graceful: si la query DB falla (timeout, RLS, columna
+    faltante), retorna el context con defaults (name=default_name, resto None)
+    + emite logger.warning con el tenant_id para diagnóstico. NO reraise — un
+    fallo de business_ops no debe tumbar el turno del cliente, pero TAMPOCO
+    debe ser silencioso (lección A6.2.1: el `except: pass` previo reintroducía
+    P1 invisible si la DB fallaba).
+    """
+    ctx = TenantPromptContext(name=default_name)
+    try:
+        ten_row = (
+            supabase.table("tenants")
+            .select(
+                "name, business_pitch, tono_comunicacion, "
+                "mision, vision, valores, "
+                # A2 finiquito 2026-06-23 — business_ops block.
+                "shipping_origin, store_locations, store_type, "
+                "support_schedule, social_links, after_hours_message",
+            )
+            .eq("id", tenant_id).single().execute()
+        )
+        td = ten_row.data or {}
+        ctx.name = td.get("name") or ctx.name
+        ctx.pitch = td.get("business_pitch") or None
+        ctx.tone = td.get("tono_comunicacion") or None
+        # Rev. 109 auditoría — inyectar filosofía completa al system_prompt.
+        if any(td.get(k) for k in ("mision", "vision", "valores")):
+            ctx.philosophy = {
+                "mision": td.get("mision"),
+                "vision": td.get("vision"),
+                "valores": td.get("valores"),
+            }
+        # A2 finiquito — business_ops fields.
+        ctx.shipping_origin = td.get("shipping_origin") or None
+        ctx.store_locations = td.get("store_locations") or None
+        ctx.store_type = td.get("store_type") or None
+        ctx.support_schedule = td.get("support_schedule") or None
+        ctx.social_links = td.get("social_links") or None
+        ctx.after_hours_message = td.get("after_hours_message") or None
+    except Exception as exc:
+        # A6.2.1 finiquito 2026-06-23 (super-audit worwkgukx HIGH gap):
+        # ANTES `except: pass` silenciaba fallos DB → TODOS los kwargs
+        # business_ops + philosophy quedaban None → bot improvisaba
+        # horarios/despacho como pre-Fase 0, sin señal. Reintroducción
+        # silenciosa de P1. Ahora logueamos con tenant_id para diagnóstico.
+        logger.warning(
+            "[AGENTIC_TENANT_LOAD] fallo cargando tenant=%s business_ops/"
+            "philosophy (bot operará SIN esos datos → posible improvisación): "
+            "%s: %s",
+            tenant_id, type(exc).__name__, exc,
+        )
+    return ctx
+
+
 # ─── Agentic full path (cutover) ───────────────────────────────────────────
 
 
@@ -516,49 +601,20 @@ async def _run_agentic_full(
     # System prompt — Rev. 107 fix: leer tenant.name real desde DB
     # (antes default "el negocio" → bot decía "Bienvenida a Sara Camila,
     # cosmética artesanal natural" usando agent_name como tenant name).
-    tenant_name = "el negocio"
-    tenant_pitch = None
-    tenant_tone = None
-    tenant_philosophy: Optional[dict] = None
-    # A2 finiquito 2026-06-23 — business_ops block source.
-    tenant_shipping_origin: Optional[dict] = None
-    tenant_store_locations: Optional[list[dict]] = None
-    tenant_store_type: Optional[str] = None
-    tenant_support_schedule: Optional[dict] = None
-    tenant_social_links: Optional[dict] = None
-    tenant_after_hours_message: Optional[str] = None
-    try:
-        ten_row = (
-            supabase.table("tenants")
-            .select(
-                "name, business_pitch, tono_comunicacion, "
-                "mision, vision, valores, "
-                # A2 finiquito 2026-06-23 — business_ops block.
-                "shipping_origin, store_locations, store_type, "
-                "support_schedule, social_links, after_hours_message",
-            )
-            .eq("id", tenant_id).single().execute()
-        )
-        td = ten_row.data or {}
-        tenant_name = td.get("name") or tenant_name
-        tenant_pitch = td.get("business_pitch") or None
-        tenant_tone = td.get("tono_comunicacion") or None
-        # Rev. 109 auditoría — inyectar filosofía completa al system_prompt.
-        if any(td.get(k) for k in ("mision", "vision", "valores")):
-            tenant_philosophy = {
-                "mision": td.get("mision"),
-                "vision": td.get("vision"),
-                "valores": td.get("valores"),
-            }
-        # A2 finiquito — business_ops fields.
-        tenant_shipping_origin = td.get("shipping_origin") or None
-        tenant_store_locations = td.get("store_locations") or None
-        tenant_store_type = td.get("store_type") or None
-        tenant_support_schedule = td.get("support_schedule") or None
-        tenant_social_links = td.get("social_links") or None
-        tenant_after_hours_message = td.get("after_hours_message") or None
-    except Exception:
-        pass
+    # A6.2.1 finiquito 2026-06-23 — extraído a helper testeable
+    # `_load_tenant_prompt_context` (super-audit worwkgukx). El manejo de
+    # error (logger.warning en vez de `except: pass`) ahora es testeable.
+    _tpc = _load_tenant_prompt_context(supabase, tenant_id, default_name="el negocio")
+    tenant_name = _tpc.name
+    tenant_pitch = _tpc.pitch
+    tenant_tone = _tpc.tone
+    tenant_philosophy = _tpc.philosophy
+    tenant_shipping_origin = _tpc.shipping_origin
+    tenant_store_locations = _tpc.store_locations
+    tenant_store_type = _tpc.store_type
+    tenant_support_schedule = _tpc.support_schedule
+    tenant_social_links = _tpc.social_links
+    tenant_after_hours_message = _tpc.after_hours_message
 
     # Rev. 108 holístico — cargar capacidades carrier (canonical + tenant
     # override) para que el bot SIEMPRE sepa qué carriers soportan COD,

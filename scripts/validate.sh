@@ -141,15 +141,20 @@ fi
 # Modo baseline: solo falla si introduce gaps NUEVOS vs baseline conocido.
 # Ver: scripts/audit_tenant_filter.py + tests/test_audit_tenant_filter.py
 _hdr "Tenant filter AST lint (multi-tenant safety)"
+# A6.2.4 — BASELINE_MAX ratchet: el total de gaps NO puede exceder este valor.
+# Cada fix A6.2.7 que reduzca gaps debe BAJAR este número. Subirlo requiere
+# review CODEOWNERS (.github/CODEOWNERS protege baseline + script).
+BASELINE_MAX="${BASELINE_MAX:-198}"
 if [ -f "${SCRIPT_DIR:-scripts}/audit_tenant_filter.py" ] || \
    [ -f "scripts/audit_tenant_filter.py" ]; then
   baseline_file="gaps_tenant_filter_baseline.csv"
   if [ -f "$baseline_file" ]; then
-    if python3.11 scripts/audit_tenant_filter.py --baseline "$baseline_file" --quiet 2>&1; then
+    if python3.11 scripts/audit_tenant_filter.py --baseline "$baseline_file" \
+         --max-gaps "$BASELINE_MAX" --quiet 2>&1; then
       baseline_count=$(($(wc -l < "$baseline_file") - 1))
-      _ok "Tenant filter lint: 0 gaps NEW vs baseline ($baseline_count known)"
+      _ok "Tenant filter lint: 0 gaps NEW vs baseline ($baseline_count known, ratchet≤$BASELINE_MAX)"
     else
-      _err "Tenant filter lint detectó gaps NUEVOS vs baseline (ver scripts/audit_tenant_filter.py)"
+      _err "Tenant filter lint: gaps NUEVOS vs baseline o ratchet excedido (>$BASELINE_MAX). Ver scripts/audit_tenant_filter.py"
     fi
   else
     _warn "Tenant filter lint: baseline missing — corre 'python3.11 scripts/audit_tenant_filter.py --csv gaps_tenant_filter_baseline.csv'"
