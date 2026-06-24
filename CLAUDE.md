@@ -97,5 +97,5 @@ enmascaraba 2 fallos cross-test). Fallback a unittest si pytest ausente.
 Baselines:
 - **Coverage Python**: 58.9% (target J.5 = 70% Sem 11) — env `COVERAGE_MIN=55` ajustable
 - **ruff lint errors**: 202 baseline (cleanup planificado Sem 2-3) — env `BASELINE_RUFF_ERRORS=202`
-- **Tenant filter gaps**: 190 baseline (ratchet decreciente) — env `BASELINE_MAX=190`. Lint AST `scripts/audit_tenant_filter.py` enforce `.eq("tenant_id", tid)` en queries multi-tenant (ADR-0025). Fixear gaps en finiquito A6.2.7.
+- **Tenant filter gaps**: 188 baseline (ratchet decreciente) — env `BASELINE_MAX=188`. Lint AST `scripts/audit_tenant_filter.py` enforce `.eq("tenant_id", tid)` en queries multi-tenant (ADR-0025). Fixear gaps en finiquito A6.2.7.
 

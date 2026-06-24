@@ -113,6 +113,7 @@ class GetContactInfoTool:
                     "document_type, document_number, address"
                 )
                 .eq("id", ctx.contact_id)
+                .eq("tenant_id", ctx.tenant_id)  # A6.2.7: PII Habeas Data cross-tenant
                 .single()
                 .execute()
             )
@@ -368,6 +369,7 @@ async def _verify_consent_or_fail(ctx: ToolContext) -> Optional[ToolResult]:
             ctx.supabase.table("contacts")
             .select("consent_given")
             .eq("id", ctx.contact_id)
+            .eq("tenant_id", ctx.tenant_id)  # A6.2.7: consent gate Habeas Data cross-tenant
             .single()
             .execute()
         )

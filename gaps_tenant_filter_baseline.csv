@@ -23,8 +23,6 @@ services/ai-orchestrator/agentic/legacy_adapters/aveonline.py,171,16,conversatio
 services/ai-orchestrator/agentic/legacy_adapters/payment.py,51,12,contacts,missing_eq,"supabase.table(""contacts"")"
 services/ai-orchestrator/agentic/observability.py,76,8,agentic_shadow_log,missing_eq,"supabase.table(""agentic_shadow_log"")"
 services/ai-orchestrator/agentic/tools/claims.py,159,25,claims,unverifiable_payload_insert,"insert_res = ctx.supabase.table(""claims"").insert(payload).execute()"
-services/ai-orchestrator/agentic/tools/contact.py,110,16,contacts,missing_eq,"ctx.supabase.table(""contacts"")"
-services/ai-orchestrator/agentic/tools/contact.py,368,12,contacts,missing_eq,"ctx.supabase.table(""contacts"")"
 services/ai-orchestrator/agentic/tools/orders.py,122,16,order_items,missing_eq,"ctx.supabase.table(""order_items"")"
 services/ai-orchestrator/agentic/tools/orders.py,138,24,product_variations,missing_eq,"ctx.supabase.table(""product_variations"")"
 services/ai-orchestrator/agentic/tools/orders.py,171,16,shipments,missing_eq,"ctx.supabase.table(""shipments"")"
