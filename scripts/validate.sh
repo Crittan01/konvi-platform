@@ -65,20 +65,45 @@ for dir in services/api services/ai-orchestrator services/connector-whatsapp; do
 done
 
 # ─── 2. Python — Tests ───────────────────────────────────────────────────────
+# A6.2.5 finiquito 2026-06-23 (super-audit worwkgukx HIGH gap): MIGRADO de
+# `unittest discover` a `pytest`. El runner unittest enmascaraba 2 fallos
+# cross-test (test_r01_stock_release contaminado por sys.modules["worker"]) que
+# pytest SÍ detecta. pytest también da mejor reporting + soporta subtests. Si
+# pytest no está instalado, fallback a unittest (CI debe tener pytest).
 _hdr "Python unit tests"
 
-if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
-  python3.11 -m coverage erase 2>/dev/null || true
-  result=$(python3.11 -m coverage run --source=services -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
+if python3.11 -c "import pytest" 2>/dev/null; then
+  if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
+    python3.11 -m coverage erase 2>/dev/null || true
+    result=$(python3.11 -m coverage run --source=services -m pytest tests/ -q -p no:cacheprovider 2>&1 | tail -4)
+  else
+    result=$(python3.11 -m pytest tests/ -q -p no:cacheprovider 2>&1 | tail -4)
+  fi
+  # pytest summary line: "N passed, M skipped in Xs" (sin "failed"/"error").
+  if echo "$result" | grep -qE "[0-9]+ passed" && \
+     ! echo "$result" | grep -qE "[0-9]+ (failed|error)"; then
+    total=$(echo "$result" | grep -oP '\d+ passed' | head -1)
+    _ok "Suite completa OK ($total) [pytest]"
+  else
+    _err "Hay tests fallando — NO desplegar [pytest]"
+    echo "$result" | grep -E "FAILED|ERROR|failed|error" | head -5
+  fi
 else
-  result=$(python3.11 -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
-fi
-if echo "$result" | grep -q "^OK"; then
-  total=$(echo "$result" | grep -oP '\d+ test' | head -1)
-  _ok "Suite completa OK ($total)"
-else
-  _err "Hay tests fallando — NO desplegar"
-  echo "$result" | grep -E "FAIL|ERROR" | head -5
+  # Fallback legacy — unittest (NO detecta cross-test contamination).
+  _warn "pytest no instalado — usando unittest discover (no detecta cross-test bugs)"
+  if $COVERAGE && python3.11 -c "import coverage" 2>/dev/null; then
+    python3.11 -m coverage erase 2>/dev/null || true
+    result=$(python3.11 -m coverage run --source=services -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
+  else
+    result=$(python3.11 -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3)
+  fi
+  if echo "$result" | grep -q "^OK"; then
+    total=$(echo "$result" | grep -oP '\d+ test' | head -1)
+    _ok "Suite completa OK ($total) [unittest fallback]"
+  else
+    _err "Hay tests fallando — NO desplegar"
+    echo "$result" | grep -E "FAIL|ERROR" | head -5
+  fi
 fi
 
 # ─── 2b. Python — Coverage (--coverage / --ci) ────────────────────────────────

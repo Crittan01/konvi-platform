@@ -19,11 +19,21 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
+import worker as _worker_mod
 from worker import OrchestratorWorker, PENDING_PAYMENT_TTL_MINUTES
 
 
 def _make_worker():
-    with patch("worker.create_client") as mock_client:
+    # A6.2.5 finiquito 2026-06-23 (super-audit worwkgukx): ANTES
+    # `patch("worker.create_client")` resolvía `sys.modules["worker"]` en
+    # RUN time. Si otro test recargó/borró worker de sys.modules entre la
+    # colección (import a nivel módulo arriba) y la ejecución, el patch
+    # aplicaba a una instancia DISTINTA de la que define este OrchestratorWorker
+    # → create_client real se invocaba → 2 fallos cross-test que pytest exponía
+    # y unittest discover enmascaraba. Ahora patcheamos `_worker_mod` (el mismo
+    # módulo del que se importó OrchestratorWorker a collection-time) → siempre
+    # consistente, inmune a mutaciones de sys.modules en run-time.
+    with patch.object(_worker_mod, "create_client") as mock_client:
         mock_client.return_value = MagicMock()
         w = OrchestratorWorker()
     return w

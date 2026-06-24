@@ -174,19 +174,37 @@ class _FakeSupabase:
 
 def _build_worker(fake_sb):
     """Carga worker.OrchestratorWorker con .supabase reemplazado por fake.
-    Evita iniciar Supabase real porque tests no tienen env vars."""
+    Evita iniciar Supabase real porque tests no tienen env vars.
+
+    A6.2.5 finiquito 2026-06-23 (super-audit worwkgukx HIGH gap): ANTES este
+    helper hacía `del sys.modules["worker"]` SIN restaurar, dejando una
+    instancia recargada en sys.modules. Otros tests que importaron `worker` a
+    nivel módulo (test_r01_stock_release.py) terminaban con `OrchestratorWorker`
+    de la instancia VIEJA pero su `patch("worker.create_client")` aplicaba a la
+    NUEVA → create_client real se invocaba → 2 fallos cross-test que
+    `unittest discover` enmascaraba y pytest exponía. Ahora restauramos el
+    módulo original en finally (aislamiento entre tests).
+    """
     os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://stub.test")
     os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "stub_key")
 
     # Pre-stub supabase.create_client para que el constructor no haga llamada real
     import supabase as _sp
-    with patch.object(_sp, "create_client", return_value=fake_sb):
-        if "worker" in sys.modules:
-            del sys.modules["worker"]
-        import worker as _w  # type: ignore
-        instance = _w.OrchestratorWorker()
-        instance.supabase = fake_sb  # garantizar
-        return _w, instance
+    _saved_worker = sys.modules.get("worker")
+    try:
+        with patch.object(_sp, "create_client", return_value=fake_sb):
+            if "worker" in sys.modules:
+                del sys.modules["worker"]
+            import worker as _w  # type: ignore
+            instance = _w.OrchestratorWorker()
+            instance.supabase = fake_sb  # garantizar
+            return _w, instance
+    finally:
+        # Restaurar el módulo worker original (si existía) para NO contaminar
+        # otros tests que lo importaron a nivel módulo. El _w retornado sigue
+        # siendo la instancia recargada que este test usa localmente.
+        if _saved_worker is not None:
+            sys.modules["worker"] = _saved_worker
 
 
 # ─── _try_send_payment_reminder_hsm ─────────────────────────────────────────
