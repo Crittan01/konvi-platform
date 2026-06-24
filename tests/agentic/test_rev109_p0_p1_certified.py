@@ -1014,6 +1014,84 @@ class TestFakeEscalationInvariant:
         assert update_calls[0][1] == "conversations"
         assert update_calls[0][2].get("status") == "human_takeover"
 
+    def test_fake_escalation_rewrites_if_status_update_fails(self):
+        return asyncio.run(self._test_rewrites_if_status_fails())
+
+    async def _test_rewrites_if_status_fails(self):
+        # A10 SALVAGUARDA CRÍTICA: si el UPDATE de status falla, el invariant NO
+        # puede garantizar atención humana → REWRITE a mensaje neutro. NO debe
+        # preservar la promesa de "especialista" (sería mentir al cliente:
+        # promesa sin nadie que la atienda).
+        from agentic.invariants.fake_escalation import FakeEscalationInvariant
+        from agentic.invariants.base import InvariantOutcome
+
+        class FailingQuery:
+            def update(self, payload):
+                return self
+            def insert(self, payload):
+                return self
+            def eq(self, *a, **k):
+                return self
+            def execute(self):
+                raise RuntimeError("db down")
+
+        class FakeSupabase:
+            def table(self, name):
+                return FailingQuery()
+
+        result = await FakeEscalationInvariant().validate(
+            candidate_text="Te paso con un especialista de mi equipo.",
+            tenant_id="0fb0777e-aaaa-bbbb-cccc-dddddddddddd",
+            conversation_id="abc12345-0000-0000-0000-000000000000",
+            contact_id=None,
+            supabase=FakeSupabase(),
+            tool_call_log=[],
+        )
+        assert result.outcome == InvariantOutcome.REWRITE
+        # El texto neutro NO promete especialista (no miente).
+        assert result.replacement_text
+        assert "especialista" not in result.replacement_text.lower()
+
+    def test_fake_escalation_notifies_operator_on_side_effect(self):
+        return asyncio.run(self._test_notifies_operator())
+
+    async def _test_notifies_operator(self):
+        # A10: el side-effect REAL debe notificar al operador (Path A
+        # notify_escalation_async). Si no, el cliente recibe promesa sin
+        # que nadie sea avisado.
+        from unittest.mock import AsyncMock, patch
+        from agentic.invariants.fake_escalation import FakeEscalationInvariant
+        from agentic.invariants.base import InvariantOutcome
+
+        class OkQuery:
+            def update(self, p):
+                return self
+            def insert(self, p):
+                return self
+            def eq(self, *a, **k):
+                return self
+            def execute(self):
+                return type("R", (), {"data": [{"id": "x"}]})()
+
+        class FakeSupabase:
+            def table(self, name):
+                return OkQuery()
+
+        with patch(
+            "telegram_notifications.notify_escalation_async",
+            new_callable=AsyncMock,
+        ) as mock_notify:
+            result = await FakeEscalationInvariant().validate(
+                candidate_text="Te paso con un especialista de mi equipo.",
+                tenant_id="0fb0777e-aaaa-bbbb-cccc-dddddddddddd",
+                conversation_id="abc12345-0000-0000-0000-000000000000",
+                contact_id=None,
+                supabase=FakeSupabase(),
+                tool_call_log=[],
+            )
+        assert result.outcome == InvariantOutcome.OK
+        mock_notify.assert_awaited_once()
+
     def test_fake_escalation_skips_if_tool_invoked(self):
         return asyncio.run(self._test_skips_if_tool_invoked())
 
