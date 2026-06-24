@@ -570,8 +570,8 @@ async def _run_agentic_full(
 
     # get_tenant_catalog es async — debe awaitearse.
     catalog = await get_tenant_catalog(supabase, tenant_id)
-    history = await _get_conversation_history(supabase, conversation_id)
-    customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
+    history = await _get_conversation_history(supabase, tenant_id, conversation_id)
+    customer_phone = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
     # Rev. 108 — auto-upsert contact si no existe (paridad con orchestrator V1
     # línea 6833). Sin esto, record_consent + save_pii fallan con NO_CONTACT
     # cuando un cliente nuevo escribe (o tras reset --hard).
@@ -1462,7 +1462,7 @@ async def _run_agentic_full(
             )
             if _img_result.handled:
                 customer_phone = _get_conversation_customer_phone(
-                    supabase, conversation_id,
+                    supabase, tenant_id, conversation_id,
                 )
                 if _img_result.image_link:
                     # Rev. 109 fix BUG 27: send_whatsapp_message firma real es
@@ -2377,8 +2377,8 @@ async def _run_agentic_shadow(
     from tools.catalog_tool import get_tenant_catalog
 
     catalog = await get_tenant_catalog(supabase, tenant_id)
-    history = await _get_conversation_history(supabase, conversation_id)
-    customer_phone = _get_conversation_customer_phone(supabase, conversation_id)
+    history = await _get_conversation_history(supabase, tenant_id, conversation_id)
+    customer_phone = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
     if customer_phone:
         contact_id, contact = _fetch_contact_for_phone(supabase, tenant_id, customer_phone)
     else:

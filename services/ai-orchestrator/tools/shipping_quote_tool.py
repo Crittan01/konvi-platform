@@ -1426,11 +1426,13 @@ def _get_tenant_shipping_origin(supabase: Client, tenant_id: str) -> Optional[di
     return (res.data or {}).get("shipping_origin")
 
 
-def _get_conversation_customer_phone(supabase: Client, conversation_id: str) -> Optional[str]:
+def _get_conversation_customer_phone(supabase: Client, tenant_id: str, conversation_id: str) -> Optional[str]:
+    # A6.2.7: filtrar por tenant — no leer customer_phone de conversación ajena.
     res = (
         supabase.table("conversations")
         .select("customer_phone")
         .eq("id", conversation_id)
+        .eq("tenant_id", tenant_id)
         .single()
         .execute()
     )
@@ -1712,7 +1714,7 @@ async def requote_shipping_for_cart(
         return None
     # Recipient phone si está en contact (best-effort)
     try:
-        phone = _get_conversation_customer_phone(supabase, conversation_id)
+        phone = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
         if phone:
             recipient_phone = _get_contact_shipping_phone(supabase, tenant_id, phone)
             if recipient_phone:
@@ -1812,7 +1814,7 @@ async def handle_shipping_quote_if_applicable(
                 requires_human=True,
             )
 
-        phone = _get_conversation_customer_phone(supabase, conversation_id)
+        phone = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
 
         # Rev. 104 (S14[known] fix) — prioridad de destino:
         #   1. cart.shipping_meta.city: si el cliente acaba de cambiar la

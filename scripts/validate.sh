@@ -169,7 +169,7 @@ _hdr "Tenant filter AST lint (multi-tenant safety)"
 # A6.2.4 — BASELINE_MAX ratchet: el total de gaps NO puede exceder este valor.
 # Cada fix A6.2.7 que reduzca gaps debe BAJAR este número. Subirlo requiere
 # review CODEOWNERS (.github/CODEOWNERS protege baseline + script).
-BASELINE_MAX="${BASELINE_MAX:-105}"
+BASELINE_MAX="${BASELINE_MAX:-73}"
 if [ -f "${SCRIPT_DIR:-scripts}/audit_tenant_filter.py" ] || \
    [ -f "scripts/audit_tenant_filter.py" ]; then
   baseline_file="gaps_tenant_filter_baseline.csv"

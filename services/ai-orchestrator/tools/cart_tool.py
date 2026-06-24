@@ -240,7 +240,7 @@ def ensure_cart(
             try:
                 supabase.table("conversation_carts").update(
                     {"contact_id": contact_id}
-                ).eq("id", cart["id"]).execute()
+                ).eq("id", cart["id"]).eq("tenant_id", tenant_id).execute()
                 cart["contact_id"] = contact_id
             except Exception as exc:
                 logger.warning("[CART] No pude asociar contact_id=%s a cart=%s: %s",
@@ -304,6 +304,7 @@ def get_cart_with_items(
         supabase.table("conversation_cart_items")
         .select("id, variation_id, product_id, quantity, unit_price_cents, meta, created_at")
         .eq("cart_id", cart["id"])
+        .eq("tenant_id", tenant_id)
         .order("created_at", desc=False)
         .execute()
     )
@@ -452,7 +453,7 @@ def update_item_quantity(
     # DELETE existente + INSERT con new_quantity (atomic via SECURITY DEFINER RPC).
     supabase.table("conversation_cart_items").delete().eq(
         "cart_id", cart_id
-    ).eq("variation_id", variation_id).execute()
+    ).eq("variation_id", variation_id).eq("tenant_id", tenant_id).execute()
     return add_item(
         supabase,
         cart_id=cart_id,
@@ -481,7 +482,7 @@ def remove_item(
     )
     supabase.table("conversation_cart_items").delete().eq(
         "cart_id", cart_id
-    ).eq("variation_id", variation_id).execute()
+    ).eq("variation_id", variation_id).eq("tenant_id", tenant_id).execute()
     # Recalcular subtotal manualmente.
     items = (
         supabase.table("conversation_cart_items")
@@ -912,7 +913,7 @@ def set_shipping_city(
         "shipping_meta": new_meta,
         "total_cents": new_total,
         "requires_requote": True,
-    }).eq("id", cart_id).execute()
+    }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
     logger.info(
         "[CART] shipping_city=%s cart=%s — requires_requote=True, prev city=%s",
         new_city, cart_id[:8], meta.get("city"),
@@ -968,7 +969,7 @@ def invalidate_shipping(
         "shipping_meta": preserved,
         "total_cents": new_total,
         "requires_requote": True,
-    }).eq("id", cart_id).execute()
+    }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
     logger.info("[CART] shipping invalidated cart=%s reason=%s", cart_id[:8], reason)
     _emit_cart_event(
         supabase,

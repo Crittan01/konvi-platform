@@ -228,6 +228,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
         })
         self.sb._tables["contacts"].append({
             "id": "contact_1",
+            "tenant_id": "tenant-A",
             "first_name": "Camila",
             "full_name": "Camila Pérez",
             "consent_given": True,
@@ -369,11 +370,13 @@ class CartAbandonedCronTests(unittest.TestCase):
         if has_contact:
             self.sb._tables["contacts"].append({
                 "id": "contact_1",
+                "tenant_id": "tenant-A",
                 "consent_given": consent,
                 "first_name": "Camila",
             })
         self.sb._tables["conversation_cart_items"].append({
             "cart_id": cart_id,
+            "tenant_id": "tenant-A",
             "product_title": "Jabón artesanal de coco",
             "quantity": 2,
         })

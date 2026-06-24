@@ -848,10 +848,11 @@ def _extract_first_name(name: Optional[str]) -> Optional[str]:
     return tokens[0].title()
 
 
-def _get_conversation_customer_phone(supabase: Client, conversation_id: str) -> Optional[str]:
+def _get_conversation_customer_phone(supabase: Client, tenant_id: str, conversation_id: str) -> Optional[str]:
     conv_res = (
         supabase.table("conversations")
         .select("customer_phone")
+        .eq("tenant_id", tenant_id)
         .eq("id", conversation_id)
         .limit(1)
         .execute()
@@ -1681,11 +1682,12 @@ class OrchestratorOutput(BaseModel):
 
 # ─── Context Builder ──────────────────────────────────────────────────────────
 
-async def _get_conversation_history(supabase: Client, conversation_id: str) -> list:
+async def _get_conversation_history(supabase: Client, tenant_id: str, conversation_id: str) -> list:
     """Retorna los últimos N mensajes de la conversación (contexto del chat)."""
     result = (
         supabase.table("messages")
         .select("direction, content, created_at")
+        .eq("tenant_id", tenant_id)
         .eq("conversation_id", conversation_id)
         .order("created_at", desc=True)
         .limit(CONVERSATION_HISTORY_LIMIT)
@@ -1695,11 +1697,12 @@ async def _get_conversation_history(supabase: Client, conversation_id: str) -> l
     return list(reversed(result.data or []))
 
 
-def _get_conversation_status(supabase: Client, conversation_id: str) -> str:
+def _get_conversation_status(supabase: Client, tenant_id: str, conversation_id: str) -> str:
     """Lee el estado actual de la conversación para decidir si el bot puede responder."""
     conv_res = (
         supabase.table("conversations")
         .select("status")
+        .eq("tenant_id", tenant_id)
         .eq("id", conversation_id)
         .single()
         .execute()
@@ -1788,17 +1791,21 @@ def _create_claim(
         return None
 
 
-def _is_conversation_window_expired(supabase: Client, conversation_id: str) -> bool:
+def _is_conversation_window_expired(supabase: Client, tenant_id: str, conversation_id: str) -> bool:
     """
     Retorna True si la ventana de mensajería de 24h (CONVERSATION_WINDOW_HOURS) expiró.
     Fuera de esta ventana, WhatsApp solo permite mensajes de plantilla aprobados.
     Si no hay last_interaction_at, retorna False (no penalizar conversaciones nuevas).
+
+    A6.2.7: tenant_id obligatorio — la conversación se lee filtrada por tenant
+    para no leer last_interaction_at de otro tenant (aislamiento cross-tenant).
     """
     try:
         res = (
             supabase.table("conversations")
             .select("last_interaction_at")
             .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
             .single()
             .execute()
         )
@@ -3773,6 +3780,7 @@ def _has_shipping_been_quoted_in_conversation(
             r = (
                 supabase.table("messages")
                 .select("id", count="exact")
+                .eq("tenant_id", conversation_id[:conversation_id.find("_")] if "_" in conversation_id else tenant_id)
                 .eq("conversation_id", conversation_id)
                 .eq("direction", "outbound")
                 .ilike("content", f"%{marker}%")
@@ -3943,6 +3951,7 @@ def _has_carrier_been_selected_in_conversation(
         quote_res = (
             supabase.table("messages")
             .select("id, content, created_at")
+            .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .eq("direction", "outbound")
             .ilike("content", "%continuamos%")
@@ -3968,6 +3977,7 @@ def _has_carrier_been_selected_in_conversation(
         in_res = (
             supabase.table("messages")
             .select("content")
+            .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .eq("direction", "inbound")
             .gt("created_at", quote_at)
@@ -4992,6 +5002,7 @@ def _extract_shipping_cost_from_db(
         res = (
             supabase.table("messages")
             .select("content")
+            .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .eq("direction", "outbound")
             .ilike("content", "%conómica%")
@@ -6804,7 +6815,7 @@ async def build_and_run_orchestration(
 
     try:
         # 0) Revisar estado real de la conversación antes de responder
-        conversation_status = _get_conversation_status(supabase, conversation_id)
+        conversation_status = _get_conversation_status(supabase, tenant_id, conversation_id)
         if conversation_status == CONVERSATION_STATUS_HUMAN_TAKEOVER:
             logger.info("[ORCH] Mensaje %s omitido: conversación en human_takeover", message_id)
             _mark_message_processing(
@@ -6894,7 +6905,7 @@ async def build_and_run_orchestration(
         contact_id: Optional[str] = None
         contact_record: dict = {}
         try:
-            customer_phone_raw = _get_conversation_customer_phone(supabase, conversation_id)
+            customer_phone_raw = _get_conversation_customer_phone(supabase, tenant_id, conversation_id)
             if customer_phone_raw:
                 # Rev. 103 — shipping_phone defaultea al WhatsApp para que la
                 # transportadora siempre tenga un número (caso real: cliente
@@ -7223,7 +7234,7 @@ async def build_and_run_orchestration(
                     _coupon_err,
                 )
 
-        history: list[dict] = await _get_conversation_history(supabase, conversation_id)
+        history: list[dict] = await _get_conversation_history(supabase, tenant_id, conversation_id)
 
         # Primer nombre: solo si hay consentimiento explícito en DB
         first_name = (
@@ -7350,7 +7361,7 @@ async def build_and_run_orchestration(
         # F3A: Ventana de conversación 24h
         # Si expiró, forzar CATALOG_MODE en FSM Y enviar mensaje de reactivación al cliente.
         # No silenciar — el cliente merece saber que puede empezar de nuevo.
-        _window_expired = _is_conversation_window_expired(supabase, conversation_id)
+        _window_expired = _is_conversation_window_expired(supabase, tenant_id, conversation_id)
         if _window_expired:
             logger.info(
                 "[ORCH] Ventana de conversación expirada (>%sh) | conv=%s — reiniciando con mensaje de reactivación",

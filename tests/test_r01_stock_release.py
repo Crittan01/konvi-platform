@@ -75,6 +75,10 @@ def _stub_supabase_for_release(
                 return MagicMock(data=[{"id": update_chain._captured_id}])
 
             second.execute = _exec_capture
+            # A6.2.7: la cadena ahora tiene .eq("id").eq("tenant_id").eq("status")
+            # — permitir N .eq()/.is_() encadenados antes de execute().
+            second.eq.return_value = second
+            second.is_.return_value = second
             return second
 
         update_chain._captured_id = None

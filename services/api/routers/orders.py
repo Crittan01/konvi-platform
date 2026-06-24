@@ -537,7 +537,7 @@ def _consume_cart_reservations_if_any(
             supabase.table("conversation_carts").update({
                 "status": "converted",
                 "converted_order_id": order_id,
-            }).eq("id", cart_id).execute()
+            }).eq("tenant_id", tenant_id).eq("id", cart_id).execute()
         except Exception as exc:
             logger.warning(
                 "[CART] no pude marcar cart=%s converted tras order=%s: %s",
@@ -573,6 +573,7 @@ def _consume_cart_reservations_if_any(
             cart_meta = (
                 supabase.table("conversation_carts")
                 .select("coupon_id, coupon_code, discount_cents")
+                .eq("tenant_id", tenant_id)
                 .eq("id", cart_id)
                 .single()
                 .execute()

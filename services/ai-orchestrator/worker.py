@@ -377,7 +377,7 @@ class OrchestratorWorker:
                         "processed": True,
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                         "skip_reason": "coalesced_into_next",
-                    }).in_("id", older_ids).execute()
+                    }).in_("id", older_ids).eq("tenant_id", msgs[0]["tenant_id"]).execute()
                 except Exception as exc:
                     logger.warning("[COALESCE] no pude marcar coalesced: %s", exc)
                 # El último msg lleva el content combinado
@@ -448,7 +448,7 @@ class OrchestratorWorker:
                         "processed": True,
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                         "last_error": "max_attempts_exceeded",
-                    }).eq("id", msg["id"]).execute()
+                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).execute()
                     logger.warning(
                         "Mensaje %s marcado failed por max_attempts=%s",
                         msg["id"],
@@ -463,7 +463,7 @@ class OrchestratorWorker:
                     "processing_attempts": attempts,
                     "processing_status": PROCESSING_STATUS_PROCESSING,
                     "last_error": None,
-                }).eq("id", msg["id"]).eq("processing_status", "pending").execute()
+                }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq("processing_status", "pending").execute()
 
                 if not lock_res.data:
                     logger.info(
@@ -1090,7 +1090,7 @@ class OrchestratorWorker:
                     try:
                         self.supabase.table("orders").update({
                             "payment_reminder_sent_at": now_dt.isoformat(),
-                        }).eq("id", order_id).is_(
+                        }).eq("id", order_id).eq("tenant_id", tenant_id).is_(
                             "payment_reminder_sent_at", "null",
                         ).execute()
                     except Exception:
@@ -1147,6 +1147,7 @@ class OrchestratorWorker:
                     self.supabase.table("orders")
                     .update({"payment_reminder_sent_at": now_dt.isoformat()})
                     .eq("id", order_id)
+                    .eq("tenant_id", tenant_id)
                     .is_("payment_reminder_sent_at", "null")
                     .execute()
                 )
@@ -1185,6 +1186,7 @@ class OrchestratorWorker:
                 self.supabase.table("orders")
                 .select("id, total_amount, contact_id")
                 .eq("id", order_id)
+                .eq("tenant_id", tenant_id)
                 .limit(1)
                 .execute()
             )
@@ -1207,6 +1209,7 @@ class OrchestratorWorker:
                     self.supabase.table("contacts")
                     .select("first_name, full_name")
                     .eq("id", contact_id)
+                    .eq("tenant_id", tenant_id)
                     .limit(1)
                     .execute()
                 )
@@ -1303,7 +1306,7 @@ class OrchestratorWorker:
         try:
             self.supabase.table("orders").update({
                 "payment_reminder_sent_at": now_dt.isoformat(),
-            }).eq("id", order_id).is_(
+            }).eq("id", order_id).eq("tenant_id", tenant_id).is_(
                 "payment_reminder_sent_at", "null",
             ).execute()
         except Exception:
@@ -1392,6 +1395,7 @@ class OrchestratorWorker:
                         self.supabase.table("contacts")
                         .select("consent_given, first_name, full_name")
                         .eq("id", contact_id)
+                        .eq("tenant_id", tenant_id)
                         .limit(1)
                         .execute()
                     )
@@ -1410,7 +1414,7 @@ class OrchestratorWorker:
                 try:
                     self.supabase.table("conversation_carts").update({
                         "abandoned_reminder_sent_at": now_dt.isoformat(),
-                    }).eq("id", cart_id).is_(
+                    }).eq("id", cart_id).eq("tenant_id", tenant_id).is_(
                         "abandoned_reminder_sent_at", "null",
                     ).execute()
                 except Exception:
@@ -1429,6 +1433,7 @@ class OrchestratorWorker:
                     self.supabase.table("conversation_cart_items")
                     .select("product_title, quantity")
                     .eq("cart_id", cart_id)
+                    .eq("tenant_id", tenant_id)
                     .limit(3)
                     .execute()
                 )
@@ -1465,7 +1470,7 @@ class OrchestratorWorker:
                 try:
                     self.supabase.table("conversation_carts").update({
                         "abandoned_reminder_sent_at": now_dt.isoformat(),
-                    }).eq("id", cart_id).is_(
+                    }).eq("id", cart_id).eq("tenant_id", tenant_id).is_(
                         "abandoned_reminder_sent_at", "null",
                     ).execute()
                 except Exception:
@@ -1507,7 +1512,7 @@ class OrchestratorWorker:
             try:
                 self.supabase.table("conversation_carts").update({
                     "abandoned_reminder_sent_at": now_dt.isoformat(),
-                }).eq("id", cart_id).is_(
+                }).eq("id", cart_id).eq("tenant_id", tenant_id).is_(
                     "abandoned_reminder_sent_at", "null",
                 ).execute()
             except Exception:
@@ -1718,6 +1723,7 @@ class OrchestratorWorker:
                         self.supabase.table("payments")
                         .select("id, created_at")
                         .eq("order_id", order["id"])
+                        .eq("tenant_id", order["tenant_id"])
                         .eq("status", "pending")
                         .gte("created_at", cutoff_iso)
                         .limit(1)
@@ -1747,6 +1753,7 @@ class OrchestratorWorker:
                         "status": "cancelled",
                     })
                     .eq("id", order["id"])
+                    .eq("tenant_id", order["tenant_id"])
                     .eq("status", "pending_payment")  # guard contra race condition
                     .execute()
                 )
