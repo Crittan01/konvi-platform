@@ -312,7 +312,7 @@ class MarkSubmittedTests(unittest.TestCase):
         sb = _FakeSupabase()
         draft = self._setup_draft(sb)
         result = wt.mark_submitted_to_meta(
-            sb, draft.id, meta_template_id="META_999",
+            sb, draft.id, meta_template_id="META_999", tenant_id="tenant-A",
         )
         self.assertEqual(result.status, "PENDING")
         self.assertEqual(result.meta_template_id, "META_999")
@@ -321,28 +321,28 @@ class MarkSubmittedTests(unittest.TestCase):
     def test_submit_idempotente_si_ya_pending_mismo_meta_id(self):
         sb = _FakeSupabase()
         draft = self._setup_draft(sb)
-        wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_999")
-        result = wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_999")
+        wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_999", tenant_id="tenant-A")
+        result = wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_999", tenant_id="tenant-A")
         self.assertEqual(result.status, "PENDING")  # no error
         self.assertEqual(result.meta_template_id, "META_999")
 
     def test_submit_falla_si_status_no_editable(self):
         sb = _FakeSupabase()
         draft = self._setup_draft(sb)
-        wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_999")
+        wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_999", tenant_id="tenant-A")
         # Simular que Meta aprobó vía webhook
         wt.update_status_from_webhook(
             sb, meta_template_id="META_999", new_status="APPROVED",
         )
         # No se puede re-submitear un APPROVED
         with self.assertRaises(wt.TemplateError):
-            wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_OTRO")
+            wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_OTRO", tenant_id="tenant-A")
 
     def test_submit_requiere_meta_template_id(self):
         sb = _FakeSupabase()
         draft = self._setup_draft(sb)
         with self.assertRaises(wt.TemplateError):
-            wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="")
+            wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="", tenant_id="tenant-A")
 
 
 class WebhookStatusUpdateTests(unittest.TestCase):
@@ -352,7 +352,7 @@ class WebhookStatusUpdateTests(unittest.TestCase):
             waba_id="WABA_999", name="ok_name", language="es_CO",
             category="UTILITY", components=_sample_components(),
         )
-        return wt.mark_submitted_to_meta(sb, draft.id, meta_template_id=meta_id)
+        return wt.mark_submitted_to_meta(sb, draft.id, meta_template_id=meta_id, tenant_id="tenant-A")
 
     def test_status_update_approved(self):
         sb = _FakeSupabase()
@@ -396,7 +396,7 @@ class WebhookQualityUpdateTests(unittest.TestCase):
             waba_id="WABA_X", name="ok_name", language="es_CO",
             category="UTILITY", components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_QQQ")
+        wt.mark_submitted_to_meta(sb, draft.id, meta_template_id="META_QQQ", tenant_id="tenant-A")
         wt.update_status_from_webhook(
             sb, meta_template_id="META_QQQ", new_status="APPROVED",
         )
@@ -448,7 +448,7 @@ class ListTemplatesTests(unittest.TestCase):
             sb, "tenant-A", waba_id="W1", name="approved_one", language="es_CO",
             category="UTILITY", components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d2.id, meta_template_id="M1")
+        wt.mark_submitted_to_meta(sb, d2.id, meta_template_id="M1", tenant_id="tenant-A")
         wt.update_status_from_webhook(
             sb, meta_template_id="M1", new_status="APPROVED",
         )
@@ -465,7 +465,7 @@ class GetApprovedTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="M_PAY")
+        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="M_PAY", tenant_id="tenant-A")
         wt.update_status_from_webhook(
             sb, meta_template_id="M_PAY", new_status="APPROVED",
         )
@@ -483,7 +483,7 @@ class GetApprovedTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="M_PEND")
+        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="M_PEND", tenant_id="tenant-A")
         # Sigue PENDING
         result = wt.get_approved_template(
             sb, "tenant-A", name="pending_v1", language="es_CO",
@@ -506,7 +506,7 @@ class DeleteTemplateTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        ok = wt.delete_template(sb, d.id)
+        ok = wt.delete_template(sb, d.id, tenant_id="tenant-A")
         self.assertTrue(ok)
         self.assertEqual(len(sb._tables["whatsapp_templates"]), 0)
 
@@ -517,9 +517,9 @@ class DeleteTemplateTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX")
+        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX", tenant_id="tenant-A")
         with self.assertRaises(wt.TemplateError):
-            wt.delete_template(sb, d.id)
+            wt.delete_template(sb, d.id, tenant_id="tenant-A")
 
     def test_delete_approved_falla(self):
         sb = _FakeSupabase()
@@ -528,12 +528,12 @@ class DeleteTemplateTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX")
+        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX", tenant_id="tenant-A")
         wt.update_status_from_webhook(
             sb, meta_template_id="MX", new_status="APPROVED",
         )
         with self.assertRaises(wt.TemplateError):
-            wt.delete_template(sb, d.id)
+            wt.delete_template(sb, d.id, tenant_id="tenant-A")
 
 
 class UpdateLocalDraftTests(unittest.TestCase):
@@ -545,7 +545,7 @@ class UpdateLocalDraftTests(unittest.TestCase):
             components=_sample_components(),
         )
         new_components = _sample_components_full()
-        result = wt.update_local_draft(sb, d.id, components=new_components)
+        result = wt.update_local_draft(sb, d.id, components=new_components, tenant_id="tenant-A")
         self.assertEqual(len(result.components), 4)
         self.assertEqual(result.status, "LOCAL_DRAFT")
 
@@ -556,9 +556,9 @@ class UpdateLocalDraftTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX")
+        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX", tenant_id="tenant-A")
         with self.assertRaises(wt.TemplateError):
-            wt.update_local_draft(sb, d.id, category="MARKETING")
+            wt.update_local_draft(sb, d.id, category="MARKETING", tenant_id="tenant-A")
 
     def test_update_rejected_resetea_a_local_draft(self):
         """Tras edit en REJECTED, vuelve a LOCAL_DRAFT y limpia meta_template_id."""
@@ -568,13 +568,13 @@ class UpdateLocalDraftTests(unittest.TestCase):
             language="es_CO", category="UTILITY",
             components=_sample_components(),
         )
-        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX")
+        wt.mark_submitted_to_meta(sb, d.id, meta_template_id="MX", tenant_id="tenant-A")
         wt.update_status_from_webhook(
             sb, meta_template_id="MX",
             new_status="REJECTED", reason="INCORRECT_CATEGORY",
         )
         # Edit category para corregir y re-submitear
-        result = wt.update_local_draft(sb, d.id, category="MARKETING")
+        result = wt.update_local_draft(sb, d.id, category="MARKETING", tenant_id="tenant-A")
         self.assertEqual(result.status, "LOCAL_DRAFT")
         self.assertEqual(result.category, "MARKETING")
         self.assertIsNone(result.meta_template_id)

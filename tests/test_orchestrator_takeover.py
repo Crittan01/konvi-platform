@@ -135,7 +135,7 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
             )
 
         send_msg.assert_not_called()
-        set_status.assert_called_once_with(ANY, "c-1", "human_takeover")
+        set_status.assert_called_once_with(ANY, "t-1", "c-1", "human_takeover")
         mark_processing.assert_called_once()
         self.assertEqual(mark_processing.call_args.kwargs["skip_reason"], "non_text_requires_human")
 
@@ -316,7 +316,7 @@ class OrchestratorTakeoverTests(unittest.IsolatedAsyncioTestCase):
             )
 
         send_msg.assert_awaited_once()
-        set_status.assert_called_once_with(ANY, "c-1", "human_takeover")
+        set_status.assert_called_once_with(ANY, "t-1", "c-1", "human_takeover")
         self.assertEqual(mark_processing.call_args.kwargs["processing_status"], "processed")
 
 

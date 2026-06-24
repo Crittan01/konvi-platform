@@ -324,6 +324,7 @@ def get_cart_with_items(
                 .select("id, attributes, weight_kg, length_cm, "
                         "width_cm, height_cm, sku")
                 .in_("id", var_ids)
+                .eq("tenant_id", tenant_id)  # A6.2.7: defensa cross-tenant
                 .execute()
             )
             var_lookup = {}
@@ -349,6 +350,7 @@ def get_cart_with_items(
                 supabase.table("products")
                 .select("id, title")
                 .in_("id", prod_ids)
+                .eq("tenant_id", tenant_id)  # A6.2.7: defensa cross-tenant
                 .execute()
             )
             prod_lookup = {}
@@ -870,7 +872,7 @@ def set_shipping_city(
     cart_id: str,
     new_city: str,
     new_dane_code: str | None = None,
-    tenant_id: str | None = None,
+    tenant_id: str,
 ) -> dict:
     """Rev. 104 (F0-3 / BUG-1): registra cambio de ciudad post-cotización.
 
@@ -888,6 +890,7 @@ def set_shipping_city(
         supabase.table("conversation_carts")
         .select("shipping_meta, subtotal_cents, discount_cents")
         .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
         .limit(1)
         .execute()
     )
@@ -939,7 +942,7 @@ def invalidate_shipping(
     *,
     cart_id: str,
     reason: str = "item_changed",
-    tenant_id: str | None = None,
+    tenant_id: str,
 ) -> dict:
     """Setea requires_requote=true + reset shipping_cents=0. Conserva
     address en shipping_meta para que el bot no tenga que repreguntar."""
@@ -947,6 +950,7 @@ def invalidate_shipping(
         supabase.table("conversation_carts")
         .select("shipping_meta, subtotal_cents, discount_cents")
         .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
         .limit(1)
         .execute()
     )

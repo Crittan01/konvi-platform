@@ -1719,9 +1719,13 @@ def _get_conversation_status(supabase: Client, tenant_id: str, conversation_id: 
     return CONVERSATION_STATUS_CLOSED
 
 
-def _set_conversation_status(supabase: Client, conversation_id: str, status: str) -> None:
-    """Actualiza el estado de conversación en contrato canónico."""
-    supabase.table("conversations").update({"status": status}).eq("id", conversation_id).execute()
+def _set_conversation_status(supabase: Client, tenant_id: str, conversation_id: str, status: str) -> None:
+    """Actualiza el estado de conversación en contrato canónico.
+
+    A6.2.7: tenant_id obligatorio — el UPDATE filtra por tenant para no mutar
+    el status de una conversación de otro tenant aunque coincidiera el id.
+    """
+    supabase.table("conversations").update({"status": status}).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
 
 
 _COMPLAINT_INTENTS: frozenset[str] = frozenset({
@@ -1863,12 +1867,16 @@ def _cancel_pending_payment_order(supabase: Client, conversation_id: str, tenant
 
 def _mark_message_processing(
     supabase: Client,
+    tenant_id: str,
     message_id: str,
     processing_status: str,
     skip_reason: Optional[str] = None,
     last_error: Optional[str] = None,
 ) -> None:
-    """Registra el outcome explícito del procesamiento del inbound message."""
+    """Registra el outcome explícito del procesamiento del inbound message.
+
+    A6.2.7: tenant_id obligatorio — el UPDATE de messages filtra por tenant.
+    """
     supabase.table("messages").update(
         {
             "processing_status": processing_status,
@@ -1879,7 +1887,7 @@ def _mark_message_processing(
             "skip_reason": skip_reason,
             "last_error": last_error,
         }
-    ).eq("id", message_id).execute()
+    ).eq("id", message_id).eq("tenant_id", tenant_id).execute()
 
 
 async def _send_outbound_text(
@@ -3766,7 +3774,7 @@ def _has_shipping_been_quoted(history: list[dict]) -> bool:
 
 
 def _has_shipping_been_quoted_in_conversation(
-    supabase: Client, conversation_id: str
+    supabase: Client, tenant_id: str, conversation_id: str
 ) -> bool:
     """Versión DB que verifica TODA la conversación (no limitada por
     CONVERSATION_HISTORY_LIMIT). Usar cuando el history en memoria pueda
@@ -3780,7 +3788,7 @@ def _has_shipping_been_quoted_in_conversation(
             r = (
                 supabase.table("messages")
                 .select("id", count="exact")
-                .eq("tenant_id", conversation_id[:conversation_id.find("_")] if "_" in conversation_id else tenant_id)
+                .eq("tenant_id", tenant_id)
                 .eq("conversation_id", conversation_id)
                 .eq("direction", "outbound")
                 .ilike("content", f"%{marker}%")
@@ -3922,7 +3930,7 @@ def _has_carrier_been_selected(history: list[dict]) -> bool:
 
 
 def _has_carrier_been_selected_in_conversation(
-    supabase: Client, conversation_id: str
+    supabase: Client, tenant_id: str, conversation_id: str
 ) -> bool:
     """Rev. 103 — DB fallback para `_has_carrier_been_selected` (igual
     patrón que `_has_shipping_been_quoted_in_conversation`).
@@ -4983,7 +4991,7 @@ def _extract_shipping_cost_from_history(history: list[dict]) -> Optional[int]:
 
 
 def _extract_shipping_cost_from_db(
-    supabase: Client, conversation_id: str,
+    supabase: Client, tenant_id: str, conversation_id: str,
 ) -> Optional[int]:
     """Rev. 103 — DB fallback de `_extract_shipping_cost_from_history`.
 
@@ -5159,7 +5167,7 @@ async def _persist_cart_shipping_if_needed(
     # Paso 2 — fallback al shipping del history (comportamiento legacy).
     ship_cents = _extract_shipping_cost_from_history(history) or 0
     if ship_cents <= 0:
-        ship_cents = _extract_shipping_cost_from_db(supabase, conversation_id) or 0
+        ship_cents = _extract_shipping_cost_from_db(supabase, tenant_id, conversation_id) or 0
     if ship_cents <= 0:
         return  # no hay cotización conocida — nada que persistir
     carrier_name = _extract_shipping_carrier_from_history(history) or "Coordinadora"
@@ -6820,6 +6828,7 @@ async def build_and_run_orchestration(
             logger.info("[ORCH] Mensaje %s omitido: conversación en human_takeover", message_id)
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_SKIPPED,
                 skip_reason=SKIP_REASON_HUMAN_TAKEOVER,
@@ -6830,6 +6839,7 @@ async def build_and_run_orchestration(
             logger.info("[ORCH] Mensaje %s omitido: conversación cerrada", message_id)
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_SKIPPED,
                 skip_reason=SKIP_REASON_CLOSED,
@@ -6847,6 +6857,7 @@ async def build_and_run_orchestration(
             )
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_SKIPPED,
                 skip_reason=SKIP_REASON_OPTED_OUT,
@@ -7033,6 +7044,7 @@ async def build_and_run_orchestration(
                         # Marca el mensaje inbound como procesado.
                         _mark_message_processing(
                             supabase,
+                            tenant_id,
                             message_id,
                             processing_status=PROCESSING_STATUS_PROCESSED,
                         )
@@ -7222,7 +7234,7 @@ async def build_and_run_orchestration(
                             )
 
                         _mark_message_processing(
-                            supabase, message_id,
+                            supabase, tenant_id, message_id,
                             processing_status=PROCESSING_STATUS_PROCESSED,
                         )
                         return  # Short-circuit: NO continuar con LLM.
@@ -7286,10 +7298,10 @@ async def build_and_run_orchestration(
                     message_id, content_type,
                 )
                 _set_conversation_status(
-                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+                    supabase, tenant_id, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_SKIPPED,
                     skip_reason=SKIP_REASON_NON_TEXT,
                 )
@@ -7309,7 +7321,7 @@ async def build_and_run_orchestration(
                     ),
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
             return
@@ -7338,8 +7350,8 @@ async def build_and_run_orchestration(
                     supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
                     text=f"Entendido, te conecto con un {tenant_escalation_role}. ¡Un momento! ",
                 )
-            _set_conversation_status(supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _set_conversation_status(supabase, tenant_id, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             return
 
         # F3B Gate: comando "cancelar" — cancela pedido pending_payment y resetea FSM implícito
@@ -7354,7 +7366,7 @@ async def build_and_run_orchestration(
                 supabase=supabase, conversation_id=conversation_id, tenant_id=tenant_id,
                 text=reply,
             )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[ORCH] Comando cancelar | conv=%s cancelled=%s", conversation_id, cancelled)
             return
 
@@ -7421,7 +7433,7 @@ async def build_and_run_orchestration(
                     tenant_id=tenant_id,
                     text=_build_next_data_request_prompt(contact_record),
                 )
-                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
                 logger.info("[CONSENT] Aceptado | conversation=%s contact=%s", conversation_id, contact_id)
                 return
             elif _detect_consent_no(content):
@@ -7438,7 +7450,7 @@ async def build_and_run_orchestration(
                         "que te ayude por otra vía."
                     ),
                 )
-                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
                 logger.info("[CONSENT] Rechazado | conversation=%s", conversation_id)
                 return
 
@@ -7612,10 +7624,10 @@ async def build_and_run_orchestration(
                     )
             if _dispatch_result.requires_human:
                 _set_conversation_status(
-                    supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER,
+                    supabase, tenant_id, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER,
                 )
             _mark_message_processing(
-                supabase, message_id,
+                supabase, tenant_id, message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
             return
@@ -7662,7 +7674,7 @@ async def build_and_run_orchestration(
                 }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()  # A6.2.7
             except Exception as _crisis_err:
                 logger.error("[CRISIS] no pude marcar takeover: %s", _crisis_err)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.warning(
                 "[CRISIS] Mental health crisis detectada conv=%s — escalación inmediata",
                 conversation_id,
@@ -7685,7 +7697,7 @@ async def build_and_run_orchestration(
                     "datos en su widget cifrado. Yo nunca los necesito acá."
                 ),
             )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.warning(
                 "[PCI] Datos sensibles detectados conv=%s reason=%s — bot advirtió y descartó",
                 conversation_id, _sensitive_reason,
@@ -7713,7 +7725,7 @@ async def build_and_run_orchestration(
                     "con gusto te ayudo."
                 ),
             )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.warning(
                 "[META_HEALTHCARE] Consulta médica detectada conv=%s — bot redirigió a profesional",
                 conversation_id,
@@ -7736,7 +7748,7 @@ async def build_and_run_orchestration(
                     "ayudo a encontrarlo."
                 ),
             )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.warning(
                 "[META_COMMERCE] Solicitud medicamento detectada conv=%s — bot rechazó cordialmente",
                 conversation_id,
@@ -7801,7 +7813,7 @@ async def build_and_run_orchestration(
                 }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
             except Exception as exc:
                 logger.warning("[MINOR] escalation status update falló: %s", exc)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.warning(
                 "[MINOR] Detectada minoría de edad conv=%s — flujo comercial bloqueado, escalado a humano",
                 conversation_id,
@@ -7876,7 +7888,7 @@ async def build_and_run_orchestration(
                 except Exception as exc:
                     logger.error("[CONSENT] notify_consent_revoked excepción: %s", exc)
 
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info(
                 "[CONSENT] Revocación procesada | conversation=%s | had_data=%s",
                 conversation_id, had_data_to_revoke,
@@ -7935,7 +7947,7 @@ async def build_and_run_orchestration(
                     )
             except Exception as exc:
                 logger.error("[SAR] notify_sar_received excepción: %s", exc)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[SAR] Export self-service procesado | conversation=%s", conversation_id)
             return
 
@@ -8000,7 +8012,7 @@ async def build_and_run_orchestration(
                     )
             except Exception as exc:
                 logger.error("[SAR] notify_sar_received(rectify) excepción: %s", exc)
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[SAR] Rectify self-service registrado | conversation=%s", conversation_id)
             return
 
@@ -8033,7 +8045,7 @@ async def build_and_run_orchestration(
                 tenant_id=tenant_id,
                 text=_prompts.get(_update_intent, _prompts["general"]),
             )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info(
                 "[UPDATE] sub-flow activado conv=%s field=%s",
                 conversation_id, _update_intent,
@@ -8074,7 +8086,7 @@ async def build_and_run_orchestration(
                     "estaré para ayudarte. ¡Que tengas un excelente día!"
                 ),
             )
-            _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+            _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
             logger.info("[CANCEL] Cancelación procesada (sin escalación) | conversation=%s", conversation_id)
             return
 
@@ -8156,7 +8168,7 @@ async def build_and_run_orchestration(
                     text=_ambig_text,
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 logger.info(
@@ -8250,7 +8262,7 @@ async def build_and_run_orchestration(
                             text=_resumen_text,
                         )
                         _mark_message_processing(
-                            supabase, message_id,
+                            supabase, tenant_id, message_id,
                             processing_status=PROCESSING_STATUS_PROCESSED,
                         )
                         logger.info(
@@ -8292,7 +8304,7 @@ async def build_and_run_orchestration(
                             text=_ask_text,
                         )
                         _mark_message_processing(
-                            supabase, message_id,
+                            supabase, tenant_id, message_id,
                             processing_status=PROCESSING_STATUS_PROCESSED,
                         )
                         logger.info(
@@ -8418,7 +8430,7 @@ async def build_and_run_orchestration(
                                         summary_text=_unified_qty,
                                     )
                                     _mark_message_processing(
-                                        supabase, message_id,
+                                        supabase, tenant_id, message_id,
                                         processing_status=PROCESSING_STATUS_PROCESSED,
                                     )
                                     return
@@ -8443,7 +8455,7 @@ async def build_and_run_orchestration(
                         text=_ambig_text,
                     )
                     _mark_message_processing(
-                        supabase, message_id,
+                        supabase, tenant_id, message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
                     )
                     logger.info(
@@ -8696,7 +8708,7 @@ async def build_and_run_orchestration(
                                 summary_text=_unified_text,
                             )
                             _mark_message_processing(
-                                supabase, message_id,
+                                supabase, tenant_id, message_id,
                                 processing_status=PROCESSING_STATUS_PROCESSED,
                             )
                             logger.info(
@@ -8755,7 +8767,7 @@ async def build_and_run_orchestration(
         # CONVERSATION_HISTORY_LIMIT. Si shipping_quoted=False allí, verificar en
         # DB la conversación completa antes de degradar el FSM a NEEDS_SHIPPING_CITY.
         if not shipping_quoted:
-            shipping_quoted = _has_shipping_been_quoted_in_conversation(supabase, conversation_id)
+            shipping_quoted = _has_shipping_been_quoted_in_conversation(supabase, tenant_id, conversation_id)
         # Rev. 73 — si el cliente agregó productos DESPUÉS de la cotización,
         # invalidar la cotización vigente (peso/dimensiones cambiaron). Forzar
         # nueva pasada por shipping_quote_tool.
@@ -8781,7 +8793,7 @@ async def build_and_run_orchestration(
         # el history truncado a 25 mensajes pierde la señal del inbound de
         # selección, que en convs largas queda fuera del window).
         _carrier_selected_db = _has_carrier_been_selected_in_conversation(
-            supabase, conversation_id,
+            supabase, tenant_id, conversation_id,
         )
 
         # Rev. 103 — Cart-as-SoT: persistir shipping al cart en cuanto el
@@ -8923,6 +8935,7 @@ async def build_and_run_orchestration(
             )
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
@@ -8937,6 +8950,7 @@ async def build_and_run_orchestration(
             )
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
@@ -9077,7 +9091,7 @@ async def build_and_run_orchestration(
                                 text=_summary_text,
                             )
                             _mark_message_processing(
-                                supabase, message_id,
+                                supabase, tenant_id, message_id,
                                 processing_status=PROCESSING_STATUS_PROCESSED,
                             )
                             logger.info(
@@ -9093,6 +9107,7 @@ async def build_and_run_orchestration(
                     )
                     _mark_message_processing(
                         supabase,
+                        tenant_id,
                         message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
                     )
@@ -9178,7 +9193,7 @@ async def build_and_run_orchestration(
                             if _vctx_sp and not _vctx_sp.get("shipping_cost_cents"):
                                 _ship_h = (
                                     _extract_shipping_cost_from_history(history or [])
-                                    or _extract_shipping_cost_from_db(supabase, conversation_id)
+                                    or _extract_shipping_cost_from_db(supabase, tenant_id, conversation_id)
                                     or 0
                                 )
                                 if _ship_h > 0:
@@ -9209,7 +9224,7 @@ async def build_and_run_orchestration(
                                         text=_outbound_sp,
                                     )
                                     _mark_message_processing(
-                                        supabase, message_id,
+                                        supabase, tenant_id, message_id,
                                         processing_status=PROCESSING_STATUS_PROCESSED,
                                     )
                                     logger.info(
@@ -9277,7 +9292,7 @@ async def build_and_run_orchestration(
                 if _vctx and not _vctx.get("shipping_cost_cents"):
                     _ship = (
                         _extract_shipping_cost_from_history(history or []) or
-                        _extract_shipping_cost_from_db(supabase, conversation_id) or
+                        _extract_shipping_cost_from_db(supabase, tenant_id, conversation_id) or
                         0
                     )
                     if _ship > 0:
@@ -9303,7 +9318,7 @@ async def build_and_run_orchestration(
                             text=_resumen_text,
                         )
                         _mark_message_processing(
-                            supabase, message_id,
+                            supabase, tenant_id, message_id,
                             processing_status=PROCESSING_STATUS_PROCESSED,
                         )
                         logger.info(
@@ -9367,7 +9382,7 @@ async def build_and_run_orchestration(
                     text=_override_text,
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 logger.info(
@@ -9392,7 +9407,7 @@ async def build_and_run_orchestration(
                     tenant_id=tenant_id,
                     text=reply,
                 )
-                _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
+                _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
                 logger.info("[CORR] Corrección solicitada campo='%s' | conv=%s", correction_field, conversation_id)
                 return
 
@@ -9812,6 +9827,7 @@ async def build_and_run_orchestration(
             logger.warning(f"[GUARDRAIL] Mensaje {message_id} rechazado por guardrails")
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_SKIPPED,
                 skip_reason=SKIP_REASON_GUARDRAIL,
@@ -10033,7 +10049,7 @@ async def build_and_run_orchestration(
                         # `_verified_ctx_from_cart` lo pase al resumen.
                         if not (_cart_for_summary.get("shipping_cents") or 0):
                             _ship_db = _extract_shipping_cost_from_db(
-                                supabase, conversation_id,
+                                supabase, tenant_id, conversation_id,
                             ) or 0
                             if _ship_db > 0:
                                 _cart_for_summary["shipping_cents"] = _ship_db
@@ -10154,7 +10170,7 @@ async def build_and_run_orchestration(
                         if _vctx_lh and not _vctx_lh.get("shipping_cost_cents"):
                             _ship_lh = (
                                 _extract_shipping_cost_from_history(history or []) or
-                                _extract_shipping_cost_from_db(supabase, conversation_id) or
+                                _extract_shipping_cost_from_db(supabase, tenant_id, conversation_id) or
                                 0
                             )
                             if _ship_lh > 0:
@@ -10245,7 +10261,7 @@ async def build_and_run_orchestration(
         # ── 8. Escalar a humano si es necesario ───────────────────────────────
         if parsed.requires_human:
             _set_conversation_status(
-                supabase, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
+                supabase, tenant_id, conversation_id, CONVERSATION_STATUS_HUMAN_TAKEOVER
             )
             logger.info(f"[ESCALATION] Conversación {conversation_id} marcada para agente humano")
 
@@ -10388,6 +10404,7 @@ async def build_and_run_orchestration(
         # ── 9. Marcar mensaje como procesado ──────────────────────────────────
         _mark_message_processing(
             supabase,
+            tenant_id,
             message_id,
             processing_status=PROCESSING_STATUS_PROCESSED,
         )
@@ -10418,6 +10435,7 @@ async def build_and_run_orchestration(
             )
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_PENDING,
                 last_error=f"[transitorio] {error_str[:500]}",
@@ -10431,6 +10449,7 @@ async def build_and_run_orchestration(
             )
             _mark_message_processing(
                 supabase,
+                tenant_id,
                 message_id,
                 processing_status=PROCESSING_STATUS_FAILED,
                 last_error=error_str[:1000],

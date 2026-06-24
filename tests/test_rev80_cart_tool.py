@@ -224,7 +224,7 @@ class InvalidateShippingTests(unittest.TestCase):
                 "subtotal_cents": 1800000,
             }],
         })
-        out = invalidate_shipping(sb, cart_id="c", reason="item_added")
+        out = invalidate_shipping(sb, cart_id="c", reason="item_added", tenant_id="t")
         self.assertTrue(out["invalidated"])
         self.assertEqual(out["reason"], "item_added")
 

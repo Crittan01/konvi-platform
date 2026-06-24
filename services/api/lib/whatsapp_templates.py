@@ -267,7 +267,7 @@ def create_template_draft(
         payload["created_by"] = created_by
 
     res = (
-        supabase_client.table("whatsapp_templates")
+        supabase_client.table("whatsapp_templates")  # tenant_filter:exempt:payload_includes_tenant_id
         .insert(payload)
         .execute()
     )
@@ -282,15 +282,18 @@ def mark_submitted_to_meta(
     template_id: str,
     *,
     meta_template_id: str,
+    tenant_id: str,
 ) -> WhatsAppTemplate:
     """Tras POST exitoso a Meta, transiciona LOCAL_DRAFT → PENDING + guarda
     `meta_template_id`. Idempotente: si ya está PENDING con el mismo
-    meta_template_id, retorna el row sin error."""
+    meta_template_id, retorna el row sin error.
+
+    A6.2.7: tenant_id obligatorio — scope cross-tenant del template."""
     if not meta_template_id:
         raise TemplateError("meta_template_id requerido para submit.")
 
     # Lookup actual para validar transición.
-    current = _fetch_by_id(supabase_client, template_id)
+    current = _fetch_by_id(supabase_client, template_id, tenant_id=tenant_id)
     if current.status == "PENDING" and current.meta_template_id == meta_template_id:
         return current  # Idempotente
 
@@ -309,6 +312,7 @@ def mark_submitted_to_meta(
             "status_reason": None,
         })
         .eq("id", template_id)
+        .eq("tenant_id", tenant_id)
         .execute()
     )
     rows = res.data or []
@@ -343,6 +347,10 @@ def update_status_from_webhook(
         update_fields["approved_at"] = datetime.utcnow().isoformat()
 
     res = (
+        # tenant_filter:exempt:webhook_resolution_by_meta_template_id_global
+        # meta_template_id es el ID GLOBAL único de Meta — el webhook de Meta
+        # (message_template_status_update) NO trae tenant_id; se resuelve por
+        # este id que Meta garantiza único cross-tenant.
         supabase_client.table("whatsapp_templates")
         .update(update_fields)
         .eq("meta_template_id", meta_template_id)
@@ -374,6 +382,8 @@ def update_quality_from_webhook(
         )
 
     res = (
+        # tenant_filter:exempt:webhook_resolution_by_meta_template_id_global
+        # meta_template_id global de Meta (message_template_quality_update webhook).
         supabase_client.table("whatsapp_templates")
         .update({"quality_rating": new_quality_rating})
         .eq("meta_template_id", meta_template_id)
@@ -448,14 +458,18 @@ def get_approved_template(
 def delete_template(
     supabase_client: Any,
     template_id: str,
+    *,
+    tenant_id: str,
 ) -> bool:
     """Hard-delete de un template (solo si está en LOCAL_DRAFT).
 
     NO permitimos delete de templates ya submitted a Meta — tienen historia
     de audit (status_reason, approved_at). Para esos, el lifecycle es
     deshabilitarlos vía Meta o esperar PAUSED/DISABLED.
+
+    A6.2.7: tenant_id obligatorio — scope cross-tenant del delete.
     """
-    current = _fetch_by_id(supabase_client, template_id)
+    current = _fetch_by_id(supabase_client, template_id, tenant_id=tenant_id)
     if current.status != "LOCAL_DRAFT":
         raise TemplateError(
             f"No se puede eliminar template en estado {current.status}. "
@@ -466,6 +480,7 @@ def delete_template(
         supabase_client.table("whatsapp_templates")
         .delete()
         .eq("id", template_id)
+        .eq("tenant_id", tenant_id)
         .execute()
     )
     return bool(res.data)
@@ -475,6 +490,7 @@ def update_local_draft(
     supabase_client: Any,
     template_id: str,
     *,
+    tenant_id: str,
     components: Optional[list[dict[str, Any]]] = None,
     category: Optional[str] = None,
     parameter_format: Optional[str] = None,
@@ -483,8 +499,10 @@ def update_local_draft(
 
     NO se puede cambiar `name` ni `language` post-creación (Meta los usa como
     parte del UNIQUE key). Para versionar, crear nuevo template con name_v2.
+
+    A6.2.7: tenant_id obligatorio — scope cross-tenant de la edición.
     """
-    current = _fetch_by_id(supabase_client, template_id)
+    current = _fetch_by_id(supabase_client, template_id, tenant_id=tenant_id)
     if current.status not in EDITABLE_STATUSES:
         raise TemplateError(
             f"No se puede editar template en estado {current.status}. "
@@ -515,6 +533,7 @@ def update_local_draft(
         supabase_client.table("whatsapp_templates")
         .update(update_fields)
         .eq("id", template_id)
+        .eq("tenant_id", tenant_id)
         .execute()
     )
     rows = res.data or []
@@ -526,11 +545,14 @@ def update_local_draft(
 # ─── Internos ────────────────────────────────────────────────────────────────
 
 
-def _fetch_by_id(supabase_client: Any, template_id: str) -> WhatsAppTemplate:
+def _fetch_by_id(supabase_client: Any, template_id: str, *, tenant_id: str) -> WhatsAppTemplate:
+    # A6.2.7: tenant_id obligatorio — el template se busca filtrado por tenant
+    # para no leer/operar sobre un template de otro tenant por su UUID.
     res = (
         supabase_client.table("whatsapp_templates")
         .select("*")
         .eq("id", template_id)
+        .eq("tenant_id", tenant_id)
         .limit(1)
         .execute()
     )
