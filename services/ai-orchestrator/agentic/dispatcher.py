@@ -697,6 +697,16 @@ async def _run_agentic_full(
     except Exception:
         _agent = {"name": "Sara Camila"}
 
+    # A8 finiquito (audit §1 #8 + §6) — Handoff sintético con consumer REAL.
+    # Si el agent_router determinó que NINGÚN agente del tenant cubre este
+    # inbound (_needs_human_handoff), antes el flag se ignoraba: el bot
+    # respondía "te contacto con un asesor" pero NADIE era notificado y la conv
+    # NO se marcaba human_takeover → promesa rota. Acá ejecutamos el side-effect
+    # REAL. El LLM igual corre con el role_description del agente sintético
+    # (mensaje cálido al cliente, sin tools), pero ahora SÍ hay atención humana.
+    if _agent.get("_needs_human_handoff"):
+        await _consume_router_handoff(supabase, tenant_id, conversation_id)
+
     # Rev. 109 auditoría — pitch/tone YA NO se duplican en ai_agents.
     # Única fuente verdad: tenants.business_pitch + tenants.tono_comunicacion.
     # Filosofía completa inyectada como bloque dedicado al system_prompt.
@@ -2680,6 +2690,62 @@ def _mark_message_skipped(supabase: Any, tenant_id: str, message_id: str) -> Non
             "[AGENTIC_DISPATCH] error marcando msg=%s skipped: %s",
             message_id[:8], exc,
         )
+
+
+async def _consume_router_handoff(
+    supabase: Any, tenant_id: str, conversation_id: str,
+) -> bool:
+    """A8 — Side-effect REAL del handoff sintético del agent_router.
+
+    Cuando el router clasifica un inbound para un rol que NINGÚN agente del
+    tenant cubre, devuelve `_HANDOFF_SYNTHETIC_AGENT` con `_needs_human_handoff`.
+    Este helper materializa la escalación (mismo patrón que la tool
+    escalate_to_human y FakeEscalationInvariant): status=human_takeover + audit
+    append-only + notificar operador. Retorna True si marcó takeover.
+    """
+    _reason = (
+        "Consulta fuera del alcance de los agentes configurados — "
+        "requiere asesor humano (router handoff)."
+    )
+    try:
+        supabase.table("conversations").update({
+            "status": "human_takeover",
+        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+    except Exception as exc:
+        logger.error(
+            "[AGENTIC_DISPATCH] handoff sintético: error marcando status "
+            "conv=%s: %s — operador podría NO ser notificado",
+            (conversation_id or "?")[:8], exc,
+        )
+        return False
+
+    # Audit append-only (no bloquea — status ya cambiado).
+    try:
+        supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "escalation_audit",
+            "content": "",
+            "payload": {"reason": _reason, "source": "agent_router_handoff"},
+            "processed": True,
+            "processing_status": "processed",
+        }).execute()
+    except Exception:
+        pass
+
+    # Notificar operador (best-effort; Path B DB-trigger→pgmq→worker respalda).
+    try:
+        from telegram_notifications import notify_escalation_async
+        await notify_escalation_async(
+            supabase,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            reason=_reason,
+        )
+    except Exception:
+        pass
+    return True
 
 
 # ─── Opt-out gate (Rev. 109 founder 2026-05-29) ─────────────────────────────
