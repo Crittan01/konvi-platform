@@ -124,6 +124,7 @@ class GetRecentOrdersTool:
                     "order_id, title, quantity, unit_price, variation_id",
                 )
                 .in_("order_id", order_ids)
+                .eq("tenant_id", ctx.tenant_id)  # A6.2.7: defensa cross-tenant
                 .execute()
             )
             # Variant attributes para detalle de presentación.
@@ -138,6 +139,7 @@ class GetRecentOrdersTool:
                         ctx.supabase.table("product_variations")
                         .select("id, attributes")
                         .in_("id", var_ids)
+                        .eq("tenant_id", ctx.tenant_id)  # A6.2.7: defensa cross-tenant
                         .execute()
                     )
                     var_lookup = {v["id"]: (v.get("attributes") or {}) for v in (vres.data or [])}
@@ -171,6 +173,7 @@ class GetRecentOrdersTool:
                 ctx.supabase.table("shipments")
                 .select("order_id, status, carrier, tracking_number, tracking_url")
                 .in_("order_id", order_ids)
+                .eq("tenant_id", ctx.tenant_id)  # A6.2.7: defensa cross-tenant
                 .execute()
             )
             for sh in (ships_res.data or []):

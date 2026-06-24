@@ -418,7 +418,7 @@ def apply_coupon(
                     "status": REDEMPTION_STATUS_REVOKED,
                     "revoked_at": datetime.now(timezone.utc).isoformat(),
                     "revoked_reason": f"cart_update_failed: {e}",
-                }).eq("id", redemption_id).execute()
+                }).eq("id", redemption_id).eq("tenant_id", tenant_id).execute()  # A6.2.7
         except Exception:
             pass
         return ApplyResult(ok=False, reason="cart_not_found",
@@ -479,7 +479,7 @@ def revoke_coupon(
             "status": REDEMPTION_STATUS_REVOKED,
             "revoked_at": now_iso,
             "revoked_reason": reason,
-        }).eq("cart_id", cart_id).eq("status", REDEMPTION_STATUS_APPLIED).execute()
+        }).eq("cart_id", cart_id).eq("tenant_id", tenant_id).eq("status", REDEMPTION_STATUS_APPLIED).execute()  # A6.2.7
     except Exception as e:
         logger.error(
             "[COUPON] revoke update redemption error tenant=%s cart=%s: %s",
@@ -574,6 +574,7 @@ def consume_redemption(
                 supabase.table("coupons")
                 .select("redemptions_count, max_redemptions")
                 .eq("id", coupon_id)
+                .eq("tenant_id", tenant_id)  # A6.2.7
                 .limit(1)
                 .execute()
             )
@@ -584,7 +585,7 @@ def consume_redemption(
                 if max_r is None or count < int(max_r):
                     supabase.table("coupons").update({
                         "redemptions_count": count + 1,
-                    }).eq("id", coupon_id).execute()
+                    }).eq("id", coupon_id).eq("tenant_id", tenant_id).execute()  # A6.2.7
                     incremented = True
                 else:
                     incremented = False
@@ -612,7 +613,7 @@ def consume_redemption(
             "status": REDEMPTION_STATUS_CONSUMED,
             "consumed_at": datetime.now(timezone.utc).isoformat(),
             "order_id": order_id,
-        }).eq("id", redemption_id).eq("status", REDEMPTION_STATUS_APPLIED).execute()
+        }).eq("id", redemption_id).eq("tenant_id", tenant_id).eq("status", REDEMPTION_STATUS_APPLIED).execute()  # A6.2.7
     except Exception as e:
         logger.error(
             "[COUPON] consume mark redemption error tenant=%s redemption=%s: %s",

@@ -7384,7 +7384,7 @@ async def build_and_run_orchestration(
                     _pii_recovered["email"] = _email_m.group(0).lower()
                 if _pii_recovered:
                     try:
-                        supabase.table("contacts").update(_pii_recovered).eq("id", contact_id).execute()
+                        supabase.table("contacts").update(_pii_recovered).eq("id", contact_id).eq("tenant_id", tenant_id).execute()  # A6.2.7: PII cross-tenant
                         logger.info("[CONSENT][PII] Recuperado del history: %s", list(_pii_recovered.keys()))
                     except Exception as exc:
                         logger.warning("[CONSENT][PII] Error persistiendo recovery: %s", exc)
@@ -7642,7 +7642,7 @@ async def build_and_run_orchestration(
                 supabase.table("conversations").update({
                     "status": "human_takeover",
                     "human_takeover_reason": "mental_health_crisis",
-                }).eq("id", conversation_id).execute()
+                }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()  # A6.2.7
             except Exception as _crisis_err:
                 logger.error("[CRISIS] no pude marcar takeover: %s", _crisis_err)
             _mark_message_processing(supabase, message_id, processing_status=PROCESSING_STATUS_PROCESSED)
@@ -8040,7 +8040,7 @@ async def build_and_run_orchestration(
                 if _existing_cart and _existing_cart.get("id"):
                     supabase.table("conversation_carts").update(
                         {"status": "cancelled"}
-                    ).eq("id", _existing_cart["id"]).execute()
+                    ).eq("id", _existing_cart["id"]).eq("tenant_id", tenant_id).execute()  # A6.2.7
                     logger.info(
                         "[CANCEL] cart=%s marcado cancelled tras intent del cliente",
                         _existing_cart["id"][:8],
@@ -10362,7 +10362,7 @@ async def build_and_run_orchestration(
                 update_data["address"] = merged_address
             if update_data:
                 try:
-                    supabase.table("contacts").update(update_data).eq("id", contact_id).execute()
+                    supabase.table("contacts").update(update_data).eq("id", contact_id).eq("tenant_id", tenant_id).execute()  # A6.2.7: PII cross-tenant
                     logger.info(f"[CONTACT USYNC] Actualizado {contact_id} con {update_data}")
                 except Exception as ex:
                     logger.warning(f"[CONTACT USYNC] Error actualizando contacto: {ex}")
