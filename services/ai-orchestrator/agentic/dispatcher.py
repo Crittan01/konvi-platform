@@ -697,6 +697,18 @@ async def _run_agentic_full(
     except Exception:
         _agent = {"name": "Sara Camila"}
 
+    # A8 #3 finiquito (audit §6) — observabilidad del agente activo. Antes el
+    # persona_block (role_description) llegaba al LLM pero NO se trackeaba qué
+    # rol lo renderizó → imposible auditar/debuggear "el bot se presentó como
+    # agente X". Log per-turn del agente + rol + si inyecta persona.
+    logger.info(
+        "[AGENTIC_AGENT] conv=%s agent=%s role=%s has_persona=%s handoff=%s",
+        conversation_id[:8] if conversation_id else "?",
+        _agent.get("name") or "?", _agent.get("role") or "default",
+        bool(_agent.get("role_description")),
+        bool(_agent.get("_needs_human_handoff")),
+    )
+
     # A8 finiquito (audit §1 #8 + §6) — Handoff sintético con consumer REAL.
     # Si el agent_router determinó que NINGÚN agente del tenant cubre este
     # inbound (_needs_human_handoff), antes el flag se ignoraba: el bot
@@ -2072,21 +2084,25 @@ async def _run_agentic_full(
             )
             _allowed_tools = None  # monolito = todas las tools
 
-    # Rev. 109 ADR-0017 — multi-agente tools enforcement.
-    # Si el agente tiene `tools_allowed` restringido, intersectamos con
-    # el subset de estado. Ej: agente Support nunca expone add_to_cart
-    # aunque el estado lo permita.
-    _agent_tools = _agent.get("tools_allowed") if isinstance(_agent, dict) else None
-    if _agent_tools and isinstance(_agent_tools, list):
-        _agent_tools_set = {str(t) for t in _agent_tools if t}
-        if _allowed_tools is None:
-            _allowed_tools = _agent_tools_set
-        else:
-            _allowed_tools = _allowed_tools & _agent_tools_set
-        logger.info(
-            "[AGENTIC_AGENT_TOOLS] conv=%s agent=%s tools_after_intersect=%d",
+    # A8 #2 finiquito (audit §6) — fsm_states_allowed enforcement + tools
+    # intersection del agente activo. Helper puro testeable (ver
+    # _compute_agent_allowed_tools): si el estado resuelto está fuera del subset
+    # de estados del agente, NO se aplica su restricción de tools este turn.
+    _allowed_tools, _agent_out_of_state = _compute_agent_allowed_tools(
+        _allowed_tools, _agent, _resolved_state,
+    )
+    if _agent_out_of_state:
+        logger.warning(
+            "[AGENTIC_FSM_STATES] conv=%s agent=%s estado=%s FUERA de "
+            "fsm_states_allowed — ignorando restricción de tools del agente "
+            "este turn (sirve con toolset del estado)",
             conversation_id[:8], _agent.get("name") or "?",
-            len(_allowed_tools),
+            _resolved_state.value if _resolved_state else "?",
+        )
+    elif isinstance(_allowed_tools, set):
+        logger.info(
+            "[AGENTIC_AGENT_TOOLS] conv=%s agent=%s tools_allowed=%d",
+            conversation_id[:8], _agent.get("name") or "?", len(_allowed_tools),
         )
     # ─── /per-state ───
 
@@ -2746,6 +2762,34 @@ async def _consume_router_handoff(
     except Exception:
         pass
     return True
+
+
+def _compute_agent_allowed_tools(state_tools, agent, resolved_state):
+    """A8 #2 — combina el toolset del estado con la restricción del agente activo.
+
+    - Si el agente tiene `fsm_states_allowed` y el estado resuelto está FUERA →
+      out_of_state=True y NO se aplica su restricción de tools (se devuelve
+      state_tools tal cual; el cliente se sirve con el toolset del estado).
+      Decisión low-touch no-disruptiva (vs downgrade GREETING / escalar).
+    - Si el agente está en-estado (o sin restricción de estados) y tiene
+      `tools_allowed` → se intersecta con state_tools (Support nunca expone
+      add_to_cart aunque el estado lo permita).
+
+    Helper puro (sin side-effects) → testeable. Retorna (allowed_tools, out_of_state).
+    """
+    out_of_state = bool(
+        isinstance(agent, dict)
+        and agent.get("fsm_states_allowed") is not None
+        and resolved_state is not None
+        and resolved_state.value not in agent.get("fsm_states_allowed")
+    )
+    agent_tools = agent.get("tools_allowed") if isinstance(agent, dict) else None
+    if agent_tools and isinstance(agent_tools, list) and not out_of_state:
+        agent_set = {str(t) for t in agent_tools if t}
+        if state_tools is None:
+            return agent_set, out_of_state
+        return (state_tools & agent_set), out_of_state
+    return state_tools, out_of_state
 
 
 # ─── Opt-out gate (Rev. 109 founder 2026-05-29) ─────────────────────────────

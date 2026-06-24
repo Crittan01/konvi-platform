@@ -97,5 +97,66 @@ class RouterHandoffConsumerTests(unittest.TestCase):
         self.assertEqual(_HANDOFF_SYNTHETIC_AGENT.get("tools_allowed"), [])
 
 
+class FsmStatesEnforcementTests(unittest.TestCase):
+    """A8 #2 — _compute_agent_allowed_tools: fsm_states_allowed + tools intersect."""
+
+    def setUp(self):
+        from agentic.state_machine.states import AgenticState
+        self.S = AgenticState
+
+    def test_agent_in_state_intersects_tools(self):
+        # Support (tools=[get_order_status]) en POST_PAYMENT (permitido) →
+        # intersección con el toolset del estado.
+        agent = {
+            "name": "Support",
+            "fsm_states_allowed": ["POST_PAYMENT", "HUMAN_HANDOFF"],
+            "tools_allowed": ["get_order_status", "escalate_to_human"],
+        }
+        state_tools = {"get_order_status", "add_to_cart", "escalate_to_human"}
+        allowed, oos = disp._compute_agent_allowed_tools(
+            state_tools, agent, self.S.POST_PAYMENT,
+        )
+        self.assertFalse(oos)
+        self.assertEqual(allowed, {"get_order_status", "escalate_to_human"})
+
+    def test_agent_out_of_state_ignores_restriction(self):
+        # Support en CART_BUILDING (FUERA de su subset) → out_of_state, NO aplica
+        # su restricción de tools: se devuelve el toolset del estado intacto.
+        agent = {
+            "name": "Support",
+            "fsm_states_allowed": ["POST_PAYMENT", "HUMAN_HANDOFF"],
+            "tools_allowed": ["get_order_status"],
+        }
+        state_tools = {"add_to_cart", "get_cart"}
+        allowed, oos = disp._compute_agent_allowed_tools(
+            state_tools, agent, self.S.CART_BUILDING,
+        )
+        self.assertTrue(oos)
+        self.assertEqual(allowed, {"add_to_cart", "get_cart"})  # intacto
+
+    def test_default_agent_no_fsm_restriction(self):
+        # Agente default (fsm_states_allowed=None) → nunca out_of_state, aplica
+        # su tools_allowed si lo tiene.
+        agent = {"name": "Sara", "fsm_states_allowed": None, "tools_allowed": ["add_to_cart"]}
+        allowed, oos = disp._compute_agent_allowed_tools(
+            {"add_to_cart", "get_cart"}, agent, self.S.CART_BUILDING,
+        )
+        self.assertFalse(oos)
+        self.assertEqual(allowed, {"add_to_cart"})
+
+    def test_no_agent_restriction_returns_state_tools(self):
+        agent = {"name": "Sara"}  # sin tools_allowed ni fsm_states_allowed
+        st = {"add_to_cart"}
+        allowed, oos = disp._compute_agent_allowed_tools(st, agent, self.S.CART_BUILDING)
+        self.assertFalse(oos)
+        self.assertEqual(allowed, st)
+
+    def test_state_tools_none_returns_agent_set(self):
+        # Fallback monolito (state_tools=None) + agente con tools → agent set.
+        agent = {"name": "Support", "fsm_states_allowed": None, "tools_allowed": ["a", "b"]}
+        allowed, oos = disp._compute_agent_allowed_tools(None, agent, self.S.POST_PAYMENT)
+        self.assertEqual(allowed, {"a", "b"})
+
+
 if __name__ == "__main__":
     unittest.main()
