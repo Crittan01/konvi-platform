@@ -55,6 +55,10 @@ supabase/migrations/          # fuente canónica de esquema
   Leer solo si actualizas documentación.
 - `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md` — Konvi NUNCA será Partner Meta. Cada tenant Direct Provider con SU PROPIA Meta App + HMAC per-tenant.
   Leer si tocas: connector WhatsApp, integración Meta, onboarding tenants, webhook routing.
+- `docs/adr/0024-invariant-binary-only-criterion.md` — Invariants en `apply_invariants` SOLO si verificación binaria/determinística (SET membership, DB lookup, comparación numérica). NO parsers NLP semánticos.
+  Leer si tocas: agentic/invariants, validación post-LLM, anti-hallucination.
+- `docs/adr/0025-multi-tenant-isolation-strategy.md` — Aislamiento = lint AST (`scripts/audit_tenant_filter.py`) + RLS GUC + Vault ownership. Patrón canónico `.table(X).eq("tenant_id", tid)`. Helper `scoped_table` ELIMINADO (0 adopción).
+  Leer si tocas: queries DB multi-tenant, RLS, seguridad cross-tenant, webhooks.
 
 ## NO leer (reduce tokens ~50%)
 
@@ -77,7 +81,7 @@ supabase/migrations/          # fuente canónica de esquema
 ## Validación pre-deploy
 
 ```bash
-bash scripts/validate.sh             # sintaxis + 1490 tests + TypeScript + lint
+bash scripts/validate.sh             # sintaxis + ~2889 tests (pytest) + tenant lint + TypeScript + ESLint
 bash scripts/validate.sh --build     # + Next.js build (detecta errores que bloquean Render)
 bash scripts/validate.sh --full      # + pip-audit + coherencia vars
 bash scripts/validate.sh --coverage  # + cobertura Python (baseline 58.9%, target 70% Sem 11)
@@ -87,7 +91,11 @@ bash scripts/validate.sh --ci        # CI strict: --full + --coverage + --build 
 
 CI/CD: `.github/workflows/ci.yml` ejecuta `validate.sh --ci` + Next.js build en cada PR.
 
-Baselines (rev. 105 Sem 1):
+Test runner: **pytest** (rev. 111 A6.2.5 — migrado de unittest discover que
+enmascaraba 2 fallos cross-test). Fallback a unittest si pytest ausente.
+
+Baselines:
 - **Coverage Python**: 58.9% (target J.5 = 70% Sem 11) — env `COVERAGE_MIN=55` ajustable
 - **ruff lint errors**: 202 baseline (cleanup planificado Sem 2-3) — env `BASELINE_RUFF_ERRORS=202`
+- **Tenant filter gaps**: 198 baseline (ratchet decreciente) — env `BASELINE_MAX=198`. Lint AST `scripts/audit_tenant_filter.py` enforce `.eq("tenant_id", tid)` en queries multi-tenant (ADR-0025). Fixear gaps en finiquito A6.2.7.
 

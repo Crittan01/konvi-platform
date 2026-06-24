@@ -6,6 +6,30 @@
 
 ---
 
+## 🚨 CIERRE REV. 111 — 2026-06-23/24 — Cura crónica Inbox + Fase A NIVEL 2 (A6)
+
+**Cura raíz crónica Inbox** (cierre dev en `develop`): bot improvisaba horarios/despacho
+porque V3 per-state builder no recibía business_ops kwargs. Root-cause workflow `wujbdgrhk`.
+Fase 0-3 + ADR-0024 (criterio invariant binario) + ToolIdReferentialIntegrity (cierra BUG-CART-1).
+UAT live KAIU confirma cita literal DB. Commits `3b429d2f`/`bcf47d1a`/`5b8fc14d`/`ef100150`.
+
+**Fase A NIVEL 2 (A6)** — branch `feat/A6-A7-quality-first-rev111`:
+- Super-audit `worwkgukx` → PASS_WITH_GAPS. Root-cause `w7hw4n935`: scoped_table 0 adopción
+  → **Opción E** (lint AST + RLS GUC + Vault ownership). ADR-0025.
+- ✅ A6.1 lint AST + baseline 198 gaps + CI. A6.2.1 silent regression fix. A6.2.2 schema
+  discovery (66 tablas migrations). A6.2.3 lint strictness. A6.2.4 CODEOWNERS + ratchet.
+  A6.2.5 runner pytest. A6.5 decommission scoped_table.
+- ⏳ **Pendiente A6/A7**: A6.2.7 fix puntuales 198 gaps (worker.py:455, wompi lookups,
+  marketplace rollback) + A6.3 RLS GUC middleware + A6.4 Vault RPC ownership + A7 RBAC
+  marketplace/ai_agents + Telegram constant-time.
+- Ver memoria `project_a6_lint_approach_opcion_e` + ADR-0025.
+
+**Siguiente NIVELES finiquito** (post A6/A7): A5 Save-PII Habeas Data · A8 Multi-agente router
+(incluye BUG-CATALOG-1/2/3 smoke) · A9 Contactos drift · A10 FakeEscalation · A3 cotizador ·
+A4 Reclamos · A11 UAT live analítico dual-mode (cierre).
+
+---
+
 ## 🚨 CIERRE REV. 110 — 2026-06-22 — ADR-0023 Model B Direct Provider per-tenant
 
 **Cierre dev completo** Phases 1-6+8 refactor WhatsApp connector a modelo `Direct Provider per-tenant`
