@@ -19,6 +19,7 @@ INTERVENCION HUMANA REQUERIDA — configurar setWebhook:
 
 Referencia Telegram Bot API: https://core.telegram.org/bots/api#setwebhook
 """
+import hmac
 import logging
 import os
 
@@ -49,7 +50,8 @@ async def telegram_webhook(
         logger.warning("[TG_WH] TELEGRAM_WEBHOOK_SECRET no configurado — endpoint deshabilitado")
         raise HTTPException(status_code=503, detail="Telegram webhook no configurado")
 
-    if x_telegram_bot_api_secret_token != TELEGRAM_WEBHOOK_SECRET:
+    # A7.5 finiquito: constant-time comparison evita timing attack sobre el secret.
+    if not hmac.compare_digest(x_telegram_bot_api_secret_token, TELEGRAM_WEBHOOK_SECRET):
         logger.warning("[TG_WH] Token inválido — request rechazado")
         raise HTTPException(status_code=401, detail="Token inválido")
 
@@ -66,24 +68,51 @@ async def telegram_webhook(
         return JSONResponse(status_code=200, content={"ok": True})
 
     logger.info("[TG_WH] Comando recibido: chat=%s text=%r", chat_id, text[:80])
-    reply = await _handle_command(text, chat_id)
+
+    # A6.2.7 finiquito 2026-06-24 (super-audit + triage wl982c7yb CRITICAL):
+    # SEGURIDAD MULTI-TENANT. Antes los comandos /resolver /estado leían/mutaban
+    # conversaciones por conv_id del INPUT del operador SIN filtrar por tenant →
+    # un operador del tenant B podía escribir "/resolver {conv_id_de_A}" y mutar
+    # o leer PII (customer_phone) de la conversación de OTRO tenant. La verdadera
+    # solución NO es .eq("tenant_id") ciego (no hay tenant en scope del comando):
+    # el chat_id ES la identidad del operador → resolvemos su tenant vía
+    # tenant_provider_identity ANTES de ejecutar, y rechazamos chats no mapeados.
+    supabase = _get_service_client()
+    from lib.identity_registry import resolve_tenant_id
+    tenant_id = resolve_tenant_id(supabase, "telegram", chat_id)
+    if not tenant_id:
+        # Chat no vinculado a ningún tenant → NO ejecutamos comando ni respondemos
+        # (sin tenant no hay bot_token con qué responder, y es un origen no
+        # autorizado). Backfill de identidad vía lib.identity_registry.register_identity.
+        logger.warning(
+            "[TG_WH] chat_id=%s SIN tenant en tenant_provider_identity — "
+            "comando RECHAZADO (origen no autorizado o pendiente backfill)",
+            chat_id,
+        )
+        return JSONResponse(status_code=200, content={"ok": True})
+
+    reply = await _handle_command(text, chat_id, tenant_id)
 
     if reply:
-        _send_telegram_reply(chat_id, reply, update)
+        _send_telegram_reply(chat_id, reply, tenant_id)
 
     return JSONResponse(status_code=200, content={"ok": True})
 
 
-async def _handle_command(text: str, chat_id: int) -> str:
-    """Parsea el comando y ejecuta la acción. Retorna el texto de respuesta."""
+async def _handle_command(text: str, chat_id: int, tenant_id: str) -> str:
+    """Parsea el comando y ejecuta la acción. Retorna el texto de respuesta.
+
+    `tenant_id` ya resuelto del chat_id (A6.2.7) — todas las queries de los
+    comandos DEBEN filtrar por él para aislamiento cross-tenant.
+    """
     parts = text.split(maxsplit=1)
     cmd = parts[0].lower().lstrip("/")
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     if cmd in ("resolver", "resolve"):
-        return await _cmd_resolver(arg)
+        return await _cmd_resolver(arg, tenant_id)
     if cmd in ("estado", "status"):
-        return await _cmd_estado(arg)
+        return await _cmd_estado(arg, tenant_id)
     if cmd in ("ayuda", "help", "start"):
         return (
             "📋 *Comandos disponibles:*\n\n"
@@ -94,7 +123,7 @@ async def _handle_command(text: str, chat_id: int) -> str:
     return ""
 
 
-async def _cmd_resolver(conv_id: str) -> str:
+async def _cmd_resolver(conv_id: str, tenant_id: str) -> str:
     if not conv_id:
         return "⚠️ Uso: `/resolver {conversation_id}`"
 
@@ -102,10 +131,14 @@ async def _cmd_resolver(conv_id: str) -> str:
     supabase = _get_service_client()
 
     try:
+        # A6.2.7: filtrar por tenant del operador (resuelto del chat_id) → un
+        # operador no puede tocar conversaciones de otro tenant aunque pase su
+        # conv_id. Si el conv_id es de otro tenant, la query retorna 0 filas.
         res = (
             supabase.table("conversations")
             .select("id, status, tenant_id")
             .eq("id", conv_id)
+            .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )
@@ -119,7 +152,7 @@ async def _cmd_resolver(conv_id: str) -> str:
 
         supabase.table("conversations").update({"status": "bot_active"}).eq(
             "id", conv_id
-        ).execute()
+        ).eq("tenant_id", tenant_id).execute()
 
         logger.info("[TG_WH] bot_active restaurado: conv=%s", conv_id)
         return (
@@ -131,7 +164,7 @@ async def _cmd_resolver(conv_id: str) -> str:
         return "⚠️ Error al actualizar la conversación. Intenta de nuevo."
 
 
-async def _cmd_estado(conv_id: str) -> str:
+async def _cmd_estado(conv_id: str, tenant_id: str) -> str:
     if not conv_id:
         return "⚠️ Uso: `/estado {conversation_id}`"
 
@@ -139,10 +172,13 @@ async def _cmd_estado(conv_id: str) -> str:
     supabase = _get_service_client()
 
     try:
+        # A6.2.7: filtrar por tenant del operador → no leer customer_phone (PII)
+        # de conversación de otro tenant.
         res = (
             supabase.table("conversations")
             .select("id, status, customer_phone, last_interaction_at")
             .eq("id", conv_id)
+            .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )
@@ -166,52 +202,29 @@ async def _cmd_estado(conv_id: str) -> str:
         return "⚠️ Error al consultar la conversación."
 
 
-def _send_telegram_reply(chat_id: int, text: str, update: dict) -> None:
+def _send_telegram_reply(chat_id: int, text: str, tenant_id: str) -> None:
     """
     Envía respuesta al asesor en Telegram usando el bot_token del tenant
     propietario del chat_id.
 
-    Rev. 105 Sem 2 F.12 (MA-10) — antes tomaba "primer tenant activo" lo que
-    causaba cross-talk silencioso al haber 2+ tenants con Telegram. Ahora
-    resuelve el tenant vía `tenant_provider_identity` (chat_id como
-    provider_internal_id). Fallback al patrón legacy SOLO si la identidad
-    no está registrada (warning explícito) — esto se removerá tras backfill
-    completo de identidades.
+    A6.2.7 finiquito 2026-06-24 — el `tenant_id` ya viene resuelto del chat_id
+    en `telegram_webhook` (vía tenant_provider_identity). ELIMINADO el fallback
+    legacy "primer tenant activo" que causaba cross-talk silencioso (MA-10): el
+    handler ya rechaza chats no mapeados ANTES de llegar acá, así que siempre
+    tenemos el tenant correcto. La config se busca SIEMPRE filtrada por tenant.
     """
     supabase = _get_service_client()
     try:
-        from lib.identity_registry import resolve_tenant_id
-
-        tenant_id = resolve_tenant_id(supabase, "telegram", chat_id)
-
-        if tenant_id:
-            # Camino correcto: lookup config del tenant específico.
-            settings_res = (
-                supabase.table("notification_settings")
-                .select("config")
-                .eq("tenant_id", tenant_id)
-                .eq("channel", "telegram")
-                .eq("enabled", True)
-                .limit(1)
-                .execute()
-            )
-        else:
-            # Fallback legacy temporal — pre-backfill identity registry.
-            # Cuando todos los tenants estén registrados, este branch debe
-            # removerse y el chat_id sin identidad rechazarse explícitamente.
-            logger.warning(
-                "[TG_WH] chat_id=%s sin identidad en tenant_provider_identity, "
-                "usando fallback 'primer tenant activo' (legacy pre-backfill)",
-                chat_id,
-            )
-            settings_res = (
-                supabase.table("notification_settings")
-                .select("config")
-                .eq("channel", "telegram")
-                .eq("enabled", True)
-                .limit(1)
-                .execute()
-            )
+        # Camino único: config del tenant resuelto (sin fallback cross-tenant).
+        settings_res = (
+            supabase.table("notification_settings")
+            .select("config")
+            .eq("tenant_id", tenant_id)
+            .eq("channel", "telegram")
+            .eq("enabled", True)
+            .limit(1)
+            .execute()
+        )
 
         config = (settings_res.data or [{}])[0].get("config") or {}
         from vault_helper import VaultHelper, resolve_secret

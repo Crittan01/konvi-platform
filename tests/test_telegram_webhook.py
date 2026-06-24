@@ -31,11 +31,15 @@ def _mock_supabase_conversation(conv_data):
     supabase = MagicMock()
     chain = MagicMock()
     chain.execute.return_value = MagicMock(data=[conv_data] if conv_data else [])
+    # A6.2.7: query ahora es .select().eq("id").eq("tenant_id").limit() (2 .eq).
     (supabase.table.return_value
      .select.return_value
      .eq.return_value
+     .eq.return_value
      .limit.return_value) = chain
-    supabase.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    # update ahora es .update().eq("id").eq("tenant_id").execute() (2 .eq).
+    (supabase.table.return_value.update.return_value
+     .eq.return_value.eq.return_value.execute.return_value) = MagicMock()
     return supabase
 
 
@@ -47,7 +51,7 @@ class CmdResolverTests(unittest.IsolatedAsyncioTestCase):
         supabase = _mock_supabase_conversation(conv)
         mock_client.return_value = supabase
 
-        result = await _cmd_resolver("conv-uuid-abcdef")
+        result = await _cmd_resolver("conv-uuid-abcdef", "t1")
 
         self.assertIn("Bot activado", result)
         self.assertIn("conv-uui", result)  # first 8 chars of conv id
@@ -59,7 +63,7 @@ class CmdResolverTests(unittest.IsolatedAsyncioTestCase):
         supabase = _mock_supabase_conversation(conv)
         mock_client.return_value = supabase
 
-        result = await _cmd_resolver("conv-uuid-abcdef")
+        result = await _cmd_resolver("conv-uuid-abcdef", "t1")
 
         self.assertIn("ya está en modo bot", result)
         supabase.table.return_value.update.assert_not_called()
@@ -69,13 +73,13 @@ class CmdResolverTests(unittest.IsolatedAsyncioTestCase):
         supabase = _mock_supabase_conversation(None)
         mock_client.return_value = supabase
 
-        result = await _cmd_resolver("conv-no-existe")
+        result = await _cmd_resolver("conv-no-existe", "t1")
 
         self.assertIn("no encontrada", result)
         supabase.table.return_value.update.assert_not_called()
 
     async def test_resolver_empty_arg_returns_usage(self):
-        result = await _cmd_resolver("")
+        result = await _cmd_resolver("", "t1")
         self.assertIn("Uso", result)
         self.assertIn("resolver", result.lower())
 
@@ -85,7 +89,7 @@ class CmdResolverTests(unittest.IsolatedAsyncioTestCase):
         supabase.table.side_effect = RuntimeError("DB down")
         mock_client.return_value = supabase
 
-        result = await _cmd_resolver("conv-uuid-xyz")
+        result = await _cmd_resolver("conv-uuid-xyz", "t1")
         self.assertIn("Error", result)
 
 
@@ -102,47 +106,47 @@ class CmdEstadoTests(unittest.IsolatedAsyncioTestCase):
         supabase = _mock_supabase_conversation(conv)
         mock_client.return_value = supabase
 
-        result = await _cmd_estado("conv-uuid-abcdef")
+        result = await _cmd_estado("conv-uuid-abcdef", "t1")
 
         self.assertIn("human_takeover", result)
         self.assertIn("+573001234567", result)
         self.assertIn("2026-04-25", result)
 
     async def test_estado_empty_arg_returns_usage(self):
-        result = await _cmd_estado("")
+        result = await _cmd_estado("", "t1")
         self.assertIn("Uso", result)
 
 
 class HandleCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_help_command(self):
-        result = await _handle_command("/ayuda", 12345)
+        result = await _handle_command("/ayuda", 12345, "t1")
         self.assertIn("resolver", result.lower())
         self.assertIn("estado", result.lower())
 
     async def test_help_english(self):
-        result = await _handle_command("/help", 12345)
+        result = await _handle_command("/help", 12345, "t1")
         self.assertIn("resolver", result.lower())
 
     async def test_unknown_command_returns_empty(self):
-        result = await _handle_command("/unknown_command", 12345)
+        result = await _handle_command("/unknown_command", 12345, "t1")
         self.assertEqual(result, "")
 
     async def test_no_slash_prefix_not_matched(self):
-        result = await _handle_command("hola, ¿cómo estás?", 12345)
+        result = await _handle_command("hola, ¿cómo estás?", 12345, "t1")
         self.assertEqual(result, "")
 
     @patch("routers.telegram_webhook._cmd_resolver", new_callable=AsyncMock)
     async def test_resolver_command_dispatched(self, mock_resolver):
         mock_resolver.return_value = "ok"
-        await _handle_command("/resolver conv-123", 12345)
-        mock_resolver.assert_called_once_with("conv-123")
+        await _handle_command("/resolver conv-123", 12345, "t1")
+        mock_resolver.assert_called_once_with("conv-123", "t1")
 
     @patch("routers.telegram_webhook._cmd_estado", new_callable=AsyncMock)
     async def test_estado_command_dispatched(self, mock_estado):
         mock_estado.return_value = "estado: ok"
-        await _handle_command("/estado conv-456", 12345)
-        mock_estado.assert_called_once_with("conv-456")
+        await _handle_command("/estado conv-456", 12345, "t1")
+        mock_estado.assert_called_once_with("conv-456", "t1")
 
 
 class TelegramWebhookEndpointTests(unittest.IsolatedAsyncioTestCase):
