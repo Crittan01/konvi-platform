@@ -44,7 +44,7 @@ Además, super-audit reveló:
    - **authenticated** (frontend, NO bypasea RLS) → ya protegido por las policies RLS existentes. Cobertura verificada 2026-06-24: **65/66 tablas tenant-scoped con policy `tenant_id = app_current_tenant()`**; `tenant_users` ya tiene policy (`20260415000000`); la única sin policy es `rate_limit_windows` (infra sin columna `tenant_id`, solo backend la usa → RLS-enabled sin policy = locked a service_role, postura correcta).
    - Re-evaluar GUC solo si se adopta la capa psycopg directa o un ORM con tenant scoping nativo.
 
-4. **Vault RPC ownership** (Fase A6.4 — migración autorada 2026-06-24): `pgsec_read/update/delete/upsert/create_secret` validan internamente ownership. El nombre del secret codifica `{tenant_id}/provider/credential`, así que el RPC deriva el tenant dueño (`split_part(name,'/',1)::uuid`) y exige que el `authenticated` sea miembro vía `public.tenant_users`; `service_role` (auth.uid() NULL) bypasa. Sigue el precedente `get_aveonline_credentials` (`20260527020000`). **NO** requiere tabla metadata ni dual-read (el nombre ya es la fuente de verdad del owner). Migración: `20260624000000_vault_rpc_tenant_ownership.sql`. **INTERVENCION HUMANA**: aplicar a dev → verificar lectura propia + cross-tenant=NULL + smoke frontend/bot → aplicar a prod.
+4. **Vault RPC ownership** (Fase A6.4 — migración autorada 2026-06-24): `pgsec_read/update/delete/upsert/create_secret` validan internamente ownership. El nombre del secret codifica `{tenant_id}/provider/credential`, así que el RPC deriva el tenant dueño (`split_part(name,'/',1)::uuid`) y exige que el `authenticated` sea miembro vía `public.tenant_users`; `service_role` (auth.uid() NULL) bypasa. Sigue el precedente `get_aveonline_credentials` (`20260527020000`). **NO** requiere tabla metadata ni dual-read (el nombre ya es la fuente de verdad del owner). Migración: `20260624000000_vault_rpc_tenant_ownership.sql`. **APLICADA + VERIFICADA en prod (commerce-ops-dev) 2026-06-24** vía protocolo seguro (pre-check deps → `supabase db query --linked -f` aislada → smoke → `migration repair --status applied`). Pruebas binarias en remote: (A) miembro lee secret propio → OK; (B) no-miembro lee secret ajeno → NULL; (C) authenticated lee secret legacy sin prefijo (`whatsapp_app_secret_kaiu_*`) → NULL (locked a service_role, único caller es el connector backend); (D) upsert no-miembro con prefijo ajeno → RAISE `tenant_ownership_violation`, 0 escrito; service_role (backend/bot) lee todo igual que antes (app_secret len=32, telegram bot_token).
 
 5. **Webhooks resuelven tenant ANTES del primer query tenant-scoped** (per ADR-0023 Direct Provider): vía secret per-tenant o path `/webhook/{tenant_id}`. Los lookups de resolución llevan exemption marker.
 
@@ -94,7 +94,7 @@ Además, super-audit reveló:
 | A6.5 | Eliminar scoped_table + ADR-0025 | ✅ DONE (este ADR) |
 | A6.2.7 | Cierre TOTAL gaps tenant_filter 198→0 + Telegram raíz | ✅ DONE (`BASELINE_MAX=0`) |
 | A6.3 | RLS GUC middleware | 🔶 RE-SCOPED (GUC no-viable con PostgREST — ver abajo) |
-| A6.4 | Vault RPC ownership | 🟡 MIGRACIÓN AUTORADA (pendiente apply prod, founder) |
+| A6.4 | Vault RPC ownership | ✅ DONE (aplicada + verificada prod 2026-06-24) |
 | A7 | RBAC marketplace + ai_agents (+ Telegram constant-time en A6.2.7) | ✅ DONE |
 
 ---
