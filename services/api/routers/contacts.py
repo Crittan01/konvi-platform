@@ -16,13 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client
-from dependencies.audit import audit_log
+from dependencies.audit import audit_log, _extract_user_info
 from dependencies.auth import (
     get_current_tenant,
     get_service_client,
     require_owner_role,
     require_write_role,
 )
+from dependencies.pii_audit import log_pii_access
 from dependencies.contact_validators import (
     DOCUMENT_TYPES_CO,
     validate_document,
@@ -70,6 +71,11 @@ class ContactCreate(BaseModel):
     document_number: Optional[str] = Field(default=None, max_length=30)
     # Address structured: schema canónico documentado en migración 20260429000000.
     address: Optional[dict] = Field(default=None)
+    # A9 finiquito — shipping_phone (destinatario de envío, puede diferir del phone
+    # de contacto). Paridad con la UI; default al phone en checkout si vacío.
+    shipping_phone: Optional[str] = Field(
+        default=None, max_length=20, pattern=r"^\+?[1-9]\d{7,19}$",
+    )
     consent_given: bool = False
     consent_source: Optional[str] = None
     consent_notice_version: Optional[str] = Field(default=None, max_length=80)
@@ -103,6 +109,9 @@ class ContactPatch(BaseModel):
     document_type: Optional[str] = Field(default=None, max_length=10)
     document_number: Optional[str] = Field(default=None, max_length=30)
     address: Optional[dict] = Field(default=None)
+    shipping_phone: Optional[str] = Field(
+        default=None, max_length=20, pattern=r"^\+?[1-9]\d{7,19}$",
+    )
     consent_given: Optional[bool] = None
     consent_source: Optional[str] = None
     consent_notice_version: Optional[str] = Field(default=None, max_length=80)
@@ -123,6 +132,13 @@ class ContactPatch(BaseModel):
     @classmethod
     def _normalize_doc_number(cls, v: Optional[str]) -> Optional[str]:
         return normalize_document_number(v)
+
+
+# Campos PII de contacto cuya escritura se audita en pii_access_log (Art. 9).
+_PII_CONTACT_FIELDS = (
+    "name", "email", "phone", "shipping_phone",
+    "document_type", "document_number", "address",
+)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -220,6 +236,7 @@ async def create_contact(
             "document_type": contact.document_type,
             "document_number": contact.document_number,
             "address": contact.address,
+            "shipping_phone": contact.shipping_phone,
             "consent_given": contact.consent_given,
             "consent_date": now_iso if contact.consent_given else None,
             "consent_source": contact.consent_source if contact.consent_given else None,
@@ -234,6 +251,26 @@ async def create_contact(
         if not result.data:
             raise HTTPException(status_code=500, detail="Error al crear contacto")
         response_body = result.data[0]
+
+        # A9 finiquito (Habeas Data Art. 9): audit field-level del WRITE de PII
+        # desde la UI/API. El @audit_log registra la acción de entidad; esto
+        # registra QUÉ campos PII se escribieron. Best-effort (no rompe el flujo).
+        _uid, _email = _extract_user_info(request)
+        _pii_written = [
+            f for f in _PII_CONTACT_FIELDS
+            if (payload.get(f) not in (None, "", {}))
+        ]
+        log_pii_access(
+            supabase,
+            tenant_id=tenant_id,
+            contact_id=response_body.get("id"),
+            accessed_by=f"user:{_email or _uid or 'unknown'}",
+            purpose="contact_create",
+            fields_accessed=_pii_written,
+            ip_address=getattr(getattr(request, "client", None), "host", None),
+            user_agent=request.headers.get("user-agent") if request else None,
+        )
+
         finalize_idempotency(
             supabase=supabase,
             tenant_id=tenant_id,
@@ -340,6 +377,22 @@ async def patch_contact(
         if not result.data:
             raise HTTPException(status_code=404, detail="Contacto no encontrado")
         response_body = result.data[0]
+
+        # A9 finiquito (Habeas Data Art. 9): audit field-level del UPDATE de PII.
+        _pii_written = [f for f in _PII_CONTACT_FIELDS if f in data]
+        if _pii_written:
+            _uid, _email = _extract_user_info(request)
+            log_pii_access(
+                supabase,
+                tenant_id=tenant_id,
+                contact_id=contact_id,
+                accessed_by=f"user:{_email or _uid or 'unknown'}",
+                purpose="contact_update",
+                fields_accessed=_pii_written,
+                ip_address=getattr(getattr(request, "client", None), "host", None),
+                user_agent=request.headers.get("user-agent") if request else None,
+            )
+
         finalize_idempotency(
             supabase=supabase,
             tenant_id=tenant_id,
