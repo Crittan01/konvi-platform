@@ -39,9 +39,12 @@ Además, super-audit reveló:
    - Baseline CSV + ratchet `BASELINE_MAX` decreciente: gaps solo pueden bajar.
    - `.github/CODEOWNERS` protege baseline + script (no se puede vaciar el guardrail sin review).
 
-3. **RLS DB-enforced** (Fase A6.3, pendiente): middleware FastAPI `SET LOCAL app.current_tenant_id = jwt.tenant_id` por request HTTP + equivalente en `ai-orchestrator` per tool call. Capitaliza las 66 policies existentes. Entra con flag `RLS_GUC_ENFORCEMENT=false` primera semana (observación) antes de `true`.
+3. **RLS DB-enforced** (Fase A6.3 — RE-SCOPED 2026-06-24): el plan original (middleware `SET LOCAL app.current_tenant_id` por request) es **NO-VIABLE con el stack actual**. `supabase-py` habla con **PostgREST (HTTP stateless)**: cada query es un request independiente, así que un `SET LOCAL` no persiste a las queries siguientes de la misma "request" lógica. Hacerlo efectivo requeriría envolver TODAS las queries en RPCs (impráctico) o una capa psycopg con connection pooling per-tenant (rework arquitectónico mayor, varias sesiones). **Decisión:** diferir GUC enforcement. La cobertura ya es adecuada sin él:
+   - **service_role** (backend, bypasea RLS) → cubierto por el **lint AST A6.2.7** (0 gaps, CI-enforced).
+   - **authenticated** (frontend, NO bypasea RLS) → ya protegido por las policies RLS existentes. Cobertura verificada 2026-06-24: **65/66 tablas tenant-scoped con policy `tenant_id = app_current_tenant()`**; `tenant_users` ya tiene policy (`20260415000000`); la única sin policy es `rate_limit_windows` (infra sin columna `tenant_id`, solo backend la usa → RLS-enabled sin policy = locked a service_role, postura correcta).
+   - Re-evaluar GUC solo si se adopta la capa psycopg directa o un ORM con tenant scoping nativo.
 
-4. **Vault RPC ownership** (Fase A6.4, pendiente): `pgsec_read/update/upsert/delete_secret` validan internamente `auth.jwt() -> tenant_id` contra el name pattern del secret. No confían en GRANT.
+4. **Vault RPC ownership** (Fase A6.4 — migración autorada 2026-06-24): `pgsec_read/update/delete/upsert/create_secret` validan internamente ownership. El nombre del secret codifica `{tenant_id}/provider/credential`, así que el RPC deriva el tenant dueño (`split_part(name,'/',1)::uuid`) y exige que el `authenticated` sea miembro vía `public.tenant_users`; `service_role` (auth.uid() NULL) bypasa. Sigue el precedente `get_aveonline_credentials` (`20260527020000`). **NO** requiere tabla metadata ni dual-read (el nombre ya es la fuente de verdad del owner). Migración: `20260624000000_vault_rpc_tenant_ownership.sql`. **INTERVENCION HUMANA**: aplicar a dev → verificar lectura propia + cross-tenant=NULL + smoke frontend/bot → aplicar a prod.
 
 5. **Webhooks resuelven tenant ANTES del primer query tenant-scoped** (per ADR-0023 Direct Provider): vía secret per-tenant o path `/webhook/{tenant_id}`. Los lookups de resolución llevan exemption marker.
 
@@ -89,10 +92,10 @@ Además, super-audit reveló:
 | A6.2.4 | CODEOWNERS + ratchet | ✅ DONE |
 | A6.2.5 | Runner pytest + cross-test fix | ✅ DONE |
 | A6.5 | Eliminar scoped_table + ADR-0025 | ✅ DONE (este ADR) |
-| A6.2.7 | Fix puntuales gaps reales (worker.py:455, etc.) | ⏳ pendiente |
-| A6.3 | RLS GUC middleware | ⏳ pendiente |
-| A6.4 | Vault RPC ownership | ⏳ pendiente |
-| A7 | RBAC marketplace + ai_agents + Telegram constant-time | ⏳ pendiente |
+| A6.2.7 | Cierre TOTAL gaps tenant_filter 198→0 + Telegram raíz | ✅ DONE (`BASELINE_MAX=0`) |
+| A6.3 | RLS GUC middleware | 🔶 RE-SCOPED (GUC no-viable con PostgREST — ver abajo) |
+| A6.4 | Vault RPC ownership | 🟡 MIGRACIÓN AUTORADA (pendiente apply prod, founder) |
+| A7 | RBAC marketplace + ai_agents (+ Telegram constant-time en A6.2.7) | ✅ DONE |
 
 ---
 
