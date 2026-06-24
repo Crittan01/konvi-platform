@@ -13,9 +13,11 @@ Endpoints:
 Estados válidos: open → in_progress → resolved | closed | cancelled
 
 Coexistencia con orchestrator: el bot inserta claims via service_role direct
-(`scoped_table('claims').insert(...)`), bypassa este router. Es intencional:
-el bot tiene contexto de conversación que el frontend no tiene. Ambos paths
-escriben a la misma tabla; RLS + tenant_id explícito mantiene aislamiento.
+(`.table('claims').insert({'tenant_id': ..., ...})`), bypassa este router. Es
+intencional: el bot tiene contexto de conversación que el frontend no tiene.
+Ambos paths escriben a la misma tabla; RLS + tenant_id explícito mantiene
+aislamiento. Patrón canónico `.table(X).eq('tenant_id', tid)` enforced por lint
+AST scripts/audit_tenant_filter.py (ADR-0025 — helper scoped_table eliminado).
 """
 import logging
 from typing import Optional, List

@@ -138,7 +138,7 @@ services/api/lib/whatsapp_templates.py,377,8,whatsapp_templates,missing_payload_
 services/api/lib/whatsapp_templates.py,466,8,whatsapp_templates,missing_eq,"supabase_client.table(""whatsapp_templates"")"
 services/api/lib/whatsapp_templates.py,515,8,whatsapp_templates,unverifiable_payload_update,"supabase_client.table(""whatsapp_templates"")"
 services/api/lib/whatsapp_templates.py,531,8,whatsapp_templates,missing_eq,"supabase_client.table(""whatsapp_templates"")"
-services/api/routers/claims.py,148,10,claims,unverifiable_payload_insert,"res = supabase.table(""claims"").insert(payload).execute()"
+services/api/routers/claims.py,150,10,claims,unverifiable_payload_insert,"res = supabase.table(""claims"").insert(payload).execute()"
 services/api/routers/contacts.py,232,17,contacts,unverifiable_payload_insert,"result = supabase.table(""contacts"").insert(payload).execute()"
 services/api/routers/conversations.py,406,20,conversation_cart_items,missing_eq,"supabase.table(""conversation_cart_items"")"
 services/api/routers/conversations.py,423,28,product_variations,missing_eq,"supabase.table(""product_variations"")"
