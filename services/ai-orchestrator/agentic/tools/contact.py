@@ -401,7 +401,31 @@ async def _write_contact_update(
     SaveTool mutaban PII sin trazabilidad de WRITES — solo get_contact_info
     (reads) y record_consent auditaban. Ante auditoría SIC no había registro de
     cuándo se modificó qué campo. El chokepoint único cierra los 6 de una vez.
+
+    A5 extensión (decisión founder 2026-06-24): si el WRITE CORRIGE un valor que
+    YA existía (no colección inicial), además se registra `consent_audit_log`
+    event='rectified' (Art. 8 lit. c — derecho de rectificación; aparece en el
+    reporte SIC). Se lee el valor previo ANTES del update para distinguir
+    corrección (rectified) de colección inicial (solo pii_access_log).
     """
+    # Leer valores previos para detectar rectificación (corrección de un valor
+    # existente) vs colección inicial. Best-effort: si falla, se trata como
+    # colección inicial (no se pierde el WRITE ni el pii_access_log).
+    prior: dict = {}
+    try:
+        _cols = ",".join(sorted(update_data.keys()))
+        _cur = (
+            ctx.supabase.table("contacts")
+            .select(_cols)
+            .eq("id", ctx.contact_id)
+            .eq("tenant_id", ctx.tenant_id)
+            .limit(1)
+            .execute()
+        )
+        prior = (_cur.data or [{}])[0] or {}
+    except Exception:
+        prior = {}
+
     try:
         ctx.supabase.table("contacts").update(update_data).eq(
             "id", ctx.contact_id,
@@ -428,6 +452,33 @@ async def _write_contact_update(
             "[HABEAS_DATA] pii_access_log WRITE audit falló contact=%s field=%s: %s",
             (ctx.contact_id or "")[:8], field_name, audit_exc,
         )
+
+    # Rectificación (Art. 8 lit. c): campos cuyo valor previo era no-vacío Y
+    # cambió → es corrección, no colección inicial. Se registra en
+    # consent_audit_log para el lifecycle del reporte SIC.
+    rectified_fields = sorted(
+        k for k, v in update_data.items()
+        if prior.get(k) not in (None, "")
+        and str(prior.get(k)) != str(v)
+    )
+    if rectified_fields:
+        try:
+            ctx.supabase.table("consent_audit_log").insert({
+                "tenant_id": ctx.tenant_id,
+                "contact_id": ctx.contact_id,
+                "event": "rectified",
+                "source": "whatsapp",
+                "conversation_id": ctx.conversation_id,
+                "evidence": {
+                    "fields_rectified": rectified_fields,
+                    "via": f"agentic_tool:save_pii:{field_name}",
+                },
+            }).execute()
+        except Exception as rect_exc:
+            logger.warning(
+                "[HABEAS_DATA] consent_audit_log rectified falló contact=%s fields=%s: %s",
+                (ctx.contact_id or "")[:8], rectified_fields, rect_exc,
+            )
 
     return tool_success({
         "field": field_name,
