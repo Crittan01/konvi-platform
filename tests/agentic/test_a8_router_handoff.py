@@ -97,6 +97,43 @@ class RouterHandoffConsumerTests(unittest.TestCase):
         self.assertEqual(_HANDOFF_SYNTHETIC_AGENT.get("tools_allowed"), [])
 
 
+class AgentPermitsToolTests(unittest.TestCase):
+    """A8 #1 — _agent_permits_tool: resolvers pre-LLM respetan tools_allowed.
+
+    SEGURO POR CONSTRUCCIÓN: agente default (tools_allowed=None) permite todo →
+    cero cambio para KAIU single-agent. Solo restringe multi-agente explícito.
+    """
+
+    def test_default_agent_permits_all(self):
+        # tools_allowed=None (agente default) → permite cualquier tool.
+        self.assertTrue(disp._agent_permits_tool({"name": "Sara"}, "add_to_cart"))
+        self.assertTrue(disp._agent_permits_tool(
+            {"name": "Sara", "tools_allowed": None}, "select_carrier"))
+
+    def test_restricted_agent_permits_only_listed(self):
+        claims = {"name": "Claims", "tools_allowed": ["get_recent_orders", "create_claim"]}
+        # Claims NO tiene add_to_cart → purchase_intent resolver NO ejecuta.
+        self.assertFalse(disp._agent_permits_tool(claims, "add_to_cart"))
+        self.assertFalse(disp._agent_permits_tool(claims, "select_carrier"))
+        self.assertFalse(disp._agent_permits_tool(claims, "quote_shipping"))
+        self.assertTrue(disp._agent_permits_tool(claims, "create_claim"))
+
+    def test_sales_agent_permits_cart_tools(self):
+        sales = {"name": "Sara", "tools_allowed": ["add_to_cart", "select_carrier", "quote_shipping"]}
+        self.assertTrue(disp._agent_permits_tool(sales, "add_to_cart"))
+        self.assertTrue(disp._agent_permits_tool(sales, "select_carrier"))
+        self.assertTrue(disp._agent_permits_tool(sales, "quote_shipping"))
+
+    def test_handoff_agent_permits_nothing(self):
+        # tools_allowed=[] (handoff sintético) → ninguna tool pre-LLM.
+        handoff = {"name": "Asistente", "tools_allowed": []}
+        self.assertFalse(disp._agent_permits_tool(handoff, "add_to_cart"))
+
+    def test_non_dict_agent_safe_default(self):
+        self.assertTrue(disp._agent_permits_tool(None, "add_to_cart"))
+        self.assertTrue(disp._agent_permits_tool("Sara Camila", "add_to_cart"))
+
+
 class FsmStatesEnforcementTests(unittest.TestCase):
     """A8 #2 — _compute_agent_allowed_tools: fsm_states_allowed + tools intersect."""
 

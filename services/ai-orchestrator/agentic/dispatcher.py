@@ -1608,7 +1608,8 @@ async def _run_agentic_full(
             inbound_text=content,
             last_bot_outbound=last_bot_msg if 'last_bot_msg' in locals() else "",
         )
-        if carrier_match:
+        # A8 #1 — solo si el agente activo permite select_carrier.
+        if carrier_match and _agent_permits_tool(_agent, "select_carrier"):
             try:
                 from agentic.legacy_adapters import select_carrier_for_cart
                 sel = await select_carrier_for_cart(
@@ -1653,7 +1654,11 @@ async def _run_agentic_full(
         inbound_text=content,
         catalog=catalog,
     )
-    if intent_resolution and (intent_resolution.get("resolved") or intent_resolution.get("ambiguous")):
+    # A8 #1 — el resolver solo entra si el agente activo permite add_to_cart
+    # (un agente Claims/Support sin add_to_cart cae al LLM, que respeta su scope).
+    if (intent_resolution
+            and (intent_resolution.get("resolved") or intent_resolution.get("ambiguous"))
+            and _agent_permits_tool(_agent, "add_to_cart")):
         from agentic.tools.cart import AddToCartTool, AddToCartArgs
         from agentic.tools.base import ToolContext
         tool = AddToCartTool()
@@ -1765,7 +1770,7 @@ async def _run_agentic_full(
         history=history,
         catalog=catalog,
     )
-    if variant_match:
+    if variant_match and _agent_permits_tool(_agent, "add_to_cart"):  # A8 #1
         logger.info(
             "[AGENTIC_PRE_LLM] conv=%s variant_continuation matched: "
             "product=%s variant=%s — bypaseando Gemini",
@@ -1891,7 +1896,7 @@ async def _run_agentic_full(
         inbound_text=content,
         cart_has_items=cart_has_items,
     )
-    if shipping_match:
+    if shipping_match and _agent_permits_tool(_agent, "quote_shipping"):  # A8 #1
         logger.info(
             "[AGENTIC_PRE_LLM] conv=%s shipping_intent matched city=%s "
             "— bypaseando Gemini",
@@ -2762,6 +2767,29 @@ async def _consume_router_handoff(
     except Exception:
         pass
     return True
+
+
+def _agent_permits_tool(agent, tool_name: str) -> bool:
+    """A8 #1 — True si el agente activo permite ejecutar `tool_name` en un
+    resolver pre-LLM.
+
+    SEGURO POR CONSTRUCCIÓN: un agente sin `tools_allowed` (None = agente
+    default, caso KAIU single-agent) permite TODO → cero cambio de
+    comportamiento. Solo restringe cuando `tools_allowed` es una lista explícita
+    (multi-agente). El handoff sintético (tools_allowed=[]) no permite ninguna
+    tool pre-LLM (correcto: solo debe emitir el mensaje de handoff).
+
+    Cierra audit §1 #8: antes los resolvers pre-LLM (purchase_intent→add_to_cart,
+    carrier_select, coupon, cancel, shipping, recipient) ejecutaban su tool ANTES
+    de que el dispatcher intersectara `agent.tools_allowed` → un agente Claims
+    sin add_to_cart podía agregar al carrito vía el resolver.
+    """
+    if not isinstance(agent, dict):
+        return True
+    allowed = agent.get("tools_allowed")
+    if allowed is None:
+        return True  # agente default — sin restricción
+    return tool_name in {str(t) for t in (allowed or [])}
 
 
 def _compute_agent_allowed_tools(state_tools, agent, resolved_state):
