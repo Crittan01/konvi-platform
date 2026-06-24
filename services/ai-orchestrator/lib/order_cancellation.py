@@ -283,6 +283,7 @@ async def cancel_order(
             supabase.table("payments")
             .select("status, wompi_status, wompi_txn_id, amount_in_cents, raw_webhook")
             .eq("order_id", request.order_id)
+            .eq("tenant_id", request.tenant_id)  # A6.2.7: defensa cross-tenant
             .order("created_at", desc=True).limit(1).execute()
         ).data or []
         payment_row = payments[0] if payments else None
@@ -297,6 +298,7 @@ async def cancel_order(
             supabase.table("shipments")
             .select("status, tracking_number, carrier, service")
             .eq("order_id", request.order_id)
+            .eq("tenant_id", request.tenant_id)  # A6.2.7: defensa cross-tenant
             .order("created_at", desc=True).limit(1).execute()
         ).data or []
         shipment_row = shipments[0] if shipments else None
@@ -719,9 +721,11 @@ def _process_refund(
             # actualizamos wompi_status localmente para coherencia (el webhook
             # subsecuente será idempotente).
             try:
+                # A6.2.7: wompi_txn_id NO es UNIQUE a nivel DB (índice parcial
+                # no-unique). Filtrar por tenant evita VOID de payment ajeno.
                 supabase.table("payments").update({
                     "wompi_status": "VOIDED",
-                }).eq("wompi_txn_id", txn_id).execute()
+                }).eq("wompi_txn_id", txn_id).eq("tenant_id", order["tenant_id"]).execute()
             except Exception as exc:
                 logger.warning(
                     "[CANCEL] update payments.wompi_status=VOIDED failed: %s",

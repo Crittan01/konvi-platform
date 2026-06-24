@@ -260,8 +260,13 @@ def cleanup_expired_grace_periods(supabase_client: Any) -> int:
     NO eliminar — sigue siendo API estable para callers programáticos.
     """
     now = datetime.now(timezone.utc).isoformat()
+    # A6.2.7: cleanup de mantenimiento INTENCIONAL cross-tenant — limpia grace
+    # periods ya EXPIRADOS de todos los tenants (idéntico al RPC hourly
+    # fn_cleanup_webhook_secrets). Filtrar por tenant rompería su propósito.
+    # Borrar previous_secret_hash de un grace expirado es seguro para cualquier
+    # tenant (el secret nuevo ya está activo). NO es fuga: es housekeeping.
     res = (
-        supabase_client.table("tenant_webhook_secrets")
+        supabase_client.table("tenant_webhook_secrets")  # tenant_filter:exempt:cron_cleanup_grace_all_tenants_by_design
         .update({"previous_secret_hash": None, "grace_period_until": None})
         .lt("grace_period_until", now)
         .execute()

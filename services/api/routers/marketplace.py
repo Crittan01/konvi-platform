@@ -644,8 +644,8 @@ async def import_from_meli(
     try:
         var_res = supabase.table("product_variations").insert(var_payload).execute()
     except Exception as e:
-        # Rollback producto creado
-        supabase.table("products").delete().eq("id", product_id).execute()
+        # Rollback producto creado (A6.2.7: tenant filter defensa cross-tenant)
+        supabase.table("products").delete().eq("id", product_id).eq("tenant_id", tenant_id).execute()
         err_str = str(e)
         if "duplicate key" in err_str or "23505" in err_str:
             raise HTTPException(
@@ -656,8 +656,8 @@ async def import_from_meli(
         raise HTTPException(status_code=500, detail="Error al crear variante en catálogo")
 
     if not var_res.data:
-        # Rollback: eliminar el producto creado
-        supabase.table("products").delete().eq("id", product_id).execute()
+        # Rollback: eliminar el producto creado (A6.2.7: tenant filter)
+        supabase.table("products").delete().eq("id", product_id).eq("tenant_id", tenant_id).execute()
         raise HTTPException(status_code=500, detail="Error al crear variante en catálogo")
 
     variation_id = var_res.data[0]["id"]
@@ -680,9 +680,9 @@ async def import_from_meli(
     }).execute()
 
     if not link_res.data:
-        # Rollback: eliminar producto y variante
-        supabase.table("product_variations").delete().eq("id", variation_id).execute()
-        supabase.table("products").delete().eq("id", product_id).execute()
+        # Rollback: eliminar producto y variante (A6.2.7: tenant filter)
+        supabase.table("product_variations").delete().eq("id", variation_id).eq("tenant_id", tenant_id).execute()
+        supabase.table("products").delete().eq("id", product_id).eq("tenant_id", tenant_id).execute()
         raise HTTPException(status_code=500, detail="Error al vincular con Mercado Libre")
 
     return {
