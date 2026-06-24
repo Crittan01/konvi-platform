@@ -118,9 +118,21 @@ class ContactPatch(BaseModel):
     )
     consent_given: Optional[bool] = None
     consent_source: Optional[str] = None
+    consent_channel: Optional[str] = Field(default=None, max_length=40)
     consent_notice_version: Optional[str] = Field(default=None, max_length=80)
     consent_evidence: Optional[dict] = None
     consent_revoked_reason: Optional[str] = Field(default=None, max_length=500)
+    # A9 — campos del flujo de consent de la UI (editContact). Movidos API-side
+    # para que la máquina de estados Habeas Data sea idéntica vía API (antes
+    # vivía solo en el server action con escritura directa).
+    consent_evidence_note: Optional[str] = Field(default=None, max_length=2000)
+    # Renovación post-anonimización (Opción B Habeas Data): re-activar consent de
+    # un contacto previamente anonimizado, con evidencia obligatoria.
+    renewed_consent: Optional[bool] = None
+    renewed_consent_evidence: Optional[str] = Field(default=None, max_length=2000)
+    # Metadata del adjunto de evidencia (subido client-side a Storage; acá llega
+    # solo el path/mime/size o markers de skip — el archivo NO viaja por JSON).
+    consent_attachment: Optional[dict] = None
 
     @field_validator("document_type")
     @classmethod
@@ -143,6 +155,120 @@ _PII_CONTACT_FIELDS = (
     "name", "email", "phone", "shipping_phone",
     "document_type", "document_number", "address",
 )
+
+# Máximo de renovaciones post-revocación que se conservan en evidence (Habeas
+# Data — cap para que el JSONB no crezca sin control; marker de truncamiento).
+_MAX_RENEWALS = 50
+
+
+def _compute_consent_update(
+    *,
+    patch: "ContactPatch",
+    current: dict,
+    incoming_pii: bool,
+    actor_email: Optional[str],
+    now_iso: str,
+) -> dict:
+    """A9 — Máquina de estados de consent (Habeas Data Ley 1581), replicada
+    EXACTAMENTE del server action editContact (apps/web/.../contacts/page.tsx)
+    para que el flujo legal sea idéntico vía API. Antes vivía solo en la UI con
+    escritura directa a Supabase (sin audit/idempotency).
+
+    Garantías legales:
+      • Guard A: NO permite soft-revoke (desmarcar consent) sin renovación formal
+        — la revocación va por el botón Anonimizar (Art. 15).
+      • Guard B: contacto anonimizado + PII entrante exige consent renovado +
+        evidencia ≥10 chars (Opción B Habeas Data).
+      • mergedEvidence: preserva evidence previa + last_update + array inmutable
+        renewals_after_revocation (cap 50, marker de truncamiento).
+      • effective_consent_given: la renovación re-activa consent (evita estado
+        contradictorio PII-sin-consent).
+
+    Levanta HTTPException(422) en los guards. Retorna el dict de campos consent_*
+    a mergear en el UPDATE.
+    """
+    prev_given = bool(current.get("consent_given"))
+    renewed_ev = (patch.renewed_consent_evidence or "").strip()
+    renewed = bool(patch.renewed_consent)
+    consent_given = patch.consent_given if patch.consent_given is not None else prev_given
+
+    # Guard A — soft-revoke bloqueado (Art. 15: revocación vía Anonimizar).
+    if prev_given and not consent_given and not renewed:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No puedes revocar el consentimiento desmarcando el check. Usa "
+                "Anonimizar (Habeas Data) — borra PII + audit inmutable + notifica."
+            ),
+        )
+
+    # Guard B — renovación post-anonimización.
+    was_anonymized = bool(current.get("consent_revoked_at")) and not prev_given
+    if was_anonymized and incoming_pii:
+        if not renewed:
+            raise HTTPException(
+                status_code=422,
+                detail="Contacto anonimizado: marca 'consentimiento renovado' antes de editar PII.",
+            )
+        if len(renewed_ev) < 10:
+            raise HTTPException(
+                status_code=422,
+                detail="La evidencia del consentimiento renovado debe tener ≥10 caracteres.",
+            )
+
+    note = (patch.consent_evidence_note or "").strip() or renewed_ev
+
+    merged = dict(current.get("consent_evidence") or {})
+    merged["last_update"] = {
+        "source": patch.consent_source or current.get("consent_source"),
+        "notice_version": patch.consent_notice_version or current.get("consent_notice_version"),
+        "note": note or None,
+        "actor_email": actor_email,
+        "at": now_iso,
+    }
+    if was_anonymized and renewed and renewed_ev:
+        prev_renewals = merged.get("renewals_after_revocation")
+        prev_renewals = list(prev_renewals) if isinstance(prev_renewals, list) else []
+        prev_renewals.append({
+            "at": now_iso,
+            "actor_email": actor_email,
+            "previous_revoked_at": current.get("consent_revoked_at"),
+            "evidence_text": renewed_ev,
+        })
+        if len(prev_renewals) > _MAX_RENEWALS:
+            merged["renewals_truncated_at"] = now_iso
+            merged["renewals_truncated_count"] = len(prev_renewals) - _MAX_RENEWALS
+            prev_renewals = prev_renewals[-_MAX_RENEWALS:]
+        merged["renewals_after_revocation"] = prev_renewals
+
+    # Adjunto de evidencia (subido client-side; acá solo la metadata).
+    if patch.consent_attachment:
+        merged.pop("attachment_url", None)  # limpiar legacy
+        merged.update(patch.consent_attachment)
+
+    effective = bool(
+        True if (was_anonymized and renewed and renewed_ev) else consent_given
+    )
+    should_mark_revoked = (not effective) and prev_given
+    if effective:
+        effective_date = now_iso if was_anonymized else (current.get("consent_date") or now_iso)
+    else:
+        effective_date = current.get("consent_date")
+
+    return {
+        "consent_given": effective,
+        "consent_date": effective_date,
+        "consent_source": patch.consent_source or current.get("consent_source"),
+        "consent_channel": (patch.consent_channel or "dashboard_console") if effective else None,
+        "consent_notice_version": patch.consent_notice_version or current.get("consent_notice_version"),
+        "consent_evidence": merged,
+        "consent_actor_email": actor_email,
+        "consent_revoked_at": (
+            None if effective
+            else (now_iso if should_mark_revoked else current.get("consent_revoked_at"))
+        ),
+        "consent_revoked_reason": None if effective else (patch.consent_revoked_reason or None),
+    }
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -334,6 +460,11 @@ async def patch_contact(
             )
 
         data = {k: v for k, v in patch.model_dump().items() if v is not None}
+        # A9 — campos de control del flujo de consent (NO columnas de la tabla):
+        # los consume _compute_consent_update vía el objeto `patch`, no van al UPDATE.
+        for _ctl in ("consent_evidence_note", "renewed_consent",
+                     "renewed_consent_evidence", "consent_attachment"):
+            data.pop(_ctl, None)
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 
@@ -346,7 +477,10 @@ async def patch_contact(
 
         current_res = (
             supabase.table("contacts")
-            .select("id, consent_given, consent_date")
+            .select(
+                "id, consent_given, consent_date, consent_source, "
+                "consent_notice_version, consent_evidence, consent_revoked_at"
+            )
             .eq("id", contact_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -357,23 +491,34 @@ async def patch_contact(
 
         current = current_res.data
         now_iso = datetime.now(timezone.utc).isoformat()
-        consent_given = data.get("consent_given")
-        if consent_given is not None:
-            if consent_given and not data.get("consent_source") and not current.get("consent_given"):
-                raise HTTPException(
-                    status_code=422,
-                    detail="consent_source es requerido al activar consentimiento.",
-                )
-            if consent_given and not current.get("consent_given"):
-                data["consent_date"] = current.get("consent_date") or now_iso
-                data["consent_revoked_at"] = None
-                data["consent_revoked_reason"] = None
-            elif consent_given and current.get("consent_given"):
-                data.pop("consent_revoked_reason", None)
-                data["consent_revoked_at"] = None
-            elif not consent_given and current.get("consent_given"):
-                data["consent_date"] = current.get("consent_date")
-                data["consent_revoked_at"] = now_iso
+
+        # A9 — máquina de estados de consent (Habeas Data) cuando el patch toca
+        # consent (editContact siempre envía consent_given). Patches sin consent
+        # (ej. solo notes/name) NO tocan el estado de consent.
+        if patch.consent_given is not None:
+            # Validaciones de input (orden de editContact).
+            if patch.consent_given:
+                if not patch.consent_source or patch.consent_source not in CONSENT_SOURCES:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Falta el canal por el que el titular dio consent (Ley 1581 Art. 9).",
+                    )
+                _note = (patch.consent_evidence_note or "").strip() or (patch.renewed_consent_evidence or "").strip()
+                if patch.consent_source == "other" and len(_note) < 20:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Canal 'Otro' exige evidencia que describa el origen (≥20 caracteres).",
+                    )
+            _incoming_pii = any(
+                data.get(f) for f in ("name", "email", "document_number", "address", "notes")
+            )
+            data.update(_compute_consent_update(
+                patch=patch,
+                current=current,
+                incoming_pii=bool(_incoming_pii),
+                actor_email=_extract_user_info(request)[1],
+                now_iso=now_iso,
+            ))
 
         result = (
             supabase.table("contacts")

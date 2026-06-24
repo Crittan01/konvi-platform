@@ -26,6 +26,9 @@ REPO = Path('/home/ansible/workspaces/konvi-platform')
 PAGE_TSX = REPO / 'apps/web/app/dashboard/(sales)/contacts/page.tsx'
 MANAGER_TSX = REPO / 'apps/web/app/dashboard/(sales)/contacts/_components/contacts-manager.tsx'
 CONSENT_HELP_TS = REPO / 'apps/web/app/dashboard/(sales)/contacts/_components/helpers/consent-source-help.ts'
+# A9 finiquito — la máquina de estados de consent (guards Habeas Data) MIGRÓ del
+# server action page.tsx al API router contacts.py (_compute_consent_update).
+CONTACTS_API_PY = REPO / 'services/api/routers/contacts.py'
 
 
 class ConsentSourcesRev103Tests(unittest.TestCase):
@@ -74,24 +77,25 @@ class ServerActionsRev103Tests(unittest.TestCase):
         )
 
     def test_soft_revoke_guard_preserved(self):
-        # El guard "no puedes desmarcar el check para revocar" SÍ se mantiene
-        # (la revocación va por Anonimizar — Art. 15 ritual legal serio).
-        self.assertIn(
-            'No puedes revocar el consentimiento desmarcando este check',
-            self.page_src,
-        )
+        # A9 — el guard "no puedes desmarcar el check para revocar" MIGRÓ al API
+        # router (_compute_consent_update) para que aplique a TODO cliente, no
+        # solo la UI. La revocación va por Anonimizar (Art. 15).
+        api_src = CONTACTS_API_PY.read_text()
+        self.assertIn('No puedes revocar el consentimiento desmarcando', api_src)
 
     def test_other_evidence_min_20_chars_guard_preserved(self):
-        # Canal "other" sigue exigiendo Evidencia ≥ 20 chars.
+        # Canal "other" sigue exigiendo Evidencia ≥ 20 chars — validación UX en
+        # page.tsx (feedback inmediato) + enforce API-side (boundary).
         self.assertIn('canal es "Otro"', self.page_src)
+        self.assertIn("== \"other\"", CONTACTS_API_PY.read_text())
 
     def test_renewed_consent_post_anonim_guard_preserved(self):
-        # Re-introducir PII tras anonimización requiere renewed_consent
-        # con evidencia ≥ 10 chars (Art. 15 ritual).
-        self.assertIn(
-            'al menos 10 caracteres',
-            self.page_src,
-        )
+        # A9 — la renovación post-anonimización (evidencia ≥10 chars) MIGRÓ al
+        # API router. editContact envía renewed_consent/renewed_consent_evidence
+        # crudos; el API computa el guard.
+        api_src = CONTACTS_API_PY.read_text()
+        self.assertIn('≥10 caracteres', api_src)
+        self.assertIn('renewed_consent', self.page_src)
 
 
 class FormAddRev103Tests(unittest.TestCase):

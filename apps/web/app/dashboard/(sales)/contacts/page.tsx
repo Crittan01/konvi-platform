@@ -308,93 +308,43 @@ export default async function ContactsPage({
 
   async function editContact(formData: FormData) {
     'use server'
+    // A9 finiquito — editContact migró a PATCH /api/v1/contacts/{id} (router con
+    // RBAC + idempotency + audit_log + pii_access_log Art. 9). La MÁQUINA DE
+    // ESTADOS DE CONSENT (Habeas Data: guards soft-revoke + renovación
+    // post-anonimización + mergedEvidence + renewals + effectiveConsentGiven)
+    // ahora vive API-side en _compute_consent_update (contacts.py), idéntica al
+    // comportamiento previo (verificada con tests). Antes era escritura directa
+    // a Supabase con la lógica acá (drift §3, sin audit). El server action solo
+    // parsea el form, sube el adjunto client-side y envía los inputs crudos.
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    const nowIso = new Date().toISOString()
+    const editContactId = (formData.get('contact_id') as string) || ''
+    if (!editContactId) return
+
     const consentGiven = formData.get('consent_given') === 'on'
     const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
-    // Rev. 102 — Canal ahora required en UI cuando consent_given=true.
+    const consentSource = sourceRaw
+    const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
+    const renewedConsentEvidence = ((formData.get('renewed_consent_evidence') as string) || '').trim()
+    const consentEvidenceNote = ((formData.get('consent_evidence_note') as string) || '').trim() || renewedConsentEvidence
+    const renewedConsentChecked = formData.get('renewed_consent') === 'on'
+    const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
+
+    // Validaciones UX inmediatas (la API también las enforce server-side; estos
+    // throws dan feedback rápido al operador sin round-trip).
     if (consentGiven && (!sourceRaw || !CONSENT_SOURCES.has(sourceRaw))) {
       throw new Error(
         'Falta seleccionar el canal por el que el titular dio consent. ' +
         'Es obligatorio para audit (Ley 1581 Art. 9).'
       )
     }
-    const consentSource = sourceRaw
-    // Rev. 102 — versión auto-estampada con la constante vigente.
-    const consentNoticeVersion = CURRENT_PRIVACY_NOTICE_VERSION
-    // Rev. 102 — `consent_evidence_note` puede venir del bloque normal de
-    // consent O del bloque renewed_consent (post-anonim). Tomamos el que
-    // venga primero no vacío. Esto evita duplicar el mismo campo en el
-    // form cuando awaitingRenewal=true.
-    const renewedConsentEvidenceRaw = ((formData.get('renewed_consent_evidence') as string) || '').trim()
-    const consentEvidenceNoteRaw = ((formData.get('consent_evidence_note') as string) || '').trim()
-    const consentEvidenceNote = consentEvidenceNoteRaw || renewedConsentEvidenceRaw
-    const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
-    // Rev. 102 — canal "other" exige Evidencia ≥ 20 chars.
     if (consentGiven && consentSource === 'other' && consentEvidenceNote.length < 20) {
       throw new Error(
         'Cuando el canal es "Otro" la Evidencia debe describir de dónde vino el ' +
         'consentimiento (mínimo 20 caracteres).'
       )
-    }
-    // Rev. 102 — Opción B Habeas Data: campos exclusivos del flujo de
-    // re-edición post-anonimización (mantenido en rev. 103: la
-    // anonimización formal sí es ritual legal serio).
-    const renewedConsentChecked = formData.get('renewed_consent') === 'on'
-    const renewedConsentEvidence = ((formData.get('renewed_consent_evidence') as string) || '').trim()
-
-    const { data: existing } = await sb.from('contacts')
-      .select('phone, consent_given, consent_date, consent_source, consent_notice_version, consent_evidence, consent_revoked_at')
-      .eq('id', formData.get('contact_id') as string)
-      .eq('tenant_id', m.tenant_id)
-      .single()
-    const prev = (existing as {
-      phone?: string | null
-      consent_given?: boolean
-      consent_date?: string | null
-      consent_source?: string | null
-      consent_notice_version?: string | null
-      consent_evidence?: Record<string, unknown> | null
-      consent_revoked_at?: string | null
-    } | null)
-
-    // Rev. 102 — Guardrail server-side: bloquear desmarcar el check de
-    // consent en Edit cuando el contact tenía consent_given=true.
-    // La revocación debe ir por el flujo formal (botón Anonimizar) que
-    // garantiza nullificación de PII + audit inmutable + notif tenant.
-    // Si el operador (o un cliente API) intenta hacer "soft revoke"
-    // desmarcando el check + guardar con PII llena → rechazar.
-    if (prev?.consent_given === true && !consentGiven && !renewedConsentChecked) {
-      throw new Error(
-        'No puedes revocar el consentimiento desmarcando este check. ' +
-        'Para revocar usa el botón "Anonimizar" en la sección Habeas Data — ' +
-        'esa acción borra la PII, deja audit inmutable y notifica al tenant ' +
-        'conforme Ley 1581/2012 Art. 15.'
-      )
-    }
-
-    // Rev. 102 — Guard de re-edición post-anonimización (Opción B).
-    // Si el contact estaba anonimizado (revoked_at no null) Y el operador
-    // intenta enviar PII (cualquier campo no vacío) Y no marcó el checkbox
-    // de consent renovado o no proporcionó evidencia → rechazar.
-    const wasAnonymized = !!prev?.consent_revoked_at && prev?.consent_given === false
-    const incomingPii = [
-      'name', 'email', 'document_number', 'addr_street', 'notes',
-    ].some(k => ((formData.get(k) as string) || '').trim().length > 0)
-    if (wasAnonymized && incomingPii) {
-      if (!renewedConsentChecked) {
-        throw new Error(
-          'Este contacto fue anonimizado. Marca "Confirmo consentimiento renovado" antes de editar PII.'
-        )
-      }
-      if (renewedConsentEvidence.length < 10) {
-        throw new Error(
-          'La evidencia del consentimiento renovado debe tener al menos 10 caracteres.'
-        )
-      }
     }
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
@@ -426,119 +376,70 @@ export default async function ContactsPage({
     const editDocTypeRaw = ((formData.get('document_type') as string) || '').trim().toUpperCase()
     const editDocType = ['CC', 'CE', 'NIT', 'PP', 'OTHER'].includes(editDocTypeRaw) ? editDocTypeRaw : null
     const editDocNumber = ((formData.get('document_number') as string) || '').replace(/[\s.]/g, '').trim() || null
-    const mergedEvidence: Record<string, unknown> = {
-      ...((prev?.consent_evidence ?? {}) as Record<string, unknown>),
-      last_update: {
-        source: consentSource || prev?.consent_source || null,
-        notice_version: consentNoticeVersion || prev?.consent_notice_version || null,
-        note: consentEvidenceNote || null,
-        actor_email: u?.email ?? null,
-        at: nowIso,
-      },
-    }
-    // Rev. 102 — Opción B Habeas Data: registrar inmutablemente el
-    // consent renovado tras anonimización (append a array para que
-    // si el ciclo se repite, queden todos los renewals históricos).
-    if (wasAnonymized && renewedConsentChecked && renewedConsentEvidence) {
-      const prevRenewals = Array.isArray(mergedEvidence.renewals_after_revocation)
-        ? mergedEvidence.renewals_after_revocation as unknown[]
-        : []
-      mergedEvidence.renewals_after_revocation = [
-        ...prevRenewals,
-        {
-          at: nowIso,
-          actor_email: u?.email ?? null,
-          previous_revoked_at: prev?.consent_revoked_at ?? null,
-          evidence_text: renewedConsentEvidence,
-        },
-      ]
-    }
-    // Rev. 103 — Cap renewals_after_revocation a las últimas 50 entries
-    // para que JSONB no crezca sin control en contracts enterprise con
-    // muchos ciclos de revocación/renovación. Marker de truncamiento
-    // queda en evidence (transparencia ante SIC).
-    if (Array.isArray(mergedEvidence.renewals_after_revocation)) {
-      const arr = mergedEvidence.renewals_after_revocation as unknown[]
-      if (arr.length > 50) {
-        mergedEvidence.renewals_after_revocation = arr.slice(-50)
-        mergedEvidence.renewals_truncated_at = nowIso
-        mergedEvidence.renewals_truncated_count = arr.length - 50
-      }
-    }
-    // Rev. 103 (F10) — Si canal in_person + archivo adjunto, sube
-    // evidencia física al bucket consent-evidence y persiste URL en
-    // mergedEvidence.attachment_url. La SAR export incluye el URL.
-    // Si upload falla (MIME no válido, > 5MB, error storage), NO abortamos
-    // el edit: persistimos marker en evidence + log; los demás campos del
-    // form se aplican normalmente.
-    const editContactId = (formData.get('contact_id') as string) || ''
-    if (editContactId && consentSource === 'in_person') {
+    // Adjunto de evidencia in_person: se sube client-side a Storage (el archivo
+    // NO viaja por JSON); a la API va solo la metadata en consent_attachment.
+    // El API la mergea en consent_evidence (limpia attachment_url legacy).
+    let consentAttachment: Record<string, unknown> | undefined
+    if (consentSource === 'in_person') {
       const upload = await uploadConsentEvidence(formData, editContactId, m.tenant_id)
+      const nowIso = new Date().toISOString()
       if (upload.status === 'uploaded') {
-        // Persistimos `attachment_path` (no `attachment_url`): el bucket
-        // es privado, la UI genera signed URL on-demand.
-        // Si hay un attachment_url legacy, lo limpiamos.
-        delete mergedEvidence.attachment_url
-        mergedEvidence.attachment_path = upload.path
-        mergedEvidence.attachment_mime = upload.mime
-        mergedEvidence.attachment_size = upload.size
-        mergedEvidence.attachment_uploaded_at = nowIso
+        consentAttachment = {
+          attachment_path: upload.path,
+          attachment_mime: upload.mime,
+          attachment_size: upload.size,
+          attachment_uploaded_at: nowIso,
+        }
       } else if (upload.status === 'rejected' || upload.status === 'error') {
         const skipReason = upload.status === 'rejected' ? upload.reason : 'storage_error'
-        mergedEvidence.attachment_skip_reason = skipReason
-        mergedEvidence.attachment_skip_filename = 'filename' in upload ? upload.filename : null
-        mergedEvidence.attachment_skip_received_mime = 'receivedMime' in upload ? upload.receivedMime : null
-        mergedEvidence.attachment_skip_storage_message = upload.status === 'error' ? upload.message : null
-        mergedEvidence.attachment_skip_at = nowIso
-        console.warn(
-          '[F10] Edit contact: adjunto no se subió',
-          { contactId: editContactId, skipReason,
-            filename: 'filename' in upload ? upload.filename : null,
-            receivedMime: 'receivedMime' in upload ? upload.receivedMime : null,
-            storageMessage: upload.status === 'error' ? upload.message : null },
-        )
+        consentAttachment = {
+          attachment_skip_reason: skipReason,
+          attachment_skip_filename: 'filename' in upload ? upload.filename : null,
+          attachment_skip_received_mime: 'receivedMime' in upload ? upload.receivedMime : null,
+          attachment_skip_storage_message: upload.status === 'error' ? upload.message : null,
+          attachment_skip_at: nowIso,
+        }
+        console.warn('[F10] Edit contact: adjunto no se subió', { contactId: editContactId, skipReason })
       }
     }
-    // Rev. 102 — si el operador confirmó renewed_consent + evidencia,
-    // implícitamente el contact está siendo re-activado: forzar
-    // consent_given=true para evitar estado contradictorio (PII registrada
-    // sin consent activo).
-    const effectiveConsentGiven = (wasAnonymized && renewedConsentChecked && renewedConsentEvidence)
-      ? true
-      : consentGiven
-    const shouldMarkRevoked = !effectiveConsentGiven && !!prev?.consent_given
-    const effectiveConsentDate = effectiveConsentGiven
-      ? (wasAnonymized ? nowIso : (prev?.consent_date ?? nowIso))
-      : (prev?.consent_date ?? null)
-    // Rev. 103 — shipping_phone (opcional). Si el usuario lo deja vacío,
-    // defaulteamos al phone WhatsApp del contact (prev.phone) para que la
-    // transportadora siempre tenga un número de contacto.
+
+    // shipping_phone (opcional): solo se envía si el operador ingresó uno válido;
+    // vacío → se omite y la API conserva el valor actual (PATCH semantics).
     const editShippingRaw = ((formData.get('shipping_phone') as string) || '').replace(/\D/g, '')
     const editShippingE164 = (editShippingRaw.length >= 10 && editShippingRaw[editShippingRaw.length - 10] !== '0')
       ? `+57${editShippingRaw.slice(-10)}`
-      : (prev?.phone ?? null)
-    await sb.from('contacts').update({
-      name:          (formData.get('name') as string) || null,
-      email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
-      notes:         (formData.get('notes') as string) || null,
-      shipping_phone: editShippingE164,
-      // Rev. 69 — documento (ambos juntos o ambos null).
-      document_type:   editDocType && editDocNumber ? editDocType : null,
-      document_number: editDocType && editDocNumber ? editDocNumber : null,
-      address,
-      consent_given: effectiveConsentGiven,
-      consent_date: effectiveConsentDate,
-      consent_source: consentSource || prev?.consent_source || null,
-      // Igual que en addContact: persistimos consent_channel para Ley 1581.
-      consent_channel: effectiveConsentGiven ? 'dashboard_console' : null,
-      consent_notice_version: consentNoticeVersion || prev?.consent_notice_version || null,
-      consent_evidence: mergedEvidence,
-      consent_actor_email: u?.email ?? null,
-      consent_revoked_at: effectiveConsentGiven ? null : (shouldMarkRevoked ? nowIso : (prev?.consent_revoked_at ?? null)),
-      consent_revoked_reason: effectiveConsentGiven ? null : (revocationReason || null),
+      : undefined
+
+    const token = (await sb.auth.getSession()).data.session?.access_token
+    if (!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.')
+    const res = await fetch(`${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(editContactId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        name:            (formData.get('name') as string) || null,
+        email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
+        notes:           (formData.get('notes') as string) || null,
+        ...(editShippingE164 ? { shipping_phone: editShippingE164 } : {}),
+        document_type:   editDocType && editDocNumber ? editDocType : null,
+        document_number: editDocType && editDocNumber ? editDocNumber : null,
+        address,
+        // Inputs CRUDOS del flujo de consent — el API computa la máquina de
+        // estados (guards soft-revoke/renovación + mergedEvidence + fechas).
+        consent_given:   consentGiven,
+        consent_source:  consentSource || null,
+        consent_channel: 'dashboard_console',
+        consent_notice_version: consentNoticeVersion || null,
+        consent_evidence_note: consentEvidenceNote || null,
+        consent_revoked_reason: revocationReason || null,
+        renewed_consent: renewedConsentChecked,
+        renewed_consent_evidence: renewedConsentEvidence || null,
+        ...(consentAttachment ? { consent_attachment: consentAttachment } : {}),
+      }),
     })
-      .eq('id', formData.get('contact_id') as string)
-      .eq('tenant_id', m.tenant_id)
+    if (!res.ok) {
+      const detail = await res.text()
+      throw new Error(detail || 'Error al actualizar el contacto.')
+    }
     revalidatePath('/dashboard/contacts')
   }
 

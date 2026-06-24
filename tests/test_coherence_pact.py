@@ -85,7 +85,13 @@ class ContactsCoherenceTests(unittest.TestCase):
         self.assertFalse(orphans, f"ContactCreate huérfanos: {orphans}")
 
     def test_contact_patch_fields_in_contacts(self):
-        orphans, _ = _check_subset(ContactPatch, "contacts")
+        # A9 — campos de control del flujo de consent que NO mapean a columna:
+        # los consume _compute_consent_update (máquina de estados Habeas Data) y
+        # se eliminan del payload antes del UPDATE.
+        orphans, _ = _check_subset(ContactPatch, "contacts", allowed_extras={
+            "consent_evidence_note", "renewed_consent",
+            "renewed_consent_evidence", "consent_attachment",
+        })
         self.assertFalse(orphans, f"ContactPatch huérfanos: {orphans}")
 
 

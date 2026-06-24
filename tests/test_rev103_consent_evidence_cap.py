@@ -10,42 +10,31 @@ from pathlib import Path
 import unittest
 
 REPO = Path('/home/ansible/workspaces/konvi-platform')
-PAGE_TSX = REPO / 'apps/web/app/dashboard/(sales)/contacts/page.tsx'
+# A9 finiquito — el cap de renewals_after_revocation MIGRÓ del server action
+# page.tsx al API router contacts.py (_compute_consent_update). Comportamiento
+# verificado byte-a-byte en tests/test_a9_editcontact_consent.py.
+CONTACTS_API_PY = REPO / 'services/api/routers/contacts.py'
 
 
 class ConsentEvidenceCapTests(unittest.TestCase):
-    """editContact aplica cap a renewals_after_revocation."""
+    """El cap a renewals_after_revocation ahora vive en el API router."""
 
     def setUp(self):
-        self.page_src = PAGE_TSX.read_text()
+        self.api_src = CONTACTS_API_PY.read_text()
 
     def test_caps_renewals_to_last_50(self):
-        # arr.length > 50 → arr.slice(-50)
-        self.assertIn(
-            'arr.slice(-50)',
-            self.page_src,
-        )
+        self.assertIn('_MAX_RENEWALS = 50', self.api_src)
+        self.assertIn('prev_renewals[-_MAX_RENEWALS:]', self.api_src)
 
     def test_truncation_marker_present(self):
-        # Cuando se cap'ea, queda marker `renewals_truncated_at`.
-        self.assertIn(
-            "mergedEvidence.renewals_truncated_at = nowIso",
-            self.page_src,
-        )
+        self.assertIn('"renewals_truncated_at"', self.api_src)
 
     def test_truncation_count_persisted(self):
-        # Cuántas entries se truncaron — útil para audit ante SIC.
-        self.assertIn(
-            'mergedEvidence.renewals_truncated_count = arr.length - 50',
-            self.page_src,
-        )
+        self.assertIn('"renewals_truncated_count"', self.api_src)
 
     def test_cap_only_runs_when_array(self):
-        # Guarda contra null/object — solo aplica cuando es array.
-        self.assertIn(
-            'Array.isArray(mergedEvidence.renewals_after_revocation)',
-            self.page_src,
-        )
+        # Guarda contra null/object — solo aplica cuando es lista.
+        self.assertIn('isinstance(prev_renewals, list)', self.api_src)
 
 
 if __name__ == '__main__':

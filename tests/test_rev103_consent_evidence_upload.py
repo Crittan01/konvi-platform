@@ -134,10 +134,11 @@ class ServerActionWireTests(unittest.TestCase):
         )
 
     def test_edit_only_uploads_when_in_person(self):
-        self.assertIn(
-            "editContactId && consentSource === 'in_person'",
-            self.page_src,
-        )
+        # A9 — editContact migró a PATCH API; el adjunto se sube client-side solo
+        # para in_person (editContactId ya validado con early-return arriba) y su
+        # metadata viaja a la API en consent_attachment.
+        self.assertIn("consentSource === 'in_person'", self.page_src)
+        self.assertIn("consent_attachment", self.page_src)
 
     def test_persists_attachment_url_in_evidence(self):
         # mergedEvidence.attachment_url = upload.url
