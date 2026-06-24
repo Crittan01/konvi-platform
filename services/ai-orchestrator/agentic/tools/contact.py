@@ -7,6 +7,7 @@ ADR-0018 Sem 0 MVP. Compliance Habeas Data Ley 1581 preservada (ADR-0003):
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Literal, Optional
 
@@ -14,6 +15,8 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 
 from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
+
+logger = logging.getLogger(__name__)
 
 
 _EMAIL_REGEX = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", re.IGNORECASE)
@@ -391,7 +394,14 @@ async def _verify_consent_or_fail(ctx: ToolContext) -> Optional[ToolResult]:
 async def _write_contact_update(
     ctx: ToolContext, update_data: dict, field_name: str,
 ) -> ToolResult:
-    """Helper compartido: aplica el update al contact + audit log."""
+    """Helper compartido: aplica el update al contact + audit log.
+
+    A5 finiquito (Habeas Data Ley 1581 Art. 17 lit. e + Art. 21): TODA escritura
+    de PII debe quedar auditada en `pii_access_log` (append-only). Antes los 6
+    SaveTool mutaban PII sin trazabilidad de WRITES — solo get_contact_info
+    (reads) y record_consent auditaban. Ante auditoría SIC no había registro de
+    cuándo se modificó qué campo. El chokepoint único cierra los 6 de una vez.
+    """
     try:
         ctx.supabase.table("contacts").update(update_data).eq(
             "id", ctx.contact_id,
@@ -401,6 +411,24 @@ async def _write_contact_update(
             f"Error guardando {field_name}: {exc}",
             code="PII_WRITE_ERROR",
         )
+
+    # Audit log: PII WRITE (Habeas Data). Best-effort para no romper el flujo
+    # del cliente, pero con logger.warning (NO `pass` silencioso) — un fallo de
+    # audit en compliance debe ser observable, no enterrado.
+    try:
+        ctx.supabase.table("pii_access_log").insert({
+            "tenant_id": ctx.tenant_id,
+            "contact_id": ctx.contact_id,
+            "accessed_by": f"agentic_tool:save_pii:{field_name}",
+            "fields_accessed": sorted(update_data.keys()),
+            "purpose": "pii_update",
+        }).execute()
+    except Exception as audit_exc:
+        logger.warning(
+            "[HABEAS_DATA] pii_access_log WRITE audit falló contact=%s field=%s: %s",
+            (ctx.contact_id or "")[:8], field_name, audit_exc,
+        )
+
     return tool_success({
         "field": field_name,
         "saved": True,
