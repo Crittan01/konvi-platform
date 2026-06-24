@@ -19,7 +19,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Body
-from dependencies.auth import get_current_tenant, _get_service_client
+from dependencies.auth import get_current_tenant, _get_service_client, require_write_role
 from integrations.meli_client import (
     get_tenant_meli_credentials,
     get_valid_token,
@@ -267,6 +267,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
 async def link_listing(
     payload: dict = Body(...),
     tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
 ):
     """
     Vincula un item existente de MeLi con una variante de Supabase.
@@ -356,6 +357,7 @@ async def link_listing(
 async def unlink_listing(
     listing_id: str,
     tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
 ):
     """
     Desvincula un item MeLi de su variante Supabase.
@@ -381,6 +383,7 @@ async def update_listing_status(
     listing_id: str,
     payload: dict = Body(...),
     tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
 ):
     """
     Pausa o activa un listing en MeLi.
@@ -435,6 +438,7 @@ async def update_listing_status(
 async def sync_stock_from_supabase(
     listing_id: str,
     tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
 ):
     """
     Fuerza la sincronización de stock + precio + precio tachado desde Supabase hacia MeLi.
@@ -553,6 +557,7 @@ async def sync_stock_from_supabase(
 async def import_from_meli(
     payload: dict = Body(...),
     tenant_id: str = Depends(get_current_tenant),
+    _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
 ):
     """
     Importa una publicación de MeLi al catálogo interno de Supabase y la vincula.

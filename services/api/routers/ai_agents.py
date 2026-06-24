@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from supabase import Client
 
-from dependencies.auth import get_current_tenant, get_service_client
+from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 
 
 # Path injection para acceder al orchestrator lib.
@@ -102,6 +102,7 @@ async def suggest_agent_prompt(
     body: SuggestRequest,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),  # A7: configurar agente AI = owner/manager
 ) -> SuggestResponse:
     """Genera un role_description draft con AI lecturando el contexto
     del tenant + template del rol seleccionado."""
