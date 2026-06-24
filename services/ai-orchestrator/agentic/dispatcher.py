@@ -246,6 +246,7 @@ async def _emit_degraded_response_and_escalate(
             supabase.table("messages")
             .select("id", count="exact")
             .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)  # A6.2.7: defensa cross-tenant
             .eq("direction", "inbound")
             .eq("processing_status", PROCESSING_STATUS_FAILED)
             .gte("created_at", _since)
@@ -439,6 +440,7 @@ async def _run_agentic_full(
                 supabase.table("messages")
                 .select("media_id, media_mime, media_url")
                 .eq("id", message_id)
+                .eq("tenant_id", tenant_id)
                 .single()
                 .execute()
             )
@@ -768,7 +770,7 @@ async def _run_agentic_full(
                     if cart_q.data:
                         supabase.table("conversation_carts").update({
                             "payment_method": forced_method,
-                        }).eq("id", cart_q.data[0]["id"]).execute()
+                        }).eq("id", cart_q.data[0]["id"]).eq("tenant_id", tenant_id).execute()
                 except Exception:
                     pass
     except Exception as exc:
@@ -948,7 +950,7 @@ async def _run_agentic_full(
                     if cur_method != "cod":
                         supabase.table("conversation_carts").update({
                             "payment_method": "cod",
-                        }).eq("id", cid).execute()
+                        }).eq("id", cid).eq("tenant_id", tenant_id).execute()
                         logger.info(
                             "[AGENTIC_PRE_LLM] conv=%s cart=%s payment_method "
                             "credit → cod (intent: %s)",
@@ -975,7 +977,7 @@ async def _run_agentic_full(
                     cid = cart_row.data[0]["id"]
                     supabase.table("conversation_carts").update({
                         "payment_method": "credit",
-                    }).eq("id", cid).execute()
+                    }).eq("id", cid).eq("tenant_id", tenant_id).execute()
                     logger.info(
                         "[AGENTIC_PRE_LLM] conv=%s cart=%s payment_method "
                         "cod → credit (intent: %s)",
@@ -1448,6 +1450,7 @@ async def _run_agentic_full(
                 supabase.table("messages")
                 .select("direction, content, content_type, created_at")
                 .eq("conversation_id", conversation_id)
+                .eq("tenant_id", tenant_id)
                 .order("created_at", desc=True).limit(10).execute().data or []
             )
             _img_result = await _handle_image_request(
@@ -1855,6 +1858,7 @@ async def _run_agentic_full(
                 supabase.table("conversation_cart_items")
                 .select("id", count="exact", head=True)
                 .eq("cart_id", cart_row.data[0]["id"])
+                .eq("tenant_id", tenant_id)
                 .execute()
             )
             cart_has_items = bool(getattr(items_row, "count", 0) or 0)
@@ -2115,7 +2119,7 @@ async def _run_agentic_full(
                     if is_method_enabled(supabase, tenant_id=tenant_id, method="cod"):
                         supabase.table("conversation_carts").update({
                             "payment_method": "cod",
-                        }).eq("id", _cart_post.data[0]["id"]).execute()
+                        }).eq("id", _cart_post.data[0]["id"]).eq("tenant_id", tenant_id).execute()
                         logger.info(
                             "[AGENTIC_POST_LLM] conv=%s cart=%s marked COD "
                             "post-LLM (intent detected pre, cart created during)",
@@ -2466,6 +2470,7 @@ def _resolve_and_persist_agentic_state(
                 supabase.table("conversations")
                 .select("status, agentic_state")
                 .eq("id", conversation_id)
+                .eq("tenant_id", tenant_id)
                 .single()
                 .execute()
             )
@@ -2475,6 +2480,7 @@ def _resolve_and_persist_agentic_state(
                 supabase.table("conversations")
                 .select("status")
                 .eq("id", conversation_id)
+                .eq("tenant_id", tenant_id)
                 .single()
                 .execute()
             )
@@ -2503,6 +2509,7 @@ def _resolve_and_persist_agentic_state(
                 supabase.table("conversation_cart_items")
                 .select("id", count="exact", head=True)
                 .eq("cart_id", _cart["id"])
+                .eq("tenant_id", tenant_id)
                 .execute()
             )
             _cart["items_count"] = int(
@@ -2739,6 +2746,7 @@ async def _handle_optout_if_keyword(
             supabase.table("conversations")
             .select("customer_phone")
             .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )
@@ -2847,7 +2855,7 @@ async def _handle_optout_if_keyword(
         supabase.table("messages").update({
             "processing_status": "processed",
             "processed": True,
-        }).eq("id", message_id).execute()
+        }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
     except Exception as exc:
         logger.warning("[OPTOUT_GATE] mark inbound processed falló: %s", exc)
 

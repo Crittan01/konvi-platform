@@ -156,6 +156,7 @@ class CreateClaimTool:
             payload["requested_amount"] = args.requested_amount
 
         try:
+            # tenant_filter:exempt:payload_includes_tenant_id
             insert_res = ctx.supabase.table("claims").insert(payload).execute()
         except Exception as exc:
             return tool_failure(

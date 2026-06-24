@@ -1831,6 +1831,7 @@ async def handle_shipping_quote_if_applicable(
             cart_row = (
                 supabase.table("conversation_carts")
                 .select("shipping_meta")
+                .eq("tenant_id", tenant_id)
                 .eq("conversation_id", conversation_id)
                 .eq("status", "open")
                 .limit(1).execute()

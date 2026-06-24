@@ -50,6 +50,7 @@ async def generate_payment_link_for_cart(
         res = (
             supabase.table("contacts")
             .select("consent_given, email, name, document_type, document_number, address")
+            .eq("tenant_id", tenant_id)
             .eq("id", contact_id)
             .single()
             .execute()

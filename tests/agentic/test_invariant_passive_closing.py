@@ -55,7 +55,8 @@ def _mock_supabase_with_cart(
         elif name == "cart_items":
             chain.select.return_value.eq.return_value.execute.return_value = items_res
         elif name == "contacts":
-            chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = contact_res
+            # A6.2.7: query contacts ahora filtra .eq("tenant_id").eq("id") (2 .eq)
+            chain.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = contact_res
         return chain
 
     sb.table.side_effect = table_side_effect

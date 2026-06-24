@@ -256,7 +256,7 @@ MELI_SHIPMENT_ORDER_STATUS_MAP: dict[str, str] = {
 async def _find_tenant_by_meli_user(meli_user_id: str, supabase) -> str | None:
     """Busca el tenant que tiene ese meli user_id en tenant_integrations.meta."""
     result = (
-        supabase.table("tenant_integrations")
+        supabase.table("tenant_integrations")  # tenant_filter:exempt:resolution_lookup_by_external_meli_user_id
         .select("tenant_id, meta")
         .eq("provider", "mercadolibre")
         .eq("status", "connected")
@@ -447,9 +447,9 @@ def _upsert_meli_contact(
         )
         if legacy.data:
             contact_id = legacy.data[0]["id"]
-            supabase.table("contacts").update(contact_payload).eq("id", contact_id).execute()
+            supabase.table("contacts").update(contact_payload).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
         else:
-            result = supabase.table("contacts").upsert(
+            result = supabase.table("contacts").upsert(  # tenant_filter:exempt:upsert_on_conflict_tenant_id_phone
                 contact_payload,
                 on_conflict="tenant_id,phone",
             ).execute()
@@ -541,7 +541,7 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
         if contact_id:
             order_payload["contact_id"] = contact_id
 
-        order_result = supabase.table("orders").insert(order_payload).execute()
+        order_result = supabase.table("orders").insert(order_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
         if order_result.data:
             new_order_id = order_result.data[0]["id"]
@@ -558,7 +558,7 @@ async def _process_order(resource: str, tenant_id: str, access_token: str, supab
                 for item in meli_order_items
             ]
             if items_to_insert:
-                supabase.table("order_items").insert(items_to_insert).execute()
+                supabase.table("order_items").insert(items_to_insert).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
             # Decrementar stock si el pedido llega ya confirmado/pagado
             if internal_status == "confirmed":
@@ -661,9 +661,9 @@ async def _process_shipment(resource: str, tenant_id: str, access_token: str, su
             if existing_tracking.data:
                 supabase.table("order_tracking").update(tracking_payload).eq(
                     "id", existing_tracking.data["id"]
-                ).execute()
+                ).eq("tenant_id", tenant_id).execute()
             else:
-                supabase.table("order_tracking").insert(tracking_payload).execute()
+                supabase.table("order_tracking").insert(tracking_payload).execute()  # tenant_filter:exempt:payload_includes_tenant_id
             logger.info("Tracking MeLi shipment %s → %s (orden %s)", shipment_id, shipment_status, order_id)
         except Exception as track_err:
             logger.warning("No se pudo persistir tracking MeLi shipment %s: %s", shipment_id, track_err)

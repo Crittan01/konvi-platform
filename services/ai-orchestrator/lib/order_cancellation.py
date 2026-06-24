@@ -408,7 +408,7 @@ async def cancel_order(
             "stock_restored": stock_restored,
             "stock_restore_method": stock_method,
             "completed_at": completed_at,
-        }).eq("id", cancel_id).execute()
+        }).eq("id", cancel_id).eq("tenant_id", request.tenant_id).execute()
     except Exception as exc:
         logger.warning("[CANCEL] update cancellation row failed: %s", exc)
 
@@ -581,7 +581,7 @@ def _restore_stock(
     try:
         carts = (
             supabase.table("conversation_carts")
-            .select("id").eq("converted_order_id", order_id)
+            .select("id").eq("converted_order_id", order_id).eq("tenant_id", tenant_id)
             .execute()
         ).data or []
         for c in carts:
@@ -597,6 +597,7 @@ def _restore_stock(
             supabase.table("stock_movements")
             .select("variation_id, delta, tenant_id")
             .eq("order_id", order_id)
+            .eq("tenant_id", tenant_id)
             .eq("reason", "reservation_consumed")
             .execute()
         ).data or []
@@ -618,13 +619,13 @@ def _restore_stock(
             try:
                 cur_row = (
                     supabase.table("product_variations")
-                    .select("stock_quantity").eq("id", var_id).single().execute()
+                    .select("stock_quantity").eq("id", var_id).eq("tenant_id", tenant_id).single().execute()
                 ).data
                 cur_stock = int(cur_row.get("stock_quantity") or 0)
                 new_stock = cur_stock + qty_to_restore
                 supabase.table("product_variations").update({
                     "stock_quantity": new_stock,
-                }).eq("id", var_id).execute()
+                }).eq("id", var_id).eq("tenant_id", tenant_id).execute()
                 supabase.table("stock_movements").insert({
                     "tenant_id": tenant_id,
                     "variation_id": var_id,

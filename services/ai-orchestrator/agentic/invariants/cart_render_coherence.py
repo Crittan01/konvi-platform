@@ -183,6 +183,7 @@ async def _get_cart_state(
         items_res = (
             supabase.table("conversation_cart_items")
             .select("id")
+            .eq("tenant_id", tenant_id)
             .eq("cart_id", cart_row["id"]).execute()
         )
         return (len(items_res.data or []), cart_row)

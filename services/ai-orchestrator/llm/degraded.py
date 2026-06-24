@@ -115,7 +115,7 @@ def on_cascade_degraded(
     try:
         supabase.table("conversations").update({
             "status": "human_takeover",
-        }).eq("id", conversation_id).execute()
+        }).eq("tenant_id", tenant_id).eq("id", conversation_id).execute()
         logger.info(
             "[DEGRADED_HANDOFF] conv=%s → human_takeover",
             conversation_id[:8],

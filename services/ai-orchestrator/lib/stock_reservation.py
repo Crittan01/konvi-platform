@@ -279,7 +279,7 @@ def available_stock(supabase: Any, *, variation_id: str) -> int:
         try:
             r = supabase.table("product_variations").select(
                 "stock_quantity",
-            ).eq("id", variation_id).single().execute()
+            ).eq("tenant_id", tenant_id).eq("id", variation_id).single().execute()
             return int((r.data or {}).get("stock_quantity") or 0)
         except Exception:
             return 0

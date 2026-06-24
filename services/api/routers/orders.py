@@ -507,6 +507,7 @@ def _consume_cart_reservations_if_any(
         res_list = (
             supabase.table("stock_reservations")
             .select("id")
+            .eq("tenant_id", tenant_id)
             .eq("cart_id", cart_id)
             .eq("status", "active")
             .execute()
@@ -822,6 +823,7 @@ async def generate_shipping_guide_endpoint(
         sh = (
             supabase.table("shipments")
             .select("carrier, tracking_number, tracking_url")
+            .eq("tenant_id", tenant_id)
             .eq("order_id", order_id).limit(1).execute()
         )
         sh_row = (sh.data or [{}])[0]
@@ -849,6 +851,7 @@ async def generate_shipping_guide_endpoint(
     final = (
         supabase.table("shipments")
         .select("id, tracking_number, label_url, tracking_url, carrier, status")
+        .eq("tenant_id", tenant_id)
         .eq("order_id", order_id)
         .limit(1).execute()
     )

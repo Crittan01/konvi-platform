@@ -89,7 +89,7 @@ def persist_template_status_update(event: Dict[str, Any]) -> bool:
 
     try:
         res = (
-            sb.table("whatsapp_templates")
+            sb.table("whatsapp_templates")  # tenant_filter:exempt:resolution_lookup_by_external_meta_template_id
             .update(update_fields)
             .eq("meta_template_id", str(meta_template_id))
             .execute()
@@ -153,7 +153,7 @@ def persist_template_quality_update(event: Dict[str, Any]) -> bool:
 
     try:
         res = (
-            sb.table("whatsapp_templates")
+            sb.table("whatsapp_templates")  # tenant_filter:exempt:resolution_lookup_by_external_meta_template_id
             .update({"quality_rating": new_quality})
             .eq("meta_template_id", str(meta_template_id))
             .execute()

@@ -710,6 +710,7 @@ def _log_consent_event(
             "actor_email": actor_email,
             "evidence": evidence or {},
         }
+        # tenant_filter:exempt:payload_includes_tenant_id
         supabase.table("consent_audit_log").insert(row).execute()
     except Exception as e:
         logger.warning(
@@ -746,6 +747,7 @@ def _log_pii_access(
             "ip_address": ip_address,
             "user_agent": user_agent,
         }
+        # tenant_filter:exempt:payload_includes_tenant_id
         supabase.table("pii_access_log").insert(row).execute()
     except Exception as e:
         logger.warning(
@@ -1772,6 +1774,7 @@ def _create_claim(
         if contact_id:
             payload["customer_id"] = contact_id
 
+        # tenant_filter:exempt:payload_includes_tenant_id
         res = supabase.table("claims").insert(payload).execute()
         inserted = (res.data or [{}])[0]
         ticket_number = inserted.get("ticket_number")
@@ -1906,6 +1909,7 @@ async def _send_outbound_text(
         recent = (
             supabase.table("messages")
             .select("direction, content")
+            .eq("tenant_id", tenant_id)
             .eq("conversation_id", conversation_id)
             .order("created_at", desc=True)
             .limit(20)
@@ -1923,6 +1927,7 @@ async def _send_outbound_text(
         _conv_row = (
             supabase.table("conversations")
             .select("customer_phone")
+            .eq("tenant_id", tenant_id)
             .eq("id", conversation_id)
             .limit(1)
             .execute()
@@ -2138,6 +2143,7 @@ async def _send_outbound_text(
     conv_res = (
         supabase.table("conversations")
         .select("customer_phone")
+        .eq("tenant_id", tenant_id)
         .eq("id", conversation_id)
         .execute()
     )
@@ -9135,6 +9141,7 @@ async def build_and_run_orchestration(
                             "id, consent_given, name, email, address, "
                             "document_type, document_number, phone, shipping_phone"
                         )
+                        .eq("tenant_id", tenant_id)
                         .eq("id", contact_id)
                         .single()
                         .execute()

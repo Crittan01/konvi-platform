@@ -140,6 +140,7 @@ def _read_cart_state(supabase: Any, *, conversation_id: str, tenant_id: str) -> 
             contact_res = (
                 supabase.table("contacts")
                 .select("consent_given, email, name, document_number, address")
+                .eq("tenant_id", tenant_id)
                 .eq("id", contact_id)
                 .maybe_single()
                 .execute()

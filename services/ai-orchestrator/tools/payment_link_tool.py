@@ -458,7 +458,7 @@ async def handle_payment_link_if_applicable(
                 try:
                     r = supabase.table("product_variations").select(
                         "sku, stock_quantity"
-                    ).eq("id", var_id).single().execute()
+                    ).eq("tenant_id", tenant_id).eq("id", var_id).single().execute()
                     sku = (r.data or {}).get("sku") or var_id[:8]
                     have = (r.data or {}).get("stock_quantity") or 0
                     insufficient.append(
@@ -513,7 +513,7 @@ async def handle_payment_link_if_applicable(
             cm_q = (
                 supabase.table("conversation_carts")
                 .select("payment_method")
-                .eq("id", cart_id_for_reserve).single().execute()
+                .eq("tenant_id", tenant_id).eq("id", cart_id_for_reserve).single().execute()
             )
             cart_payment_method = (
                 (cm_q.data or {}).get("payment_method") or "credit"
@@ -573,7 +573,7 @@ async def handle_payment_link_if_applicable(
             cart_meta = (
                 supabase.table("conversation_carts")
                 .select("shipping_meta")
-                .eq("id", cart_id_for_reserve).single().execute()
+                .eq("tenant_id", tenant_id).eq("id", cart_id_for_reserve).single().execute()
             )
             carrier_name = (
                 (cart_meta.data or {}).get("shipping_meta", {}).get("carrier")

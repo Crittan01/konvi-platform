@@ -95,7 +95,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
                 # Marcar listing local como cerrado para no intentar sync futuro
                 supabase.table("marketplace_listings").update(
                     {"status": "closed"}
-                ).eq("id", listing_id).execute()
+                ).eq("tenant_id", tenant_id).eq("id", listing_id).execute()
                 return
         except Exception as check_err:
             logger.warning("No se pudo verificar status MeLi para %s: %s — intentando sync igual", external_id, check_err)
@@ -129,7 +129,7 @@ async def sync_meli_stock(variation_id: str, new_qty: int, supabase) -> None:
                 "meli_condition":  meli_item.get("condition"),
                 "meli_category_id": meli_item.get("category_id"),
                 "meli_attributes": meli_item.get("attributes"),
-            }).eq("id", listing_id).execute()
+            }).eq("tenant_id", tenant_id).eq("id", listing_id).execute()
         except Exception as pull_err:
             logger.warning("No se pudo actualizar pull fields listing %s: %s", listing_id, pull_err)
 
@@ -336,7 +336,7 @@ async def link_listing(
                     "status":          item_details.get("status", "active"),
                     "external_price":  item_details.get("price") or meli_price,
                     "synced_at":       datetime.now(timezone.utc).isoformat(),
-                }).eq("id", listing_id).execute()
+                }).eq("tenant_id", tenant_id).eq("id", listing_id).execute()
             except Exception as enrich_err:
                 logger.warning("No se pudo enriquecer listing MeLi %s al vincular: %s", meli_id, enrich_err)
 

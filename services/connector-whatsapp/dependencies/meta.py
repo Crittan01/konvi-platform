@@ -325,7 +325,7 @@ def _resolve_tenant_id_for_phone_number(phone_number_id: str) -> Optional[str]:
 
     try:
         res = (
-            sb.table("tenant_integrations")
+            sb.table("tenant_integrations")  # tenant_filter:exempt:resolution_lookup_phone_number_id_to_tenant
             .select("tenant_id, credentials")
             .eq("provider", "whatsapp")
             .in_("status", ["connected", "pending_token"])

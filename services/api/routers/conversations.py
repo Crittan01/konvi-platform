@@ -406,6 +406,7 @@ async def get_conversation_context(
                     supabase.table("conversation_cart_items")
                     .select("id, product_id, variation_id, quantity, "
                             "unit_price_cents, created_at")
+                    .eq("tenant_id", tenant_id)
                     .eq("cart_id", cart["id"])
                     .order("created_at", desc=False)
                     .execute()
@@ -422,6 +423,7 @@ async def get_conversation_context(
                         vres = (
                             supabase.table("product_variations")
                             .select("id, attributes, sku")
+                            .eq("tenant_id", tenant_id)
                             .in_("id", var_ids)
                             .execute()
                         )
@@ -438,6 +440,7 @@ async def get_conversation_context(
                         pres = (
                             supabase.table("products")
                             .select("id, title")
+                            .eq("tenant_id", tenant_id)
                             .in_("id", prod_ids)
                             .execute()
                         )
@@ -480,6 +483,7 @@ async def get_conversation_context(
                     msgs_res = (
                         supabase.table("messages")
                         .select("content, created_at")
+                        .eq("tenant_id", tenant_id)
                         .eq("conversation_id", conversation_id)
                         .eq("direction", "outbound")
                         .ilike("content", "%conómica%")

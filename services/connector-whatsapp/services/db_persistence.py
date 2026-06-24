@@ -136,7 +136,7 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
             # 'opted_out'. Bot NO debe responder. Operador humano puede
             # intervenir vía Inbox si quiere re-engagement explícito.
             if current_status != "opted_out":
-                supabase.table("conversations").update(
+                supabase.table("conversations").update(  # tenant_filter:exempt:post_resolution_update_by_pk
                     {"status": "opted_out"}
                 ).eq("id", conversation_id).execute()
                 logger.info(
@@ -148,7 +148,7 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
         elif current_status in {"closed"} or current_status not in {"bot_active", "human_takeover", "closed", "opted_out"}:
             # Reabrir cerrada o status fuera de contrato (sin incluir opted_out
             # que ahora se respeta arriba).
-            supabase.table("conversations").update(
+            supabase.table("conversations").update(  # tenant_filter:exempt:post_resolution_update_by_pk
                 {"status": "bot_active"}
             ).eq("id", conversation_id).execute()
             logger.info(f"Conversación {conversation_id} reabierta (estaba '{current_status}')")
@@ -217,7 +217,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
         # o si hay timeouts de red. Evitamos insertar duplicados.
         if meta_message_id:
             dup_check = (
-                supabase.table("messages")
+                supabase.table("messages")  # tenant_filter:exempt:post_resolution_filter_by_conversation_id
                 .select("id")
                 .eq("conversation_id", conversation_id)
                 .eq("meta_message_id", meta_message_id)
@@ -247,7 +247,7 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
             msg_row["media_id"] = media_id
         if media_mime:
             msg_row["media_mime"] = media_mime
-        supabase.table("messages").insert(msg_row).execute()
+        supabase.table("messages").insert(msg_row).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
         logger.info(
             f"[INBOUND] Mensaje persistido | tenant={tenant_id} | "

@@ -170,7 +170,7 @@ async def quote_shipping_for_cart_aveonline(
             if detect_cod_intent(last_content):
                 supabase.table("conversation_carts").update({
                     "payment_method": "cod",
-                }).eq("id", cart_for_cod_check).execute()
+                }).eq("tenant_id", tenant_id).eq("id", cart_for_cod_check).execute()
                 early_payment_method = "cod"
                 logger.info(
                     "[agentic.shipping.aveonline.pre-quote] re-detect COD intent OK "

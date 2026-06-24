@@ -296,7 +296,7 @@ def _process_wompi_event(payload: dict) -> None:
             sh_res = (
                 supabase.table("shipments")
                 .select("carrier, tracking_number, tracking_url")
-                .eq("order_id", order_id).limit(1).execute()
+                .eq("order_id", order_id).eq("tenant_id", tenant_id).limit(1).execute()
             )
             sh_row = (sh_res.data or [{}])[0]
             if conversation_id and sh_row.get("tracking_number"):
@@ -321,6 +321,7 @@ def _process_wompi_event(payload: dict) -> None:
     # no es crítico — el dedup ya bloqueó duplicados al inicio.
     if event_uid:
         try:
+            # tenant_filter:exempt:webhook_dedup_idempotent_event_id_unique
             supabase.table("wompi_events_seen").update(
                 {"processed_at": datetime.now(timezone.utc).isoformat()}
             ).eq("event_id", event_uid).execute()
@@ -570,6 +571,7 @@ def _upsert_payment_record(
     existing = None
     # 1) Lookup por wompi_txn_id (replay del mismo evento).
     if wompi_txn_id:
+        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
             supabase.table("payments")
             .select("id, tenant_id")
@@ -582,6 +584,7 @@ def _upsert_payment_record(
     # 2) Si no encontró por txn_id, buscar por wompi_link_id (fila pre-existente
     #    creada por payment_link_tool con txn_id NULL — primer webhook APPROVED).
     if not existing and wompi_link_id and order_id:
+        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
             supabase.table("payments")
             .select("id, tenant_id, wompi_txn_id")
@@ -609,6 +612,7 @@ def _upsert_payment_record(
         logger.warning("[WOMPI] sin_order_id_para_insert txn_id=%s — payment no registrado", wompi_txn_id)
         return False
 
+    # tenant_filter:exempt:webhook_resolution_lookup
     order_res = (
         supabase.table("orders")
         .select("tenant_id")
@@ -639,6 +643,7 @@ def _upsert_payment_record(
 def _get_order_id_by_link(supabase, wompi_link_id: str):
     """Resuelve order_id desde wompi_link_id via tabla payments."""
     try:
+        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
             supabase.table("payments")
             .select("order_id")
@@ -655,6 +660,7 @@ def _get_order_id_by_link(supabase, wompi_link_id: str):
 
 def _get_order_by_id(supabase, order_id: str):
     try:
+        # tenant_filter:exempt:webhook_resolution_lookup
         res = (
             supabase.table("orders")
             .select("id, tenant_id, status, conversation_id, contact_id")
@@ -736,6 +742,7 @@ def _is_post_cancel_void(supabase, *, order_id: str) -> bool:
     donde sí queremos ofrecer retry.
     """
     try:
+        # tenant_filter:exempt:webhook_resolution_lookup
         row = (
             supabase.table("orders")
             .select("status, cancellation_id")
@@ -749,6 +756,7 @@ def _is_post_cancel_void(supabase, *, order_id: str) -> bool:
         cid = row.get("cancellation_id")
         if not cid:
             return False
+        # tenant_filter:exempt:webhook_resolution_lookup
         cancel_row = (
             supabase.table("order_cancellations")
             .select("refund_method")
@@ -775,6 +783,7 @@ def _notify_client_refund_completed(
     Envía WhatsApp + email + actualiza audit refund_completed_at.
     """
     try:
+        # tenant_filter:exempt:webhook_resolution_lookup
         order = (
             supabase.table("orders")
             .select("tenant_id, conversation_id, cancellation_id")
@@ -834,7 +843,7 @@ def _notify_client_refund_completed(
             supabase.table("order_cancellations").update({
                 "refund_completed_at": datetime.now(timezone.utc).isoformat(),
                 "refund_status": "completed",
-            }).eq("id", cancellation_id).execute()
+            }).eq("id", cancellation_id).eq("tenant_id", tenant_id).execute()
         except Exception as exc:
             logger.warning(
                 "[WOMPI] audit refund_completed_at update failed cid=%s: %s",
@@ -1042,7 +1051,7 @@ def _send_payment_confirmation_email(
         items_res = (
             supabase.table("order_items")
             .select("title, quantity, unit_price")
-            .eq("order_id", order_id)
+            .eq("order_id", order_id).eq("tenant_id", tenant_id)
             .execute()
         )
         items = items_res.data or []
@@ -1070,7 +1079,7 @@ def _send_payment_confirmation_email(
         sh_res = (
             supabase.table("shipments")
             .select("carrier, tracking_number, tracking_url, label_url, status")
-            .eq("order_id", order_id)
+            .eq("order_id", order_id).eq("tenant_id", tenant_id)
             .limit(1).execute()
         )
         sh = (sh_res.data or [{}])[0]

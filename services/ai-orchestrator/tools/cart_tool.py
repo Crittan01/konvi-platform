@@ -487,6 +487,7 @@ def remove_item(
         supabase.table("conversation_cart_items")
         .select("quantity, unit_price_cents")
         .eq("cart_id", cart_id)
+        .eq("tenant_id", tenant_id)
         .execute()
     )
     new_subtotal = sum(

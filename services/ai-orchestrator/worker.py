@@ -834,6 +834,7 @@ class OrchestratorWorker:
 
             try:
                 # 1. Encontrar escalated_at — último escalation_audit.
+                # tenant_filter:exempt:cron_cross_tenant_sla_check
                 escalation_audit = (
                     self.supabase.table("messages")
                     .select("created_at")
@@ -849,6 +850,7 @@ class OrchestratorWorker:
                 escalated_at_iso = escalation_audit.data[0]["created_at"]
 
                 # 2. ¿Ya alertamos previamente esta breach?
+                # tenant_filter:exempt:cron_cross_tenant_sla_check
                 breach_audit = (
                     self.supabase.table("messages")
                     .select("id")
@@ -865,6 +867,7 @@ class OrchestratorWorker:
                 # 3. ¿Hubo respuesta humana post-escalación?
                 # Outbound 'text' (no escalation_audit, no degraded, etc.)
                 # creado después de escalated_at = operador respondió.
+                # tenant_filter:exempt:cron_cross_tenant_sla_check
                 human_response = (
                     self.supabase.table("messages")
                     .select("id")
@@ -1047,6 +1050,7 @@ class OrchestratorWorker:
                 continue
 
             try:
+                # tenant_filter:exempt:cron_cross_tenant_payment_reminder
                 last_in_res = (
                     self.supabase.table("messages")
                     .select("created_at")

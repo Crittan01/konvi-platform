@@ -134,7 +134,7 @@ class PIICoherenceTests(unittest.TestCase):
     def test_db_unreadable_ok_best_effort(self):
         from agentic.invariants.base import InvariantOutcome
         sb = MagicMock()
-        sb.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = Exception("db down")
+        sb.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.side_effect = Exception("db down")
         b = dict(self.base, supabase=sb)
         r = _run(self.inv.validate(
             candidate_text="Datos de envío:\n*Nombre:* X",

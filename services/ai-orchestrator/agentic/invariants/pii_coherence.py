@@ -117,6 +117,7 @@ class PIICoherenceInvariant:
             res = (
                 supabase.table("contacts")
                 .select("name, email, document_number")
+                .eq("tenant_id", tenant_id)
                 .eq("id", contact_id)
                 .single()
                 .execute()
