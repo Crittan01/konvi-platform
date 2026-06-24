@@ -78,6 +78,10 @@ class ContactCreate(BaseModel):
     )
     consent_given: bool = False
     consent_source: Optional[str] = None
+    # A9 — canal por el que se capturó el consentimiento (medio). La UI web
+    # pasa 'dashboard_console'. Antes el API lo dejaba en su default DB ('manual'),
+    # generando inconsistencia con consent_source que sí se llenaba.
+    consent_channel: Optional[str] = Field(default=None, max_length=40)
     consent_notice_version: Optional[str] = Field(default=None, max_length=80)
     consent_evidence: dict = Field(default_factory=dict)
     consent_revoked_reason: Optional[str] = Field(default=None, max_length=500)
@@ -226,6 +230,9 @@ async def create_contact(
         if doc_err:
             raise HTTPException(status_code=422, detail=doc_err)
 
+        # Actor del JWT — autoritativo para consent_actor_email (no client-supplied).
+        _uid, _email = _extract_user_info(request)
+
         now_iso = datetime.now(timezone.utc).isoformat()
         payload = {
             "tenant_id": tenant_id,
@@ -240,6 +247,8 @@ async def create_contact(
             "consent_given": contact.consent_given,
             "consent_date": now_iso if contact.consent_given else None,
             "consent_source": contact.consent_source if contact.consent_given else None,
+            "consent_channel": contact.consent_channel if contact.consent_given else None,
+            "consent_actor_email": _email if contact.consent_given else None,
             "consent_notice_version": contact.consent_notice_version if contact.consent_given else None,
             "consent_evidence": evidence,
             "consent_revoked_reason": contact.consent_revoked_reason if not contact.consent_given else None,
@@ -255,7 +264,6 @@ async def create_contact(
         # A9 finiquito (Habeas Data Art. 9): audit field-level del WRITE de PII
         # desde la UI/API. El @audit_log registra la acción de entidad; esto
         # registra QUÉ campos PII se escribieron. Best-effort (no rompe el flujo).
-        _uid, _email = _extract_user_info(request)
         _pii_written = [
             f for f in _PII_CONTACT_FIELDS
             if (payload.get(f) not in (None, "", {}))

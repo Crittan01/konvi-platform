@@ -226,31 +226,40 @@ export default async function ContactsPage({
       actor_email: u?.email ?? null,
       captured_at: nowIso,
     }
-    const { data: inserted } = await sb.from('contacts').insert({
-      tenant_id:     m.tenant_id,
-      phone:         phoneE164,
-      shipping_phone: shippingPhoneE164,
-      name:          (formData.get('name') as string) || null,
-      email:         (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
-      notes:         (formData.get('notes') as string) || null,
-      // rev. 69 — solo persiste si tipo+número están AMBOS poblados (regla Wompi).
-      document_type:   docType && docNumber ? docType : null,
-      document_number: docType && docNumber ? docNumber : null,
-      consent_given: consentGiven,
-      consent_date:  consentGiven ? nowIso : null,
-      consent_source: consentGiven ? consentSource : null,
-      // `consent_channel` (Ley 1581 + migración 20260423000000_contacts_consent_v2):
-      // canal por el que el titular dio el consentimiento. En el form web
-      // siempre es 'dashboard_console'. Antes quedaba en su default 'manual'
-      // generando inconsistencia con `consent_source` (que sí se llenaba).
-      consent_channel: consentGiven ? 'dashboard_console' : null,
-      consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
-      consent_evidence: initialEvidence,
-      consent_actor_email: u?.email ?? null,
-      consent_revoked_at: !consentGiven && revocationReason ? nowIso : null,
-      consent_revoked_reason: !consentGiven ? (revocationReason || null) : null,
-      address,
-    }).select('id').single()
+    // A9 finiquito — la creación pasa por el API router /api/v1/contacts/
+    // (RBAC owner/manager + idempotency + audit_log + pii_access_log Art. 9).
+    // Antes era escritura DIRECTA a Supabase sin esas garantías (drift §3).
+    // El API computa consent_date / consent_revoked_at / consent_actor_email
+    // server-side (actor autoritativo del JWT, no client-supplied).
+    const token = (await sb.auth.getSession()).data.session?.access_token
+    if (!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.')
+    const res = await fetch(`${CORE_API_URL}/api/v1/contacts/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        phone:           phoneE164,
+        shipping_phone:  shippingPhoneE164,
+        name:            (formData.get('name') as string) || null,
+        email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
+        notes:           (formData.get('notes') as string) || null,
+        document_type:   docType && docNumber ? docType : null,
+        document_number: docType && docNumber ? docNumber : null,
+        address,
+        consent_given:   consentGiven,
+        consent_source:  consentGiven ? consentSource : null,
+        consent_channel: consentGiven ? 'dashboard_console' : null,
+        consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
+        consent_evidence: initialEvidence,
+        consent_revoked_reason: !consentGiven ? (revocationReason || null) : null,
+      }),
+    })
+    if (!res.ok) {
+      const detail = await res.text()
+      // 409 = teléfono duplicado (UNIQUE tenant+phone). Mensaje claro al operador.
+      if (res.status === 409) throw new Error('Ya existe un contacto con ese teléfono.')
+      throw new Error(detail || 'Error al crear el contacto.')
+    }
+    const inserted = await res.json() as { id?: string }
 
     // Rev. 103 (F10) — si canal in_person + file adjunto, sube a Storage
     // y persiste URL en consent_evidence.attachment_url (segundo update).

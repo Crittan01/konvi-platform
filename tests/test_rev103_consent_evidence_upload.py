@@ -117,9 +117,14 @@ class ServerActionWireTests(unittest.TestCase):
             self.page_src,
         )
 
-    def test_add_uses_select_id_single_to_get_new_id(self):
-        # await sb.from('contacts').insert({...}).select('id').single()
-        self.assertIn(".select('id').single()", self.page_src)
+    def test_add_uses_api_response_to_get_new_id(self):
+        # A9 finiquito — addContact migró a POST /api/v1/contacts/ (router con
+        # RBAC + idempotency + audit + pii_access_log). El nuevo id se obtiene
+        # de la respuesta JSON del API, no de .select('id').single() directo.
+        self.assertIn("/api/v1/contacts/", self.page_src)
+        self.assertIn("const inserted = await res.json()", self.page_src)
+        # El attachment flow (diferido) sigue usando newId del id retornado.
+        self.assertIn("const newId", self.page_src)
 
     def test_add_only_uploads_when_in_person_and_consent(self):
         # if (newId && consentGiven && consentSource === 'in_person')

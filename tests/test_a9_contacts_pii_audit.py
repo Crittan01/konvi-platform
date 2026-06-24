@@ -153,6 +153,36 @@ class PiiAuditEndpointTests(unittest.TestCase):
         self.assertIn("name", pii[0]["fields_accessed"])
         self.assertIn("shipping_phone", pii[0]["fields_accessed"])
 
+    def test_create_persists_consent_channel_and_actor(self):
+        # A9: consent_channel (de la UI) + consent_actor_email (del JWT) se
+        # persisten cuando consent_given=True.
+        sb = _FakeSupabase()
+        contact = ContactCreate(
+            phone="+573001112233", name="Ana",
+            consent_given=True, consent_source="manual_console",
+            consent_channel="dashboard_console",
+        )
+        asyncio.run(create_contact(
+            contact=contact, request=_fake_request(),
+            tenant_id="tenant-A", supabase=sb, _role="manager", _rl=None,
+        ))
+        inserts = [d for (n, op, d) in sb.ops if n == "contacts" and op == "insert"]
+        self.assertEqual(len(inserts), 1)
+        self.assertEqual(inserts[0]["consent_channel"], "dashboard_console")
+        self.assertEqual(inserts[0]["consent_actor_email"], "op@kaiu.co")
+
+    def test_create_no_consent_nulls_channel_actor(self):
+        # Sin consent → consent_channel/actor null (no se estampan).
+        sb = _FakeSupabase()
+        contact = ContactCreate(phone="+573001112233", consent_channel="dashboard_console")
+        asyncio.run(create_contact(
+            contact=contact, request=_fake_request(),
+            tenant_id="tenant-A", supabase=sb, _role="manager", _rl=None,
+        ))
+        inserts = [d for (n, op, d) in sb.ops if n == "contacts" and op == "insert"]
+        self.assertIsNone(inserts[0]["consent_channel"])
+        self.assertIsNone(inserts[0]["consent_actor_email"])
+
     def test_patch_non_pii_only_no_audit(self):
         # Patch de solo 'notes' (no PII de contenido) → no pii_access_log.
         sb = _FakeSupabase()
