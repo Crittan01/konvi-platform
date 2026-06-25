@@ -41,6 +41,29 @@ router = APIRouter(tags=["Orders"])
 
 VALID_STATUSES = {"pending", "pending_payment", "confirmed", "processing", "shipped", "delivered", "cancelled"}
 
+# A11 audit ORD-01: máquina de estados de la orden. patch_order validaba
+# pertenencia al set pero NO la transición → permitía saltos inválidos
+# (delivered→pending). Lifecycle: pending|pending_payment → confirmed →
+# processing → shipped → delivered | cancelled. Regla conservadora (no rompe
+# flujos legítimos): forward (rank no decrece) + cancelar desde cualquier
+# no-terminal + idempotente; rechaza backward y reabrir un estado terminal.
+_ORDER_STATUS_RANK = {
+    "pending": 0, "pending_payment": 0,
+    "confirmed": 1, "processing": 2, "shipped": 3, "delivered": 4,
+}
+_ORDER_TERMINAL_STATUSES = {"delivered", "cancelled"}
+
+
+def _is_allowed_order_transition(current: str, new: str) -> bool:
+    if current == new:
+        return True  # idempotente
+    if current in _ORDER_TERMINAL_STATUSES:
+        return False  # un estado terminal NO se reabre
+    if new == "cancelled":
+        return True  # cancelable desde cualquier estado no-terminal
+    return _ORDER_STATUS_RANK.get(new, 99) >= _ORDER_STATUS_RANK.get(current, -1)
+
+
 WOMPI_PAYMENT_LINK_TTL_MINUTES = 30
 # TTL de validez del link Wompi (expires_at enviado al crear el link). Tiene
 # DOS espejos en el código que deben mantenerse alineados:
@@ -330,6 +353,13 @@ async def patch_order(
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
         current_status = current_result.data["status"]
+
+        # A11 audit ORD-01: validar la TRANSICIÓN, no solo la pertenencia al set.
+        if new_status and not _is_allowed_order_transition(current_status, new_status):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Transición de estado inválida: {current_status} → {new_status}",
+            )
 
         result = (
             supabase.table("orders")
