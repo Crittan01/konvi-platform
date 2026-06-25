@@ -207,7 +207,6 @@ async def get_service_client(tenant_id: str = Depends(get_current_tenant)) -> Cl
 
 async def reject_if_tenant_deleting(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant),
 ) -> str:
     """Rev. 109 J.2.4.4 Fase 2 — middleware lectura-solo durante offboarding.
 
@@ -225,11 +224,23 @@ async def reject_if_tenant_deleting(
     (orders, conversations, contacts, products, settings, integrations,
     claims, purchases, marketplace, ai_agents, knowledge_base, shipping).
 
+    A11 UAT 2026-06-25 (BUG_REAL): la resolución de tenant usa DUAL-AUTH
+    (`get_tenant_id_internal_or_user`), NO solo JWT. Estos routers también
+    reciben escrituras service-to-service del orchestrator (crear orden,
+    payment-link, shipping). Con `get_current_tenant` (JWT-only) toda llamada
+    interna recibía 401 ANTES del internal-auth del endpoint — rompía el flujo
+    de pago del bot. El gate de offboarding igual aplica al tenant resuelto
+    (el bot tampoco debe escribir durante grace). Import lazy evita el ciclo
+    auth.py ↔ internal_auth.py.
+
     Tras hard-delete (deleted_at NOT NULL), get_current_tenant ya retornaría
     error porque el JWT del usuario sigue válido pero la fila tenants no existe;
     Supabase queries con tenant_id=X fallan silently con 0 rows. Este middleware
     NO cubre ese caso post-delete (el JWT debería re-emitirse).
     """
+    from dependencies.internal_auth import get_tenant_id_internal_or_user
+    tenant_id = await get_tenant_id_internal_or_user(request)
+
     # Fix audit 2026-05-29: skip GET/HEAD/OPTIONS automáticamente — no
     # tiene sentido bloquear reads durante grace + ahorra 1 query per req.
     if request.method in {"GET", "HEAD", "OPTIONS"}:

@@ -20,6 +20,10 @@ from fastapi import Depends, HTTPException, Request, Response
 from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client
+from dependencies.internal_auth import (
+    get_tenant_id_internal_or_user,
+    get_service_client_internal_or_user,
+)
 from dependencies.observability import record_api_security_event
 
 logger = logging.getLogger("api.security")
@@ -132,8 +136,11 @@ def build_rate_limit_dependency(rule: RateLimitRule, include_user_id: bool = Fal
     async def _dependency(
         request: Request,
         response: Response,
-        tenant_id: str = Depends(get_current_tenant),
-        supabase: Client = Depends(get_service_client),
+        # A11 UAT 2026-06-25 (BUG_REAL): dual-auth — el orchestrator
+        # (service-to-service) también pasa por rate-limit; con get_current_tenant
+        # (JWT-only) recibía 401 antes de ejecutar la escritura.
+        tenant_id: str = Depends(get_tenant_id_internal_or_user),
+        supabase: Client = Depends(get_service_client_internal_or_user),
     ) -> None:
         if not RATE_LIMIT_ENABLED:
             return

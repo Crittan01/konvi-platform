@@ -13,6 +13,10 @@ from fastapi import Depends, HTTPException, Response
 from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client
+from dependencies.internal_auth import (
+    get_tenant_id_internal_or_user,
+    get_service_client_internal_or_user,
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -50,8 +54,11 @@ def _first_row(data: Any) -> dict[str, Any]:
 def build_plan_capability_dependency(capability_key: str, units: int = 1) -> Callable:
     async def _dependency(
         response: Response,
-        tenant_id: str = Depends(get_current_tenant),
-        supabase: Client = Depends(get_service_client),
+        # A11 UAT 2026-06-25 (BUG_REAL): dual-auth — el orchestrator
+        # (service-to-service) también pasa por plan-gating; con get_current_tenant
+        # (JWT-only) recibía 401 antes de crear la orden / payment-link.
+        tenant_id: str = Depends(get_tenant_id_internal_or_user),
+        supabase: Client = Depends(get_service_client_internal_or_user),
     ) -> PlanDecision:
         if not PLAN_ENFORCEMENT_ENABLED:
             response.headers["X-Plan-Enforcement"] = "disabled"

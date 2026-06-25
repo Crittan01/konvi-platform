@@ -231,7 +231,7 @@ async def _emit_degraded_response_and_escalate(
     # Marcar este mensaje como failed primero (afecta el conteo).
     try:
         _mark_message_processing(
-            supabase, message_id,
+            supabase, tenant_id, message_id,
             processing_status=PROCESSING_STATUS_FAILED,
         )
     except Exception:
@@ -509,7 +509,7 @@ async def _run_agentic_full(
                     tenant_id=tenant_id, text=_degraded_msg,
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 # history/contact aún no cargados en este punto — passes
@@ -843,7 +843,7 @@ async def _run_agentic_full(
                 tenant_id=tenant_id, text=_redirect,
             )
             _mark_message_processing(
-                supabase, message_id,
+                supabase, tenant_id, message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
             _resolve_and_persist_agentic_state(
@@ -1128,7 +1128,7 @@ async def _run_agentic_full(
                     tenant_id=tenant_id, text=_coupon_response,
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 _resolve_and_persist_agentic_state(
@@ -1195,7 +1195,7 @@ async def _run_agentic_full(
                         tenant_id=tenant_id, text=_ambig_msg,
                     )
                     _mark_message_processing(
-                        supabase, message_id,
+                        supabase, tenant_id, message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
                     )
                     _resolve_and_persist_agentic_state(
@@ -1217,7 +1217,7 @@ async def _run_agentic_full(
                         tenant_id=tenant_id, text=_no_msg,
                     )
                     _mark_message_processing(
-                        supabase, message_id,
+                        supabase, tenant_id, message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
                     )
                     _resolve_and_persist_agentic_state(
@@ -1244,7 +1244,7 @@ async def _run_agentic_full(
                     tenant_id=tenant_id, text=_not_found_msg,
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 _resolve_and_persist_agentic_state(
@@ -1277,7 +1277,7 @@ async def _run_agentic_full(
                         text=_cancel_result.customer_message,
                     )
                     _mark_message_processing(
-                        supabase, message_id,
+                        supabase, tenant_id, message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
                     )
 
@@ -1443,7 +1443,7 @@ async def _run_agentic_full(
                     except Exception:
                         pass
                     _mark_message_processing(
-                        supabase, message_id,
+                        supabase, tenant_id, message_id,
                         processing_status=PROCESSING_STATUS_PROCESSED,
                     )
                     _resolve_and_persist_agentic_state(
@@ -1509,7 +1509,7 @@ async def _run_agentic_full(
                         tenant_id=tenant_id, text=_img_result.response_text,
                     )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 logger.info(
@@ -1715,7 +1715,7 @@ async def _run_agentic_full(
                 text=outbound,
             )
             _mark_message_processing(
-                supabase, message_id,
+                supabase, tenant_id, message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
             # Construir AgenticTurnResult sintético para el audit logger.
@@ -1822,7 +1822,7 @@ async def _run_agentic_full(
                 text=outbound,
             )
             _mark_message_processing(
-                supabase, message_id,
+                supabase, tenant_id, message_id,
                 processing_status=PROCESSING_STATUS_PROCESSED,
             )
             from agentic.agent import AgenticTurnResult
@@ -1988,7 +1988,7 @@ async def _run_agentic_full(
                     text=outbound,
                 )
                 _mark_message_processing(
-                    supabase, message_id,
+                    supabase, tenant_id, message_id,
                     processing_status=PROCESSING_STATUS_PROCESSED,
                 )
                 from agentic.agent import AgenticTurnResult
@@ -2262,7 +2262,7 @@ async def _run_agentic_full(
         text=final_text,
     )
     _mark_message_processing(
-        supabase, message_id,
+        supabase, tenant_id, message_id,
         processing_status=PROCESSING_STATUS_PROCESSED,
     )
 
