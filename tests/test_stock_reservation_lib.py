@@ -103,13 +103,14 @@ class ReserveTests(unittest.TestCase):
 class ReleaseTests(unittest.TestCase):
     def test_release_by_id_returns_true(self):
         sb = _mock_supabase_rpc({"rpc_stock_reservation_release": None})
-        self.assertTrue(sr.release_by_id(sb, reservation_id="res-1"))
+        # A11 IDOR: tenant_id obligatorio.
+        self.assertTrue(sr.release_by_id(sb, reservation_id="res-1", tenant_id="t1"))
 
     def test_release_by_id_failure_returns_false(self):
         sb = _mock_supabase_rpc({
             "rpc_stock_reservation_release": Exception("DB down"),
         })
-        self.assertFalse(sr.release_by_id(sb, reservation_id="res-1"))
+        self.assertFalse(sr.release_by_id(sb, reservation_id="res-1", tenant_id="t1"))
 
     def test_release_by_cart_counts_releases(self):
         sb = _mock_supabase_rpc(

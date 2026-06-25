@@ -548,7 +548,9 @@ def _consume_cart_reservations_if_any(
             try:
                 supabase.rpc(
                     "rpc_stock_reservation_consume",
-                    {"p_reservation_id": rid, "p_order_id": order_id},
+                    # A11 IDOR (fase migrate-callers): p_tenant_id = tenant
+                    # autenticado del request → el RPC filtra cross-tenant.
+                    {"p_reservation_id": rid, "p_order_id": order_id, "p_tenant_id": tenant_id},
                 ).execute()
                 consumed += 1
             except Exception as exc:

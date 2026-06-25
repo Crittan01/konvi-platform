@@ -479,7 +479,8 @@ async def handle_payment_link_if_applicable(
             try:
                 supabase.rpc(
                     "rpc_stock_reservation_release",
-                    {"p_reservation_id": rid},
+                    # A11 IDOR (fase migrate-callers): p_tenant_id del contexto.
+                    {"p_reservation_id": rid, "p_tenant_id": tenant_id},
                 ).execute()
             except Exception as exc:
                 logger.warning(

@@ -122,12 +122,15 @@ def reserve(
         )
 
 
-def release_by_id(supabase: Any, *, reservation_id: str) -> bool:
-    """Libera UNA reservation. Idempotente (no-op si ya released)."""
+def release_by_id(supabase: Any, *, reservation_id: str, tenant_id: str) -> bool:
+    """Libera UNA reservation. Idempotente (no-op si ya released).
+
+    A11 IDOR: tenant_id obligatorio — el RPC filtra cross-tenant.
+    """
     try:
         supabase.rpc(
             "rpc_stock_reservation_release",
-            {"p_reservation_id": reservation_id},
+            {"p_reservation_id": reservation_id, "p_tenant_id": tenant_id},
         ).execute()
         return True
     except Exception as exc:
@@ -166,7 +169,7 @@ def release_by_cart(
 
     released = 0
     for row in rows:
-        if release_by_id(supabase, reservation_id=row["id"]):
+        if release_by_id(supabase, reservation_id=row["id"], tenant_id=tenant_id):
             released += 1
     return released
 
@@ -201,7 +204,7 @@ def consume_by_cart(
         try:
             supabase.rpc(
                 "rpc_stock_reservation_consume",
-                {"p_reservation_id": row["id"], "p_order_id": order_id},
+                {"p_reservation_id": row["id"], "p_order_id": order_id, "p_tenant_id": tenant_id},
             ).execute()
             consumed += 1
         except Exception as exc:
@@ -242,7 +245,7 @@ def extend_by_cart(
         try:
             supabase.rpc(
                 "rpc_stock_reservation_extend",
-                {"p_reservation_id": row["id"], "p_new_ttl_min": ttl_minutes},
+                {"p_reservation_id": row["id"], "p_new_ttl_min": ttl_minutes, "p_tenant_id": tenant_id},
             ).execute()
             extended += 1
         except Exception as exc:
