@@ -664,13 +664,23 @@ def set_shipping_meta(
         **existing_meta,
         "carrier": carrier,
         "service_level": service_level,
-        "rate_id": rate_id,
-        "city": city,
-        "dane_code": dane_code,
-        "address_line": address_line,
-        "weight_inputs": weight_inputs,
         "shipping_cents": int(shipping_cents),
     }
+    # A11 audit 2026-06-25 (CART-01): preservar campos enriquecibles previos
+    # cuando el caller pasa info parcial (None). El docstring promete persistir
+    # parcial (carrier+cents) "y luego enriquecerla" — pero el merge plano los
+    # nulificaba. Callers reales (orchestrator.py:5176, legacy_adapters/cart.py)
+    # pasan carrier+cents SIN city/dane/address → se perdían → requote roto +
+    # link Wompi con shipping stale.
+    for _k, _v in (
+        ("rate_id", rate_id),
+        ("city", city),
+        ("dane_code", dane_code),
+        ("address_line", address_line),
+        ("weight_inputs", weight_inputs),
+    ):
+        if _v is not None:
+            shipping_meta[_k] = _v
     (
         supabase.table("conversation_carts")
         .update({
