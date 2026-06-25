@@ -224,6 +224,9 @@ class OrchestratorWorker:
             )
         self.supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         self._running = False
+        # A11 audit 2026-06-25: heartbeat para que /health detecte worker
+        # colgado/muerto (Render no auto-reinicia si /health sigue 200).
+        self.last_heartbeat_ts = time.time()
         self._queue_runtime_enabled = HUMAN_TAKEOVER_QUEUE_ENABLED
         self._wa_queue_runtime_enabled = WHATSAPP_OUTBOUND_QUEUE_ENABLED
         self._cleanup_enabled = IDEMPOTENCY_CLEANUP_ENABLED
@@ -281,6 +284,9 @@ class OrchestratorWorker:
         await self._sweep_stale_messages_on_startup()
 
         while self._running:
+            # Heartbeat al tope del loop: si _poll_cycle se cuelga, el timestamp
+            # NO avanza → /health lo detecta stale → 503 → Render reinicia.
+            self.last_heartbeat_ts = time.time()
             try:
                 await self._poll_cycle()
             except Exception as e:

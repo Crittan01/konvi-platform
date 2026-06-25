@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 from observability import init_sentry
 
@@ -44,10 +45,39 @@ _worker_status = {"running": False, "started_at": None, "error": None}
 _worker_ref = {"instance": None}
 
 
+# A11 audit 2026-06-25: el worker pollea cada POLL_INTERVAL_SECONDS (~3s);
+# 120s sin heartbeat = decenas de ciclos perdidos = worker colgado/muerto.
+HEALTH_HEARTBEAT_STALE_SECONDS = 120
+
+
 @app.get("/health")
 def health():
-    """Health check requerido por Render para detectar que el servicio está vivo."""
-    return {"status": "ok", "worker": _worker_status}
+    """Health check de Render. Devuelve 503 si el worker está caído o colgado
+    (heartbeat stale) para que Render lo auto-reinicie. Antes devolvía 200
+    incondicional → si el thread del worker moría, /health seguía OK = outage
+    silencioso (mensajes sin procesar, sin auto-restart)."""
+    instance = _worker_ref.get("instance")
+    hb = getattr(instance, "last_heartbeat_ts", None) if instance is not None else None
+    age = (time.time() - hb) if hb is not None else None
+
+    reason = None
+    if not _worker_status.get("running"):
+        reason = "worker_not_running"
+    elif _worker_status.get("error"):
+        reason = "worker_error"
+    elif age is not None and age > HEALTH_HEARTBEAT_STALE_SECONDS:
+        reason = "heartbeat_stale"
+    # hb None + running=True → ventana de arranque (worker aún no late) → healthy.
+
+    body = {
+        "status": "ok" if reason is None else "degraded",
+        "worker": _worker_status,
+        "heartbeat_age_s": round(age, 1) if age is not None else None,
+    }
+    if reason is not None:
+        body["reason"] = reason
+        return JSONResponse(status_code=503, content=body)
+    return body
 
 
 @app.get("/status")
