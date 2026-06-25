@@ -221,6 +221,30 @@ def _process_wompi_event(payload: dict) -> None:
         )
         return
 
+    # ── 5b. Validar monto/moneda antes de confirmar (A11 audit 2026-06-25) ───
+    # Defensa payment-integrity: Wompi reporta APPROVED pero el monto cobrado
+    # debe coincidir con el total de la orden (link = total al crearlo). Un
+    # mismatch (link mal correlacionado, tampering, cobro parcial) NO debe
+    # confirmar la orden — fail-closed + log para revisión manual.
+    order_total = order.get("total_amount")
+    if order_total is not None:
+        expected_cents = int(round(float(order_total) * 100))
+        if int(amount_in_cents or 0) != expected_cents:
+            logger.error(
+                "[WOMPI] monto_mismatch order_id=%s txn_id=%s amount_cents=%s "
+                "esperado_cents=%s — NO se confirma (revisión manual)",
+                order_id, txn_id, amount_in_cents, expected_cents,
+            )
+            return
+    _txn_currency = (txn.get("currency") or "").upper()
+    if _txn_currency and _txn_currency != "COP":
+        logger.error(
+            "[WOMPI] moneda_invalida order_id=%s txn_id=%s currency=%s — "
+            "solo COP; NO se confirma (revisión manual)",
+            order_id, txn_id, _txn_currency,
+        )
+        return
+
     # ── 6. Confirmar orden y descontar stock ──────────────────────────────────
     try:
         _confirm_order(supabase, order_id, tenant_id)
