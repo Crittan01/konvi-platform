@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from tools.catalog_contract import CATALOG_VARIATIONS_KEY
+
 
 # Tools que requieren validación de referential integrity contra catalog
 # inyectado en el prompt. Allow-list explícito.
@@ -72,9 +74,9 @@ def _extract_known_ids_from_catalog(catalog: Optional[list[dict]]) -> set[str]:
         # nunca contenía variation_ids → el guard bloqueaba TODO add_to_cart/
         # update/remove válido por el path agentic LLM (variation_id "desconocido").
         variations = (
-            item.get("product_variations")
+            item.get(CATALOG_VARIATIONS_KEY)        # contrato canónico (single source)
+            or item.get("product_variations")       # fallback: shape crudo de DB
             or item.get("variations")
-            or item.get("variants")
             or []
         )
         for v in variations:

@@ -1,6 +1,8 @@
 import logging
 from supabase import Client
 
+from tools.catalog_contract import CATALOG_VARIATIONS_KEY
+
 logger = logging.getLogger("orchestrator.tools.catalog")
 
 MAX_VARIANTS_PER_PRODUCT = 6
@@ -113,7 +115,8 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                 "price_min": price_min,
                 "price_max": price_max,
                 "stock_total": total_stock,
-                "variants": parsed_variants,
+                # Clave canónica del contrato (single source — el guard la lee).
+                CATALOG_VARIATIONS_KEY: parsed_variants,
                 # Campos legacy para compatibilidad con prompts previos.
                 "price": price_min,
                 "stock": total_stock,

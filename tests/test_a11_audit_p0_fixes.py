@@ -67,12 +67,13 @@ class P0_1_CatalogVariantsKeyTests(unittest.TestCase):
         catalog = [{"id": "p1", "product_variations": [{"id": "v60"}]}]
         self.assertIn("v60", _extract_known_ids_from_catalog(catalog))
 
-    def test_catalog_tool_emits_variants_key_pact(self):
-        """COHERENCE PACT: catalog_tool emite `variants` — si cambia, este test
-        avisa para mantener al guard alineado (cura raíz de Clase A)."""
+    def test_catalog_tool_emits_under_shared_constant(self):
+        """COHERENCE PACT (A11 maturity): el productor emite variantes bajo la
+        constante compartida CATALOG_VARIATIONS_KEY (single source), no un literal.
+        El pact completo vive en tests/test_audit_catalog_contract.py."""
         src = open(CATALOG_TOOL_PY, encoding="utf-8").read()
-        self.assertIn('"variants":', src,
-                      "catalog_tool dejó de emitir 'variants' — revisar guard referential")
+        self.assertIn("CATALOG_VARIATIONS_KEY:", src,
+                      "catalog_tool dejó de emitir bajo la constante — Clase A regresaría")
 
 
 class P0_3_WorkerSweepTenantIdTests(unittest.TestCase):
