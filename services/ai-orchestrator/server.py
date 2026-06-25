@@ -11,6 +11,7 @@ El worker sigue siendo un proceso de polling puro (sin cambios en su lógica).
 Referencia: https://render.com/docs/free#free-web-services
 """
 import asyncio
+import hmac
 import logging
 import os
 import sys
@@ -22,7 +23,7 @@ from observability import init_sentry
 # Init Sentry ANTES de imports pesados.
 init_sentry(service_name="ai-orchestrator")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -93,17 +94,35 @@ def status():
     return JSONResponse(content=payload)
 
 
+# A11 audit 2026-06-25: el endpoint exponía métricas agregadas SIN auth y con
+# tenant_id opcional → cualquiera (Render lo sirve público) podía dumpear datos
+# operativos cross-tenant. Se exige internal-service-secret + tenant_id.
+_INTERNAL_SERVICE_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
+
+
+def _require_internal_secret(request: Request) -> None:
+    sent = request.headers.get("X-Internal-Service-Secret", "")
+    if not _INTERNAL_SERVICE_SECRET or not sent or not hmac.compare_digest(sent, _INTERNAL_SERVICE_SECRET):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 @app.get("/agentic/metrics")
-def agentic_metrics(tenant_id: str | None = None, since_hours: int = 24):
+def agentic_metrics(request: Request, tenant_id: str | None = None, since_hours: int = 24):
     """Métricas del agentic — ratio success/truncated/errored, latencias, tools.
 
     Lee `agentic_shadow_log` y agrega en la ventana indicada. Pensado para
     monitoreo operativo + diagnóstico de regresiones del LLM.
 
+    A11 audit: requiere header `X-Internal-Service-Secret` (ops interno) y
+    `tenant_id` obligatorio (no dump cross-tenant).
+
     Query params:
-      • tenant_id (opcional): filtra por tenant.
+      • tenant_id (OBLIGATORIO): filtra por tenant.
       • since_hours (default 24): ventana hacia atrás.
     """
+    _require_internal_secret(request)
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id requerido")
     from agentic.observability import compute_agentic_metrics
     from supabase import create_client
 
