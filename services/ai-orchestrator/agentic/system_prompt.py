@@ -503,6 +503,10 @@ def _render_contact_block(
             f"  • Email: {contact_record.get('email')}\n"
             f"  • Documento: {contact_record.get('document_type')} "
             f"{contact_record.get('document_number')}\n"
+            # A11 UAT fix: incluir el celular en el contexto del LLM. Antes se
+            # omitía → el resumen del cliente nuevo renderizaba "Celular: No
+            # disponible" pese a que el contacto SÍ tiene phone (su WhatsApp).
+            f"  • Celular: {contact_record.get('shipping_phone') or contact_record.get('phone') or '(no disponible)'}\n"
             f"  • Dirección: {addr_str}\n"
             f"  • Consent: ACTIVO (Habeas Data Ley 1581).\n\n"
             f"Aplica Patrón A del FLUJO HABITUAL — saluda con nombre real "
@@ -510,8 +514,9 @@ def _render_contact_block(
             f"al saludar (asume que conoce). Si el cliente pide un producto, "
             f"el flow va directo a add_to_cart + cotización + carrier + "
             f"resumen con sus datos ya guardados. Cuando emitas el resumen "
-            f"final 📋, incluye SU dirección REAL literal (la de arriba) — "
-            f"NUNCA pongas placeholders tipo \"[Dirección de X]\"."
+            f"final 📋, incluye SU dirección REAL y SU celular REAL literales "
+            f"(los de arriba) — NUNCA pongas placeholders tipo \"[Dirección de "
+            f"X]\" ni \"No disponible\" si el dato aparece arriba."
         )
     # Cliente parcial (some PII pero falta consent o datos clave).
     # Rev. 108 fix arquitectónico (founder UAT 2026-05-27): si el contact
