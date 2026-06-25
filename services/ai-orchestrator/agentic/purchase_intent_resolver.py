@@ -125,8 +125,15 @@ _ITEM_SEPARATORS = re.compile(r"\s*(?:,|;|\+|\sy\s|\se\s|\s&\s)\s*", re.IGNORECA
 
 def _split_into_items(text: str) -> list[str]:
     """Divide el inbound en items individuales por conectores ('y', ',')."""
-    # Strip leading verb of intent.
-    cleaned = _INTENT_VERB_RE.sub("", text, count=1).strip(" ,.;")
+    # A11 UAT fix (revenue): tomar el texto DESPUÉS del primer verbo de intención
+    # para descartar saludo/relleno previo ("Hola! Quiero 2 jabones" → "2 jabones").
+    # Antes solo se BORRABA el verbo, dejando el saludo → la cantidad no quedaba al
+    # inicio del item → _parse_qty_at_start caía a default 1 (cliente pedía N,
+    # recibía 1). Fallback a remover-verbo si tras el verbo no queda contenido
+    # (p.ej. "...lo quiero" con el verbo al final).
+    m = _INTENT_VERB_RE.search(text)
+    after = text[m.end():].strip(" ,.;") if m else ""
+    cleaned = after or _INTENT_VERB_RE.sub("", text, count=1).strip(" ,.;")
     parts = _ITEM_SEPARATORS.split(cleaned)
     return [p.strip(" ,.;") for p in parts if p and p.strip()]
 
