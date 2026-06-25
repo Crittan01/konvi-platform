@@ -68,9 +68,11 @@ async def verify_webhook_for_tenant(
 async def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
     """Background task que parsea + persiste mensajes + dispatches eventos HSM.
 
-    tenant_id_from_path se pasa solo para logging/forensics — la resolución real
-    de tenant para persistencia sigue siendo por meta_waba_id en db_persistence
-    (fuera del scope ADR-0023).
+    A11 audit WH-01: `tenant_id_from_path` es el tenant HMAC-verificado
+    (`verify_meta_signature_for_tenant` ya validó la firma con el app_secret de
+    ESE tenant antes de llegar aquí). Se pasa a `persist_whatsapp_message` como
+    autoridad de tenant — NO se re-resuelve por el `meta_waba_id` del payload
+    (que es un campo del body). Esto cierra el riesgo de cross-talk.
     """
     from services.parser import parse_webhook_payloads, parse_webhook_events
     from services.db_persistence import persist_whatsapp_message
@@ -80,7 +82,7 @@ async def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
         parsed_messages = parse_webhook_payloads(body_dict)
         if parsed_messages:
             for parsed_data in parsed_messages:
-                persist_whatsapp_message(parsed_data)
+                persist_whatsapp_message(parsed_data, tenant_id_verified=tenant_id_from_path)
         else:
             logger.debug(
                 "[WH_POST] tenant=%s webhook recibido sin mensaje inbound",

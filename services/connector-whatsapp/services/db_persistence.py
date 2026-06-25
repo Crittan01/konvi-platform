@@ -172,14 +172,24 @@ def _upsert_conversation(supabase: Client, tenant_id: str, customer_phone: str) 
     return conversation_id
 
 
-def persist_whatsapp_message(data: Dict[str, Any]) -> None:
+def persist_whatsapp_message(
+    data: Dict[str, Any],
+    tenant_id_verified: Optional[str] = None,
+) -> None:
     """
     Persiste un mensaje entrante de WhatsApp en Supabase.
 
     Flujo:
-      1. Resuelve el tenant por meta_waba_id (multi-tenant real — sin hardcodes).
+      1. Tenant: usa `tenant_id_verified` (el tenant del path HMAC-verificado por
+         `verify_meta_signature_for_tenant`, Model B ADR-0023). Fallback a
+         resolución por meta_waba_id solo si el caller no lo provee.
       2. Find-or-create de la conversación del cliente.
       3. Inserta el mensaje inbound con processing_status='pending'.
+
+    A11 audit WH-01: antes se re-resolvía SIEMPRE por `meta_waba_id` (campo del
+    payload, attacker-influenciable) ignorando el tenant criptográficamente
+    establecido por la firma HMAC del path → riesgo de persistir bajo el tenant
+    equivocado si el waba del body diverge del tenant verificado.
 
     El AI Orchestrator procesa únicamente mensajes inbound con
     processing_status='pending'.
@@ -204,8 +214,8 @@ def persist_whatsapp_message(data: Dict[str, Any]) -> None:
         return
 
     try:
-        # ── 1. Resolver Tenant (MULTI-TENANT REAL) ───────────────────────────
-        tenant_id = _resolve_tenant_by_waba(supabase, meta_waba_id)
+        # ── 1. Tenant: HMAC-verificado del path (WH-01) > re-resolución por waba ─
+        tenant_id = tenant_id_verified or _resolve_tenant_by_waba(supabase, meta_waba_id)
         if not tenant_id:
             return  # Error ya logueado en _resolve_tenant_by_waba
 
