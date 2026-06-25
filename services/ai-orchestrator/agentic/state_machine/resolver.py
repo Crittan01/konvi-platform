@@ -69,7 +69,10 @@ class StateResolver:
 
     def resolve(self, ctx: ResolutionContext) -> AgenticState:
         # 1. Handoff humano siempre gana
-        if ctx.conversation_status == "human_handoff":
+        # A11 audit 2026-06-25 (Clase A): el valor canónico del status en DB es
+        # "human_takeover" (lo escriben escalation.py, dispatcher, FakeEscalation),
+        # NO "human_handoff" → el literal viejo nunca matcheaba (regla dead-code).
+        if ctx.conversation_status == "human_takeover":
             return AgenticState.HUMAN_HANDOFF
 
         # 2. Orden activa + pago resuelto = POST_PAYMENT

@@ -22,7 +22,7 @@ class AgenticState(str, Enum):
       CARRIER_SELECTION  — cliente eligiendo entre opciones de envío
       PAYMENT            — método pago / link Wompi / COD pendiente
       POST_PAYMENT       — orden creada, esperando confirmación final / tracking
-      HUMAN_HANDOFF      — bot fuera, asesor humano (status=human_handoff)
+      HUMAN_HANDOFF      — bot fuera, asesor humano (conversations.status=human_takeover)
     """
 
     GREETING = "GREETING"

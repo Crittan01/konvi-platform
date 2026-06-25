@@ -30,8 +30,9 @@ class StateResolverTests(unittest.TestCase):
 
     # ---------- Regla 1: handoff humano ----------
     def test_human_handoff_wins_over_everything(self):
+        # A11 audit: status canónico en DB = "human_takeover" (no "human_handoff").
         ctx = ResolutionContext(
-            conversation_status="human_handoff",
+            conversation_status="human_takeover",
             cart_items_count=3,
             cart_has_payment_link=True,
             has_active_order=True,

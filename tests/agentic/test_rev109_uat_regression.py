@@ -378,8 +378,10 @@ class SectionJ_PostPayment(unittest.TestCase):
 
 class SectionK_EdgeCases(unittest.TestCase):
     def test_k1_human_handoff_wins(self):
+        # A11 audit: el status canónico en DB es "human_takeover" (no "human_handoff").
+        # El test validaba el literal equivocado, enmascarando el bug del resolver.
         ctx = ResolutionContext(
-            conversation_status="human_handoff",
+            conversation_status="human_takeover",
             cart_items_count=3, has_active_order=True,
         )
         self.assertEqual(_resolver().resolve(ctx), AgenticState.HUMAN_HANDOFF)
