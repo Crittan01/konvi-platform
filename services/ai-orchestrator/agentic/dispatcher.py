@@ -132,6 +132,17 @@ async def dispatch_message(
             return
     except Exception as exc:
         logger.warning("[OPTOUT_GATE] error en optout handler: %s", exc)
+        # A11 audit (Clase C): FAIL-CLOSED. Si el mensaje ERA un keyword de
+        # opt-out y su procesamiento falló, NO avanzamos al LLM — responder a
+        # quien pidió parar es la dirección insegura (Habeas Data Art.9). El
+        # error queda en logs para revisión. NO-STOP no se afecta (sigue al LLM).
+        if _optout_failclosed_should_skip(content):
+            logger.warning(
+                "[OPTOUT_GATE] fail-closed: STOP keyword con handler fallido "
+                "conv=%s — skip (no se invoca LLM)", conversation_id,
+            )
+            _mark_message_skipped(supabase, tenant_id, message_id)
+            return
 
     agentic_enabled = await is_tenant_agentic_enabled(supabase, tenant_id)
 
@@ -2838,6 +2849,22 @@ def _get_conversation_status_safe(supabase: Any, tenant_id: str, conversation_id
         return (rows[0].get("status") or "").lower() if rows else ""
     except Exception:
         return ""
+
+
+def _optout_failclosed_should_skip(content: Any) -> bool:
+    """A11 audit (Clase C — fail-closed): tras un error en el handler de opt-out,
+    ¿NO responder (silencio) en vez de avanzar al LLM?
+
+    Sí cuando el contenido era un keyword de opt-out (STOP/BAJA/CANCELAR):
+    responder a quien pidió parar viola Habeas Data Ley 1581 Art.9 + Meta
+    Business Policy. Ante incertidumbre por error, esa es la dirección segura.
+    Cheap y sin DB (solo regex) — no puede empeorar el fallo original.
+    """
+    try:
+        from lib.whatsapp_optout import is_optout_keyword  # noqa: PLC0415
+        return bool(is_optout_keyword(content))
+    except Exception:
+        return False
 
 
 async def _handle_optout_if_keyword(
