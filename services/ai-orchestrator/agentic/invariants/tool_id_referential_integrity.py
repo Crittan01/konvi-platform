@@ -66,7 +66,17 @@ def _extract_known_ids_from_catalog(catalog: Optional[list[dict]]) -> set[str]:
         prod_id = item.get("id")
         if prod_id:
             known.add(str(prod_id))
-        variations = item.get("product_variations") or item.get("variations") or []
+        # A11 audit 2026-06-25 (P0 BUG_REAL Clase A): el catálogo canónico que
+        # produce `get_tenant_catalog` (catalog_tool.py) emite la key `variants`,
+        # NO `product_variations`/`variations`. Sin `variants` aquí, known_ids
+        # nunca contenía variation_ids → el guard bloqueaba TODO add_to_cart/
+        # update/remove válido por el path agentic LLM (variation_id "desconocido").
+        variations = (
+            item.get("product_variations")
+            or item.get("variations")
+            or item.get("variants")
+            or []
+        )
         for v in variations:
             if isinstance(v, dict):
                 vid = v.get("id")

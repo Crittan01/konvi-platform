@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sys  # A11 audit 2026-06-25 (P0 BUG_REAL Clase A): el cron hard-delete usa `sys.path` (~L1881) con `sys` no importado a nivel módulo → NameError al ejecutar.
 import time
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
@@ -950,7 +951,11 @@ class OrchestratorWorker:
         try:
             stale_res = (
                 self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_startup_recovery
-                .select("id, processing_attempts")
+                # A11 audit 2026-06-25 (P0 BUG_REAL Clase A): incluir tenant_id —
+                # las updates posteriores hacen .eq("tenant_id", msg["tenant_id"])
+                # y sin él en el SELECT lanzaban KeyError → recuperación de
+                # mensajes atascados rota + posible doble-envío.
+                .select("id, processing_attempts, tenant_id")
                 .eq("direction", "inbound")
                 .in_("processing_status", ["pending", "processing"])
                 .lt("created_at", stale_cutoff)
