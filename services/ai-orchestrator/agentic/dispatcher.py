@@ -581,6 +581,7 @@ async def _run_agentic_full(
         EmptyPromiseInvariant,
         FakeEscalationInvariant,
         NoDecorativeEmojiInvariant, PassiveClosingInvariant,
+        NoInternalsExposureInvariant,
         PaymentCoherenceInvariant,
         PIICoherenceInvariant,
         PIISaveTruthfulnessInvariant,
@@ -2252,7 +2253,10 @@ async def _run_agentic_full(
     # escalación silenciosa. Solo aplicamos cosméticos (no_emoji).
     is_silent_escalation = getattr(result, "requires_silent_escalation", False)
     if is_silent_escalation:
-        invariant_set = [NoDecorativeEmojiInvariant()]
+        invariant_set = [
+            NoInternalsExposureInvariant(),
+            NoDecorativeEmojiInvariant(),
+        ]
     else:
         invariant_set = [
             # Rev. 108 CONSOLIDADO (founder 2026-05-27) — cart render
@@ -2280,6 +2284,11 @@ async def _run_agentic_full(
             # Cuidado → Kits). Aplica SOLO en outbounds que listen
             # categorías; no toca textos de cotización/pago/etc.
             CanonicalCategoriesInvariant(),
+            # A11 2026-06-26 — red de contenido final: el bot NUNCA expone su
+            # mecánica interna (KB/sistema/catálogo) al cliente. Después de los
+            # invariants de correctitud (sus rewrites ya son exposure-free),
+            # antes del cosmético.
+            NoInternalsExposureInvariant(),
             NoDecorativeEmojiInvariant(),
         ]
     invariant_result = await apply_invariants(

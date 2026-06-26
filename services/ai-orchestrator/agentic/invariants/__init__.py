@@ -26,6 +26,7 @@ from agentic.invariants.consent_required import ConsentRequiredInvariant
 from agentic.invariants.empty_promise import EmptyPromiseInvariant
 from agentic.invariants.fake_escalation import FakeEscalationInvariant
 from agentic.invariants.no_emoji import NoDecorativeEmojiInvariant
+from agentic.invariants.no_internals_exposure import NoInternalsExposureInvariant
 from agentic.invariants.passive_closing import PassiveClosingInvariant
 from agentic.invariants.payment_coherence import PaymentCoherenceInvariant
 from agentic.invariants.pii_coherence import PIICoherenceInvariant
@@ -44,6 +45,7 @@ __all__ = [
     "EmptyPromiseInvariant",
     "FakeEscalationInvariant",
     "NoDecorativeEmojiInvariant",
+    "NoInternalsExposureInvariant",
     "PassiveClosingInvariant",
     "PaymentCoherenceInvariant",
     "PIICoherenceInvariant",
