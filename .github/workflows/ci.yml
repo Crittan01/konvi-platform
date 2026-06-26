@@ -57,6 +57,19 @@ jobs:
       - name: Install Node dependencies
         run: pnpm install --frozen-lockfile
 
+      # COMPAT SHIM (deuda técnica — FOLLOW-UP): ~187 archivos de test usan
+      # sys.path.insert / Path() con el path ABSOLUTO del dev
+      # (/home/ansible/workspaces/konvi-platform). En CI el repo está en
+      # $GITHUB_WORKSPACE → esos paths no existen → 34 errores de colección.
+      # El fix CORRECTO es hacer los paths portables (os.path.abspath relativo),
+      # pero son 187 archivos con patrones mixtos → merece su propio PR. Hasta
+      # entonces, este symlink hace resolver los paths absolutos en CI sin tocar
+      # los tests. Reversible: borrar este step cuando los tests sean portables.
+      - name: Compat symlink para tests con path absoluto (deuda — follow-up)
+        run: |
+          sudo mkdir -p /home/ansible/workspaces
+          sudo ln -sfn "$GITHUB_WORKSPACE" /home/ansible/workspaces/konvi-platform
+
       - name: Run validate.sh (CI strict)
         env:
           CI_STRICT: "true"
