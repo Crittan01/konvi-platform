@@ -112,16 +112,9 @@ def _has_already_shown_confirmation(history: list[dict]) -> bool:
     return False
 
 
-def _format_phone_co(phone: str) -> str:
-    """+57 312 583 5649 ← '573125835649'."""
-    if not phone:
-        return ""
-    digits = re.sub(r"\D", "", phone)
-    if len(digits) == 12 and digits.startswith("57"):
-        return f"+57 {digits[2:5]} {digits[5:8]} {digits[8:]}"
-    if len(digits) == 10:
-        return f"+57 {digits[:3]} {digits[3:6]} {digits[6:]}"
-    return phone
+# Fuente única en lib/phone_format. Se conserva el nombre `_format_phone_co`
+# para callers + tests existentes (delega sin cambiar comportamiento).
+from lib.phone_format import format_phone_co as _format_phone_co  # noqa: E402
 
 
 def _format_address(address: dict) -> str:

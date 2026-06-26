@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from lib.phone_format import format_phone_co
+
 
 def _render_catalog_block(catalog: list[dict]) -> str:
     """Renderiza el catalog como markdown block para embeber en prompt.
@@ -506,7 +508,7 @@ def _render_contact_block(
             # A11 UAT fix: incluir el celular en el contexto del LLM. Antes se
             # omitía → el resumen del cliente nuevo renderizaba "Celular: No
             # disponible" pese a que el contacto SÍ tiene phone (su WhatsApp).
-            f"  • Celular: {contact_record.get('shipping_phone') or contact_record.get('phone') or '(no disponible)'}\n"
+            f"  • Celular: {format_phone_co(contact_record.get('shipping_phone') or contact_record.get('phone')) or '(no disponible)'}\n"
             f"  • Dirección: {addr_str}\n"
             f"  • Consent: ACTIVO (Habeas Data Ley 1581).\n\n"
             f"Aplica Patrón A del FLUJO HABITUAL — saluda con nombre real "

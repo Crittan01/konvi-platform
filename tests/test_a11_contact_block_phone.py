@@ -32,7 +32,8 @@ class ContactBlockPhoneTests(unittest.TestCase):
     def test_known_block_includes_phone_not_unavailable(self):
         contact = dict(_KNOWN, phone="573009998877")
         block = _render_contact_block(contact)
-        self.assertIn("573009998877", block)
+        # Formato CO presentable (no dígitos raw) — fuente única lib.phone_format:
+        self.assertIn("+57 300 999 8877", block)
         self.assertIn("Celular", block)
         # El LLM ya no debería ver que el celular "no está" cuando sí está:
         self.assertNotIn("(no disponible)", block)
@@ -40,7 +41,8 @@ class ContactBlockPhoneTests(unittest.TestCase):
     def test_prefers_shipping_phone(self):
         contact = dict(_KNOWN, phone="573000000000", shipping_phone="573009998877")
         block = _render_contact_block(contact)
-        self.assertIn("573009998877", block)  # shipping_phone tiene prioridad
+        self.assertIn("+57 300 999 8877", block)  # shipping_phone tiene prioridad
+        self.assertNotIn("+57 300 000 0000", block)  # NO usa el phone base
 
     def test_block_instructs_no_placeholder_for_phone(self):
         contact = dict(_KNOWN, phone="573009998877")
