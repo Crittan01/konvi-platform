@@ -1397,13 +1397,17 @@ class OrchestratorWorker:
 
             # Habeas Data Ley 1581: necesita consent_given=TRUE explícito
             # para enviar MARKETING. Sin consent → skip.
+            # A11 fix: además respetar consent_revoked_at — un soft opt-out
+            # (STOP) deja consent_given=TRUE pero setea consent_revoked_at;
+            # enviar marketing HSM a quien dijo STOP viola Ley 1581 Art.9 +
+            # Meta Policy. El gate antes solo miraba consent_given.
             consent_ok = False
             customer_name = "cliente"
             if contact_id:
                 try:
                     contact_res = (
                         self.supabase.table("contacts")
-                        .select("consent_given, first_name, full_name")
+                        .select("consent_given, consent_revoked_at, first_name, full_name")
                         .eq("id", contact_id)
                         .eq("tenant_id", tenant_id)
                         .limit(1)
@@ -1411,7 +1415,10 @@ class OrchestratorWorker:
                     )
                     contact_rows = contact_res.data or []
                     if contact_rows:
-                        consent_ok = bool(contact_rows[0].get("consent_given"))
+                        consent_ok = (
+                            bool(contact_rows[0].get("consent_given"))
+                            and not contact_rows[0].get("consent_revoked_at")
+                        )
                         first = (contact_rows[0].get("first_name") or "").strip()
                         full = (contact_rows[0].get("full_name") or "").strip()
                         customer_name = first or (full.split(" ")[0] if full else "cliente")

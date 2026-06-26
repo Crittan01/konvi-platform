@@ -351,7 +351,8 @@ class CartAbandonedCronTests(unittest.TestCase):
         self.w._last_cart_abandoned_at = 0
 
     def _seed_cart(self, *, cart_id="cart_1", consent=True, hours_ago=25,
-                   has_contact=True, reminder_sent=False, status="abandoned"):
+                   has_contact=True, reminder_sent=False, status="abandoned",
+                   revoked_at=None):
         cart_updated_at = (
             datetime.now(timezone.utc) - timedelta(hours=hours_ago)
         ).isoformat()
@@ -372,6 +373,7 @@ class CartAbandonedCronTests(unittest.TestCase):
                 "id": "contact_1",
                 "tenant_id": "tenant-A",
                 "consent_given": consent,
+                "consent_revoked_at": revoked_at,
                 "first_name": "Camila",
             })
         self.sb._tables["conversation_cart_items"].append({
@@ -394,6 +396,20 @@ class CartAbandonedCronTests(unittest.TestCase):
         self.assertEqual(self.w._metrics["cart_abandoned_reminders_skipped_no_consent"], 1)
         # Idempotencia marcada
         self.assertIsNotNone(self.sb._tables["conversation_carts"][0]["abandoned_reminder_sent_at"])
+
+    def test_opted_out_soft_revoke_skip_marketing(self):
+        # A11 fix: consent_given=True pero consent_revoked_at seteado (soft
+        # opt-out vía STOP) → NO se envía marketing HSM (Ley 1581 Art.9).
+        self._seed_cart(consent=True, revoked_at="2026-06-25T23:20:00Z")
+
+        async def fake_send_template(*a, **kw):
+            return "wamid.never", None
+
+        with patch.object(self.worker_mod, "send_whatsapp_template",
+                          side_effect=fake_send_template) as mock_send:
+            _run(self.w._send_cart_abandoned_reminders_if_due())
+        mock_send.assert_not_called()
+        self.assertEqual(self.w._metrics["cart_abandoned_reminders_skipped_no_consent"], 1)
 
     def test_con_consent_template_approved_envia(self):
         self._seed_cart(consent=True)
