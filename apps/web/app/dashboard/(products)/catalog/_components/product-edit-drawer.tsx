@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Image from 'next/image'
+import { createClient } from '@/utils/supabase/client'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
@@ -11,7 +12,7 @@ import { SubmitButton } from '@/components/ui/submit-button'
 import { Button } from '@/components/ui/button'
 import {
   Info, Package2, ArrowUpDown, Archive,
-  Plus, Zap, Edit3, X, ImageOff, ChevronDown, ChevronUp,
+  Plus, Zap, Edit3, X, ImageOff, ChevronDown, ChevronUp, Sparkles, Loader2,
 } from 'lucide-react'
 import { ImageUploadBox } from './image-upload-box'
 import { VariantMatrixGenerator } from './variant-matrix'
@@ -167,6 +168,41 @@ export function ProductEditDrawer({
   const [showAddVar, setShowAddVar] = useState<'manual' | 'matrix' | false>(false)
   const [newVarAttrs, setNewVarAttrs] = useState([{ key: '', value: '' }])
 
+  // "Sugerir con IA" — refs a los textareas (form no-controlado) + draft.
+  const descRef = useRef<HTMLTextAreaElement>(null)
+  const safetyRef = useRef<HTMLTextAreaElement>(null)
+  const [suggesting, setSuggesting] = useState(false)
+  const [aiNotice, setAiNotice] = useState('')
+
+  async function onSuggest() {
+    setSuggesting(true); setAiNotice('')
+    try {
+      const sb = createClient()
+      const { data: { session } } = await sb.auth.getSession()
+      if (!session?.access_token) { setAiNotice('Sesión expirada.'); return }
+      const categoryName = product.platform_category_id
+        ? catMap[product.platform_category_id] : undefined
+      const resp = await fetch('/api/catalog/suggest-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          title: product.title,
+          category_name: categoryName ?? null,
+          current_description: descRef.current?.value?.trim() || null,
+        }),
+      })
+      if (!resp.ok) { const b = await resp.json().catch(() => ({})); setAiNotice(b.detail || 'No se pudo generar.'); return }
+      const data = await resp.json()
+      if (descRef.current && data.description) descRef.current.value = data.description
+      if (safetyRef.current && data.safety_note) safetyRef.current.value = data.safety_note
+      setAiNotice(data.disclaimer || 'Borrador generado por IA. Revísalo y edítalo antes de guardar.')
+    } catch {
+      setAiNotice('Error al sugerir con IA.')
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
   const addAttr    = () => setNewVarAttrs(a => [...a, { key: '', value: '' }])
   const removeAttr = (i: number) => setNewVarAttrs(a => a.filter((_, idx) => idx !== i))
   const updateAttr = (i: number, field: 'key' | 'value', val: string) =>
@@ -188,6 +224,17 @@ export function ProductEditDrawer({
           <Section icon={Info} title="Información del producto">
             <form action={editProductAction} className="space-y-3">
               <input type="hidden" name="product_id" value={product.id} />
+              <div className="flex items-center justify-end">
+                <Button type="button" variant="outline" size="sm" disabled={suggesting}
+                  onClick={onSuggest} className="gap-1.5 h-7 text-xs">
+                  {suggesting
+                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Generando...</>
+                    : <><Sparkles className="h-3 w-3" /> Sugerir con IA</>}
+                </Button>
+              </div>
+              {aiNotice && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-700/30 rounded px-2 py-1">{aiNotice}</p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Nombre</label>
@@ -205,11 +252,11 @@ export function ProductEditDrawer({
                 </div>
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción</label>
-                  <Textarea name="description" defaultValue={product.description ?? ''} className="min-h-[80px] text-sm resize-y" />
+                  <Textarea ref={descRef} name="description" defaultValue={product.description ?? ''} className="min-h-[80px] text-sm resize-y" />
                 </div>
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">⚠️ Nota de seguridad (opcional — la IA SIEMPRE la menciona)</label>
-                  <Textarea name="safety_note" defaultValue={product.safety_note ?? ''} placeholder="Ej.: Diluir antes de usar, no aplicar directo en la piel." className="min-h-[44px] text-sm resize-y" />
+                  <Textarea ref={safetyRef} name="safety_note" defaultValue={product.safety_note ?? ''} placeholder="Ej.: Diluir antes de usar, no aplicar directo en la piel." className="min-h-[44px] text-sm resize-y" />
                 </div>
               </div>
               <ImageUploadBox name="cover_image_url" defaultUrl={product.cover_image_url ?? ''} tenantId={tenantId} size="lg" label="Imagen portada" />
