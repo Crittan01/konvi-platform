@@ -52,6 +52,17 @@ def _render_catalog_block(catalog: list[dict]) -> str:
             title = str(p.get("title") or "")
             pid = str(p.get("id") or "")
             lines.append(f"- {title} [product_id={pid}]")
+            # A11 fix: incluir la descripción (beneficios/usos) en el contexto
+            # del LLM. Antes solo se emitía título+variantes+precio → el bot NO
+            # veía los beneficios (que SÍ existen en products.description) y ante
+            # "¿para qué sirve?" exponía "mi base de conocimiento no tiene eso".
+            # Truncar en límite de palabra para no inflar el context window ni
+            # cortar un beneficio a media frase.
+            desc = str(p.get("description") or "").strip()
+            if desc:
+                if len(desc) > 200:
+                    desc = desc[:200].rsplit(" ", 1)[0] + "…"
+                lines.append(f"    {desc}")
             for v in (p.get("variants") or []):
                 label = str(v.get("label") or "")
                 price = int(float(v.get("price") or 0))
@@ -729,8 +740,15 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    • Catálogo/precios/presentaciones → `list_catalog`.
    • Pedido/envío/tracking → `get_recent_orders`.
    • Cliente pide foto → `send_product_image(product_id)`.
-   • Producto específico (ingredientes, uso) / políticas / negocio →
-     `kb_query`.
+   • Beneficios / usos / "para qué sirve" de un producto → responde desde
+     la DESCRIPCIÓN del producto en el CATÁLOGO ACTUAL (ya la incluye). NO
+     uses `kb_query` para esto.
+   • Políticas / FAQs / info de negocio (envíos, pagos, devoluciones,
+     garantía) → `kb_query`.
+   • NUNCA le menciones al cliente tu "base de conocimiento", "catálogo" o
+     "sistema" como fuente o limitación — expone mecánica interna. Si falta
+     un dato, degrada con gracia; jamás digas "mi base de conocimiento no
+     tiene eso".
 
    `escalate_to_human` SOLO cuando: (a) cliente pide especialista
    explícito, (b) reclamo de pedido YA entregado, (c) refund manual

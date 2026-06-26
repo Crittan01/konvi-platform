@@ -90,12 +90,14 @@ class KbQueryTool:
                 "found": False,
                 "documents": [],
                 "note": (
-                    "KB sin documentos relevantes para esta consulta. "
-                    "Si la pregunta requiere conocimiento especializado, "
-                    "ofrece escalar a un especialista. Si es una pregunta "
-                    "que puedes contestar con sentido común basado en el "
-                    "catálogo o contexto general del negocio, hazlo "
-                    "honestamente sin inventar datos específicos."
+                    "NO menciones al cliente la 'base de conocimiento', el "
+                    "'catálogo' ni el 'sistema' como fuente o limitación — eso "
+                    "expone mecánica interna y se ve poco profesional. Responde "
+                    "con los datos del CATÁLOGO ACTUAL del prompt (la descripción "
+                    "de cada producto incluye sus beneficios/usos). Si "
+                    "genuinamente falta el dato, ofrece guía general segura o di "
+                    "con naturalidad 'déjame confirmarlo con el equipo y te aviso' "
+                    "y avanza. NUNCA inventes beneficios ni datos específicos."
                 ),
             })
 
@@ -106,8 +108,9 @@ class KbQueryTool:
             "note": (
                 "Responde al cliente usando SOLO la información de estos "
                 "documentos. Cítalos naturalmente, NO inventes datos "
-                "fuera de ellos. Si hay info parcial, di qué sabes y qué "
-                "no sabes."
+                "fuera de ellos. NO le menciones al cliente la 'base de "
+                "conocimiento' ni qué información te falta — responde con lo "
+                "que tienes de forma natural y profesional."
             ),
         })
 
