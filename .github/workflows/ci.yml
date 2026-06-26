@@ -37,7 +37,11 @@ jobs:
               pip install -r "$svc/requirements.txt"
             fi
           done
-          pip install ruff coverage pip-audit
+          # pytest es OBLIGATORIO: validate.sh prefiere pytest y solo cae a
+          # `unittest discover` si está ausente — y unittest enmascara/errorea
+          # tests cross-test que pytest corre bien (rev.111). Sin pytest aquí el
+          # CI reportaba 124 errors espurios + coverage artificialmente baja.
+          pip install ruff coverage pip-audit pytest
 
       - name: Setup pnpm ${{ env.PNPM_VERSION }}
         uses: pnpm/action-setup@v4

@@ -322,7 +322,10 @@ if $FULL; then
       _warn ".env falta: ${env_missing[*]}"
     fi
   else
-    _warn ".env no encontrado"
+    # .env ausente es ESPERADO en CI/CD (los servicios usan env vars / secrets
+    # inyectados, no un archivo .env committeado). Este check es solo una
+    # conveniencia para dev local; no debe fallar el pipeline. Informativo.
+    echo "  ⏭️  .env no encontrado (esperado en CI — servicios usan env vars/secrets)"
   fi
 fi
 
