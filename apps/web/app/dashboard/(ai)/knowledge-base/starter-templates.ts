@@ -4,7 +4,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   {
     id: 'devoluciones',
     title: 'Política de devoluciones y cambios',
-    category: 'politica',
+    category: 'politicas',
     content: `Aceptamos devoluciones y cambios dentro de los 15 días calendario siguientes a la fecha de entrega, siempre que el producto esté en perfectas condiciones, sin uso, con empaque original y etiquetas intactas.
 
 Para iniciar una devolución escríbenos por WhatsApp con tu número de pedido y el motivo. Te indicaremos los pasos a seguir.
@@ -40,7 +40,7 @@ Los tiempos son estimados y pueden variar según el transportista. Te enviamos e
   {
     id: 'garantia',
     title: 'Garantía de productos',
-    category: 'politica',
+    category: 'politicas',
     content: `Todos nuestros productos cuentan con garantía contra defectos de fabricación.
 
 Para hacer válida la garantía: contáctanos por WhatsApp con tu número de pedido, describe el defecto y envíanos fotos. Evaluamos el caso en 24-48 horas hábiles.
@@ -92,7 +92,7 @@ Si tienes alguna pregunta sobre nosotros o sobre cómo trabajamos, con gusto te 
   {
     id: 'horarios',
     title: 'Horarios de atención',
-    category: 'general',
+    category: 'faq',
     content: `Nuestro horario de atención con asesor humano es de lunes a viernes de 9:00 AM a 6:00 PM (hora Colombia).
 
 Los sábados atendemos de 9:00 AM a 1:00 PM.
@@ -104,7 +104,7 @@ Para pedidos urgentes o situaciones especiales, escríbenos y te responderemos e
   {
     id: 'cuidado-productos',
     title: 'Guía de cuidado de productos',
-    category: 'producto',
+    category: 'productos',
     content: `Para conservar tus productos en óptimas condiciones te recomendamos:
 
 • Guarda los productos en un lugar fresco y seco, lejos de la luz solar directa
