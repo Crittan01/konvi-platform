@@ -143,6 +143,14 @@ SCENARIOS: dict[str, dict] = {
              [check_no_payment_link_when_requote, check_no_stale_total]),
         ],
     },
+    # Palanca 3: solicitud Habeas Data NO-keyword → escala + acusa recibo.
+    "habeas_data_dsr": {
+        "desc": "Solicitud de derechos de datos (Ley 1581) → acuse + escala a humano",
+        "turns": [
+            ("Quiero que borren mis datos personales, ejerzo mi derecho al olvido",
+             [partial(check_mentions_all, needles=["1581"])]),
+        ],
+    },
     # Bug 2026-06-26: bot decía "solo 30ml" con 15ml en stock.
     "variant_truth": {
         "desc": "El bot nunca niega una variante que existe en stock",

@@ -164,6 +164,30 @@ async def dispatch_message(
             _mark_message_skipped(supabase, tenant_id, message_id)
             return
 
+    # A11 2026-06-26 (palanca 3) — Habeas Data DSR gate: solicitudes de derechos
+    # de datos NO-keyword ("borren mis datos", "retiro mi consentimiento", "derecho
+    # al olvido") se escalan a humano + acusan recibo DETERMINÍSTICAMENTE (Ley 1581
+    # exige manejo verificado por un asesor; NO auto-borramos). Corre DESPUÉS de STOP
+    # (más específico) y del skip de status. Cierra el gap legal en todos los estados.
+    try:
+        if await _handle_data_rights_if_intent(
+            supabase,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            content=content,
+            content_type=content_type,
+        ):
+            return
+    except Exception as exc:
+        logger.warning("[HABEAS_DATA_GATE] error en data-rights handler: %s", exc)
+        # FAIL-SAFE: si ERA solicitud de datos y el handler falló, NO avanzar al
+        # LLM (responder mal a un DSR es la dirección legalmente insegura) → skip.
+        from lib.habeas_data_request import is_data_rights_request
+        if is_data_rights_request(content):
+            _mark_message_skipped(supabase, tenant_id, message_id)
+            return
+
     agentic_enabled = await is_tenant_agentic_enabled(supabase, tenant_id)
 
     if agentic_enabled:
@@ -347,6 +371,78 @@ async def _emit_degraded_response_and_escalate(
         "[AGENTIC_DEGRADED] conv=%s failed_recent=%d repeat=%s",
         conversation_id[:8], failed_recent, is_repeat_failure,
     )
+
+
+async def _handle_data_rights_if_intent(
+    supabase: Any,
+    *,
+    message_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    content: str,
+    content_type: str,
+) -> bool:
+    """Habeas Data Ley 1581 (palanca 3): si el mensaje es una solicitud de derechos
+    de datos NO-keyword ("borren mis datos", "retiro mi consentimiento", "derecho al
+    olvido"), garantiza el side-effect seguro: ESCALA a humano + ACUSA recibo. NO
+    auto-ejecuta borrados (un DSR exige verificación + plazo legal; lo tramita un
+    asesor vía data_subject_request). Retorna True si procesó → el caller NO avanza al
+    LLM. Determinístico: no depende de que el LLM lo maneje bien."""
+    if content_type != "text":
+        return False
+    from lib.habeas_data_request import (
+        detect_data_rights_request, DATA_RIGHTS_ACK_TEXT,
+    )
+    matched = detect_data_rights_request(content)
+    if not matched:
+        return False
+
+    from orchestrator import (
+        _send_outbound_text, _mark_message_processing, PROCESSING_STATUS_PROCESSED,
+    )
+    # 1. Acuse de recibo al cliente (Ley 1581: confirmar que se registró).
+    try:
+        await _send_outbound_text(
+            supabase=supabase, conversation_id=conversation_id,
+            tenant_id=tenant_id, text=DATA_RIGHTS_ACK_TEXT,
+        )
+    except Exception as exc:
+        logger.error("[HABEAS_DATA] send ack falló conv=%s: %s", conversation_id, exc)
+    # 2. Escalar a humano (un asesor tramita el DSR formal).
+    try:
+        supabase.table("conversations").update({
+            "status": "human_takeover",
+        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+    except Exception as exc:
+        logger.warning("[HABEAS_DATA] status update falló: %s", exc)
+    # 3. Notificar al operador (best effort).
+    try:
+        from telegram_notifications import notify_escalation_async
+        await notify_escalation_async(
+            supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            reason=(
+                f"⚖️ *Solicitud Habeas Data (Ley 1581)*\n"
+                f"El cliente pidió ejercer derechos sobre sus datos: "
+                f"«{matched[:120]}».\n\nConversación pasó a human_takeover. "
+                f"Acción: tramitar el DSR (data_subject_request) + responder al cliente."
+            ),
+            severity="critical",
+        )
+    except Exception as exc:
+        logger.warning("[HABEAS_DATA] telegram notif falló: %s", exc)
+    # 4. Marcar procesado — NO avanzar al LLM.
+    try:
+        _mark_message_processing(
+            supabase, tenant_id, message_id,
+            processing_status=PROCESSING_STATUS_PROCESSED,
+        )
+    except Exception:
+        pass
+    logger.info(
+        "[HABEAS_DATA] DSR detectado conv=%s phrase=%r → escalado a humano",
+        (conversation_id or "?")[:8], matched[:80],
+    )
+    return True
 
 
 # ─── Tenant prompt context loader (A6.2.1 finiquito 2026-06-23) ─────────────
