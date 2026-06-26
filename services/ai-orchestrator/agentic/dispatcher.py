@@ -101,6 +101,26 @@ async def dispatch_message(
          agentic shadow corre en paralelo y loggea silenciosamente.
       3. Else → solo legacy.
     """
+    # Re-opt-in gate (FINDING-A 2026-06-25) — DEBE correr ANTES del skip de
+    # status: 'opted_out' ∈ _SKIP_STATUSES, así que un cliente que envía
+    # START/SUSCRIBIR/REACTIVAR sería skipped sin reactivarse jamás (la
+    # confirmación de opt-out le prometió poder volver). Habeas Data Art.9:
+    # re-consent explícito vía keyword inequívoco.
+    try:
+        if await _handle_reoptin_if_keyword(
+            supabase,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            content=content,
+            content_type=content_type,
+        ):
+            return
+    except Exception as exc:
+        logger.warning("[REOPTIN_GATE] error en reoptin handler: %s", exc)
+        # FAIL-SAFE: si era keyword de re-optin y falló, NO reactivar — la conv
+        # sigue opted_out → skip natural abajo. Sin re-engagement accidental.
+
     # Gate de conversation status — rev. 107 cierre runtime KAIU 2026-05-23.
     # El bot legacy ya tenía este gate en orchestrator.py:6754, pero el
     # agentic dispatcher saltaba al `_run_agentic_full` SIN verificar.
@@ -3078,5 +3098,171 @@ async def _handle_optout_if_keyword(
         }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
     except Exception as exc:
         logger.warning("[OPTOUT_GATE] mark inbound processed falló: %s", exc)
+
+    return True
+
+
+async def _handle_reoptin_if_keyword(
+    supabase: Any,
+    *,
+    message_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    content: str,
+    content_type: str,
+) -> bool:
+    """Detecta START/SUSCRIBIR/REACTIVAR y procesa re-opt-in (FINDING-A 2026-06-25).
+
+    Cierra la promesa de OPTOUT_CONFIRMATION_TEXT ("escríbenos cuando quieras"):
+    un contacto opted_out queda atascado porque el gate de status lo skipea.
+    Espejo de `_handle_optout_if_keyword`:
+      1. is_optin_keyword(content).
+      2. Resolver contact_id + phone.
+      3. SOLO procede si la conv está 'opted_out' (un 'start' en conv activa →
+         return False, deja al LLM responder).
+      4. restore_consent (limpia consent_revoked_at — obligatorio, ver lib).
+      5. _log_consent_event(event='granted') — Habeas Data Art.9 re-consent.
+         (event='granted', NO 'reoptin': el CHECK de consent_audit_log solo
+         permite {granted,revoked,rectified,export_request,portability,pii_access}.)
+      6. conv.status → 'bot_active'.
+      7. Enviar OPTIN_CONFIRMATION_TEXT + persistir outbound + mark processed.
+
+    Returns True si procesó re-opt-in (caller NO avanza al LLM).
+    Returns False si no aplica (caller sigue su flujo normal → skip/LLM).
+    """
+    if content_type != "text":
+        return False
+    try:
+        from lib.whatsapp_optout import (  # noqa: PLC0415
+            CONVERSATION_STATUS_BOT_ACTIVE,
+            OPTIN_CONFIRMATION_TEXT,
+            is_optin_keyword,
+            restore_consent,
+        )
+    except Exception:
+        return False
+
+    if not is_optin_keyword(content):
+        return False
+
+    # Resolver conv (status + phone) + contact_id.
+    try:
+        conv_res = (
+            supabase.table("conversations")
+            .select("status, customer_phone")
+            .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .limit(1)
+            .execute()
+        )
+        conv_row = (conv_res.data or [{}])[0]
+        # SOLO re-opt-in si la conv está actualmente opted_out. Un 'start' en
+        # una conv activa es un mensaje normal → return False (lo maneja el LLM).
+        if conv_row.get("status") != "opted_out":
+            return False
+        customer_phone = conv_row.get("customer_phone") or ""
+        if not customer_phone:
+            return False
+
+        contact_res = (
+            supabase.table("contacts")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("phone", customer_phone)
+            .limit(1)
+            .execute()
+        )
+        contact_id = (contact_res.data or [{}])[0].get("id")
+        if not contact_id:
+            return False
+    except Exception as exc:
+        logger.warning("[REOPTIN_GATE] lookup conv/contact falló: %s", exc)
+        return False
+
+    logger.info(
+        "[REOPTIN_GATE] re-opt-in detectado msg=%s conv=%s contact=%s",
+        message_id[:8], conversation_id[:8], contact_id[:8],
+    )
+
+    # 1. Restaurar consent (limpia consent_revoked_at — obligatorio para que el
+    # connector NO re-fuerce opted_out en el próximo inbound).
+    try:
+        ok = restore_consent(
+            supabase,
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            conversation_id=conversation_id,
+        )
+        if not ok:
+            logger.error("[REOPTIN_GATE] restore_consent no actualizó filas")
+            return False
+    except Exception as exc:
+        logger.error("[REOPTIN_GATE] restore_consent falló: %s", exc)
+        return False
+
+    # 2. Audit Habeas Data Art.9 (re-consent explícito). event='granted'.
+    try:
+        from orchestrator import _log_consent_event  # noqa: PLC0415
+        _log_consent_event(
+            supabase,
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            phone=customer_phone,
+            event="granted",
+            source="whatsapp",
+            conversation_id=conversation_id,
+            evidence={
+                "trigger": "reoptin_keyword",
+                "keyword_matched": content.strip().lower(),
+                "path": "agentic_dispatcher",
+            },
+        )
+    except Exception as exc:
+        logger.warning("[REOPTIN_GATE] audit log falló (no crítico): %s", exc)
+
+    # 3. Reactivar conv (status → bot_active).
+    try:
+        supabase.table("conversations").update({
+            "status": CONVERSATION_STATUS_BOT_ACTIVE,
+        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+    except Exception as exc:
+        logger.error("[REOPTIN_GATE] reactivar conv falló: %s", exc)
+
+    # 4. Confirmación al cliente.
+    try:
+        from whatsapp_sender import send_whatsapp_message  # noqa: PLC0415
+        meta_msg_id = await send_whatsapp_message(
+            tenant_id=tenant_id,
+            supabase=supabase,
+            to_phone=customer_phone,
+            text=OPTIN_CONFIRMATION_TEXT,
+        )
+    except Exception as exc:
+        logger.error("[REOPTIN_GATE] send confirmación falló: %s", exc)
+        meta_msg_id = None
+
+    # 5. Persistir outbound en messages (Inbox).
+    try:
+        supabase.table("messages").insert({
+            "conversation_id": conversation_id,
+            "tenant_id": tenant_id,
+            "direction": "outbound",
+            "content_type": "text",
+            "content": OPTIN_CONFIRMATION_TEXT,
+            "meta_message_id": meta_msg_id,
+            "processed": True,
+            "processing_status": "processed",
+        }).execute()
+    except Exception as exc:
+        logger.error("[REOPTIN_GATE] persist outbound falló: %s", exc)
+
+    # 6. Marcar inbound processed.
+    try:
+        supabase.table("messages").update({
+            "processing_status": "processed",
+            "processed": True,
+        }).eq("id", message_id).eq("tenant_id", tenant_id).execute()
+    except Exception as exc:
+        logger.warning("[REOPTIN_GATE] mark inbound processed falló: %s", exc)
 
     return True

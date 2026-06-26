@@ -290,5 +290,53 @@ class PublicConstantsTests(unittest.TestCase):
         self.assertEqual(optout.CONVERSATION_STATUS_OPTED_OUT, "opted_out")
 
 
+# ─── Re-opt-in (FINDING-A 2026-06-25) ────────────────────────────────────────
+
+class IsOptinKeywordTests(unittest.TestCase):
+    def test_keywords_conservadores_matchean(self):
+        for kw in ("START", "start", "  Start  ", "SUSCRIBIR",
+                   "suscribirme", "Suscribirse", "REACTIVAR", "reactivar"):
+            self.assertTrue(optout.is_optin_keyword(kw), kw)
+
+    def test_palabras_ambiguas_no_matchean(self):
+        # Art.9: re-consent debe ser inequívoco. 'volver'/frases comunes NO.
+        for txt in ("volver", "quiero volver", "start ya quiero",
+                    "hola", "reactivar mi cuenta de banco", "", None):
+            self.assertFalse(optout.is_optin_keyword(txt), txt)
+
+
+class RestoreConsentTests(unittest.TestCase):
+    def test_limpia_consent_revoked_at_y_reason(self):
+        sb = _FakeSupabase()
+        sb.tables["contacts"].append({
+            "id": "C-1", "tenant_id": "T-1",
+            "name": "Cristian Test",  # PII intacta (no se toca)
+            "consent_given": True,
+            "consent_revoked_at": "2026-06-25T23:20:00+00:00",
+            "consent_revoked_reason": optout.OPTOUT_REVOCATION_REASON,
+        })
+        ok = optout.restore_consent(
+            sb, tenant_id="T-1", contact_id="C-1", conversation_id="conv-1",
+        )
+        self.assertTrue(ok)
+        contact = sb.tables["contacts"][0]
+        self.assertIsNone(contact["consent_revoked_at"])
+        self.assertIsNone(contact["consent_revoked_reason"])
+        # NO toca consent_given ni PII.
+        self.assertTrue(contact["consent_given"])
+        self.assertEqual(contact["name"], "Cristian Test")
+
+    def test_db_error_retorna_false(self):
+        sb = _FakeSupabase()
+        sb.errors["contacts"] = RuntimeError("DB caída")
+        ok = optout.restore_consent(
+            sb, tenant_id="T-1", contact_id="C-1", conversation_id="conv-1",
+        )
+        self.assertFalse(ok)
+
+    def test_optin_confirmation_text_existe(self):
+        self.assertIn("reactiv", optout.OPTIN_CONFIRMATION_TEXT.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

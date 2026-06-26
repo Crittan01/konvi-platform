@@ -68,9 +68,32 @@ OPTOUT_CONFIRMATION_TEXT = (
 
 # Estado de conversación tras opt-out — separa visualmente del flujo normal.
 CONVERSATION_STATUS_OPTED_OUT = "opted_out"
+CONVERSATION_STATUS_BOT_ACTIVE = "bot_active"
 
 # Razón canónica para consent_revoked_reason (filtra audit dashboards).
 OPTOUT_REVOCATION_REASON = "WhatsApp STOP keyword opt-out"
+
+# Re-opt-in (FINDING-A 2026-06-25, decisión founder: keywords conservadores).
+# Habeas Data Ley 1581 Art.9: re-otorgar consent debe ser acto afirmativo
+# INEQUÍVOCO del titular → solo keywords sin ambigüedad (START/SUSCRIBIR/
+# REACTIVAR). 'volver'/'reactivar la cuenta' son palabras comunes → excluidas
+# para no inferir re-consent de un mensaje ambiguo. Mismo rigor que opt-out:
+# fullmatch del mensaje completo trimmed, case-insensitive.
+_OPTIN_PATTERNS = [
+    r"^start$",
+    r"^suscribir$",
+    r"^suscribirme$",
+    r"^suscribirse$",
+    r"^reactivar$",
+]
+_COMPILED_OPTIN_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in _OPTIN_PATTERNS
+]
+
+OPTIN_CONFIRMATION_TEXT = (
+    "¡Listo! Reactivaste tus mensajes con nosotros. "
+    "¿En qué te puedo ayudar?"
+)
 
 
 def is_optout_keyword(text: Optional[str]) -> bool:
@@ -82,6 +105,61 @@ def is_optout_keyword(text: Optional[str]) -> bool:
     if not cleaned:
         return False
     return any(p.fullmatch(cleaned) is not None for p in _COMPILED_PATTERNS)
+
+
+def is_optin_keyword(text: Optional[str]) -> bool:
+    """True si el mensaje completo (trimmed) coincide exactamente con un
+    patrón de re-suscripción inequívoco (START/SUSCRIBIR/REACTIVAR)."""
+    if not text or not isinstance(text, str):
+        return False
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    return any(
+        p.fullmatch(cleaned) is not None for p in _COMPILED_OPTIN_PATTERNS
+    )
+
+
+def restore_consent(
+    supabase: Any,
+    *,
+    tenant_id: str,
+    contact_id: str,
+    conversation_id: str,
+) -> bool:
+    """Re-opt-in: limpia consent_revoked_at + reason en `contacts`.
+
+    CLAVE: limpiar consent_revoked_at es OBLIGATORIO — el connector
+    (db_persistence) re-fuerza conv='opted_out' en CADA inbound mientras
+    consent_revoked_at NOT NULL. Sin esto, el re-opt-in funcionaría una vez
+    y el siguiente mensaje volvería a quedar skipped. NO toca consent_given
+    (no se bajó en el opt-out). Idéntico al path operador-driven
+    (services/api/routers/contacts.py reactivación). Retorna True si OK.
+    """
+    try:
+        res = (
+            supabase.table("contacts")
+            .update({
+                "consent_revoked_at": None,
+                "consent_revoked_reason": None,
+            })
+            .eq("id", contact_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        ok = bool(res.data)
+        if ok:
+            logger.info(
+                "[OPTIN] re-suscripción | contact=%s tenant=%s conv=%s",
+                contact_id, tenant_id, conversation_id,
+            )
+        return ok
+    except Exception as e:
+        logger.error(
+            "[OPTIN] Error restaurando consent contact=%s: %s",
+            contact_id, e,
+        )
+        return False
 
 
 def soft_revoke_consent(
