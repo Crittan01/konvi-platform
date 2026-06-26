@@ -1,4 +1,4 @@
-# Handoff — Estado Operativo Real (2026-05-01, rev. 100)
+# Handoff — Estado Operativo Real (2026-06-26, rev. 111)
 
 Este documento describe el estado operativo real de `develop`.
 Para árbol funcional y semántica de dominio: `.context/00-product.md`.
@@ -6,6 +6,36 @@ Para estado por módulo: `.context/01-state.md`.
 Los documentos de `docs/deployment/` y parte de `docs/operations/` contienen
 histórico de fases previas; ante conflicto, este HANDOFF y `.context/01-state.md`
 tienen prioridad.
+
+---
+
+## Actualización rev. 111 (2026-06-26) — finiquito Fase A + A11 DESPLEGADO
+
+**Lo más reciente (tiene prioridad sobre el histórico de abajo):**
+
+- **Deploy:** todo el finiquito Fase A + A11 (auditoría/UAT/closeout del Inbox) está
+  EN PRODUCCIÓN. Branches: solo `develop` y `main`, iguales (`develop = main`).
+  **Render despliega desde `develop`** (auto-deploy on-push; configurado en el
+  dashboard, NO en render.yaml). Los 4 servicios `konvi-*` corren el código actual.
+  ⚠️ Existen 4 servicios `commerce-ops-*` VIEJOS (pre-rename) en Render, 25d stale,
+  NO en render.yaml → limpiar (suspender/borrar).
+- **Migraciones:** **156 migraciones `2026*` aplicadas a prod = filesystem** (0 sin
+  aplicar, verificado 2026-06-26 contra `supabase_migrations.schema_migrations`). El
+  conteo "87" de abajo es histórico. Últimas A11 aplicadas + repaired:
+  `20260625120000_stock_rpc_tenant_scoped_expand.sql` (IDOR stock RPCs 3-arg con
+  p_tenant_id, expand-contract — NO ejecutar fase CONTRACT/DROP hasta estabilizar),
+  `20260625130000_tenants_meta_waba_id_unique.sql` (UNIQUE parcial meta_waba_id).
+- **CI:** `.github/workflows/ci.yml` corre `bash scripts/validate.sh --ci` en cada push
+  a main + PRs. **Pre-deploy correr `--ci` local (NO `--build`)** — `--ci` añade ruff
+  (baseline `BASELINE_RUFF_ERRORS=202`, actual 145), pytest obligatorio, coverage
+  (`COVERAGE_MIN`, actual ~61%), warns→fails. CI workflow instala `pytest`
+  (sin él cae a unittest discover → errores espurios). Runner del repo asume
+  checkout en `/home/ansible/workspaces/konvi-platform` (symlink compat en ci.yml —
+  deuda: ~187 tests con path absoluto, fix portable pendiente).
+- **Reconciliación Wompi:** validado contra docs oficiales — el API público NO permite
+  buscar transacción por payment_link_id/reference → cron automático INFACTIBLE.
+  Mitigación: reintentos de webhook Wompi (30m/3h/24h) + runbook manual
+  `docs/operations/runbooks/wompi-payment-reconciliation.md`.
 
 ---
 
@@ -153,13 +183,15 @@ Aplicar SQL:
 supabase db query --linked -f supabase/migrations/<archivo>.sql
 ```
 
-Smoke tests usados en este cierre:
+Gate pre-deploy (= comando exacto del CI):
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
-node --test apps/web/tests/marketplace-badges.test.mjs
-pnpm --filter web lint
+bash scripts/validate.sh --ci   # pytest ~3007 + ruff + coverage + TS + build + tenant lint
 ```
+
+Runner de tests (rev. 111): **pytest** (`python3.11 -m pytest tests/ -q`). El
+`unittest discover` quedó como fallback — enmascaraba fallos cross-test que pytest
+detecta; el CI DEBE tener pytest instalado.
 
 ---
 
