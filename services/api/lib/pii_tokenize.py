@@ -6,6 +6,7 @@ y triggers en DB. Cualquier cambio en una de las dos partes debe
 sincronizarse.
 """
 from __future__ import annotations
+
 import hashlib
 import re
 from typing import Optional

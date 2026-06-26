@@ -16,13 +16,15 @@ Seguridad:
 """
 import logging
 import re
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import Client
+
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from dependencies.idempotency import (
     abort_idempotency,
@@ -87,7 +89,7 @@ async def get_inbox_stats(
             "PII_COLLECTION", "SHIPPING_QUOTE", "CARRIER_SELECTION",
             "PAYMENT", "POST_PAYMENT", "HUMAN_HANDOFF",
         ]
-        agentic_counts: dict[str, int] = {s: 0 for s in _agentic_order}
+        agentic_counts: dict[str, int] = dict.fromkeys(_agentic_order, 0)
         agentic_unset = 0
         for c in conversations:
             state = c.get("agentic_state")

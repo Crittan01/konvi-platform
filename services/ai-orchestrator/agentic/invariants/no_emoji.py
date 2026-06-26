@@ -15,7 +15,6 @@ import re
 from typing import Any, Optional
 
 from agentic.invariants.base import (
-    Invariant,
     InvariantOutcome,
     InvariantResult,
 )

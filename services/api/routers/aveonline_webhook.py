@@ -305,9 +305,9 @@ def _notify_status_change(
     # Imports laxos — funciones de notificación viven en wompi_webhook para
     # mantener un solo lugar la lógica de queue + helpers.
     from routers.wompi_webhook import (
-        _notify_client_shipment_in_transit,
         _notify_client_shipment_delivered,
         _notify_client_shipment_exception,
+        _notify_client_shipment_in_transit,
         _send_payment_confirmation_email,
     )
 

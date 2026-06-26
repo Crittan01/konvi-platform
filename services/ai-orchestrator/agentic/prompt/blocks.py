@@ -11,7 +11,7 @@ Convenciones:
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 # Reutilizamos los renderers del monolito (catalog, carriers, payment_methods,
 # contact, server_greeting, business_ops) — son funciones puras testeadas en

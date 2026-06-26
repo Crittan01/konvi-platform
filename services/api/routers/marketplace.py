@@ -16,19 +16,20 @@ Flujo de sync automático (llamado desde orders.py y products.py):
   sync_meli_stock(variation_id, new_qty, supabase) → si hay listing activo → PUT MeLi
 """
 import logging
-import asyncio
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Body
-from dependencies.auth import get_current_tenant, _get_service_client, require_write_role
+
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from dependencies.auth import _get_service_client, get_current_tenant, require_write_role
 from integrations.meli_client import (
-    get_tenant_meli_credentials,
-    get_valid_token,
-    get_user_items,
-    get_items_details,
     get_item,
+    get_items_details,
+    get_tenant_meli_credentials,
+    get_user_items,
+    get_valid_token,
+    update_item_listing,
     update_item_quantity,
     update_item_status,
-    update_item_listing,
 )
 
 logger = logging.getLogger(__name__)

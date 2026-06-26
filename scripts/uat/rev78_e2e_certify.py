@@ -451,7 +451,7 @@ def domain_10_regex_matrix() -> DomainResult:
     """
     try:
         from dependencies.contact_validators import (
-            validate_document, normalize_document_number,
+            validate_document,
         )
     except Exception as exc:
         return DomainResult(10, "Regex matrix", SKIP,

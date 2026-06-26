@@ -24,9 +24,8 @@ fuentes. Toda regla (mínimos, max peso, etc.) vive en el canonical seed.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any, Optional
-
 
 # In-memory TTL cache (per-process).
 # Rev. 108 modular tuning (founder 2026-05-27 Opción A): TTL 30s en lugar

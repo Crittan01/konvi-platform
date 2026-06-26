@@ -21,7 +21,6 @@ Tests: `tests/test_safety_domain_filter.py`.
 """
 from __future__ import annotations
 
-import re as _re
 import unicodedata as _ud
 
 

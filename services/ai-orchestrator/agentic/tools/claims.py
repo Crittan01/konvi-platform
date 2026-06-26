@@ -35,7 +35,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from agentic.tools.base import (
-    Tool,
     ToolContext,
     ToolResult,
     tool_failure,

@@ -18,7 +18,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from agentic.tools.base import Tool, ToolContext, ToolResult, tool_failure, tool_success
+from agentic.tools.base import ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
 
 logger = logging.getLogger(__name__)

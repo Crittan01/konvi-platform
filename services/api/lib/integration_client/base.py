@@ -40,10 +40,9 @@ Caller construye una instancia con todas las strategies inyectadas:
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from . import idempotency as idemp
 from .circuit import CircuitBreaker
@@ -52,7 +51,6 @@ from .errors import (
     ProviderRejectedError,
     ProviderUnavailableError,
     RateLimitLocalError,
-    ResponseValidationError,
 )
 from .retry import RetryPolicy, default_is_retriable, retry_async
 
@@ -209,7 +207,7 @@ class IntegrationClient(ABC):
                 policy=self.retry_policy,
                 is_retriable=default_is_retriable,
             )
-        except IntegrationClientError as e:
+        except IntegrationClientError:
             if self.circuit_breaker is not None:
                 self.circuit_breaker.record_failure(self.provider)
             raise

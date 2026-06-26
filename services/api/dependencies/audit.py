@@ -118,8 +118,8 @@ def _extract_entity_id(kwargs: dict, result: Any) -> Optional[str]:
         return None
     if isinstance(result, dict) and result.get("id"):
         return str(result["id"])
-    if hasattr(result, "id") and getattr(result, "id"):
-        return str(getattr(result, "id"))
+    if hasattr(result, "id") and result.id:
+        return str(result.id)
     return None
 
 

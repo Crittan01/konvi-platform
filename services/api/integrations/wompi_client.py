@@ -30,7 +30,8 @@ from typing import Any, Optional, Tuple
 
 import httpx
 
-from lib.phone import to_canonical as _phone_to_canonical, is_valid_co as _phone_is_valid_co  # rev. 104 F0-4
+from lib.phone import is_valid_co as _phone_is_valid_co
+from lib.phone import to_canonical as _phone_to_canonical  # rev. 104 F0-4
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +565,7 @@ def is_void_eligible(payment_method_type: str, paid_at_iso: str | None) -> bool:
         # Sin timestamp = optimista, intentamos.
         return True
     try:
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
         paid_at = datetime.fromisoformat(paid_at_iso.replace("Z", "+00:00"))
         now = datetime.now(timezone.utc)
         # Ventana conservadora 23h para no llegar al borde de settlement.
@@ -589,7 +590,7 @@ def is_void_eligible(payment_method_type: str, paid_at_iso: str | None) -> bool:
 # Wompi causaban falla inmediata en primer intento; con retry el flow se
 # recupera; con CB damos UX claro al cliente cuando Wompi está caído real.
 
-from typing import Callable as _Callable, TypeVar as _TypeVar  # noqa: E402
+from typing import TypeVar as _TypeVar
 
 _T = _TypeVar("_T")
 

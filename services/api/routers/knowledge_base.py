@@ -22,7 +22,7 @@ con embedding=NULL. La página `/dashboard/knowledge-base` muestra banner
 MAX por tenant: 30 docs (alineado con frontend MAX_DOCS).
 """
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field

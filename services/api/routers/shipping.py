@@ -15,28 +15,28 @@ Nota histórica: endpoints label/tracking/pickup/cancel eliminados con Envia.
 Aveonline maneja eventos de estado vía webhook (routers/aveonline_webhook.py)
 y guía se genera implícitamente al confirmar orden.
 """
-import asyncio
 import logging
-import os
 import re
 import unicodedata
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
+
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
-from dependencies.internal_auth import (
-    get_tenant_id_internal_or_user,
-    require_write_internal_or_user,
-    get_service_client_internal_or_user,
-)
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
     finalize_idempotency,
     payload_fingerprint,
+)
+from dependencies.internal_auth import (
+    get_service_client_internal_or_user,
+    get_tenant_id_internal_or_user,
+    require_write_internal_or_user,
 )
 from dependencies.plans import PLAN_SHIPPING_CONFIRM_RATE, PLAN_SHIPPING_QUOTE
 from dependencies.security import RL_WRITE_DEFAULT
@@ -96,8 +96,7 @@ def _normalize_state(state: str, country: str) -> str:
 
 # Rev. 72 — sanitización DANE centralizada en `dependencies/dane.py`.
 # Aliases locales para no romper call-sites históricos en este módulo.
-from dependencies.dane import sanitize_dane_code as _sanitize_dane_code, co_dane_codes as _co_dane_codes  # noqa: E402,F401
-
+from dependencies.dane import sanitize_dane_code as _sanitize_dane_code  # noqa: E402,F401
 
 # Nota rev. 109: helpers Envia (_validate_co_address_with_envia,
 # _resolve_carriers_for_quote, _extract_carrier_name) eliminados con el
@@ -193,8 +192,8 @@ async def _quote_via_aveonline(
     shipment_id) para preservar compat con el frontend Cotizador del Console.
     """
     from integrations.aveonline_client import (
-        AveonlineClient,
         AveonlineAuthError,
+        AveonlineClient,
         AveonlineNoCarriersError,
         AveonlinePackageLimitError,
         AveonlinePermanentError,

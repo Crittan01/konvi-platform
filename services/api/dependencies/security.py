@@ -10,8 +10,8 @@ Controles de seguridad runtime para API Gateway.
 """
 import logging
 import os
-import time
 import threading
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable
@@ -19,10 +19,9 @@ from typing import Callable
 from fastapi import Depends, HTTPException, Request, Response
 from supabase import Client
 
-from dependencies.auth import get_current_tenant, get_service_client
 from dependencies.internal_auth import (
-    get_tenant_id_internal_or_user,
     get_service_client_internal_or_user,
+    get_tenant_id_internal_or_user,
 )
 from dependencies.observability import record_api_security_event
 

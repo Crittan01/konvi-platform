@@ -178,7 +178,7 @@ async def process_inbound_media(
 
     # Descargar bytes.
     try:
-        from services.meta_media import fetch_media_bytes, MediaDownloadError
+        from services.meta_media import fetch_media_bytes
         media_bytes, mime_resolved = await fetch_media_bytes(media_id, access_token)
     except Exception as exc:
         logger.info(

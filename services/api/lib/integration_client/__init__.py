@@ -40,7 +40,7 @@ from .errors import (
     ResponseValidationError,
     RetryBudgetExceededError,
 )
-from .retry import RetryPolicy, retry_async, retry_sync, default_is_retriable
+from .retry import RetryPolicy, default_is_retriable, retry_async, retry_sync
 
 __all__ = [
     "IntegrationClient",

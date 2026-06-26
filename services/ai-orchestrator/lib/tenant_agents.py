@@ -76,7 +76,6 @@ def get_active_agent(
         try:
             from agentic.agent_router import (
                 select_agent_for_inbound,
-                classify_intent_to_role,
             )
             all_agents = list_tenant_agents(supabase, tenant_id=tenant_id)
             if len(all_agents) > 1:

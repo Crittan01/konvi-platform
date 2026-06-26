@@ -10,27 +10,33 @@ Endpoints:
 
 Estados válidos: pending | pending_payment → confirmed → processing → shipped → delivered | cancelled
 """
-import logging
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
+
 from dependencies.audit import audit_log
-from dependencies.auth import get_current_tenant, get_service_client, require_write_role, get_current_role
-from dependencies.internal_auth import (
-    get_tenant_id_internal_or_user,
-    require_write_internal_or_user,
-    get_role_internal_or_user,
-    get_service_client_internal_or_user,
+from dependencies.auth import (
+    get_current_tenant,
+    get_service_client,
+    require_write_role,
 )
 from dependencies.idempotency import (
     abort_idempotency,
     begin_idempotency,
     finalize_idempotency,
     payload_fingerprint,
+)
+from dependencies.internal_auth import (
+    get_role_internal_or_user,
+    get_service_client_internal_or_user,
+    get_tenant_id_internal_or_user,
+    require_write_internal_or_user,
 )
 from dependencies.plans import PLAN_ORDERS_CREATE
 from dependencies.security import RL_WRITE_DEFAULT
@@ -399,7 +405,8 @@ async def create_payment_link(
     Válido por WOMPI_PAYMENT_LINK_TTL_MINUTES minutos (default 30).
     """
     try:
-        from integrations.wompi_client import create_payment_link as wompi_create_link, get_tenant_wompi_creds
+        from integrations.wompi_client import create_payment_link as wompi_create_link
+        from integrations.wompi_client import get_tenant_wompi_creds
 
         private_key, _, wompi_environment = get_tenant_wompi_creds(supabase, tenant_id)
         if not private_key:

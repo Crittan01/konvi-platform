@@ -38,7 +38,7 @@ from agentic.degraded_messages import (
     DEGRADED_SAFETY,
 )
 from agentic.tools.base import ToolContext
-from agentic.tools.registry import all_tools, get_tool, gemini_function_schemas
+from agentic.tools.registry import get_tool, gemini_function_schemas
 
 logger = logging.getLogger(__name__)
 

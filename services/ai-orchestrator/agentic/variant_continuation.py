@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Optional
+from typing import Optional
 
 
 # Regex para detectar respuesta corta de variante del cliente:

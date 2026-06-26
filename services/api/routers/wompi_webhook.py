@@ -21,7 +21,11 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from dependencies.auth import _get_service_client
-from integrations.wompi_client import verify_event_signature, get_tenant_wompi_creds, create_payment_link_sync
+from integrations.wompi_client import (
+    create_payment_link_sync,
+    get_tenant_wompi_creds,
+    verify_event_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1379,7 +1383,6 @@ async def _generate_shipping_guide_async(
         return False
 
     # 5. Construir payload + invocar generate_guide.
-    import asyncio
     try:
         from integrations.aveonline_client import AveonlineClient
 

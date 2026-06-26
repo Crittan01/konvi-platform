@@ -19,7 +19,6 @@ Diseño:
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -29,7 +28,6 @@ from pydantic import BaseModel, Field
 from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
-
 
 # Path injection para acceder al orchestrator lib.
 _ORCHESTRATOR_DIR = (
@@ -197,9 +195,9 @@ async def suggest_agent_prompt(
     suggested = ""
     model_used: Optional[str] = None
     try:
+        from google.genai import types as genai_types
         from llm_cascade import cascade_invoke
         from orchestrator import _get_genai_client
-        from google.genai import types as genai_types
 
         client = _get_genai_client()
 

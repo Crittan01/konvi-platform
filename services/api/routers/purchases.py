@@ -22,7 +22,7 @@ Idempotencia: la transición 'ordered' → 'received' solo aplica si el PO está
 (condición en el UPDATE evita doble recibo).
 """
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field

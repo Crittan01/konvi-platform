@@ -19,7 +19,6 @@ verify es 5/min (anti-brute force).
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -27,7 +26,6 @@ from supabase import Client
 
 from dependencies.auth import (
     _extract_jwt_payload,  # type: ignore
-    get_current_tenant,
     get_service_client,
 )
 from dependencies.security import RL_WRITE_DEFAULT

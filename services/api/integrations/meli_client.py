@@ -23,16 +23,17 @@ Endpoints de items usados:
   - GET  /items/{item_id}                       → detalle de un item
   - PUT  /items/{item_id}                       → actualizar cantidad, precio o status
 """
-import os
-import httpx
 import base64
-import logging
 import hashlib
 import hmac
 import json
+import logging
+import os
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 

@@ -31,7 +31,6 @@ import argparse
 import logging
 import os
 import sys
-from typing import Optional
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

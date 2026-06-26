@@ -1,4 +1,3 @@
-import os
 import sys
 from supabase import create_client, Client
 

@@ -18,14 +18,15 @@ Auth: tenant role owner/manager (tenant es el Responsable).
 Audit: cada generación queda en consent_audit_log con event='sic_report'.
 """
 from __future__ import annotations
+
 import csv
 import io
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from supabase import Client
 
 from dependencies.auth import (
@@ -34,8 +35,8 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
-from dependencies.security import RL_WRITE_DEFAULT
 from dependencies.pii_audit import log_pii_access
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger("api.sic_report")
 router = APIRouter(tags=["habeas-data", "sic"])

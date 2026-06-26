@@ -14,8 +14,10 @@ Diseño:
     crossimports cross-service).
 """
 from __future__ import annotations
+
 import logging
 from typing import Iterable, Optional
+
 from supabase import Client
 
 logger = logging.getLogger("api.pii_audit")

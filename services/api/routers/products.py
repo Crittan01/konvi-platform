@@ -21,12 +21,14 @@ RBAC:
 
 Nota: patch_variation dispara sync_meli_stock si stock_quantity cambia y hay listing activo.
 """
-import logging
 import asyncio
-from typing import Optional, List
+import logging
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from supabase import Client
+
 from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from routers.marketplace import sync_meli_stock

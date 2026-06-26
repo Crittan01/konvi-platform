@@ -28,7 +28,6 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestr
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/tests")
 
-import unittest.mock as _mock
 from supabase import create_client, Client
 from orchestrator import build_and_run_orchestration
 from routers.wompi_webhook import _process_wompi_event

@@ -18,16 +18,17 @@ externos hay que usar JWT firmado u OAuth — fuera de scope.
 INTERNAL_SERVICE_SECRET se genera con `openssl rand -hex 32` y vive en
 env vars de api + orchestrator (MISMO valor en ambos).
 """
-import os
 import hmac
 import logging
-from fastapi import Request, HTTPException, Depends
+import os
+
+from fastapi import Depends, HTTPException, Request
 from supabase import Client
 
 from dependencies.auth import (
     _get_service_client,
-    get_current_tenant,
     get_current_role,
+    get_current_tenant,
 )
 
 logger = logging.getLogger(__name__)

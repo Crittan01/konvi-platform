@@ -212,15 +212,15 @@ async def main():
         ("inbound", "Hola, buenas tardes"),
         ("outbound", "¡Hola! ¿En qué te ayudo hoy?"),
         ("inbound", "Quiero una camiseta polo roja"),
-        ("outbound", "Sí, tenemos la Camiseta Polo en color Rojo. Tenemos 20 unidades disponibles a \$60.000 cada una. ¿Te interesa?"),
+        ("outbound", r"Sí, tenemos la Camiseta Polo en color Rojo. Tenemos 20 unidades disponibles a \$60.000 cada una. ¿Te interesa?"),
         ("inbound", "Sí, envíame una. Me llamo Cristian Camilo Garzon Tamayo"),
         ("outbound", "Perfecto Cristian, ¿a qué ciudad te la envío?"),
         ("inbound", "Medellín"),
-        ("outbound", "Envío de 1 unidad de Camiseta Polo Testing (Color: Rojo) a Medellín:\n\n• Económica: Deprisa Estandar | \$13.140 | entrega 27/04/2026\n• Rápida: Coordinadora Ground | \$15.420 | entrega 25/04/2026\n\n¿Con cuál continuamos? (Responde Económica o Rápida)"),
+        ("outbound", "Envío de 1 unidad de Camiseta Polo Testing (Color: Rojo) a Medellín:\n\n• Económica: Deprisa Estandar | \\$13.140 | entrega 27/04/2026\n• Rápida: Coordinadora Ground | \\$15.420 | entrega 25/04/2026\n\n¿Con cuál continuamos? (Responde Económica o Rápida)"),
         ("inbound", "Económica"),
         ("outbound", "Perfecto Cristian. Para finalizar, ¿me das tu dirección completa?"),
         ("inbound", "Cra 10 #20-30, Barrio Centro, Medellín. Es una casa."),
-        ("outbound", "Resumen de tu pedido:\n\n• 1x Camiseta Polo Roja — \$60.000\n• Envío Económica a Medellín — \$13.140\n• Total: \$73.140\n\n¿Confirmas que estos datos son correctos para proceder?"),
+        ("outbound", "Resumen de tu pedido:\n\n• 1x Camiseta Polo Roja — \\$60.000\n• Envío Económica a Medellín — \\$13.140\n• Total: \\$73.140\n\n¿Confirmas que estos datos son correctos para proceder?"),
     ]
     for direction, content in historial:
         insert_message(supabase, conversation_id, direction, content)
@@ -291,7 +291,7 @@ async def main():
         return
 
     order = orders[0]
-    _ok(f"Orden: {order['id']} | status={order['status']} | total=\${order['total_amount']}")
+    _ok(rf"Orden: {order['id']} | status={order['status']} | total=\${order['total_amount']}")
 
     if order["status"] != "pending_payment":
         _err(f"Esperaba pending_payment, got {order['status']}")

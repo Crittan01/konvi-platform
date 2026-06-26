@@ -18,15 +18,15 @@ NOTA sobre duplicación:
 - Solución futura: extraer a `packages/python-shared/` cuando se consolide
   infra de packages compartidos (post Sem 12 plan K).
 """
-import os
 import logging
+import os
 from typing import Optional
 
 from google import genai
 
 from lib.llm_embed import (
-    embed_with_cascade,
     EmbedResult,
+    embed_with_cascade,
     get_embedding_model_version,  # noqa: F401 — usado por API endpoints
 )
 

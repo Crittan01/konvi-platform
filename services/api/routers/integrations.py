@@ -13,17 +13,24 @@ ADR-0023 (Shipping Provider Integration Pattern).
 """
 import logging
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from supabase import Client
+
 from dependencies.audit import audit_log
-from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, get_current_role
-from vault_helper import VaultHelper
+from dependencies.auth import (
+    _get_service_client,
+    get_current_role,
+    get_current_tenant,
+    get_service_client,
+)
 from dependencies.plans import PLAN_INTEGRATIONS_MELI
 from integrations import meli_client
+from vault_helper import VaultHelper
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Integrations"])
@@ -327,8 +334,9 @@ async def list_aveonline_agents(
     if role not in ("owner", "manager"):
         raise HTTPException(403, "Solo owner/manager pueden ver agentes")
 
-    from integrations.aveonline_client import AveonlineClient
     import httpx
+
+    from integrations.aveonline_client import AveonlineClient
 
     client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)
     try:
@@ -494,8 +502,10 @@ async def aveonline_guide_dry_run(
 
     # 4. Construir payload canónico.
     from integrations.aveonline_client import (
-        AveonlineClient, AveonlineAuthError,
-        AveonlineTransientError, AveonlinePermanentError,
+        AveonlineAuthError,
+        AveonlineClient,
+        AveonlinePermanentError,
+        AveonlineTransientError,
     )
     from lib.dane_resolver import resolve_dane_from_city
     client = AveonlineClient(supabase=supabase, tenant_id=tenant_id)

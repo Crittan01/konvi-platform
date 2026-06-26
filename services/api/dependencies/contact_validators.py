@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-
 # Tipos de documento aceptados por Wompi para Colombia.
 # DNI no aplica (es Argentina/España); RG es Brasil.
 #

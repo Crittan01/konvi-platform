@@ -20,7 +20,7 @@ aislamiento. Patrón canónico `.table(X).eq('tenant_id', tid)` enforced por lin
 AST scripts/audit_tenant_filter.py (ADR-0025 — helper scoped_table eliminado).
 """
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field

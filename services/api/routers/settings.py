@@ -14,11 +14,18 @@ Endpoints:
 """
 import logging
 from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from supabase import Client
+
 from dependencies.audit import audit_log
-from dependencies.auth import get_current_tenant, get_service_client, require_owner_role, require_write_role
+from dependencies.auth import (
+    get_current_tenant,
+    get_service_client,
+    require_owner_role,
+    require_write_role,
+)
 from vault_helper import VaultHelper
 
 logger = logging.getLogger(__name__)

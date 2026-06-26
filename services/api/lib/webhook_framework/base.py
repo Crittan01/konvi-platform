@@ -32,7 +32,6 @@ from typing import Any, Optional
 from .errors import (
     DuplicateEventError,
     RateLimitExceededError,
-    SignatureError,
     WebhookError,
 )
 from .idempotency import IdempotencyStrategy

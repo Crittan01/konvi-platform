@@ -291,7 +291,7 @@ async def quote_shipping_for_cart_aveonline(
     cart_payment_method = early_payment_method
 
     try:
-        from lib.tenant_carriers import filter_enabled_carriers, list_preferences
+        from lib.tenant_carriers import filter_enabled_carriers
 
         candidates_codes = [_to_canonical(o["carrier"]) for o in options]
         allowed = set(filter_enabled_carriers(

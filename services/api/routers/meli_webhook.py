@@ -20,18 +20,20 @@ Defensa de origen:
 Referencia oficial:
   https://developers.mercadolibre.com.co/es_ar/notificaciones
 """
-import logging
-import os
 import asyncio
 import hashlib
-import httpx
+import logging
+import os
 import re
-import time
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Optional
+
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+
 from dependencies.auth import _get_service_client, get_service_client
 from dependencies.security import webhook_rate_limit_check
 from integrations import meli_client

@@ -42,7 +42,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Optional, TypeVar
 
 from .errors import (
-    ComplianceViolationError,
     ConsentMissingError,
     CountryScopeError,
     CSWTemplateRequiredError,

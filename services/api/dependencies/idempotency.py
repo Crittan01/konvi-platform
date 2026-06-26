@@ -16,8 +16,8 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Request
 from supabase import Client
-from dependencies.observability import record_api_security_event
 
+from dependencies.observability import record_api_security_event
 
 _KEY_PATTERN = re.compile(r"^[A-Za-z0-9:_-]{8,128}$")
 

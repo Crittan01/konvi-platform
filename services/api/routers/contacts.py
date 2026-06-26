@@ -9,24 +9,23 @@ Endpoints:
   DELETE /api/v1/contacts/{id}       — soft-delete + anonimización   [owner, manager]
 """
 import logging
-import re
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client
-from dependencies.audit import audit_log, _extract_user_info
+
+from dependencies.audit import _extract_user_info, audit_log
 from dependencies.auth import (
     get_current_tenant,
     get_service_client,
     require_owner_role,
     require_write_role,
 )
-from dependencies.pii_audit import log_pii_access
 from dependencies.contact_validators import (
     DOCUMENT_TYPES_CO,
-    validate_document,
     normalize_document_number,
 )
 from dependencies.idempotency import (
@@ -35,6 +34,7 @@ from dependencies.idempotency import (
     finalize_idempotency,
     payload_fingerprint,
 )
+from dependencies.pii_audit import log_pii_access
 from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
@@ -849,7 +849,7 @@ async def purge_contact(
 
     Audit log con phone_hash inmutable ANTES del purge (trazabilidad SIC).
     """
-    from lib.contact_cleanup import purge_contact_completely, PurgeBlockedError
+    from lib.contact_cleanup import PurgeBlockedError, purge_contact_completely
     from lib.phone import hash_phone
 
     try:

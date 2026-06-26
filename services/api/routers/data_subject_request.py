@@ -13,12 +13,13 @@ SAR autorizado por el titular vía WhatsApp se procesa en orchestrator
 Cada SAR escribe un row en `consent_audit_log` para audit trail.
 """
 from __future__ import annotations
+
 import hashlib
-import json
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -106,7 +107,8 @@ async def _notify_sar_safe(
 ) -> None:
     """Rev. 94 — Wrapper seguro: notifica al tenant del SAR sin bloquear flujo."""
     try:
-        import sys, os as _os
+        import os as _os
+        import sys
         sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "ai-orchestrator"))
         from notifications import notify_sar_received  # type: ignore
         await notify_sar_received(

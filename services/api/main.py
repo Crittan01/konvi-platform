@@ -2,17 +2,36 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+
 from observability import init_sentry
 
 # Init Sentry ANTES de cargar routers (capturar errores de import también).
 init_sentry(service_name="api")
 
-from routers import products, conversations, orders, contacts, settings, integrations, shipping, meli_webhook, marketplace, wompi_webhook, telegram_webhook, claims, purchases, knowledge_base, aveonline_webhook
-from dependencies.auth import get_current_tenant, reject_if_tenant_deleting
 from fastapi import Depends as _Depends
+
+from dependencies.auth import reject_if_tenant_deleting
+from routers import (
+    aveonline_webhook,
+    claims,
+    contacts,
+    conversations,
+    integrations,
+    knowledge_base,
+    marketplace,
+    meli_webhook,
+    orders,
+    products,
+    purchases,
+    settings,
+    shipping,
+    telegram_webhook,
+    wompi_webhook,
+)
 
 # Rev. 109 J.2.4.4 Fase 2 — gate compartido para todos los routers de mutación.
 # Aplica `reject_if_tenant_deleting` que rechaza writes con HTTP 423 si el
@@ -118,16 +137,20 @@ app.include_router(orders.router, prefix="/api/v1/orders", dependencies=_OFFBOAR
 app.include_router(contacts.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
 # Rev. 93 — Habeas Data: Subject Access Request (SAR / ARCO).
 from routers import data_subject_request as _dsr  # noqa: E402
+
 app.include_router(_dsr.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
 # Rev. 109 J.2.4.4 — Tenant offboarding (export + soft-delete + cancel).
 # NO aplicar _OFFBOARDING_GATE — el owner debe poder cancelar dentro del grace.
 from routers import tenant_offboarding as _toff  # noqa: E402
+
 app.include_router(_toff.router, prefix="/api/v1/tenant/offboarding")
 # Rev. 109 J.2.4.3 — MFA TOTP recovery codes.
 from routers import mfa as _mfa  # noqa: E402
+
 app.include_router(_mfa.router, prefix="/api/v1/mfa")
 # Rev. 101 (F5) — SIC pre-cocinado.
 from routers import sic_report as _sic  # noqa: E402
+
 app.include_router(_sic.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 app.include_router(settings.router, prefix="/api/v1/settings", dependencies=_OFFBOARDING_GATE)
 app.include_router(integrations.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
@@ -144,6 +167,7 @@ app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline"
 app.include_router(telegram_webhook.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
 # Rev. 109 ADR-0017 — Multi-agente per tenant (templates + AI suggest).
 from routers import ai_agents as _ai_agents  # noqa: E402
+
 app.include_router(_ai_agents.router, prefix="/api/v1", dependencies=_OFFBOARDING_GATE)
 # Rev. 72 — routers nuevos (cierran drifts D1/D2/D3)
 app.include_router(claims.router, prefix="/api/v1/claims", dependencies=_OFFBOARDING_GATE)

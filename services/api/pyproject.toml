@@ -20,6 +20,11 @@ select = [
 ]
 ignore = [
     "E501",  # line too long, handled by black/ruff formatter
+    # B008: function-call-in-default-argument. FALSO POSITIVO para FastAPI +
+    # Pydantic: `def endpoint(x = Depends(...))` y `field: X = Field(...)` son
+    # el patrón ESTÁNDAR de inyección de dependencias / definición de schema.
+    # Ignorar B008 es práctica recomendada FastAPI (no es deuda, es false positive).
+    "B008",
 ]
 
 [tool.ruff.lint.isort]

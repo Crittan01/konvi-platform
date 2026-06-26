@@ -38,10 +38,10 @@ hace en Sem 4-5 (P0 integraciones) cuando consuman este framework.
 """
 from .base import WebhookHandler
 from .errors import (
-    WebhookError,
-    SignatureError,
     DuplicateEventError,
     RateLimitExceededError,
+    SignatureError,
+    WebhookError,
 )
 
 __all__ = [
