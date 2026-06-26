@@ -2573,10 +2573,50 @@ def _resolve_and_persist_agentic_state(
             if _cart.get("status") == "checkout" and _cart.get("converted_order_id"):
                 _cart["payment_link"] = "checkout"
 
+        # FIX A11: cargar la última orden + su pago para que POST_PAYMENT sea
+        # ALCANZABLE. Antes order/payment nunca se pasaban → has_active_order
+        # siempre False → el estado post-venta (resolver.py regla 2) era dead.
+        # Scope SEGURO: solo cuando NO hay cart activo con items, así una orden
+        # vieja aprobada NO empuja a POST_PAYMENT mientras el cliente arma un
+        # pedido NUEVO (POST_PAYMENT precede a las reglas de cart). Tras
+        # confirmar orden el cart pasa a 'converted' (orders.py:560) → sale del
+        # filtro [open,checkout] → _cart None → se carga la orden. Defensivo.
+        _order = None
+        _payment = None
+        _cart_items_for_order = int((_cart or {}).get("items_count") or 0)
+        if not _cart or _cart_items_for_order == 0:
+            try:
+                _order_row = (
+                    supabase.table("orders")
+                    .select("id, status")
+                    .eq("conversation_id", conversation_id)
+                    .eq("tenant_id", tenant_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                _order = (_order_row.data or [None])[0]
+                if _order:
+                    _pay_row = (
+                        supabase.table("payments")
+                        .select("status")
+                        .eq("order_id", _order["id"])
+                        .eq("tenant_id", tenant_id)
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    _payment = (_pay_row.data or [None])[0]
+            except Exception:
+                _order = None
+                _payment = None
+
         _ctx = build_context_from_records(
             conversation=_conv,
             cart=_cart,
             contact=contact or {},
+            order=_order,
+            payment=_payment,
             history_len=len(history or []),
         )
         _state = StateResolver().resolve(_ctx)

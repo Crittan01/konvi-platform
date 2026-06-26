@@ -179,6 +179,35 @@ class StateResolverTests(unittest.TestCase):
         )
         self.assertEqual(self.resolver.resolve(ctx), AgenticState.PAYMENT)
 
+    def test_build_context_from_records_post_payment(self):
+        # FIX A11: build_context_from_records ahora hila order+payment → el
+        # dispatcher puede alcanzar POST_PAYMENT (antes order/payment nunca se
+        # pasaban → estado post-venta dead). Cart convertido (None) + orden con
+        # pago approved → POST_PAYMENT.
+        ctx = build_context_from_records(
+            conversation={"status": "bot_active"},
+            cart=None,
+            contact={"consent_given": True, "name": "John",
+                     "document_number": "123", "address": "Calle 1"},
+            order={"id": "order-1", "status": "confirmed"},
+            payment={"status": "approved"},
+            history_len=14,
+        )
+        self.assertTrue(ctx.has_active_order)
+        self.assertEqual(ctx.payment_status, "approved")
+        self.assertEqual(self.resolver.resolve(ctx), AgenticState.POST_PAYMENT)
+
+    def test_build_context_no_order_not_post_payment(self):
+        # Sin order/payment (default) → NO POST_PAYMENT (regresión del bug).
+        ctx = build_context_from_records(
+            conversation={"status": "bot_active"},
+            cart=None,
+            contact={"consent_given": True},
+            history_len=3,
+        )
+        self.assertFalse(ctx.has_active_order)
+        self.assertNotEqual(self.resolver.resolve(ctx), AgenticState.POST_PAYMENT)
+
 
 class TransitionsTests(unittest.TestCase):
     def test_null_to_any_is_valid(self):
