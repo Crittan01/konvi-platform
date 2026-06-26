@@ -47,6 +47,7 @@ def _mock_supabase_rpc(rpc_responses: dict, table_responses: dict | None = None)
         chain.in_.return_value = chain
         chain.order.return_value = chain
         chain.limit.return_value = chain
+        chain.single.return_value = chain
         data = (table_responses or {}).get(name, [])
         chain.execute.return_value = MagicMock(data=data)
         return chain
@@ -150,15 +151,28 @@ class ExtendTests(unittest.TestCase):
 class AvailableStockTests(unittest.TestCase):
     def test_available_stock_returns_int(self):
         sb = _mock_supabase_rpc({"fn_variation_available_stock": 7})
-        self.assertEqual(sr.available_stock(sb, variation_id="v1"), 7)
+        self.assertEqual(sr.available_stock(sb, variation_id="v1", tenant_id="t1"), 7)
 
     def test_available_stock_dict_response(self):
         sb = _mock_supabase_rpc({"fn_variation_available_stock": {"available": 3}})
-        self.assertEqual(sr.available_stock(sb, variation_id="v1"), 3)
+        self.assertEqual(sr.available_stock(sb, variation_id="v1", tenant_id="t1"), 3)
 
     def test_available_stock_list_response(self):
         sb = _mock_supabase_rpc({"fn_variation_available_stock": [5]})
-        self.assertEqual(sr.available_stock(sb, variation_id="v1"), 5)
+        self.assertEqual(sr.available_stock(sb, variation_id="v1", tenant_id="t1"), 5)
+
+    def test_available_stock_fallback_usa_tenant_id(self):
+        # Regresión bug F821: cuando el RPC falla, el fallback leía raw
+        # stock_quantity filtrando por tenant_id. Antes tenant_id era undefined
+        # → NameError tragado por el except → fallback SIEMPRE 0. Ahora con
+        # tenant_id como parámetro, el fallback lee el valor real.
+        sb = _mock_supabase_rpc(
+            {"fn_variation_available_stock": RuntimeError("RPC caído")},
+            table_responses={"product_variations": {"stock_quantity": 9}},
+        )
+        self.assertEqual(
+            sr.available_stock(sb, variation_id="v1", tenant_id="t1"), 9,
+        )
 
 
 class CleanupTests(unittest.TestCase):

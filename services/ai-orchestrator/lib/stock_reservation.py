@@ -106,7 +106,9 @@ def reserve(
         msg = str(exc).lower()
         if "insufficient_stock" in msg or "p0001" in msg:
             # Lookup current available para mensaje preciso.
-            available = available_stock(supabase, variation_id=variation_id)
+            available = available_stock(
+                supabase, variation_id=variation_id, tenant_id=tenant_id,
+            )
             raise InsufficientStock(variation_id, qty, available) from exc
         if "variation_not_found" in msg:
             return ReservationResult(
@@ -256,11 +258,16 @@ def extend_by_cart(
     return extended
 
 
-def available_stock(supabase: Any, *, variation_id: str) -> int:
+def available_stock(supabase: Any, *, variation_id: str, tenant_id: str) -> int:
     """Stock disponible = stock_quantity - SUM(reservas activas con TTL vivo).
 
     Usar SIEMPRE este wrapper en lugar de leer product_variations.stock_quantity
     directamente cuando se valida disponibilidad pre-add.
+
+    `tenant_id` es REQUERIDO: el fallback raw filtra por tenant_id (aislamiento
+    multi-tenant ADR-0025). Antes el fallback referenciaba `tenant_id` sin que
+    fuera parámetro → NameError (lo tragaba el except → siempre 0). Cazado por
+    ruff F821.
     """
     try:
         res = supabase.rpc(
