@@ -49,6 +49,31 @@ def _mock_supabase_with_quoted_options(options: list[dict]):
     return sb
 
 
+def _mock_supabase_with_selected_carrier(*, carrier, rate_id,
+                                         shipping_cents=900000, total_cents=4800000):
+    """Mock supabase con un carrier YA SELECCIONADO persistido en shipping_meta."""
+    sb = MagicMock()
+    cart_data = {
+        "shipping_meta": {
+            "carrier": carrier,
+            "rate_id": rate_id,
+            "service_level": "Estándar",
+            "quoted_options": [{"rate_id": rate_id, "carrier": carrier}],
+        },
+        "shipping_cents": shipping_cents,
+        "total_cents": total_cents,
+    }
+
+    def table_side(name):
+        chain = MagicMock()
+        if name == "conversation_carts":
+            chain.select.return_value.eq.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=cart_data)
+        return chain
+
+    sb.table.side_effect = table_side
+    return sb
+
+
 class SelectCarrierDBFirstTests(unittest.TestCase):
 
     def setUp(self):
@@ -439,6 +464,26 @@ class SelectCarrierDBFirstTests(unittest.TestCase):
         result = _run(self.tool.execute(args, ctx))
         self.assertFalse(result.success)
         self.assertEqual(result.data["code"], "MISSING_CARRIER_ARG")
+
+    def test_empty_args_idempotent_when_carrier_already_selected(self):
+        """A11 FIX: si el carrier YA está persistido (shipping_meta.carrier +
+        rate_id) y el LLM re-llama sin args (doble-manejo resolver+LLM), el
+        tool devuelve éxito NO-OP en vez de MISSING_CARRIER_ARG ('error al
+        seleccionar' visible al cliente)."""
+        sb = _mock_supabase_with_selected_carrier(
+            carrier="INTERRAPIDISIMO", rate_id="1016",
+            shipping_cents=1810000, total_cents=6610000,
+        )
+        ctx = ToolContext(
+            tenant_id="t", conversation_id="c", contact_id="ct",
+            supabase=sb, extras={},
+        )
+        args = self.tool.args_schema(rate_id="", carrier_name="")
+        result = _run(self.tool.execute(args, ctx))
+        self.assertTrue(result.success, f"Esperaba no-op éxito: {result.data}")
+        self.assertEqual(result.data["carrier"], "INTERRAPIDISIMO")
+        self.assertTrue(result.data.get("idempotent_noop"))
+        self.assertEqual(result.data["total_cop"], 66100)
 
 
 if __name__ == "__main__":

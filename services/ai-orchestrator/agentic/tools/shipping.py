@@ -341,6 +341,43 @@ class SelectCarrierTool:
         rate_id_raw = (args.rate_id or "").strip()
         carrier_name_raw = (args.carrier_name or "").strip()
         if not rate_id_raw and not carrier_name_raw:
+            # A11 FIX (idempotencia) — doble-manejo resolver+LLM: el resolver
+            # pre-LLM carrier_select YA persistió el carrier; el LLM re-llama
+            # este tool sin args y antes devolvía MISSING_CARRIER_ARG, que el
+            # cliente veía como "error al seleccionar" pese a que el dato ya
+            # estaba correcto. Si el cart YA tiene un carrier SELECCIONADO
+            # persistido (shipping_meta.carrier + rate_id), el re-call es un
+            # NO-OP benigno → devolver éxito con el dato existente. NO crea ni
+            # muta nada. Scope tenant + status='open'. La mera presencia de
+            # quoted_options (sin carrier elegido) sigue siendo MISSING_CARRIER_ARG.
+            try:
+                _existing = (
+                    ctx.supabase.table("conversation_carts")
+                    .select("shipping_meta, shipping_cents, total_cents")
+                    .eq("conversation_id", ctx.conversation_id)
+                    .eq("tenant_id", ctx.tenant_id)
+                    .eq("status", "open")
+                    .maybe_single()
+                    .execute()
+                )
+                _row = (_existing.data or {}) if _existing else {}
+                _meta = _row.get("shipping_meta") or {}
+                if _meta.get("carrier") and _meta.get("rate_id"):
+                    _log = ctx.logger or logger
+                    _log.info(
+                        "[agentic.select_carrier] idempotent no-op: carrier "
+                        "'%s' ya persistido (rate_id=%s) — re-call sin args.",
+                        _meta.get("carrier"), _meta.get("rate_id"),
+                    )
+                    return tool_success({
+                        "carrier": _meta.get("carrier"),
+                        "service_level": _meta.get("service_level"),
+                        "shipping_cop": int(_row.get("shipping_cents") or 0) // 100,
+                        "total_cop": int(_row.get("total_cents") or 0) // 100,
+                        "idempotent_noop": True,
+                    })
+            except Exception:
+                pass
             return tool_failure(
                 "Falta el carrier. Pasa rate_id literal del quote_shipping "
                 "o carrier_name (e.g. 'Servientrega').",
