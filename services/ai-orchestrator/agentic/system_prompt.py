@@ -20,6 +20,23 @@ from typing import Optional
 from lib.phone_format import format_phone_co
 
 
+def _variant_line(v: dict) -> Optional[str]:
+    """Línea de variante para el prompt. Marca *AGOTADO* si stock<=0 (palanca 4)
+    para que el LLM NO ofrezca una presentación sin existencias — add_to_cart igual
+    la bloquea (stock_reservation), pero marcarla evita ofrecerla + backtrack.
+    Retorna None si la variante no es presentable (sin label o precio<=0)."""
+    label = str(v.get("label") or "")
+    price = int(float(v.get("price") or 0))
+    vid = str(v.get("id") or "")
+    if not label or price <= 0:
+        return None
+    price_str = f"${price:,}".replace(",", ".")
+    raw_stock = v.get("stock")
+    agotado = raw_stock is not None and int(raw_stock) <= 0
+    suffix = "  — *AGOTADO* (no ofrecer)" if agotado else ""
+    return f"    * {label}: {price_str} COP [variation_id={vid}]{suffix}"
+
+
 def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     """Renderiza el catalog como markdown block para embeber en prompt.
 
@@ -61,13 +78,9 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
             if compact:
                 # Checkout: solo variantes + precio (sin descripción ni safety).
                 for v in (p.get("variants") or []):
-                    label = str(v.get("label") or "")
-                    price = int(float(v.get("price") or 0))
-                    vid = str(v.get("id") or "")
-                    if not label or price <= 0:
-                        continue
-                    price_str = f"${price:,}".replace(",", ".")
-                    lines.append(f"    * {label}: {price_str} COP [variation_id={vid}]")
+                    vline = _variant_line(v)
+                    if vline:
+                        lines.append(vline)
                 continue
             # A11 fix: incluir la descripción (beneficios/usos) en el contexto
             # del LLM. Antes solo se emitía título+variantes+precio → el bot NO
@@ -89,15 +102,9 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
             if safety:
                 lines.append(f"    ⚠️ Seguridad: {safety}")
             for v in (p.get("variants") or []):
-                label = str(v.get("label") or "")
-                price = int(float(v.get("price") or 0))
-                vid = str(v.get("id") or "")
-                if not label or price <= 0:
-                    continue
-                price_str = f"${price:,}".replace(",", ".")
-                lines.append(
-                    f"    * {label}: {price_str} COP [variation_id={vid}]"
-                )
+                vline = _variant_line(v)
+                if vline:
+                    lines.append(vline)
     return "\n".join(lines)
 
 
