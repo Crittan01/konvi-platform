@@ -2320,6 +2320,28 @@ async def _run_agentic_full(
         else result.outbound_text
     )
 
+    # A11 2026-06-26 — OBSERVABILIDAD: trace estructurado por turno (1 línea
+    # greppable). Hace visible la decisión del bot — estado FSM resuelto, tools
+    # invocados, invariant que intervino, si hubo rewrite — para diagnosticar
+    # incoherencias al instante (antes había que leer código). Lo consume también
+    # el harness adversarial (scripts/uat/coherence_scenarios.py).
+    try:
+        _trace_tools = [t.get("tool") for t in (result.tool_call_log or [])]
+        _trace_inv = (
+            f"{invariant_result.invariant_name}:{invariant_result.outcome.value}"
+            if invariant_result.outcome != InvariantOutcome.OK else "ok"
+        )
+        logger.info(
+            "[AGENTIC_TRACE] conv=%s state=%s tools=%s invariant=%s rewrote=%s",
+            conversation_id[:8],
+            getattr(_resolved_state, "value", None) or "fallback",
+            _trace_tools,
+            _trace_inv,
+            invariant_result.outcome != InvariantOutcome.OK,
+        )
+    except Exception:
+        pass  # el trace NUNCA debe romper el turno
+
     # Enviar outbound al cliente.
     await _send_outbound_text(
         supabase=supabase,
