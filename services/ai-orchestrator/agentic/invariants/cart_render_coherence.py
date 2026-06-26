@@ -171,7 +171,7 @@ async def _get_cart_state(
     try:
         cart_q = (
             supabase.table("conversation_carts")
-            .select("id, subtotal_cents, total_cents")
+            .select("id, subtotal_cents, total_cents, requires_requote")
             .eq("conversation_id", conversation_id)
             .eq("tenant_id", tenant_id)
             .eq("status", "open")
@@ -357,12 +357,22 @@ class CartRenderCoherenceInvariant:
         # ── CASE A: LLM afirma cart sin tool ejecutado ─────────────────
         if _llm_affirms_cart_change(candidate_text):
             if not _any_cart_write_executed(tool_call_log):
-                return InvariantResult(
-                    outcome=InvariantOutcome.REWRITE,
-                    invariant_name=self.name,
-                    replacement_text=_build_case_a_replacement(),
-                    reason="CASE A: LLM afirmó cart sin tool exitoso",
+                # 2026-06-26 (founder + AGENTIC_TRACE): NO disparar si el carrito
+                # tiene requires_requote=True. El cliente AGREGÓ/QUITÓ items en un
+                # turno PREVIO (el add fue real) y el bot legítimamente lo referencia
+                # mientras recotiza el envío. Sin este gate, Case A reescribía a
+                # "cuéntame qué producto" (non-sequitur) clobbering la respuesta de
+                # recotización — conversación sin sentido reportada en vivo.
+                _, _cart_row_a = await _get_cart_state(
+                    supabase, conversation_id, tenant_id,
                 )
+                if not (_cart_row_a or {}).get("requires_requote"):
+                    return InvariantResult(
+                        outcome=InvariantOutcome.REWRITE,
+                        invariant_name=self.name,
+                        replacement_text=_build_case_a_replacement(),
+                        reason="CASE A: LLM afirmó cart sin tool exitoso",
+                    )
 
             # ── CASE B: items afirmados > items en cart real ──────────
             items_affirmed = _count_items_affirmed_in_text(candidate_text)

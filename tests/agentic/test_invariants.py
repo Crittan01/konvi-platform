@@ -90,6 +90,42 @@ class CartRenderCoherenceInvariantTests(unittest.TestCase):
         ))
         self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
 
+    def _sb_requote(self, requote):
+        """Mock supabase para _get_cart_state: carts → cart_row; items → []."""
+        from unittest.mock import MagicMock
+        sb = MagicMock()
+        carts = MagicMock()
+        for m in ("select", "eq", "limit"):
+            getattr(carts, m).return_value = carts
+        carts.execute.return_value = MagicMock(
+            data=[{"id": "c1", "requires_requote": requote,
+                   "subtotal_cents": 0, "total_cents": 0}])
+        items = MagicMock()
+        for m in ("select", "eq"):
+            getattr(items, m).return_value = items
+        items.execute.return_value = MagicMock(data=[])
+        sb.table.side_effect = lambda n: carts if n == "conversation_carts" else items
+        return sb
+
+    def test_case_a_NO_dispara_con_requires_requote(self):
+        """Founder + AGENTIC_TRACE 2026-06-26: si requires_requote=True (cliente
+        agregó/quitó items recién), el bot referencia el cart legítimamente al
+        recotizar → Case A NO debe reescribir a 'cuéntame qué producto'."""
+        result = _run(self.inv.validate(
+            candidate_text="Listo, agregué 1 Sérum de Vitamina C a tu carrito.",
+            tool_call_log=[], tenant_id="t", conversation_id="c",
+            contact_id="ct", supabase=self._sb_requote(True),
+        ))
+        self.assertEqual(result.outcome, InvariantOutcome.OK)
+
+    def test_case_a_SI_dispara_sin_requote(self):
+        result = _run(self.inv.validate(
+            candidate_text="Listo, agregué 1 Sérum de Vitamina C a tu carrito.",
+            tool_call_log=[], tenant_id="t", conversation_id="c",
+            contact_id="ct", supabase=self._sb_requote(False),
+        ))
+        self.assertEqual(result.outcome, InvariantOutcome.REWRITE)
+
     def test_outbound_sin_afirmacion_de_cart_ok(self):
         """LLM responde sin afirmar cart change → OK siempre."""
         result = _run(self.inv.validate(
