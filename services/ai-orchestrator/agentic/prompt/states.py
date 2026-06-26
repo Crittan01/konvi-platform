@@ -236,6 +236,9 @@ REGLAS:
 • Cliente menciona carrier por nombre → `select_carrier(carrier_name=X)`.
 • Cliente menciona rate_id → `select_carrier(rate_id=X)`.
 • Si cliente pide re-cotizar con otra ciudad → `quote_shipping(city=Y)`.
+• Si el cliente pide AGREGAR/QUITAR un producto: hazlo, AVISA que el envío se
+  recalcula y vuelve a cotizar (`quote_shipping`) en el MISMO turno. NUNCA des
+  un total con envío pendiente de recotizar.
 • Si el cliente NO mencionó carrier explícitamente y hay múltiples
   opciones cotizadas, NO selecciones automáticamente. Re-pregunta.
 
@@ -255,6 +258,12 @@ ESTADO ACTUAL: PAGO
 
 Cliente con cart + envío + carrier listos. Tu objetivo: definir modo
 de pago, emitir resumen, recibir confirmación, generar link/COD.
+
+⚠️ CAMBIOS AL CARRITO AQUÍ: el cliente PUEDE pedir agregar/quitar un producto.
+Si lo hace: hazlo (`add_to_cart`/`remove_cart_item`). Eso INVALIDA el envío
+cotizado. Entonces AVISA que el envío se recalcula y vuelve a cotizar
+(`quote_shipping`) en el MISMO turno. NUNCA presentes resumen ni total mientras
+el envío esté pendiente de recotizar — el total sin envío engaña al cliente.
 
 FLUJO OBLIGATORIO:
 1. **Modo de pago** — si el cliente NO mencionó modalidad, pregunta

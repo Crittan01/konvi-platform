@@ -586,6 +586,7 @@ async def _run_agentic_full(
         PIICoherenceInvariant,
         PIISaveTruthfulnessInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
+        RequotePendingSummaryInvariant,
         VariantAvailabilityAssertionInvariant,
         InvariantOutcome,
     )
@@ -2269,6 +2270,11 @@ async def _run_agentic_full(
             # debe especificar modo antes de pago, outbound léxico
             # coherente con cart.payment_method).
             PaymentCoherenceInvariant(),
+            # A11 2026-06-26 — ANTES de SummaryCoherence: si el envío está
+            # pendiente de recotizar (item agregado a mitad de checkout invalidó
+            # el envío), el bot NO debe presentar resumen/total sin envío
+            # (Total=Subtotal engaña). Reescribe a recotizar. Principio #4.
+            RequotePendingSummaryInvariant(),
             SummaryCoherenceInvariant(),
             PIICoherenceInvariant(),
             # Rev. 109 UAT live BUG 19: bot afirma "guardé X" sin invocar tool.

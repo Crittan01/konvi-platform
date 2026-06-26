@@ -32,6 +32,9 @@ from agentic.invariants.payment_coherence import PaymentCoherenceInvariant
 from agentic.invariants.pii_coherence import PIICoherenceInvariant
 from agentic.invariants.pii_save_truthfulness import PIISaveTruthfulnessInvariant
 from agentic.invariants.post_tool_coherence import PostToolCoherenceInvariant
+from agentic.invariants.requote_pending_summary import (
+    RequotePendingSummaryInvariant,
+)
 from agentic.invariants.summary_coherence import SummaryCoherenceInvariant
 from agentic.invariants.variant_availability_assertion import (
     VariantAvailabilityAssertionInvariant,
@@ -54,6 +57,7 @@ __all__ = [
     "PIICoherenceInvariant",
     "PIISaveTruthfulnessInvariant",
     "PostToolCoherenceInvariant",
+    "RequotePendingSummaryInvariant",
     "SummaryCoherenceInvariant",
     "VariantAvailabilityAssertionInvariant",
 ]

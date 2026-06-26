@@ -113,6 +113,10 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
     AgenticState.PAYMENT: _with_cart_mods(
         "generate_payment_link",
         "select_carrier",
+        # A11 2026-06-26 — el cliente puede agregar/quitar productos en PAYMENT
+        # (vía _CART_MODS), lo que INVALIDA el envío. Sin quote_shipping aquí el
+        # bot no podía recotizar en el mismo turno → presentaba total sin envío.
+        "quote_shipping",
         "save_contact_field",
         "record_consent",
         "get_contact_info",
