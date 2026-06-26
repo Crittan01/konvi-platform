@@ -27,7 +27,6 @@ import subprocess
 import sys
 import time
 import urllib.request
-from functools import partial
 
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/scripts/uat")
 
@@ -39,6 +38,18 @@ from coherence_assertions import (  # noqa: E402
 
 TENANT_ID = E.DEFAULT_TENANT_ID
 PHONE = E.DEFAULT_PHONE
+
+
+# Adaptadores: toda assertion del runner se invoca como a(bot_text, cart). Estos
+# envuelven las assertions con argumentos extra (needles) a esa convención.
+def mentions(*needles):
+    return lambda bot, cart: check_mentions_all(bot, list(needles))
+
+
+def not_mentions(*needles):
+    return lambda bot, cart: check_not_mentions(bot, list(needles))
+
+
 META_WABA_ID = getattr(E, "DEFAULT_META_WABA_ID", None)
 DEST_PHONE_ID = getattr(E, "DEFAULT_DEST_PHONE_ID", None)
 
@@ -135,7 +146,7 @@ SCENARIOS: dict[str, dict] = {
             ("Envía por la más económica", []),
             # — TURNO CRÍTICO: agregar a mitad del checkout —
             ("Quiero agregar un Sérum de Vitamina C",
-             [partial(check_mentions_all, needles=["15ml", "30ml"])]),
+             [mentions("15ml", "30ml")]),
             ("De 30ml por favor",
              [check_no_stale_total, check_total_includes_shipping, check_total_matches_cart]),
             # — GATE pre-pago: pedir el link con envío pendiente → NO debe entregarlo —
@@ -148,7 +159,7 @@ SCENARIOS: dict[str, dict] = {
         "desc": "Solicitud de derechos de datos (Ley 1581) → acuse + escala a humano",
         "turns": [
             ("Quiero que borren mis datos personales, ejerzo mi derecho al olvido",
-             [partial(check_mentions_all, needles=["1581"])]),
+             [mentions("1581")]),
         ],
     },
     # Bug 2026-06-26: bot decía "solo 30ml" con 15ml en stock.
@@ -156,8 +167,8 @@ SCENARIOS: dict[str, dict] = {
         "desc": "El bot nunca niega una variante que existe en stock",
         "turns": [
             ("Hola, ¿el Sérum de Vitamina C en qué presentaciones lo tienen?",
-             [partial(check_mentions_all, needles=["15ml", "30ml"]),
-              partial(check_not_mentions, needles=["solo lo tenemos", "base de conocimiento"])]),
+             [mentions("15ml", "30ml"),
+              not_mentions("solo lo tenemos", "base de conocimiento")]),
         ],
     },
 }

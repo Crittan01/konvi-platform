@@ -252,6 +252,38 @@ async def handle_payment_link_if_applicable(
         )
         return None
 
+    # ── 1.4. Gate requires_requote (auditoría 2026-06-26, bloqueante #1) ──────
+    # Defensa en el CHOKEPOINT COMPARTIDO: lo invocan el path agéntico (vía
+    # legacy_adapters/payment.py, que ya gatea antes) Y el path legacy
+    # (orchestrator.py, que dependía de su re-cotización upstream). Aquí cerramos
+    # AMBOS: nunca generar link si el envío está pendiente de recotizar (cliente
+    # agregó/quitó items o cambió dirección tras cotizar) → evita cobrar con
+    # envío inválido. Determinístico (ADR-0024).
+    try:
+        _gate_cart = (
+            supabase.table("conversation_carts")
+            .select("requires_requote")
+            .eq("tenant_id", tenant_id)  # ADR-0025 aislamiento multi-tenant
+            .eq("conversation_id", conversation_id)
+            .in_("status", ["open", "checkout"])
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        _gate_rows = getattr(_gate_cart, "data", None)
+        if (
+            isinstance(_gate_rows, list) and _gate_rows
+            and isinstance(_gate_rows[0], dict)
+            and _gate_rows[0].get("requires_requote")
+        ):
+            logger.warning(
+                "[PAYMENT_LINK] requires_requote=True conv=%s — NO se genera link "
+                "(envío pendiente de recotizar)", conversation_id,
+            )
+            return None
+    except Exception:
+        pass  # ante fallo de DB no bloqueamos por el gate (degradación segura)
+
     # ── 1.5. Idempotencia transaccional (Plan A.0.1) ──────────────────────────
     # Una conversación + cart abierto = una orden activa. Antes de crear,
     # buscamos si la conversación ya tiene una `orders.status='pending_payment'`.

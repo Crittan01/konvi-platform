@@ -32,7 +32,10 @@ def _variant_line(v: dict) -> Optional[str]:
         return None
     price_str = f"${price:,}".replace(",", ".")
     raw_stock = v.get("stock")
-    agotado = raw_stock is not None and int(raw_stock) <= 0
+    try:
+        agotado = raw_stock is not None and int(raw_stock) <= 0
+    except (TypeError, ValueError):
+        agotado = False  # stock no-numérico ('' / None raros) → no marcar (sin crash)
     suffix = "  — *AGOTADO* (no ofrecer)" if agotado else ""
     return f"    * {label}: {price_str} COP [variation_id={vid}]{suffix}"
 

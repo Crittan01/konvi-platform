@@ -408,14 +408,31 @@ async def _handle_data_rights_if_intent(
         )
     except Exception as exc:
         logger.error("[HABEAS_DATA] send ack falló conv=%s: %s", conversation_id, exc)
-    # 2. Escalar a humano (un asesor tramita el DSR formal).
-    try:
-        supabase.table("conversations").update({
-            "status": "human_takeover",
-        }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
-    except Exception as exc:
-        logger.warning("[HABEAS_DATA] status update falló: %s", exc)
-    # 3. Notificar al operador (best effort).
+    # 2. Escalar a humano. FAIL-SAFE (auditoría 2026-06-26 #2): si el UPDATE
+    # falla, reintentar una vez; si igual falla, log CRITICAL + la notificación
+    # le pide al operador PAUSA MANUAL. NO dejar la conversación activa
+    # silenciosamente tras un DSR (sería incumplir la promesa Ley 1581).
+    status_set = False
+    for _attempt in range(2):
+        try:
+            supabase.table("conversations").update({
+                "status": "human_takeover",
+            }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            status_set = True
+            break
+        except Exception as exc:
+            logger.warning(
+                "[HABEAS_DATA] status update intento %d falló: %s", _attempt + 1, exc,
+            )
+    if not status_set:
+        logger.critical(
+            "[HABEAS_DATA] NO se pudo pausar la conversación conv=%s tras DSR — "
+            "requiere PAUSA MANUAL del operador (Ley 1581)", conversation_id,
+        )
+    # 3. Notificar al operador — INDEPENDIENTE del status (es la señal de escalación).
+    _pause_warn = "" if status_set else (
+        "\n⚠️ *La auto-pausa del bot FALLÓ — pausa esta conversación MANUALMENTE ya.*"
+    )
     try:
         from telegram_notifications import notify_escalation_async
         await notify_escalation_async(
@@ -425,6 +442,7 @@ async def _handle_data_rights_if_intent(
                 f"El cliente pidió ejercer derechos sobre sus datos: "
                 f"«{matched[:120]}».\n\nConversación pasó a human_takeover. "
                 f"Acción: tramitar el DSR (data_subject_request) + responder al cliente."
+                f"{_pause_warn}"
             ),
             severity="critical",
         )

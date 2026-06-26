@@ -46,9 +46,12 @@ _CART_MUTATIONS = frozenset({
     "add_to_cart", "update_cart_item_quantity", "remove_cart_item",
 })
 # El bot YA reconoce que recotiza/recalcula el envío (no hace falta reescribir).
+# Amplio (auditoría 2026-06-26): captura sinónimos válidos para no reescribir cuando
+# el bot SÍ avisó ('calcular el costo de envío', 'actualizar el envío', etc.).
 _ACK_REQUOTE = re.compile(
-    r"recotiz|recalcul|vuelvo a cotiz|nuevo el env|cambi\w*\s+el\s+env|"
-    r"recalcular\s+(?:el\s+)?env|cotiz\w*\s+(?:de\s+)?nuevo",
+    r"recotiz|recalcul|vuelvo a cotiz|cotiz\w*\s+(?:de\s+)?nuevo|"
+    r"(?:calcul|actualiz|ajust|cambi)\w*\s+(?:el\s+|tu\s+|del\s+)?"
+    r"(?:costo\s+(?:de\s+)?)?env",
     re.IGNORECASE,
 )
 
