@@ -68,6 +68,9 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "get_contact_info",
         "kb_query",
         "send_product_image",
+        # Palanca 6: el prompt de GREETING ofrece tracking ("¿cómo va mi pedido?")
+        # con get_recent_orders → debe estar en el subset o el bot no puede cumplirlo.
+        "get_recent_orders",
         _ESCALATE,
     }) | _CLAIMS_CAPABILITY,  # cliente puede iniciar con "tengo un reclamo"
     # Navegación catálogo. Cart vacío típicamente, pero el cliente puede
@@ -79,6 +82,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "kb_query",
         "get_contact_info",
         "set_shipping_recipient",  # rev. 109 BUG 37 — receptor alterno
+        "get_recent_orders",  # palanca 6: cliente puede preguntar por pedido previo
         _ESCALATE,
     }) | _CLAIMS_CAPABILITY,  # rev. 109 — cliente puede reportar reclamo aquí
     # Construcción cart — todas las ops de carrito + foto producto.

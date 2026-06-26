@@ -33,6 +33,26 @@ total, con evidencia, no por pedazos.
 > invariant con side-effect garantizado**, NO confiar en el prompt. Cada gap "partial cuyo
 > mecanismo es 'el prompt lo guía'" es deuda hasta convertirlo en determinismo.
 
+## Estado de cierre (2026-06-26)
+
+| # | Palanca | Estado |
+|---|---|---|
+| 1 | Reconciliación intra-turno | ✅ cerrada (invariant caso A+B + prompt) |
+| 2 | Gates pre-pago | ✅ cerrada — **verificado: la mayoría ya existía** (status=open, idempotencia, carrier_caps); solo se agregó gate explícito requires_requote + regresión |
+| 3 | Habeas Data no-keyword | ✅ cerrada (detector + escala a humano + acuse, Ley 1581) |
+| 4 | Variante AGOTADA | ✅ cerrada (marcador en catálogo + regla + add_to_cart enforce) |
+| 5 | Cupones | ✅ **ya estaba cubierta** — handler pre-LLM determinístico (detect→apply/revoke) + regla "NUNCA afirmar cupón fuera del bloque" + summary_coherence. NO requirió build |
+| 6 | Tracking en estados tempranos | ✅ cerrada (get_recent_orders agregado a GREETING+EXPLORING subset) |
+| 7 | Pulido | ◐ parcial: off-topic/dominio ✅ (regla universal); **IVA = N/A** (no existe modelo de impuestos — precios IVA-incluido); anáfora-en-greeting + PII-voluntaria = marginales diferidos |
+
+**Disciplina aplicada:** verificar antes de construir. 3 de las "alta" del synth resultaron
+ya-cubiertas o parciales al inspeccionar el código real (gates de pago, cupones; y el
+veredicto/HILO previos). Se evitó construir redundante.
+
+**Follow-up de modelo de datos:** teleporte geográfico inicial (cotiza Bogotá / dirección
+Medellín) requiere un campo `city` ESTRUCTURADO en `contacts` (hoy solo `address` free-text).
+No hackeado.
+
 ## Cada gap → escenario de regresión
 
 El cierre de cada palanca siembra su escenario permanente en `scripts/uat/coherence_scenarios.py`
