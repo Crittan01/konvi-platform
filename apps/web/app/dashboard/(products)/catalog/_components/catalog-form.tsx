@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Loader2, Zap, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Loader2, Zap, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/utils/supabase/client'
@@ -328,6 +329,33 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
   const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
   const [safetyNote, setSafetyNote] = useState('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [aiNotice, setAiNotice] = useState('')
+
+  async function onSuggest() {
+    if (!title.trim()) { setError('Escribe el nombre del producto primero.'); return }
+    setSuggesting(true); setError(null); setAiNotice('')
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) { setError('Sesión expirada'); return }
+      const categoryName = categories.find(c => c.id === categoryId)?.name
+      const resp = await fetch('/api/catalog/suggest-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ title: title.trim(), category_name: categoryName ?? null, current_description: description.trim() || null }),
+      })
+      if (!resp.ok) { const b = await resp.json().catch(() => ({})); setError(b.detail || 'No se pudo generar la sugerencia'); return }
+      const data = await resp.json()
+      if (data.description) setDescription(data.description)
+      if (data.safety_note) setSafetyNote(data.safety_note)
+      setAiNotice(data.disclaimer || 'Borrador generado por IA. Revísalo y edítalo antes de guardar.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al sugerir con IA')
+    } finally {
+      setSuggesting(false)
+    }
+  }
   const [categoryId, setCategoryId] = useState('')
   const [coverUrl, setCoverUrl]     = useState('')
   const [variants, setVariants]     = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
@@ -396,7 +424,18 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
 
       {/* ① INFORMACIÓN */}
       <div className="space-y-3">
-        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">① Información</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">① Información</p>
+          <Button type="button" variant="outline" size="sm" disabled={suggesting}
+            onClick={onSuggest} className="gap-1.5 h-7 text-xs">
+            {suggesting
+              ? <><Loader2 className="h-3 w-3 animate-spin" /> Generando...</>
+              : <><Sparkles className="h-3 w-3" /> Sugerir con IA</>}
+          </Button>
+        </div>
+        {aiNotice && (
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-700/30 rounded px-2 py-1">{aiNotice}</p>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-[10px] font-semibold text-muted-foreground uppercase">Nombre *</label>
