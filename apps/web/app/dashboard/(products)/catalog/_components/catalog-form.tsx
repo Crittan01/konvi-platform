@@ -327,6 +327,7 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
   const router = useRouter()
   const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
+  const [safetyNote, setSafetyNote] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [coverUrl, setCoverUrl]     = useState('')
   const [variants, setVariants]     = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
@@ -355,6 +356,7 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
       const { data: prod, error: e1 } = await supabase.from('products').insert({
         tenant_id: meta.tenant_id, platform_category_id: categoryId || null,
         title: title.trim(), description: description.trim() || null,
+        safety_note: safetyNote.trim() || null,
         cover_image_url: coverUrl.trim() || null, status: 'active',
       }).select().single()
       if (e1 || !prod) throw new Error(e1?.message ?? 'Error al crear producto')
@@ -380,7 +382,7 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
       const { error: e2 } = await supabase.from('product_variations').insert(payload)
       if (e2) throw new Error(e2.message)
 
-      setTitle(''); setDescription(''); setVariants([{ ...DEFAULT_VARIANT }]); setCoverUrl('')
+      setTitle(''); setDescription(''); setSafetyNote(''); setVariants([{ ...DEFAULT_VARIANT }]); setCoverUrl('')
       onCreated(); router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al crear producto')
@@ -413,6 +415,11 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
             <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción (la IA la usa para responder sobre el producto)</label>
             <Textarea value={description} onChange={e => setDescription(e.target.value)}
               placeholder="Ingredientes, beneficios, cómo usarlo..." className="min-h-[70px] text-sm resize-y mt-1" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">⚠️ Nota de seguridad (opcional — la IA SIEMPRE la menciona)</label>
+            <Textarea value={safetyNote} onChange={e => setSafetyNote(e.target.value)}
+              placeholder="Ej.: Diluir antes de usar, no aplicar directo en la piel." className="min-h-[44px] text-sm resize-y mt-1" />
           </div>
         </div>
         <ImageUploadBox name="cover_image_url" defaultUrl={coverUrl}

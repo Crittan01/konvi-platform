@@ -63,6 +63,12 @@ def _render_catalog_block(catalog: list[dict]) -> str:
                 if len(desc) > 200:
                     desc = desc[:200].rsplit(" ", 1)[0] + "…"
                 lines.append(f"    {desc}")
+            # Nota de seguridad — render GARANTIZADO (sin truncar) con marcador
+            # ⚠️ para productos de riesgo (ej. aceites esenciales). El bot debe
+            # mencionarla al hablar de / agregar ese producto (ver regla prompt).
+            safety = str(p.get("safety_note") or "").strip()
+            if safety:
+                lines.append(f"    ⚠️ Seguridad: {safety}")
             for v in (p.get("variants") or []):
                 label = str(v.get("label") or "")
                 price = int(float(v.get("price") or 0))

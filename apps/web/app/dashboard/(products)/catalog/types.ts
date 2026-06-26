@@ -20,6 +20,7 @@ export interface Product {
   id: string
   title: string
   description: string | null
+  safety_note: string | null
   cover_image_url: string | null
   platform_category_id: string | null
   product_variations: Variation[]

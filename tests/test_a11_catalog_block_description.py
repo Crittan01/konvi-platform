@@ -52,6 +52,16 @@ class CatalogBlockDescriptionTests(unittest.TestCase):
         # Truncado a límite de palabra (no corta "palabra" a media):
         self.assertNotIn("palab…", out)
 
+    def test_safety_note_se_renderiza_con_marcador(self):
+        prod = dict(_PROD, safety_note="Diluir antes de usar, no aplicar directo en la piel.")
+        out = _render_catalog_block([prod])
+        self.assertIn("⚠️", out)
+        self.assertIn("Diluir antes de usar", out)
+
+    def test_sin_safety_note_no_renderiza_marcador(self):
+        out = _render_catalog_block([dict(_PROD, safety_note="")])
+        self.assertNotIn("⚠️", out)
+
 
 if __name__ == "__main__":
     unittest.main()

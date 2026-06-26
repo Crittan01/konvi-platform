@@ -54,7 +54,7 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
         result = (
             supabase.table("products")
             .select(
-                "id, title, description, "
+                "id, title, description, safety_note, "
                 "product_variations(id, sku, attributes, price, stock_quantity)"
             )
             .eq("tenant_id", tenant_id)
@@ -112,6 +112,7 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                 "id": product.get("id"),  # product_id real para pedidos
                 "title": product.get("title", "Sin nombre"),
                 "description": product.get("description", ""),
+                "safety_note": product.get("safety_note") or "",
                 "price_min": price_min,
                 "price_max": price_max,
                 "stock_total": total_stock,

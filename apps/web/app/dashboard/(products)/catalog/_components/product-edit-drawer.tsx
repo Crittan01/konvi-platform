@@ -207,6 +207,10 @@ export function ProductEditDrawer({
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción</label>
                   <Textarea name="description" defaultValue={product.description ?? ''} className="min-h-[80px] text-sm resize-y" />
                 </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">⚠️ Nota de seguridad (opcional — la IA SIEMPRE la menciona)</label>
+                  <Textarea name="safety_note" defaultValue={product.safety_note ?? ''} placeholder="Ej.: Diluir antes de usar, no aplicar directo en la piel." className="min-h-[44px] text-sm resize-y" />
+                </div>
               </div>
               <ImageUploadBox name="cover_image_url" defaultUrl={product.cover_image_url ?? ''} tenantId={tenantId} size="lg" label="Imagen portada" />
 
