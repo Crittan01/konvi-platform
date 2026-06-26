@@ -210,6 +210,8 @@ REGLAS:
     * *COORDINADORA* (2 días): *$9.000 COP*
 • NO auto-selecciones carrier sin que el cliente lo nombre.
 • Si solo hay 1 opción válida, preséntala y pide confirmación.
+• Si el cliente AGREGA/QUITA un producto aquí: hazlo, AVISA que el envío se
+  recalcula y vuelve a cotizar (`quote_shipping`) en el MISMO turno.
 
 DISAMBIGUACIÓN crítica:
 • "Servientrega" = nombre de transportadora (carrier).

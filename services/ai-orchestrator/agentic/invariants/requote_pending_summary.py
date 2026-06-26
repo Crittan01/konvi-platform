@@ -41,9 +41,22 @@ _REWRITE = (
     "envío con tu misma dirección de entrega?"
 )
 
+# Tools que mutan el carrito (invalidan el envío al ejecutarse exitosamente).
+_CART_MUTATIONS = frozenset({
+    "add_to_cart", "update_cart_item_quantity", "remove_cart_item",
+})
+# El bot YA reconoce que recotiza/recalcula el envío (no hace falta reescribir).
+_ACK_REQUOTE = re.compile(
+    r"recotiz|recalcul|vuelvo a cotiz|nuevo el env|cambi\w*\s+el\s+env|"
+    r"recalcular\s+(?:el\s+)?env|cotiz\w*\s+(?:de\s+)?nuevo",
+    re.IGNORECASE,
+)
+
 
 class RequotePendingSummaryInvariant:
-    """Bloquea resúmenes/totales cuando el envío está pendiente de recotizar."""
+    """Reconciliación de estado intra-turno: cuando el envío quedó pendiente de
+    recotizar, fuerza que el bot lo avise. Cubre (A) presentar resumen/total/link
+    y (B) mutar el carrito sin avisar la recotización (silent stale)."""
 
     name = "requote_pending_summary"
 
@@ -62,8 +75,21 @@ class RequotePendingSummaryInvariant:
         if not candidate_text or not candidate_text.strip():
             return ok
 
-        # (1) Pre-check barato: sin resumen/total no hay nada que validar.
-        if not _SUMMARY_OR_TOTAL.search(candidate_text):
+        # Reconciliación intra-turno (palanca 3): el guard cubre DOS casos cuando
+        # el envío quedó pendiente de recotizar (requires_requote=True):
+        #   (A) el bot presenta un resumen/total/link → engaña con total sin envío.
+        #   (B) el bot mutó el carrito ESTE turno (add/remove/qty) y NO avisó que
+        #       recotiza → deja al cliente con cotización vieja silenciosamente.
+        shows_summary = bool(_SUMMARY_OR_TOTAL.search(candidate_text))
+        mutated_this_turn = any(
+            c.get("tool") in _CART_MUTATIONS
+            and "error" not in (c.get("result") or {})
+            for c in (tool_call_log or [])
+        )
+        already_ack = bool(_ACK_REQUOTE.search(candidate_text))
+
+        # (1) Pre-check barato: si no hay resumen NI mutación-sin-aviso → nada que validar.
+        if not shows_summary and not (mutated_this_turn and not already_ack):
             return ok
 
         # (2) Estado real del carrito — fuente de verdad.
@@ -90,13 +116,14 @@ class RequotePendingSummaryInvariant:
         # invalidó (agregar/quitar item). NO usamos shipping_cents<=0 solo (también
         # es 0 antes de la 1ª cotización o con envío gratis → falsos positivos).
         if requires_requote:
+            caso = "resumen/total" if shows_summary else "mutación sin avisar recotización"
             return InvariantResult(
                 outcome=InvariantOutcome.REWRITE,
                 invariant_name=self.name,
                 replacement_text=_REWRITE,
                 reason=(
-                    f"resumen/total con envío pendiente de recotizar "
-                    f"(requires_requote=True, "
+                    f"{caso} con envío pendiente de recotizar "
+                    f"(requires_requote=True, mutated_this_turn={mutated_this_turn}, "
                     f"shipping_cents={int(cart.get('shipping_cents') or 0)})"
                 ),
             )

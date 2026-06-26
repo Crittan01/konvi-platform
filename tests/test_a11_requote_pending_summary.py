@@ -39,11 +39,15 @@ _SUMMARY = (
 )
 
 
-def _run(text, cart):
+def _run(text, cart, tool_log=None):
     inv = RequotePendingSummaryInvariant()
     return asyncio.new_event_loop().run_until_complete(inv.validate(
         candidate_text=text, tenant_id="t", conversation_id="c", contact_id=None,
-        supabase=_sb(cart), tool_call_log=[], inbound_text=""))
+        supabase=_sb(cart), tool_call_log=tool_log or [], inbound_text=""))
+
+
+_ADD_LOG = [{"tool": "add_to_cart", "result": {"ok": True}}]
+_REQUOTE_CART = {"requires_requote": True, "shipping_cents": 0, "status": "open"}
 
 
 class RequotePendingSummaryTests(unittest.TestCase):
@@ -76,6 +80,27 @@ class RequotePendingSummaryTests(unittest.TestCase):
         r = _run("Genero el link de pago por $214.000.",
                  {"requires_requote": True, "shipping_cents": 0, "status": "open"})
         self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
+
+    # ── Caso B (palanca 3): mutación sin avisar recotización ──
+    def test_caso_b_agregue_sin_avisar_reescribe(self):
+        # "Listo, lo agregué" tras add_to_cart + envío invalidado, SIN avisar recalc.
+        r = _run("Listo, agregué el Sérum de Vitamina C a tu pedido. ¿Algo más?",
+                 _REQUOTE_CART, tool_log=_ADD_LOG)
+        self.assertEqual(r.outcome, InvariantOutcome.REWRITE)
+        self.assertIn("recalcular", r.replacement_text.lower())
+
+    def test_caso_b_agregue_avisando_recalc_no_dispara(self):
+        # Si el bot YA avisa que recotiza → OK (no reescribe, ya es coherente).
+        r = _run("Agregué el Sérum. Como cambió tu pedido, recalculo el envío. ¿Confirmas dirección?",
+                 _REQUOTE_CART, tool_log=_ADD_LOG)
+        self.assertEqual(r.outcome, InvariantOutcome.OK)
+
+    def test_caso_b_mutacion_sin_requote_no_dispara(self):
+        # add_to_cart pero el envío NUNCA se había cotizado (requires_requote=False) → OK.
+        r = _run("Listo, agregué el Sérum.",
+                 {"requires_requote": False, "shipping_cents": 0, "status": "open"},
+                 tool_log=_ADD_LOG)
+        self.assertEqual(r.outcome, InvariantOutcome.OK)
 
 
 if __name__ == "__main__":
