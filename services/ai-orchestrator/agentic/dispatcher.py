@@ -586,6 +586,7 @@ async def _run_agentic_full(
         PIICoherenceInvariant,
         PIISaveTruthfulnessInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
+        VariantAvailabilityAssertionInvariant,
         InvariantOutcome,
     )
 
@@ -2284,6 +2285,12 @@ async def _run_agentic_full(
             # Cuidado → Kits). Aplica SOLO en outbounds que listen
             # categorías; no toca textos de cotización/pago/etc.
             CanonicalCategoriesInvariant(),
+            # A11 2026-06-26 — verdad transaccional de variantes (principio #4):
+            # si el bot afirma falsamente "solo X presentación" / niega una
+            # variante que SÍ está en stock, lo reescribe a la verdad completa
+            # consultando el catálogo real (cierra el hueco de _NO_CATALOG_STATES
+            # donde el prompt omite el catálogo en checkout). ADR-0024 binario.
+            VariantAvailabilityAssertionInvariant(),
             # A11 2026-06-26 — red de contenido final: el bot NUNCA expone su
             # mecánica interna (KB/sistema/catálogo) al cliente. Después de los
             # invariants de correctitud (sus rewrites ya son exposure-free),

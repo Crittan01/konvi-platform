@@ -20,7 +20,7 @@ from typing import Optional
 from lib.phone_format import format_phone_co
 
 
-def _render_catalog_block(catalog: list[dict]) -> str:
+def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     """Renderiza el catalog como markdown block para embeber en prompt.
 
     Formato compacto pero completo:
@@ -31,6 +31,12 @@ def _render_catalog_block(catalog: list[dict]) -> str:
     Los `variation_id` se incluyen para que el LLM pueda referenciar
     UUIDs reales al invocar `add_to_cart` sin tener que llamar
     `list_catalog` solo para conocerlos.
+
+    `compact=True` (estados de checkout, A11 2026-06-26): emite SOLO título +
+    variantes + precio + variation_id, OMITIENDO descripción y nota de seguridad.
+    Así el bot conoce las variantes reales si el cliente agrega un producto a
+    mitad del checkout (cierra la causa raíz del falso "solo 30ml") sin inflar
+    el prompt de los estados post-carrito.
     """
     if not catalog:
         return "(Catálogo vacío para este tenant.)"
@@ -52,6 +58,17 @@ def _render_catalog_block(catalog: list[dict]) -> str:
             title = str(p.get("title") or "")
             pid = str(p.get("id") or "")
             lines.append(f"- {title} [product_id={pid}]")
+            if compact:
+                # Checkout: solo variantes + precio (sin descripción ni safety).
+                for v in (p.get("variants") or []):
+                    label = str(v.get("label") or "")
+                    price = int(float(v.get("price") or 0))
+                    vid = str(v.get("id") or "")
+                    if not label or price <= 0:
+                        continue
+                    price_str = f"${price:,}".replace(",", ".")
+                    lines.append(f"    * {label}: {price_str} COP [variation_id={vid}]")
+                continue
             # A11 fix: incluir la descripción (beneficios/usos) en el contexto
             # del LLM. Antes solo se emitía título+variantes+precio → el bot NO
             # veía los beneficios (que SÍ existen en products.description) y ante
@@ -64,8 +81,10 @@ def _render_catalog_block(catalog: list[dict]) -> str:
                     desc = desc[:200].rsplit(" ", 1)[0] + "…"
                 lines.append(f"    {desc}")
             # Nota de seguridad — render GARANTIZADO (sin truncar) con marcador
-            # ⚠️ para productos de riesgo (ej. aceites esenciales). El bot debe
-            # mencionarla al hablar de / agregar ese producto (ver regla prompt).
+            # ⚠️ para productos de riesgo (ej. aceites esenciales). El bot la TIENE
+            # en contexto pero la menciona SOLO si el cliente pregunta por
+            # seguridad/uso/precauciones (founder 2026-06-26 — no proactiva: evita
+            # enfriar la compra). Ver regla en agentic/prompt/states.py EXPLORING.
             safety = str(p.get("safety_note") or "").strip()
             if safety:
                 lines.append(f"    ⚠️ Seguridad: {safety}")

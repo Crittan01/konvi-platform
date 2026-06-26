@@ -28,6 +28,7 @@ from agentic.prompt.blocks import (
     safety_block,
     style_block,
     catalog_section,
+    catalog_compact_section,
     customer_section,
     carriers_section,
     payment_methods_section,
@@ -70,6 +71,17 @@ _NO_CATALOG_STATES = frozenset({
     AgenticState.PAYMENT,
     AgenticState.POST_PAYMENT,
     AgenticState.HUMAN_HANDOFF,
+})
+
+# A11 2026-06-26 — estados de checkout que NO reciben el catálogo COMPLETO pero
+# SÍ una referencia COMPACTA (título+variantes+precio). Causa raíz del falso
+# "solo 30ml": el cliente puede agregar productos a mitad del checkout y el bot
+# necesita las variantes reales para no inventar disponibilidad. POST_PAYMENT/
+# PII_COLLECTION/HUMAN_HANDOFF se quedan SIN catálogo (no aplica agregar ahí).
+_COMPACT_CATALOG_STATES = frozenset({
+    AgenticState.SHIPPING_QUOTE,
+    AgenticState.CARRIER_SELECTION,
+    AgenticState.PAYMENT,
 })
 
 
@@ -207,9 +219,12 @@ def build_prompt_for_state(
     if state_fn:
         parts.append(state_fn(tenant_name))
 
-    # Catálogo solo donde el cliente lo necesita (browsing/cart).
+    # Catálogo completo donde el cliente navega/arma carrito; referencia compacta
+    # en checkout (para agregar productos a mitad de flujo sin inventar variantes).
     if state not in _NO_CATALOG_STATES:
         parts.append(catalog_section(catalog))
+    elif state in _COMPACT_CATALOG_STATES:
+        parts.append(catalog_compact_section(catalog))
 
     # Carriers solo en SHIPPING_QUOTE + CARRIER_SELECTION + PAYMENT.
     if state not in _NO_CARRIERS_STATES:

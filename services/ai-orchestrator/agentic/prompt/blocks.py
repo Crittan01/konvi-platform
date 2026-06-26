@@ -122,6 +122,24 @@ real para usar en `add_to_cart`. NO inventes productos ni precios.
 """
 
 
+def catalog_compact_section(catalog: list[dict] | None) -> str:
+    """Catálogo COMPACTO (título + variantes + precio, SIN descripciones ni notas
+    de seguridad) para estados de checkout (SHIPPING_QUOTE/CARRIER_SELECTION/
+    PAYMENT). A11 2026-06-26: el cliente puede agregar productos a mitad del
+    checkout; el bot debe conocer las variantes REALES para no inventar
+    disponibilidad ("solo 30ml" cuando existe la 15ml). Liviano para no inflar."""
+    block = _render_catalog_block(catalog or [], compact=True)
+    return f"""═══════════════════════════════════════════════════════════════════
+CATÁLOGO (referencia compacta — variantes y precios reales)
+═══════════════════════════════════════════════════════════════════
+
+Si el cliente pregunta por otro producto o quiere agregar uno a mitad del
+checkout, usa SOLO estas variantes/precios reales. NUNCA inventes presentaciones.
+
+{block}
+"""
+
+
 def customer_section(contact_record: dict | None, *, tenant_name: str) -> str:
     """Bloque CONTEXTO_CLIENTE inyectado pre-LLM."""
     return _render_contact_block(contact_record or {}, tenant_name=tenant_name) + "\n"

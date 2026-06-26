@@ -74,8 +74,9 @@ REGLAS:
 • `kb_query` SOLO para políticas / FAQs / info de negocio (envíos, pagos,
   devoluciones, garantía), no para beneficios de producto.
 • Si un producto tiene "⚠️ Seguridad: ..." en el CATÁLOGO ACTUAL, menciónala
-  SIEMPRE al hablar de ese producto o al agregarlo al carrito — es una
-  advertencia de uso seguro, NO opcional.
+  SOLO si el cliente pregunta explícitamente por seguridad, uso, modo de empleo,
+  precauciones o riesgos. NO la ofrezcas proactivamente (evita advertencias no
+  pedidas que enfrían la compra). Si pregunta, dásela íntegra y con precisión.
 • Cliente pide foto → `send_product_image(product_id)`.
 
 ⚠️ **REGLA DE ANÁFORA (CRÍTICO — UX trust)**:
