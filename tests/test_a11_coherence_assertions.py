@@ -12,6 +12,7 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/scripts/uat")
 from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,
     check_mentions_all, check_not_mentions, check_cart_items, shows_total,
+    check_no_payment_link_when_requote,
 )
 
 _SUMMARY_NO_SHIP = "📋 *Resumen*\n* Subtotal: $214.000\n* *Total: $214.000 COP*"
@@ -72,6 +73,19 @@ class CoherenceAssertionTests(unittest.TestCase):
         self.assertTrue(ok)
         ok2, _ = check_cart_items({"items_count": 2}, 3)
         self.assertFalse(ok2)
+
+    def test_no_payment_link_when_requote(self):
+        cart = {"requires_requote": True}
+        ok, _ = check_no_payment_link_when_requote(
+            "Aquí está tu link: https://checkout.wompi.co/l/abc123", cart)
+        self.assertFalse(ok)
+        ok2, _ = check_no_payment_link_when_requote(
+            "Recalculo el envío, ¿confirmas tu dirección?", cart)
+        self.assertTrue(ok2)
+        # Sin requote pendiente, un link es legítimo.
+        ok3, _ = check_no_payment_link_when_requote(
+            "Tu link: https://checkout.wompi.co/l/x", {"requires_requote": False})
+        self.assertTrue(ok3)
 
     def test_shows_total(self):
         self.assertTrue(shows_total(_SUMMARY_OK))

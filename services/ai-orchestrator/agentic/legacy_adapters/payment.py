@@ -36,6 +36,19 @@ async def generate_payment_link_for_cart(
     )
     if not cart or not (cart.get("items") or []):
         return {"ok": False, "error": "Cart vacío.", "code": "EMPTY_CART"}
+    # Palanca 2 (gate determinístico): envío pendiente de recotizar = el cliente
+    # agregó/quitó productos o cambió la dirección → la cotización vieja es inválida.
+    # Error específico que guía al LLM (más claro que NO_SHIPPING). Refuerza el
+    # chokepoint de pago contra cobrar envío incorrecto. (Convertido/abandonado ya
+    # los bloquea el filtro status="open" de get_cart_with_items; dedup vive en la
+    # idempotencia ADR-0011; COD-deshabilitado en carrier_capabilities.)
+    if bool(cart.get("requires_requote")):
+        return {
+            "ok": False,
+            "error": ("El envío cambió y debe recotizarse antes de pagar. "
+                      "Llama quote_shipping con la dirección del cliente."),
+            "code": "REQUOTE_PENDING",
+        }
     if int(cart.get("shipping_cents") or 0) <= 0:
         return {
             "ok": False,

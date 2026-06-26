@@ -93,6 +93,19 @@ def check_not_mentions(bot_text: str, needles: list[str]) -> tuple[bool, str]:
     return (True, "ok")
 
 
+_LINK_RE = re.compile(r"https?://\S+|wompi|checkout", re.IGNORECASE)
+
+
+def check_no_payment_link_when_requote(bot_text: str, cart: dict | None) -> tuple[bool, str]:
+    """Si el envío está pendiente de recotizar, el bot NO debe entregar un link de
+    pago real (el gate del adapter lo bloquea; esto verifica el comportamiento)."""
+    if not cart or not bool(cart.get("requires_requote")):
+        return (True, "sin requote pendiente")
+    if _LINK_RE.search(bot_text):
+        return (False, "entregó link de pago con envío pendiente de recotizar")
+    return (True, "ok — no entregó link con envío inválido")
+
+
 def check_cart_items(cart: dict | None, expected: int) -> tuple[bool, str]:
     """El carrito (DB) tiene la cantidad de líneas esperada."""
     if cart is None:

@@ -34,7 +34,7 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/scripts/uat")
 import e2e_chat as E  # noqa: E402
 from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,
-    check_mentions_all, check_not_mentions,
+    check_mentions_all, check_not_mentions, check_no_payment_link_when_requote,
 )
 
 TENANT_ID = E.DEFAULT_TENANT_ID
@@ -138,6 +138,9 @@ SCENARIOS: dict[str, dict] = {
              [partial(check_mentions_all, needles=["15ml", "30ml"])]),
             ("De 30ml por favor",
              [check_no_stale_total, check_total_includes_shipping, check_total_matches_cart]),
+            # — GATE pre-pago: pedir el link con envío pendiente → NO debe entregarlo —
+            ("Perfecto, genérame el link de pago",
+             [check_no_payment_link_when_requote, check_no_stale_total]),
         ],
     },
     # Bug 2026-06-26: bot decía "solo 30ml" con 15ml en stock.
