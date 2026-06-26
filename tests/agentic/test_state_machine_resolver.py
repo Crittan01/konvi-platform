@@ -95,6 +95,44 @@ class StateResolverTests(unittest.TestCase):
         )
         self.assertEqual(self.resolver.resolve(ctx), AgenticState.SHIPPING_QUOTE)
 
+    # ---------- 2026-06-26 (founder, hallazgo live): requires_requote invalida quote ----------
+    _CONTACT = {"consent_given": True, "name": "John",
+                "document_number": "123", "address": "Calle 50, Medellín"}
+
+    def test_requires_requote_invalida_quote_stale_va_a_shipping_quote(self):
+        # Cart con quoted_options STALE + requires_requote=True (agregó item a
+        # mitad del checkout) → has_quote=False → SHIPPING_QUOTE (recotiza limpio).
+        ctx = build_context_from_records(
+            conversation={"status": "bot_active"},
+            cart={
+                "status": "open",
+                "items": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+                "requires_requote": True,
+                "shipping_meta": {"quoted_options": [{"carrier": "ENVIA"}],
+                                  "invalidated_reason": "item_added"},
+                "shipping_cents": 0,
+            },
+            contact=self._CONTACT, history_len=5,
+        )
+        self.assertFalse(ctx.cart_has_shipping_quote)
+        self.assertFalse(ctx.cart_has_carrier_selected)
+        self.assertEqual(self.resolver.resolve(ctx), AgenticState.SHIPPING_QUOTE)
+
+    def test_quote_valido_sin_requote_va_a_carrier_selection(self):
+        # Mismo cart pero requires_requote=False → has_quote=True → CARRIER_SELECTION.
+        ctx = build_context_from_records(
+            conversation={"status": "bot_active"},
+            cart={
+                "status": "open",
+                "items": [{"id": "a"}, {"id": "b"}],
+                "requires_requote": False,
+                "shipping_meta": {"quoted_options": [{"carrier": "ENVIA"}]},
+            },
+            contact=self._CONTACT, history_len=5,
+        )
+        self.assertTrue(ctx.cart_has_shipping_quote)
+        self.assertEqual(self.resolver.resolve(ctx), AgenticState.CARRIER_SELECTION)
+
     # ---------- Regla 6: PII collection ----------
     def test_pii_collection_when_consent_missing(self):
         ctx = ResolutionContext(

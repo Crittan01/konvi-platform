@@ -165,13 +165,21 @@ def build_context_from_records(
     # Schema real: shipping_meta JSONB contiene quoted_options + carrier + rate_id.
     # Cotización está disponible cuando hay quoted_options (pre-select_carrier) O
     # cuando ya hay shipping_cents > 0 (post-select_carrier).
+    #
+    # 2026-06-26 (founder, hallazgo live): `requires_requote=True` (cliente agregó/
+    # quitó items o cambió dirección post-cotización) INVALIDA la cotización aunque
+    # `shipping_meta` conserve quoted_options STALE. Sin esto, has_quote seguía True
+    # → el bot quedaba en CARRIER_SELECTION con opciones viejas y la conversación se
+    # rompía (pedía ciudad de nuevo, deflectía ante "genérame el link"). Gateando por
+    # requires_requote, el resolver enruta a SHIPPING_QUOTE → recotización limpia.
     _meta = c.get("shipping_meta") or {}
-    has_quote = bool(
+    _requires_requote = bool(c.get("requires_requote"))
+    has_quote = (not _requires_requote) and bool(
         _meta.get("quoted_options")
         or c.get("shipping_cents")
         or c.get("shipping_quote_id")
     )
-    has_carrier = bool(
+    has_carrier = (not _requires_requote) and bool(
         _meta.get("carrier")
         or c.get("carrier_id")
         or c.get("carrier_code")
