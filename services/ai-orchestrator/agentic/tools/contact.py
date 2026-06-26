@@ -269,9 +269,17 @@ class RecordConsentTool:
         # marcar "no autorizado").
         try:
             if args.given:
-                # GRANTED: solo flip flag (preserva datos si existían).
+                # GRANTED: flip flag + timestamps denormalizados (A11 UAT fix).
+                # consent_date alimenta la UI Tenant Console; consent_given_at
+                # alimenta el export SAR Habeas Data ("Otorgado en"). El audit
+                # log ya los tenía; estas columnas son las que ven UI + SAR.
+                from datetime import datetime as _dt, timezone as _tz
+                _now_iso = _dt.now(_tz.utc).isoformat()
                 ctx.supabase.table("contacts").update({
                     "consent_given": True,
+                    "consent_date": _now_iso,
+                    "consent_given_at": _now_iso,
+                    "consent_revoked_at": None,
                 }).eq("id", ctx.contact_id).eq("tenant_id", ctx.tenant_id).execute()
             else:
                 # REVOKED: anonimizar campos PII (Habeas Data Ley 1581

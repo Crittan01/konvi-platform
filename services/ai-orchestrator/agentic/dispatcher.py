@@ -1562,9 +1562,22 @@ async def _run_agentic_full(
         if consent_match and contact_id:
             new_consent = consent_match["intent"] == "consent_granted"
             try:
-                supabase.table("contacts").update({
-                    "consent_given": new_consent,
-                }).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
+                # A11 UAT fix: setear timestamps denormalizados al otorgar.
+                # Antes solo se flipeaba consent_given → consent_date/consent_given_at
+                # quedaban NULL (UI Tenant Console sin fecha + export SAR sin
+                # "Otorgado en"). El audit log canónico SÍ los tenía, pero estas
+                # columnas alimentan UI + reporte SAR Habeas Data.
+                from datetime import datetime as _dt, timezone as _tz
+                _consent_fields = {"consent_given": new_consent}
+                if new_consent:
+                    _now_iso = _dt.now(_tz.utc).isoformat()
+                    _consent_fields["consent_date"] = _now_iso
+                    _consent_fields["consent_given_at"] = _now_iso
+                    # Re-grant tras revocación: limpiar marca de revocación.
+                    _consent_fields["consent_revoked_at"] = None
+                supabase.table("contacts").update(
+                    _consent_fields
+                ).eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 # Audit log Habeas Data
                 supabase.table("consent_audit_log").insert({
                     "tenant_id": tenant_id,
