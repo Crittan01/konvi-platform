@@ -1353,13 +1353,49 @@ async def _run_agentic_full(
                     )
                     return
                 else:
-                    # 0 órdenes cancelables → mensaje natural
-                    _no_msg = (
-                        "No encuentro pedidos activos para cancelar en esta "
-                        "conversación. ¿Tienes el número del pedido (8 "
-                        "caracteres después del #)? También te conecto con "
-                        "un especialista si prefieres."
-                    )
+                    # 2026-06-26 (conversación real, founder S11): si NO hay orden
+                    # pero SÍ un carrito con items, el cliente quiere ABANDONAR el
+                    # carrito (no cancelar una orden) → acusar coherente + marcar
+                    # abandonado. Sin esto el bot decía "no encuentro pedidos para
+                    # cancelar" — incoherente con "ya no quiero nada".
+                    _abandoned_cart = False
+                    try:
+                        _oc = (
+                            supabase.table("conversation_carts")
+                            .select("id")
+                            .eq("tenant_id", tenant_id)
+                            .eq("conversation_id", conversation_id)
+                            .eq("status", "open")
+                            .limit(1).execute()
+                        )
+                        if _oc.data:
+                            _cid = _oc.data[0]["id"]
+                            _it = (
+                                supabase.table("conversation_cart_items")
+                                .select("id")
+                                .eq("tenant_id", tenant_id)
+                                .eq("cart_id", _cid).limit(1).execute()
+                            )
+                            if _it.data:
+                                supabase.table("conversation_carts").update(
+                                    {"status": "abandoned"}
+                                ).eq("id", _cid).eq("tenant_id", tenant_id).execute()
+                                _abandoned_cart = True
+                    except Exception as _exc:
+                        logger.warning("[CANCEL] abandon cart check falló: %s", _exc)
+                    if _abandoned_cart:
+                        _no_msg = (
+                            "Listo, descarté lo que tenías en el carrito — no "
+                            "quedó nada pendiente. Cuando quieras retomar o ver "
+                            "algo más, aquí estoy."
+                        )
+                    else:
+                        _no_msg = (
+                            "No encuentro pedidos activos para cancelar en esta "
+                            "conversación. ¿Tienes el número del pedido (8 "
+                            "caracteres después del #)? También te conecto con "
+                            "un especialista si prefieres."
+                        )
                     await _send_outbound_text(
                         supabase=supabase, conversation_id=conversation_id,
                         tenant_id=tenant_id, text=_no_msg,
