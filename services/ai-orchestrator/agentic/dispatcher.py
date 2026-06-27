@@ -776,6 +776,7 @@ async def _run_agentic_full(
         PIISaveTruthfulnessInvariant,
         PostToolCoherenceInvariant, SummaryCoherenceInvariant,
         RequotePendingSummaryInvariant,
+        ToolCodeLeakInvariant,
         VariantAvailabilityAssertionInvariant,
         InvariantOutcome,
     )
@@ -2527,11 +2528,18 @@ async def _run_agentic_full(
     is_silent_escalation = getattr(result, "requires_silent_escalation", False)
     if is_silent_escalation:
         invariant_set = [
+            # 2026-06-26: aun en escalación silenciosa, una tool-call filtrada como
+            # texto JAMÁS debe llegar al cliente. Primero.
+            ToolCodeLeakInvariant(),
             NoInternalsExposureInvariant(),
             NoDecorativeEmojiInvariant(),
         ]
     else:
         invariant_set = [
+            # 2026-06-26 (certificación ADR-0026) — PRIMERO: si Gemini filtró una
+            # tool-call como texto (`tool_code\nprint(add_to_cart(...))`), reemplazar
+            # por recovery seguro ANTES que cualquier otro invariant procese el código.
+            ToolCodeLeakInvariant(),
             # Rev. 108 CONSOLIDADO (founder 2026-05-27) — cart render
             # coherence: 4 cases (cart-state coherente con tool, items
             # affirmed vs real, add_to_cart pricing, category completeness).

@@ -36,6 +36,7 @@ from agentic.invariants.requote_pending_summary import (
     RequotePendingSummaryInvariant,
 )
 from agentic.invariants.summary_coherence import SummaryCoherenceInvariant
+from agentic.invariants.tool_code_leak import ToolCodeLeakInvariant
 from agentic.invariants.variant_availability_assertion import (
     VariantAvailabilityAssertionInvariant,
 )
@@ -59,5 +60,6 @@ __all__ = [
     "PostToolCoherenceInvariant",
     "RequotePendingSummaryInvariant",
     "SummaryCoherenceInvariant",
+    "ToolCodeLeakInvariant",
     "VariantAvailabilityAssertionInvariant",
 ]
