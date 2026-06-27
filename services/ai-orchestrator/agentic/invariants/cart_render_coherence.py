@@ -171,7 +171,7 @@ async def _get_cart_state(
     try:
         cart_q = (
             supabase.table("conversation_carts")
-            .select("id, subtotal_cents, total_cents, requires_requote")
+            .select("id, subtotal_cents, total_cents, requires_requote, shipping_meta")
             .eq("conversation_id", conversation_id)
             .eq("tenant_id", tenant_id)
             .eq("status", "open")
@@ -282,6 +282,17 @@ def _build_pricing_replacement(
             f"{_format_cop(line_total)}."
         )
     subtotal_line = f"Subtotal: *{_format_cop(subtotal)}*."
+    # ADR-0026: si el add (vía LLM, no resolver) invalidó un envío YA cotizado y hay una
+    # ciudad persistida, ser coherente con la recotización — mismo criterio que el
+    # renderizador canónico (no repreguntar la ciudad). Cierra el post-mutación también
+    # en el path del invariant (no solo el pre-LLM purchase).
+    _requote_city = (cart_row.get("shipping_meta") or {}).get("city") \
+        if cart_row.get("requires_requote") else None
+    if _requote_city:
+        subtotal_line += (
+            f"\nComo cambió tu pedido, recalculo el envío a *{_requote_city}*. "
+            "Dame un segundo y te muestro las opciones actualizadas."
+        )
 
     if not original_text:
         return f"{enriched}\n{subtotal_line}"

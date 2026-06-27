@@ -111,6 +111,34 @@ class CartRenderModesTests(unittest.TestCase):
         self.assertTrue(out.startswith("Listo, Ana. Tu pedido va así:"))
 
 
+class PricingReplacementRequoteAwareTests(unittest.TestCase):
+    """ADR-0026: el invariant cart_render_coherence (Case C, add vía LLM) ahora es
+    consciente de la recotización con la ciudad persistida."""
+
+    def _replace(self, cart_row):
+        from agentic.invariants.cart_render_coherence import _build_pricing_replacement
+        add_result = {"added": {"title": "Jabón Artesanal de Coco", "variant_label": "100g",
+                                "quantity": 1, "unit_price_cop": 24000}}
+        return _build_pricing_replacement(add_result, cart_row, "")
+
+    def test_requote_pending_with_city_mentions_recalculo(self):
+        out = self._replace({"subtotal_cents": 10_900_000, "requires_requote": True,
+                             "shipping_meta": {"city": "Medellín"}})
+        self.assertIn("Subtotal: *$109.000*", out)
+        self.assertIn("recalculo el envío a *Medellín*", out)
+
+    def test_no_requote_no_recalculo_line(self):
+        out = self._replace({"subtotal_cents": 2_400_000, "requires_requote": False,
+                             "shipping_meta": {}})
+        self.assertIn("Subtotal: *$24.000*", out)
+        self.assertNotIn("recalculo", out.lower())
+
+    def test_requote_but_no_city_no_recalculo(self):
+        out = self._replace({"subtotal_cents": 2_400_000, "requires_requote": True,
+                             "shipping_meta": {}})
+        self.assertNotIn("recalculo", out.lower())
+
+
 class CartFactsForLLMTests(unittest.TestCase):
     def test_facts_real_subtotal_and_known_city_quoted(self):
         cart = _cart(shipping_cents=1_650_000, total_cents=12_550_000,
