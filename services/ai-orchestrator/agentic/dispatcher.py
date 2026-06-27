@@ -547,6 +547,81 @@ def _load_tenant_prompt_context(
     return ctx
 
 
+async def _compose_purchase_outbound_canonical(
+    *,
+    supabase: Any,
+    tenant_id: str,
+    conversation_id: str,
+    contact_id: str,
+    contact: Optional[dict],
+    customer_name: Optional[str],
+    catalog: Any,
+    content: str,
+    agent: Any,
+    intent_resolution: dict,
+) -> str:
+    """ADR-0026 Pieza C — compone el outbound del path pre-LLM purchase usando el
+    renderizador canónico (Pieza B) con el cart REAL + destino persistido (Pieza A).
+
+    - Subtotal SIEMPRE real (del cart, no parcial).
+    - Si el add invalidó un envío con ciudad conocida → recotiza determinísticamente y
+      presenta opciones (sin repreguntar la ciudad).
+    - Fallback seguro a compose_outbound_from_resolution si no hay cart.
+    """
+    from agentic.purchase_intent_resolver import compose_outbound_from_resolution
+    from tools.cart_tool import get_cart_with_items, get_shipping_destination
+    from agentic.cart_render import render_cart_state_snapshot
+
+    cart = None
+    try:
+        cart = get_cart_with_items(
+            supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning("[ADR0026] get_cart_with_items falló en pre-LLM purchase: %s", exc)
+    if not cart:
+        # Sin cart legible → fallback al composer legacy (no rompemos el turno).
+        return compose_outbound_from_resolution(
+            intent_resolution, customer_name=customer_name,
+        )
+
+    destination = get_shipping_destination(cart, contact)
+    requote_options = None
+    # Recotización determinística: solo si el envío quedó pendiente CON ciudad conocida
+    # y el agente permite cotizar.
+    if (bool(cart.get("requires_requote")) and destination and destination.get("city")
+            and _agent_permits_tool(agent, "quote_shipping")):
+        try:
+            from agentic.tools.shipping import QuoteShippingTool, QuoteShippingArgs
+            from agentic.tools.base import ToolContext
+            _ctx = ToolContext(
+                tenant_id=tenant_id, conversation_id=conversation_id,
+                contact_id=contact_id, supabase=supabase,
+                catalog_cache=catalog, logger=logger,
+                extras={"recent_inbound_texts": [content]},
+            )
+            _res = await QuoteShippingTool().execute(
+                QuoteShippingArgs(city=destination["city"]), _ctx)
+            if _res and _res.success:
+                requote_options = (_res.data or {}).get("options") or None
+                # Recargar cart: el re-quote pudo refrescar quoted_options/meta.
+                cart = get_cart_with_items(
+                    supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                ) or cart
+            logger.info(
+                "[ADR0026] pre-LLM purchase auto-recotización conv=%s city=%s opts=%s",
+                conversation_id, destination["city"],
+                len(requote_options or []),
+            )
+        except Exception as exc:
+            logger.warning("[ADR0026] auto-recotización pre-LLM falló: %s", exc)
+
+    return render_cart_state_snapshot(
+        cart=cart, contact=contact, destination=destination,
+        customer_name=customer_name, requote_options=requote_options,
+    )
+
+
 # ─── Agentic full path (cutover) ───────────────────────────────────────────
 
 
@@ -1895,9 +1970,32 @@ async def _run_agentic_full(
             # Solo primer nombre, más natural.
             if customer_name and " " in customer_name:
                 customer_name = customer_name.split(" ", 1)[0]
-            outbound = compose_outbound_from_resolution(
-                intent_resolution, customer_name=customer_name,
-            )
+            # ADR-0026 Pieza C: el path pre-LLM purchase deja de componer outbound
+            # CIEGO (subtotal parcial + repreguntar ciudad). Recarga el cart real y usa
+            # el renderizador canónico (Pieza B) con el destino persistido (Pieza A). Si
+            # el add invalidó un envío con ciudad conocida, recotiza determinísticamente.
+            if intent_resolution.get("ambiguous"):
+                # Mix con variante ambigua: el foco es preguntar la variante; pasamos el
+                # subtotal REAL del cart para no mostrar subtotal parcial.
+                _cart_sub = None
+                try:
+                    from tools.cart_tool import get_cart_with_items as _gcwi
+                    _cmix = _gcwi(supabase, conversation_id=conversation_id, tenant_id=tenant_id)
+                    if _cmix:
+                        _cart_sub = int(_cmix.get("subtotal_cents") or 0) // 100
+                except Exception:
+                    pass
+                outbound = compose_outbound_from_resolution(
+                    intent_resolution, customer_name=customer_name, cart_subtotal_cop=_cart_sub,
+                )
+            else:
+                outbound = await _compose_purchase_outbound_canonical(
+                    supabase=supabase, tenant_id=tenant_id,
+                    conversation_id=conversation_id, contact_id=contact_id,
+                    contact=contact, customer_name=customer_name,
+                    catalog=catalog, content=content, agent=_agent,
+                    intent_resolution=intent_resolution,
+                )
             logger.info(
                 "[AGENTIC_PRE_LLM] conv=%s purchase_intent resolved=%d "
                 "ambiguous=%d — bypaseando Gemini",
