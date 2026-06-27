@@ -958,7 +958,7 @@ def invalidate_shipping(
     address en shipping_meta para que el bot no tenga que repreguntar."""
     cur = (
         supabase.table("conversation_carts")
-        .select("shipping_meta, subtotal_cents, discount_cents")
+        .select("shipping_meta, subtotal_cents, discount_cents, shipping_cents")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -968,6 +968,12 @@ def invalidate_shipping(
         return {"cart_id": cart_id, "invalidated": False}
     row = cur.data[0]
     meta = row.get("shipping_meta") or {}
+    # 2026-06-26 (conversación real, founder): requires_requote SOLO si HABÍA un
+    # envío real que invalidar (cotizado: quoted_options o shipping_cents>0). En el
+    # PRIMER add (sin envío aún) no hay nada que recotizar → requires_requote=False,
+    # si no el invariant de recotización dispara un falso "recalculo el envío" antes
+    # de siquiera pedir la dirección. Bug que el script quemado nunca habría pillado.
+    had_shipping = bool(meta.get("quoted_options")) or int(row.get("shipping_cents") or 0) > 0
     # Conservar address (city, dane_code, address_line) y limpiar el resto.
     preserved = {
         k: meta.get(k)
@@ -982,7 +988,7 @@ def invalidate_shipping(
         "shipping_cents": 0,
         "shipping_meta": preserved,
         "total_cents": new_total,
-        "requires_requote": True,
+        "requires_requote": had_shipping,
     }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
     logger.info("[CART] shipping invalidated cart=%s reason=%s", cart_id[:8], reason)
     _emit_cart_event(
