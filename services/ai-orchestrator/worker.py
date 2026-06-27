@@ -23,6 +23,15 @@ MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "5"))
 # mensajes rápidos, esperamos esta ventana antes de procesar para juntar
 # en un solo input al LLM (no perder contexto al ver solo el último msg).
 MESSAGE_COALESCE_WINDOW_SECONDS = int(os.getenv("MESSAGE_COALESCE_WINDOW_SECONDS", "5"))
+# 2026-06-27 (ADR worker-robustez Capa A) — recuperación PERIÓDICA de mensajes
+# huérfanos en 'processing'. Antes el sweep solo corría en startup → un mensaje
+# atascado por una carrera de coalescing quedaba bloqueado hasta el próximo restart.
+# Umbral GENEROSO (muy por encima del procesamiento real ~9-60s) para NUNCA reclamar
+# un mensaje legítimamente en curso → evita doble procesamiento. Configurable.
+STALE_PROCESSING_RECLAIM_MINUTES = int(os.getenv("STALE_PROCESSING_RECLAIM_MINUTES", "3"))
+STALE_PROCESSING_SWEEP_INTERVAL_SECONDS = int(
+    os.getenv("STALE_PROCESSING_SWEEP_INTERVAL_SECONDS", "60")
+)
 HUMAN_TAKEOVER_QUEUE_ENABLED = os.getenv("HUMAN_TAKEOVER_QUEUE_ENABLED", "true").lower() in {
     "1", "true", "yes", "on"
 }
@@ -240,6 +249,8 @@ class OrchestratorWorker:
         self._wompi_void_poll_enabled = WOMPI_VOID_POLL_ENABLED
         self._last_wompi_void_poll_at = 0.0
         self._last_sla_check_at = 0.0
+        # Capa A worker-robustez — recuperación periódica de mensajes huérfanos.
+        self._last_stale_sweep_at = 0.0
         self._anti_hibernation_enabled = ANTI_HIBERNATION_ENABLED and bool(ANTI_HIBERNATION_PING_URL)
         self._last_ping_at = 0.0
         # Rev. 109 J.2.4.4 Fase 2 — Tenant hard-delete cron timestamps.
@@ -295,6 +306,10 @@ class OrchestratorWorker:
     async def _poll_cycle(self):
         """Ejecuta ciclo de inbound + notificaciones operacionales + mantenimiento."""
         self._metrics["poll_cycles"] += 1
+        # Capa A — recuperación periódica de mensajes huérfanos en 'processing'
+        # (carrera de coalescing/claim). ANTES del poll inbound para que un mensaje
+        # re-encolado entre de inmediato al ciclo.
+        await self._sweep_stale_processing_if_due()
         await self._poll_inbound_messages()
         await self._poll_human_takeover_notifications()
         await self._poll_whatsapp_outbound_messages()
@@ -308,35 +323,70 @@ class OrchestratorWorker:
         await self._run_tenant_hard_delete_if_due()
         await self._collect_health_metrics_if_due()
 
+    def _combine_by_conversation(self, msgs: list[dict]) -> list[dict]:
+        """Rev. 85 — combina mensajes consecutivos de la MISMA conversación en uno solo
+        (el último con el content combinado por `\n\n`), marcando los anteriores como
+        'processed' (coalesced). Mensajes de convs distintas pasan independientes.
+
+        Evita el bug donde "Hola" como último msg tras un flujo de compra hacía al bot
+        resetear al saludo y perder el contexto previo. Síncrono (sin espera) — la espera
+        de la ventana vive en `_coalesce_claimed_by_conversation`.
+        """
+        if not msgs:
+            return msgs
+        from collections import OrderedDict
+        by_conv: dict = OrderedDict()
+        for m in msgs:
+            by_conv.setdefault(m["conversation_id"], []).append(m)
+
+        coalesced: list[dict] = []
+        for conv_id, conv_msgs in by_conv.items():
+            if len(conv_msgs) >= 2:
+                conv_msgs = sorted(conv_msgs, key=lambda m: str(m.get("created_at") or ""))
+                older_ids = [m["id"] for m in conv_msgs[:-1]]
+                try:
+                    self.supabase.table("messages").update({
+                        "processing_status": "processed",
+                        "processed": True,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                        "skip_reason": "coalesced_into_next",
+                    }).in_("id", older_ids).eq("tenant_id", conv_msgs[0]["tenant_id"]).execute()
+                except Exception as exc:
+                    logger.warning("[COALESCE] no pude marcar coalesced: %s", exc)
+                last = dict(conv_msgs[-1])
+                last["content"] = "\n\n".join(str(m.get("content") or "") for m in conv_msgs)
+                logger.info(
+                    "[COALESCE] conv=%s coalesce %d mensajes en uno (chars=%d)",
+                    conv_id[:8], len(conv_msgs), len(last["content"]),
+                )
+                coalesced.append(last)
+            else:
+                coalesced.append(conv_msgs[0])
+        return coalesced
+
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
-        """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente.
+        """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente (coalesce-first).
 
-        Si una conversación tiene un mensaje que llegó hace <5s, esperamos
-        el resto de la ventana antes de procesar — eso da tiempo a que
-        lleguen mensajes adicionales del cliente que quería continuar.
+        Si una conv tiene un mensaje muy reciente (<ventana), espera el resto de la ventana
+        y RE-FETCHEA todos los pending para capturar fragmentos que lleguen mientras espera
+        (ej. "Hola" / "Buenos días" / "Quiero un jabón" / "de Coco"), y los combina en un
+        solo input al LLM. Luego el caller reclama+despacha el combinado.
 
-        Cuando hay 2+ mensajes pendientes de la misma conversación tras la
-        ventana, los unimos en un solo input al LLM (separados por `\n\n`)
-        y marcamos los anteriores como `processed` con metadata indicando
-        que fueron coalesced. El último mensaje original es el que pasa
-        al orchestrator con el contenido combinado.
-
-        Esto evita el bug observado donde "Hola" como último msg después
-        de un flujo de compra hacía al bot resetear al saludo y perder
-        el contexto previo.
+        NOTA (2026-06-27): se evaluó "claim-first" para cerrar la carrera de claim, pero
+        DISPERSABA los fragmentos (cada uno reclamado por separado → 4 respuestas en vez de
+        1). El coalescing requiere AGRUPAR el pending ANTES de reclamar. La carrera de claim
+        se maneja con la red de seguridad (recuperación periódica Capa A + reset en except),
+        que recupera cualquier huérfano sin romper el coalescing.
         """
         if not pending:
             return pending
-        # Agrupar por conversation_id manteniendo orden cronológico
         from collections import OrderedDict
         by_conv: dict = OrderedDict()
         for m in pending:
             by_conv.setdefault(m["conversation_id"], []).append(m)
 
-        # Si hay solo una conv y todos los mensajes son recientes, vale
-        # la pena esperar la ventana para que lleguen más.
-        max_age = 0.0
         now = datetime.now(timezone.utc)
+        max_age = 0.0
         for msgs in by_conv.values():
             for m in msgs:
                 ts = m.get("created_at")
@@ -344,11 +394,10 @@ class OrchestratorWorker:
                     continue
                 try:
                     dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-                    age = (now - dt).total_seconds()
-                    if age > max_age:
-                        max_age = age
+                    max_age = max(max_age, (now - dt).total_seconds())
                 except (ValueError, TypeError):
                     continue
+
         if max_age < MESSAGE_COALESCE_WINDOW_SECONDS:
             wait_more = MESSAGE_COALESCE_WINDOW_SECONDS - max_age
             logger.info(
@@ -356,7 +405,6 @@ class OrchestratorWorker:
                 max_age, wait_more,
             )
             await asyncio.sleep(wait_more)
-            # Re-fetch tras la espera para capturar nuevos pendings.
             re_result = (
                 self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_inbound_polling
                 .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
@@ -367,37 +415,8 @@ class OrchestratorWorker:
                 .execute()
             )
             pending = re_result.data or pending
-            by_conv.clear()
-            for m in pending:
-                by_conv.setdefault(m["conversation_id"], []).append(m)
 
-        # Ahora coalescer cada conv que tenga 2+ mensajes
-        coalesced: list[dict] = []
-        for conv_id, msgs in by_conv.items():
-            if len(msgs) >= 2:
-                # Marcar los anteriores como processed (coalesced)
-                older_ids = [m["id"] for m in msgs[:-1]]
-                try:
-                    self.supabase.table("messages").update({
-                        "processing_status": "processed",
-                        "processed": True,
-                        "processed_at": datetime.now(timezone.utc).isoformat(),
-                        "skip_reason": "coalesced_into_next",
-                    }).in_("id", older_ids).eq("tenant_id", msgs[0]["tenant_id"]).execute()
-                except Exception as exc:
-                    logger.warning("[COALESCE] no pude marcar coalesced: %s", exc)
-                # El último msg lleva el content combinado
-                last = dict(msgs[-1])
-                combined = "\n\n".join(str(m.get("content") or "") for m in msgs)
-                last["content"] = combined
-                logger.info(
-                    "[COALESCE] conv=%s coalesce %d mensajes en uno (chars=%d)",
-                    conv_id[:8], len(msgs), len(combined),
-                )
-                coalesced.append(last)
-            else:
-                coalesced.extend(msgs)
-        return coalesced
+        return self._combine_by_conversation(pending)
 
     async def _poll_inbound_messages(self):
         """Busca mensajes inbound pendientes y los orquesta.
@@ -439,48 +458,45 @@ class OrchestratorWorker:
 
         logger.info(f"📬 {len(pending)} mensaje(s) pendiente(s) encontrado(s)")
 
-        # Rev. 85 — Coalesce: agrupar por conversation_id. Si la conv tiene
-        # mensajes muy recientes (<5s), esperar el resto de la ventana para
-        # capturar mensajes adicionales que lleguen mientras esperamos.
+        # Coalesce-first: agrupar fragmentos del mismo cliente ANTES de reclamar (preserva
+        # el coalescing — el claim-first lo dispersaba). La carrera de claim se maneja con
+        # la red de seguridad (Capa A recuperación periódica + reset en except), sin romper
+        # el coalescing.
         pending = await self._coalesce_pending_by_conversation(pending)
 
-        # Procesar en secuencia para no sobrecargar la API de Gemini
+        # Procesar en secuencia (reclamar atómicamente + despachar) para no sobrecargar Gemini.
         for msg in pending:
-            try:
-                attempts = int(msg.get("processing_attempts") or 0) + 1
-                if attempts > MAX_PROCESSING_ATTEMPTS:
+            attempts = int(msg.get("processing_attempts") or 0) + 1
+            if attempts > MAX_PROCESSING_ATTEMPTS:
+                try:
                     self.supabase.table("messages").update({
                         "processing_status": "failed",
                         "processed": True,
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                         "last_error": "max_attempts_exceeded",
-                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).execute()
-                    logger.warning(
-                        "Mensaje %s marcado failed por max_attempts=%s",
-                        msg["id"],
-                        MAX_PROCESSING_ATTEMPTS,
-                    )
-                    continue
-
-                # Lock atómico (compare-and-swap): solo procesamos si el mensaje
-                # sigue en 'pending'. Si otro worker ya lo cambió, el update
-                # retorna data vacía y saltamos.
-                lock_res = self.supabase.table("messages").update({
-                    "processing_attempts": attempts,
-                    "processing_status": PROCESSING_STATUS_PROCESSING,
-                    "last_error": None,
-                }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq("processing_status", "pending").execute()
-
-                if not lock_res.data:
-                    logger.info(
-                        "Mensaje %s ya fue tomado por otro worker. Saltando.", msg["id"]
-                    )
-                    continue
-
-                # ADR-0018 Fase B+C: dispatcher decide legacy/agentic/shadow
-                # según flags (tenant_integrations.meta.agentic_enabled +
-                # AGENTIC_SHADOW_ENABLED env). Sin flags activos →
-                # comportamiento legacy idéntico al pre-refactor.
+                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
+                        "processing_status", "pending").execute()
+                except Exception as exc:
+                    logger.warning("No pude marcar failed %s: %s", msg["id"], exc)
+                logger.warning(
+                    "Mensaje %s marcado failed por max_attempts=%s",
+                    msg["id"], MAX_PROCESSING_ATTEMPTS,
+                )
+                continue
+            # Lock atómico (CAS): solo procesamos si sigue 'pending'.
+            lock_res = self.supabase.table("messages").update({
+                "processing_attempts": attempts,
+                "processing_status": PROCESSING_STATUS_PROCESSING,
+                "last_error": None,
+            }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
+                "processing_status", "pending").execute()
+            if not lock_res.data:
+                logger.info(
+                    "Mensaje %s ya fue tomado por otro worker. Saltando.", msg["id"]
+                )
+                continue
+            try:
+                # ADR-0018 Fase B+C: dispatcher decide legacy/agentic/shadow según flags.
                 await _agentic_dispatch_message(
                     self.supabase,
                     message_id=msg["id"],
@@ -493,7 +509,30 @@ class OrchestratorWorker:
                 logger.error(
                     f"Error procesando mensaje {msg['id']}: {e}", exc_info=True
                 )
-                # El core orquestador intenta registrar failed. Continuar con el siguiente.
+                # Worker-robustez (except-fix): si el dispatch lanzó (mensaje 'processing')
+                # sin que el core lo marcara, quedaría HUÉRFANO. Lo reseteamos con CAS-guard
+                # (solo si SIGUE 'processing', sin pisar lo que el core ya marcó): failed si
+                # superó max attempts, si no pending para reintentar.
+                try:
+                    if attempts >= MAX_PROCESSING_ATTEMPTS:
+                        self.supabase.table("messages").update({
+                            "processing_status": "failed",
+                            "processed": True,
+                            "processed_at": datetime.now(timezone.utc).isoformat(),
+                            "last_error": f"dispatch_exception_max_attempts: {str(e)[:180]}",
+                        }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
+                            "processing_status", "processing").execute()
+                    else:
+                        self.supabase.table("messages").update({
+                            "processing_status": "pending",
+                            "last_error": f"dispatch_exception_retry: {str(e)[:180]}",
+                        }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
+                            "processing_status", "processing").execute()
+                except Exception as _reset_exc:
+                    logger.error(
+                        "No pude resetear mensaje %s tras excepción de dispatch: %s",
+                        msg["id"], _reset_exc,
+                    )
 
     async def _poll_human_takeover_notifications(self):
         """
@@ -937,39 +976,40 @@ class OrchestratorWorker:
                 logger.error("[SLA] error procesando conv=%s: %s", conv_id, exc)
                 continue
 
-    async def _sweep_stale_messages_on_startup(self) -> None:
-        """
-        Al iniciar el worker, reestablece mensajes atascados en 'pending' o 'processing'
-        que llevan más de 5 minutos sin avanzar.
+    async def _reclaim_stale_inbound(
+        self, *, threshold_minutes: int, statuses: list[str], label: str,
+    ) -> None:
+        """Core reusable: re-encola mensajes inbound atascados que llevan más de
+        `threshold_minutes` sin avanzar (created_at < cutoff). Reestablece a 'pending'
+        salvo que superen MAX_PROCESSING_ATTEMPTS (→ 'failed'). CAS-guard en el reset.
 
-        Escenario típico: el worker anterior se reinició (Render Free hiberna / deploy)
-        dejando mensajes en 'processing' que nunca completaron. Sin este sweep, esos
-        mensajes quedarían bloqueados indefinidamente porque el nuevo loop solo consume
-        mensajes nuevos.
-
-        Solo reestablece a 'pending' si no superaron MAX_PROCESSING_ATTEMPTS.
+        Umbral GENEROSO por diseño: muy por encima del tiempo real de procesamiento
+        (~9-60s) para NUNCA reclamar un mensaje legítimamente en curso (evita doble
+        procesamiento). Sin columna processing_started_at, `created_at` es el proxy: en
+        operación normal el mensaje se reclama segundos tras crearse, así que created_at
+        ≈ tiempo de claim. (`processing_started_at` sería el fix perfecto bajo carga
+        pesada — follow-up con migración.)
         """
         stale_cutoff = (
-            datetime.now(timezone.utc) - timedelta(minutes=5)
+            datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
         ).isoformat()
-
         try:
             stale_res = (
                 self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_startup_recovery
                 # A11 audit 2026-06-25 (P0 BUG_REAL Clase A): incluir tenant_id —
                 # las updates posteriores hacen .eq("tenant_id", msg["tenant_id"])
-                # y sin él en el SELECT lanzaban KeyError → recuperación de
-                # mensajes atascados rota + posible doble-envío.
+                # y sin él en el SELECT lanzaban KeyError → recuperación rota.
                 .select("id, processing_attempts, tenant_id")
                 .eq("direction", "inbound")
-                .in_("processing_status", ["pending", "processing"])
+                .in_("processing_status", statuses)
                 .lt("created_at", stale_cutoff)
                 .limit(100)
                 .execute()
             )
             stale = stale_res.data or []
             if not stale:
-                logger.info("[STARTUP] Sin mensajes atascados — OK")
+                if label == "STARTUP":
+                    logger.info("[STARTUP] Sin mensajes atascados — OK")
                 return
 
             recovered = 0
@@ -981,21 +1021,48 @@ class OrchestratorWorker:
                         "processing_status": "failed",
                         "processed": True,
                         "processed_at": datetime.now(timezone.utc).isoformat(),
-                        "last_error": "abandoned_at_startup_max_attempts",
+                        "last_error": f"abandoned_{label.lower()}_max_attempts",
                     }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).execute()
                     abandoned += 1
                 else:
-                    self.supabase.table("messages").update({
+                    # CAS-guard: solo re-encolar si SIGUE en uno de los statuses
+                    # objetivo (no pisar un mensaje que recién completó).
+                    res = self.supabase.table("messages").update({
                         "processing_status": "pending",
-                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).in_("processing_status", ["pending", "processing"]).execute()
-                    recovered += 1
+                    }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).in_(
+                        "processing_status", statuses).execute()
+                    if res.data:
+                        recovered += 1
 
-            logger.info(
-                "[STARTUP] Sweep completado: %s mensajes re-encolados, %s abandonados (max_attempts)",
-                recovered, abandoned,
+            logger.warning(
+                "[%s] Sweep mensajes atascados (>%dmin, %s): %s re-encolados, %s abandonados",
+                label, threshold_minutes, statuses, recovered, abandoned,
             )
         except Exception as exc:
-            logger.error("[STARTUP] Error en sweep de startup: %s", exc)
+            logger.error("[%s] Error en sweep de mensajes atascados: %s", label, exc)
+
+    async def _sweep_stale_messages_on_startup(self) -> None:
+        """Al iniciar: re-encola mensajes 'pending'/'processing' atascados >5min.
+        Escenario típico: el worker anterior se reinició dejando mensajes huérfanos."""
+        await self._reclaim_stale_inbound(
+            threshold_minutes=5, statuses=["pending", "processing"], label="STARTUP",
+        )
+
+    async def _sweep_stale_processing_if_due(self) -> None:
+        """Capa A worker-robustez — recuperación PERIÓDICA (no solo en startup) de
+        mensajes huérfanos en 'processing'. Garantiza que una carrera de coalescing/claim
+        nunca deje a un cliente sin respuesta, haya restart o no. Corre cada
+        STALE_PROCESSING_SWEEP_INTERVAL_SECONDS; reclama 'processing' >umbral."""
+        now = time.time()
+        if self._last_stale_sweep_at and (
+            now - self._last_stale_sweep_at
+        ) < max(30, STALE_PROCESSING_SWEEP_INTERVAL_SECONDS):
+            return
+        self._last_stale_sweep_at = now
+        await self._reclaim_stale_inbound(
+            threshold_minutes=STALE_PROCESSING_RECLAIM_MINUTES,
+            statuses=["processing"], label="PERIODIC",
+        )
 
     async def _send_payment_reminders_if_due(self) -> None:
         """Rev. 103 F1 — Recordatorio de pago dentro de la CSW (Meta 24h).
