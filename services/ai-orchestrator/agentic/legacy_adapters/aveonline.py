@@ -409,7 +409,9 @@ async def quote_shipping_for_cart_aveonline(
 
     # Persistir quoted_options en DB (DB-first Plan A.0.2).
     try:
-        from tools.cart_tool import get_cart_with_items, set_quoted_options
+        from tools.cart_tool import (
+            get_cart_with_items, set_quoted_options, set_shipping_destination,
+        )
         cart_row = get_cart_with_items(
             supabase, conversation_id=conversation_id, tenant_id=tenant_id,
         )
@@ -420,9 +422,19 @@ async def quote_shipping_for_cart_aveonline(
                 tenant_id=tenant_id,
                 options=options,
             )
+            # ADR-0026 Pieza A: persistir el DESTINO cotizado (city/dane) como dato de
+            # primera clase del cart. Antes la ciudad se perdía tras cotizar → el bot la
+            # repreguntaba al agregar un producto a mitad de checkout.
+            set_shipping_destination(
+                supabase,
+                cart_id=cart_row["id"],
+                tenant_id=tenant_id,
+                city=destination.get("city") or "",
+                dane_code=destination.get("dane_code"),
+            )
     except Exception as exc:
         logger.warning(
-            "[agentic.shipping.aveonline] persist quoted_options falló: %s", exc,
+            "[agentic.shipping.aveonline] persist quoted_options/destination falló: %s", exc,
         )
 
     return {

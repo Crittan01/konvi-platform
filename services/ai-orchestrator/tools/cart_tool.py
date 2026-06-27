@@ -876,6 +876,95 @@ def set_quoted_options(
     return {"id": cart_id, "shipping_meta": new_meta}
 
 
+def set_shipping_destination(
+    supabase: Client,
+    *,
+    cart_id: str,
+    tenant_id: str,
+    city: str,
+    dane_code: Optional[str] = None,
+    address_line: Optional[str] = None,
+) -> dict:
+    """ADR-0026 Pieza A — persiste el DESTINO de entrega (city/dane/address_line) en
+    `shipping_meta` como dato de PRIMERA CLASE del carrito, SIN tocar carrier, totales
+    ni `requires_requote`.
+
+    Se llama tras la PRIMERA cotización (quote_shipping). Antes solo se persistía
+    `quoted_options` y la ciudad cotizada se perdía → el bot la repreguntaba en el turno
+    siguiente. Ahora el cart es dueño del destino: cualquier recotización lo recupera vía
+    `get_shipping_destination` sin volver a preguntar.
+
+    Idempotente y merge-preserving: no nulifica campos previos de shipping_meta.
+    """
+    if not city or not str(city).strip():
+        return {"id": cart_id, "updated": False}
+    cur = (
+        supabase.table("conversation_carts")
+        .select("shipping_meta")
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
+        return {"id": cart_id, "updated": False}
+    new_meta = dict(cur.data[0].get("shipping_meta") or {})
+    new_meta["city"] = str(city).strip()
+    if dane_code:
+        new_meta["dane_code"] = str(dane_code).strip()
+    if address_line:
+        new_meta["address_line"] = str(address_line).strip()
+    (
+        supabase.table("conversation_carts")
+        .update({"shipping_meta": new_meta})
+        .eq("id", cart_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    logger.info(
+        "[CART] shipping_destination persisted cart=%s city=%s dane=%s",
+        cart_id[:8], new_meta.get("city"), new_meta.get("dane_code"),
+    )
+    return {"id": cart_id, "updated": True, "shipping_meta": new_meta}
+
+
+def get_shipping_destination(
+    cart: Optional[dict],
+    contact: Optional[dict] = None,
+) -> Optional[dict]:
+    """ADR-0026 Pieza A — resuelve el destino de entrega vigente del carrito con
+    precedencia ÚNICA y canónica:
+
+      1. `shipping_meta.city` — lo que el cliente pidió explícito y se cotizó. SIEMPRE gana.
+      2. `contact.address.city/dane_code` — fallback estructurado (migración 20260623153808)
+         cuando aún no se cotizó nada.
+      3. None.
+
+    Devuelve `{city, dane_code, address_line, source: 'cart'|'contact'}` o None. Función pura
+    (sin IO): recibe el cart + contact ya cargados.
+    """
+    meta = (cart or {}).get("shipping_meta") or {}
+    city = str(meta.get("city") or "").strip()
+    if city:
+        return {
+            "city": city,
+            "dane_code": meta.get("dane_code"),
+            "address_line": meta.get("address_line"),
+            "source": "cart",
+        }
+    addr = (contact or {}).get("address") or {}
+    if isinstance(addr, dict):
+        c_city = str(addr.get("city") or "").strip()
+        if c_city:
+            return {
+                "city": c_city,
+                "dane_code": addr.get("dane_code"),
+                "address_line": addr.get("street") or addr.get("address_line"),
+                "source": "contact",
+            }
+    return None
+
+
 def set_shipping_city(
     supabase: Client,
     *,

@@ -1991,7 +1991,7 @@ async def handle_shipping_quote_if_applicable(
         # Plan A.0.2: cross-path legacy↔agentic comparten misma fuente.
         try:
             from tools.cart_tool import (
-                get_cart_with_items, set_quoted_options,
+                get_cart_with_items, set_quoted_options, set_shipping_destination,
             )
             cart_row = get_cart_with_items(
                 supabase, conversation_id=conversation_id, tenant_id=tenant_id,
@@ -2030,6 +2030,15 @@ async def handle_shipping_quote_if_applicable(
                         tenant_id=tenant_id,
                         options=opts_to_persist,
                     )
+                # ADR-0026 Pieza A: persistir el DESTINO cotizado como dato de primera
+                # clase (mismo fix que el path agentic en legacy_adapters/aveonline.py).
+                set_shipping_destination(
+                    supabase,
+                    cart_id=cart_row["id"],
+                    tenant_id=tenant_id,
+                    city=(destination or {}).get("city") or "",
+                    dane_code=(destination or {}).get("dane_code"),
+                )
         except Exception as exc:
             logger.warning(
                 "[SHIPPING_QUOTE] persist quoted_options falló: %s", exc,
