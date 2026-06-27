@@ -1,7 +1,24 @@
 # ADR-0026 — Cart-as-SoT dueño del destino + renderizador canónico de estado
 
-**Estado:** PROPUESTO (diseño aterrizado, pendiente aprobación founder)
+**Estado:** IMPLEMENTADO (A + B + C + revert override) · verificado en vivo · main `4f8b77b2`
 **Fecha:** 2026-06-26
+
+> **Resultado de implementación (2026-06-26):** Piezas A, B y C implementadas y verificadas
+> con CONVERSACIÓN REAL 1-a-1 (escenario exacto del founder): add a mitad de checkout →
+> "Subtotal: $109.000" (real, no parcial) + "Recalculé el envío a *Medellín*" + opciones (no
+> repregunta la ciudad) → resumen final TOTAL $125.500 correcto. El override post-LLM band-aid
+> fue REVERTIDO (A+B+C lo manejan solos, verificado sin él). Suite 3089 verde.
+>
+> **Decisión sobre el paso de migración de los 3 renderizadores pre-checkout
+> (`_build_order_summary_text`, `_build_canonical_summary`, `_build_pricing_replacement`):
+> DIFERIDO deliberadamente.** Esos 3 producen output CORRECTO y validado (el 📋 Resumen
+> alimenta el invariant `summary_coherence` que parsea el total para verificarlo contra el
+> cart). Consolidarlos es deduplicación de código correcto con riesgo de regresión en el path
+> de PAGO, desproporcionado al beneficio. La causa raíz (destino efímero + productores ciegos
+> del post-mutación) ya está cerrada; el renderizador canónico queda como base para una
+> consolidación futura cuidada (con golden parity tests). Quality-first = no desestabilizar el
+> resumen de pago validado. `requote_pending_summary` se MANTIENE como red de seguridad del
+> path LLM (output no determinístico).
 **Contexto:** síntoma hallado por conversación REAL 1-a-1 (founder): al agregar un producto a
 mitad del checkout el bot dice un subtotal PARCIAL (solo el ítem nuevo) y repregunta "a qué
 ciudad" aunque el carrito ya fue cotizado a Medellín. No es money bug (el final queda correcto)
