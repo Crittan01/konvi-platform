@@ -55,7 +55,13 @@ class _RecTable:
     def execute(self):
         m = MagicMock()
         if self._op == "select":
-            m.data = self.store.get("select_rows", [])
+            seq = self.store.get("select_sequence")
+            if seq is not None:
+                idx = self.store.get("_seq_idx", 0)
+                m.data = seq[min(idx, len(seq) - 1)]
+                self.store["_seq_idx"] = idx + 1
+            else:
+                m.data = self.store.get("select_rows", [])
         else:
             self.store.setdefault("updates", []).append(self._payload)
             m.data = self.store.get("update_returns", [{"id": "x"}])
@@ -153,6 +159,84 @@ class CoalesceFirstFragmentTests(unittest.TestCase):
 
 async def _async_noop(*a, **k):
     return None
+
+
+class _SleepSpy:
+    def __init__(self):
+        self.count = 0
+        self.total = 0.0
+
+    async def __call__(self, secs):
+        self.count += 1
+        self.total += secs
+
+
+def _msg(id_, conv_id, content, age_seconds):
+    from datetime import datetime, timedelta, timezone
+    return {
+        "id": id_, "tenant_id": "t1", "conversation_id": conv_id,
+        "content": content, "content_type": "text", "processing_attempts": 0,
+        "created_at": (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).isoformat(),
+    }
+
+
+class BatchAgesTests(unittest.TestCase):
+    def test_oldest_and_newest(self):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        pending = [_msg("m1", "c1", "a", 10), _msg("m2", "c1", "b", 2)]
+        oldest, newest = OrchestratorWorker._batch_ages(pending, now)
+        self.assertGreater(oldest, 9)      # más viejo ~10s
+        self.assertLess(newest, 4)         # más nuevo ~2s
+
+    def test_inf_when_no_timestamps(self):
+        from datetime import datetime, timezone
+        oldest, newest = OrchestratorWorker._batch_ages(
+            [{"id": "x", "conversation_id": "c1"}], datetime.now(timezone.utc))
+        self.assertEqual(newest, float("inf"))  # sin ts → procesar ya
+
+
+class DebounceTests(unittest.TestCase):
+    def test_old_messages_process_immediately_no_wait(self):
+        # Mensaje viejo (>ventana) → silencio ya alcanzado → NO espera.
+        store = {"select_rows": []}
+        w = _worker(store)
+        spy = _SleepSpy()
+        with patch("worker.asyncio.sleep", new=spy):
+            result = asyncio.run(w._coalesce_pending_by_conversation(
+                [_msg("m1", "c1", "Hola", 10)]))
+        self.assertEqual(spy.count, 0)           # no esperó
+        self.assertEqual(len(result), 1)
+
+    def test_sliding_window_captures_late_fragment(self):
+        # iter1: lead reciente → espera; el re-fetch trae el fragmento y, ya en silencio
+        # (ambos viejos), iter2 corta y combina los dos.
+        lead_fresh = _msg("m1", "c1", "Quiero un jabón", 1)        # reciente → espera
+        both_silent = [_msg("m1", "c1", "Quiero un jabón", 8),     # ya pasó silencio
+                       _msg("m2", "c1", "de Coco", 6)]
+        store = {"select_sequence": [both_silent]}  # primer re-fetch trae ambos (ya viejos)
+        w = _worker(store)
+        with patch("worker.asyncio.sleep", new=_async_noop):
+            result = asyncio.run(w._coalesce_pending_by_conversation([lead_fresh]))
+        self.assertEqual(len(result), 1)
+        combined = result[0]["content"]
+        self.assertIn("Quiero un jabón", combined)
+        self.assertIn("de Coco", combined)
+
+    def test_max_cap_breaks_even_with_fresh_message(self):
+        # Hay un mensaje muy viejo (>tope) + uno fresco → el tope corta aunque siga
+        # llegando texto, para no colgarse.
+        pending = [_msg("mold", "c1", "primero", 26),   # > 25s (tope)
+                   _msg("mnew", "c1", "ultimo", 1)]     # fresco
+        store = {"select_rows": pending}
+        w = _worker(store)
+        spy = _SleepSpy()
+        with patch("worker.asyncio.sleep", new=spy):
+            result = asyncio.run(w._coalesce_pending_by_conversation(pending))
+        self.assertEqual(spy.count, 0)   # tope ya alcanzado → no espera
+        self.assertEqual(len(result), 1)
+        self.assertIn("primero", result[0]["content"])
+        self.assertIn("ultimo", result[0]["content"])
 
 
 if __name__ == "__main__":

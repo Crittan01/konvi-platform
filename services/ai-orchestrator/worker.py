@@ -23,6 +23,11 @@ MAX_PROCESSING_ATTEMPTS = int(os.getenv("MAX_PROCESSING_ATTEMPTS", "5"))
 # mensajes rápidos, esperamos esta ventana antes de procesar para juntar
 # en un solo input al LLM (no perder contexto al ver solo el último msg).
 MESSAGE_COALESCE_WINDOW_SECONDS = int(os.getenv("MESSAGE_COALESCE_WINDOW_SECONDS", "5"))
+# 2026-06-27 (founder) — DEBOUNCE: la ventana se reinicia con cada mensaje nuevo (espera
+# SILENCIO de WINDOW segundos desde el ÚLTIMO mensaje, no una ventana fija desde el primero).
+# Así un cliente que escribe en varios ENTER con pausas <WINDOW dice TODO antes de que el bot
+# responda. TOPE total para no esperar indefinidamente si escribe sin parar.
+MESSAGE_COALESCE_MAX_TOTAL_SECONDS = int(os.getenv("MESSAGE_COALESCE_MAX_TOTAL_SECONDS", "25"))
 # 2026-06-27 (ADR worker-robustez Capa A) — recuperación PERIÓDICA de mensajes
 # huérfanos en 'processing'. Antes el sweep solo corría en startup → un mensaje
 # atascado por una carrera de coalescing quedaba bloqueado hasta el próximo restart.
@@ -364,47 +369,79 @@ class OrchestratorWorker:
                 coalesced.append(conv_msgs[0])
         return coalesced
 
+    @staticmethod
+    def _batch_ages(pending: list[dict], now: datetime) -> tuple[float, float]:
+        """Devuelve (oldest_age, newest_age) en segundos del lote pending.
+          • oldest_age = edad del mensaje MÁS VIEJO (para el tope total).
+          • newest_age = edad del mensaje MÁS NUEVO = tiempo desde el ÚLTIMO mensaje
+            (para el debounce de silencio). inf si no hay timestamps válidos → procesar ya.
+        """
+        oldest = 0.0
+        newest = float("inf")
+        for m in pending:
+            ts = m.get("created_at")
+            if not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                age = (now - dt).total_seconds()
+            except (ValueError, TypeError):
+                continue
+            oldest = max(oldest, age)
+            newest = min(newest, age)
+        return oldest, newest
+
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
-        """Rev. 85 — Coalesce mensajes consecutivos del mismo cliente (coalesce-first).
+        """Rev. 85 + DEBOUNCE (2026-06-27, founder) — agrupa mensajes consecutivos del mismo
+        cliente esperando SILENCIO, no una ventana fija desde el primer mensaje.
 
-        Si una conv tiene un mensaje muy reciente (<ventana), espera el resto de la ventana
-        y RE-FETCHEA todos los pending para capturar fragmentos que lleguen mientras espera
-        (ej. "Hola" / "Buenos días" / "Quiero un jabón" / "de Coco"), y los combina en un
-        solo input al LLM. Luego el caller reclama+despacha el combinado.
+        Reinicia la ventana con cada mensaje nuevo: espera hasta que pasen
+        MESSAGE_COALESCE_WINDOW_SECONDS sin que llegue NADA (= el cliente dejó de escribir),
+        re-fetcheando los pending en cada vuelta. Así un cliente que escribe en varios ENTER
+        con pausas (<ventana) dice TODO antes de que el bot responda — cierra el borde del
+        "mensaje en el segundo 6" que con la ventana fija arrancaba un turno nuevo.
 
-        NOTA (2026-06-27): se evaluó "claim-first" para cerrar la carrera de claim, pero
-        DISPERSABA los fragmentos (cada uno reclamado por separado → 4 respuestas en vez de
-        1). El coalescing requiere AGRUPAR el pending ANTES de reclamar. La carrera de claim
-        se maneja con la red de seguridad (recuperación periódica Capa A + reset en except),
-        que recupera cualquier huérfano sin romper el coalescing.
+        TOPE: nunca espera más de MESSAGE_COALESCE_MAX_TOTAL_SECONDS desde el primer mensaje,
+        para no quedarse colgado si el cliente escribe sin parar.
+
+        NOTA: coalesce-first (agrupa el pending ANTES de reclamar). La carrera de claim la
+        cubre la red de seguridad (recuperación periódica Capa A + reset en except).
         """
         if not pending:
             return pending
-        from collections import OrderedDict
-        by_conv: dict = OrderedDict()
-        for m in pending:
-            by_conv.setdefault(m["conversation_id"], []).append(m)
 
-        now = datetime.now(timezone.utc)
-        max_age = 0.0
-        for msgs in by_conv.values():
-            for m in msgs:
-                ts = m.get("created_at")
-                if not ts:
-                    continue
-                try:
-                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-                    max_age = max(max_age, (now - dt).total_seconds())
-                except (ValueError, TypeError):
-                    continue
+        loops = 0
+        while True:
+            loops += 1
+            now = datetime.now(timezone.utc)
+            oldest_age, newest_age = self._batch_ages(pending, now)
 
-        if max_age < MESSAGE_COALESCE_WINDOW_SECONDS:
-            wait_more = MESSAGE_COALESCE_WINDOW_SECONDS - max_age
+            # Silencio alcanzado: el último mensaje ya tiene >= ventana → el cliente terminó.
+            if newest_age >= MESSAGE_COALESCE_WINDOW_SECONDS:
+                break
+            # Tope total: el primer mensaje ya esperó el máximo → procesar aunque siga escribiendo.
+            if oldest_age >= MESSAGE_COALESCE_MAX_TOTAL_SECONDS:
+                logger.info(
+                    "[COALESCE] tope %ds alcanzado (primero hace %.1fs); proceso sin más espera",
+                    MESSAGE_COALESCE_MAX_TOTAL_SECONDS, oldest_age,
+                )
+                break
+            # Backstop anti-bucle (el tope ya acota; esto es defensa en profundidad).
+            if loops > 30:
+                logger.warning("[COALESCE] %d vueltas de debounce — corto", loops)
+                break
+
+            wait_more = max(0.0, min(
+                MESSAGE_COALESCE_WINDOW_SECONDS - newest_age,
+                MESSAGE_COALESCE_MAX_TOTAL_SECONDS - oldest_age,
+            ))
             logger.info(
-                "[COALESCE] mensajes recientes (max_age=%.1fs); esperando %.1fs",
-                max_age, wait_more,
+                "[COALESCE] debounce: esperando silencio %.1fs (último hace %.1fs, "
+                "primero hace %.1fs, vuelta=%d)",
+                wait_more, newest_age, oldest_age, loops,
             )
             await asyncio.sleep(wait_more)
+            # Re-fetch: si llegó un mensaje nuevo, newest_age se reinicia → otra vuelta.
             re_result = (
                 self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_inbound_polling
                 .select("id, tenant_id, conversation_id, content, content_type, processing_attempts, created_at")
