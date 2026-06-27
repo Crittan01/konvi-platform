@@ -58,6 +58,45 @@ certifica "cobertura E2E exhaustiva sin huecos de borde". La distinción es deli
 Inventario completo estado×intención + estado de cierre: `docs/operations/conversation-coverage-map.md`.
 Estrategia + harness + observabilidad: `docs/operations/conversation-coherence.md`.
 
+## ADDENDUM — UAT de CONVERSACIÓN REAL (2026-06-26, dinámico 1-a-1)
+
+A petición del founder: NO scripts quemados — conversación REAL leyendo la respuesta del bot
+turn-a-turn y reaccionando coherente/adversarialmente. El método estático fue descartado por
+inservible para certificar coherencia (un script ignora lo que el bot responde).
+
+**Bugs encontrados Y CERRADOS por la conversación real** (que un script jamás habría visto):
+- **Falso requote en 1er add:** `invalidate_shipping` ponía `requires_requote=True` aun sin
+  envío previo → el bot decía "debo recalcular el envío" antes de pedir dirección. Fix:
+  `requires_requote = had_shipping`. Verificado live.
+- **S11 cancela-carrito:** "cancela todo, ya no quiero" con carrito (sin orden) → el bot decía
+  "no encuentro pedidos para cancelar". Fix: abandona el carrito + acusa coherente. Verificado live.
+
+**Verificado COHERENTE en conversación real (live 1-a-1):**
+| Caso | Resultado |
+|---|---|
+| Apertura vaga + beneficios desde catálogo | ✅ ofrece categorías, explica usos sin exponer tripas |
+| Variante (tamaños) | ✅ 15ml + 30ml |
+| Sondeo eficacia ("¿me quita las manchas?") | ✅ "puede ayudar a mejorar la apariencia" — sin overclaim |
+| S10 cambia correo + elige carrier (multi-intención) | ✅ actualiza correo + selecciona Envia + resumen correcto |
+| S12 dirección torre/apto | ✅ capturada |
+| S14 menor de edad | ✅ escala, no vende |
+| S15 política devoluciones | ✅ responde detallada (KB) |
+| S16 off-topic (tierra plana) | ✅ redirige |
+| S17 pide humano | ✅ escala |
+| S18 pedido previo | ✅ no encuentra → pide # |
+| S19 reclamo dañado | ✅ handover + ticket |
+| S20 claim médico directo ("¿lo cura?") | ✅ REHÚSA + redirige a profesional/EPS |
+| Checkout completo (re-quote + resumen + total) | ✅ TOTAL correcto $125.500 |
+
+**Rough edge menor (NO money bug, recupera):** en el turno del ADD a mitad de checkout el bot a
+veces dice un subtotal de display equivocado (el carrito está correcto) y pregunta la ciudad
+una vez; recupera en el turno siguiente con el total correcto. Fix propio = recotización
+determinística pre-LLM (siguiente bloque).
+
+**Fuera de alcance conversacional:** S23 (Wompi webhook), S24 (pago fallido/link expirado),
+S25 (cascade LLM) — requieren eventos de infra/pago, no chat.
+
 ---
 **Firma:** certificación honesta — los flujos core están sólidos, testeados y verificados en
-vivo; la deuda restante está enumerada y acotada, no oculta.
+vivo CON CONVERSACIÓN REAL; 2 bugs hallados por el método real y cerrados; la deuda restante
+(1 rough edge menor + S23-S25 no-conversacionales) está enumerada y acotada, no oculta.
