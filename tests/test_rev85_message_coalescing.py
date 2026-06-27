@@ -20,15 +20,62 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestr
 from worker import OrchestratorWorker, MESSAGE_COALESCE_WINDOW_SECONDS  # noqa: E402
 
 
+class _Tbl:
+    """Tabla mock: el re-fetch SCOPED (debounce no-bloqueante) devuelve los mensajes de la
+    conversación pedida (captura el filtro conversation_id)."""
+    def __init__(self, store):
+        self.store = store
+        self._op = None
+        self._f = {}
+
+    def select(self, *a, **k):
+        self._op = "select"
+        return self
+
+    def update(self, *a, **k):
+        self._op = "update"
+        return self
+
+    def eq(self, k=None, v=None):
+        if k is not None:
+            self._f[k] = v
+        return self
+
+    def in_(self, *a, **k):
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def execute(self):
+        m = MagicMock()
+        if self._op == "select":
+            m.data = self.store["conv_rows"].get(self._f.get("conversation_id"), [])
+        else:
+            m.data = []
+        return m
+
+
+class _SB:
+    def __init__(self, store):
+        self.store = store
+
+    def table(self, name):
+        return _Tbl(self.store)
+
+
 def _make_worker_with_mock_supabase(initial_pending: list[dict]) -> OrchestratorWorker:
-    """Crea un worker con supabase mock que retorna `initial_pending` en re-fetch."""
-    sb = MagicMock()
-    sb.table.return_value.update.return_value.in_.return_value.execute.return_value = MagicMock(data=[])
-    sb.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-        data=initial_pending
-    )
+    """Worker con supabase mock; el re-fetch scopeado por conversación devuelve los mensajes
+    de esa conversación (debounce no-bloqueante por conv)."""
+    from collections import defaultdict
+    conv_rows: dict = defaultdict(list)
+    for m in initial_pending:
+        conv_rows[m["conversation_id"]].append(m)
     w = OrchestratorWorker.__new__(OrchestratorWorker)  # bypass __init__
-    w.supabase = sb
+    w.supabase = _SB({"conv_rows": dict(conv_rows)})
     w._metrics = {}
     return w
 

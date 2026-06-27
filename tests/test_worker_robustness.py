@@ -19,11 +19,12 @@ from worker import OrchestratorWorker, MAX_PROCESSING_ATTEMPTS  # noqa: E402
 
 
 class _RecTable:
-    """Tabla mock que registra updates y devuelve filas configurables por op."""
+    """Tabla mock que registra updates y devuelve filas configurables por op/filtros."""
     def __init__(self, store):
         self.store = store
         self._op = None
         self._payload = None
+        self._filters = {}
 
     def select(self, *a, **k):
         self._op = "select"
@@ -34,7 +35,9 @@ class _RecTable:
         self._payload = payload
         return self
 
-    def eq(self, *a, **k):
+    def eq(self, k=None, v=None):
+        if k is not None:
+            self._filters[k] = v
         return self
 
     def in_(self, *a, **k):
@@ -55,8 +58,11 @@ class _RecTable:
     def execute(self):
         m = MagicMock()
         if self._op == "select":
+            conv_rows = self.store.get("conv_rows")
             seq = self.store.get("select_sequence")
-            if seq is not None:
+            if conv_rows is not None:
+                m.data = conv_rows.get(self._filters.get("conversation_id"), [])
+            elif seq is not None:
                 idx = self.store.get("_seq_idx", 0)
                 m.data = seq[min(idx, len(seq) - 1)]
                 self.store["_seq_idx"] = idx + 1
@@ -133,30 +139,6 @@ class StaleSweepGateTests(unittest.TestCase):
         self.assertIn("pending", [u.get("processing_status") for u in store.get("updates", [])])
 
 
-class CoalesceFirstFragmentTests(unittest.TestCase):
-    def test_refetch_captures_late_fragment_and_combines(self):
-        # Coalesce-first: el lead es reciente → espera; el re-fetch (todos los pending)
-        # captura el fragmento tardío de la misma conv → se combinan en uno.
-        from datetime import datetime, timedelta, timezone
-        t0 = datetime.now(timezone.utc)
-        lead = {"id": "m1", "tenant_id": "t1", "conversation_id": "c1",
-                "content": "Quiero un jabón", "content_type": "text",
-                "processing_attempts": 0, "created_at": t0.isoformat()}
-        fragment = {"id": "m2", "tenant_id": "t1", "conversation_id": "c1",
-                    "content": "de Coco", "content_type": "text",
-                    "processing_attempts": 0,
-                    "created_at": (t0 + timedelta(seconds=1)).isoformat()}
-        # El re-fetch devuelve TODOS los pending (lead + fragmento), como en la DB real.
-        store = {"select_rows": [lead, fragment]}
-        w = _worker(store)
-        with patch("worker.asyncio.sleep", new=_async_noop):
-            result = asyncio.run(w._coalesce_pending_by_conversation([lead]))
-        self.assertEqual(len(result), 1)
-        combined = result[0]["content"]
-        self.assertIn("Quiero un jabón", combined)
-        self.assertIn("de Coco", combined)
-
-
 async def _async_noop(*a, **k):
     return None
 
@@ -196,47 +178,58 @@ class BatchAgesTests(unittest.TestCase):
         self.assertEqual(newest, float("inf"))  # sin ts → procesar ya
 
 
-class DebounceTests(unittest.TestCase):
-    def test_old_messages_process_immediately_no_wait(self):
-        # Mensaje viejo (>ventana) → silencio ya alcanzado → NO espera.
-        store = {"select_rows": []}
+class DebounceNonBlockingTests(unittest.TestCase):
+    """Debounce NO-BLOQUEANTE por conversación (re-fetch scopeado por conv_rows)."""
+
+    def test_silence_reached_combines_and_no_sleep(self):
+        # conv c1 con 2 mensajes ya viejos (silencio) → listo → combinado en 1, SIN sleep.
+        store = {"conv_rows": {"c1": [
+            _msg("m1", "c1", "Quiero un jabón", 8),
+            _msg("m2", "c1", "de Coco", 6)]}}
         w = _worker(store)
         spy = _SleepSpy()
         with patch("worker.asyncio.sleep", new=spy):
             result = asyncio.run(w._coalesce_pending_by_conversation(
-                [_msg("m1", "c1", "Hola", 10)]))
-        self.assertEqual(spy.count, 0)           # no esperó
+                [_msg("m1", "c1", "Quiero un jabón", 8)]))
+        self.assertEqual(spy.count, 0)  # NO bloquea el ciclo
         self.assertEqual(len(result), 1)
+        self.assertIn("Quiero un jabón", result[0]["content"])
+        self.assertIn("de Coco", result[0]["content"])
 
-    def test_sliding_window_captures_late_fragment(self):
-        # iter1: lead reciente → espera; el re-fetch trae el fragmento y, ya en silencio
-        # (ambos viejos), iter2 corta y combina los dos.
-        lead_fresh = _msg("m1", "c1", "Quiero un jabón", 1)        # reciente → espera
-        both_silent = [_msg("m1", "c1", "Quiero un jabón", 8),     # ya pasó silencio
-                       _msg("m2", "c1", "de Coco", 6)]
-        store = {"select_sequence": [both_silent]}  # primer re-fetch trae ambos (ya viejos)
-        w = _worker(store)
-        with patch("worker.asyncio.sleep", new=_async_noop):
-            result = asyncio.run(w._coalesce_pending_by_conversation([lead_fresh]))
-        self.assertEqual(len(result), 1)
-        combined = result[0]["content"]
-        self.assertIn("Quiero un jabón", combined)
-        self.assertIn("de Coco", combined)
-
-    def test_max_cap_breaks_even_with_fresh_message(self):
-        # Hay un mensaje muy viejo (>tope) + uno fresco → el tope corta aunque siga
-        # llegando texto, para no colgarse.
-        pending = [_msg("mold", "c1", "primero", 26),   # > 25s (tope)
-                   _msg("mnew", "c1", "ultimo", 1)]     # fresco
-        store = {"select_rows": pending}
+    def test_still_typing_returns_empty(self):
+        # Mensaje fresco (sigue escribiendo) → NO listo → [] (se reevalúa próximo poll).
+        store = {"conv_rows": {"c1": [_msg("m1", "c1", "Hola", 1)]}}
         w = _worker(store)
         spy = _SleepSpy()
         with patch("worker.asyncio.sleep", new=spy):
-            result = asyncio.run(w._coalesce_pending_by_conversation(pending))
-        self.assertEqual(spy.count, 0)   # tope ya alcanzado → no espera
+            result = asyncio.run(w._coalesce_pending_by_conversation(
+                [_msg("m1", "c1", "Hola", 1)]))
+        self.assertEqual(spy.count, 0)
+        self.assertEqual(result, [])
+
+    def test_cap_processes_even_if_typing(self):
+        # Más viejo > tope (25s) → listo aunque el último sea fresco (no colgar).
+        store = {"conv_rows": {"c1": [
+            _msg("mold", "c1", "primero", 26),
+            _msg("mnew", "c1", "ultimo", 1)]}}
+        w = _worker(store)
+        result = asyncio.run(w._coalesce_pending_by_conversation(
+            [_msg("mold", "c1", "primero", 26)]))
         self.assertEqual(len(result), 1)
         self.assertIn("primero", result[0]["content"])
         self.assertIn("ultimo", result[0]["content"])
+
+    def test_per_conversation_isolation(self):
+        # [A1] fix: conv A en silencio (lista) + conv B escribiendo (no lista) → SOLO A.
+        # Que A esté lista NO debe forzar el proceso de B (antes el tope global lo cortaba).
+        store = {"conv_rows": {
+            "cA": [_msg("a1", "cA", "listo A", 8)],         # silencio → lista
+            "cB": [_msg("b1", "cB", "escribiendo B", 1)],   # fresca → NO lista
+        }}
+        w = _worker(store)
+        result = asyncio.run(w._coalesce_pending_by_conversation(
+            [_msg("a1", "cA", "listo A", 8), _msg("b1", "cB", "escribiendo B", 1)]))
+        self.assertEqual({r["conversation_id"] for r in result}, {"cA"})
 
 
 if __name__ == "__main__":
