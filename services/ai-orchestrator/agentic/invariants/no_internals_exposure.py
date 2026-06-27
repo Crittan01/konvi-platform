@@ -40,13 +40,13 @@ _EXPOSURE_PATTERNS = (
     re.compile(r"\bbase\s+de\s+(?:conocimiento|datos)\b", re.IGNORECASE),
     # "mi sistema/catálogo/base (no) tiene/da/incluye/registra..."
     re.compile(
-        r"\b(?:mi|el|la)\s+(?:sistema|cat[aá]logo|base)\b[^.!?\n]{0,45}\bno\s+"
+        r"\b(?:mi|el|la)\s+(?:sistema|cat[aá]logo|base)\b[^.!?\n]*\bno\s+"
         r"(?:tiene|da|incluye|me\s+da|cuenta\s+con|registra|contiene)\b",
         re.IGNORECASE,
     ),
     # "no tengo/dispongo ... en mi sistema/base / registrado en el sistema"
     re.compile(
-        r"\bno\s+(?:tengo|dispongo\s+de|cuento\s+con)\b[^.!?\n]{0,45}"
+        r"\bno\s+(?:tengo|dispongo\s+de|cuento\s+con)\b[^.!?\n]*"
         r"\b(?:en\s+mi\s+(?:sistema|base|cat[aá]logo)|registrad[oa]\s+en)\b",
         re.IGNORECASE,
     ),

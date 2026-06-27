@@ -349,7 +349,7 @@ class AddToCartTool:
             # Si insuficiente, ABORT sin tocar cart.
             from lib import stock_reservation as _stock_res
             try:
-                _stock_res.reserve(
+                _reserve_res = _stock_res.reserve(
                     ctx.supabase,
                     tenant_id=ctx.tenant_id,
                     variation_id=args.variation_id,
@@ -370,6 +370,18 @@ class AddToCartTool:
                         "requested": exc.requested,
                         "variation_id": args.variation_id,
                     },
+                )
+            # Robustez (auditoría 2026-06-26): reserve() puede retornar ok=False SIN
+            # lanzar (VARIATION_NOT_FOUND / INTERNAL — p.ej. mensaje de error de
+            # Postgres con formato distinto). Antes el return se ignoraba → se
+            # agregaba el item SIN reserva válida (riesgo de oversell). ABORTAR.
+            if not getattr(_reserve_res, "ok", False):
+                return tool_failure(
+                    f"No pude reservar el stock de *{product.get('title')}* en este "
+                    f"momento. ¿Lo intentamos de nuevo en un momento?",
+                    code=(getattr(_reserve_res, "error_code", None)
+                          or "STOCK_RESERVE_FAILED"),
+                    extra={"variation_id": args.variation_id},
                 )
 
             add_payload = add_item(
