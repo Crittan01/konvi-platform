@@ -29,6 +29,7 @@ from agentic.prompt.blocks import (
     style_block,
     catalog_section,
     catalog_compact_section,
+    cart_state_section,
     customer_section,
     carriers_section,
     payment_methods_section,
@@ -79,6 +80,17 @@ _NO_CATALOG_STATES = frozenset({
 # necesita las variantes reales para no inventar disponibilidad. POST_PAYMENT/
 # PII_COLLECTION/HUMAN_HANDOFF se quedan SIN catálogo (no aplica agregar ahí).
 _COMPACT_CATALOG_STATES = frozenset({
+    AgenticState.SHIPPING_QUOTE,
+    AgenticState.CARRIER_SELECTION,
+    AgenticState.PAYMENT,
+})
+
+
+# ADR-0026 Pieza C — estados donde se inyecta CARRITO ACTUAL (el cliente ya está
+# armando/cerrando: el LLM debe ver subtotal real + ciudad cotizada para no inventar
+# ni repreguntar). Mismos estados de checkout que ven el catálogo compacto + CART_BUILDING.
+_CART_STATE_STATES = frozenset({
+    AgenticState.CART_BUILDING,
     AgenticState.SHIPPING_QUOTE,
     AgenticState.CARRIER_SELECTION,
     AgenticState.PAYMENT,
@@ -157,6 +169,10 @@ def build_prompt_for_state(
     support_schedule: Optional[dict] = None,
     social_links: Optional[dict] = None,
     after_hours_message: Optional[str] = None,
+    # ADR-0026 Pieza C — snapshot canónico del carrito (render_cart_state_snapshot)
+    # inyectado como CARRITO ACTUAL en estados de checkout para que el LLM vea el
+    # estado real (subtotal/ciudad) y no invente ni repregunte.
+    cart_snapshot: Optional[str] = None,
 ) -> str:
     """Construye el system prompt específico para un estado.
 
@@ -225,6 +241,11 @@ def build_prompt_for_state(
         parts.append(catalog_section(catalog))
     elif state in _COMPACT_CATALOG_STATES:
         parts.append(catalog_compact_section(catalog))
+
+    # ADR-0026 Pieza C — CARRITO ACTUAL en estados de checkout: el LLM ve el estado real
+    # (items + subtotal + envío + ciudad ya cotizada) y no inventa montos ni repregunta.
+    if state in _CART_STATE_STATES and cart_snapshot:
+        parts.append(cart_state_section(cart_snapshot))
 
     # Carriers solo en SHIPPING_QUOTE + CARRIER_SELECTION + PAYMENT.
     if state not in _NO_CARRIERS_STATES:

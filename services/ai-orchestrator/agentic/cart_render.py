@@ -57,6 +57,53 @@ def _shipping_option_bullets(options: list[dict]) -> list[str]:
     return bullets
 
 
+def render_cart_facts_for_llm(
+    cart: dict,
+    contact: Optional[dict] = None,
+) -> str:
+    """ADR-0026 Pieza C — snapshot FACTUAL del carrito para inyectar en el system prompt.
+
+    NO es texto al cliente: son hechos para que el LLM no invente subtotales ni repregunte
+    la ciudad. Función pura.
+    """
+    from tools.cart_tool import get_shipping_destination
+
+    cart = cart or {}
+    items = cart.get("items") or []
+    if not items:
+        return ""
+    lines = ["Items en el carrito:"]
+    for it in items:
+        qty = int(it.get("quantity") or 1)
+        unit_cents = int(it.get("unit_price_cents") or 0)
+        title = ((it.get("product") or {}).get("title")) or "Producto"
+        label = ((it.get("variation") or {}).get("label")) or ""
+        lbl = f" ({label})" if label else ""
+        lines.append(f"- {qty}x {title}{lbl}: {_cop(qty * unit_cents)}")
+    lines.append(f"Subtotal real del carrito: {_cop(cart.get('subtotal_cents'))}")
+
+    requires_requote = bool(cart.get("requires_requote"))
+    shipping_cents = int(cart.get("shipping_cents") or 0)
+    meta = cart.get("shipping_meta") or {}
+    dest = get_shipping_destination(cart, contact)
+    city = (dest or {}).get("city")
+
+    if shipping_cents > 0 and not requires_requote:
+        carrier = str(meta.get("carrier") or "").strip()
+        carrier_str = f" ({carrier})" if carrier else ""
+        lines.append(
+            f"Envío: cotizado{carrier_str} {_cop(shipping_cents)} — "
+            f"TOTAL {_cop(cart.get('total_cents'))}"
+        )
+    elif requires_requote:
+        lines.append("Envío: PENDIENTE de recotizar (el cliente cambió el carrito)")
+    else:
+        lines.append("Envío: aún no cotizado")
+    if city:
+        lines.append(f"Ciudad de entrega ya conocida: {city} — NO la repreguntes")
+    return "\n".join(lines)
+
+
 def render_cart_state_snapshot(
     *,
     cart: dict,

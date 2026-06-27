@@ -146,6 +146,27 @@ checkout, usa SOLO estas variantes/precios reales. NUNCA inventes presentaciones
 """
 
 
+def cart_state_section(cart_snapshot: str | None) -> str:
+    """ADR-0026 Pieza C — bloque CARRITO ACTUAL inyectado en estados de checkout.
+
+    Antes el LLM NO veía el carrito (solo el catálogo) → inventaba subtotales y
+    repreguntaba una ciudad ya cotizada. Ahora recibe el snapshot canónico
+    (render_cart_state_snapshot) como verdad transaccional."""
+    if not cart_snapshot or not cart_snapshot.strip():
+        return ""
+    return f"""═══════════════════════════════════════════════════════════════════
+CARRITO ACTUAL (estado real — fuente de verdad transaccional)
+═══════════════════════════════════════════════════════════════════
+
+Este es el estado EXACTO del carrito del cliente AHORA. Úsalo como verdad:
+- El subtotal y el total son los REALES — NUNCA inventes ni recalcules montos.
+- Si aparece una ciudad de envío, YA la conoces — NO la repreguntes.
+- Si el envío está pendiente de recotizar, avísalo, pero NO pidas la ciudad de nuevo.
+
+{cart_snapshot.strip()}
+"""
+
+
 def customer_section(contact_record: dict | None, *, tenant_name: str) -> str:
     """Bloque CONTEXTO_CLIENTE inyectado pre-LLM."""
     return _render_contact_block(contact_record or {}, tenant_name=tenant_name) + "\n"

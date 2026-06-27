@@ -2348,6 +2348,22 @@ async def _run_agentic_full(
     if _resolved_state is not None:
         try:
             from agentic.prompt import build_prompt_for_state, tools_for_state
+            # ADR-0026 Pieza C — snapshot factual del carrito para el LLM (estados de
+            # checkout): subtotal real + estado de envío + ciudad conocida → no inventa ni
+            # repregunta. Falla-seguro: si no se puede leer, el prompt va sin el bloque.
+            _cart_snapshot = None
+            try:
+                from agentic.prompt.builder import _CART_STATE_STATES
+                if _resolved_state in _CART_STATE_STATES:
+                    from tools.cart_tool import get_cart_with_items
+                    from agentic.cart_render import render_cart_facts_for_llm
+                    _csnap_cart = get_cart_with_items(
+                        supabase, conversation_id=conversation_id, tenant_id=tenant_id,
+                    )
+                    if _csnap_cart and _csnap_cart.get("items"):
+                        _cart_snapshot = render_cart_facts_for_llm(_csnap_cart, contact)
+            except Exception as _cs_exc:
+                logger.warning("[ADR0026] cart_snapshot LLM falló: %s", _cs_exc)
             system_prompt = build_prompt_for_state(
                 state=_resolved_state,
                 tenant_name=tenant_name,
@@ -2358,6 +2374,7 @@ async def _run_agentic_full(
                 carriers=carriers_caps,
                 payment_methods=payment_methods_cfg,
                 active_coupons=active_coupons,
+                cart_snapshot=_cart_snapshot,
                 # Fase 0 finiquito 2026-06-23 — V3 per-state recibe los 6 kwargs
                 # business_ops (root-cause analysis wujbdgrhk). Cierra bug verificado
                 # runtime trace 2026-06-23T17:39 HAS_BUSINESS_OPS_MARKER:False — bot

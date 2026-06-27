@@ -12,7 +12,10 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
-from agentic.cart_render import render_cart_state_snapshot  # noqa: E402
+from agentic.cart_render import (  # noqa: E402
+    render_cart_state_snapshot,
+    render_cart_facts_for_llm,
+)
 
 
 def _cart(**over):
@@ -106,6 +109,26 @@ class CartRenderModesTests(unittest.TestCase):
     def test_lead_default_with_name(self):
         out = render_cart_state_snapshot(cart=_cart(), customer_name="Ana")
         self.assertTrue(out.startswith("Listo, Ana. Tu pedido va así:"))
+
+
+class CartFactsForLLMTests(unittest.TestCase):
+    def test_facts_real_subtotal_and_known_city_quoted(self):
+        cart = _cart(shipping_cents=1_650_000, total_cents=12_550_000,
+                     requires_requote=False,
+                     shipping_meta={"carrier": "ENVIA", "city": "Medellín"})
+        out = render_cart_facts_for_llm(cart)
+        self.assertIn("Subtotal real del carrito: $109.000", out)
+        self.assertIn("cotizado (ENVIA) $16.500", out)
+        self.assertIn("Ciudad de entrega ya conocida: Medellín — NO la repreguntes", out)
+
+    def test_facts_requote_pending(self):
+        cart = _cart(requires_requote=True, shipping_meta={"city": "Medellín"})
+        out = render_cart_facts_for_llm(cart)
+        self.assertIn("PENDIENTE de recotizar", out)
+        self.assertIn("Ciudad de entrega ya conocida: Medellín", out)
+
+    def test_facts_empty_cart_returns_empty(self):
+        self.assertEqual(render_cart_facts_for_llm({"items": []}), "")
 
 
 if __name__ == "__main__":
