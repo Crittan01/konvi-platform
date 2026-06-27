@@ -2505,60 +2505,11 @@ async def _run_agentic_full(
             conversation_id, result.truncated_reason,
         )
 
-    # 2026-06-26 (founder, recotización DETERMINÍSTICA): si un tool mutó el carrito
-    # ESTE turno y el envío quedó pendiente de recotizar CON una ciudad conocida,
-    # recotizamos automáticamente y REEMPLAZAMOS el outbound del LLM con las opciones
-    # reales (total correcto + ciudad conocida). Cierra el rough edge del add-a-mitad
-    # de checkout (el LLM decía un subtotal de display equivocado + "a qué ciudad").
-    if not getattr(result, "requires_silent_escalation", False):
-        try:
-            _CART_MUT = {"add_to_cart", "update_cart_item_quantity", "remove_cart_item"}
-            _mutated = any(
-                c.get("tool") in _CART_MUT and "error" not in (c.get("result") or {})
-                for c in (result.tool_call_log or [])
-            )
-            if _mutated:
-                _rq = (
-                    supabase.table("conversation_carts")
-                    .select("requires_requote, shipping_meta")
-                    .eq("tenant_id", tenant_id)
-                    .eq("conversation_id", conversation_id)
-                    .in_("status", ["open", "checkout"])
-                    .order("updated_at", desc=True).limit(1).execute()
-                )
-                _rqrow = (_rq.data or [{}])[0]
-                _known_city = (_rqrow.get("shipping_meta") or {}).get("city")
-                if _rqrow.get("requires_requote") and _known_city:
-                    from agentic.tools.shipping import QuoteShippingTool, QuoteShippingArgs
-                    from agentic.tools.base import ToolContext
-                    _rqctx = ToolContext(
-                        tenant_id=tenant_id, conversation_id=conversation_id,
-                        contact_id=contact_id, supabase=supabase,
-                        catalog_cache=catalog, logger=logger,
-                        extras={"recent_inbound_texts": [content]},
-                    )
-                    _rqres = await QuoteShippingTool().execute(
-                        QuoteShippingArgs(city=_known_city), _rqctx)
-                    _opts = (_rqres.data or {}).get("options") or [] if (_rqres and _rqres.success) else []
-                    if _opts:
-                        _bul = []
-                        for _o in _opts:
-                            _p = int(_o.get("price_cop") or 0)
-                            _ps = f"${_p:,}".replace(",", ".")
-                            _eta = _o.get("eta_date") or ""
-                            _bul.append(
-                                f"* *{_o.get('carrier')}*{f' ({_eta})' if _eta else ''}: *{_ps} COP*")
-                        _city_show = (_rqres.data or {}).get("destination", {}).get("city") or _known_city
-                        result.outbound_text = (
-                            f"Listo, actualicé tu pedido. Como cambió el contenido, recalculé "
-                            f"el envío a *{_city_show}*:\n\n" + "\n".join(_bul) + "\n\n¿Cuál prefieres?"
-                        )
-                        logger.info(
-                            "[AGENTIC_REQUOTE] auto-recotización post-mutación conv=%s city=%s opts=%d",
-                            conversation_id, _known_city, len(_opts),
-                        )
-        except Exception as _rqexc:
-            logger.warning("[AGENTIC_REQUOTE] auto-requote falló: %s", _rqexc)
+    # ADR-0026: el override post-LLM de auto-recotización fue REVERTIDO. Era un band-aid
+    # que (a) nunca corría en el path pre-LLM purchase (que retorna antes) y (b) dependía
+    # de shipping_meta.city que antes nunca se persistía. Ahora el path pre-LLM purchase
+    # recotiza vía render canónico (Pieza C) y el path LLM ve [CARRITO ACTUAL] + tiene el
+    # invariant requote_pending_summary como red de seguridad. Sin override heavy-handed.
 
     # Aplicar invariants Python (anti-hallu + style + flow guards).
     # Orden importa:
