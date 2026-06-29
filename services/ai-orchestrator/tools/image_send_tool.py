@@ -49,6 +49,26 @@ _IMAGE_REQUEST_PHRASES: tuple[str, ...] = (
     "puedes enviar", "puedes mandar",
 )
 
+# ADR-0027 2026-06-29 — desambiguación foto vs LISTAR catálogo. Los verbos genéricos
+# "muéstrame/ver/mostrar/mándame" son AMBIGUOS: "muéstrame los jabones" = listar la categoría,
+# NO enviar una foto. Solo son intención de foto si hay una palabra/frase EXPLÍCITA de imagen.
+_GENERIC_SHOW_VERBS: frozenset[str] = frozenset({
+    "muestrame", "muestra", "mostrar", "ver", "verla", "verlo",
+    "mandame", "enviame", "manda", "envia", "enviar", "mandar",
+})
+_EXPLICIT_IMAGE_WORDS: frozenset[str] = frozenset({
+    "foto", "fotos", "imagen", "imagenes", "fotico", "fotito",
+})
+_EXPLICIT_IMAGE_PHRASES: tuple[str, ...] = (
+    "como se ve", "como luce", "tienes foto", "tienen foto", "hay foto",
+)
+# Señales de que el cliente quiere LISTAR (catálogo/categoría), no una foto concreta.
+_CATALOG_LIST_TERMS: frozenset[str] = frozenset({
+    "productos", "producto", "catalogo", "opciones", "todo", "todos", "todas",
+    "categorias", "categoria",
+})
+_PLURAL_ARTICLES: frozenset[str] = frozenset({"los", "las"})
+
 
 def _phrase_matches_with_boundary(phrase: str, normalized: str) -> bool:
     """Rev. 82: matching con word boundaries para evitar que una frase
@@ -192,6 +212,20 @@ def is_image_request_query(text: str) -> bool:
     )
     if _has_payment_signal and not _has_explicit_image:
         return False
+
+    # ADR-0027 2026-06-29 — NEGATIVE override foto vs LISTAR: si la señal de imagen viene SOLO de
+    # un verbo genérico de mostrar/enviar (sin palabra/frase explícita de imagen) Y el cliente
+    # pide LISTAR (término de catálogo o artículo plural: "muéstrame los jabones", "ver el
+    # catálogo", "muéstrame las opciones"), es navegación de catálogo, NO foto. Evita el falso
+    # positivo de mandar una foto (a veces del producto equivocado) cuando pidió ver una lista.
+    _explicit_image = bool(tokens & _EXPLICIT_IMAGE_WORDS) or any(
+        _phrase_matches_with_boundary(p, normalized) for p in _EXPLICIT_IMAGE_PHRASES
+    )
+    _generic_show_only = bool(tokens & _GENERIC_SHOW_VERBS) and not _explicit_image
+    _wants_list = bool(tokens & _CATALOG_LIST_TERMS) or bool(tokens & _PLURAL_ARTICLES)
+    if _generic_show_only and _wants_list:
+        return False
+
     has_transactional = bool(tokens & _TRANSACTIONAL_OVERRIDE_TOKENS)
     # Prioridad imagen cuando ambos están — cliente quiere ver antes de comprar.
     return has_image_tokens or False  # transactional-only no dispara
