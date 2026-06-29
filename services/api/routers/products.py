@@ -42,6 +42,7 @@ router = APIRouter(tags=["Products"])
 class VariationCreate(BaseModel):
     sku: str = Field(..., min_length=1, max_length=100)
     price: float = Field(..., gt=0)
+    cost_price: Optional[float] = Field(default=None, ge=0)  # costo interno (margen)
     compare_at_price: Optional[float] = Field(default=None, ge=0)
     stock_quantity: int = Field(default=0, ge=0)
     attributes: dict = Field(default={"default": "Standard"})
@@ -54,22 +55,28 @@ class VariationCreate(BaseModel):
 
 class ProductCreate(BaseModel):
     platform_category_id: Optional[str] = None
+    category_id: Optional[str] = None        # ADR-0027 categoría operativa per-tenant
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    safety_note: Optional[str] = None        # nota de seguridad (Ley 1480, customer-facing)
     cover_image_url: Optional[str] = None
     variation: VariationCreate
 
 
 class ProductPatch(BaseModel):
     platform_category_id: Optional[str] = None
+    category_id: Optional[str] = None        # ADR-0027 categoría operativa per-tenant
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
+    safety_note: Optional[str] = None
+    retracto_excluded: Optional[bool] = None  # exclusión derecho de retracto (Ley 1480)
     cover_image_url: Optional[str] = None
 
 
 class VariationPatch(BaseModel):
     sku: Optional[str] = Field(default=None, min_length=1, max_length=100)
     price: Optional[float] = Field(default=None, gt=0)
+    cost_price: Optional[float] = Field(default=None, ge=0)
     compare_at_price: Optional[float] = Field(default=None, ge=0)
     stock_quantity: Optional[int] = Field(default=None, ge=0)
     attributes: Optional[dict] = None
@@ -94,7 +101,7 @@ async def list_products(
     try:
         query = (
             supabase.table("products")
-            .select("id, title, description, status, platform_category_id, cover_image_url, created_at, product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
+            .select("id, title, description, status, platform_category_id, category_id, safety_note, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("tenant_id", tenant_id)
             .order("title")
             .limit(limit)
@@ -124,8 +131,10 @@ async def create_product(
         prod_result = supabase.table("products").insert({
             "tenant_id": tenant_id,
             "platform_category_id": product.platform_category_id,
+            "category_id": product.category_id,
             "title": product.title,
             "description": product.description,
+            "safety_note": product.safety_note,
             "cover_image_url": product.cover_image_url,
             "status": "active",
         }).execute()
@@ -140,6 +149,7 @@ async def create_product(
             "tenant_id": tenant_id,
             "sku": product.variation.sku,
             "price": product.variation.price,
+            "cost_price": product.variation.cost_price,
             "compare_at_price": product.variation.compare_at_price,
             "stock_quantity": product.variation.stock_quantity,
             "attributes": product.variation.attributes,
@@ -169,7 +179,7 @@ async def get_product(
     try:
         result = (
             supabase.table("products")
-            .select("id, title, description, status, platform_category_id, cover_image_url, created_at, product_variations(id, sku, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
+            .select("id, title, description, status, platform_category_id, category_id, safety_note, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("id", product_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -307,6 +317,7 @@ async def add_variation(
             "tenant_id": tenant_id,
             "sku": variation.sku,
             "price": variation.price,
+            "cost_price": variation.cost_price,
             "compare_at_price": variation.compare_at_price,
             "stock_quantity": variation.stock_quantity,
             "attributes": variation.attributes,
