@@ -14,6 +14,25 @@ MAX_VARIANTS_PER_PRODUCT = 6
 # (Pieza 3), no truncando la verdad transaccional.
 MAX_CATALOG_PRODUCTS = int(os.getenv("MAX_CATALOG_PRODUCTS", "1000"))
 
+# ADR-0027 Fase 2 — categoría DATA-DRIVEN per-tenant. El catálogo expone la categoría REAL
+# (products.category_id → product_categories.display_label). Fallback a heurística título-head
+# SOLO si category_id es NULL (durante backfill) — NO permanente (ver _fallback_category).
+_CATEGORY_STOPWORDS = {"de", "con", "la", "el", "del", "al", "para", "y", "e", "o"}
+
+
+def _fallback_category_from_title(title: str) -> str:
+    """Fallback título-head (primera palabra significativa) cuando category_id es NULL.
+    Espejo de _extract_category_head — red temporal durante el backfill, no fuente primaria."""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", (title or "").lower())
+    norm = "".join(c for c in nfkd if not unicodedata.combining(c)).strip()
+    orig = (title or "").split()
+    for i, word in enumerate(norm.split()):
+        if len(word) >= 3 and word not in _CATEGORY_STOPWORDS:
+            disp = orig[i] if i < len(orig) else word
+            return (disp[:1].upper() + disp[1:]) if disp else word
+    return ""
+
 
 def _normalize_attributes_label(attributes: dict | None, sku: str | None, fallback_index: int) -> str:
     """Construye una etiqueta legible de variante para el prompt.
@@ -61,7 +80,7 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
         result = (
             supabase.table("products")
             .select(
-                "id, title, description, safety_note, "
+                "id, title, description, safety_note, category_id, "
                 "product_variations(id, sku, attributes, price, stock_quantity)"
             )
             .eq("tenant_id", tenant_id)
@@ -70,6 +89,23 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
             .limit(MAX_CATALOG_PRODUCTS)  # ADR-0027 Pieza 6: cota generosa, no un 50 silencioso
             .execute()
         )
+
+        # ADR-0027 Fase 2 — mapa id→display_label de las categorías REALES del tenant (consulta
+        # aparte, robusto pre/post migración: si la tabla no existe aún, queda vacío → fallback).
+        cat_map: dict = {}
+        try:
+            _cats = (
+                supabase.table("product_categories")
+                .select("id, name, display_label")
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            cat_map = {
+                c["id"]: (c.get("display_label") or c.get("name") or "")
+                for c in (_cats.data or [])
+            }
+        except Exception as _cat_exc:
+            logger.warning("[CATALOG] product_categories no disponible (fallback título): %s", _cat_exc)
         # Truncado OBSERVABLE (nunca silencioso): si llegamos a la cota, el catálogo del tenant
         # excede MAX_CATALOG_PRODUCTS y hay productos no cargados — señal para activar Pieza 3/4
         # (índice + paginación) para ese tenant.
@@ -124,11 +160,16 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
 
             price_min = min(prices) if prices else 0.0
             price_max = max(prices) if prices else 0.0
+            # ADR-0027 Fase 2 — categoría REAL (data-driven). Fallback título-head SOLO si NULL.
+            _category = cat_map.get(product.get("category_id")) \
+                or _fallback_category_from_title(product.get("title", ""))
             catalog.append({
                 "id": product.get("id"),  # product_id real para pedidos
                 "title": product.get("title", "Sin nombre"),
                 "description": product.get("description", ""),
                 "safety_note": product.get("safety_note") or "",
+                "category": _category,            # ADR-0027 Fase 2: categoría per-tenant real
+                "category_id": product.get("category_id"),
                 "price_min": price_min,
                 "price_max": price_max,
                 "stock_total": total_stock,

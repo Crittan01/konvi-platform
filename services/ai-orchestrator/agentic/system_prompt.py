@@ -61,16 +61,19 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     if not catalog:
         return "(Catálogo vacío para este tenant.)"
     lines: list[str] = []
-    # Agrupar por categoría (primera palabra significativa del título).
+    # ADR-0027 Fase 2 — agrupar por la categoría REAL del tenant (get_tenant_catalog ya la
+    # resuelve desde products.category_id → product_categories). Fallback a la heurística
+    # título-head SOLO si el catálogo no trae 'category' (compat pre-Fase 2 / data sin backfill).
     by_category: dict[str, list[dict]] = {}
     for p in catalog:
-        title = str(p.get("title") or "")
-        # Categoría = primera palabra ≥3 chars del título.
-        first_words = [
-            w for w in title.lower().split()
-            if len(w) >= 3 and w not in ("de", "con", "para", "del", "al", "la", "el")
-        ]
-        cat = first_words[0] if first_words else "otros"
+        cat = str(p.get("category") or "").strip()
+        if not cat:
+            title = str(p.get("title") or "")
+            first_words = [
+                w for w in title.lower().split()
+                if len(w) >= 3 and w not in ("de", "con", "para", "del", "al", "la", "el")
+            ]
+            cat = first_words[0] if first_words else "otros"
         by_category.setdefault(cat, []).append(p)
 
     for cat, products in by_category.items():
