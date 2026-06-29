@@ -103,7 +103,8 @@ class ListCatalogTool:
             products_out.append({
                 "product_id": str(p.get("id") or ""),
                 "title": str(p.get("title") or ""),
-                "category": _extract_category_head(p),
+                # ADR-0027 Fase 2: categoría REAL; fallback título-head solo si no hay.
+                "category": str(p.get("category") or "") or _extract_category_head(p),
                 "variants": variants,
             })
 
@@ -138,15 +139,20 @@ def _extract_category_head(product: dict) -> str:
 
 
 def _product_matches_category(product: dict, category_norm: str) -> bool:
-    """True si la palabra-categoría está en el título del producto.
+    """True si el producto pertenece a la categoría pedida.
 
-    Rev. 109 UAT live BUG 14: el match laxo previo requería ≥4 chars
-    en ambos lados, pero head="kit" (3 chars) vs category="kits" (4)
-    fallaba. Fix: singular/plural tolerance — quita 's'/'es' al final
-    de ambos lados y compara stems.
+    ADR-0027 Fase 2: usa la categoría REAL del producto (product['category'] vía
+    product_categories) y cae a la heurística título-head solo si no hay categoría real.
+    Matchea contra AMBAS (real + head) → funciona si el LLM pide por el label real
+    ('Camisas') o por una palabra del título ('polo'). Tolerante a singular/plural y prefijo.
+
+    Rev. 109 UAT live BUG 14: el match laxo previo requería ≥4 chars en ambos lados, pero
+    head="kit" (3 chars) vs category="kits" (4) fallaba. Fix: stem singular/plural.
     """
+    real = _normalize_simple(str(product.get("category") or ""))
     head = _extract_category_head(product)
-    if head == category_norm:
+    candidates = {c for c in (real, head) if c}
+    if category_norm in candidates:
         return True
 
     def _stem(w: str) -> str:
@@ -157,13 +163,14 @@ def _product_matches_category(product: dict, category_norm: str) -> bool:
             return w[:-1]
         return w
 
-    if _stem(head) == _stem(category_norm):
-        return True
-
-    # Match prefijo (kit / kit-inicio, aceite / aceite-coco, etc.)
-    if len(head) >= 3 and len(category_norm) >= 3:
-        if head.startswith(_stem(category_norm)) or category_norm.startswith(_stem(head)):
+    cat_stem = _stem(category_norm)
+    for cand in candidates:
+        if _stem(cand) == cat_stem:
             return True
+        # Match prefijo (kit / kit-inicio, aceite / aceite-coco, etc.)
+        if len(cand) >= 3 and len(category_norm) >= 3:
+            if cand.startswith(cat_stem) or category_norm.startswith(_stem(cand)):
+                return True
     return False
 
 

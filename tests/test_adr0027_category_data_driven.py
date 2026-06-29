@@ -19,6 +19,7 @@ from tools.catalog_tool import get_tenant_catalog, _fallback_category_from_title
 from agentic.invariants.cart_render_coherence import (  # noqa: E402
     _detect_listed_category, _split_present_missing,
 )
+from agentic.tools.catalog import _product_matches_category  # noqa: E402
 
 
 class _Chain:
@@ -86,6 +87,15 @@ class DetectListedCategoryTests(unittest.TestCase):
     def test_plural_and_accent_tolerant(self):
         self.assertEqual(_detect_listed_category("tenemos estos Sérums", ["Sérum"]), "Sérum")
         self.assertEqual(_detect_listed_category("nuestros Aceites", ["Aceite"]), "Aceite")
+
+    def test_list_catalog_matcher_uses_real_category(self):
+        # list_catalog filtra por categoría REAL: 'camisas' matchea el producto de moda
+        # aunque su título-head sea 'polo'. Y 'polo' también (fallback head). Multi-vertical.
+        fashion = {"title": "Polo Ralph Lauren", "category": "Camisas"}
+        self.assertTrue(_product_matches_category(fashion, "camisas"))   # por categoría real
+        self.assertTrue(_product_matches_category(fashion, "camisa"))    # singular-tolerante
+        self.assertTrue(_product_matches_category(fashion, "polo"))      # fallback título-head
+        self.assertFalse(_product_matches_category(fashion, "vino"))     # no pertenece
 
     def test_split_present_missing_by_category(self):
         prods = [{"title": "Polo Ralph Lauren"}, {"title": "Camisa Oxford Azul"}]
