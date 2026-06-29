@@ -18,6 +18,7 @@ original. Reduce 753 → ~450 LOC y elimina 3 archivos.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Optional
 
@@ -78,17 +79,11 @@ _VARIANT_PRESENTATION_ANCHORS = (
 
 # ─── Patterns: categorías ──────────────────────────────────────────────────
 
-# Categorías canónicas + función matcher producto.
-_CATEGORIES = [
-    ("sérum", [re.compile(r"\bs[eé]rum(?:es|s)?\b", re.IGNORECASE)],
-     lambda title: "serum" in title.lower() or "sérum" in title.lower()),
-    ("jabón", [re.compile(r"\bjab[oó]n(?:es)?\b", re.IGNORECASE)],
-     lambda title: "jabon" in title.lower() or "jabón" in title.lower()),
-    ("aceite", [re.compile(r"\baceites?\b", re.IGNORECASE)],
-     lambda title: "aceite" in title.lower()),
-    ("kit", [re.compile(r"\bkits?\b", re.IGNORECASE)],
-     lambda title: "kit" in title.lower()),
-]
+# ADR-0027 Fase 2 — CASE D es DATA-DRIVEN: las categorías salen del catálogo real del tenant
+# (product["category"] vía get_tenant_catalog → product_categories), NO de un hardcode KAIU.
+# Umbral: no forzar completitud (wall-of-text) en categorías grandes — eso lo maneja la
+# navegación/paginación (Pieza 5). Configurable.
+_CASE_D_MAX_CATEGORY = int(os.getenv("CASE_D_MAX_CATEGORY", "12"))
 
 # Anchors de presentación de categoría (lista).
 _CATEGORY_LIST_ANCHORS = (
@@ -204,14 +199,11 @@ def _outbound_has_subtotal(text: str) -> bool:
     ))
 
 
-def _detect_category_intent(text: str) -> Optional[tuple]:
-    if not text:
-        return None
-    for label, patterns, match_fn in _CATEGORIES:
-        for p in patterns:
-            if p.search(text):
-                return (label, match_fn)
-    return None
+def _norm_txt(text: str) -> str:
+    """Lowercase + strip de acentos (para match tolerante de categorías)."""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", (text or "").lower())
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
 def _outbound_presents_category_list(text: str) -> bool:
@@ -220,16 +212,32 @@ def _outbound_presents_category_list(text: str) -> bool:
     return any(p.search(text) for p in _CATEGORY_LIST_ANCHORS)
 
 
-def _products_in_text(
-    catalog: list[dict], text: str, match_fn,
+def _detect_listed_category(text: str, categories: list[str]) -> Optional[str]:
+    """ADR-0027 Fase 2 (data-driven) — ¿el texto presenta/pide una categoría REAL del tenant?
+    Matchea el label de categoría (tolerante a plural/acentos) contra el texto. Devuelve la
+    categoría real o None. Reemplaza el matcher hardcodeado a KAIU."""
+    if not text or not categories:
+        return None
+    tl = _norm_txt(text)
+    for cat in categories:
+        cn = _norm_txt(cat).strip()
+        if len(cn) < 3:
+            continue
+        if re.search(r"\b" + re.escape(cn) + r"(?:es|s)?\b", tl):
+            return cat
+    return None
+
+
+def _split_present_missing(
+    products: list[dict], text: str,
 ) -> tuple[list[dict], list[dict]]:
+    """De los productos de UNA categoría real, cuáles están mencionados en el texto."""
     text_lower = (text or "").lower()
-    matched_in_cat = [p for p in catalog if match_fn(str(p.get("title") or ""))]
     present, missing = [], []
-    for p in matched_in_cat:
+    for p in products:
         title = str(p.get("title") or "").lower()
         title_words = [w for w in title.split() if len(w) > 4 and w not in ("artesanal", "natural", "esencial")]
-        if title in text_lower:
+        if title and title in text_lower:
             present.append(p)
         elif title_words and any(w in text_lower for w in title_words):
             present.append(p)
@@ -315,7 +323,9 @@ def _build_category_completeness_replacement(
 ) -> str:
     """LLM omitió productos al listar categoría → lista compacta completa."""
     all_products = sorted(present + missing, key=lambda p: str(p.get("title") or ""))
-    lines = [f"Tenemos estos *{category_label}s*:", ""]
+    # ADR-0027 Fase 2: el label es la categoría REAL del tenant (display_label) — sin
+    # pluralización forzada (rompía labels que ya terminan en 's', ej. "Camisas").
+    lines = [f"En *{category_label}* tenemos:", ""]
     for p in all_products:
         title = str(p.get("title") or "Producto")
         variants = p.get("variants") or []
@@ -436,39 +446,44 @@ class CartRenderCoherenceInvariant:
                             reason="CASE C: add_to_cart success sin precio en outbound",
                         )
 
-        # ── CASE D: categoría con productos omitidos ──────────────────
+        # ── CASE D: categoría con productos omitidos (DATA-DRIVEN, ADR-0027 Fase 2) ──
         if _outbound_presents_category_list(candidate_text):
-            intent = _detect_category_intent(candidate_text)
-            client_asked = False
-            if inbound_text and intent:
-                for _, patterns, _ in _CATEGORIES:
-                    for p in patterns:
-                        if p.search(inbound_text):
-                            client_asked = True
-                            break
-                    if client_asked:
-                        break
-            if intent and client_asked:
-                category_label, match_fn = intent
-                try:
-                    from tools.catalog_tool import get_tenant_catalog
-                    catalog = await get_tenant_catalog(supabase, tenant_id)
-                except Exception:
-                    catalog = []
-                if catalog:
-                    present, missing = _products_in_text(catalog, candidate_text, match_fn)
-                    if missing:
-                        return InvariantResult(
-                            outcome=InvariantOutcome.REWRITE,
-                            invariant_name=self.name,
-                            replacement_text=_build_category_completeness_replacement(
-                                category_label, missing, present,
-                            ),
-                            reason=(
-                                f"CASE D: categoría '{category_label}' "
-                                f"omitió {len(missing)} productos"
-                            ),
-                        )
+            try:
+                from tools.catalog_tool import get_tenant_catalog
+                catalog = await get_tenant_catalog(supabase, tenant_id)
+            except Exception:
+                catalog = []
+            if catalog:
+                # Categorías REALES del tenant (del catálogo enriquecido, NO hardcode KAIU).
+                cats: list[str] = []
+                for p in catalog:
+                    c = str(p.get("category") or "").strip()
+                    if c and c not in cats:
+                        cats.append(c)
+                listed = _detect_listed_category(candidate_text, cats)
+                # El cliente pidió ESA categoría (señal de intención real).
+                client_asked = bool(
+                    listed and inbound_text
+                    and _detect_listed_category(inbound_text, [listed])
+                )
+                if listed and client_asked:
+                    in_cat = [p for p in catalog if str(p.get("category") or "") == listed]
+                    # Guard (interim Pieza 5): no forzar completitud en categorías grandes
+                    # (wall-of-text) — eso lo maneja la navegación/paginación.
+                    if 2 <= len(in_cat) <= _CASE_D_MAX_CATEGORY:
+                        present, missing = _split_present_missing(in_cat, candidate_text)
+                        if missing:
+                            return InvariantResult(
+                                outcome=InvariantOutcome.REWRITE,
+                                invariant_name=self.name,
+                                replacement_text=_build_category_completeness_replacement(
+                                    listed, missing, present,
+                                ),
+                                reason=(
+                                    f"CASE D: categoría '{listed}' "
+                                    f"omitió {len(missing)} productos"
+                                ),
+                            )
 
         return InvariantResult(
             outcome=InvariantOutcome.OK, invariant_name=self.name,
