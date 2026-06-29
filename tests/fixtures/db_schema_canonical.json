@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "column_count": 7,
+      "column_count": 13,
       "columns": [
         {
           "col": "id",
@@ -44,6 +44,42 @@
           "default": "now()",
           "nullable": "YES",
           "type": "timestamp with time zone"
+        },
+        {
+          "col": "role",
+          "default": "'sales'::text",
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "is_default",
+          "default": "true",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "persona_block",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "tools_allowed",
+          "default": null,
+          "nullable": "YES",
+          "type": "jsonb"
+        },
+        {
+          "col": "fsm_states_allowed",
+          "default": null,
+          "nullable": "YES",
+          "type": "jsonb"
+        },
+        {
+          "col": "fallback_for_roles",
+          "default": "'[\"sales\", \"support\", \"marketing\", \"claims\"]'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
         }
       ],
       "table_name": "ai_agents"
@@ -469,7 +505,211 @@
       "table_name": "contacts"
     },
     {
-      "column_count": 7,
+      "column_count": 10,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "tenant_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "cart_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "product_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "variation_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "quantity",
+          "default": null,
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "unit_price_cents",
+          "default": null,
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "meta",
+          "default": "'{}'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
+        },
+        {
+          "col": "created_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "updated_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        }
+      ],
+      "table_name": "conversation_cart_items"
+    },
+    {
+      "column_count": 22,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "tenant_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "conversation_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "contact_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "status",
+          "default": "'open'::text",
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "version",
+          "default": "1",
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "shipping_meta",
+          "default": "'{}'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
+        },
+        {
+          "col": "subtotal_cents",
+          "default": "0",
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "shipping_cents",
+          "default": "0",
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "total_cents",
+          "default": "0",
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "currency",
+          "default": "'COP'::bpchar",
+          "nullable": "NO",
+          "type": "character"
+        },
+        {
+          "col": "converted_order_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "last_activity_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "expires_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "created_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "updated_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "requires_requote",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "coupon_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "coupon_code",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "discount_cents",
+          "default": "0",
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "abandoned_reminder_sent_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "payment_method",
+          "default": "'credit'::text",
+          "nullable": "YES",
+          "type": "text"
+        }
+      ],
+      "table_name": "conversation_carts"
+    },
+    {
+      "column_count": 9,
       "columns": [
         {
           "col": "id",
@@ -512,6 +752,18 @@
           "default": null,
           "nullable": "YES",
           "type": "timestamp with time zone"
+        },
+        {
+          "col": "agentic_state",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "channel",
+          "default": "'whatsapp'::text",
+          "nullable": "NO",
+          "type": "text"
         }
       ],
       "table_name": "conversations"
@@ -1051,7 +1303,7 @@
       "table_name": "order_tracking"
     },
     {
-      "column_count": 12,
+      "column_count": 15,
       "columns": [
         {
           "col": "id",
@@ -1124,6 +1376,24 @@
           "default": "'credit'::text",
           "nullable": "YES",
           "type": "text"
+        },
+        {
+          "col": "cancelled_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "cancelled_by_actor",
+          "default": null,
+          "nullable": "YES",
+          "type": "USER-DEFINED"
+        },
+        {
+          "col": "cancellation_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
         }
       ],
       "table_name": "orders"
@@ -1217,6 +1487,48 @@
         }
       ],
       "table_name": "payments"
+    },
+    {
+      "column_count": 6,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "tenant_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "name",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "display_label",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "sort_order",
+          "default": "0",
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "created_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        }
+      ],
+      "table_name": "product_categories"
     },
     {
       "column_count": 17,
@@ -1327,7 +1639,7 @@
       "table_name": "product_variations"
     },
     {
-      "column_count": 10,
+      "column_count": 14,
       "columns": [
         {
           "col": "id",
@@ -1388,6 +1700,30 @@
           "default": null,
           "nullable": "YES",
           "type": "text"
+        },
+        {
+          "col": "retracto_excluded",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "retracto_excluded_reason",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "safety_note",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "category_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
         }
       ],
       "table_name": "products"
@@ -1495,7 +1831,7 @@
       "table_name": "purchase_orders"
     },
     {
-      "column_count": 20,
+      "column_count": 19,
       "columns": [
         {
           "col": "id",
@@ -1577,12 +1913,6 @@
         },
         {
           "col": "tracking_url",
-          "default": null,
-          "nullable": "YES",
-          "type": "text"
-        },
-        {
-          "col": "envia_shipment_id",
           "default": null,
           "nullable": "YES",
           "type": "text"
@@ -1885,7 +2215,7 @@
       "table_name": "tenant_integrations"
     },
     {
-      "column_count": 25,
+      "column_count": 30,
       "columns": [
         {
           "col": "id",
@@ -2036,6 +2366,36 @@
           "default": "true",
           "nullable": "NO",
           "type": "boolean"
+        },
+        {
+          "col": "deletion_requested_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "deletion_scheduled_for",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "deletion_requested_by",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "deletion_reason",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "deleted_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
         }
       ],
       "table_name": "tenants"

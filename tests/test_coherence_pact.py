@@ -165,6 +165,9 @@ class FixtureSanityTests(unittest.TestCase):
         "messages", "products", "product_variations", "orders", "order_items",
         "claims", "suppliers", "purchase_orders", "purchase_order_items",
         "audit_log", "bot_source_log",
+        # Auditoría 2026-06-29 — cerraban un hueco de coherencia (el fixture estaba ciego a ellas):
+        "conversation_carts", "conversation_cart_items",  # ADR-0026 cart-as-SoT
+        "product_categories",  # ADR-0027 Pieza 1 categorías per-tenant
     ]
 
     def test_all_required_tables_present(self):

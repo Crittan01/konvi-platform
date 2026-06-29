@@ -33,8 +33,11 @@ CORE_TABLES = [
     "contacts",
     "conversations",
     "messages",
+    "conversation_carts",       # ADR-0026 cart-as-SoT (faltaba en el fixture)
+    "conversation_cart_items",  # ADR-0026 cart-as-SoT
     "products",
     "product_variations",
+    "product_categories",       # ADR-0027 Pieza 1 categorías per-tenant (faltaba)
     "stock_movements",
     "stock_reservations",
     "orders",
