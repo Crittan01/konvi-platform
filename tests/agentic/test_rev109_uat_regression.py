@@ -102,11 +102,14 @@ class SectionA_Saludo(unittest.TestCase):
         # Sin history previo, técnicamente GREETING aplica (re-engage).
         self.assertEqual(_resolver().resolve(ctx), AgenticState.GREETING)
 
-    def test_a3_greeting_prompt_has_categorias_canonicas(self):
+    def test_a3_greeting_prompt_has_category_guidance(self):
+        # ADR-0027 2026-06-29: categorías DATA-DRIVEN (sin hardcode KAIU). El prompt ya no
+        # cablea "Aceites Vegetales/Esenciales"; instruye usar las etiquetas REALES que el
+        # catálogo embebido muestra como encabezados (*Categoría*:) → multi-vertical.
         prompt, tools = _build(AgenticState.GREETING)
-        self.assertIn("CATEGORÍAS CANÓNICAS", prompt)
-        self.assertIn("Aceites Vegetales", prompt)
-        self.assertIn("Aceites Esenciales", prompt)
+        self.assertIn("CATEGORÍAS", prompt)
+        self.assertIn("etiquetas de categoría", prompt)
+        self.assertNotIn("CATEGORÍAS CANÓNICAS", prompt)  # hardcode retirado
         self.assertIn("list_catalog", tools)
 
     def test_a4_greeting_prompt_no_re_saluda(self):

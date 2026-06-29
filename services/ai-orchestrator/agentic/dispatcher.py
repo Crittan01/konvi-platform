@@ -764,7 +764,6 @@ async def _run_agentic_full(
     from agentic.system_prompt import build_system_prompt
     from agentic.invariants import (
         apply_invariants,
-        CanonicalCategoriesInvariant,
         CartRenderCoherenceInvariant,
         ConsentRequiredInvariant,
         EmptyPromiseInvariant,
@@ -2565,11 +2564,10 @@ async def _run_agentic_full(
             # FUERZA el side-effect real para garantizar atención humana.
             FakeEscalationInvariant(),
             PassiveClosingInvariant(),
-            # Rev. 109 UAT live — normaliza variaciones del LLM al naming
-            # canónico de categorías (Sérums Faciales → Sérums, Kits de
-            # Cuidado → Kits). Aplica SOLO en outbounds que listen
-            # categorías; no toca textos de cotización/pago/etc.
-            CanonicalCategoriesInvariant(),
+            # ADR-0027 2026-06-29 — RETIRADO CanonicalCategoriesInvariant (hardcode KAIU:
+            # "Sérums Faciales"→"Sérums" etc.). Las etiquetas de categoría ahora son
+            # data-driven: el catálogo embebido muestra los encabezados reales del tenant
+            # (*display_label*:) y el prompt instruye usarlos literal → multi-vertical.
             # A11 2026-06-26 — verdad transaccional de variantes (principio #4):
             # si el bot afirma falsamente "solo X presentación" / niega una
             # variante que SÍ está en stock, lo reescribe a la verdad completa

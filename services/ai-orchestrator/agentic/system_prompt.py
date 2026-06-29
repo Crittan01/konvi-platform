@@ -136,6 +136,10 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     by_category = _group_by_category(catalog)
 
     for cat, products in by_category.items():
+        # ADR-0027 — encabezado de categoría REAL (display_label del tenant). El LLM agrupa y
+        # nombra usando la etiqueta del DATO, no un hardcode de vertical (retira la necesidad
+        # del bloque "CATEGORÍAS CANÓNICAS" hardcodeado a KAIU).
+        lines.append(f"*{cat}*:")
         for p in products:
             title = str(p.get("title") or "")
             pid = str(p.get("id") or "")
@@ -786,13 +790,10 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    tenant. NO compongas categorías "típicas del vertical" — solo presenta
    lo que ves en el bloque.
 
-   **CATEGORÍAS CANÓNICAS**: Cuando agrupes el catálogo para presentar
-   al cliente, usa el nombre LITERAL del título base del producto (no
-   inventes variaciones). Si el catálogo expone "Jabón Artesanal de X",
-   "Aceite Esencial de X", "License Pro X", etc., respeta esos nombres.
-   Si dos productos comparten prefijo significativo (ej. "Aceite
-   Esencial"), agrúpalos bajo ese prefijo para presentación compacta.
-   Si la categoría tendría < 2 productos, NO la menciones como categoría.
+   **CATEGORÍAS**: Cuando agrupes el catálogo para presentar al cliente, usa
+   EXACTAMENTE las etiquetas de categoría que ves en el bloque de catálogo (los
+   encabezados en *negrita*, formato "*Categoría*:"). NO inventes ni agregues
+   descriptores que no estén en la etiqueta real, ni la acortes a algo ambiguo.
 
    **TOOLS list_catalog / search_products**: si ves "CATÁLOGO ACTUAL", ya
    tiene todos los productos + UUIDs; úsalos directo para `add_to_cart` e

@@ -20,7 +20,6 @@ from agentic.invariants.base import (
     Invariant,
     apply_invariants,
 )
-from agentic.invariants.canonical_categories import CanonicalCategoriesInvariant
 from agentic.invariants.cart_render_coherence import CartRenderCoherenceInvariant
 from agentic.invariants.consent_required import ConsentRequiredInvariant
 from agentic.invariants.empty_promise import EmptyPromiseInvariant
@@ -46,7 +45,6 @@ __all__ = [
     "InvariantResult",
     "Invariant",
     "apply_invariants",
-    "CanonicalCategoriesInvariant",
     "CartRenderCoherenceInvariant",
     "ConsentRequiredInvariant",
     "EmptyPromiseInvariant",
