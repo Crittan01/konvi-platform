@@ -1,6 +1,6 @@
 # ADR-0027 — Catálogo navegable y buscable, data-driven y multi-tenant
 
-**Estado:** PROPUESTO · **REVISADO 2026-06-27** tras auditoría full-stack · pendiente founder
+**Estado:** PARCIALMENTE IMPLEMENTADO (Piezas 1·2·3·4·6) · **REVISADO 2026-06-27** · **IMPLEMENTADO 2026-06-29**
 **Fecha:** 2026-06-27
 **Disparador:** founder sobre conversación KAIU +573125835649 — pidió "¿qué productos tienen?" y el
 bot volcó los 16 productos (1.092 chars, 4 categorías, todas las variantes). Pregunta: "¿qué pasa
@@ -35,6 +35,24 @@ multi-tenant). **Coordina con:** ADR-0028 (catálogo/cart como servicio cross-su
 > per-tenant) sigue siendo correcta y necesaria — ahora con su rol claro (operativa) y SIN tocar
 > platform_categories (marketplace). La migración escrita queda **válida** (crea la capa operativa)
 > y puede aplicarse una vez confirmada esta decisión.
+
+---
+
+## Estado de implementación (2026-06-29)
+
+| Pieza | Estado | Dónde |
+|---|---|---|
+| **1** — `product_categories` per-tenant + `products.category_id` | ✅ APLICADO a prod (founder autorizó) + backfill ejecutado (KAIU 4 cat / 16 prods / 0 NULL) | migración `20260627120000`, `scripts/backfill_product_categories.py` |
+| **2** — Consumo unificado de categoría real (sin hardcode KAIU) | ✅ en main | `get_tenant_catalog` (`category` real), grouping `system_prompt`, CASE D `cart_render_coherence`, `list_catalog` |
+| **3** — Inyección selectiva (umbral conteo, índice de categorías en modo grande) | ✅ en main | `catalog_is_large`/`render_category_index` (`system_prompt.py`), `catalog_section`/`catalog_compact_section` (`blocks.py`), fallback monolito |
+| **4** — Búsqueda on-demand (`search_products` por nombre/categoría/precio) + `list_catalog` paginado | ✅ en main | `tools/catalog.py` + `tools_subset.py` |
+| **6** — Cota observable (no truncación silenciosa) | ✅ en main | `MAX_CATALOG_PRODUCTS` + `logger.warning` |
+| **2 (resolver determinístico)** / pieza navegación pre-LLM | ⏸ DIFERIDA (fase 2, riesgo de pisar intención de compra) | — |
+
+**Umbral:** `CATALOG_EMBED_THRESHOLD` (default 40, por CONTEO de productos — determinístico, no por tokens; override por envvar/tenant).
+**No-regresión:** catálogos ≤ umbral (KAIU 16) se comportan **idéntico** a antes (verificado live + tests).
+**Limitación conocida (deferida, NO silenciosa):** tenants con >`MAX_CATALOG_PRODUCTS` (1000) tienen `catalog_cache` truncado → productos #1001+ invisibles a `search_products`/`add_to_cart` (warning logueado). Fix sistémico (catálogo DB-backed on-demand) fuera de alcance.
+**Verificación:** `tests/test_adr0027_catalog_large_ondemand.py` (14 tests) + `tests/test_adr0027_category_data_driven.py` (7) + review adversarial multi-agente (0 must-fix). Commits en `main` hasta `5662c04f`.
 
 ---
 
