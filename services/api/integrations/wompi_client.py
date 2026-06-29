@@ -25,6 +25,7 @@ H.3.1 — Estado de exposición HTTP (cierre 2026-05-29):
     "Reconciliar pago" o el cron de reconciliación background.
 """
 import hashlib
+import hmac
 import logging
 from typing import Any, Optional, Tuple
 
@@ -134,7 +135,8 @@ def verify_event_signature(payload: dict, events_key: str) -> bool:
 
     concat = "".join(parts) + str(timestamp) + events_key
     computed = hashlib.sha256(concat.encode()).hexdigest().upper()
-    valid = computed == expected_checksum.upper()
+    # Comparación constant-time (anti timing-attack) — no usar `==` para firmas.
+    valid = hmac.compare_digest(computed, expected_checksum.upper())
 
     if not valid:
         # Diagnóstico: log de las properties usadas (sin secrets) para
