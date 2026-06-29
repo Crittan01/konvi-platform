@@ -29,6 +29,9 @@ from routers.purchases import (  # noqa: E402
 )
 from routers.knowledge_base import KbDocCreate, KbDocPatch  # noqa: E402
 from routers.settings import TenantPatch  # noqa: E402
+from routers.product_categories import (  # noqa: E402
+    ProductCategoryCreate, ProductCategoryPatch,
+)
 
 FIXTURE = Path("/home/ansible/workspaces/konvi-platform/tests/fixtures/db_schema_canonical.json")
 
@@ -112,6 +115,14 @@ class ProductsCoherenceTests(unittest.TestCase):
     def test_variation_patch_fields_in_product_variations(self):
         orphans, _ = _check_subset(VariationPatch, "product_variations")
         self.assertFalse(orphans, f"VariationPatch huérfanos: {orphans}")
+
+    def test_product_category_create_fields_in_product_categories(self):
+        orphans, _ = _check_subset(ProductCategoryCreate, "product_categories")
+        self.assertFalse(orphans, f"ProductCategoryCreate huérfanos: {orphans}")
+
+    def test_product_category_patch_fields_in_product_categories(self):
+        orphans, _ = _check_subset(ProductCategoryPatch, "product_categories")
+        self.assertFalse(orphans, f"ProductCategoryPatch huérfanos: {orphans}")
 
 
 class ClaimsCoherenceTests(unittest.TestCase):

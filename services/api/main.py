@@ -25,6 +25,7 @@ from routers import (
     marketplace,
     meli_webhook,
     orders,
+    product_categories,
     products,
     purchases,
     settings,
@@ -132,6 +133,7 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 app.include_router(products.router, prefix="/api/v1/products", dependencies=_OFFBOARDING_GATE)
+app.include_router(product_categories.router, prefix="/api/v1/product-categories", dependencies=_OFFBOARDING_GATE)
 app.include_router(conversations.router, prefix="/api/v1/conversations", dependencies=_OFFBOARDING_GATE)
 app.include_router(orders.router, prefix="/api/v1/orders", dependencies=_OFFBOARDING_GATE)
 app.include_router(contacts.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)
