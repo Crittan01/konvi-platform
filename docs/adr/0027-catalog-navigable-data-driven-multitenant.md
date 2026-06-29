@@ -1,13 +1,40 @@
 # ADR-0027 — Catálogo navegable y buscable, data-driven y multi-tenant
 
-**Estado:** PROPUESTO (diseño verificado contra código + revisión adversarial) · pendiente founder
+**Estado:** PROPUESTO · **REVISADO 2026-06-27** tras auditoría full-stack · pendiente founder
 **Fecha:** 2026-06-27
 **Disparador:** founder sobre conversación KAIU +573125835649 — pidió "¿qué productos tienen?" y el
 bot volcó los 16 productos (1.092 chars, 4 categorías, todas las variantes). Pregunta: "¿qué pasa
 con 500 productos?". Premisa explícita del founder: **calidad primero, sin parches, tiempo no importa.**
 
-Relaciona: ADR-0018 (verdad transaccional: el LLM no inventa), ADR-0024 (invariants binarios),
-ADR-0025 (aislamiento multi-tenant).
+Relaciona: ADR-0018 (verdad transaccional), ADR-0024 (invariants binarios), ADR-0025 (aislamiento
+multi-tenant). **Coordina con:** ADR-0028 (catálogo/cart como servicio cross-surface), ADR-0029
+(modelo de producto multi-vertical).
+
+> ## ⚠️ REVISIÓN 2026-06-27 — corrección de premisa + decisión de modelo de categoría
+>
+> La auditoría full-stack posterior **DESMINTIÓ una premisa de la versión original** de este ADR: yo
+> afirmé que `products.platform_category_id` estaba MUERTA ("cero referencias"). **Es FALSO** —
+> verificado con grep: hay **36 referencias** activas (API `products.py`/`marketplace.py`, web
+> `catalog-form`/`catalog-table`/`product-edit-drawer`/`mass-importer`). Existe una tabla GLOBAL
+> `platform_categories` (sin tenant_id, jerárquica, **poblada con 20 verticales**: Belleza, Moda,
+> Alimentos…) en uso.
+>
+> **DECISIÓN DE MODELO DE CATEGORÍA (Fase 0) — DOS CAPAS CON ROLES DISTINTOS (no una reemplaza a la otra):**
+> - **`product_categories` (per-tenant, esta ADR)** = categoría **OPERATIVA**: lo que el bot lista, lo
+>   que la navegación web muestra al cliente. `products.category_id` → product_categories. Es lo que
+>   consumen el bot/catálogo/web. (ej. cosmética: "Sérums/Jabones/Aceites"; moda: "Camisas/Pantalones".)
+> - **`platform_categories` (global, existente)** = taxonomía de **PLATAFORMA/MARKETPLACE**: mapeo a
+>   MeLi/marketplaces, reporting cross-tenant, clasificación por vertical en onboarding. `products.
+>   platform_category_id` se **CONSERVA** para esto — NO está muerta, tiene rol propio. Opcionalmente
+>   `product_categories.platform_category_id` enlaza una categoría operativa del tenant a una vertical
+>   de plataforma (reporting cross-tenant, aditivo).
+>
+> **Consecuencia:** se elimina el lenguaje de "columna muerta / DROP" de esta ADR. El bug real no era
+> una columna muerta sino que **el bot ignora la categoría real** (usa heurística título-head +
+> hardcode KAIU) mientras admin/API/web usan la taxonomía global. La Pieza 1 (product_categories
+> per-tenant) sigue siendo correcta y necesaria — ahora con su rol claro (operativa) y SIN tocar
+> platform_categories (marketplace). La migración escrita queda **válida** (crea la capa operativa)
+> y puede aplicarse una vez confirmada esta decisión.
 
 ---
 
@@ -23,8 +50,9 @@ ADR-0025 (aislamiento multi-tenant).
    [agentic/tools/catalog.py:129-137](../../services/ai-orchestrator/agentic/tools/catalog.py#L129),
    [cart_render_coherence.py:82-91](../../services/ai-orchestrator/agentic/invariants/cart_render_coherence.py#L82) `_CATEGORIES` **hardcodeadas a KAIU**:
    sérum/jabón/aceite/kit). **No es multi-tenant.** (Existe `platform_categories` —migración
-   20260411162042— pero es GLOBAL `UNIQUE(name)` sin `tenant_id`, RLS read-only, y
-   `products.platform_category_id` está **muerta**: cero referencias en el código.)
+   20260411162042— GLOBAL, jerárquica, con 20 verticales pobladas; `products.platform_category_id`
+   la referencia en 36 sitios [admin/API/web]. **CORRECCIÓN (ver REVISIÓN arriba):** NO está muerta
+   — es la taxonomía de PLATAFORMA/marketplace; el bug real es que el BOT la ignora y usa heurística.)
 3. **Bug de correctitud `.limit(50)`** — [catalog_tool.py:63](../../services/ai-orchestrator/tools/catalog_tool.py#L63): un tenant con >50 productos
    ve el catálogo truncado **en silencio**. Como ese `get_tenant_catalog` alimenta el prompt, CASE D
    y el cache de `add_to_cart`, el bot puede afirmar "no existe" un producto #51 que SÍ existe, o
