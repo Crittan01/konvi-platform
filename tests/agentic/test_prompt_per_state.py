@@ -69,9 +69,11 @@ class PromptBuilderTests(unittest.TestCase):
         self.assertIn("Jabón de Coco", prompt)
 
     def test_pii_collection_excludes_catalog(self):
-        """PII no necesita catálogo — reduce prompt size."""
+        """PII no necesita catálogo — reduce prompt size. (ADR-0027: "CATÁLOGO ACTUAL"
+        ahora se menciona en la Regla 2 de safety; verificamos AUSENCIA del LISTADO de
+        productos, no del substring.)"""
         prompt = self._build(AgenticState.PII_COLLECTION)
-        self.assertNotIn("CATÁLOGO ACTUAL", prompt)
+        self.assertNotIn("Jabón de Coco", prompt)  # el listado de productos NO está
         self.assertIn("Habeas Data", prompt)
 
     def test_payment_includes_carriers_and_methods(self):
@@ -86,8 +88,9 @@ class PromptBuilderTests(unittest.TestCase):
     def test_human_handoff_minimal(self):
         prompt = self._build(AgenticState.HUMAN_HANDOFF)
         self.assertIn("HUMAN_HANDOFF", prompt)
-        # Sin catálogo ni carriers en handoff.
-        self.assertNotIn("CATÁLOGO ACTUAL", prompt)
+        # Sin catálogo ni carriers en handoff (verificamos ausencia del LISTADO, no del
+        # substring "CATÁLOGO ACTUAL" que ahora aparece en la Regla 2 de safety — ADR-0027).
+        self.assertNotIn("Jabón de Coco", prompt)
 
     def test_all_prompts_include_safety(self):
         for state in AgenticState:

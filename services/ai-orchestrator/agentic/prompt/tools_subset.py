@@ -31,6 +31,7 @@ _CART_MODS = frozenset({
     "remove_cart_item",
     "get_cart",
     "list_catalog",        # cliente puede agregar item adicional
+    "search_products",     # ADR-0027 Pieza 4 — buscar por nombre (catálogo grande)
     "send_product_image",  # cliente puede pedir foto en cualquier momento
     "kb_query",            # cliente puede preguntar info de producto/política
     "set_shipping_recipient",  # rev. 109 BUG 37 — receptor alterno
@@ -64,6 +65,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
     # Saludo — cart vacío típicamente; puede saltar a buy directo.
     AgenticState.GREETING: frozenset({
         "list_catalog",
+        "search_products",  # ADR-0027 Pieza 4 — buscar por nombre desde el saludo
         "add_to_cart",
         "get_contact_info",
         "kb_query",
@@ -77,6 +79,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
     # decidir agregar — add_to_cart presente.
     AgenticState.EXPLORING: frozenset({
         "list_catalog",
+        "search_products",  # ADR-0027 Pieza 4 — buscar por nombre/característica
         "add_to_cart",
         "send_product_image",
         "kb_query",
@@ -135,6 +138,7 @@ _TOOLS_BY_STATE: dict[AgenticState, frozenset[str]] = {
         "get_cart",
         "kb_query",
         "list_catalog",
+        "search_products",  # ADR-0027 Pieza 4 — buscar para una recompra
         _ESCALATE,
     }) | _CLAIMS_CAPABILITY,
     # Humano takeover — sin LLM. Mantenemos escalation por consistencia.

@@ -15,6 +15,7 @@ CATÁLOGO EN PROMPT (decisión arquitectónica):
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from lib.phone_format import format_phone_co
@@ -40,6 +41,75 @@ def _variant_line(v: dict) -> Optional[str]:
     return f"    * {label}: {price_str} COP [variation_id={vid}]{suffix}"
 
 
+# ADR-0027 Pieza 3 — umbral de embebido completo. Por encima, el catálogo NO se vuelca
+# entero al prompt (O(N) por turno); se embebe un ÍNDICE de categorías y el detalle se obtiene
+# on-demand (list_catalog paginado / search_products). Decisión por CONTEO (determinístico,
+# el catálogo ya está en RAM) — NO por tokens. Default 40 (ADR-0027 INTERVENCIÓN HUMANA #4:
+# embed≤40, page_size=8). Override global por envvar; el override por-tenant vive en config.
+CATALOG_EMBED_THRESHOLD = int(os.getenv("CATALOG_EMBED_THRESHOLD", "40"))
+
+
+def _group_by_category(catalog: list[dict]) -> dict[str, list[dict]]:
+    """Agrupa por la categoría REAL del tenant (ADR-0027 Fase 2: products.category_id →
+    product_categories). Fallback a la heurística título-head SOLO si el producto no trae
+    'category'. Preserva orden de inserción (estable para el render)."""
+    by_category: dict[str, list[dict]] = {}
+    for p in catalog:
+        cat = str(p.get("category") or "").strip()
+        if not cat:
+            title = str(p.get("title") or "")
+            first_words = [
+                w for w in title.lower().split()
+                if len(w) >= 3 and w not in ("de", "con", "para", "del", "al", "la", "el")
+            ]
+            cat = first_words[0] if first_words else "otros"
+        by_category.setdefault(cat, []).append(p)
+    return by_category
+
+
+def catalog_is_large(catalog: list[dict] | None, threshold: int | None = None) -> bool:
+    """ADR-0027 Pieza 3 — True si el catálogo supera el umbral de embebido completo.
+    Por CONTEO (O(1), determinístico): len(catalog) > threshold. KAIU (16) < 40 → False."""
+    thr = threshold if threshold is not None else CATALOG_EMBED_THRESHOLD
+    return len(catalog or []) > thr
+
+
+def _has_sellable_variant(product: dict) -> bool:
+    """True si el producto tiene ≥1 variante vendible (id + precio>0). Espejo del filtro de
+    _serialize_product (tools/catalog.py) → el conteo del índice coincide con lo que
+    list_catalog/search_products devuelven (no promete (N) y luego muestra (N-1))."""
+    return any(
+        v.get("id") and float(v.get("price") or 0) > 0
+        for v in (product.get("variants") or [])
+    )
+
+
+def render_category_index(catalog: list[dict] | None) -> str:
+    """ADR-0027 Pieza 3 — índice de CATEGORÍAS con conteo (O(categorías), no O(productos))
+    para catálogos grandes. El detalle (productos/precios/variation_id) se obtiene on-demand.
+    Multi-vertical: usa la categoría real del tenant (no hardcode). Cuenta SOLO productos
+    vendibles (coherente con list_catalog/search_products) y omite categorías que quedan en 0."""
+    if not catalog:
+        return "(Catálogo vacío para este tenant.)"
+    by_cat = _group_by_category(catalog)
+    counts = {
+        c: sum(1 for p in prods if _has_sellable_variant(p))
+        for c, prods in by_cat.items()
+    }
+    cats = [c for c in sorted(counts) if counts[c] > 0]
+    if not cats:
+        return "(Catálogo sin productos disponibles para este tenant.)"
+    lines = [f"* *{c}* ({counts[c]})" for c in cats]
+    n_prod, n_cat = sum(counts.values()), len(cats)
+    prod_w = "producto" if n_prod == 1 else "productos"
+    cat_w = "categoría" if n_cat == 1 else "categorías"
+    header = (
+        f"El catálogo tiene {n_prod} {prod_w} en {n_cat} {cat_w} "
+        f"(demasiados para listarlos completos). Categorías disponibles:"
+    )
+    return header + "\n\n" + "\n".join(lines)
+
+
 def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     """Renderiza el catalog como markdown block para embeber en prompt.
 
@@ -61,20 +131,9 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     if not catalog:
         return "(Catálogo vacío para este tenant.)"
     lines: list[str] = []
-    # ADR-0027 Fase 2 — agrupar por la categoría REAL del tenant (get_tenant_catalog ya la
-    # resuelve desde products.category_id → product_categories). Fallback a la heurística
-    # título-head SOLO si el catálogo no trae 'category' (compat pre-Fase 2 / data sin backfill).
-    by_category: dict[str, list[dict]] = {}
-    for p in catalog:
-        cat = str(p.get("category") or "").strip()
-        if not cat:
-            title = str(p.get("title") or "")
-            first_words = [
-                w for w in title.lower().split()
-                if len(w) >= 3 and w not in ("de", "con", "para", "del", "al", "la", "el")
-            ]
-            cat = first_words[0] if first_words else "otros"
-        by_category.setdefault(cat, []).append(p)
+    # ADR-0027 Fase 2 — agrupar por la categoría REAL del tenant (helper compartido con
+    # render_category_index; fallback título-head si el producto no trae 'category').
+    by_category = _group_by_category(catalog)
 
     for cat, products in by_category.items():
         for p in products:
@@ -654,7 +713,17 @@ def build_system_prompt(
         f"asesor/a de {tenant_name}"
     )
     tone = tenant_tone or "cordial y profesional, en español Colombia"
-    catalog_block = _render_catalog_block(catalog or [])
+    # ADR-0027 Pieza 3 (ruta FALLBACK monolito) — mismo switch que la ruta viva (blocks.py):
+    # catálogo grande → índice de categorías + navegación on-demand, no se vuelca O(N).
+    if catalog_is_large(catalog or []):
+        catalog_block = (
+            render_category_index(catalog or [])
+            + "\n\n(Catálogo GRANDE: arriba ves SOLO las categorías. Para productos, precios y "
+            "`variation_id` invoca `list_catalog(category=...)` o `search_products(query=...)` "
+            "en el mismo turno. NUNCA afirmes existencia/precio/variante sin invocar uno primero.)"
+        )
+    else:
+        catalog_block = _render_catalog_block(catalog or [])
     contact_block = _render_contact_block(contact_record, tenant_name=tenant_name)
     carriers_block = _render_carriers_block(carriers)
     payment_methods_block = _render_payment_methods_block(payment_methods)
@@ -725,9 +794,12 @@ REGLAS DE NEGOCIO — NO VIOLAR (cada una refleja compliance o UX crítica)
    Esencial"), agrúpalos bajo ese prefijo para presentación compacta.
    Si la categoría tendría < 2 productos, NO la menciones como categoría.
 
-   **TOOL list_catalog**: la sección CATÁLOGO ACTUAL ya tiene todos los
-   productos + UUIDs. Para `add_to_cart` usa esos UUIDs directamente.
-   Solo invoca `list_catalog(category)` si necesitas presentar subset.
+   **TOOLS list_catalog / search_products**: si ves "CATÁLOGO ACTUAL", ya
+   tiene todos los productos + UUIDs; úsalos directo para `add_to_cart` e
+   invoca `list_catalog(category)` solo para presentar un subset. Si ves
+   "CATEGORÍAS DISPONIBLES" (catálogo grande), el detalle NO está embebido:
+   invoca `list_catalog(category=...)` o `search_products(query=...)` ANTES
+   de afirmar existencia, precio o variante.
 
    **FORMATO según contexto** (rev. 108, REGLA DURA):
    • LISTAR CATEGORÍA (cliente pide "muéstrame los X", "qué jabones
@@ -923,9 +995,9 @@ CARRIERS — CAPACIDADES POR TRANSPORTADORA (canonical Aveonline)
 CATÁLOGO ACTUAL
 ═══════════════════════════════════════════════════════════════════
 
-Estos son TODOS los productos disponibles del tenant. Cada variante
-incluye su `variation_id` real para que puedas usarlo directamente en
-`add_to_cart`. NO inventes productos ni precios — solo lo que ves aquí:
+Productos del tenant. Cada variante incluye su `variation_id` real para
+usarlo directamente en `add_to_cart`. NO inventes productos ni precios — usa
+solo lo que ves aquí o lo que devuelvan `list_catalog`/`search_products`:
 
 {catalog_block}
 

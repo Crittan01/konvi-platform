@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from agentic.tools.base import ToolContext, ToolResult, tool_success
 from agentic.tools.registry import register_tool
+from agentic.system_prompt import catalog_is_large, _group_by_category
 
 
 class ListCatalogArgs(BaseModel):
@@ -37,11 +38,23 @@ class ListCatalogArgs(BaseModel):
     category: Optional[str] = Field(
         default=None,
         description=(
-            "Categoría opcional para filtrar (ej: 'jabon', 'aceite', "
-            "'serum'). Match por palabra inicial del título. Sin "
-            "categoría retorna el catálogo completo."
+            "Categoría a filtrar (ej: 'jabon', 'camisas', 'vinos'). En catálogos "
+            "GRANDES es OBLIGATORIA: sin categoría se devuelve el índice de "
+            "categorías (no los productos). En catálogos chicos sin categoría se "
+            "devuelve todo."
         ),
         max_length=40,
+    )
+    limit: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="Máx productos por página al filtrar por categoría (paginación). Default 8.",
+    )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="Desde qué producto empezar (paginación). Usa next_offset de la página previa.",
     )
 
 
@@ -50,13 +63,13 @@ class ListCatalogTool:
 
     name = "list_catalog"
     description = (
-        "Lista productos del tenant con variantes y precios. NOTA: "
-        "la sección CATÁLOGO ACTUAL del system prompt ya tiene el "
-        "catálogo completo embebido con UUIDs reales — úsalo de ahí "
-        "directamente para `add_to_cart`. Invoca `list_catalog` solo "
-        "cuando necesites filtrar por categoría específica (ej. "
-        "'sérum', 'jabón') para presentar al cliente un subset "
-        "organizado."
+        "Lista productos de una categoría del tenant con variantes, precios y "
+        "`variation_id` reales (paginado, page_size=limit). Si el prompt muestra "
+        "'CATÁLOGO ACTUAL' (catálogo chico) los productos ya están embebidos; úsalos "
+        "directo. Si muestra 'CATEGORÍAS DISPONIBLES' (catálogo grande), DEBES invocar "
+        "list_catalog(category=...) para ver los productos de una categoría, o "
+        "search_products(query=...) para buscar por nombre. Sin categoría en catálogo "
+        "grande devuelve solo el índice de categorías."
     )
     args_schema = ListCatalogArgs
 
@@ -68,9 +81,26 @@ class ListCatalogTool:
                 "note": "Catálogo vacío para este tenant.",
             })
 
-        # Filtro opcional por categoría: match palabra-inicial del título.
-        filtered = catalog
-        if args.category:
+        large = catalog_is_large(catalog)
+
+        # ADR-0027 Pieza 3 — SIN categoría: en catálogo GRANDE no se vuelca todo (sería el muro
+        # de texto que evitamos); se devuelve el índice de categorías. En catálogo chico se
+        # conserva el comportamiento actual (todo).
+        if not args.category:
+            if large:
+                by_cat = _group_by_category(catalog)
+                index = [{"category": c, "count": len(by_cat[c])} for c in sorted(by_cat)]
+                return tool_success({
+                    "categories": index,
+                    "total_products": len(catalog),
+                    "note": (
+                        "Catálogo grande: especifica una categoría con "
+                        "list_catalog(category=...) o usa search_products(query=...) "
+                        "para ver productos, precios y variation_id."
+                    ),
+                })
+            filtered = catalog  # modo chico: todo
+        else:
             cat_norm = _normalize_simple(args.category)
             filtered = [
                 p for p in catalog
@@ -86,31 +116,29 @@ class ListCatalogTool:
                     ),
                 })
 
-        # Serializar productos a estructura mínima para el LLM.
-        products_out = []
-        for p in filtered:
-            variants = [
-                {
-                    "variation_id": str(v.get("id") or ""),
-                    "label": str(v.get("label") or ""),
-                    "price_cop": int(float(v.get("price") or 0)),
-                }
-                for v in (p.get("variants") or [])
-                if v.get("id") and float(v.get("price") or 0) > 0
-            ]
-            if not variants:
-                continue  # producto sin variantes válidas → skip
-            products_out.append({
-                "product_id": str(p.get("id") or ""),
-                "title": str(p.get("title") or ""),
-                # ADR-0027 Fase 2: categoría REAL; fallback título-head solo si no hay.
-                "category": str(p.get("category") or "") or _extract_category_head(p),
-                "variants": variants,
-            })
+        # Serializar productos a estructura mínima para el LLM (helper compartido).
+        products_out = [s for s in (_serialize_product(p) for p in filtered) if s]
+
+        # ADR-0027 Pieza 3 — paginación en la rama de categoría (page_size=args.limit). Sin
+        # categoría en modo chico: se devuelve todo (no se pagina, no-regresión KAIU).
+        total = len(products_out)
+        if args.category:
+            offset = max(0, args.offset)
+            page = products_out[offset:offset + args.limit]
+            result = {
+                "products": page,
+                "count": len(page),
+                "total": total,
+                "offset": offset,
+            }
+            if offset + args.limit < total:
+                result["has_more"] = True
+                result["next_offset"] = offset + args.limit
+            return tool_success(result)
 
         return tool_success({
             "products": products_out,
-            "count": len(products_out),
+            "count": total,
         })
 
 
@@ -174,5 +202,115 @@ def _product_matches_category(product: dict, category_norm: str) -> bool:
     return False
 
 
+def _serialize_product(p: dict) -> Optional[dict]:
+    """Estructura mínima de un producto para el LLM (compartida por list_catalog y
+    search_products). None si no tiene variantes válidas (id + precio>0)."""
+    variants = [
+        {
+            "variation_id": str(v.get("id") or ""),
+            "label": str(v.get("label") or ""),
+            "price_cop": int(float(v.get("price") or 0)),
+        }
+        for v in (p.get("variants") or [])
+        if v.get("id") and float(v.get("price") or 0) > 0
+    ]
+    if not variants:
+        return None
+    return {
+        "product_id": str(p.get("id") or ""),
+        "title": str(p.get("title") or ""),
+        # ADR-0027 Fase 2: categoría REAL; fallback título-head solo si no hay.
+        "category": str(p.get("category") or "") or _extract_category_head(p),
+        "variants": variants,
+    }
+
+
+class SearchProductsArgs(BaseModel):
+    """Búsqueda de productos por texto/categoría/precio (ADR-0027 Pieza 4)."""
+
+    query: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        description="Texto a buscar en el nombre del producto (ej. 'jabón de coco', 'camisa azul').",
+    )
+    category: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        description="Opcional: limitar la búsqueda a una categoría.",
+    )
+    price_max_cop: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Opcional: precio máximo en COP; deja solo productos con alguna presentación a ese precio o menos.",
+    )
+    limit: int = Field(default=8, ge=1, le=50, description="Máx resultados por página.")
+    offset: int = Field(default=0, ge=0, description="Desde qué resultado empezar (paginación).")
+
+
+class SearchProductsTool:
+    """Búsqueda de catálogo por texto/categoría/precio (ADR-0027 Pieza 4).
+
+    Resuelve lo que list_catalog NO cubre: encontrar un producto por NOMBRE sin que el cliente
+    nombre la categoría (ej. 'busca jabón de coco', 'algo bajo $20.000'). Read-only sobre
+    catalog_cache (in-memory, cubre tenants ≤ MAX_CATALOG_PRODUCTS). Imprescindible para
+    catálogos grandes (no embebidos en el prompt)."""
+
+    name = "search_products"
+    description = (
+        "Busca productos por NOMBRE/texto (opcional: categoría, precio máximo). Úsalo cuando el "
+        "cliente nombra un producto o pide algo por característica y el catálogo es grande "
+        "(el prompt muestra 'CATEGORÍAS DISPONIBLES', no los productos). Devuelve productos con "
+        "`variation_id` real, paginado. Si no hay resultados, NUNCA inventes: dilo y ofrece ver "
+        "categorías con list_catalog."
+    )
+    args_schema = SearchProductsArgs
+
+    async def execute(self, args: SearchProductsArgs, ctx: ToolContext) -> ToolResult:
+        catalog = ctx.catalog_cache or []
+        if not catalog:
+            return tool_success({"products": [], "note": "Catálogo vacío para este tenant."})
+
+        # Términos del query normalizados (≥2 chars); todos deben aparecer (AND).
+        terms = [t for t in _normalize_simple(args.query or "").split() if len(t) >= 2]
+        cat_norm = _normalize_simple(args.category) if args.category else None
+
+        matched = []
+        for p in catalog:
+            if cat_norm and not _product_matches_category(p, cat_norm):
+                continue
+            if terms:
+                haystack = (
+                    _normalize_simple(str(p.get("title") or "")) + " "
+                    + _normalize_simple(str(p.get("category") or ""))
+                )
+                if not all(t in haystack for t in terms):
+                    continue
+            if args.price_max_cop is not None:
+                prices = [
+                    float(v.get("price") or 0)
+                    for v in (p.get("variants") or [])
+                    if float(v.get("price") or 0) > 0
+                ]
+                if not prices or min(prices) > args.price_max_cop:
+                    continue
+            matched.append(p)
+
+        serialized = [s for s in (_serialize_product(p) for p in matched) if s]
+        total = len(serialized)
+        offset = max(0, args.offset)
+        page = serialized[offset:offset + args.limit]
+        result = {"products": page, "count": len(page), "total": total, "offset": offset}
+        if total == 0:
+            result["note"] = (
+                "No se encontraron productos para esa búsqueda. NO inventes productos; "
+                "ofrece ver categorías con list_catalog."
+            )
+        if offset + args.limit < total:
+            result["has_more"] = True
+            result["next_offset"] = offset + args.limit
+        return tool_success(result)
+
+
 # Auto-registro.
 register_tool(ListCatalogTool())
+register_tool(SearchProductsTool())

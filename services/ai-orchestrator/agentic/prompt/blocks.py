@@ -20,6 +20,8 @@ from typing import Optional
 # antes business_ops solo vivía en V2 monolito).
 from agentic.system_prompt import (
     _render_catalog_block,
+    catalog_is_large,
+    render_category_index,
     _render_carriers_block,
     _render_payment_methods_block,
     _render_contact_block,
@@ -71,9 +73,12 @@ REGLAS UNIVERSALES — NO VIOLAR
    reporta solo lo que sí pasó.
 
 2. **Catálogo es fuente de verdad**: NUNCA inventes productos, precios,
-   variantes ni categorías. Los productos REALES están en "CATÁLOGO
-   ACTUAL" con UUIDs reales. Si una variante aparece como *AGOTADO*, NO la
-   ofrezcas ni la agregues — ofrece las presentaciones disponibles.
+   variantes ni categorías. Si ves "CATÁLOGO ACTUAL", los productos reales
+   están ahí con sus UUIDs — úsalos directo. Si ves "CATEGORÍAS DISPONIBLES"
+   (catálogo grande), el detalle NO está embebido: invoca
+   `list_catalog(category=...)` o `search_products(query=...)` en el MISMO
+   turno ANTES de afirmar existencia, precio o variante. Si una variante
+   aparece como *AGOTADO*, NO la ofrezcas ni la agregues.
 
 3. **Habeas Data Ley 1581**: NO invoques `save_contact_field` sin
    `consent_given=True`. Si el contacto no tiene consent, primero pide
@@ -115,8 +120,23 @@ ESTILO
 
 
 def catalog_section(catalog: list[dict] | None) -> str:
-    """Sección CATÁLOGO ACTUAL — todos los productos con UUIDs reales."""
-    catalog_block = _render_catalog_block(catalog or [])
+    """Sección de catálogo. Chico: CATÁLOGO ACTUAL completo (UUIDs reales, embebido).
+    Grande (ADR-0027 Pieza 3, >CATALOG_EMBED_THRESHOLD): ÍNDICE de categorías + navegación
+    on-demand — NO vuelca O(N) productos por turno; el detalle se obtiene con tools."""
+    catalog = catalog or []
+    if catalog_is_large(catalog):
+        return f"""═══════════════════════════════════════════════════════════════════
+CATEGORÍAS DISPONIBLES (catálogo grande)
+═══════════════════════════════════════════════════════════════════
+
+{render_category_index(catalog)}
+
+El catálogo es GRANDE: aquí ves SOLO las categorías (no los productos). Para
+mostrar productos, precios y `variation_id`, invoca `list_catalog(category=...)`
+o `search_products(query=...)` en el MISMO turno. NUNCA afirmes existencia,
+precio ni variante de un producto sin invocar uno de esos tools primero.
+"""
+    catalog_block = _render_catalog_block(catalog)
     return f"""═══════════════════════════════════════════════════════════════════
 CATÁLOGO ACTUAL
 ═══════════════════════════════════════════════════════════════════
@@ -134,7 +154,19 @@ def catalog_compact_section(catalog: list[dict] | None) -> str:
     PAYMENT). A11 2026-06-26: el cliente puede agregar productos a mitad del
     checkout; el bot debe conocer las variantes REALES para no inventar
     disponibilidad ("solo 30ml" cuando existe la 15ml). Liviano para no inflar."""
-    block = _render_catalog_block(catalog or [], compact=True)
+    catalog = catalog or []
+    if catalog_is_large(catalog):
+        return f"""═══════════════════════════════════════════════════════════════════
+CATÁLOGO (catálogo grande — referencia por categorías)
+═══════════════════════════════════════════════════════════════════
+
+{render_category_index(catalog)}
+
+Si el cliente quiere agregar otro producto a mitad del checkout, invoca
+`list_catalog(category=...)` o `search_products(query=...)` para ver variantes
+y precios reales. NUNCA inventes presentaciones ni precios.
+"""
+    block = _render_catalog_block(catalog, compact=True)
     return f"""═══════════════════════════════════════════════════════════════════
 CATÁLOGO (referencia compacta — variantes y precios reales)
 ═══════════════════════════════════════════════════════════════════
