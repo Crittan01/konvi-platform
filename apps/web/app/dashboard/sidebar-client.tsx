@@ -10,7 +10,7 @@ import {
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
   Wallet, DollarSign, AlertCircle, Bot, Lock, KeyRound,
-  Store, Crown, Briefcase, Headphones, Tag,
+  Store, Crown, Briefcase, Headphones, Tag, Tags,
   Shield, Activity, Scale, Archive, Trash2,
 } from 'lucide-react'
 
@@ -70,6 +70,7 @@ const NAV_ITEMS: NavItem[] = [
 
   // ── Productos ──────────────────────────────────────────────────────────
   { kind: 'leaf', href: '/dashboard/catalog', label: 'Productos', icon: Boxes, roles: ['owner', 'manager'] },
+  { kind: 'leaf', href: '/dashboard/categories', label: 'Categorías', icon: Tags, roles: ['owner', 'manager'] },
 
   // ── Canales ────────────────────────────────────────────────────────────
   // Restaurado como grupo — Shopify, tienda custom entrarán aquí en fases futuras
