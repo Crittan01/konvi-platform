@@ -1,4 +1,5 @@
 import logging
+import os
 from supabase import Client
 
 from tools.catalog_contract import CATALOG_VARIATIONS_KEY
@@ -6,6 +7,12 @@ from tools.catalog_contract import CATALOG_VARIATIONS_KEY
 logger = logging.getLogger("orchestrator.tools.catalog")
 
 MAX_VARIANTS_PER_PRODUCT = 6
+# ADR-0027 Pieza 6 — cierra el bug del .limit(50) silencioso: get_tenant_catalog alimenta el
+# CACHE transaccional (add_to_cart), que NO puede estar truncado (era el bug que hacía "no
+# existe" un producto real #51+). Cota GENEROSA (no un 50 que oculta), y si se alcanza se LOGGEA
+# (truncado observable, nunca silencioso). El acotado del PROMPT se hace por inyección selectiva
+# (Pieza 3), no truncando la verdad transaccional.
+MAX_CATALOG_PRODUCTS = int(os.getenv("MAX_CATALOG_PRODUCTS", "1000"))
 
 
 def _normalize_attributes_label(attributes: dict | None, sku: str | None, fallback_index: int) -> str:
@@ -60,9 +67,18 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
             .eq("tenant_id", tenant_id)
             .eq("status", "active")
             .order("title", desc=False)
-            .limit(50)  # Limitar catálogo para no exceder el context window del LLM
+            .limit(MAX_CATALOG_PRODUCTS)  # ADR-0027 Pieza 6: cota generosa, no un 50 silencioso
             .execute()
         )
+        # Truncado OBSERVABLE (nunca silencioso): si llegamos a la cota, el catálogo del tenant
+        # excede MAX_CATALOG_PRODUCTS y hay productos no cargados — señal para activar Pieza 3/4
+        # (índice + paginación) para ese tenant.
+        if len(result.data or []) >= MAX_CATALOG_PRODUCTS:
+            logger.warning(
+                "[CATALOG] tenant=%s alcanzó MAX_CATALOG_PRODUCTS=%d — catálogo grande, "
+                "activar inyección selectiva/paginación (ADR-0027)",
+                str(tenant_id)[:8], MAX_CATALOG_PRODUCTS,
+            )
 
         catalog = []
         for product in result.data or []:
