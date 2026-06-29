@@ -2364,11 +2364,20 @@ async def _run_agentic_full(
                         _cart_snapshot = render_cart_facts_for_llm(_csnap_cart, contact)
             except Exception as _cs_exc:
                 logger.warning("[ADR0026] cart_snapshot LLM falló: %s", _cs_exc)
+            # ADR-0027 Pieza 2 — vista de catálogo según intención: browse general en catálogo
+            # multi-categoría → ÍNDICE (englobe); específico/compra → detalle completo.
+            _catalog_view = "auto"
+            try:
+                from agentic.catalog_navigation import decide_catalog_view
+                _catalog_view = decide_catalog_view(content, catalog)
+            except Exception as _cv_exc:
+                logger.warning("[ADR0027] decide_catalog_view falló: %s", _cv_exc)
             system_prompt = build_prompt_for_state(
                 state=_resolved_state,
                 tenant_name=tenant_name,
                 tenant_pitch=tenant_pitch,
                 tenant_tone=tenant_tone,
+                catalog_view=_catalog_view,
                 catalog=catalog,
                 contact_record=contact or {},
                 carriers=carriers_caps,
@@ -2389,9 +2398,9 @@ async def _run_agentic_full(
             )
             _allowed_tools = set(tools_for_state(_resolved_state))
             logger.info(
-                "[AGENTIC_PER_STATE] conv=%s state=%s prompt=%dch tools=%d",
+                "[AGENTIC_PER_STATE] conv=%s state=%s prompt=%dch tools=%d catview=%s",
                 conversation_id[:8], _resolved_state.value,
-                len(system_prompt), len(_allowed_tools),
+                len(system_prompt), len(_allowed_tools), _catalog_view,
             )
         except Exception as _ps_exc:
             logger.warning(

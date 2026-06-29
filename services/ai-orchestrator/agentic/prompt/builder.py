@@ -173,6 +173,9 @@ def build_prompt_for_state(
     # inyectado como CARRITO ACTUAL en estados de checkout para que el LLM vea el
     # estado real (subtotal/ciudad) y no invente ni repregunte.
     cart_snapshot: Optional[str] = None,
+    # ADR-0027 Pieza 2 — vista de catálogo decidida por intención (catalog_navigation):
+    # "index" → englobe (solo categorías) en browse general; "full"/"auto" → detalle completo.
+    catalog_view: str = "auto",
 ) -> str:
     """Construye el system prompt específico para un estado.
 
@@ -238,7 +241,7 @@ def build_prompt_for_state(
     # Catálogo completo donde el cliente navega/arma carrito; referencia compacta
     # en checkout (para agregar productos a mitad de flujo sin inventar variantes).
     if state not in _NO_CATALOG_STATES:
-        parts.append(catalog_section(catalog))
+        parts.append(catalog_section(catalog, prefer_index=(catalog_view == "index")))
     elif state in _COMPACT_CATALOG_STATES:
         parts.append(catalog_compact_section(catalog))
 

@@ -119,22 +119,36 @@ ESTILO
 """
 
 
-def catalog_section(catalog: list[dict] | None) -> str:
+def catalog_section(catalog: list[dict] | None, *, prefer_index: bool = False) -> str:
     """Sección de catálogo. Chico: CATÁLOGO ACTUAL completo (UUIDs reales, embebido).
     Grande (ADR-0027 Pieza 3, >CATALOG_EMBED_THRESHOLD): ÍNDICE de categorías + navegación
-    on-demand — NO vuelca O(N) productos por turno; el detalle se obtiene con tools."""
+    on-demand. `prefer_index` (ADR-0027 Pieza 2): aunque el catálogo quepa entero, presenta solo
+    el ÍNDICE porque el cliente hizo un BROWSE GENERAL (englobe por UX) — el detalle del producto
+    que elija llega en el siguiente turno."""
     catalog = catalog or []
-    if catalog_is_large(catalog):
+    large = catalog_is_large(catalog)
+    if large or prefer_index:
+        if large:
+            note = (
+                "El catálogo es GRANDE: aquí ves SOLO las categorías (no los productos). Para "
+                "mostrar productos, precios y `variation_id`, invoca `list_catalog(category=...)` "
+                "o `search_products(query=...)` en el MISMO turno. NUNCA afirmes existencia, "
+                "precio ni variante de un producto sin invocar uno de esos tools primero."
+            )
+        else:
+            note = (
+                "Presenta estas categorías al cliente de forma cálida y pregúntale cuál le "
+                "interesa (o que nombre un producto). Cuando elija una categoría o nombre un "
+                "producto verás su detalle en el siguiente turno. NO inventes productos ni precios; "
+                "si necesitas el detalle de una categoría ya, invoca `list_catalog(category=...)`."
+            )
         return f"""═══════════════════════════════════════════════════════════════════
-CATEGORÍAS DISPONIBLES (catálogo grande)
+CATEGORÍAS DISPONIBLES
 ═══════════════════════════════════════════════════════════════════
 
 {render_category_index(catalog)}
 
-El catálogo es GRANDE: aquí ves SOLO las categorías (no los productos). Para
-mostrar productos, precios y `variation_id`, invoca `list_catalog(category=...)`
-o `search_products(query=...)` en el MISMO turno. NUNCA afirmes existencia,
-precio ni variante de un producto sin invocar uno de esos tools primero.
+{note}
 """
     catalog_block = _render_catalog_block(catalog)
     return f"""═══════════════════════════════════════════════════════════════════
