@@ -652,6 +652,23 @@ function CouponForm({
         </div>
       </div>
 
+      <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/20 p-3">
+        <input
+          type="checkbox"
+          id="is_customer_visible"
+          name="is_customer_visible"
+          defaultChecked={initialCoupon ? initialCoupon.is_customer_visible : true}
+          className="mt-0.5 h-4 w-4 accent-emerald-700"
+        />
+        <label htmlFor="is_customer_visible" className="text-sm text-foreground">
+          <span className="font-medium">Visible al cliente</span>
+          <span className="block text-xs text-muted-foreground">
+            Si está marcado, el bot puede mencionar este cupón proactivamente. Si lo desmarcas, es
+            interno: solo se aplica cuando el cliente escribe el código exacto.
+          </span>
+        </label>
+      </div>
+
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
           Cancelar

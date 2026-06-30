@@ -36,6 +36,7 @@ export type Coupon = {
   valid_from: string | null
   valid_until: string | null
   is_active: boolean
+  is_customer_visible: boolean  // F4.2 — si false, el bot no lo anuncia (solo aplica por código)
   created_at: string
   updated_at: string
   /**
@@ -136,6 +137,7 @@ async function createCouponAction(formData: FormData): Promise<{ ok: boolean; er
     valid_from,
     valid_until,
     is_active: true,
+    is_customer_visible: formData.get('is_customer_visible') === 'on',  // F4.2: anunciable por el bot
     created_by: user?.id ?? null,
   })
 
@@ -202,6 +204,7 @@ async function updateCouponAction(
       max_redemptions,
       valid_from,
       valid_until,
+      is_customer_visible: formData.get('is_customer_visible') === 'on',  // F4.2
     })
     .eq('id', id)
     .eq('tenant_id', meta.tenant_id)
@@ -325,7 +328,7 @@ export default async function PromotionsPage() {
       .select(
         'id, code, description, discount_type, discount_value, ' +
         'min_subtotal_cents, max_redemptions, redemptions_count, ' +
-        'valid_from, valid_until, is_active, created_at, updated_at'
+        'valid_from, valid_until, is_active, is_customer_visible, created_at, updated_at'
       )
       .eq('tenant_id', tenantId)
       .order('is_active', { ascending: false })

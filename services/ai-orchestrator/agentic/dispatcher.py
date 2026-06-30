@@ -890,6 +890,10 @@ async def _run_agentic_full(
             )
             .eq("tenant_id", tenant_id)
             .eq("is_active", True)
+            # Auditoría 2026-06-29 (F4.2) — el bot solo ANUNCIA cupones cara-cliente. Los internos
+            # (is_customer_visible=false) siguen aplicando cuando el cliente da el código
+            # (apply_coupon hace lookup por code), pero el bot no los menciona proactivamente.
+            .eq("is_customer_visible", True)
             .gt("valid_until", _now_iso)
             .order("created_at", desc=True)
             .limit(20)
