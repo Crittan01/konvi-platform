@@ -70,6 +70,7 @@ class ProductPatch(BaseModel):
     description: Optional[str] = None
     safety_note: Optional[str] = None
     retracto_excluded: Optional[bool] = None  # exclusión derecho de retracto (Ley 1480)
+    retracto_excluded_reason: Optional[str] = None
     cover_image_url: Optional[str] = None
 
 
