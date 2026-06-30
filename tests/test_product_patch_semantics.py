@@ -14,6 +14,7 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 from routers.products import (  # noqa: E402
     build_patch_update,
     ProductPatch,
+    VariationCreate,
     VariationPatch,
     _PRODUCT_NEVER_CLEAR,
     _VARIATION_NEVER_CLEAR,
@@ -55,6 +56,12 @@ class ProductPatchSemanticsTests(unittest.TestCase):
         # restore/deactivate envían status; se aplica y nunca se limpia a null.
         self.assertEqual(build_patch_update(ProductPatch(status="active"), _PRODUCT_NEVER_CLEAR)["status"], "active")
         self.assertNotIn("status", build_patch_update(ProductPatch(status=None), _PRODUCT_NEVER_CLEAR))
+
+    def test_variation_create_allows_null_sku_and_attributes(self):
+        # Variante única: el web crea sin SKU ni atributos → el contrato debe aceptarlo (antes 422).
+        v = VariationCreate(price=10.0, stock_quantity=5)
+        self.assertIsNone(v.sku)
+        self.assertIsNone(v.attributes)
 
     def test_variation_protects_price_and_stock(self):
         v = VariationPatch(price=None, stock_quantity=None, image_url=None, compare_at_price=None)

@@ -143,11 +143,25 @@ export default async function CatalogPage() {
       try { attributes = JSON.parse(attrsJson) } catch { /* usa legado */ }
     }
     if (!attributes && attrKey && attrVal) attributes = { [attrKey.trim()]: attrVal.trim() }
-    await sb.from('product_variations').insert({
-      tenant_id: m.tenant_id,
-      product_id: formData.get('product_id') as string,
-      sku, price, compare_at_price: finalCompare, cost_price, stock_quantity: stock, attributes
-    })
+
+    // F2.2: crear variante vía API (audita la creación + RBAC server-side). sku/attributes nullable
+    // (variante única sin SKU/atributos) — el contrato VariationCreate ahora los acepta.
+    const { data: { session: s } } = await sb.auth.getSession()
+    const token = s?.access_token
+    if (!token) return
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      await fetch(`${CORE_API_URL}/api/v1/products/${formData.get('product_id') as string}/variations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          sku, price, compare_at_price: finalCompare, cost_price, stock_quantity: stock, attributes,
+        }),
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+    } catch { /* non-fatal */ }
     revalidatePath('/dashboard/catalog')
   }
 

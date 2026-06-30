@@ -40,12 +40,15 @@ router = APIRouter(tags=["Products"])
 # ─── Modelos Pydantic ──────────────────────────────────────────────────────────
 
 class VariationCreate(BaseModel):
-    sku: str = Field(..., min_length=1, max_length=100)
+    # sku/attributes nullable: reflejan la realidad DB/web (un producto de variante única se crea sin
+    # SKU y sin atributos). El contrato estricto previo (sku requerido, attributes con default)
+    # divergía del web → impedía migrar addVariation. F2.2 los alinea.
+    sku: Optional[str] = Field(default=None, min_length=1, max_length=100)
     price: float = Field(..., gt=0)
     cost_price: Optional[float] = Field(default=None, ge=0)  # costo interno (margen)
     compare_at_price: Optional[float] = Field(default=None, ge=0)
     stock_quantity: int = Field(default=0, ge=0)
-    attributes: dict = Field(default={"default": "Standard"})
+    attributes: Optional[dict] = Field(default=None)
     weight_kg: Optional[float] = Field(default=None, ge=0)
     length_cm: Optional[float] = Field(default=None, ge=0)
     width_cm: Optional[float] = Field(default=None, ge=0)
