@@ -150,6 +150,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   catMap: Record<string, string>
+  productCategories: { id: string; display_label: string }[]
   tenantId: string
   threshold: number
   editProductAction:   (fd: FormData) => Promise<void>
@@ -160,7 +161,7 @@ interface Props {
 }
 
 export function ProductEditDrawer({
-  product, open, onOpenChange, catMap, tenantId, threshold,
+  product, open, onOpenChange, catMap, productCategories, tenantId, threshold,
   editProductAction, editVariationAction, addVariationAction,
   adjustStockAction, deactivateProductAction,
 }: Props) {
@@ -241,7 +242,17 @@ export function ProductEditDrawer({
                   <Input name="title" defaultValue={product.title} className="h-8 text-sm" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría</label>
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría (catálogo)</label>
+                  <select name="category_id" defaultValue={product.category_id ?? ''}
+                    className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 text-foreground">
+                    <option value="">Sin categoría</option>
+                    {productCategories.map(c => (
+                      <option key={c.id} value={c.id}>{c.display_label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría marketplace (MeLi)</label>
                   <select name="platform_category_id" defaultValue={product.platform_category_id ?? ''}
                     className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 text-foreground">
                     <option value="">Sin categoría</option>

@@ -23,6 +23,7 @@ export interface Product {
   safety_note: string | null
   cover_image_url: string | null
   platform_category_id: string | null
+  category_id: string | null  // ADR-0027 categoría operativa per-tenant (la que usa el bot)
   product_variations: Variation[]
   // Rev. 109 backlog #1 — Retracto categories multi-tenant.
   // Tenant marca productos excluidos del Art. 47 Ley 1480 parágrafo

@@ -32,6 +32,7 @@ type Props = {
   catMap: Record<string, string>
   canWrite: boolean
   categories: Category[]
+  productCategories: { id: string; display_label: string }[]  // ADR-0027 categorías operativas
   tenantId: string
   apiUrl: string
   threshold: number
@@ -57,7 +58,7 @@ function SaveThresholdButton() {
 
 export default function ProductsManager({
   products, archivedProducts, catMap, canWrite,
-  categories, tenantId, apiUrl,
+  categories, productCategories, tenantId, apiUrl,
   threshold,
   editProductAction, editVariationAction, addVariationAction,
   deactivateProductAction, restoreProductAction, deleteProductAction,
@@ -168,6 +169,7 @@ export default function ProductsManager({
         products={products}
         archivedProducts={archivedProducts}
         catMap={catMap}
+        productCategories={productCategories}
         canWrite={canWrite}
         threshold={threshold}
         tenantId={tenantId}
@@ -193,6 +195,7 @@ export default function ProductsManager({
           <CatalogForm
             apiUrl={apiUrl}
             categories={categories}
+            productCategories={productCategories}
             tenantId={tenantId}
             onCreated={() => setDialogOpen(false)}
           />

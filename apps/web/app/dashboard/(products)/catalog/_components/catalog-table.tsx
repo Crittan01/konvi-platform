@@ -18,6 +18,7 @@ type Props = {
   products: Product[]
   archivedProducts: Product[]
   catMap: Record<string, string>
+  productCategories: { id: string; display_label: string }[]
   canWrite: boolean
   threshold: number
   tenantId: string
@@ -51,9 +52,9 @@ function fmtPrice(vars: Variation[]): string {
 // ── ExpandedPanel — lean: solo tabla de variantes + botón Editar ─────────────
 
 const ExpandedPanel = memo(function ExpandedPanel({
-  p, canWrite, catMap, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
+  p, canWrite, catMap, productCategories, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
-  p: Product; canWrite: boolean; catMap: Record<string, string>; threshold: number; tenantId: string;
+  p: Product; canWrite: boolean; catMap: Record<string, string>; productCategories: { id: string; display_label: string }[]; threshold: number; tenantId: string;
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
@@ -120,6 +121,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
           open={drawerOpen}
           onOpenChange={setDrawerOpen}
           catMap={catMap}
+          productCategories={productCategories}
           tenantId={tenantId}
           threshold={threshold}
           editProductAction={editProductAction}
@@ -136,10 +138,10 @@ const ExpandedPanel = memo(function ExpandedPanel({
 // ── ProductMobileCard — tarjeta para vista móvil en lista ─────────────────────
 
 const ProductMobileCard = memo(function ProductMobileCard({
-  p, catName, catMap, threshold, tenantId, isExpanded, onToggle, canWrite,
+  p, catName, catMap, productCategories, threshold, tenantId, isExpanded, onToggle, canWrite,
   editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
-  p: Product; catName: string | null; catMap: Record<string, string>; threshold: number; tenantId: string; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
+  p: Product; catName: string | null; catMap: Record<string, string>; productCategories: { id: string; display_label: string }[]; threshold: number; tenantId: string; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
   editProductAction: (fd: FormData) => Promise<void>
   editVariationAction: (fd: FormData) => Promise<void>
   addVariationAction: (fd: FormData) => Promise<void>
@@ -198,7 +200,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
 
       {isExpanded && (
         <ExpandedPanel
-          p={p} canWrite={canWrite} catMap={catMap} threshold={threshold} tenantId={tenantId}
+          p={p} canWrite={canWrite} catMap={catMap} productCategories={productCategories} threshold={threshold} tenantId={tenantId}
           editProductAction={editProductAction}
           editVariationAction={editVariationAction}
           addVariationAction={addVariationAction}
@@ -285,7 +287,7 @@ const ArchivedSection = memo(function ArchivedSection({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function CatalogTable({
-  products, archivedProducts, catMap, canWrite, threshold, tenantId,
+  products, archivedProducts, catMap, productCategories, canWrite, threshold, tenantId,
   editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
   adjustStockAction, linkedVariationIds,
 }: Props) {
@@ -439,6 +441,7 @@ export default function CatalogTable({
               p={p}
               catName={p.platform_category_id ? catMap[p.platform_category_id] : null}
               catMap={catMap}
+              productCategories={productCategories}
               threshold={threshold}
               tenantId={tenantId}
               isExpanded={expandedIds.has(p.id)}
@@ -543,7 +546,7 @@ export default function CatalogTable({
                     <tr key={`${p.id}-exp`}>
                       <td colSpan={6} className="bg-muted/10" onClick={e => e.stopPropagation()}>
                         <ExpandedPanel
-                          p={p} canWrite={canWrite} catMap={catMap} threshold={threshold} tenantId={tenantId}
+                          p={p} canWrite={canWrite} catMap={catMap} productCategories={productCategories} threshold={threshold} tenantId={tenantId}
                           editProductAction={editProductAction}
                           editVariationAction={editVariationAction}
                           addVariationAction={addVariationAction}
@@ -653,7 +656,7 @@ export default function CatalogTable({
                 {isExpanded && (
                   <div className="border-t border-border/40">
                     <ExpandedPanel
-                      p={p} canWrite={canWrite} catMap={catMap} threshold={threshold} tenantId={tenantId}
+                      p={p} canWrite={canWrite} catMap={catMap} productCategories={productCategories} threshold={threshold} tenantId={tenantId}
                       editProductAction={editProductAction}
                       editVariationAction={editVariationAction}
                       addVariationAction={addVariationAction}

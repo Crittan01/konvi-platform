@@ -18,7 +18,7 @@ interface VariantDraft {
   weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''
   image_url: string
 }
-interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; tenantId: string }
+interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; productCategories?: {id: string, display_label: string}[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
   sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '',
@@ -324,7 +324,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId }: {
 
 // ─── Formulario principal ─────────────────────────────────────────────────────
 
-export default function CatalogForm({ onCreated = () => {}, categories = [], tenantId }: Props) {
+export default function CatalogForm({ onCreated = () => {}, categories = [], productCategories = [], tenantId }: Props) {
   const router = useRouter()
   const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
@@ -357,6 +357,7 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
     }
   }
   const [categoryId, setCategoryId] = useState('')
+  const [productCategoryId, setProductCategoryId] = useState('')  // ADR-0027 categoría operativa
   const [coverUrl, setCoverUrl]     = useState('')
   const [variants, setVariants]     = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
   const [showMatrix, setShowMatrix] = useState(false)
@@ -383,6 +384,7 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
     try {
       const { data: prod, error: e1 } = await supabase.from('products').insert({
         tenant_id: meta.tenant_id, platform_category_id: categoryId || null,
+        category_id: productCategoryId || null,
         title: title.trim(), description: description.trim() || null,
         safety_note: safetyNote.trim() || null,
         cover_image_url: coverUrl.trim() || null, status: 'active',
@@ -443,7 +445,15 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], ten
               placeholder="Ej: Aceite Esencial de Lavanda" className="h-8 text-sm mt-1" />
           </div>
           <div>
-            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría (catálogo)</label>
+            <select value={productCategoryId} onChange={e => setProductCategoryId(e.target.value)}
+              className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
+              <option value="">Sin categoría</option>
+              {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría marketplace (MeLi)</label>
             <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
               className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
               <option value="">Sin categoría</option>

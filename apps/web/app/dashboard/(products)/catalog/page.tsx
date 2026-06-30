@@ -23,6 +23,17 @@ export default async function CatalogPage() {
   const platformCategories = (cats as { id: string; name: string }[]) ?? []
   const catMap = Object.fromEntries(platformCategories.map(c => [c.id, c.name]))
 
+  // ADR-0027 — categorías OPERATIVAS per-tenant (las que el bot presenta). RLS via JWT.
+  const { data: pcats } = tenantId
+    ? await supabase
+        .from('product_categories')
+        .select('id, display_label')
+        .eq('tenant_id', tenantId)
+        .order('sort_order')
+        .order('display_label')
+    : { data: [] }
+  const productCategories = (pcats as { id: string; display_label: string }[]) ?? []
+
   // Products (active + archived) + inventory data
   let products: Product[] = []
   let archivedProducts: Product[] = []
@@ -33,7 +44,7 @@ export default async function CatalogPage() {
     const [activeRes, archivedRes, tenantRes, listingsRes] = await Promise.all([
       supabase
         .from('products')
-        .select(`id, title, description, safety_note, cover_image_url, platform_category_id,
+        .select(`id, title, description, safety_note, cover_image_url, platform_category_id, category_id,
                  retracto_excluded, retracto_excluded_reason,
                  product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
@@ -41,7 +52,7 @@ export default async function CatalogPage() {
         .order('title'),
       supabase
         .from('products')
-        .select(`id, title, description, safety_note, cover_image_url, platform_category_id,
+        .select(`id, title, description, safety_note, cover_image_url, platform_category_id, category_id,
                  retracto_excluded, retracto_excluded_reason,
                  product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
@@ -78,6 +89,7 @@ export default async function CatalogPage() {
       description:          (formData.get('description') as string) || null,
       safety_note:          (formData.get('safety_note') as string) || null,
       platform_category_id: (formData.get('platform_category_id') as string) || null,
+      category_id:          (formData.get('category_id') as string) || null,  // ADR-0027 operativa
       // Rev. 109 backlog #1 — Retracto categories multi-tenant.
       // Checkbox + textarea opcionales; null si checkbox desmarcado.
       retracto_excluded:        formData.get('retracto_excluded') === 'on',
@@ -269,6 +281,7 @@ export default async function CatalogPage() {
         catMap={catMap}
         canWrite={canWrite}
         categories={platformCategories}
+        productCategories={productCategories}
         tenantId={tenantId ?? ''}
         apiUrl={CORE_API_URL}
         threshold={threshold}
