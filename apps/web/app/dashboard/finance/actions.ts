@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
+import { CORE_API_URL } from '@/lib/runtime-env'
 import { revalidatePath } from 'next/cache'
 
 export async function addExpense(formData: FormData) {
@@ -18,13 +19,27 @@ export async function addExpense(formData: FormData) {
 
   if (!description || !category || isNaN(amount) || amount <= 0) return
 
-  await supabase.from('expenses').insert({
-    tenant_id: m.tenant_id,
-    category,
-    description: description.trim(),
-    amount,
-    expense_date: new Date(expense_date).toISOString()
-  })
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) return
+
+  // F2.2: registrar gasto vía API (audita el registro financiero + RBAC server-side).
+  try {
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), 15000)
+    await fetch(`${CORE_API_URL}/api/v1/expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        category,
+        description: description.trim(),
+        amount,
+        expense_date: new Date(expense_date).toISOString(),
+      }),
+      signal: ctrl.signal,
+    })
+    clearTimeout(timeout)
+  } catch { /* non-fatal */ }
 
   revalidatePath('/dashboard/finance')
 }
