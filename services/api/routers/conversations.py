@@ -1388,3 +1388,94 @@ async def send_agent_image(
             conversation_id, e,
         )
         raise HTTPException(status_code=500, detail="Error al enviar la imagen")
+
+
+# ── Cart-as-SoT cross-surface (ADR-0028 Pieza C — READ) ─────────────────────────
+
+def shape_cart(cart: dict, items: list[dict], title_map: dict) -> dict:
+    """Forma canónica del cart-as-SoT para consumo cross-surface (web/storefront futuro).
+    Montos en cents (igual que la verdad transaccional). Testeable."""
+    return {
+        "id": cart.get("id"),
+        "status": cart.get("status"),
+        "currency": cart.get("currency") or "COP",
+        "subtotal_cents": cart.get("subtotal_cents"),
+        "shipping_cents": cart.get("shipping_cents"),
+        "discount_cents": cart.get("discount_cents"),
+        "total_cents": cart.get("total_cents"),
+        "coupon_code": cart.get("coupon_code"),
+        "requires_requote": cart.get("requires_requote"),
+        "shipping_meta": cart.get("shipping_meta"),
+        "items": [
+            {
+                "id": it.get("id"),
+                "product_id": it.get("product_id"),
+                "variation_id": it.get("variation_id"),
+                "product_title": title_map.get(it.get("product_id")),
+                "quantity": it.get("quantity"),
+                "unit_price_cents": it.get("unit_price_cents"),
+            }
+            for it in items
+        ],
+    }
+
+
+@router.get("/{conversation_id}/cart", response_model=dict)
+async def get_conversation_cart(
+    conversation_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+):
+    """Lee el cart-as-SoT (subtotal/envío/total/items) de una conversación, tenant-scoped.
+    Forma canónica consumible por web/storefront sin reimplementar la verdad transaccional."""
+    try:
+        conv = (
+            supabase.table("conversations")
+            .select("id")
+            .eq("id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if not conv.data:
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+        cart_res = (
+            supabase.table("conversation_carts")
+            .select("*")
+            .eq("conversation_id", conversation_id)
+            .eq("tenant_id", tenant_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not cart_res.data:
+            return {"id": None, "status": None, "items": []}  # sin carrito aún
+        cart = cart_res.data[0]
+
+        items = (
+            supabase.table("conversation_cart_items")
+            .select("*")
+            .eq("cart_id", cart["id"])
+            .eq("tenant_id", tenant_id)
+            .execute()
+        ).data or []
+
+        title_map: dict = {}
+        pids = list({it["product_id"] for it in items if it.get("product_id")})
+        if pids:
+            prods = (
+                supabase.table("products")
+                .select("id, title")
+                .in_("id", pids)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            ).data or []
+            title_map = {p["id"]: p["title"] for p in prods}
+
+        return shape_cart(cart, items, title_map)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error leyendo cart conversación %s: %s", conversation_id, e)
+        raise HTTPException(status_code=500, detail="Error al obtener el carrito") from e
