@@ -21,6 +21,7 @@ from routers import (
     claims,
     contacts,
     conversations,
+    coupons,
     integrations,
     knowledge_base,
     marketplace,
@@ -136,6 +137,7 @@ async def security_headers_middleware(request: Request, call_next):
 app.include_router(products.router, prefix="/api/v1/products", dependencies=_OFFBOARDING_GATE)
 app.include_router(product_categories.router, prefix="/api/v1/product-categories", dependencies=_OFFBOARDING_GATE)
 app.include_router(catalog.router, prefix="/api/v1/catalog", dependencies=_OFFBOARDING_GATE)
+app.include_router(coupons.router, prefix="/api/v1/coupons", dependencies=_OFFBOARDING_GATE)
 app.include_router(conversations.router, prefix="/api/v1/conversations", dependencies=_OFFBOARDING_GATE)
 app.include_router(orders.router, prefix="/api/v1/orders", dependencies=_OFFBOARDING_GATE)
 app.include_router(contacts.router, prefix="/api/v1/contacts", dependencies=_OFFBOARDING_GATE)

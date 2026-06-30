@@ -769,6 +769,186 @@
       "table_name": "conversations"
     },
     {
+      "column_count": 12,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "tenant_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "coupon_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "cart_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "contact_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "order_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "discount_applied_cents",
+          "default": null,
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "status",
+          "default": "'applied'::text",
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "applied_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "consumed_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "revoked_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "revoked_reason",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        }
+      ],
+      "table_name": "coupon_redemptions"
+    },
+    {
+      "column_count": 16,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "tenant_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "code",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "description",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "discount_type",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "discount_value",
+          "default": null,
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "min_subtotal_cents",
+          "default": "0",
+          "nullable": "NO",
+          "type": "bigint"
+        },
+        {
+          "col": "max_redemptions",
+          "default": null,
+          "nullable": "YES",
+          "type": "integer"
+        },
+        {
+          "col": "redemptions_count",
+          "default": "0",
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "valid_from",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "valid_until",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "is_active",
+          "default": "true",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "created_by",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "created_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "updated_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        },
+        {
+          "col": "is_customer_visible",
+          "default": "true",
+          "nullable": "NO",
+          "type": "boolean"
+        }
+      ],
+      "table_name": "coupons"
+    },
+    {
       "column_count": 7,
       "columns": [
         {

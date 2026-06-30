@@ -11,6 +11,7 @@
  */
 import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
+import { CORE_API_URL } from '@/lib/runtime-env'
 import { revalidatePath } from 'next/cache'
 import { Tag, AlertTriangle } from 'lucide-react'
 import PromotionsManager from './_components/promotions-manager'
@@ -99,6 +100,35 @@ function validateCouponInput(input: {
 
 // ─── Server actions ──────────────────────────────────────────────────────────
 
+// F2.2: escrituras de cupones vía API (restaura @audit_log + RBAC server-side). La validación
+// client-side (validateCouponInput) queda como fast-fail; la API re-valida y es la autoridad.
+async function writeCouponApi(
+  method: string, path: string, token: string, body?: unknown,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), 15000)
+    const res = await fetch(`${CORE_API_URL}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    })
+    clearTimeout(timeout)
+    if (!res.ok) {
+      const j = await res.json().catch(() => null)
+      const d = (j as { detail?: unknown } | null)?.detail
+      const msg = typeof d === 'string'
+        ? d
+        : Array.isArray(d) ? ((d[0] as { msg?: string })?.msg ?? 'Error de validación') : `Error ${res.status}`
+      return { ok: false, error: msg }
+    }
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Error de red. Intenta de nuevo.' }
+  }
+}
+
 async function createCouponAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
   'use server'
   const sb = createClient()
@@ -125,28 +155,17 @@ async function createCouponAction(formData: FormData): Promise<{ ok: boolean; er
   })
   if (validationError) return { ok: false, error: validationError }
 
-  // INSERT — RLS Tenant Isolation aplica vía JWT app_metadata.
-  const { error } = await sb.from('coupons').insert({
-    tenant_id: meta.tenant_id,
-    code,
-    description,
-    discount_type,
-    discount_value,
-    min_subtotal_cents,
-    max_redemptions,
-    valid_from,
-    valid_until,
-    is_active: true,
-    is_customer_visible: formData.get('is_customer_visible') === 'on',  // F4.2: anunciable por el bot
-    created_by: user?.id ?? null,
-  })
+  const { data: { session } } = await sb.auth.getSession()
+  const token = session?.access_token
+  if (!token) return { ok: false, error: 'Sesión inválida.' }
 
-  if (error) {
-    if (error.code === '23505') {
-      return { ok: false, error: `Ya existe un cupón con código "${code}".` }
-    }
-    return { ok: false, error: `Error al crear: ${error.message}` }
-  }
+  // POST vía API → audita la creación + RBAC server-side. is_active y created_by los setea el API.
+  const result = await writeCouponApi('POST', '/api/v1/coupons', token, {
+    code, description, discount_type, discount_value, min_subtotal_cents,
+    max_redemptions, valid_from, valid_until,
+    is_customer_visible: formData.get('is_customer_visible') === 'on',  // F4.2: anunciable por el bot
+  })
+  if (!result.ok) return result
 
   revalidatePath('/dashboard/promotions')
   return { ok: true }
@@ -194,22 +213,17 @@ async function updateCouponAction(
   })
   if (validationError) return { ok: false, error: validationError }
 
-  const { error } = await sb
-    .from('coupons')
-    .update({
-      description,
-      discount_type,
-      discount_value,
-      min_subtotal_cents,
-      max_redemptions,
-      valid_from,
-      valid_until,
-      is_customer_visible: formData.get('is_customer_visible') === 'on',  // F4.2
-    })
-    .eq('id', id)
-    .eq('tenant_id', meta.tenant_id)
+  const { data: { session } } = await sb.auth.getSession()
+  const token = session?.access_token
+  if (!token) return { ok: false, error: 'Sesión inválida.' }
 
-  if (error) return { ok: false, error: `Error al actualizar: ${error.message}` }
+  // PATCH vía API → audita la edición. `code` no se envía (inmutable). description=null se limpia.
+  const result = await writeCouponApi('PATCH', `/api/v1/coupons/${id}`, token, {
+    description, discount_type, discount_value, min_subtotal_cents,
+    max_redemptions, valid_from, valid_until,
+    is_customer_visible: formData.get('is_customer_visible') === 'on',  // F4.2
+  })
+  if (!result.ok) return result
 
   revalidatePath('/dashboard/promotions')
   return { ok: true }
@@ -230,13 +244,13 @@ async function toggleCouponActiveAction(
   const targetActive = formData.get('is_active') === 'true'
   if (!id) return { ok: false, error: 'ID requerido.' }
 
-  const { error } = await sb
-    .from('coupons')
-    .update({ is_active: targetActive })
-    .eq('id', id)
-    .eq('tenant_id', meta.tenant_id)
+  const { data: { session } } = await sb.auth.getSession()
+  const token = session?.access_token
+  if (!token) return { ok: false, error: 'Sesión inválida.' }
 
-  if (error) return { ok: false, error: `Error: ${error.message}` }
+  // Activar/desactivar vía API (auditado). El PATCH parcial solo toca is_active.
+  const result = await writeCouponApi('PATCH', `/api/v1/coupons/${id}`, token, { is_active: targetActive })
+  if (!result.ok) return result
 
   revalidatePath('/dashboard/promotions')
   return { ok: true }
@@ -271,42 +285,14 @@ async function deleteCouponAction(
   const id = ((formData.get('id') as string) || '').trim()
   if (!id) return { ok: false, error: 'ID requerido.' }
 
-  // Re-check defensivo en backend.
-  const { count, error: countErr } = await sb
-    .from('coupon_redemptions')
-    .select('id', { count: 'exact', head: true })
-    .eq('coupon_id', id)
-    .eq('tenant_id', meta.tenant_id)
+  const { data: { session } } = await sb.auth.getSession()
+  const token = session?.access_token
+  if (!token) return { ok: false, error: 'Sesión inválida.' }
 
-  if (countErr) {
-    return { ok: false, error: `No pude verificar redenciones: ${countErr.message}` }
-  }
-  if ((count ?? 0) > 0) {
-    return {
-      ok: false,
-      error:
-        'Este cupón ya tuvo redenciones (clientes lo aplicaron). ' +
-        'No se puede eliminar para preservar auditoría Habeas Data. ' +
-        'Usa "Desactivar" en su lugar.',
-    }
-  }
-
-  // Lookup code para mensaje + audit log de la eliminación.
-  const { data: existing } = await sb
-    .from('coupons')
-    .select('code')
-    .eq('id', id)
-    .eq('tenant_id', meta.tenant_id)
-    .single()
-  if (!existing) return { ok: false, error: 'Cupón no encontrado.' }
-
-  const { error } = await sb
-    .from('coupons')
-    .delete()
-    .eq('id', id)
-    .eq('tenant_id', meta.tenant_id)
-
-  if (error) return { ok: false, error: `Error al eliminar: ${error.message}` }
+  // DELETE vía API: el backend re-verifica el conteo de redenciones (anti-race) y rechaza con 409 +
+  // mensaje Habeas Data si el cupón ya se usó, o lo elimina y audita si nunca tuvo redenciones.
+  const result = await writeCouponApi('DELETE', `/api/v1/coupons/${id}`, token)
+  if (!result.ok) return result
 
   revalidatePath('/dashboard/promotions')
   return { ok: true }

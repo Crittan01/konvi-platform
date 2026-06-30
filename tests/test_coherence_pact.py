@@ -32,6 +32,7 @@ from routers.settings import TenantPatch  # noqa: E402
 from routers.product_categories import (  # noqa: E402
     ProductCategoryCreate, ProductCategoryPatch,
 )
+from routers.coupons import CouponCreate, CouponPatch  # noqa: E402
 
 FIXTURE = Path("/home/ansible/workspaces/konvi-platform/tests/fixtures/db_schema_canonical.json")
 
@@ -123,6 +124,16 @@ class ProductsCoherenceTests(unittest.TestCase):
     def test_product_category_patch_fields_in_product_categories(self):
         orphans, _ = _check_subset(ProductCategoryPatch, "product_categories")
         self.assertFalse(orphans, f"ProductCategoryPatch huérfanos: {orphans}")
+
+
+class CouponsCoherenceTests(unittest.TestCase):
+    def test_coupon_create_fields_in_coupons(self):
+        orphans, _ = _check_subset(CouponCreate, "coupons")
+        self.assertFalse(orphans, f"CouponCreate huérfanos vs coupons: {orphans}")
+
+    def test_coupon_patch_fields_in_coupons(self):
+        orphans, _ = _check_subset(CouponPatch, "coupons")
+        self.assertFalse(orphans, f"CouponPatch huérfanos vs coupons: {orphans}")
 
 
 class ClaimsCoherenceTests(unittest.TestCase):

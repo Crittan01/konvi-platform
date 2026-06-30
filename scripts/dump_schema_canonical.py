@@ -53,6 +53,8 @@ CORE_TABLES = [
     "purchase_orders",
     "purchase_order_items",
     "expenses",
+    "coupons",                  # F2.2 router coupons — escrituras auditadas
+    "coupon_redemptions",       # F2.2 — DELETE condicional verifica este conteo
     "audit_log",
     "bot_source_log",
 ]
