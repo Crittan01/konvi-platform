@@ -414,30 +414,28 @@ async def delete_variation(
 
 @router.delete("/{product_id}", status_code=204)
 @audit_log(entity_type="product", action="deleted")
-async def deactivate_product(
+async def delete_product(
     product_id: str,
     request: Request,
+    hard: bool = Query(default=False),
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
 ):
     """
-    Soft delete: marca el producto como 'inactive'.
-    No elimina el registro para mantener trazabilidad histórica.
-    Solo owner/manager.
+    DELETE /products/{id}: por defecto soft-delete (status='inactive', preserva trazabilidad).
+    Con ?hard=true: hard-delete REAL — la cascada de FK borra variantes, marketplace_listings y
+    stock_reservations; los order_items quedan con product_id/variation_id en NULL, así que el
+    historial de pedidos se preserva POR DISEÑO (ON DELETE SET NULL). Solo owner/manager.
     """
     try:
-        result = (
-            supabase.table("products")
-            .update({"status": "inactive"})
-            .eq("id", product_id)
-            .eq("tenant_id", tenant_id)
-            .execute()
-        )
+        table = supabase.table("products")
+        query = table.delete() if hard else table.update({"status": "inactive"})
+        result = query.eq("id", product_id).eq("tenant_id", tenant_id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Producto no encontrado")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error desactivando producto %s: %s", product_id, e)
-        raise HTTPException(status_code=500, detail="Error al desactivar producto")
+        logger.error("Error eliminando producto %s (hard=%s): %s", product_id, hard, e)
+        raise HTTPException(status_code=500, detail="Error al eliminar producto")
