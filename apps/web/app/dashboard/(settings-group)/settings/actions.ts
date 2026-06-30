@@ -48,6 +48,9 @@ export async function saveFilosofia(formData: FormData) {
     mision:            (formData.get('mision') as string)?.trim() || null,
     vision:            (formData.get('vision') as string)?.trim() || null,
     valores:           (formData.get('valores') as string)?.trim() || null,
+    // business_pitch: el bot lo inyecta como 1ª línea de identidad ("Eres {agente}, {pitch}").
+    // Antes solo se podía setear por SQL; ahora editable aquí (gap de coherencia bot↔web).
+    business_pitch:    (formData.get('business_pitch') as string)?.trim() || null,
   })
   revalidatePath('/dashboard/settings')
 }

@@ -393,7 +393,7 @@ async def get_conversation_context(
                 supabase.table("conversation_carts")
                 .select("id, status, subtotal_cents, shipping_cents, "
                         "total_cents, shipping_meta, requires_requote, "
-                        "discount_cents, coupon_code")
+                        "discount_cents, coupon_code, payment_method")
                 .eq("tenant_id", tenant_id)
                 .eq("conversation_id", conversation_id)
                 .eq("status", "open")
@@ -562,6 +562,9 @@ async def get_conversation_context(
                     "carrier_name": effective_carrier,
                     "requires_requote": requires_rq,
                     "shipping_status": ship_status,  # active | stale | pending
+                    # Medio de pago elegido por el cliente (credit | cod). El bot lo escribe;
+                    # el operador necesita verlo (p.ej. COD no dispara wompi_webhook).
+                    "payment_method": (cart.get("payment_method") or "credit"),
                 }
         except Exception as ce:
             logger.warning("Error cargando active_cart conv=%s: %s", conversation_id, ce)

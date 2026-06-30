@@ -44,6 +44,7 @@ type Tenant = {
   mision?: string | null
   vision?: string | null
   valores?: string | null
+  business_pitch?: string | null
   tono_comunicacion?: string | null
   support_schedule?: SupportSchedule | null
   after_hours_message?: string | null
@@ -94,7 +95,7 @@ export default async function SettingsPage() {
 
   if (tenantId) {
     const { data } = await supabase.from('tenants')
-      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
+      .select('id, name, status, shipping_origin, logo_url, nit, email_contacto, telefono_contacto, store_type, social_links, store_locations, mision, vision, valores, business_pitch, tono_comunicacion, support_schedule, after_hours_message, escalation_role')
       .eq('id', tenantId).single()
     tenant = data as Tenant
   }
@@ -282,6 +283,17 @@ export default async function SettingsPage() {
                       className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
                     <p className="text-[10px] text-muted-foreground">¿Qué principios te guían? Máx 280 chars.</p>
                   </div>
+                </div>
+                {/* Frase de presentación (business_pitch) — el bot la inyecta como 1ª línea de identidad */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium" htmlFor="business_pitch">Frase de presentación del asistente</Label>
+                  <textarea id="business_pitch" name="business_pitch"
+                    defaultValue={tenant?.business_pitch ?? ''}
+                    maxLength={160}
+                    placeholder={'Ej: "asesora experta en cosmética natural de KAIU"'}
+                    rows={2}
+                    className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none" />
+                  <p className="text-[10px] text-muted-foreground">Cómo se presenta el asistente al cliente: «Eres [nombre], <strong>esta frase</strong>». Define su rol y expertise. Máx 160 chars.</p>
                 </div>
                 <p className="text-[10px] text-muted-foreground/70">
                   Todos los campos son opcionales. El asistente IA usa estos datos para responder preguntas sobre la marca.

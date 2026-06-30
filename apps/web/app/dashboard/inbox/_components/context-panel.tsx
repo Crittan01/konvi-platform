@@ -291,6 +291,12 @@ export function ContextPanel({
                     <span>{formatMoney(context.active_cart.total_cents / 100)}</span>
                   </div>
                 )}
+                {context.active_cart.payment_method && (
+                  <div className="flex justify-between text-xs text-muted-foreground pt-0.5">
+                    <span>Pago</span>
+                    <span>{context.active_cart.payment_method === 'cod' ? 'Contraentrega' : 'Pago online'}</span>
+                  </div>
+                )}
               </div>
             </div>
           </section>

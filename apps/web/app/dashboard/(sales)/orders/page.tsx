@@ -130,30 +130,25 @@ export default async function OrdersPage({
     const isCancel = formData.get('cancel') === 'true'
     const nextStatus = formData.get('next_status') as string
     
-    if (isCancel) {
-      await sb.from('orders').update({ status: 'cancelled' })
-        .eq('id', orderId)
-        .eq('tenant_id', m.tenant_id)
-      revalidatePath('/dashboard/orders')
-      return
-    }
-
     const { data: { session: s } } = await sb.auth.getSession()
     const token = s?.access_token
     if (!token) return
-    
+
+    // F2.2: cancel y avance de estado pasan AMBOS por la API. El cancel antes escribía directo a
+    // Supabase (sin @audit_log ni validación de transición); ahora reusa el mismo PATCH auditado.
+    const targetStatus = isCancel ? 'cancelled' : nextStatus
     try {
       const ctrl = new AbortController()
       const timeout = setTimeout(() => ctrl.abort(), 15000)
       await fetch(`${CORE_API_URL}/api/v1/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ status: targetStatus }),
         signal: ctrl.signal,
       })
       clearTimeout(timeout)
     } catch { /* non-fatal */ }
-    
+
     revalidatePath('/dashboard/orders')
   }
 

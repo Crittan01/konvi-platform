@@ -127,6 +127,7 @@ export interface ActiveCart {
   //   "stale"   → cotización existe pero cart cambió (bot re-cotizará)
   //   "pending" → aún no se ha cotizado
   shipping_status?: 'active' | 'stale' | 'pending'
+  payment_method?: 'credit' | 'cod'   // medio de pago elegido por el cliente (online vs contraentrega)
 }
 
 // Rev. 103 — Reclamos abiertos espejo del system prompt.
