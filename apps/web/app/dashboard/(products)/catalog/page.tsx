@@ -84,21 +84,38 @@ export default async function CatalogPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    const updates: Record<string, unknown> = {
+
+    const { data: { session: s } } = await sb.auth.getSession()
+    const token = s?.access_token
+    if (!token) return
+
+    // F2.2: editar vía API (restaura @audit_log + RBAC server-side; antes era write directo a
+    // Supabase sin auditar). PATCH semántico: los campos opcionales enviados como null SE LIMPIAN
+    // (el backend usa exclude_unset + never_clear), preservando la capacidad de borrar safety_note,
+    // categoría o razón de retracto. cover_image_url solo se envía si hay una nueva (se preserva).
+    const payload: Record<string, unknown> = {
       title:                formData.get('title') as string,
       description:          (formData.get('description') as string) || null,
       safety_note:          (formData.get('safety_note') as string) || null,
       platform_category_id: (formData.get('platform_category_id') as string) || null,
       category_id:          (formData.get('category_id') as string) || null,  // ADR-0027 operativa
-      // Rev. 109 backlog #1 — Retracto categories multi-tenant.
-      // Checkbox + textarea opcionales; null si checkbox desmarcado.
       retracto_excluded:        formData.get('retracto_excluded') === 'on',
       retracto_excluded_reason: (formData.get('retracto_excluded_reason') as string) || null,
     }
     const coverUrl = formData.get('cover_image_url') as string
-    if (coverUrl) updates.cover_image_url = coverUrl
-    await sb.from('products').update(updates)
-      .eq('id', formData.get('product_id') as string).eq('tenant_id', m.tenant_id)
+    if (coverUrl) payload.cover_image_url = coverUrl
+
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      await fetch(`${CORE_API_URL}/api/v1/products/${formData.get('product_id') as string}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+    } catch { /* non-fatal */ }
     revalidatePath('/dashboard/catalog')
   }
 

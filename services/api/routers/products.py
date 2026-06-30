@@ -88,6 +88,24 @@ class VariationPatch(BaseModel):
     image_url: Optional[str] = None
 
 
+# Campos que NUNCA deben quedar en null vía PATCH (requeridos por el dominio).
+_PRODUCT_NEVER_CLEAR = {"title"}
+_VARIATION_NEVER_CLEAR = {"sku", "price", "stock_quantity"}
+
+
+def build_patch_update(patch: BaseModel, never_clear: set) -> dict:
+    """PATCH semántico (F2.2): aplica SOLO los campos que el cliente envió explícitamente
+    (`exclude_unset`), permitiendo limpiar a null los opcionales (safety_note, category_id, etc.).
+    Protege `never_clear` de quedar en null aunque lleguen como null. Distingue 'campo ausente'
+    (no se toca) de 'campo=null' (se limpia) — requisito para migrar editProduct a la API sin
+    perder la capacidad de borrar una nota de seguridad / categoría (Ley 1480/ADR-0027)."""
+    return {
+        k: v
+        for k, v in patch.model_dump(exclude_unset=True).items()
+        if not (v is None and k in never_clear)
+    }
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
@@ -206,9 +224,10 @@ async def patch_product(
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
 ):
-    """Edita título y/o descripción del producto. Solo owner/manager."""
+    """Edita campos del producto (título, descripción, categorías, safety_note, retracto).
+    PATCH semántico: los campos opcionales enviados como null se limpian. Solo owner/manager."""
     try:
-        data = {k: v for k, v in product.model_dump().items() if v is not None}
+        data = build_patch_update(product, _PRODUCT_NEVER_CLEAR)
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 
@@ -246,7 +265,7 @@ async def patch_variation(
     Solo owner/manager.
     """
     try:
-        data = {k: v for k, v in variation.model_dump().items() if v is not None}
+        data = build_patch_update(variation, _VARIATION_NEVER_CLEAR)
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
 
