@@ -110,6 +110,24 @@ def render_category_index(catalog: list[dict] | None) -> str:
     return header + "\n\n" + "\n".join(lines)
 
 
+def _clip_description(desc: str, max_chars: int = 600) -> str:
+    """Recorta una descripción de producto SIN cortar a media frase.
+
+    Si cabe en `max_chars`, se devuelve íntegra. Si no, se recorta hasta el último cierre de oración
+    (`.`, `!`, `?`) dentro del límite → oraciones COMPLETAS. El `…` a media frase confundía al cliente
+    ("no termina la frase", reporte founder 2026-06-30) — solo se usa como fallback raro si la
+    descripción no tiene ningún punto dentro del límite.
+    """
+    desc = desc.strip()
+    if len(desc) <= max_chars:
+        return desc
+    window = desc[:max_chars]
+    cut = max(window.rfind("."), window.rfind("!"), window.rfind("?"))
+    if cut >= 50:  # hay al menos una oración completa razonable
+        return window[: cut + 1].strip()
+    return window.rsplit(" ", 1)[0].strip() + "…"  # fallback: descripción sin puntuación
+
+
 def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     """Renderiza el catalog como markdown block para embeber en prompt.
 
@@ -155,13 +173,12 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
             # del LLM. Antes solo se emitía título+variantes+precio → el bot NO
             # veía los beneficios (que SÍ existen en products.description) y ante
             # "¿para qué sirve?" exponía "mi base de conocimiento no tiene eso".
-            # Truncar en límite de palabra para no inflar el context window ni
-            # cortar un beneficio a media frase.
+            # _clip_description recorta por ORACIÓN completa (no a media frase): el
+            # truncado anterior a 200 chars + "…" cortaba el beneficio a media frase
+            # y el LLM lo copiaba literal al cliente (reporte founder 2026-06-30).
             desc = str(p.get("description") or "").strip()
             if desc:
-                if len(desc) > 200:
-                    desc = desc[:200].rsplit(" ", 1)[0] + "…"
-                lines.append(f"    {desc}")
+                lines.append(f"    {_clip_description(desc)}")
             # Nota de seguridad — render GARANTIZADO (sin truncar) con marcador
             # ⚠️ para productos de riesgo (ej. aceites esenciales). El bot la TIENE
             # en contexto pero la menciona SOLO si el cliente pregunta por
