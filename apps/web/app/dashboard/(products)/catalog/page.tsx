@@ -187,10 +187,26 @@ export default async function CatalogPage() {
     if (imgUrl !== null) updates.image_url = imgUrl
     if (sku !== null)   updates.sku        = sku
     if (!Object.keys(updates).length) return
-    await sb.from('product_variations')
-      .update(updates)
-      .eq('id', formData.get('variation_id') as string)
-      .eq('tenant_id', m.tenant_id)
+
+    // F2.2: editar variante vía API (restaura @audit_log + RBAC server-side). `updates` mapea 1:1 a
+    // VariationPatch; compare_at_price=null se limpia vía el contrato semántico (exclude_unset).
+    const { data: { session: s } } = await sb.auth.getSession()
+    const token = s?.access_token
+    if (!token) return
+    const productId = formData.get('product_id') as string
+    const variationId = formData.get('variation_id') as string
+
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      await fetch(`${CORE_API_URL}/api/v1/products/${productId}/variations/${variationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updates),
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+    } catch { /* non-fatal */ }
     revalidatePath('/dashboard/catalog')
   }
 

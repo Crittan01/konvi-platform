@@ -55,8 +55,8 @@ function Section({ icon: Icon, title, children, defaultOpen = true }: {
 
 // ── Variante editable dentro del drawer ───────────────────────────────────────
 
-function VariantEditRow({ v, threshold, tenantId, editVariationAction }: {
-  v: Variation; threshold: number; tenantId: string
+function VariantEditRow({ v, productId, threshold, tenantId, editVariationAction }: {
+  v: Variation; productId: string; threshold: number; tenantId: string
   editVariationAction: (fd: FormData) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
@@ -96,6 +96,7 @@ function VariantEditRow({ v, threshold, tenantId, editVariationAction }: {
     <form action={editVariationAction} onSubmit={() => setEditing(false)}
       className="py-2 border-b border-border/40 last:border-0 space-y-2">
       <input type="hidden" name="variation_id" value={v.id} />
+      <input type="hidden" name="product_id" value={productId} />
       <p className="text-[10px] text-muted-foreground italic">El stock se gestiona en Inventario ↓</p>
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -316,7 +317,7 @@ export function ProductEditDrawer({
             {/* Lista de variantes */}
             <div>
               {vars.map(v => (
-                <VariantEditRow key={v.id} v={v} threshold={threshold} tenantId={tenantId} editVariationAction={editVariationAction} />
+                <VariantEditRow key={v.id} v={v} productId={product.id} threshold={threshold} tenantId={tenantId} editVariationAction={editVariationAction} />
               ))}
             </div>
 
