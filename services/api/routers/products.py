@@ -72,6 +72,7 @@ class ProductPatch(BaseModel):
     retracto_excluded: Optional[bool] = None  # exclusión derecho de retracto (Ley 1480)
     retracto_excluded_reason: Optional[str] = None
     cover_image_url: Optional[str] = None
+    status: Optional[str] = None              # 'active' | 'inactive' (restaurar/desactivar)
 
 
 class VariationPatch(BaseModel):
@@ -89,8 +90,9 @@ class VariationPatch(BaseModel):
 
 
 # Campos que NUNCA deben quedar en null vía PATCH (requeridos por el dominio).
-_PRODUCT_NEVER_CLEAR = {"title"}
+_PRODUCT_NEVER_CLEAR = {"title", "status"}
 _VARIATION_NEVER_CLEAR = {"sku", "price", "stock_quantity"}
+_PRODUCT_STATUSES = {"active", "inactive"}
 
 
 def build_patch_update(patch: BaseModel, never_clear: set) -> dict:
@@ -230,6 +232,8 @@ async def patch_product(
         data = build_patch_update(product, _PRODUCT_NEVER_CLEAR)
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
+        if "status" in data and data["status"] not in _PRODUCT_STATUSES:
+            raise HTTPException(status_code=422, detail="Estado inválido (active | inactive).")
 
         result = (
             supabase.table("products")

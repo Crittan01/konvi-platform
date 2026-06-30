@@ -216,10 +216,21 @@ export default async function CatalogPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('products')
-      .update({ status: 'active' })
-      .eq('id', formData.get('product_id') as string)
-      .eq('tenant_id', m.tenant_id)
+    // F2.2: reactivar vía API (auditado). PATCH semántico solo toca status.
+    const { data: { session: s } } = await sb.auth.getSession()
+    const token = s?.access_token
+    if (!token) return
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      await fetch(`${CORE_API_URL}/api/v1/products/${formData.get('product_id') as string}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ status: 'active' }),
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+    } catch { /* non-fatal */ }
     revalidatePath('/dashboard/catalog')
   }
 
@@ -229,10 +240,21 @@ export default async function CatalogPage() {
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
-    await sb.from('products')
-      .update({ status: 'inactive' })
-      .eq('id', formData.get('product_id') as string)
-      .eq('tenant_id', m.tenant_id)
+    // F2.2: desactivar vía API (auditado). PATCH semántico solo toca status.
+    const { data: { session: s } } = await sb.auth.getSession()
+    const token = s?.access_token
+    if (!token) return
+    try {
+      const ctrl = new AbortController()
+      const timeout = setTimeout(() => ctrl.abort(), 15000)
+      await fetch(`${CORE_API_URL}/api/v1/products/${formData.get('product_id') as string}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ status: 'inactive' }),
+        signal: ctrl.signal,
+      })
+      clearTimeout(timeout)
+    } catch { /* non-fatal */ }
     revalidatePath('/dashboard/catalog')
   }
 

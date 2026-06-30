@@ -51,6 +51,11 @@ class ProductPatchSemanticsTests(unittest.TestCase):
         data = build_patch_update(p, _PRODUCT_NEVER_CLEAR)
         self.assertEqual(data["retracto_excluded"], False)
 
+    def test_status_applied_and_protected(self):
+        # restore/deactivate envían status; se aplica y nunca se limpia a null.
+        self.assertEqual(build_patch_update(ProductPatch(status="active"), _PRODUCT_NEVER_CLEAR)["status"], "active")
+        self.assertNotIn("status", build_patch_update(ProductPatch(status=None), _PRODUCT_NEVER_CLEAR))
+
     def test_variation_protects_price_and_stock(self):
         v = VariationPatch(price=None, stock_quantity=None, image_url=None, compare_at_price=None)
         data = build_patch_update(v, _VARIATION_NEVER_CLEAR)
