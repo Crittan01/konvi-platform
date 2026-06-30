@@ -9,10 +9,13 @@ import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createClient } from '@/utils/supabase/client'
 
-interface Props { categories: {id: string, name: string}[]; onImported?: () => void; tenantId: string }
+interface Props { categories: {id: string, name: string}[]; productCategories: {id: string, display_label: string}[]; onImported?: () => void; tenantId: string }
 
-export default function MassImporter({ categories, onImported = () => {}, tenantId }: Props) {
+export default function MassImporter({ categories, productCategories, onImported = () => {}, tenantId }: Props) {
   const [selectedCat, setSelectedCat] = useState('')
+  // ADR-0027: categoría operativa (la que el bot usa para agrupar el catálogo). Distinta de la
+  // marketplace (platform_category_id). Sin esto los productos importados quedan sin agrupar en el bot.
+  const [selectedOpCat, setSelectedOpCat] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -209,7 +212,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
         if (existingProd) {
           productId = existingProd.id
           // Optional: Update existing product details? Let's leave them or update status to active
-          await supabase.from('products').update({ status: 'active' }).eq('id', productId)
+          await supabase.from('products').update({ status: 'active', ...(selectedOpCat ? { category_id: selectedOpCat } : {}) }).eq('id', productId)
         } else {
           // Inyectamos Nuevo Producto Base
           const { data: prodResp, error: prodErr } = await supabase.from('products').insert({
@@ -218,6 +221,7 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
             description: prodData.desc || null,
             cover_image_url: prodData.img || null,
             platform_category_id: selectedCat,
+            category_id: selectedOpCat || null,
             status: 'active'
           }).select().single()
 
@@ -292,15 +296,26 @@ export default function MassImporter({ categories, onImported = () => {}, tenant
       <CardContent className="pt-5 space-y-5">
         <div className="space-y-2">
           <Label>1. Define la Categoría</Label>
-          <select 
-            value={selectedCat} 
-            onChange={e => setSelectedCat(e.target.value)} 
+          <select
+            value={selectedCat}
+            onChange={e => setSelectedCat(e.target.value)}
             className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
           >
-            <option value="">-- Obligatorio: Seleccionar Categoría --</option>
+            <option value="">-- Obligatorio: Categoría marketplace (MercadoLibre) --</option>
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <p className="text-[11px] text-muted-foreground leading-snug pt-1">La plantilla auto-generada asocia los productos directamente a esta categoría.</p>
+          <p className="text-[11px] text-muted-foreground leading-snug pt-1">Categoría del marketplace (MercadoLibre). La plantilla auto-generada asocia los productos a esta categoría.</p>
+
+          {/* ADR-0027: categoría operativa — la que el bot usa para agrupar el catálogo en el chat. */}
+          <select
+            value={selectedOpCat}
+            onChange={e => setSelectedOpCat(e.target.value)}
+            className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
+          >
+            <option value="">-- Opcional: Categoría de catálogo (la que ve el bot) --</option>
+            {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
+          </select>
+          <p className="text-[11px] text-muted-foreground leading-snug pt-1">Recomendado: la categoría con la que el bot agrupa el catálogo en el chat. Sin esto, los productos quedan sin agrupar (&quot;Otros&quot;).</p>
         </div>
 
         <div className="space-y-2 pt-2 border-t border-border/40">

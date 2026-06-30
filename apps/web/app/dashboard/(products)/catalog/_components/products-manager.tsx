@@ -201,7 +201,7 @@ export default function ProductsManager({
           />
           <div className="border-t border-border pt-4 mt-2">
             <p className="text-xs font-medium text-muted-foreground mb-3">O importa desde Excel</p>
-            <MassImporter categories={categories} tenantId={tenantId} />
+            <MassImporter categories={categories} productCategories={productCategories} tenantId={tenantId} />
           </div>
         </DialogContent>
       </Dialog>
