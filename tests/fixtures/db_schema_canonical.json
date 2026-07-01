@@ -85,6 +85,48 @@
       "table_name": "ai_agents"
     },
     {
+      "column_count": 6,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "category_attribute_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "value",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "gid",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "meta",
+          "default": "'{}'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
+        },
+        {
+          "col": "sort_order",
+          "default": "0",
+          "nullable": "NO",
+          "type": "integer"
+        }
+      ],
+      "table_name": "attribute_values"
+    },
+    {
       "column_count": 9,
       "columns": [
         {
@@ -269,6 +311,78 @@
         }
       ],
       "table_name": "bot_source_log"
+    },
+    {
+      "column_count": 11,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "platform_category_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "code",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "label",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "type",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "unit",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "is_required",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "is_variant_axis",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "localizable",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "sort_order",
+          "default": "0",
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "created_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        }
+      ],
+      "table_name": "category_attributes"
     },
     {
       "column_count": 11,
@@ -1669,7 +1783,91 @@
       "table_name": "payments"
     },
     {
-      "column_count": 6,
+      "column_count": 13,
+      "columns": [
+        {
+          "col": "id",
+          "default": "gen_random_uuid()",
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "tenant_id",
+          "default": null,
+          "nullable": "NO",
+          "type": "uuid"
+        },
+        {
+          "col": "product_category_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "code",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "label",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "type",
+          "default": null,
+          "nullable": "NO",
+          "type": "text"
+        },
+        {
+          "col": "unit",
+          "default": null,
+          "nullable": "YES",
+          "type": "text"
+        },
+        {
+          "col": "is_required",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "is_variant_axis",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "allowed_values",
+          "default": "'[]'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
+        },
+        {
+          "col": "localizable",
+          "default": "false",
+          "nullable": "NO",
+          "type": "boolean"
+        },
+        {
+          "col": "sort_order",
+          "default": "0",
+          "nullable": "NO",
+          "type": "integer"
+        },
+        {
+          "col": "created_at",
+          "default": "now()",
+          "nullable": "NO",
+          "type": "timestamp with time zone"
+        }
+      ],
+      "table_name": "product_attribute_definitions"
+    },
+    {
+      "column_count": 7,
       "columns": [
         {
           "col": "id",
@@ -1706,6 +1904,12 @@
           "default": "now()",
           "nullable": "NO",
           "type": "timestamp with time zone"
+        },
+        {
+          "col": "platform_category_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
         }
       ],
       "table_name": "product_categories"
