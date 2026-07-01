@@ -14,7 +14,7 @@ import {
 import CatalogForm from './catalog-form'
 import MassImporter from './mass-importer'
 import CatalogTable from './catalog-table'
-import type { Product } from '../types'
+import type { Product, AttributeDef } from '../types'
 
 type Movement = {
   id: string
@@ -33,6 +33,7 @@ type Props = {
   canWrite: boolean
   categories: Category[]
   productCategories: { id: string; display_label: string }[]  // ADR-0027 categorías operativas
+  attributeDefs: AttributeDef[]  // ADR-0029 contrato de atributos por categoría
   tenantId: string
   apiUrl: string
   threshold: number
@@ -58,7 +59,7 @@ function SaveThresholdButton() {
 
 export default function ProductsManager({
   products, archivedProducts, catMap, canWrite,
-  categories, productCategories, tenantId, apiUrl,
+  categories, productCategories, attributeDefs, tenantId, apiUrl,
   threshold,
   editProductAction, editVariationAction, addVariationAction,
   deactivateProductAction, restoreProductAction, deleteProductAction,
@@ -196,6 +197,7 @@ export default function ProductsManager({
             apiUrl={apiUrl}
             categories={categories}
             productCategories={productCategories}
+            attributeDefs={attributeDefs}
             tenantId={tenantId}
             onCreated={() => setDialogOpen(false)}
           />

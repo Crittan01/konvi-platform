@@ -2,7 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { revalidatePath } from 'next/cache'
 import ProductsManager from './_components/products-manager'
-import type { Product } from './types'
+import type { Product, AttributeDef } from './types'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 const DEFAULT_THRESHOLD = 5
@@ -33,6 +33,16 @@ export default async function CatalogPage() {
         .order('display_label')
     : { data: [] }
   const productCategories = (pcats as { id: string; display_label: string }[]) ?? []
+
+  // ADR-0029 F1/F3 — contrato de atributos por categoría (guía el alta hacia valores canónicos).
+  const { data: adefs } = tenantId
+    ? await supabase
+        .from('product_attribute_definitions')
+        .select('product_category_id, code, label, type, unit, allowed_values, is_variant_axis, sort_order')
+        .eq('tenant_id', tenantId)
+        .order('sort_order')
+    : { data: [] }
+  const attributeDefs = (adefs as AttributeDef[]) ?? []
 
   // Products (active + archived) + inventory data
   let products: Product[] = []
@@ -358,6 +368,7 @@ export default async function CatalogPage() {
         canWrite={canWrite}
         categories={platformCategories}
         productCategories={productCategories}
+        attributeDefs={attributeDefs}
         tenantId={tenantId ?? ''}
         apiUrl={CORE_API_URL}
         threshold={threshold}

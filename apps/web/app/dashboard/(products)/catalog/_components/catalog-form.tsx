@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/utils/supabase/client'
 import { ImageUploadBox } from './image-upload-box'
+import type { AttributeDef } from '../types'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ interface VariantDraft {
   weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''
   image_url: string
 }
-interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; productCategories?: {id: string, display_label: string}[]; tenantId: string }
+interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; productCategories?: {id: string, display_label: string}[]; attributeDefs?: AttributeDef[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
   sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '',
@@ -324,7 +325,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId }: {
 
 // ─── Formulario principal ─────────────────────────────────────────────────────
 
-export default function CatalogForm({ onCreated = () => {}, categories = [], productCategories = [], tenantId }: Props) {
+export default function CatalogForm({ onCreated = () => {}, categories = [], productCategories = [], attributeDefs = [], tenantId }: Props) {
   const router = useRouter()
   const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
@@ -462,6 +463,18 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+          {/* ADR-0029 F3: guía de atributos del contrato de la categoría (nudge a valores canónicos). */}
+          {productCategoryId && attributeDefs.some(d => d.product_category_id === productCategoryId) && (
+            <div className="sm:col-span-2 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-[11px] text-foreground/80">
+              <span className="font-semibold">Atributos de esta categoría:</span>{' '}
+              {attributeDefs
+                .filter(d => d.product_category_id === productCategoryId)
+                .sort((a, b) => a.sort_order - b.sort_order)
+                .map(d => `${d.label}${d.is_variant_axis ? ' (variante)' : ''}${d.allowed_values?.length ? ': ' + d.allowed_values.join(d.unit ? d.unit + ', ' : ', ') + (d.unit ?? '') : ''}`)
+                .join(' · ')}
+              <span className="block text-muted-foreground mt-0.5">Usa estos nombres/valores para mantener el catálogo consistente (el bot los lee).</span>
+            </div>
+          )}
           <div className="sm:col-span-2">
             <label className="text-[10px] font-semibold text-muted-foreground uppercase">Descripción (la IA la usa para responder sobre el producto)</label>
             <Textarea value={description} onChange={e => setDescription(e.target.value)}

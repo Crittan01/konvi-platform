@@ -1,6 +1,18 @@
 // Tipos compartidos del módulo Catálogo
 // Definidos en un solo lugar para evitar duplicación entre page.tsx y catalog-table.tsx
 
+// ADR-0029 F1/F3 — definición de atributo tipado por categoría (el contrato que guía el alta).
+export interface AttributeDef {
+  product_category_id: string | null
+  code: string
+  label: string
+  type: string
+  unit: string | null
+  allowed_values: string[]
+  is_variant_axis: boolean
+  sort_order: number
+}
+
 export interface Variation {
   id: string
   sku: string | null
