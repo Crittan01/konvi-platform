@@ -412,7 +412,8 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
       })
 
       // ADR-0029 F3: crear vía API (restaura @audit_log + RBAC server-side; bulk atómico de variantes).
-      const res = await fetch(`${apiUrl}/api/v1/products`, {
+      // Barra final: el endpoint es POST /api/v1/products/ (router "/"); sin ella FastAPI responde 307 cross-origin.
+      const res = await fetch(`${apiUrl}/api/v1/products/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({

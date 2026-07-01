@@ -112,6 +112,24 @@ def build_patch_update(patch: BaseModel, never_clear: set) -> dict:
     }
 
 
+def _assert_category_owned(supabase: Client, tenant_id: str, category_id: Optional[str]) -> None:
+    """Valida que la categoría operativa (product_categories) pertenece al tenant.
+    ADR-0025: el FK products.category_id es id-only (no compuesto con tenant_id), así que sin
+    este chequeo un tenant podría referenciar la categoría de OTRO (integridad multi-tenant rota).
+    No-op si category_id es None (la categoría operativa es opcional)."""
+    if category_id is None:
+        return
+    owned = (
+        supabase.table("product_categories")
+        .select("id")
+        .eq("id", category_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    if not owned.data:
+        raise HTTPException(status_code=422, detail="Categoría de catálogo inválida para este tenant")
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
@@ -157,6 +175,12 @@ async def create_product(
     if not variations:
         raise HTTPException(status_code=422, detail="Se requiere al menos una variante")
     try:
+        # Integridad multi-tenant (ADR-0025): la categoría operativa DEBE pertenecer al tenant.
+        # El FK products.category_id es id-only (no compuesto con tenant_id), así que sin este
+        # chequeo un tenant podría referenciar la categoría de OTRO. platform_category_id es
+        # taxonomía GLOBAL compartida (su FK basta, no hay riesgo cross-tenant).
+        _assert_category_owned(supabase, tenant_id, product.category_id)
+
         prod_result = supabase.table("products").insert({
             "tenant_id": tenant_id,
             "platform_category_id": product.platform_category_id,
@@ -189,8 +213,20 @@ async def create_product(
             "height_cm": v.height_cm,
             "image_url": v.image_url,
         } for v in variations]
-        # tenant_filter:exempt: cada row de var_rows lleva tenant_id del JWT (arriba); el AST no traza el payload de una comprehension.
-        var_result = supabase.table("product_variations").insert(var_rows).execute()
+        try:
+            # tenant_filter:exempt: cada row de var_rows lleva tenant_id del JWT (arriba); el AST no traza el payload de una comprehension.
+            var_result = supabase.table("product_variations").insert(var_rows).execute()
+        except Exception as var_err:
+            # El producto ya se persistió; sin variantes quedaría HUÉRFANO (el bot lo listaría con
+            # cero variantes y el usuario acumularía basura al reintentar). Lo borramos y devolvemos
+            # un 4xx accionable en vez del 500 opaco que enmascaraba el conflicto de SKU.
+            supabase.table("products").delete().eq("id", prod["id"]).eq("tenant_id", tenant_id).execute()
+            emsg = str(var_err).lower()
+            if "uc_tenant_sku" in emsg or "duplicate key" in emsg or "23505" in emsg:
+                raise HTTPException(status_code=409, detail="SKU duplicado: ya existe una variante con ese SKU.") from var_err
+            if "23502" in emsg or "not null" in emsg or "not-null" in emsg:
+                raise HTTPException(status_code=422, detail="Cada variante requiere un SKU.") from var_err
+            raise HTTPException(status_code=500, detail="Error al crear las variantes del producto") from var_err
 
         prod["product_variations"] = var_result.data or []
         return prod
@@ -245,6 +281,9 @@ async def patch_product(
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
         if "status" in data and data["status"] not in _PRODUCT_STATUSES:
             raise HTTPException(status_code=422, detail="Estado inválido (active | inactive).")
+        # Integridad multi-tenant (ADR-0025): si el patch reasigna category_id, debe ser del tenant.
+        if "category_id" in data:
+            _assert_category_owned(supabase, tenant_id, data["category_id"])
 
         result = (
             supabase.table("products")
