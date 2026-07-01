@@ -553,6 +553,7 @@ def compute_shipping_inputs(cart: dict) -> dict:
     total_volumetric = 0.0
     lines = []
     max_line_dims = (0.0, 0.0, 0.0)
+    missing_shipping_data: list[str] = []  # títulos sin weight_kg/dims → el caller bloquea la cotización
 
     for it in items:
         qty = int(it.get("quantity") or 1)
@@ -566,6 +567,10 @@ def compute_shipping_inputs(cart: dict) -> dict:
             logger.warning(
                 "[CART] variation %s con dims/peso incompleto (qty=%s, w=%s, L=%s, W=%s, H=%s)",
                 it.get("variation_id"), qty, w, L, W, H,
+            )
+            p = it.get("product") or {}
+            missing_shipping_data.append(
+                str(p.get("title") or p.get("name") or it.get("variation_id") or "producto")
             )
 
         L_eff = _scale_dim(L, qty)
@@ -597,6 +602,7 @@ def compute_shipping_inputs(cart: dict) -> dict:
         "weight_kg": round(total_weight, 3),
         "volumetric_weight_kg": round(total_volumetric, 3),
         "billable_weight_kg": round(billable, 3),
+        "missing_shipping_data": missing_shipping_data,
         "package_dims": {
             "length_cm": max_line_dims[0],
             "width_cm": max_line_dims[1],

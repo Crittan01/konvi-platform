@@ -123,6 +123,7 @@ class PackageEstimate:
     quantity: int
     product_title: Optional[str] = None
     variant_label: Optional[str] = None
+    declared_value: Optional[int] = None   # valorDeclarado en COP = subtotal de productos del cart (no hardcoded 50k)
     source: str = "default"
 
 
@@ -130,6 +131,8 @@ class PackageEstimate:
 class PackageEstimateDecision:
     package: Optional[PackageEstimate] = None
     ambiguous_product_titles: list[str] = field(default_factory=list)
+    # Títulos de productos SIN weight_kg/dims: bloquea la cotización (no cotizar a ~0kg → evita reajuste retroactivo).
+    missing_shipping_data: list[str] = field(default_factory=list)
 
 
 from text_utils import normalize_text as _normalize_text, normalize_phone as _normalize_phone  # noqa: E402
@@ -931,6 +934,18 @@ def _estimate_package_from_cart_if_available(
         return None
 
     inputs = compute_shipping_inputs(cart)
+    missing = inputs.get("missing_shipping_data") or []
+    if missing:
+        # ENVIO-1: NO cotizar productos sin peso/dims. Cotizarían a ~0.05kg → Aveonline auto-ajusta a 1kg
+        # → reajuste retroactivo en la factura semanal que paga el tenant. Se bloquea y se escala a un asesor.
+        logger.warning("[SHIPPING_QUOTE] cart con producto(s) sin peso/dims — bloqueo de cotización: %s", missing)
+        return PackageEstimateDecision(package=None, missing_shipping_data=missing)
+
+    # ENVIO-2: valorDeclarado del seguro = subtotal REAL de productos del cart (COP), no hardcoded 50k.
+    # subtotal_cents está en CENTAVOS → COP = /100. Aveonline aplica su propio floor ≥10.000 COP.
+    subtotal_cents = int(cart.get("subtotal_cents") or 0)
+    declared_value_cop = int(round(subtotal_cents / 100)) if subtotal_cents > 0 else None
+
     weight_kg = max(float(inputs.get("billable_weight_kg") or 0.0), 0.05)
     dims = inputs.get("package_dims") or {}
     L = float(dims.get("length_cm") or 0.0) or DEFAULT_LENGTH_CM
@@ -964,6 +979,7 @@ def _estimate_package_from_cart_if_available(
             quantity=total_qty,
             product_title=title_str,
             variant_label=None,
+            declared_value=declared_value_cop,
             source="cart_db",
         )
     )
@@ -1335,6 +1351,9 @@ def _build_quote_payload(origin: dict, destination: dict, package: PackageEstima
                 "amount": max(package.quantity, 1),
                 "content": package.product_title or "Mercancía general",
                 "insuranceAmount": 0,
+                # ENVIO-2: valorDeclarado real (COP, subtotal de productos). Sin esto, la API (shipping.py L226)
+                # cae al 50k hardcoded. None → la API aplica su fallback.
+                "declaredValueCop": getattr(package, "declared_value", None),
             }
         ],
     }
@@ -1869,6 +1888,22 @@ async def handle_shipping_quote_if_applicable(
                 response_text=_build_product_disambiguation_text(
                     package_decision.ambiguous_product_titles
                 ),
+            )
+
+        if package_decision.missing_shipping_data:
+            # ENVIO-1: producto sin peso/dims → NO cotizar (evitaría reajuste retroactivo), escalar.
+            logger.info(
+                "[SHIPPING_QUOTE] Producto(s) sin peso/dims, escalando a asesor: %s",
+                package_decision.missing_shipping_data,
+            )
+            faltantes = ", ".join(package_decision.missing_shipping_data[:3])
+            return ShippingQuoteResult(
+                handled=True,
+                response_text=(
+                    f"Para cotizar el envío necesito el peso y las medidas de: {faltantes}. "
+                    "Te paso con un asesor para completarlo y darte el valor exacto."
+                ),
+                requires_human=True,
             )
 
         package = package_decision.package or PackageEstimate(

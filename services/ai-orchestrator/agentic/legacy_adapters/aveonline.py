@@ -98,6 +98,19 @@ async def quote_shipping_for_cart_aveonline(
                 ),
                 "code": "AMBIGUOUS_PRODUCTS",
             }
+        missing = (
+            package_decision.missing_shipping_data if package_decision else []
+        )
+        if missing:
+            # ENVIO-1: sin peso/dims NO se cotiza (evita reajuste retroactivo de Aveonline). Escala a asesor.
+            return {
+                "ok": False,
+                "error": (
+                    f"Estos productos no tienen peso/medidas de envío configurados: "
+                    f"{', '.join(missing[:3])}. Un asesor te ayuda a completarlo."
+                ),
+                "code": "MISSING_SHIPPING_DATA",
+            }
         return {
             "ok": False,
             "error": "No pude estimar el paquete (cart vacío o productos sin dimensiones).",
@@ -203,7 +216,9 @@ async def quote_shipping_for_cart_aveonline(
                 "length_cm": float(getattr(package, "length_cm", 10)),
                 "width_cm": float(getattr(package, "width_cm", 10)),
                 "height_cm": float(getattr(package, "height_cm", 10)),
-                "declared_value_cop": int(getattr(package, "declared_value", 0) or 50000),
+                # ENVIO-2: valorDeclarado = subtotal REAL de productos (COP) que trae el PackageEstimate del cart.
+                # 50000 es fallback SOLO si no hay subtotal (path inventory sin cart). Aveonline aplica su floor ≥10k.
+                "declared_value_cop": int(getattr(package, "declared_value", None) or 50000),
                 "units": int(getattr(package, "quantity", 1) or 1),
                 "product_name": str(getattr(package, "product_title", "Producto") or "Producto"),
                 # Rev. 108 Fase B — Aveonline cotizarDoble debe saber si es
