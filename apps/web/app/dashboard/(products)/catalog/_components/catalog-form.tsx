@@ -333,7 +333,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId }: {
 
 // ─── Formulario principal ─────────────────────────────────────────────────────
 
-export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [], productCategories = [], attributeDefs = [], tenantId }: Props) {
+export default function CatalogForm({ apiUrl, onCreated = () => {}, productCategories = [], attributeDefs = [], tenantId }: Props) {
   const router = useRouter()
   const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
@@ -348,7 +348,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
       const supabase = createClient()
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) { setError('Sesión expirada'); return }
-      const categoryName = categories.find(c => c.id === categoryId)?.name
+      const categoryName = productCategories.find(c => c.id === productCategoryId)?.display_label
       const resp = await fetch('/api/catalog/suggest-content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -365,7 +365,6 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
       setSuggesting(false)
     }
   }
-  const [categoryId, setCategoryId] = useState('')
   const [productCategoryId, setProductCategoryId] = useState('')  // ADR-0027 categoría operativa
   const [coverUrl, setCoverUrl]     = useState('')
   const [variants, setVariants]     = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
@@ -417,7 +416,10 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({
-          platform_category_id: categoryId || null,
+          // ADR-0029: la taxonomía de marketplace NO se captura por producto (best-practice Shopify/Google:
+          // una categoría por producto; la de canal se DERIVA). Se resuelve una vez por categoría vía
+          // product_categories.platform_category_id cuando exista publicación MeLi real. NO re-exponer aquí.
+          platform_category_id: null,
           category_id: productCategoryId,
           title: title.trim(),
           description: description.trim() || null,
@@ -470,14 +472,6 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, categories =
               className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
               <option value="">-- Selecciona (la que ve el bot) --</option>
               {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría marketplace (MeLi)</label>
-            <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
-              className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
-              <option value="">Opcional — solo si publicas a MeLi</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           {/* ADR-0029 F3: guía de atributos del contrato de la categoría (nudge a valores canónicos). */}

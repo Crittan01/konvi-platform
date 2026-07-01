@@ -114,6 +114,24 @@ curado. La frontera se implementa **estructuralmente** (campos distintos), no po
 canal, no de **EXISTIR** en el catálogo. La categoría operativa (`product_categories`) es primaria en
 toda alta.
 
+**D2-refinamiento (2026-07-01, panel de diseño 4 lentes + crítico adversarial) — UN eje en el alta, no dos.**
+Los dos ejes de D2 siguen en el MODELO, pero el merchant toca **UNO SOLO** al crear un producto: la categoría
+**operativa** (la que el bot lee y el cliente oye). La taxonomía de plataforma/marketplace **deja de ser un
+campo por producto** y pasa a ser **propiedad de la CATEGORÍA** (`product_categories.platform_category_id`, la
+columna que F0 ya creó), resuelta por un mapeo curado **una vez por categoría** y **solo cuando exista
+publicación MeLi real**. Esto es best-practice literal: Shopify asigna *only one product category per product*
+(y esa categoría ES el contrato de atributos), y Google **auto-deriva** `google_product_category` desde los
+datos, recomendando **no** rellenarla a mano. Verificado sobre el código: el bot nunca leyó `platform_category_id`
+ni `category_attributes` (grep vacío en ai-orchestrator), así que sacar el campo del alta **no le resta nada** al
+grounding. Implementado quitando el select "Categoría marketplace (MeLi)" del alta 1-a-1 (`catalog-form.tsx`);
+el payload envía `platform_category_id: null`. **NO re-exponer ese campo por-producto en ningún formulario** — la
+taxonomía de canal se deriva por categoría en el flujo de publicación, no se captura por producto.
+Corolarios verificados por el crítico: (a) NO unificar `category_attributes`/`attribute_values` (globales, hoy
+**vacías y sin lectores**) con `product_attribute_definitions` (per-tenant, contrato vivo de KAIU) — unificar es
+backfill riesgoso para un problema fantasma; si algún día ambas se pueblan, unificar en LECTURA (vista/helper),
+no en escritura. (b) **No** construir "colecciones" como entidad — el bot conversacional hace la navegación; si
+aparece merchandising ligero, usar `products.tags` con **vocabulario cerrado**, no texto libre.
+
 ---
 
 ## 4. Modelo target (concreto)
