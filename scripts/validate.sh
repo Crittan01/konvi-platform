@@ -159,6 +159,25 @@ else
   _warn "pnpm no disponible — omitiendo TypeScript"
 fi
 
+# ─── 4.2 Vitest — tests unitarios del front (apps/web) ───────────────────────
+# Lógica pura testeable (p.ej. contrato de atributos ADR-0029 F3, blindado tras 2 rondas de
+# revisión adversarial). Se ejecuta si hay *.test.ts(x); usa el exit code de vitest.
+_hdr "Vitest (apps/web)"
+if command -v pnpm &>/dev/null; then
+  if find apps/web/app -name '*.test.ts' -o -name '*.test.tsx' 2>/dev/null | grep -q .; then
+    if vt_out=$(pnpm --filter web test 2>&1); then
+      _ok "Vitest OK ($(echo "$vt_out" | grep -oE '[0-9]+ passed' | tail -1))"
+    else
+      _err "Tests de Vitest fallando (apps/web):"
+      echo "$vt_out" | tail -12
+    fi
+  else
+    _warn "Vitest: sin archivos *.test.ts (nada que correr)"
+  fi
+else
+  _warn "pnpm no disponible — omitiendo Vitest"
+fi
+
 # ─── 4.5 Tenant filter lint (AST) — A6.1 finiquito NIVEL 2 ───────────────────
 # Detecta `.table(X).select(...)` sin `.eq("tenant_id", ...)` o `.insert/update/
 # upsert(payload)` sin tenant_id en payload. Reemplaza el wrapper tenant_scope.py

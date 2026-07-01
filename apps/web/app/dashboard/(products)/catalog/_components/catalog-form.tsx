@@ -9,10 +9,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/utils/supabase/client'
 import { ImageUploadBox } from './image-upload-box'
 import type { AttributeDef } from '../types'
+import {
+  type Attr, normKey, optionsFor, getAttrValue, orphanValue,
+  canonicalizeAttrs, finalizeAttrs, attrsToObj,
+} from '../_lib/attribute-contract'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-interface Attr { key: string; value: string }
 interface VariantDraft {
   sku: string; attrs: Attr[]; price: number; compare_at_price: number | ''
   stock: number; cost_price: number | ''
@@ -24,12 +27,6 @@ interface Props { apiUrl: string; onCreated?: () => void; productCategories?: {i
 const DEFAULT_VARIANT: VariantDraft = {
   sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '',
   stock: 0, cost_price: '', weight_kg: '', length_cm: '', width_cm: '', height_cm: '', image_url: '',
-}
-
-function attrsToObj(attrs: Attr[]): Record<string, string> {
-  const obj: Record<string, string> = {}
-  for (const a of attrs) if (a.key.trim() && a.value.trim()) obj[a.key.trim()] = a.value.trim()
-  return obj
 }
 
 // ─── Generador de combinaciones (trabaja con estado local, sin product_id) ────
@@ -232,16 +229,12 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId, contractAttr
   const updateAttr = (i: number, field: 'key' | 'value', val: string) =>
     onChange('attrs', v.attrs.map((a, j) => j === i ? { ...a, [field]: val } : a))
 
-  // ADR-0029 F3: entrada guiada por el contrato. Matching por clave NORMALIZADA (trim+lower) para que
-  // 'volumen'/'Volumen ' no dupliquen el eje; al fijar valor se canonicaliza la key al label del contrato.
-  // Invariante clave (fix review): el estado (v.attrs) y la UI nunca divergen — un valor fuera del set se
-  // expone como opción visible en el dropdown (ver render), nunca se oculta ni se envía en silencio.
-  const norm = (s: string) => s.trim().toLowerCase()
-  const contractByLabel = new Map(contractAttrs.map(d => [norm(d.label), d]))
-  const optionOf = (d: AttributeDef, val: string) => (d.unit ? `${val}${d.unit}` : val)
-  const getAttrValue = (label: string) => v.attrs.find(a => norm(a.key) === norm(label))?.value ?? ''
+  // ADR-0029 F3: entrada guiada. La lógica pura (matching normalizado, canonicalización, orphan) vive
+  // testeada en ../_lib/attribute-contract; aquí solo el glue React. setAttrValue canonicaliza la key al
+  // label del contrato y actualiza in-place (o append) — nunca duplica el eje ni oculta un valor.
+  const contractByLabel = new Map(contractAttrs.map(d => [normKey(d.label), d]))
   const setAttrValue = (label: string, value: string) => {
-    const i = v.attrs.findIndex(a => norm(a.key) === norm(label))
+    const i = v.attrs.findIndex(a => normKey(a.key) === normKey(label))
     if (i >= 0) onChange('attrs', v.attrs.map((a, j) => j === i ? { key: label, value } : a))
     else onChange('attrs', [...v.attrs, { key: label, value }])
   }
@@ -273,9 +266,9 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId, contractAttr
 
           {/* ADR-0029 F3: inputs guiados por el contrato de la categoría (dato estructurado → el bot no alucina). */}
           {contractAttrs.map(d => {
-            const cur = getAttrValue(d.label)
-            const opts = (d.allowed_values ?? []).map(val => optionOf(d, val))
-            const orphan = cur && !opts.includes(cur) ? cur : null   // valor presente pero fuera del set → visible, no oculto
+            const cur = getAttrValue(v.attrs, d.label)
+            const opts = optionsFor(d)
+            const orphan = orphanValue(cur, opts)   // valor presente pero fuera del set → visible, no oculto
             return (
               <div key={d.code} className="flex gap-1.5 items-center">
                 <span className="text-xs flex-1 text-muted-foreground truncate" title={d.label}>
@@ -301,7 +294,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId, contractAttr
           })}
 
           {/* Atributos libres (fuera del contrato) — siempre disponibles como escape para no encajonar. */}
-          {v.attrs.map((attr, i) => contractByLabel.has(norm(attr.key)) ? null : (
+          {v.attrs.map((attr, i) => contractByLabel.has(normKey(attr.key)) ? null : (
             <div key={i} className="flex gap-1.5 items-center">
               <Input value={attr.key} onChange={e => updateAttr(i, 'key', e.target.value)}
                 placeholder={contractAttrs.length ? 'Otra propiedad' : 'Propiedad (Ej: Volumen)'} className="h-7 text-xs flex-1" />
@@ -432,35 +425,6 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
     .filter(d => d.product_category_id === productCategoryId && d.is_variant_axis)
     .sort((a, b) => a.sort_order - b.sort_order)
 
-  // Alinea los atributos que genera el matrix con el contrato: key → label canónico, y valor → la opción
-  // canónica (match case/espacio-insensible, con o sin unidad) para que caigan seleccionados en los dropdowns.
-  // Si el valor no matchea ninguna opción, se preserva tal cual (el dropdown lo expondrá como "fuera de contrato").
-  const canonicalizeAttrs = (attrs: Attr[]): Attr[] => attrs.map(a => {
-    const d = variantContractAttrs.find(x => x.label.trim().toLowerCase() === a.key.trim().toLowerCase())
-    if (!d) return a
-    const av = a.value.trim().toLowerCase().replace(/\s+/g, '')
-    const match = (d.allowed_values ?? []).find(val => {
-      const withUnit = (d.unit ? `${val}${d.unit}` : val).toLowerCase().replace(/\s+/g, '')
-      return withUnit === av || String(val).toLowerCase().replace(/\s+/g, '') === av
-    })
-    return { key: d.label, value: match !== undefined ? (d.unit ? `${match}${d.unit}` : match) : a.value }
-  })
-
-  // Normaliza los atributos JUSTO antes de enviar (cubre matrix, entrada manual y colisiones de key):
-  // canonicaliza y DEDUP por clave normalizada conservando la PRIMERA (== la que muestra el dropdown, que
-  // lee con .find). Garantiza payload == UI: nunca se envía un valor fantasma que el vendedor no ve.
-  const finalizeAttrs = (attrs: Attr[]): Attr[] => {
-    const seen = new Set<string>()
-    const out: Attr[] = []
-    for (const a of canonicalizeAttrs(attrs)) {
-      const k = a.key.trim().toLowerCase()
-      if (k && seen.has(k)) continue
-      if (k) seen.add(k)
-      out.push(a)
-    }
-    return out
-  }
-
   const handleSubmit = async () => {
     if (!title.trim()) { setError('El nombre del producto es obligatorio'); return }
     if (variants.some(v => !v.sku.trim())) { setError('Todas las variantes deben tener un SKU'); return }
@@ -484,7 +448,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
           sku: v.sku.trim(),
           price: finalPrice, compare_at_price: finalCompare,
           cost_price: v.cost_price === '' ? 0 : Number(v.cost_price),
-          stock_quantity: v.stock, attributes: attrsToObj(finalizeAttrs(v.attrs)),
+          stock_quantity: v.stock, attributes: attrsToObj(finalizeAttrs(v.attrs, variantContractAttrs)),
           weight_kg: v.weight_kg === '' ? null : v.weight_kg,
           length_cm: v.length_cm === '' ? null : v.length_cm,
           width_cm:  v.width_cm  === '' ? null : v.width_cm,
@@ -612,7 +576,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
             }}
             onGenerate={generated => {
               // Canonicaliza contra el contrato para que los valores generados caigan limpios en los dropdowns.
-              setVariants(generated.map(gv => ({ ...gv, attrs: canonicalizeAttrs(gv.attrs) })))
+              setVariants(generated.map(gv => ({ ...gv, attrs: canonicalizeAttrs(gv.attrs, variantContractAttrs) })))
               setShowMatrix(false)
             }}
             onClose={() => setShowMatrix(false)}
