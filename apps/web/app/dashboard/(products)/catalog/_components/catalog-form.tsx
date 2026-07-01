@@ -333,7 +333,7 @@ function VariantForm({ v, idx, total, onChange, onRemove, tenantId }: {
 
 // ─── Formulario principal ─────────────────────────────────────────────────────
 
-export default function CatalogForm({ onCreated = () => {}, categories = [], productCategories = [], attributeDefs = [], tenantId }: Props) {
+export default function CatalogForm({ apiUrl, onCreated = () => {}, categories = [], productCategories = [], attributeDefs = [], tenantId }: Props) {
   const router = useRouter()
   const [title, setTitle]           = useState('')
   const [description, setDescription] = useState('')
@@ -393,22 +393,13 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
     if (!session?.access_token || !meta.tenant_id) { setError('Sesión expirada'); setSubmitting(false); return }
 
     try {
-      const { data: prod, error: e1 } = await supabase.from('products').insert({
-        tenant_id: meta.tenant_id, platform_category_id: categoryId || null,
-        category_id: productCategoryId || null,
-        title: title.trim(), description: description.trim() || null,
-        safety_note: safetyNote.trim() || null,
-        cover_image_url: coverUrl.trim() || null, status: 'active',
-      }).select().single()
-      if (e1 || !prod) throw new Error(e1?.message ?? 'Error al crear producto')
-
-      const payload = variants.map(v => {
+      const variationsPayload = variants.map(v => {
         let finalPrice = v.price > 0 ? v.price : 1
         let finalCompare: number | null = null
         const promo = v.compare_at_price === '' ? null : Number(v.compare_at_price)
         if (promo && promo > 0 && promo < finalPrice) { finalCompare = finalPrice; finalPrice = promo }
         return {
-          product_id: prod.id, tenant_id: meta.tenant_id, sku: v.sku.trim(),
+          sku: v.sku.trim(),
           price: finalPrice, compare_at_price: finalCompare,
           cost_price: v.cost_price === '' ? 0 : Number(v.cost_price),
           stock_quantity: v.stock, attributes: attrsToObj(v.attrs),
@@ -420,8 +411,25 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
         }
       })
 
-      const { error: e2 } = await supabase.from('product_variations').insert(payload)
-      if (e2) throw new Error(e2.message)
+      // ADR-0029 F3: crear vía API (restaura @audit_log + RBAC server-side; bulk atómico de variantes).
+      const res = await fetch(`${apiUrl}/api/v1/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          platform_category_id: categoryId || null,
+          category_id: productCategoryId,
+          title: title.trim(),
+          description: description.trim() || null,
+          safety_note: safetyNote.trim() || null,
+          cover_image_url: coverUrl.trim() || null,
+          variations: variationsPayload,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        const d = (j as { detail?: unknown } | null)?.detail
+        throw new Error(typeof d === 'string' ? d : Array.isArray(d) ? ((d[0] as { msg?: string })?.msg ?? 'Datos inválidos') : `Error ${res.status}`)
+      }
 
       setTitle(''); setDescription(''); setSafetyNote(''); setVariants([{ ...DEFAULT_VARIANT }]); setCoverUrl('')
       onCreated(); router.refresh()

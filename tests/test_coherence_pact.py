@@ -103,7 +103,7 @@ class ContactsCoherenceTests(unittest.TestCase):
 class ProductsCoherenceTests(unittest.TestCase):
     def test_product_create_fields_in_products(self):
         # variation es composición — no se persiste como columna.
-        orphans, _ = _check_subset(ProductCreate, "products", allowed_extras={"variation"})
+        orphans, _ = _check_subset(ProductCreate, "products", allowed_extras={"variation", "variations"})
         self.assertFalse(orphans, f"ProductCreate huérfanos: {orphans}")
 
     def test_product_patch_fields_in_products(self):

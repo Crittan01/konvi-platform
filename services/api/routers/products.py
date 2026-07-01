@@ -63,7 +63,8 @@ class ProductCreate(BaseModel):
     description: Optional[str] = None
     safety_note: Optional[str] = None        # nota de seguridad (Ley 1480, customer-facing)
     cover_image_url: Optional[str] = None
-    variation: VariationCreate
+    variation: Optional[VariationCreate] = None        # una variante (retrocompat)
+    variations: Optional[List[VariationCreate]] = None  # o varias (bulk atómico — alta de catálogo)
 
 
 class ProductPatch(BaseModel):
@@ -150,7 +151,11 @@ async def create_product(
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),
 ):
-    """Crea producto + variante inicial. Solo owner/manager."""
+    """Crea producto + sus variantes (1 o N). Solo owner/manager."""
+    # variations (lista) tiene prioridad; variation (single) es retrocompat.
+    variations = product.variations or ([product.variation] if product.variation else [])
+    if not variations:
+        raise HTTPException(status_code=422, detail="Se requiere al menos una variante")
     try:
         prod_result = supabase.table("products").insert({
             "tenant_id": tenant_id,
@@ -168,21 +173,24 @@ async def create_product(
 
         prod = prod_result.data[0]
 
-        var_result = supabase.table("product_variations").insert({
+        # Bulk insert atómico de todas las variantes (misma atomicidad que el alta directa previa).
+        var_rows = [{
             "product_id": prod["id"],
             "tenant_id": tenant_id,
-            "sku": product.variation.sku,
-            "price": product.variation.price,
-            "cost_price": product.variation.cost_price,
-            "compare_at_price": product.variation.compare_at_price,
-            "stock_quantity": product.variation.stock_quantity,
-            "attributes": product.variation.attributes,
-            "weight_kg": product.variation.weight_kg,
-            "length_cm": product.variation.length_cm,
-            "width_cm": product.variation.width_cm,
-            "height_cm": product.variation.height_cm,
-            "image_url": product.variation.image_url,
-        }).execute()
+            "sku": v.sku,
+            "price": v.price,
+            "cost_price": v.cost_price,
+            "compare_at_price": v.compare_at_price,
+            "stock_quantity": v.stock_quantity,
+            "attributes": v.attributes,
+            "weight_kg": v.weight_kg,
+            "length_cm": v.length_cm,
+            "width_cm": v.width_cm,
+            "height_cm": v.height_cm,
+            "image_url": v.image_url,
+        } for v in variations]
+        # tenant_filter:exempt: cada row de var_rows lleva tenant_id del JWT (arriba); el AST no traza el payload de una comprehension.
+        var_result = supabase.table("product_variations").insert(var_rows).execute()
 
         prod["product_variations"] = var_result.data or []
         return prod
@@ -429,6 +437,7 @@ async def delete_product(
     historial de pedidos se preserva POR DISEÑO (ON DELETE SET NULL). Solo owner/manager.
     """
     try:
+        # tenant_filter:exempt: .eq("tenant_id") aplicado en `query` (línea siguiente); el branch delete/update impide el chain directo trazable por AST.
         table = supabase.table("products")
         query = table.delete() if hard else table.update({"status": "inactive"})
         result = query.eq("id", product_id).eq("tenant_id", tenant_id).execute()
