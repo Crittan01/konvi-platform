@@ -52,10 +52,11 @@ function suggestPrefix(title: string): string {
   return words.slice(0, 3).map(w => normalize(w).slice(0, 3)).join('-')
 }
 
-function InlineMatrixBuilder({ onGenerate, onClose, productTitle }: {
+function InlineMatrixBuilder({ onGenerate, onClose, productTitle, attrSuggestions }: {
   onGenerate: (variants: VariantDraft[]) => void
   onClose: () => void
   productTitle: string
+  attrSuggestions?: { names: string[]; values: string[] }  // ADR-0029 F3: contrato de la categoría
 }) {
   const [defs, setDefs] = useState([{ name: '', values: [''] }])
   const [skuPrefix, setSkuPrefix] = useState(() => suggestPrefix(productTitle))
@@ -107,17 +108,24 @@ function InlineMatrixBuilder({ onGenerate, onClose, productTitle }: {
           Define los atributos y sus opciones. El sistema crea todas las combinaciones automáticamente.
         </p>
 
+        {/* ADR-0029 F3: autocompletado desde el contrato de la categoría (nudge a valores canónicos). */}
+        {attrSuggestions && (attrSuggestions.names.length > 0 || attrSuggestions.values.length > 0) && (
+          <>
+            <datalist id="imb-attr-names">{attrSuggestions.names.map(n => <option key={n} value={n} />)}</datalist>
+            <datalist id="imb-attr-values">{attrSuggestions.values.map(v => <option key={v} value={v} />)}</datalist>
+          </>
+        )}
         {/* Atributos */}
         {defs.map((def, di) => (
           <div key={di} className="space-y-2">
             <div className="flex items-center gap-2">
-              <Input value={def.name} onChange={e => updateName(di, e.target.value)}
+              <Input value={def.name} onChange={e => updateName(di, e.target.value)} list="imb-attr-names"
                 placeholder="Atributo (Ej: Volumen, Color, Talla)" className="h-8 text-xs font-semibold" />
             </div>
             <div className="flex flex-wrap gap-1.5 pl-2">
               {def.values.map((val, vi) => (
                 <div key={vi} className="flex items-center gap-1">
-                  <Input value={val} onChange={e => updateValue(di, vi, e.target.value)}
+                  <Input value={val} onChange={e => updateValue(di, vi, e.target.value)} list="imb-attr-values"
                     placeholder={`Opción ${vi + 1}`} className="h-7 text-xs w-24" />
                   {def.values.length > 1 && (
                     <button type="button" onClick={() => removeValue(di, vi)}
@@ -510,6 +518,12 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
         {showMatrix && (
           <InlineMatrixBuilder
             productTitle={title}
+            attrSuggestions={{
+              names: attributeDefs.filter(d => d.product_category_id === productCategoryId).map(d => d.label),
+              values: attributeDefs
+                .filter(d => d.product_category_id === productCategoryId)
+                .flatMap(d => (d.allowed_values ?? []).map(v => d.unit ? `${v}${d.unit}` : v)),
+            }}
             onGenerate={generated => {
               setVariants(generated)
               setShowMatrix(false)
