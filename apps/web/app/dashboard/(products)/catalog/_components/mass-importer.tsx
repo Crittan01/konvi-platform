@@ -42,10 +42,10 @@ export default function MassImporter({ categories, productCategories, onImported
   ]
 
   const handleDownloadTemplate = () => {
-    if (!selectedCat) { setError('Selecciona una categoría primero para la plantilla.'); return }
+    if (!selectedOpCat) { setError('Selecciona la categoría de catálogo primero para la plantilla.'); return }
     setError(null)
     setSuccess(null)
-    const catName = categories.find(c => c.id === selectedCat)?.name || 'General'
+    const catName = productCategories.find(c => c.id === selectedOpCat)?.display_label || 'General'
 
     // --- Construir celdas manualmente para poder aplicar estilos ---
     const wb = XLSX.utils.book_new()
@@ -141,7 +141,7 @@ export default function MassImporter({ categories, productCategories, onImported
 
   const handleProcessImport = async () => {
     if (!file) { setError("Sube un archivo primero."); return }
-    if (!selectedCat) { setError("Selecciona bajo qué categoría se importarán."); return }
+    if (!selectedOpCat) { setError("Selecciona la categoría de catálogo bajo la que se importarán."); return }
     
     setUploading(true)
     setError(null)
@@ -220,8 +220,8 @@ export default function MassImporter({ categories, productCategories, onImported
             title: pName,
             description: prodData.desc || null,
             cover_image_url: prodData.img || null,
-            platform_category_id: selectedCat,
-            category_id: selectedOpCat || null,
+            platform_category_id: selectedCat || null,   // ADR-0029 F4: marketplace opcional
+            category_id: selectedOpCat,                   // operativa = primaria (siempre presente)
             status: 'active'
           }).select().single()
 
@@ -296,26 +296,27 @@ export default function MassImporter({ categories, productCategories, onImported
       <CardContent className="pt-5 space-y-5">
         <div className="space-y-2">
           <Label>1. Define la Categoría</Label>
-          <select
-            value={selectedCat}
-            onChange={e => setSelectedCat(e.target.value)}
-            className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
-          >
-            <option value="">-- Obligatorio: Categoría marketplace (MercadoLibre) --</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <p className="text-[11px] text-muted-foreground leading-snug pt-1">Categoría del marketplace (MercadoLibre). La plantilla auto-generada asocia los productos a esta categoría.</p>
-
-          {/* ADR-0027: categoría operativa — la que el bot usa para agrupar el catálogo en el chat. */}
+          {/* ADR-0029 F4: la categoría OPERATIVA (la que el bot usa) es la PRIMARIA en toda alta. */}
           <select
             value={selectedOpCat}
             onChange={e => setSelectedOpCat(e.target.value)}
             className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
           >
-            <option value="">-- Opcional: Categoría de catálogo (la que ve el bot) --</option>
+            <option value="">-- Obligatorio: Categoría de catálogo (la que ve el bot) --</option>
             {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
           </select>
-          <p className="text-[11px] text-muted-foreground leading-snug pt-1">Recomendado: la categoría con la que el bot agrupa el catálogo en el chat. Sin esto, los productos quedan sin agrupar (&quot;Otros&quot;).</p>
+          <p className="text-[11px] text-muted-foreground leading-snug pt-1">La categoría con la que el bot agrupa el catálogo en el chat. Todos los productos importados quedan bajo ella.</p>
+
+          {/* Categoría de marketplace (MeLi) — opcional, desacoplada del alta (ADR-0029 F4). */}
+          <select
+            value={selectedCat}
+            onChange={e => setSelectedCat(e.target.value)}
+            className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
+          >
+            <option value="">-- Opcional: Categoría marketplace (MercadoLibre) --</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <p className="text-[11px] text-muted-foreground leading-snug pt-1">Solo si publicas a MercadoLibre. Se puede definir después, al publicar — no es requisito para tener el producto en tu catálogo.</p>
         </div>
 
         <div className="space-y-2 pt-2 border-t border-border/40">

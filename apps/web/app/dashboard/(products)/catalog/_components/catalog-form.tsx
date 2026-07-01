@@ -374,6 +374,8 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
     if (!title.trim()) { setError('El nombre del producto es obligatorio'); return }
     if (variants.some(v => !v.sku.trim())) { setError('Todas las variantes deben tener un SKU'); return }
     if (variants.some(v => v.price <= 0)) { setError('Todos los precios deben ser mayores a 0'); return }
+    // ADR-0029 F4: la categoría de catálogo (operativa) es la primaria — el bot la usa para agrupar.
+    if (!productCategoryId) { setError('Selecciona la categoría de catálogo (la que usa el bot)'); return }
 
     setSubmitting(true); setError(null)
     const supabase = createClient()
@@ -445,10 +447,10 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
               placeholder="Ej: Aceite Esencial de Lavanda" className="h-8 text-sm mt-1" />
           </div>
           <div>
-            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría (catálogo)</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría (catálogo) *</label>
             <select value={productCategoryId} onChange={e => setProductCategoryId(e.target.value)}
               className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
-              <option value="">Sin categoría</option>
+              <option value="">-- Selecciona (la que ve el bot) --</option>
               {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
             </select>
           </div>
@@ -456,7 +458,7 @@ export default function CatalogForm({ onCreated = () => {}, categories = [], pro
             <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría marketplace (MeLi)</label>
             <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
               className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
-              <option value="">Sin categoría</option>
+              <option value="">Opcional — solo si publicas a MeLi</option>
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
