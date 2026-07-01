@@ -107,7 +107,9 @@ export default async function CatalogPage() {
       title:                formData.get('title') as string,
       description:          (formData.get('description') as string) || null,
       safety_note:          (formData.get('safety_note') as string) || null,
-      platform_category_id: (formData.get('platform_category_id') as string) || null,
+      // ADR-0029: platform_category_id NO se gestiona por producto (se deriva por categoría). Se OMITE del
+      // PATCH a propósito: el PATCH semántico limpia los null → enviarlo borraría el valor de productos que
+      // sí lo tengan (p.ej. seteado por el flujo de publicación MeLi). Ausente = intacto.
       category_id:          (formData.get('category_id') as string) || null,  // ADR-0027 operativa
       retracto_excluded:        formData.get('retracto_excluded') === 'on',
       retracto_excluded_reason: (formData.get('retracto_excluded_reason') as string) || null,
@@ -366,7 +368,6 @@ export default async function CatalogPage() {
         archivedProducts={archivedProducts}
         catMap={catMap}
         canWrite={canWrite}
-        categories={platformCategories}
         productCategories={productCategories}
         attributeDefs={attributeDefs}
         tenantId={tenantId ?? ''}

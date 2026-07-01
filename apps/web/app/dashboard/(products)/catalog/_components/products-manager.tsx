@@ -24,14 +24,11 @@ type Movement = {
   created_at: string
 }
 
-type Category = { id: string; name: string }
-
 type Props = {
   products: Product[]
   archivedProducts: Product[]
   catMap: Record<string, string>
   canWrite: boolean
-  categories: Category[]
   productCategories: { id: string; display_label: string }[]  // ADR-0027 categorías operativas
   attributeDefs: AttributeDef[]  // ADR-0029 contrato de atributos por categoría
   tenantId: string
@@ -59,7 +56,7 @@ function SaveThresholdButton() {
 
 export default function ProductsManager({
   products, archivedProducts, catMap, canWrite,
-  categories, productCategories, attributeDefs, tenantId, apiUrl,
+  productCategories, attributeDefs, tenantId, apiUrl,
   threshold,
   editProductAction, editVariationAction, addVariationAction,
   deactivateProductAction, restoreProductAction, deleteProductAction,
@@ -195,7 +192,6 @@ export default function ProductsManager({
           </DialogHeader>
           <CatalogForm
             apiUrl={apiUrl}
-            categories={categories}
             productCategories={productCategories}
             attributeDefs={attributeDefs}
             tenantId={tenantId}
@@ -203,7 +199,7 @@ export default function ProductsManager({
           />
           <div className="border-t border-border pt-4 mt-2">
             <p className="text-xs font-medium text-muted-foreground mb-3">O importa desde Excel</p>
-            <MassImporter categories={categories} productCategories={productCategories} tenantId={tenantId} />
+            <MassImporter productCategories={productCategories} tenantId={tenantId} />
           </div>
         </DialogContent>
       </Dialog>

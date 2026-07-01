@@ -150,7 +150,6 @@ interface Props {
   product: Product
   open: boolean
   onOpenChange: (open: boolean) => void
-  catMap: Record<string, string>
   productCategories: { id: string; display_label: string }[]
   tenantId: string
   threshold: number
@@ -162,7 +161,7 @@ interface Props {
 }
 
 export function ProductEditDrawer({
-  product, open, onOpenChange, catMap, productCategories, tenantId, threshold,
+  product, open, onOpenChange, productCategories, tenantId, threshold,
   editProductAction, editVariationAction, addVariationAction,
   adjustStockAction, deactivateProductAction,
 }: Props) {
@@ -182,8 +181,8 @@ export function ProductEditDrawer({
       const sb = createClient()
       const { data: { session } } = await sb.auth.getSession()
       if (!session?.access_token) { setAiNotice('Sesión expirada.'); return }
-      const categoryName = product.platform_category_id
-        ? catMap[product.platform_category_id] : undefined
+      const categoryName = product.category_id
+        ? productCategories.find(c => c.id === product.category_id)?.display_label : undefined
       const resp = await fetch('/api/catalog/suggest-content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -249,16 +248,6 @@ export function ProductEditDrawer({
                     <option value="">Sin categoría</option>
                     {productCategories.map(c => (
                       <option key={c.id} value={c.id}>{c.display_label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">Categoría marketplace (MeLi)</label>
-                  <select name="platform_category_id" defaultValue={product.platform_category_id ?? ''}
-                    className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 text-foreground">
-                    <option value="">Sin categoría</option>
-                    {Object.entries(catMap).map(([id, name]) => (
-                      <option key={id} value={id}>{name}</option>
                     ))}
                   </select>
                 </div>

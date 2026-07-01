@@ -120,7 +120,6 @@ const ExpandedPanel = memo(function ExpandedPanel({
           product={p}
           open={drawerOpen}
           onOpenChange={setDrawerOpen}
-          catMap={catMap}
           productCategories={productCategories}
           tenantId={tenantId}
           threshold={threshold}

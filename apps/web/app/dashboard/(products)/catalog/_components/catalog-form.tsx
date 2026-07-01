@@ -19,7 +19,7 @@ interface VariantDraft {
   weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''
   image_url: string
 }
-interface Props { apiUrl: string; onCreated?: () => void; categories?: {id: string, name: string}[]; productCategories?: {id: string, display_label: string}[]; attributeDefs?: AttributeDef[]; tenantId: string }
+interface Props { apiUrl: string; onCreated?: () => void; productCategories?: {id: string, display_label: string}[]; attributeDefs?: AttributeDef[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
   sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '',

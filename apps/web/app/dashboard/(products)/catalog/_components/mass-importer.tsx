@@ -9,12 +9,11 @@ import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createClient } from '@/utils/supabase/client'
 
-interface Props { categories: {id: string, name: string}[]; productCategories: {id: string, display_label: string}[]; onImported?: () => void; tenantId: string }
+interface Props { productCategories: {id: string, display_label: string}[]; onImported?: () => void; tenantId: string }
 
-export default function MassImporter({ categories, productCategories, onImported = () => {}, tenantId }: Props) {
-  const [selectedCat, setSelectedCat] = useState('')
-  // ADR-0027: categoría operativa (la que el bot usa para agrupar el catálogo). Distinta de la
-  // marketplace (platform_category_id). Sin esto los productos importados quedan sin agrupar en el bot.
+export default function MassImporter({ productCategories, onImported = () => {}, tenantId }: Props) {
+  // ADR-0027/0029: la categoría OPERATIVA (la que el bot usa para agrupar) es la ÚNICA que se captura.
+  // La marketplace (platform_category_id) NO se pide por producto — se deriva por categoría al publicar.
   const [selectedOpCat, setSelectedOpCat] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -220,7 +219,7 @@ export default function MassImporter({ categories, productCategories, onImported
             title: pName,
             description: prodData.desc || null,
             cover_image_url: prodData.img || null,
-            platform_category_id: selectedCat || null,   // ADR-0029 F4: marketplace opcional
+            platform_category_id: null,                   // ADR-0029: marketplace derivada por categoría, no por producto
             category_id: selectedOpCat,                   // operativa = primaria (siempre presente)
             status: 'active'
           }).select().single()
@@ -306,17 +305,6 @@ export default function MassImporter({ categories, productCategories, onImported
             {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
           </select>
           <p className="text-[11px] text-muted-foreground leading-snug pt-1">La categoría con la que el bot agrupa el catálogo en el chat. Todos los productos importados quedan bajo ella.</p>
-
-          {/* Categoría de marketplace (MeLi) — opcional, desacoplada del alta (ADR-0029 F4). */}
-          <select
-            value={selectedCat}
-            onChange={e => setSelectedCat(e.target.value)}
-            className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
-          >
-            <option value="">-- Opcional: Categoría marketplace (MercadoLibre) --</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <p className="text-[11px] text-muted-foreground leading-snug pt-1">Solo si publicas a MercadoLibre. Se puede definir después, al publicar — no es requisito para tener el producto en tu catálogo.</p>
         </div>
 
         <div className="space-y-2 pt-2 border-t border-border/40">
