@@ -57,26 +57,29 @@ class MultipleAttributesTests(unittest.TestCase):
 class FallbacksTests(unittest.TestCase):
     """Fallbacks cuando no hay atributos."""
 
+    # ADR-0029 F2: la fórmula canónica (tools.catalog_contract.variant_label) unifica el fallback al
+    # formato limpio (sin prefijo 'sku:'; 'Estándar' cuando no hay atributos ni sku). Verificado que
+    # NADA funcional depende del formato viejo (builder/orchestrator usan .get('label','variante')).
     def test_no_attributes_uses_sku(self):
         out = _normalize_attributes_label({}, "SKU-X-001", 1)
-        self.assertEqual(out, "sku: SKU-X-001")
+        self.assertEqual(out, "SKU-X-001")
 
     def test_none_attributes_uses_sku(self):
         out = _normalize_attributes_label(None, "SKU-X-001", 1)
-        self.assertEqual(out, "sku: SKU-X-001")
+        self.assertEqual(out, "SKU-X-001")
 
-    def test_no_attributes_no_sku_uses_index(self):
+    def test_no_attributes_no_sku_uses_estandar(self):
         out = _normalize_attributes_label({}, None, 3)
-        self.assertEqual(out, "variante 3")
+        self.assertEqual(out, "Estándar")
 
     def test_attributes_with_none_value_falls_back(self):
-        # Si todos los atributos son None, debe caer a sku/fallback.
+        # Si todos los atributos son None, debe caer a sku.
         out = _normalize_attributes_label({"Color": None}, "X", 0)
-        self.assertEqual(out, "sku: X")
+        self.assertEqual(out, "X")
 
     def test_attributes_with_empty_string_falls_back(self):
         out = _normalize_attributes_label({"Color": "  "}, "X", 0)
-        self.assertEqual(out, "sku: X")
+        self.assertEqual(out, "X")
 
 
 if __name__ == "__main__":

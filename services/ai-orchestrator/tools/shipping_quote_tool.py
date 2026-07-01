@@ -13,6 +13,8 @@ import httpx
 # PyJWT removed in A0.2c — service-to-service auth via INTERNAL_SERVICE_SECRET header
 from supabase import Client
 
+from tools.catalog_contract import variant_label  # ADR-0029 F2: label canónico único
+
 logger = logging.getLogger("orchestrator.tools.shipping_quote")
 
 API_URL = os.getenv("API_URL", "http://localhost:8001").rstrip("/")
@@ -620,93 +622,14 @@ def _product_title_tokens(title: str) -> set[str]:
     }
 
 
-# Estructura declarativa: cada tupla = (forma canónica, alias). El dict
-# se construye una sola vez al import. Más legible que repetir `"X": "X"`.
-_UNIT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # Peso
-    ("g",  ("g", "gr", "gms", "gramo", "gramos")),
-    ("kg", ("kg", "kilo", "kilos", "kilogramo", "kilogramos")),
-    ("mg", ("mg", "miligramo", "miligramos")),
-    # Volumen
-    ("ml", ("ml", "mls", "mililitro", "mililitros", "cc")),
-    ("l",  ("l", "lt", "lts", "litro", "litros")),
-    ("cl", ("cl", "centilitro", "centilitros")),
-    # Imperial
-    ("oz", ("oz", "onza", "onzas")),
-    ("lb", ("lb", "lbs", "libra", "libras")),
-    # Largo
-    ("cm", ("cm", "cms", "centimetro", "centimetros", "centímetro", "centímetros")),
-    ("m",  ("m", "metro", "metros")),
-    ("mm", ("mm", "milimetro", "milimetros", "milímetro", "milímetros")),
-    ("in", ("in", "pulgada", "pulgadas")),
-    # Cantidad / empaque
-    ("u",    ("u", "und", "uds", "unidad", "unidades")),
-    ("pack", ("pack", "packs")),
-)
-
-_UNIT_CANONICAL_MAP: dict[str, str] = {
-    alias: canonical
-    for canonical, aliases in _UNIT_GROUPS
-    for alias in aliases
-}
-
-
-def _canonicalize_unit_value(text: str) -> str:
-    """Rev. 92.c — Normaliza valores de variante con unidad a forma canónica.
-
-    Ejemplos:
-      • "30 mililitros" → "30ml"
-      • "60 gramos"     → "60g"
-      • "1 kilo"        → "1kg"
-      • "12 oz"         → "12oz"
-      • "30ml"          → "30ml"   (idempotente)
-      • "Talla M"       → "Talla M" (sin número-unidad reconocible, no toca)
-
-    Caso multi-tenant: cualquier tenant puede escribir la unidad como
-    le parezca; el cliente igual la dice como quiera. El bot muestra y
-    matchea contra forma canónica única.
-    """
-    if not text or not isinstance(text, str):
-        return text
-    raw = text.strip()
-    # Patrón: número (entero/decimal) seguido de unidad (con/sin espacio).
-    import re as _re
-    match = _re.match(
-        r"^\s*([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-zÁÉÍÓÚáéíóú]+)\.?\s*$",
-        raw,
-    )
-    if not match:
-        return raw
-    qty, unit = match.group(1), match.group(2).lower()
-    canonical_unit = _UNIT_CANONICAL_MAP.get(unit)
-    if canonical_unit is None:
-        return raw  # Unidad desconocida — preservar literal.
-    # Normalizar separador decimal a "." y compactar.
-    qty_norm = qty.replace(",", ".")
-    return f"{qty_norm}{canonical_unit}"
+# ADR-0029 F2: la canonicalización de unidad + el label de variante viven en tools.catalog_contract
+# (fuente única cross-surface: variant_label / canonicalize_unit_value).
 
 
 def _variation_label(variation: dict) -> str:
-    """Etiqueta legible de una variante para captions / cotizaciones.
-
-    Rev. 92.c — (1) Si hay UN solo atributo, devolver solo el valor
-    canonicalizado (evita "Volumen: 30ml" cuando "30ml" es suficiente).
-    (2) Normaliza unidades ("30 mililitros" → "30ml", "60 gramos" → "60g").
-    (3) Si hay múltiples atributos, preserva "Key: Value, Key: Value".
-    """
-    attrs = variation.get("attributes")
-    if isinstance(attrs, dict) and attrs:
-        non_null = {k: v for k, v in attrs.items() if v not in (None, "")}
-        if len(non_null) == 1:
-            raw_value = str(next(iter(non_null.values()))).strip()
-            return _canonicalize_unit_value(raw_value)
-        if len(non_null) > 1:
-            return ", ".join(
-                f"{k}: {_canonicalize_unit_value(str(non_null[k]))}"
-                for k in sorted(non_null.keys())
-            )
-    sku = str(variation.get("sku") or "").strip()
-    return sku or "Estándar"
+    """Etiqueta legible de una variante. ADR-0029 F2: delega en el label CANÓNICO
+    compartido (tools.catalog_contract.variant_label) — única fórmula cross-surface."""
+    return variant_label(variation.get("attributes"), variation.get("sku"))
 
 
 def _get_tenant_products_for_shipping_quote(supabase: Client, tenant_id: str) -> list[dict]:

@@ -17,10 +17,9 @@ import unittest
 
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
-from tools.shipping_quote_tool import (  # noqa: E402
-    _canonicalize_unit_value,
-    _variation_label,
-)
+from tools.shipping_quote_tool import _variation_label  # noqa: E402
+# ADR-0029 F2: la canonicalización se movió a catalog_contract (fuente única).
+from tools.catalog_contract import canonicalize_unit_value as _canonicalize_unit_value  # noqa: E402
 
 
 class WeightCanonicalizationTests(unittest.TestCase):

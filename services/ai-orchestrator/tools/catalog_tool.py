@@ -2,7 +2,7 @@ import logging
 import os
 from supabase import Client
 
-from tools.catalog_contract import CATALOG_VARIATIONS_KEY
+from tools.catalog_contract import CATALOG_VARIATIONS_KEY, variant_label
 
 logger = logging.getLogger("orchestrator.tools.catalog")
 
@@ -44,21 +44,12 @@ def _normalize_attributes_label(attributes: dict | None, sku: str | None, fallba
 
     Si tiene MÚLTIPLES atributos (ej. Color + Talla), mantener
     "Color: Rojo, Talla: M" para preservar semántica.
+
+    ADR-0029 F2: delega en el label CANÓNICO compartido (única fórmula cross-surface).
+    `fallback_index` se conserva por compatibilidad de firma pero ya no se usa.
     """
-    if isinstance(attributes, dict) and attributes:
-        non_null = {
-            k: v for k, v in attributes.items()
-            if v is not None and str(v).strip()
-        }
-        if len(non_null) == 1:
-            # Un solo atributo → solo el valor (evita "Presentación: Presentación:").
-            return str(next(iter(non_null.values()))).strip()
-        if len(non_null) > 1:
-            parts = [f"{k}: {non_null[k]}" for k in sorted(non_null.keys())]
-            return ", ".join(parts)
-    if sku:
-        return f"sku: {sku}"
-    return f"variante {fallback_index}"
+    del fallback_index  # canónico usa 'Estándar' como fallback
+    return variant_label(attributes, sku)
 
 
 async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:

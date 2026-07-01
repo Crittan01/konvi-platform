@@ -30,6 +30,8 @@ from typing import Optional
 
 from supabase import Client
 
+from tools.catalog_contract import variant_label  # ADR-0029 F2: label canónico único
+
 logger = logging.getLogger("orchestrator.tools.cart")
 
 
@@ -329,18 +331,10 @@ def get_cart_with_items(
             )
             var_lookup = {}
             for r in (vres.data or []):
-                attrs = r.get("attributes") or {}
-                if isinstance(attrs, dict) and attrs:
-                    # Concatena los valores de attributes en orden
-                    # (típicamente solo "size": "60g" → "60g").
-                    derived_label = " ".join(
-                        str(v).strip() for v in attrs.values() if v
-                    ).strip()
-                    r["label"] = derived_label or r.get("sku") or ""
-                    r["presentation"] = derived_label
-                else:
-                    r["label"] = r.get("sku") or ""
-                    r["presentation"] = ""
+                attrs = r.get("attributes")
+                # ADR-0029 F2: label CANÓNICO único (reemplaza la concatenación divergente).
+                r["label"] = variant_label(attrs, r.get("sku"))
+                r["presentation"] = variant_label(attrs) if (isinstance(attrs, dict) and attrs) else ""
                 var_lookup[r["id"]] = r
         if prod_ids:
             # Rev. 103 — schema real `products` solo tiene `title` (no `name`
