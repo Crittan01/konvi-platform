@@ -10,7 +10,33 @@ import unittest
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/ai-orchestrator")
 
-from tools.catalog_contract import variant_label, canonicalize_unit_value  # noqa: E402
+from tools.catalog_contract import (  # noqa: E402
+    variant_label, canonicalize_unit_value, variant_presentation,
+)
+
+
+class VariantPresentationTests(unittest.TestCase):
+    """ADR-0029 F5: extractor canónico de presentación (reemplaza las ≥3 listas de alias divergentes)."""
+
+    def test_extracts_from_known_keys(self):
+        self.assertEqual(variant_presentation({"Volumen": "30ml"}), "30ml")
+        self.assertEqual(variant_presentation({"Presentación": "60g"}), "60g")
+
+    def test_label_key_now_matched(self):
+        # orders.py OMITÍA 'label' antes — la consolidación lo corrige (divergencia real).
+        self.assertEqual(variant_presentation({"label": "X"}), "X")
+
+    def test_new_canonical_codes_matched(self):
+        # tras F7 los datos usan 'volume'/'weight' — el extractor ya los reconoce.
+        self.assertEqual(variant_presentation({"volume": "30ml"}), "30ml")
+        self.assertEqual(variant_presentation({"weight": "60g"}), "60g")
+
+    def test_canonicalizes(self):
+        self.assertEqual(variant_presentation({"Volumen": "30 mililitros"}), "30ml")
+
+    def test_no_match_returns_empty(self):
+        self.assertEqual(variant_presentation({"foo": "bar"}), "")
+        self.assertEqual(variant_presentation(None), "")
 
 
 class VariantLabelTests(unittest.TestCase):

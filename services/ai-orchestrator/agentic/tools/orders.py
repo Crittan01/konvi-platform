@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from agentic.tools.base import ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
+from tools.catalog_contract import variant_presentation  # ADR-0029 F5: extractor canónico único
 
 
 class GetRecentOrdersArgs(BaseModel):
@@ -148,11 +149,7 @@ class GetRecentOrdersTool:
                 oid = it["order_id"]
                 attrs = var_lookup.get(it.get("variation_id") or "", {})
                 # Etiqueta de presentación (60g, 30ml, etc.).
-                label = None
-                for k in ("Presentación", "presentacion", "size", "Volumen", "volumen"):
-                    if k in attrs and attrs[k]:
-                        label = str(attrs[k])
-                        break
+                label = variant_presentation(attrs) or None
                 items_by_order.setdefault(oid, []).append({
                     "title": it.get("title") or "Producto",
                     "quantity": int(it.get("quantity") or 0),

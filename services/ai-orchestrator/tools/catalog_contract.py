@@ -83,3 +83,22 @@ def variant_label(attributes: dict | None, sku: str | None = None) -> str:
             )
     s = str(sku or "").strip()
     return s or "Estándar"
+
+
+# Claves conocidas del atributo "presentación/tamaño": alias legacy KAIU + códigos canónicos ADR-0029
+# (tras F7 los datos usan 'volume'/'weight'). Orden = prioridad de match (primero gana).
+_PRESENTATION_KEYS = (
+    "Presentación", "presentacion", "size", "Volumen", "volumen", "volume", "weight", "label",
+)
+
+
+def variant_presentation(attributes: dict | None) -> str:
+    """Extrae el valor de presentación/tamaño de una variante probando las claves conocidas.
+    ÚNICA fuente — reemplaza las ≥3 listas de alias divergentes (una omitía 'label'). Canonicaliza la
+    unidad (consistente con variant_label). Devuelve '' si no hay match (el caller decide el fallback)."""
+    if isinstance(attributes, dict):
+        for k in _PRESENTATION_KEYS:
+            v = attributes.get(k)
+            if v is not None and str(v).strip():
+                return canonicalize_unit_value(str(v).strip())
+    return ""

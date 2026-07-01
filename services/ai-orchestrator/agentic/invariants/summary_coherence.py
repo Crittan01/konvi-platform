@@ -36,6 +36,7 @@ from agentic.invariants.base import (
     InvariantOutcome,
     InvariantResult,
 )
+from tools.catalog_contract import variant_presentation  # ADR-0029 F5: extractor canónico único
 
 
 # Detector heurístico de resumen.
@@ -183,12 +184,7 @@ def _build_canonical_summary(
         var = it.get("variation") or {}
         # Etiqueta de variante: aceptar keys multi-format de KAIU.
         attrs = var.get("attributes") or {}
-        label = ""
-        for k in ("Presentación", "presentacion", "size", "Volumen", "volumen", "label"):
-            v = attrs.get(k)
-            if v:
-                label = str(v)
-                break
+        label = variant_presentation(attrs)
         if not label:
             label = it.get("variant_label") or ""
         qty = it.get("quantity") or 1

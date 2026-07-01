@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tools.catalog_contract import variant_presentation  # ADR-0029 F5: extractor canónico único
+
 
 async def generate_payment_link_for_cart(
     supabase: Any,
@@ -108,11 +110,7 @@ async def generate_payment_link_for_cart(
         title = prod.get("title") or prod.get("name") or "Producto"
         # variant_label desde attributes (matching naming KAIU: Presentación/Volumen).
         attrs = var.get("attributes") or {}
-        variant_label = None
-        for k in ("Presentación", "presentacion", "size", "Volumen", "volumen", "label"):
-            if k in attrs and attrs[k]:
-                variant_label = str(attrs[k])
-                break
+        variant_label = variant_presentation(attrs) or None
         verified_items.append({
             "title": title,
             "variant_label": variant_label,
