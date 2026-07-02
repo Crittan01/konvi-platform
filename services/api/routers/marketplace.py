@@ -18,9 +18,10 @@ Flujo de sync automático (llamado desde orders.py y products.py):
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
-from dependencies.auth import _get_service_client, get_current_tenant, require_write_role
+from dependencies.audit import audit_log
+from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, require_write_role
 from integrations.meli_client import (
     get_item,
     get_items_details,
@@ -265,10 +266,13 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
 
 
 @router.post("/link")
+@audit_log(entity_type="marketplace_listing", action="created")
 async def link_listing(
+    request: Request,
     payload: dict = Body(...),
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
 ):
     """
     Vincula un item existente de MeLi con una variante de Supabase.
@@ -282,7 +286,6 @@ async def link_listing(
     Si meli_variation_id está presente, el sync de stock apunta exactamente a esa variación.
     Si no, el sync usa available_quantity a nivel item (item sin variaciones) o la primera variación (fallback).
     """
-    supabase = _get_service_client()
 
     meli_id           = payload.get("meli_id", "").strip().upper()
     variation_id      = payload.get("variation_id")
@@ -355,16 +358,18 @@ async def link_listing(
 
 
 @router.delete("/link/{listing_id}")
+@audit_log(entity_type="marketplace_listing", action="deleted")
 async def unlink_listing(
     listing_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
 ):
     """
     Desvincula un item MeLi de su variante Supabase.
     El item en MeLi queda intacto — solo se elimina la sincronización de stock.
     """
-    supabase = _get_service_client()
 
     res = (
         supabase.table("marketplace_listings")
@@ -380,11 +385,14 @@ async def unlink_listing(
 
 
 @router.patch("/{listing_id}/status")
+@audit_log(entity_type="marketplace_listing", action="status_changed")
 async def update_listing_status(
     listing_id: str,
+    request: Request,
     payload: dict = Body(...),
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
 ):
     """
     Pausa o activa un listing en MeLi.
@@ -392,7 +400,6 @@ async def update_listing_status(
 
     Nota: "closed" es irreversible en MeLi — no se expone desde esta UI.
     """
-    supabase = _get_service_client()
     new_status = payload.get("status")
 
     if new_status not in ("active", "paused"):
@@ -436,16 +443,18 @@ async def update_listing_status(
 
 
 @router.patch("/{listing_id}/sync-stock")
+@audit_log(entity_type="marketplace_listing", action="updated")
 async def sync_stock_from_supabase(
     listing_id: str,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
 ):
     """
     Fuerza la sincronización de stock + precio + precio tachado desde Supabase hacia MeLi.
     Útil para alinear manualmente después de un ajuste o cambio de precio.
     """
-    supabase = _get_service_client()
 
     # Obtener listing + variation
     listing_res = (
@@ -555,10 +564,13 @@ async def sync_stock_from_supabase(
 
 
 @router.post("/import")
+@audit_log(entity_type="product", action="created")
 async def import_from_meli(
+    request: Request,
     payload: dict = Body(...),
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
+    supabase = Depends(get_service_client),
 ):
     """
     Importa una publicación de MeLi al catálogo interno de Supabase y la vincula.
@@ -574,7 +586,6 @@ async def import_from_meli(
     Solo importa: título, precio, stock disponible.
     Descripción, imágenes y atributos adicionales se completan desde el Catálogo.
     """
-    supabase = _get_service_client()
 
     meli_id = payload.get("meli_id", "").strip().upper()
     # Coherencia (ADR-0029 D2): el producto importado hereda una categoría OPERATIVA (product_categories,

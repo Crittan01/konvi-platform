@@ -286,9 +286,11 @@ async def get_notifications(
 
 
 @router.put("/notifications/{channel}", response_model=dict)
+@audit_log(entity_type="settings", action="updated")
 async def upsert_notification(
     channel: str,
     cfg: NotificationConfig,
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
     supabase: Client = Depends(get_service_client),
     _role: str = Depends(require_write_role),

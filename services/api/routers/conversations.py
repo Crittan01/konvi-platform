@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import Client
 
+from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 from dependencies.idempotency import (
     abort_idempotency,
@@ -608,6 +609,7 @@ async def get_conversation_context(
 
 
 @router.patch("/{conversation_id}/status", response_model=dict)
+@audit_log(entity_type="conversation", action="status_changed")
 async def update_conversation_status(
     conversation_id: str,
     body: ConversationStatusUpdate,
@@ -736,6 +738,7 @@ def _check_24h_window_or_raise(supabase: Client, tenant_id: str, conversation_id
 
 
 @router.post("/{conversation_id}/send", response_model=dict)
+@audit_log(entity_type="conversation", action="message_sent")
 async def send_agent_message(
     conversation_id: str,
     body: AgentMessageRequest,
@@ -953,6 +956,7 @@ async def list_conversation_notes(
 
 
 @router.post("/{conversation_id}/notes", response_model=dict, status_code=201)
+@audit_log(entity_type="conversation", action="note_created")
 async def create_conversation_note(
     conversation_id: str,
     body: NoteCreate,
@@ -999,6 +1003,7 @@ async def create_conversation_note(
 
 
 @router.patch("/{conversation_id}/notes/{note_id}", response_model=dict)
+@audit_log(entity_type="conversation", action="note_updated")
 async def patch_conversation_note(
     conversation_id: str,
     note_id: str,
@@ -1062,6 +1067,7 @@ async def patch_conversation_note(
 
 
 @router.delete("/{conversation_id}/notes/{note_id}", status_code=204)
+@audit_log(entity_type="conversation", action="note_deleted")
 async def delete_conversation_note(
     conversation_id: str,
     note_id: str,
@@ -1104,6 +1110,7 @@ async def delete_conversation_note(
 
 
 @router.post("/{conversation_id}/rerun", response_model=dict, status_code=202)
+@audit_log(entity_type="conversation", action="reprocessed")
 async def rerun_last_inbound(
     conversation_id: str,
     request: Request,
@@ -1215,6 +1222,7 @@ async def rerun_last_inbound(
 
 
 @router.post("/{conversation_id}/send-image", response_model=dict)
+@audit_log(entity_type="conversation", action="image_sent")
 async def send_agent_image(
     conversation_id: str,
     body: AgentImageRequest,
