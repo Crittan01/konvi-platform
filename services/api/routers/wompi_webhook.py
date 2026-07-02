@@ -1358,12 +1358,15 @@ async def _generate_shipping_guide_async(
         )
         return False
 
-    # 4. Cart shipping_meta → idtransportador (rate_id).
+    # 4. Cart shipping_meta → idtransportador (rate_id). BUG F5 (guía cruzada): filtrar por el cart QUE
+    # CONVIRTIÓ A ESTA ORDEN (converted_order_id), no el último del tenant → evita usar el carrier de otra
+    # orden bajo concurrencia. Sin cart vinculado → sm vacío → carrier_rate_id vacío (path degradado seguro).
     try:
         cart = (
             supabase.table("conversation_carts")
             .select("shipping_meta")
             .eq("tenant_id", tenant_id)
+            .eq("converted_order_id", order_id)
             .order("updated_at", desc=True).limit(1).execute()
         )
         sm = ((cart.data or [{}])[0]).get("shipping_meta") or {}

@@ -462,12 +462,16 @@ async def aveonline_guide_dry_run(
         )
     address = contact.get("address") or {}
 
-    # 2. Cargar shipping_meta del cart (carrier seleccionado).
+    # 2. Cargar shipping_meta del cart QUE CONVIRTIÓ A ESTA ORDEN (carrier seleccionado).
+    # BUG F5 (guía cruzada): antes tomaba el ÚLTIMO cart del TENANT (order by created_at) → bajo
+    # concurrencia la guía de la orden A usaba el shipping_meta del cart de la orden B. Ahora se filtra
+    # por converted_order_id = esta orden (link exacto); sin cart vinculado → shipping_meta vacío → path "sin rate".
     cart_res = (
         supabase.table("conversation_carts")
         .select("shipping_meta")
         .eq("tenant_id", tenant_id)
-        .order("created_at", desc=True)
+        .eq("converted_order_id", req.order_id)
+        .order("updated_at", desc=True)
         .limit(1)
         .execute()
     )
