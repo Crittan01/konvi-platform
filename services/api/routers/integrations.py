@@ -65,6 +65,17 @@ class AveonlineCarriersBulk(BaseModel):
     items: list[AveonlineCarrierItem] = Field(default_factory=list, max_length=50)
 
 
+class WhatsAppCredentialsInput(BaseModel):
+    """F3 activación — las 6 credenciales que un tenant entrega de SU Meta App (ADR-0023 Model B).
+    app_secret + access_token se cifran en Vault; el resto va en tenant_integrations.credentials."""
+    app_id: str = Field(..., min_length=1, max_length=64)
+    app_secret: str = Field(..., min_length=8)
+    verify_token: str = Field(..., min_length=1, max_length=200)
+    phone_number_id: str = Field(..., min_length=1, max_length=64)
+    waba_id: str = Field(..., min_length=1, max_length=64)
+    access_token: str = Field(..., min_length=20)
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _mask_token(token: str) -> str:
@@ -75,6 +86,65 @@ def _mask_token(token: str) -> str:
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/whatsapp/credentials", response_model=dict)
+@audit_log(entity_type="integration", action="connected")
+async def upsert_whatsapp_credentials(
+    payload: WhatsAppCredentialsInput,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    role: str = Depends(get_current_role),
+):
+    """F3 activación (ADR-0023 Model B) — captura self-service de las credenciales WhatsApp del tenant:
+    app_secret + access_token → Vault (cifrado); app_id/verify_token/phone_number_id/waba_id + los
+    secret_id → tenant_integrations.credentials (shape EXACTO que el connector lee). Solo owner/manager.
+    Idempotente: reusa los secret_id existentes (update in-place) para no dejar secretos huérfanos."""
+    if role not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Solo owner/manager pueden configurar integraciones")
+    vault = VaultHelper(supabase)
+    existing = (
+        supabase.table("tenant_integrations").select("credentials")
+        .eq("tenant_id", tenant_id).eq("provider", "whatsapp").limit(1).execute()
+    )
+    existing_creds = (existing.data or [{}])[0].get("credentials") or {}
+    as_sid = existing_creds.get("app_secret_secret_id")
+    at_sid = existing_creds.get("access_token_secret_id")
+
+    if as_sid:
+        vault.update_secret(as_sid, payload.app_secret)
+    else:
+        as_sid = vault.create_secret(payload.app_secret, f"{tenant_id}/whatsapp/app_secret", "WhatsApp App Secret")
+    if at_sid:
+        vault.update_secret(at_sid, payload.access_token)
+    else:
+        at_sid = vault.create_secret(payload.access_token, f"{tenant_id}/whatsapp/access_token", "WhatsApp access token")
+    if not (as_sid and at_sid):
+        raise HTTPException(status_code=500, detail="No se pudieron guardar las credenciales en Vault")
+
+    supabase.table("tenant_integrations").upsert({
+        "tenant_id": tenant_id,
+        "provider": "whatsapp",
+        "status": "connected",
+        "credentials": {
+            "app_id": payload.app_id,
+            "app_secret_secret_id": as_sid,
+            "verify_token": payload.verify_token,
+            "phone_number_id": payload.phone_number_id,
+            "waba_id": payload.waba_id,
+            "access_token_secret_id": at_sid,
+            "access_token_rotated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "meta": {"integration_type": "direct_provider"},  # ADR-0023 Model B
+    }, on_conflict="tenant_id,provider").execute()
+
+    webhook_base = os.getenv("WHATSAPP_CONNECTOR_URL", "https://api.konvi.co").rstrip("/")
+    return {
+        "status": "connected",
+        "provider": "whatsapp",
+        "webhook_url": f"{webhook_base}/api/v1/whatsapp/webhook/{tenant_id}",
+    }
+
 
 @router.get("/", response_model=list)
 async def list_integrations(

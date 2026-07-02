@@ -12,6 +12,7 @@
  */
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/server'
+import { CORE_API_URL } from '@/lib/runtime-env'
 import {
   getCachedUser, getCachedTenantMeta, getCachedTenantName,
 } from '@/utils/supabase/cached-user'
@@ -452,6 +453,7 @@ export default async function WhatsAppIntegrationPage({
           credentials={integration?.credentials ?? {}}
           canWrite={canWrite}
           tenantId={tenantId ?? ''}
+          apiUrl={CORE_API_URL}
         />
       )}
 

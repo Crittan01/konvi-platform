@@ -14,22 +14,27 @@ import {
   ComplianceSection, DangerZoneSection,
   MigrationBanner, EmptyDisconnected,
 } from '../../_components/setup-primitives'
+import { WhatsAppCredentialsForm } from './whatsapp-credentials-form'
 
 type Props = {
   connected: boolean
   credentials: Record<string, string>
   canWrite: boolean
   tenantId: string
+  apiUrl: string
 }
 
-export default function WhatsAppSetup({ connected, credentials, tenantId }: Props) {
+export default function WhatsAppSetup({ connected, credentials, canWrite, tenantId, apiUrl }: Props) {
   if (!connected) {
-    return (
+    // ADR-0023 (Model B Direct Provider): cada tenant trae SU PROPIA Meta App. NO Embedded Signup.
+    // Un owner/manager captura las 6 credenciales aquí (self-service, multi-tenant).
+    return canWrite ? (
+      <WhatsAppCredentialsForm apiUrl={apiUrl} connected={false} />
+    ) : (
       <EmptyDisconnected
         icon={MessageSquareText}
         providerLabel="WhatsApp Business"
-        // ADR-0023 (Model B Direct Provider): cada tenant trae SU PROPIA Meta App. NO Embedded Signup.
-        helpText="Cada negocio conecta su propia Meta App (Direct Provider): captura tus credenciales de WhatsApp Cloud API (App Secret, Verify Token, Phone Number ID, WABA ID, Access Token) desde el panel de Integraciones."
+        helpText="Aún no hay WhatsApp conectado. Un owner o manager debe capturar las credenciales de la Meta App del negocio."
       />
     )
   }
@@ -62,6 +67,20 @@ export default function WhatsAppSetup({ connected, credentials, tenantId }: Prop
             Última rotación de token:{' '}
             {new Date(tokenRotatedAt).toLocaleDateString('es-CO')}
           </p>
+        )}
+        {canWrite && (
+          <div className="pt-2 border-t border-border/50">
+            <WhatsAppCredentialsForm
+              apiUrl={apiUrl}
+              connected
+              prefill={{
+                app_id: credentials.app_id,
+                verify_token: credentials.verify_token,
+                phone_number_id: credentials.phone_number_id,
+                waba_id: credentials.waba_id,
+              }}
+            />
+          </div>
         )}
       </SetupSection>
 
