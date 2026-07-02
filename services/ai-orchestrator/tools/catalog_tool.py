@@ -71,7 +71,7 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
         result = (
             supabase.table("products")
             .select(
-                "id, title, description, safety_note, category_id, "
+                "id, title, description, safety_note, category_id, attributes, "
                 "product_variations(id, sku, attributes, price, stock_quantity)"
             )
             .eq("tenant_id", tenant_id)
@@ -159,6 +159,8 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                 "title": product.get("title", "Sin nombre"),
                 "description": product.get("description", ""),
                 "safety_note": product.get("safety_note") or "",
+                # ADR-0029 F2: atributos PRODUCT-LEVEL (no-variante) citables como HECHOS por el bot (D4).
+                "attributes": product.get("attributes") or {},
                 "category": _category,            # ADR-0027 Fase 2: categoría per-tenant real
                 "category_id": product.get("category_id"),
                 "price_min": price_min,

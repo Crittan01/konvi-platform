@@ -179,6 +179,14 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
             desc = str(p.get("description") or "").strip()
             if desc:
                 lines.append(f"    {_clip_description(desc)}")
+            # ADR-0029 F2: atributos PRODUCT-LEVEL como HECHOS ESTRUCTURADOS citables (D4). A diferencia de
+            # la description (narrativa libre), estos son specs verificables del contrato de la categoría
+            # (ej. "Ingrediente activo: Bakuchiol", "FPS: 50") — el bot los cita literal, NO los inventa.
+            attrs = p.get("attributes") or {}
+            if isinstance(attrs, dict) and attrs:
+                specs = " · ".join(f"{k}: {v}" for k, v in attrs.items() if v is not None and str(v).strip())
+                if specs:
+                    lines.append(f"    Especificaciones: {specs}")
             # Nota de seguridad — render GARANTIZADO (sin truncar) con marcador
             # ⚠️ para productos de riesgo (ej. aceites esenciales). El bot la TIENE
             # en contexto pero la menciona SOLO si el cliente pregunta por

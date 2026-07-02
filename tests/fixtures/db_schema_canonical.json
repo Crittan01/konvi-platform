@@ -2023,7 +2023,7 @@
       "table_name": "product_variations"
     },
     {
-      "column_count": 14,
+      "column_count": 15,
       "columns": [
         {
           "col": "id",
@@ -2108,6 +2108,12 @@
           "default": null,
           "nullable": "YES",
           "type": "uuid"
+        },
+        {
+          "col": "attributes",
+          "default": "'{}'::jsonb",
+          "nullable": "NO",
+          "type": "jsonb"
         }
       ],
       "table_name": "products"

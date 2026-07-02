@@ -63,6 +63,7 @@ class ProductCreate(BaseModel):
     description: Optional[str] = None
     safety_note: Optional[str] = None        # nota de seguridad (Ley 1480, customer-facing)
     cover_image_url: Optional[str] = None
+    attributes: Optional[dict] = None        # ADR-0029 F2: atributos PRODUCT-LEVEL (no-variante) {label: valor}
     variation: Optional[VariationCreate] = None        # una variante (retrocompat)
     variations: Optional[List[VariationCreate]] = None  # o varias (bulk atómico — alta de catálogo)
 
@@ -76,6 +77,7 @@ class ProductPatch(BaseModel):
     retracto_excluded: Optional[bool] = None  # exclusión derecho de retracto (Ley 1480)
     retracto_excluded_reason: Optional[str] = None
     cover_image_url: Optional[str] = None
+    attributes: Optional[dict] = None         # ADR-0029 F2: atributos product-level {label: valor}
     status: Optional[str] = None              # 'active' | 'inactive' (restaurar/desactivar)
 
 
@@ -144,7 +146,7 @@ async def list_products(
     try:
         query = (
             supabase.table("products")
-            .select("id, title, description, status, platform_category_id, category_id, safety_note, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
+            .select("id, title, description, status, platform_category_id, category_id, safety_note, attributes, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("tenant_id", tenant_id)
             .order("title")
             .limit(limit)
@@ -189,6 +191,7 @@ async def create_product(
             "description": product.description,
             "safety_note": product.safety_note,
             "cover_image_url": product.cover_image_url,
+            "attributes": product.attributes or {},   # ADR-0029 F2: valores product-level (no-variante)
             "status": "active",
         }).execute()
 
@@ -247,7 +250,7 @@ async def get_product(
     try:
         result = (
             supabase.table("products")
-            .select("id, title, description, status, platform_category_id, category_id, safety_note, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
+            .select("id, title, description, status, platform_category_id, category_id, safety_note, attributes, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("id", product_id)
             .eq("tenant_id", tenant_id)
             .single()
