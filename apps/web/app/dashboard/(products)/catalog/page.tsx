@@ -27,12 +27,12 @@ export default async function CatalogPage() {
   const { data: pcats } = tenantId
     ? await supabase
         .from('product_categories')
-        .select('id, display_label')
+        .select('id, display_label, parent_id')
         .eq('tenant_id', tenantId)
         .order('sort_order')
         .order('display_label')
     : { data: [] }
-  const productCategories = (pcats as { id: string; display_label: string }[]) ?? []
+  const productCategories = (pcats as { id: string; display_label: string; parent_id: string | null }[]) ?? []
 
   // ADR-0029 F1/F3 — contrato de atributos por categoría (guía el alta hacia valores canónicos).
   const { data: adefs } = tenantId

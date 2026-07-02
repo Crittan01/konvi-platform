@@ -15,7 +15,7 @@ export default async function CategoriesPage() {
     const [catsRes, prodsRes] = await Promise.all([
       supabase
         .from('product_categories')
-        .select('id, name, display_label, sort_order')
+        .select('id, name, display_label, sort_order, parent_id')
         .eq('tenant_id', tenantId)
         .order('sort_order')
         .order('display_label'),

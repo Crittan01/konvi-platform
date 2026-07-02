@@ -84,16 +84,24 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
         # ADR-0027 Fase 2 — mapa id→display_label de las categorías REALES del tenant (consulta
         # aparte, robusto pre/post migración: si la tabla no existe aún, queda vacío → fallback).
         cat_map: dict = {}
+        group_map: dict = {}  # F2: leaf_id → label de la VERTICAL padre ("" si la categoría es raíz)
         try:
             _cats = (
                 supabase.table("product_categories")
-                .select("id, name, display_label")
+                .select("id, name, display_label, parent_id")
                 .eq("tenant_id", tenant_id)
                 .execute()
             )
+            _rows = _cats.data or []
             cat_map = {
                 c["id"]: (c.get("display_label") or c.get("name") or "")
-                for c in (_cats.data or [])
+                for c in _rows
+            }
+            # F2: mapa hoja→vertical (2 niveles). Si la categoría tiene parent_id, su "grupo" es el
+            # display_label del padre; si es raíz, grupo vacío (el bot la lista al nivel superior).
+            group_map = {
+                c["id"]: (cat_map.get(c.get("parent_id"), "") if c.get("parent_id") else "")
+                for c in _rows
             }
         except Exception as _cat_exc:
             logger.warning("[CATALOG] product_categories no disponible (fallback título): %s", _cat_exc)
@@ -161,7 +169,10 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                 "safety_note": product.get("safety_note") or "",
                 # ADR-0029 F2: atributos PRODUCT-LEVEL (no-variante) citables como HECHOS por el bot (D4).
                 "attributes": product.get("attributes") or {},
-                "category": _category,            # ADR-0027 Fase 2: categoría per-tenant real
+                "category": _category,            # ADR-0027 Fase 2: categoría per-tenant real (hoja)
+                # F2: VERTICAL padre de la categoría-hoja ("" si es raíz). El render agrupa por vertical
+                # cuando el tenant tiene ≥2 (multi-vertical); single-vertical se ve plano igual que antes.
+                "category_group": group_map.get(product.get("category_id"), ""),
                 "category_id": product.get("category_id"),
                 "price_min": price_min,
                 "price_max": price_max,

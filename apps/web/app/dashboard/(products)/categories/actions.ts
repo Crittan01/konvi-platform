@@ -19,6 +19,7 @@ export async function createCategory(data: {
   name: string
   display_label: string
   sort_order?: number
+  parent_id?: string | null   // F2: categoría padre (vertical). null/undefined = raíz.
 }) {
   const token = await getToken()
   if (!token) return { error: 'Unauthorized' }
@@ -30,6 +31,7 @@ export async function createCategory(data: {
         name: data.name,
         display_label: data.display_label,
         sort_order: data.sort_order ?? 0,
+        parent_id: data.parent_id ?? null,
       }),
     })
     if (!res.ok) {
@@ -47,6 +49,7 @@ export async function updateCategory(id: string, data: {
   display_label?: string
   name?: string
   sort_order?: number
+  parent_id?: string | null   // F2: reasignar padre. Enviar solo si se quiere cambiar.
 }) {
   const token = await getToken()
   if (!token) return { error: 'Unauthorized' }
@@ -55,6 +58,7 @@ export async function updateCategory(id: string, data: {
     if (data.display_label !== undefined) body.display_label = data.display_label
     if (data.name !== undefined) body.name = data.name
     if (data.sort_order !== undefined) body.sort_order = data.sort_order
+    if (data.parent_id !== undefined) body.parent_id = data.parent_id
 
     const res = await fetch(`${CORE_API_URL}/api/v1/product-categories/${id}`, {
       method: 'PATCH',

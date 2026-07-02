@@ -175,5 +175,48 @@ class SearchProductsTests(unittest.TestCase):
         self.assertTrue(r["has_more"])
 
 
+def _prodv(pid, title, cat, group, price=80000):
+    """Producto con VERTICAL (category_group) — para el render jerárquico F2."""
+    return {"id": pid, "title": title, "category": cat, "category_group": group,
+            "variants": [{"id": f"var-{pid}", "label": "U", "price": price}]}
+
+
+class CategoryIndexVerticalNestingTests(unittest.TestCase):
+    """F2 — el índice de categorías anida hojas bajo su vertical SOLO si el tenant es multi-vertical."""
+
+    def test_single_vertical_stays_flat(self):
+        # Una sola vertical → NO se anida (idéntico al render plano previo).
+        cat = [_prodv("a", "Aceite", "Aceites", "Salud y Belleza", 18000),
+               _prodv("j", "Jabón", "Jabones", "Salud y Belleza", 12000)]
+        idx = render_category_index(cat)
+        self.assertIn("* *Aceites* (1)", idx)     # bullet de primer nivel (no indentado)
+        self.assertNotIn("Salud y Belleza", idx)  # no imprime encabezado de vertical
+
+    def test_multi_vertical_nests_under_headers(self):
+        cat = [_prodv("a", "Aceite", "Aceites", "Salud y Belleza", 18000),
+               _prodv("j", "Jabón", "Jabones", "Salud y Belleza", 12000),
+               _prodv("h", "Audífono", "Audífonos", "Tecnología", 90000),
+               _prodv("f", "Forro", "Forros", "Tecnología", 30000)]
+        idx = render_category_index(cat)
+        # encabezados de vertical presentes…
+        self.assertIn("*Salud y Belleza*", idx)
+        self.assertIn("*Tecnología*", idx)
+        # …y las hojas quedan indentadas bajo su vertical
+        self.assertIn("  * *Aceites* (1)", idx)
+        self.assertIn("  * *Audífonos* (1)", idx)
+        # el conteo total sigue contando HOJAS (4 categorías), no verticales
+        self.assertIn("4 productos en 4 categorías", idx)
+
+    def test_mixed_root_and_verticals_ungrouped_last(self):
+        # Dos verticales + una hoja raíz (sin grupo) → la raíz cae en el bloque plano final.
+        cat = [_prodv("a", "Aceite", "Aceites", "Salud y Belleza", 18000),
+               _prodv("h", "Audífono", "Audífonos", "Tecnología", 90000),
+               _prod("g", "Regalo", "Regalos", 5000)]  # sin category_group
+        idx = render_category_index(cat)
+        self.assertIn("*Salud y Belleza*", idx)
+        self.assertIn("*Tecnología*", idx)
+        self.assertIn("* *Regalos* (1)", idx)  # raíz sin indentar
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ import {
 import { ImageUploadBox } from './image-upload-box'
 import { VariantMatrixGenerator } from './variant-matrix'
 import type { Product, Variation } from '../types'
+import { buildCategoryPicker } from '../_lib/category-tree'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ interface Props {
   product: Product
   open: boolean
   onOpenChange: (open: boolean) => void
-  productCategories: { id: string; display_label: string }[]
+  productCategories: { id: string; display_label: string; parent_id?: string | null }[]
   tenantId: string
   threshold: number
   editProductAction:   (fd: FormData) => Promise<void>
@@ -246,9 +247,14 @@ export function ProductEditDrawer({
                   <select name="category_id" defaultValue={product.category_id ?? ''}
                     className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 text-foreground">
                     <option value="">Sin categoría</option>
-                    {productCategories.map(c => (
-                      <option key={c.id} value={c.id}>{c.display_label}</option>
-                    ))}
+                    {/* F2: picker agrupado — verticales como <optgroup>, subcategorías/hojas como opciones. */}
+                    {buildCategoryPicker(productCategories).map((g, gi) =>
+                      g.label === null
+                        ? g.options.map(o => <option key={o.id} value={o.id}>{o.display_label}</option>)
+                        : <optgroup key={`g-${gi}-${g.label}`} label={g.label}>
+                            {g.options.map(o => <option key={o.id} value={o.id}>{o.display_label}</option>)}
+                          </optgroup>
+                    )}
                   </select>
                 </div>
                 <div className="space-y-1 sm:col-span-2">

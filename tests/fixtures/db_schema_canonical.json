@@ -1873,7 +1873,7 @@
       "table_name": "product_attribute_definitions"
     },
     {
-      "column_count": 7,
+      "column_count": 8,
       "columns": [
         {
           "col": "id",
@@ -1913,6 +1913,12 @@
         },
         {
           "col": "platform_category_id",
+          "default": null,
+          "nullable": "YES",
+          "type": "uuid"
+        },
+        {
+          "col": "parent_id",
           "default": null,
           "nullable": "YES",
           "type": "uuid"

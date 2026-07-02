@@ -13,6 +13,7 @@ import {
   type Attr, normKey, optionsFor, getAttrValue, orphanValue,
   canonicalizeAttrs, finalizeAttrs, attrsToObj,
 } from '../_lib/attribute-contract'
+import { buildCategoryPicker } from '../_lib/category-tree'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ interface VariantDraft {
   weight_kg: number | ''; length_cm: number | ''; width_cm: number | ''; height_cm: number | ''
   image_url: string
 }
-interface Props { apiUrl: string; onCreated?: () => void; productCategories?: {id: string, display_label: string}[]; attributeDefs?: AttributeDef[]; tenantId: string }
+interface Props { apiUrl: string; onCreated?: () => void; productCategories?: {id: string, display_label: string, parent_id?: string | null}[]; attributeDefs?: AttributeDef[]; tenantId: string }
 
 const DEFAULT_VARIANT: VariantDraft = {
   sku: '', attrs: [{ key: '', value: '' }], price: 0, compare_at_price: '',
@@ -535,7 +536,14 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
             <select value={productCategoryId} onChange={e => setProductCategoryId(e.target.value)}
               className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 mt-1 text-foreground">
               <option value="">-- Selecciona (la que ve el bot) --</option>
-              {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
+              {/* F2: picker agrupado — padres (verticales) como <optgroup>, subcategorías/hojas como opciones. */}
+              {buildCategoryPicker(productCategories).map((g, gi) =>
+                g.label === null
+                  ? g.options.map(o => <option key={o.id} value={o.id}>{o.display_label}</option>)
+                  : <optgroup key={`g-${gi}-${g.label}`} label={g.label}>
+                      {g.options.map(o => <option key={o.id} value={o.id}>{o.display_label}</option>)}
+                    </optgroup>
+              )}
             </select>
           </div>
           {/* ADR-0029 F3: guía de atributos del contrato de la categoría (nudge a valores canónicos). */}

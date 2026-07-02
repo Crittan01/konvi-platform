@@ -67,6 +67,18 @@ def _group_by_category(catalog: list[dict]) -> dict[str, list[dict]]:
     return by_category
 
 
+def _leaf_vertical_map(catalog: list[dict]) -> dict[str, str]:
+    """F2 — mapa categoría-hoja → VERTICAL padre (products.category_group). Primera no vacía gana.
+    Vacío si el tenant no usa jerarquía (todas las categorías son raíz) → el render cae a plano."""
+    m: dict[str, str] = {}
+    for p in catalog:
+        leaf = str(p.get("category") or "").strip()
+        vert = str(p.get("category_group") or "").strip()
+        if leaf and vert and leaf not in m:
+            m[leaf] = vert
+    return m
+
+
 def catalog_is_large(catalog: list[dict] | None, threshold: int | None = None) -> bool:
     """ADR-0027 Pieza 3 — True si el catálogo supera el umbral de embebido completo.
     Por CONTEO (O(1), determinístico): len(catalog) > threshold. KAIU (16) < 40 → False."""
@@ -99,7 +111,6 @@ def render_category_index(catalog: list[dict] | None) -> str:
     cats = [c for c in sorted(counts) if counts[c] > 0]
     if not cats:
         return "(Catálogo sin productos disponibles para este tenant.)"
-    lines = [f"* *{c}* ({counts[c]})" for c in cats]
     n_prod, n_cat = sum(counts.values()), len(cats)
     prod_w = "producto" if n_prod == 1 else "productos"
     cat_w = "categoría" if n_cat == 1 else "categorías"
@@ -107,7 +118,21 @@ def render_category_index(catalog: list[dict] | None) -> str:
         f"El catálogo tiene {n_prod} {prod_w} en {n_cat} {cat_w} "
         f"(demasiados para listarlos completos). Categorías disponibles:"
     )
-    return header + "\n\n" + "\n".join(lines)
+    # F2: si el tenant es multi-vertical (≥2 verticales) anida las hojas bajo su vertical; si no,
+    # render plano idéntico al previo (single-vertical y tenants sin jerarquía no cambian).
+    vmap = _leaf_vertical_map(catalog)
+    verticals = sorted({vmap[c] for c in cats if vmap.get(c)})
+    if len(verticals) >= 2:
+        blocks: list[str] = []
+        for v in verticals:
+            leaves_v = [c for c in cats if vmap.get(c) == v]
+            sub = "\n".join(f"  * *{c}* ({counts[c]})" for c in leaves_v)
+            blocks.append(f"*{v}*\n{sub}")
+        ungrouped = [c for c in cats if not vmap.get(c)]
+        if ungrouped:
+            blocks.append("\n".join(f"* *{c}* ({counts[c]})" for c in ungrouped))
+        return header + "\n\n" + "\n".join(blocks)
+    return header + "\n\n" + "\n".join(f"* *{c}* ({counts[c]})" for c in cats)
 
 
 def _clip_description(desc: str, max_chars: int = 600) -> str:
@@ -152,8 +177,12 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
     # ADR-0027 Fase 2 — agrupar por la categoría REAL del tenant (helper compartido con
     # render_category_index; fallback título-head si el producto no trae 'category').
     by_category = _group_by_category(catalog)
+    # F2 — anida por vertical si el tenant es multi-vertical (≥2 verticales). Single-vertical o
+    # sin jerarquía = render plano idéntico al previo.
+    vmap = _leaf_vertical_map(catalog)
+    verticals = sorted({vmap[c] for c in by_category if vmap.get(c)})
 
-    for cat, products in by_category.items():
+    def _emit_leaf(cat: str, products: list[dict]) -> None:
         # ADR-0027 — encabezado de categoría REAL (display_label del tenant). El LLM agrupa y
         # nombra usando la etiqueta del DATO, no un hardcode de vertical (retira la necesidad
         # del bloque "CATEGORÍAS CANÓNICAS" hardcodeado a KAIU).
@@ -199,6 +228,17 @@ def _render_catalog_block(catalog: list[dict], *, compact: bool = False) -> str:
                 vline = _variant_line(v)
                 if vline:
                     lines.append(vline)
+
+    if len(verticals) >= 2:
+        for v in verticals:
+            lines.append(f"### {v}")   # encabezado de VERTICAL (padre)
+            for cat in [c for c in by_category if vmap.get(c) == v]:
+                _emit_leaf(cat, by_category[cat])
+        for cat in [c for c in by_category if not vmap.get(c)]:  # hojas sin vertical, al final
+            _emit_leaf(cat, by_category[cat])
+    else:
+        for cat, products in by_category.items():
+            _emit_leaf(cat, products)
     return "\n".join(lines)
 
 

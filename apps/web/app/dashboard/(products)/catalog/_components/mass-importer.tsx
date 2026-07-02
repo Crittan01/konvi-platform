@@ -8,8 +8,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createClient } from '@/utils/supabase/client'
+import { buildCategoryPicker } from '../_lib/category-tree'
 
-interface Props { productCategories: {id: string, display_label: string}[]; onImported?: () => void; tenantId: string }
+interface Props { productCategories: {id: string, display_label: string, parent_id?: string | null}[]; onImported?: () => void; tenantId: string }
 
 export default function MassImporter({ productCategories, onImported = () => {}, tenantId }: Props) {
   // ADR-0027/0029: la categoría OPERATIVA (la que el bot usa para agrupar) es la ÚNICA que se captura.
@@ -302,7 +303,14 @@ export default function MassImporter({ productCategories, onImported = () => {},
             className="w-full h-10 px-3 py-2 rounded-md border border-input text-sm bg-background transition-colors focus:ring-2 focus:ring-primary focus:border-transparent"
           >
             <option value="">-- Obligatorio: Categoría de catálogo (la que ve el bot) --</option>
-            {productCategories.map(c => <option key={c.id} value={c.id}>{c.display_label}</option>)}
+            {/* F2: picker agrupado — verticales como <optgroup>, subcategorías/hojas como opciones. */}
+            {buildCategoryPicker(productCategories).map((g, gi) =>
+              g.label === null
+                ? g.options.map(o => <option key={o.id} value={o.id}>{o.display_label}</option>)
+                : <optgroup key={`g-${gi}-${g.label}`} label={g.label}>
+                    {g.options.map(o => <option key={o.id} value={o.id}>{o.display_label}</option>)}
+                  </optgroup>
+            )}
           </select>
           <p className="text-[11px] text-muted-foreground leading-snug pt-1">La categoría con la que el bot agrupa el catálogo en el chat. Todos los productos importados quedan bajo ella.</p>
         </div>

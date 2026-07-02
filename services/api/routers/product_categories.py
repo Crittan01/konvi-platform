@@ -25,12 +25,14 @@ class ProductCategoryCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=80, description="Clave normalizada (única por tenant)")
     display_label: str = Field(..., min_length=1, max_length=120, description="Etiqueta visible al cliente")
     sort_order: int = Field(default=0, ge=0)
+    parent_id: Optional[str] = None   # F2: categoría padre (jerarquía Categoría›Subcategoría). NULL = raíz/vertical.
 
 
 class ProductCategoryPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=80)
     display_label: Optional[str] = Field(default=None, min_length=1, max_length=120)
     sort_order: Optional[int] = Field(default=None, ge=0)
+    parent_id: Optional[str] = None   # F2: reasignar padre (o mover a raíz enviando null explícito)
 
 
 @router.get("/", response_model=List[dict])
@@ -42,7 +44,7 @@ async def list_product_categories(
     try:
         cats = (
             supabase.table("product_categories")
-            .select("id, name, display_label, sort_order, created_at")
+            .select("id, name, display_label, sort_order, parent_id, created_at")
             .eq("tenant_id", tenant_id)
             .order("sort_order")
             .order("display_label")
@@ -81,11 +83,25 @@ async def create_product_category(
 ):
     """Crea una categoría per-tenant. Solo owner/manager. `name` único por tenant."""
     try:
+        # F2: validar el padre (si hay) — debe ser del tenant y ser RAÍZ (jerarquía máx 2 niveles).
+        if category.parent_id:
+            parent = (
+                supabase.table("product_categories")
+                .select("id, parent_id")
+                .eq("id", category.parent_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if not parent.data:
+                raise HTTPException(status_code=422, detail="Categoría padre inválida para este tenant")
+            if parent.data[0].get("parent_id"):
+                raise HTTPException(status_code=422, detail="Solo 2 niveles: la categoría padre ya es una subcategoría")
         result = supabase.table("product_categories").insert({
             "tenant_id": tenant_id,
             "name": category.name,
             "display_label": category.display_label,
             "sort_order": category.sort_order,
+            "parent_id": category.parent_id,
         }).execute()
         if not result.data:
             raise HTTPException(status_code=500, detail="Error al crear categoría")
@@ -112,9 +128,38 @@ async def patch_product_category(
 ):
     """Edita display_label / sort_order / name de una categoría. Solo owner/manager."""
     try:
-        data = {k: v for k, v in category.model_dump().items() if v is not None}
+        # exclude_unset: solo parcheamos lo que el cliente envió (permite parent_id=null explícito → mover a raíz,
+        # sin que se cuele name/sort_order en null). Las server actions arman el body selectivamente.
+        data = category.model_dump(exclude_unset=True)
         if not data:
             raise HTTPException(status_code=422, detail="No hay campos para actualizar")
+        # F2: reasignar padre — validar tenant + raíz + no auto-referencia (jerarquía máx 2 niveles).
+        new_parent = data.get("parent_id")
+        if new_parent:
+            if new_parent == category_id:
+                raise HTTPException(status_code=422, detail="Una categoría no puede ser su propio padre")
+            parent = (
+                supabase.table("product_categories")
+                .select("id, parent_id")
+                .eq("id", new_parent)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if not parent.data:
+                raise HTTPException(status_code=422, detail="Categoría padre inválida para este tenant")
+            if parent.data[0].get("parent_id"):
+                raise HTTPException(status_code=422, detail="Solo 2 niveles: la categoría padre ya es una subcategoría")
+            # …ni anidar una categoría que YA es padre (tiene subcategorías) → crearía un 3er nivel.
+            kids = (
+                supabase.table("product_categories")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("parent_id", category_id)
+                .limit(1)
+                .execute()
+            )
+            if kids.data:
+                raise HTTPException(status_code=422, detail="Esta categoría ya tiene subcategorías; no puede volverse subcategoría de otra")
         result = (
             supabase.table("product_categories")
             .update(data)
