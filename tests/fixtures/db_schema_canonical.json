@@ -1597,7 +1597,7 @@
       "table_name": "order_tracking"
     },
     {
-      "column_count": 15,
+      "column_count": 16,
       "columns": [
         {
           "col": "id",
@@ -1688,6 +1688,12 @@
           "default": null,
           "nullable": "YES",
           "type": "uuid"
+        },
+        {
+          "col": "discount_amount",
+          "default": "0",
+          "nullable": "NO",
+          "type": "numeric"
         }
       ],
       "table_name": "orders"
