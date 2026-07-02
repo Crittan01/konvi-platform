@@ -184,7 +184,28 @@ async def create_order(
                 headers={"Idempotency-Replayed": "true"},
             )
 
-        total = sum(item.unit_price * item.quantity for item in order.items) + order.shipping_cost
+        # F1 (coherencia de dinero, 2026-07-02): el total DEBE incluir el descuento del cupón aplicado en el
+        # cart (cart-as-SoT, ADR-0026). Antes se recomponía sin descuento → orders.total_amount quedaba pleno
+        # y Wompi cobraba de más (el cliente veía el total CON descuento vía GetCartTool). Se lee el descuento
+        # del cart de esta conversación y se espeja la fórmula del cart (cart_tool.py): max(0, subtotal+shipping-descuento).
+        subtotal = sum(item.unit_price * item.quantity for item in order.items)
+        discount_amount = 0.0
+        if order.conversation_id:
+            try:
+                cart_res = (
+                    supabase.table("conversation_carts")
+                    .select("discount_cents")
+                    .eq("tenant_id", tenant_id)
+                    .eq("conversation_id", order.conversation_id)
+                    .order("updated_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if cart_res.data:
+                    discount_amount = round(int(cart_res.data[0].get("discount_cents") or 0) / 100.0, 2)
+            except Exception as exc:
+                logger.warning("[ORDER] lookup descuento del cart falló conv=%s: %s", order.conversation_id, exc)
+        total = max(0.0, subtotal + order.shipping_cost - discount_amount)
 
         # Rev. 108 Fase B — COD bypass: si payment_method='cod', orden directo
         # confirmed (no hay pago anticipado a esperar). payment_link flag
@@ -201,6 +222,7 @@ async def create_order(
             "conversation_id": order.conversation_id,
             "status": initial_status,
             "total_amount": total,
+            "discount_amount": discount_amount,   # F1: snapshot del descuento (moneda) para trazabilidad + coherencia
             "shipping_cost": order.shipping_cost,
             "notes": order.notes,
             "payment_method": order.payment_method,
