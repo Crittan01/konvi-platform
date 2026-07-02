@@ -816,6 +816,10 @@ async def send_agent_message(
                 "content": text,
                 "processed": True,
                 "processing_status": "processed",  # Mensaje del asesor humano, no requiere procesamiento IA
+                # F6 SLA: marca que ESTE outbound lo envió el OPERADOR (no el bot). El cron de SLA cuenta
+                # solo mensajes con sent_by='operator' como "respuesta humana" → la despedida generada por
+                # el LLM al escalar (outbound text sin marca) ya NO cuenta como respuesta (era falso-negativo).
+                "payload": {"sent_by": "operator"},
                 "last_error": None,
                 "skip_reason": None,
             })
@@ -1316,6 +1320,8 @@ async def send_agent_image(
                 "media_url": image_url,
                 "processed": True,
                 "processing_status": "processed",
+                # F6 SLA: imagen enviada por el OPERADOR cuenta como respuesta humana (ver send_agent_message).
+                "payload": {"sent_by": "operator"},
                 "last_error": None,
                 "skip_reason": None,
             })

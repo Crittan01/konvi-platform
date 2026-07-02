@@ -963,16 +963,17 @@ class OrchestratorWorker:
                     # Ya notificada — skip idempotencia.
                     continue
 
-                # 3. ¿Hubo respuesta humana post-escalación?
-                # Outbound 'text' (no escalation_audit, no degraded, etc.)
-                # creado después de escalated_at = operador respondió.
+                # 3. ¿Hubo respuesta del OPERADOR post-escalación? F6: solo cuentan outbound marcados
+                # sent_by='operator' (los que envía send_agent_message/image desde el Inbox), NO cualquier
+                # outbound text. Antes contaba cualquiera → la DESPEDIDA que el LLM genera al escalar (outbound
+                # text, sin marca) se contaba como "operador respondió" → el SLA NUNCA disparaba (falso-negativo).
                 # tenant_filter:exempt:cron_cross_tenant_sla_check
                 human_response = (
                     self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_sla_check
                     .select("id")
                     .eq("conversation_id", conv_id)
                     .eq("direction", "outbound")
-                    .eq("content_type", "text")
+                    .eq("payload->>sent_by", "operator")
                     .gt("created_at", escalated_at_iso)
                     .limit(1)
                     .execute()
