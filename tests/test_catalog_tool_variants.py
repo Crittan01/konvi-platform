@@ -17,6 +17,9 @@ class _Query:
     def eq(self, *_args, **_kwargs):
         return self
 
+    def gt(self, *_args, **_kwargs):
+        return self
+
     def order(self, *_args, **_kwargs):
         return self
 
@@ -103,6 +106,46 @@ class CatalogToolVariantsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(item["variants"]), catalog_tool.MAX_VARIANTS_PER_PRODUCT)
         self.assertEqual(item["stock_total"], len(variations))
+
+
+class CatalogAvailableStockTests(unittest.IsolatedAsyncioTestCase):
+    """F4 — el bot cita stock DISPONIBLE (bruto − reservas activas), no bruto."""
+
+    def _stub(self, reservations):
+        prods = [{
+            "id": "p1", "title": "Aceite", "category_id": None,
+            "product_variations": [
+                {"id": "v1", "sku": "A-30", "attributes": {}, "price": "10000", "stock_quantity": 5},
+                {"id": "v2", "sku": "A-50", "attributes": {}, "price": "15000", "stock_quantity": 3},
+            ],
+        }]
+
+        class _Stub:
+            def table(_self, name):
+                if name == "products":
+                    return _Query(prods)
+                if name == "stock_reservations":
+                    return _Query(reservations)
+                raise AssertionError(f"tabla inesperada: {name}")
+        return _Stub()
+
+    async def test_subtracts_active_reservations(self):
+        cat = await catalog_tool.get_tenant_catalog(
+            self._stub([{"variation_id": "v1", "qty": 2}]), "t1")
+        by_sku = {v["sku"]: v for v in cat[0][catalog_tool.CATALOG_VARIATIONS_KEY]}
+        self.assertEqual(by_sku["A-30"]["stock"], 3)   # 5 − 2 reservado
+        self.assertEqual(by_sku["A-50"]["stock"], 3)   # sin reserva → intacto
+        self.assertEqual(cat[0]["stock_total"], 6)     # 3 + 3
+
+    async def test_never_negative(self):
+        cat = await catalog_tool.get_tenant_catalog(
+            self._stub([{"variation_id": "v1", "qty": 9}]), "t1")   # reserva > bruto
+        by_sku = {v["sku"]: v for v in cat[0][catalog_tool.CATALOG_VARIATIONS_KEY]}
+        self.assertEqual(by_sku["A-30"]["stock"], 0)   # max(0, 5−9)
+
+    async def test_no_reservations_equals_gross(self):
+        cat = await catalog_tool.get_tenant_catalog(self._stub([]), "t1")
+        self.assertEqual(cat[0]["stock_total"], 8)     # 5 + 3 bruto
 
 
 if __name__ == "__main__":

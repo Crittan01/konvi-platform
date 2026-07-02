@@ -115,6 +115,28 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                 str(tenant_id)[:8], MAX_CATALOG_PRODUCTS,
             )
 
+        # F4 — stock DISPONIBLE = bruto − reservas activas (soft-reserve con TTL vivo). Una sola query batch
+        # por tenant (no N× fn_variation_available_stock): el bot NO debe prometer stock ya reservado por otra
+        # compra en curso → previene oversell dentro de WhatsApp. Fallback a stock bruto si la query falla.
+        reserved_map: dict = {}
+        try:
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).isoformat()
+            _resv = (
+                supabase.table("stock_reservations")
+                .select("variation_id, qty")
+                .eq("tenant_id", tenant_id)
+                .eq("status", "active")
+                .gt("expires_at", now_iso)
+                .execute()
+            )
+            for r in _resv.data or []:
+                vid = r.get("variation_id")
+                if vid:
+                    reserved_map[vid] = reserved_map.get(vid, 0) + int(r.get("qty") or 0)
+        except Exception as _resv_exc:
+            logger.warning("[CATALOG] reservas activas no disponibles (uso stock bruto): %s", _resv_exc)
+
         catalog = []
         for product in result.data or []:
             variations = product.get("product_variations") or []
@@ -133,6 +155,8 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                     stock = int(raw_stock)
                 except (TypeError, ValueError):
                     stock = 0
+                # F4: disponible = bruto − reservado (nunca negativo). Es lo que el bot cita/vende.
+                stock = max(0, stock - reserved_map.get(variation.get("id"), 0))
 
                 prices.append(price)
                 total_stock += stock
@@ -149,11 +173,11 @@ async def get_tenant_catalog(supabase: Client, tenant_id: str) -> list[dict]:
                     "stock": stock,
                 })
 
-            # Considerar todo el stock del producto incluso si hay > MAX_VARIANTS_PER_PRODUCT.
+            # Considerar todo el stock del producto incluso si hay > MAX_VARIANTS_PER_PRODUCT (también disponible).
             for variation in variations[MAX_VARIANTS_PER_PRODUCT:]:
                 raw_stock = variation.get("stock_quantity", 0) or 0
                 try:
-                    total_stock += int(raw_stock)
+                    total_stock += max(0, int(raw_stock) - reserved_map.get(variation.get("id"), 0))
                 except (TypeError, ValueError):
                     continue
 
