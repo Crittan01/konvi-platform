@@ -474,7 +474,10 @@ async def handle_payment_link_if_applicable(
             }).execute()
             rows = res.data or []
             first = rows[0] if rows else None
-            rid = first.get("reservation_id") if first else None
+            # BUG F4: rpc_stock_reserve devuelve out_reservation_id (no reservation_id). Leer solo
+            # reservation_id daba None → el id nunca se trackeaba → el rollback (abajo) no liberaba y el
+            # stock quedaba bloqueado hasta el barrido TTL. Espeja lib/stock_reservation.py (out_ primero).
+            rid = (first.get("out_reservation_id") or first.get("reservation_id")) if first else None
             if rid:
                 reservation_ids.append(rid)
             else:
