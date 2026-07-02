@@ -72,6 +72,8 @@ export default function ClaimsManager({
   const [searchTerm, setSearchTerm]     = useState('')
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null)
+  const [notesDraft, setNotesDraft]     = useState('')     // F6: borrador editable de notas de resolución
+  const [savingNotes, setSavingNotes]   = useState(false)
   const [actionError, setActionError]   = useState<string | null>(null)
 
   // Create form state
@@ -118,13 +120,29 @@ export default function ClaimsManager({
     setIsSubmitting(true)
     setActionError(null)
     try {
-      const resp = await updateClaimStatus(selectedClaim.id, status)
+      const resp = await updateClaimStatus(selectedClaim.id, status, notesDraft || undefined)
       if (resp?.error) { setActionError(resp.error); return }
-      setSelectedClaim({ ...selectedClaim, status })
+      setSelectedClaim({ ...selectedClaim, status, resolution_notes: notesDraft || selectedClaim.resolution_notes })
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // F6: guarda las notas de resolución SIN cambiar el estado (reusa el estado actual).
+  const handleSaveNotes = async () => {
+    if (!selectedClaim) return
+    setSavingNotes(true)
+    setActionError(null)
+    try {
+      const resp = await updateClaimStatus(selectedClaim.id, selectedClaim.status, notesDraft)
+      if (resp?.error) { setActionError(resp.error); return }
+      setSelectedClaim({ ...selectedClaim, resolution_notes: notesDraft })
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setSavingNotes(false)
     }
   }
 
@@ -170,7 +188,7 @@ export default function ClaimsManager({
             return (
               <div
                 key={claim.id}
-                onClick={() => { setSelectedClaim(claim); setActionError(null) }}
+                onClick={() => { setSelectedClaim(claim); setNotesDraft(claim.resolution_notes ?? ''); setActionError(null) }}
                 className={`cursor-pointer rounded-xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30 ${
                   selectedClaim?.id === claim.id
                     ? 'ring-1 ring-primary/50 border-primary/40 bg-primary/5'
@@ -279,11 +297,26 @@ export default function ClaimsManager({
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wide text-muted-foreground">Notas de resolución</Label>
                   <Textarea
-                    placeholder="El agente de soporte agregará su investigación aquí..."
+                    placeholder="El agente de soporte agrega aquí su investigación / resolución..."
                     className="min-h-[120px] resize-none"
-                    readOnly
-                    value={selectedClaim.resolution_notes ?? ''}
+                    readOnly={!canResolve}
+                    value={canResolve ? notesDraft : (selectedClaim.resolution_notes ?? '')}
+                    onChange={canResolve ? (e => setNotesDraft(e.target.value)) : undefined}
                   />
+                  {canResolve && (
+                    <div className="flex items-center justify-end gap-2">
+                      {notesDraft !== (selectedClaim.resolution_notes ?? '') && (
+                        <span className="text-[11px] text-amber-600">Cambios sin guardar</span>
+                      )}
+                      <Button
+                        size="sm" variant="outline"
+                        disabled={savingNotes || notesDraft === (selectedClaim.resolution_notes ?? '')}
+                        onClick={handleSaveNotes}
+                      >
+                        {savingNotes ? 'Guardando…' : 'Guardar notas'}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
