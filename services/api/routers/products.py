@@ -132,6 +132,81 @@ def _assert_category_owned(supabase: Client, tenant_id: str, category_id: Option
         raise HTTPException(status_code=422, detail="Categoría de catálogo inválida para este tenant")
 
 
+def _norm_attr(s: str) -> str:
+    """Normalización case/espacio-insensible (espeja normKey + canonicalizeAttrs del frontend)."""
+    return str(s).strip().lower().replace(" ", "")
+
+
+def _validate_attr_value(d: dict, key: str, value) -> None:
+    """Valida UN valor contra su definición de contrato (criterio binario ADR-0024). Lanza 422 si viola.
+
+    Regla (verify-before-build: 'Volumen' es type=metric con allowed_values → el gate real es allowed_values,
+    no el type): si hay allowed_values → SET membership (con/sin unidad); si no → chequeo por tipo."""
+    allowed = d.get("allowed_values") or []
+    unit = str(d.get("unit") or "")
+    sval = str(value).strip()
+    if not sval:
+        return  # vacío = atributo no provisto para este producto (opcional)
+    if allowed:
+        norm = _norm_attr(sval)
+        ok = any(
+            norm == _norm_attr(a) or norm == _norm_attr(f"{a}{unit}")
+            for a in allowed
+        )
+        if not ok:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Valor '{sval}' fuera del contrato de '{key}'. Válidos: {', '.join(map(str, allowed))}",
+            )
+        return
+    t = str(d.get("type") or "").lower()
+    if t in ("metric", "number"):
+        cleaned = sval
+        if unit and cleaned.lower().endswith(unit.lower()):
+            cleaned = cleaned[: -len(unit)].strip()
+        try:
+            float(cleaned.replace(",", "."))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"'{key}' debe ser numérico (recibido '{sval}').")
+    elif t == "boolean":
+        if _norm_attr(sval) not in ("true", "false", "sí", "si", "no", "1", "0", "yes"):
+            raise HTTPException(status_code=422, detail=f"'{key}' debe ser Sí/No (recibido '{sval}').")
+
+
+def _validate_attributes_against_contract(
+    supabase: Client, tenant_id: str, category_id: Optional[str], attributes: Optional[dict]
+) -> None:
+    """ADR-0029 D4 — valida products.attributes (product-level) contra el contrato de la categoría.
+
+    Anti-alucinación: el bot cita estos atributos como HECHOS, así que deben estar gobernados. Si la
+    categoría tiene contrato (product_attribute_definitions no-variante): cada atributo debe (a) tener un
+    NOMBRE definido en el contrato, y (b) un VALOR válido (SET membership / numérico / booleano).
+    NO-OP si no hay category_id, attributes vacío, o la categoría no tiene contrato (backward-compat:
+    tenants sin contrato sembrado — p.ej. KAIU hasta el seed — no se ven afectados)."""
+    if not category_id or not attributes:
+        return
+    defs = (
+        supabase.table("product_attribute_definitions")
+        .select("label, type, unit, allowed_values")
+        .eq("tenant_id", tenant_id)
+        .eq("product_category_id", category_id)
+        .eq("is_variant_axis", False)
+        .execute()
+    )
+    contract = defs.data or []
+    if not contract:
+        return
+    by_label = {_norm_attr(d["label"]): d for d in contract}
+    for raw_key, raw_val in attributes.items():
+        d = by_label.get(_norm_attr(raw_key))
+        if d is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Atributo '{raw_key}' no está en el contrato de esta categoría",
+            )
+        _validate_attr_value(d, raw_key, raw_val)
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[dict])
@@ -182,6 +257,8 @@ async def create_product(
         # chequeo un tenant podría referenciar la categoría de OTRO. platform_category_id es
         # taxonomía GLOBAL compartida (su FK basta, no hay riesgo cross-tenant).
         _assert_category_owned(supabase, tenant_id, product.category_id)
+        # ADR-0029 D4: los atributos product-level deben respetar el contrato de la categoría (anti-alucinación).
+        _validate_attributes_against_contract(supabase, tenant_id, product.category_id, product.attributes)
 
         prod_result = supabase.table("products").insert({
             "tenant_id": tenant_id,
@@ -287,6 +364,21 @@ async def patch_product(
         # Integridad multi-tenant (ADR-0025): si el patch reasigna category_id, debe ser del tenant.
         if "category_id" in data:
             _assert_category_owned(supabase, tenant_id, data["category_id"])
+        # ADR-0029 D4: si el patch toca attributes (o reasigna categoría), valida contra el contrato de la
+        # categoría EFECTIVA (la del patch si se reasigna; si no, la actual del producto).
+        if "attributes" in data:
+            eff_cat = data["category_id"] if "category_id" in data else None
+            if eff_cat is None:
+                cur = (
+                    supabase.table("products")
+                    .select("category_id")
+                    .eq("id", product_id)
+                    .eq("tenant_id", tenant_id)
+                    .single()
+                    .execute()
+                )
+                eff_cat = (cur.data or {}).get("category_id")
+            _validate_attributes_against_contract(supabase, tenant_id, eff_cat, data["attributes"])
 
         result = (
             supabase.table("products")
