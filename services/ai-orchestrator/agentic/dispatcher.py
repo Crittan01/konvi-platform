@@ -395,6 +395,37 @@ async def _emit_degraded_response_and_escalate(
     )
 
 
+def _log_habeas_event(
+    supabase: Any, *, tenant_id: str, conversation_id: str, event: str, evidence: dict,
+) -> None:
+    """Registra un evento Habeas Data en consent_audit_log (append-only, Ley 1581) — el registro
+    canónico para la SIC. Best-effort: NO bloquea la escalación (la seguridad es escalar; esto es el
+    paper-trail). Resuelve contact_id de la conversación (nullable si no se encuentra)."""
+    try:
+        contact_id = None
+        try:
+            c = (
+                supabase.table("conversations").select("contact_id")
+                .eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
+            )
+            contact_id = (c.data or {}).get("contact_id")
+        except Exception:
+            pass
+        supabase.table("consent_audit_log").insert({
+            "tenant_id": tenant_id,
+            "contact_id": contact_id,
+            "event": event,
+            "source": "whatsapp",
+            "conversation_id": conversation_id,
+            "evidence": evidence,
+        }).execute()
+    except Exception as exc:
+        logger.warning(
+            "[HABEAS_DATA] consent_audit_log(%s) insert falló conv=%s: %s",
+            event, conversation_id, exc,
+        )
+
+
 async def _handle_data_rights_if_intent(
     supabase: Any,
     *,
@@ -418,6 +449,18 @@ async def _handle_data_rights_if_intent(
     matched = detect_data_rights_request(content)
     if not matched:
         return False
+
+    # 0. Paper-trail Ley 1581: registrar la solicitud (append-only) ANTES de escalar.
+    _log_habeas_event(
+        supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+        event="data_rights_request",
+        evidence={
+            "message_text": content[:200],
+            "matched_phrase": matched[:120],
+            "gate": "agentic.dispatcher._handle_data_rights_if_intent",
+            "action": "escalated_human_takeover",
+        },
+    )
 
     from orchestrator import (
         _send_outbound_text, _mark_message_processing, PROCESSING_STATUS_PROCESSED,
@@ -506,6 +549,18 @@ async def _handle_minor_intent_if_applicable(
     from safety.consent_gates import detect_minor_intent
     if not detect_minor_intent(content):
         return False
+
+    # 0. Paper-trail Ley 1581 / Decreto 1377 Art. 7: registrar la detección de menor.
+    _log_habeas_event(
+        supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+        event="minor_detected",
+        evidence={
+            "message_text": content[:200],
+            "gate": "agentic.dispatcher._handle_minor_intent_if_applicable",
+            "legal_basis": "Decreto 1377/2013 Art. 7",
+            "action": "escalated_human_takeover",
+        },
+    )
 
     from orchestrator import (
         _send_outbound_text, _mark_message_processing, PROCESSING_STATUS_PROCESSED,
