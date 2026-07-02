@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from supabase import Client
@@ -121,38 +121,6 @@ class OrderPatch(BaseModel):
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
-
-@router.get("/", response_model=List[dict])
-async def list_orders(
-    status: Optional[str] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-):
-    """Lista pedidos del tenant con datos del contacto. Filtra por status opcional."""
-    try:
-        if status and status not in VALID_STATUSES:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Status inválido. Valores permitidos: {', '.join(sorted(VALID_STATUSES))}",
-            )
-        query = (
-            supabase.table("orders")
-            .select("id, status, total_amount, shipping_cost, notes, created_at, contact_id, contacts(phone, name)")
-            .eq("tenant_id", tenant_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .offset(offset)
-        )
-        if status:
-            query = query.eq("status", status)
-        result = query.execute()
-        return result.data or []
-    except Exception as e:
-        logger.error("Error listando pedidos tenant %s: %s", tenant_id, e)
-        raise HTTPException(status_code=500, detail="Error al obtener pedidos")
-
 
 @router.post("/", response_model=dict, status_code=201)
 @audit_log(entity_type="order", action="created")

@@ -516,27 +516,6 @@ async def quote_shipment(
         raise HTTPException(status_code=500, detail="Error inesperado cotizando envío")
 
 
-@router.get("/history", response_model=List[dict])
-async def get_shipping_history(
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-):
-    """Retorna historial de cotizaciones y envíos del tenant."""
-    try:
-        result = (
-            supabase.table("shipments")
-            .select("id, status, carrier, service, tracking_number, estimated_delivery, created_at, order_id")
-            .eq("tenant_id", tenant_id)
-            .order("created_at", desc=True)
-            .limit(50)
-            .execute()
-        )
-        return result.data or []
-    except Exception as e:
-        logger.error("Error obteniendo historial shipping tenant %s: %s", tenant_id, e)
-        raise HTTPException(status_code=500, detail="Error al obtener historial")
-
-
 class RateSelection(BaseModel):
     carrier:           str
     service:           str

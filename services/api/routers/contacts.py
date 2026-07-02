@@ -10,9 +10,9 @@ Endpoints:
 """
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client
@@ -272,44 +272,6 @@ def _compute_consent_update(
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
-
-@router.get("/", response_model=List[dict])
-async def list_contacts(
-    search: Optional[str] = Query(default=None, description="Filtra por teléfono o nombre"),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-):
-    """Lista contactos del tenant. Soporta búsqueda por teléfono o nombre."""
-    try:
-        query = (
-            supabase.table("contacts")
-            .select(
-                "id, phone, name, email, notes, address, document_type, document_number, "
-                "consent_given, consent_date, consent_source, "
-                "consent_notice_version, consent_evidence, consent_actor_email, "
-                "consent_revoked_at, consent_revoked_reason, created_at"
-            )
-            .eq("tenant_id", tenant_id)
-            .order("name", desc=False, nullsfirst=False)
-            .limit(limit)
-            .offset(offset)
-        )
-        result = query.execute()
-        rows = result.data or []
-
-        # Filtro básico client-side (búsqueda por teléfono, nombre o email)
-        if search:
-            s = search.lower()
-            rows = [r for r in rows if s in (r.get("phone") or "").lower()
-                    or s in (r.get("name") or "").lower()
-                    or s in (r.get("email") or "").lower()]
-        return rows
-    except Exception as e:
-        logger.error("Error listando contactos tenant %s: %s", tenant_id, e)
-        raise HTTPException(status_code=500, detail="Error al obtener contactos")
-
 
 @router.post("/", response_model=dict, status_code=201)
 @audit_log(entity_type="contact", action="created")

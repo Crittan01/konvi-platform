@@ -378,7 +378,11 @@ def collect_telegram(supabase: Any, tenant_id: str) -> list[HealthMetric]:
 
 def collect_meli(supabase: Any, tenant_id: str) -> list[HealthMetric]:
     """MeLi — OAuth token health (vigente vs próximo expirar)."""
-    if not _is_provider_connected(supabase, tenant_id, "meli"):
+    # El provider en tenant_integrations es "mercadolibre" (así lo escriben OAuth,
+    # marketplace y meli_client). Consultar "meli" NUNCA matcheaba → collect_meli
+    # devolvía [] siempre y la card MercadoLibre del health quedaba vacía. El LABEL
+    # emitido sigue siendo "meli" porque la UI (health-grid.tsx:23,27) keya por "meli".
+    if not _is_provider_connected(supabase, tenant_id, "mercadolibre"):
         return []
 
     try:
@@ -386,7 +390,7 @@ def collect_meli(supabase: Any, tenant_id: str) -> list[HealthMetric]:
             supabase.table("tenant_integrations")
             .select("credentials, meta")
             .eq("tenant_id", tenant_id)
-            .eq("provider", "meli")
+            .eq("provider", "mercadolibre")
             .limit(1)
             .execute()
         )
