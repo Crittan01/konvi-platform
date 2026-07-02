@@ -141,7 +141,15 @@ export default async function MarketplacePage() {
     .eq('is_active', true)
     .order('name')
   const categories = (cats ?? []) as { id: string; name: string }[]
-  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]))
+  // Categorías OPERATIVAS per-tenant — el agrupado del catálogo interno usa ESTA taxonomía (la que
+  // administra el módulo Categorías y usa el bot), NO la de marketplace. `categories` (platform) se
+  // conserva porque lo consume el selector de "Importar desde MeLi".
+  const { data: pcats } = tenantId
+    ? await supabase.from('product_categories').select('id, display_label').eq('tenant_id', tenantId)
+    : { data: [] }
+  const opCatMap = Object.fromEntries(
+    ((pcats ?? []) as { id: string; display_label: string }[]).map(c => [c.id, c.display_label])
+  )
 
   // ── Variantes del catálogo interno (Supabase directo con join de producto) ─
   // Usamos Supabase directo (no API) para poder resolver la categoría en el servidor
@@ -149,7 +157,7 @@ export default async function MarketplacePage() {
   if (tenantId) {
     const { data } = await supabase
       .from('product_variations')
-      .select('id, sku, stock_quantity, price, attributes, products(id, title, platform_category_id)')
+      .select('id, sku, stock_quantity, price, attributes, products(id, title, category_id)')
       .eq('tenant_id', tenantId)
       .order('sku')
     rawVariations = data ?? []
@@ -175,8 +183,8 @@ export default async function MarketplacePage() {
       // Supabase puede retornar el join como objeto o array según la dirección del FK
       const product      = Array.isArray(v.products) ? v.products[0] : v.products
       if (!product) return null
-      const category_id  = product.platform_category_id
-      const category_name = category_id ? (catMap[category_id] ?? 'Sin categoría') : 'Sin categoría'
+      const category_id  = product.category_id
+      const category_name = category_id ? (opCatMap[category_id] ?? 'Sin categoría') : 'Sin categoría'
       return {
         id:             v.id,
         sku:            v.sku,

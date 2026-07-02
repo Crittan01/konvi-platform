@@ -252,8 +252,8 @@ const ArchivedSection = memo(function ArchivedSection({
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-muted-foreground line-through line-clamp-1">{p.title}</p>
-                {p.platform_category_id && catMap[p.platform_category_id] && (
-                  <p className="text-[10px] text-muted-foreground/60">{catMap[p.platform_category_id]}</p>
+                {p.category_id && catMap[p.category_id] && (
+                  <p className="text-[10px] text-muted-foreground/60">{catMap[p.category_id]}</p>
                 )}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -332,8 +332,8 @@ export default function CatalogTable({
         let vb: string | number = 0
         if (sortBy === 'title') { va = a.title.toLowerCase(); vb = b.title.toLowerCase() }
         else if (sortBy === 'category') {
-          va = (a.platform_category_id ? catMap[a.platform_category_id] ?? '' : '').toLowerCase()
-          vb = (b.platform_category_id ? catMap[b.platform_category_id] ?? '' : '').toLowerCase()
+          va = (a.category_id ? catMap[a.category_id] ?? '' : '').toLowerCase()
+          vb = (b.category_id ? catMap[b.category_id] ?? '' : '').toLowerCase()
         }
         else if (sortBy === 'price') {
           va = Math.min(...a.product_variations.map(v => v.price ?? Infinity))
@@ -438,7 +438,7 @@ export default function CatalogTable({
             <ProductMobileCard
               key={p.id}
               p={p}
-              catName={p.platform_category_id ? catMap[p.platform_category_id] : null}
+              catName={p.category_id ? catMap[p.category_id] : null}
               catMap={catMap}
               productCategories={productCategories}
               threshold={threshold}
@@ -487,7 +487,7 @@ export default function CatalogTable({
                 const totalStock  = vars.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
                 const hasZero     = vars.some(v => v.stock_quantity === 0)
                 const isExpanded  = expandedIds.has(p.id)
-                const catName     = p.platform_category_id ? catMap[p.platform_category_id] : null
+                const catName     = p.category_id ? catMap[p.category_id] : null
 
                 return [
                   <tr
@@ -591,7 +591,7 @@ export default function CatalogTable({
             const totalStock = vars.reduce((s, v) => s + (v.stock_quantity ?? 0), 0)
             const hasZero    = vars.some(v => v.stock_quantity === 0)
             const isExpanded = expandedIds.has(p.id)
-            const catName    = p.platform_category_id ? catMap[p.platform_category_id] : null
+            const catName    = p.category_id ? catMap[p.category_id] : null
 
             return (
               <div

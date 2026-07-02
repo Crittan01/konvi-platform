@@ -14,15 +14,6 @@ export default async function CatalogPage() {
   const canWrite = role === 'owner' || role === 'manager'
   const supabase = createClient()
 
-  // Categories
-  const { data: cats } = await supabase
-    .from('platform_categories')
-    .select('id, name')
-    .eq('is_active', true)
-    .order('name')
-  const platformCategories = (cats as { id: string; name: string }[]) ?? []
-  const catMap = Object.fromEntries(platformCategories.map(c => [c.id, c.name]))
-
   // ADR-0027 — categorías OPERATIVAS per-tenant (las que el bot presenta). RLS via JWT.
   const { data: pcats } = tenantId
     ? await supabase
@@ -33,6 +24,9 @@ export default async function CatalogPage() {
         .order('display_label')
     : { data: [] }
   const productCategories = (pcats as { id: string; display_label: string; parent_id: string | null }[]) ?? []
+  // Coherencia: el listado etiqueta/ordena por la categoría OPERATIVA (category_id → display_label), la
+  // misma que administra el módulo Categorías y usa el bot — NO la de marketplace (platform_category_id).
+  const catMap = Object.fromEntries(productCategories.map(c => [c.id, c.display_label]))
 
   // ADR-0029 F1/F3 — contrato de atributos por categoría (guía el alta hacia valores canónicos).
   const { data: adefs } = tenantId
