@@ -37,7 +37,6 @@ _FALLBACK_AGENT = {
     "name": "Sara Camila",
     "role": "sales",
     "role_description": None,
-    "persona_block": None,
     "tools_allowed": None,
     "fsm_states_allowed": None,
     "is_default": True,
@@ -99,9 +98,12 @@ def get_active_agent(
     try:
         res = (
             supabase.table("ai_agents")
+            # persona_block NO se selecciona: se leía al vacío (nunca se inyecta al
+            # prompt; éste usa role_description). La columna se dropea post-deploy
+            # (migración 20260702220000, expand-contract).
             .select(
                 "id, name, role, role_description, "
-                "persona_block, tools_allowed, fsm_states_allowed, "
+                "tools_allowed, fsm_states_allowed, "
                 "is_default",
             )
             .eq("tenant_id", tenant_id)

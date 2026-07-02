@@ -25,13 +25,13 @@ REPO = Path("/home/ansible/workspaces/konvi-platform")
 class A3ShippingColumnsTests(unittest.TestCase):
     """El insert del Cotizador usa SOLO columnas reales de shipments."""
 
-    # Columnas reales verificadas en la DB remota 2026-06-24.
+    # Columnas reales verificadas en la DB remota. pickup_id + last_polled_at
+    # dropeadas 2026-07-02 (F7: Envia-legacy, Aveonline usa webhooks no polling).
     REAL_SHIPMENTS_COLUMNS = {
         "id", "tenant_id", "order_id", "status", "carrier", "service",
         "origin_address", "destination_address", "parcels", "quote_response",
         "selected_rate", "label_url", "tracking_number", "tracking_url",
-        "pickup_id", "estimated_delivery", "created_at", "updated_at",
-        "last_polled_at",
+        "estimated_delivery", "created_at", "updated_at",
     }
 
     def setUp(self):

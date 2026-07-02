@@ -55,9 +55,7 @@ CORE_TABLES = [
     "expenses",
     "coupons",                  # F2.2 router coupons — escrituras auditadas
     "coupon_redemptions",       # F2.2 — DELETE condicional verifica este conteo
-    "category_attributes",      # ADR-0029 F1 — contrato de atributos por categoría (taxonomía)
-    "attribute_values",         # ADR-0029 F1 — enum de valores permitidos
-    "product_attribute_definitions",  # ADR-0029 F1 — extensión per-tenant del contrato
+    "product_attribute_definitions",  # ADR-0029 F1 — contrato de atributos per-tenant (capa VIVA)
     "audit_log",
     "bot_source_log",
 ]
