@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "column_count": 13,
+      "column_count": 12,
       "columns": [
         {
           "col": "id",
@@ -56,12 +56,6 @@
           "default": "true",
           "nullable": "NO",
           "type": "boolean"
-        },
-        {
-          "col": "persona_block",
-          "default": null,
-          "nullable": "YES",
-          "type": "text"
         },
         {
           "col": "tools_allowed",
