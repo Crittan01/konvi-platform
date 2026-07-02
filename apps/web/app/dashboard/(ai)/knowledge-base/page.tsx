@@ -43,15 +43,6 @@ const CATEGORIES = [
   { value: 'pagos',     label: 'Pagos',        icon: StickyNote },
 ]
 
-const CATEGORY_COLORS: Record<string, string> = {
-  faq:       'bg-blue-500/15 text-blue-400 border border-blue-500/30',
-  negocio:   'bg-green-500/15 text-green-400 border border-green-500/30',
-  politicas: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-  productos: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
-  envios:    'bg-cyan-500/15 text-cyan-600 border border-cyan-500/30',
-  pagos:     'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30',
-}
-
 // Rev. 68 — guía por categoría: qué SÍ y qué NO escribir para evitar
 // duplicación con otras fuentes (catálogo, Filosofía del negocio).
 const CATEGORY_GUIDES: Record<string, { placeholder: string; doYes: string; doNo: string }> = {
@@ -190,15 +181,6 @@ export default async function KnowledgeBasePage({
     })
     if (!res.ok) console.error('updateDocument failed:', await res.text())
     redirect('/dashboard/knowledge-base')
-  }
-
-  async function regenerateEmbedding(formData: FormData) {
-    'use server'
-    const sb = createClient()
-    const docId = formData.get('doc_id') as string
-    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}/reindex`, { method: 'POST' })
-    if (!res.ok) console.error('regenerateEmbedding failed:', await res.text())
-    revalidatePath('/dashboard/knowledge-base')
   }
 
   async function activateDocument(formData: FormData) {

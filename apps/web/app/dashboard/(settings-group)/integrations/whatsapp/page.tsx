@@ -382,7 +382,6 @@ export default async function WhatsAppIntegrationPage({
   const connected = integration?.status === 'connected'
   const wabaId = integration?.credentials?.waba_id ?? null
   const wabaConfigured = connected && !!wabaId
-  const phoneNumberId = integration?.credentials?.phone_number_id ?? null
   const displayPhone = integration?.credentials?.display_phone_number ?? null
   const counts = {
     total: templates.length,

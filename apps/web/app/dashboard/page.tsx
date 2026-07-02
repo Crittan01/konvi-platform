@@ -93,7 +93,6 @@ export default async function DashboardPage() {
     for (let i = 6; i >= 0; i--) {
       const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
       const key = d.toISOString().split('T')[0]
-      const label = dayLabels[d.getDay()]
       dayMap.set(key, 0)
     }
 

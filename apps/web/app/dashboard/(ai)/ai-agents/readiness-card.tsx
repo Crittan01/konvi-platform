@@ -38,7 +38,7 @@ interface Props {
 }
 
 export function ReadinessCard({
-  hasFilosofia, totalDocs, activeDocs, indexedDocs, agentName, hasPrompt,
+  hasFilosofia, activeDocs, indexedDocs, agentName, hasPrompt,
   hasTono = false, hasSedesHorario = false, hasCatalog = false,
   wompiConnected = false, aveonlineConnected = false,
   hasIdentidadLegal = false,

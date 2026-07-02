@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
@@ -16,8 +16,16 @@ const CATEGORIES: Record<string, string> = {
   other: 'Otros'
 }
 
+export type Expense = {
+  id: string
+  description: string
+  category: string
+  expense_date: string
+  amount: number
+}
+
 type Props = {
-  expenses: any[]
+  expenses: Expense[]
   canWrite: boolean
 }
 

@@ -187,7 +187,7 @@ export default async function CatalogPage() {
     const stock = parseInt(formData.get('stock') as string)
     const compareStr = formData.get('compare_at_price') as string
     const costStr = formData.get('cost_price') as string
-    const updates: Record<string, any> = {}
+    const updates: Record<string, number | string | null> = {}
     if (!isNaN(price) && price > 0) updates.price = price
     if (!isNaN(stock) && stock >= 0) updates.stock_quantity = stock
     if (costStr !== null) {
@@ -196,7 +196,7 @@ export default async function CatalogPage() {
     }
     if (compareStr !== null) {
       const cmp = parseFloat(compareStr)
-      const basePrice = updates.price || 0
+      const basePrice = typeof updates.price === 'number' ? updates.price : 0
       updates.compare_at_price = (!isNaN(cmp) && cmp > 0 && cmp > basePrice) ? cmp : null
     }
     // Dimensiones, peso, imagen y SKU

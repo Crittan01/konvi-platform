@@ -2,7 +2,6 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -547,7 +546,6 @@ export default async function TeamPage({
         ) : (
           <div className="divide-y divide-border">
             {team.map(m => {
-              const roleCfg = ROLES[m.role as RoleKey]
               return (
                 <div key={m.user_id} className="flex flex-col sm:flex-row sm:items-center gap-3 py-3">
                   {/* Avatar + info */}

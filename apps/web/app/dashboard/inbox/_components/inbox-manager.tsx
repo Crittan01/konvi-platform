@@ -1,58 +1,17 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
-import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import {
-  MessageSquare, User, Bot, Phone, Clock, AlertCircle, Send,
-  Search, X, ChevronLeft, ChevronRight, Filter, CheckCheck, Check,
-  Circle, Wifi, WifiOff, Package, ShoppingBag, MapPin, Plus,
-  BadgeCheck, BadgeX, Loader2, Info, ChevronsRight,
-  ShoppingCart, Mail, FileText, Truck,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { WifiOff } from 'lucide-react'
 import { createIdempotencyKey } from '@/lib/idempotency'
-import { renderWhatsAppFormat, stripWhatsAppFormat } from '@/lib/whatsapp-format'
 
 // Refactor 2026-05-29 paso 1/10 — types, constantes y helpers extraídos a `_lib/`.
 // Single source of truth, server+client safe, testable sin DOM.
 import type {
-  AgenticState,
   Conversation,
-  Message,
-  ProductVariation,
-  Product,
-  OrderRow,
-  ContactRow,
-  CartItem,
-  ActiveCart,
-  OpenClaim,
-  ConvContext,
-  SelectedVariation,
   FilterStatus,
 } from '../_lib/types'
-import {
-  ORDER_STATUS_LABEL,
-  ORDER_STATUS_COLOR,
-  STATUS_CONFIG,
-  FILTER_OPTIONS,
-  SLA_BREACH_HOURS,
-} from '../_lib/constants'
-import {
-  formatPhone,
-  agenticStateLabel,
-  getAgenticStateBadgeColor,
-  timeAgo,
-  formatDate,
-  formatDateTime,
-  formatMoney,
-  variationLabel,
-  isSlaBreach,
-  groupConvsByPhone,
-} from '../_lib/format'
-import { wrapSelection, prefixLine, prefixLineNumbered } from '../_lib/editor'
-import { ChatEditorToolbar } from './chat-editor-toolbar'
-import { OrderMiniForm } from './order-mini-form'
+import { isSlaBreach } from '../_lib/format'
 import { useConversationContext } from '../_hooks/use-conversation-context'
 import { useConversations } from '../_hooks/use-conversations'
 import { useMessages } from '../_hooks/use-messages'
@@ -66,9 +25,6 @@ import { ChatPanel } from './chat-panel'
 // orquesta state local + Realtime + UI 3-paneles.
 export default function InboxManager() {
   const supabase = useMemo(() => createClient(), [])
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
 
   // --- Estado base ---
   // Refactor paso 7/10 2026-05-29 — conversations + selectedId + loading +
@@ -82,7 +38,6 @@ export default function InboxManager() {
     error: conversationsLoadError,
     showArchived,
     setShowArchived,
-    reload: loadConversations,
     syncUrlParam,
   } = useConversations({ supabase })
   // Refactor paso 9/10 2026-05-29 — messages state vive en useMessages hook.
@@ -94,10 +49,6 @@ export default function InboxManager() {
   const [statusError, setStatusError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('active')
-  // Rev. 109 founder 2026-05-28 — expand-collapse de grupos por phone.
-  // Modelo: 1 cliente = 1 fila visible (la conv primary del grupo). Si el
-  // cliente tiene >1 sesión histórica, expand para verlas indentadas.
-  const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set())
   // F2 scroll histórico cursor-based — vive en useMessages.
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'context'>('list')
   const [waConnected, setWaConnected] = useState<boolean | null>(null)
@@ -107,8 +58,6 @@ export default function InboxManager() {
   // Refactor paso 5/10 2026-05-29 — context vive en hook dedicado.
   // Beneficios: AbortController + interval cleanup automáticos, refresh()
   // expuesto al padre como callback puro, sin state local extra.
-  const [productSearchCatalog, setProductSearchCatalog] = useState('')  // búsqueda en catálogo informativo
-  const [showAllOrders, setShowAllOrders] = useState(false)  // B2: paginación pedidos
   // Refactor paso 4/10 2026-05-29 — state local del mini-form (productSearchForm,
   // showOrderForm, selectedVariations, orderQtys, orderShipping, orderNotes,
   // creatingOrder, orderError, orderSuccess) + handlers (toggleVariation,
@@ -325,13 +274,6 @@ export default function InboxManager() {
   // "Pedidos recientes").
   // Refactor paso 5/10 — refresh delegado al hook (encapsula auth + endpoint).
   const refreshContextAfterOrder = refreshConvContext
-
-  // ── Productos filtrados — catálogo informativo (búsqueda independiente) ────
-  const filteredProducts = (convContext?.products ?? []).filter(p =>
-    productSearchCatalog === '' ||
-    p.title.toLowerCase().includes(productSearchCatalog.toLowerCase()) ||
-    (p.product_variations ?? []).some(v => v.sku?.toLowerCase().includes(productSearchCatalog.toLowerCase()))
-  )
 
   // ── WA desconectado ────────────────────────────────────────────────────────
   if (waConnected === false) {

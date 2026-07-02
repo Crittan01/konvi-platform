@@ -58,7 +58,7 @@ function InlineMatrixBuilder({ onGenerate, onClose, productTitle, attrSuggestion
 }) {
   const [defs, setDefs] = useState([{ name: '', values: [''] }])
   const [skuPrefix, setSkuPrefix] = useState(() => suggestPrefix(productTitle))
-  const [prefixEdited, setPrefixEdited] = useState(false)
+  const [_prefixEdited, setPrefixEdited] = useState(false)
   const [bulkPrice, setBulkPrice] = useState('')
   const [bulkStock, setBulkStock] = useState('0')
   const [preview, setPreview] = useState<Record<string, string>[] | null>(null)

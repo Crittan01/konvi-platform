@@ -77,7 +77,7 @@ export function VariantMatrixGenerator({ productId, addVariationAction, onDone }
     const combos = cartesian(validDefs)
     if (!combos.length) return
 
-    setMatrix(combos.map((attrs, i) => ({
+    setMatrix(combos.map((attrs) => ({
       attrs,
       price: '',
       stock: '0',

@@ -12,7 +12,26 @@ import { buildCategoryPicker } from '../_lib/category-tree'
 
 interface Props { productCategories: {id: string, display_label: string, parent_id?: string | null}[]; onImported?: () => void; tenantId: string; apiUrl: string }
 
-export default function MassImporter({ productCategories, onImported = () => {}, tenantId, apiUrl }: Props) {
+// Forma de una variante derivada de una fila del Excel (post-parseo de celdas)
+type ImportVariant = {
+  sku: string
+  attrKey: string
+  attrVal: string
+  attrKey2: string
+  attrVal2: string
+  attrKey3: string
+  attrVal3: string
+  pNormal: number
+  pPromo: number | null
+  stock: number
+  weight: number | null
+  length: number | null
+  width: number | null
+  height: number | null
+  vImg: string | null
+}
+
+export default function MassImporter({ productCategories, onImported = () => {}, apiUrl }: Props) {
   // ADR-0027/0029: la categoría OPERATIVA (la que el bot usa para agrupar) es la ÚNICA que se captura.
   // La marketplace (platform_category_id) NO se pide por producto — se deriva por categoría al publicar.
   const [selectedOpCat, setSelectedOpCat] = useState('')
@@ -151,12 +170,12 @@ export default function MassImporter({ productCategories, onImported = () => {},
       const data = await file.arrayBuffer()
       const wb = XLSX.read(data, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json<any>(ws, { defval: "" })
+      const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
 
       if (rows.length === 0) throw new Error("El archivo está vacío o mal formateado.")
 
       // Agrupamos filas por Nombre del Producto para saber qué son Variantes del mismo
-      const productsMap: Record<string, { desc: string, img: string | null, variants: any[] }> = {}
+      const productsMap: Record<string, { desc: string, img: string | null, variants: ImportVariant[] }> = {}
       for (const row of rows) {
         const pName = row['Nombre del Producto']?.toString().trim()
         const sku = row['SKU (Obligatorio)']?.toString().trim()
@@ -206,7 +225,7 @@ export default function MassImporter({ productCategories, onImported = () => {},
             description: prodData.desc || null,
             cover_image_url: prodData.img || null,
             category_id: selectedOpCat || null,
-            variations: prodData.variants.map((v: any) => {
+            variations: prodData.variants.map((v) => {
               let price = v.pNormal > 0 ? v.pNormal : 1
               let compare_at_price = null
               if (v.pPromo && v.pPromo > 0) { price = v.pPromo; compare_at_price = v.pNormal }

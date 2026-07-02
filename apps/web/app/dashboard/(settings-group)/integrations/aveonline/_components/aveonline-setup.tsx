@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useState, useTransition } from 'react'
-import { KeyRound, Package, Phone, UserCheck, AlertCircle, CheckCircle2, Truck, Loader2, RefreshCw, Webhook, Copy, Trash2 } from 'lucide-react'
+import { KeyRound, Package, UserCheck, AlertCircle, CheckCircle2, Truck, Loader2, RefreshCw, Webhook, Copy, Trash2 } from 'lucide-react'
 
 type AveonlineAgent = {
   id: string
@@ -531,6 +531,9 @@ function AveonlineWebhookSection() {
     }
   }
 
+  // Solo al montar: carga inicial del estado del webhook. `refresh` no va en deps a
+  // propósito (recrearía el efecto en cada render → re-fetch en loop).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void refresh() }, [])
 
   const configure = async () => {

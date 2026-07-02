@@ -10,8 +10,7 @@ import { Label } from '@/components/ui/label'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
-  MessageCircle, Settings2, ChevronUp, CreditCard, HelpCircle,
-  Loader2,
+  MessageCircle, Settings2, ChevronUp, CreditCard,
 } from 'lucide-react'
 
 type Category = 'todas' | 'canal' | 'logistica' | 'marketplace' | 'notificaciones' | 'pagos'

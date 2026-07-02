@@ -9,7 +9,7 @@ import {
   Package, Users, Settings, Plug, Truck, BarChart2,
   Boxes, BookOpen, ClipboardList, BrainCircuit,
   Menu, X, ChevronDown, TrendingUp, Building2,
-  Wallet, DollarSign, AlertCircle, Bot, Lock, KeyRound,
+  Wallet, DollarSign, AlertCircle, Bot, Lock,
   Store, Crown, Briefcase, Headphones, Tag, Tags,
   Shield, Activity, Scale, Archive, Trash2,
 } from 'lucide-react'

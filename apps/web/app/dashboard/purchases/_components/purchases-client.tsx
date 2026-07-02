@@ -3,21 +3,19 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Building2, ShoppingCart } from 'lucide-react'
-import SuppliersManager from './suppliers-manager'
-import PurchaseOrdersManager from './purchase-orders-manager'
+import SuppliersManager, { type Supplier } from './suppliers-manager'
+import PurchaseOrdersManager, { type PurchaseOrder, type PurchaseProduct } from './purchase-orders-manager'
 
 type Props = {
   tenantId: string
   role: string
   canWrite: boolean
-  initialSuppliers: any[]
-  initialPurchaseOrders: any[]
-  products: any[]
+  initialSuppliers: Supplier[]
+  initialPurchaseOrders: PurchaseOrder[]
+  products: PurchaseProduct[]
 }
 
 export default function PurchasesClient({
-  tenantId,
-  role,
   canWrite,
   initialSuppliers,
   initialPurchaseOrders,

@@ -15,7 +15,7 @@ import {
   DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import type {
-  WhatsAppTemplate, TemplateCategory, TemplateStatus, ParameterFormat,
+  WhatsAppTemplate, TemplateCategory, TemplateStatus,
 } from '../page'
 
 type ActionResult = { ok: boolean; error?: string }

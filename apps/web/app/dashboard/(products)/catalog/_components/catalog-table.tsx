@@ -52,7 +52,7 @@ function fmtPrice(vars: Variation[]): string {
 // ── ExpandedPanel — lean: solo tabla de variantes + botón Editar ─────────────
 
 const ExpandedPanel = memo(function ExpandedPanel({
-  p, canWrite, catMap, productCategories, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
+  p, canWrite, productCategories, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
   p: Product; canWrite: boolean; catMap: Record<string, string>; productCategories: { id: string; display_label: string }[]; threshold: number; tenantId: string;
   editProductAction: (fd: FormData) => Promise<void>
@@ -462,7 +462,7 @@ export default function CatalogTable({
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 <th className="w-14 px-3 py-3" />
-                {(['title', 'category', 'price', 'stock'] as const).map((col, i) => {
+                {(['title', 'category', 'price', 'stock'] as const).map((col) => {
                   const labels = { title: 'Producto', category: 'Categoría', price: 'Precio', stock: 'Stock' }
                   const align  = col === 'title' || col === 'category' ? 'text-left' : 'text-right'
                   const hidden = col === 'category' ? 'hidden md:table-cell' : ''

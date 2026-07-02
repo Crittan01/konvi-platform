@@ -27,8 +27,8 @@ export async function linkListing(meliId: string, variationId: string, meliPrice
     }
     revalidatePath('/dashboard/marketplace')
     return { success: true }
-  } catch (error: any) {
-    return { error: error.message || 'Error al vincular' }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al vincular' }
   }
 }
 
@@ -45,8 +45,8 @@ export async function unlinkListing(listingId: string) {
     }
     revalidatePath('/dashboard/marketplace')
     return { success: true }
-  } catch (error: any) {
-    return { error: error.message || 'Error al desvincular' }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al desvincular' }
   }
 }
 
@@ -64,8 +64,8 @@ export async function changeListingStatus(listingId: string, status: 'active' | 
     }
     revalidatePath('/dashboard/marketplace')
     return { success: true }
-  } catch (error: any) {
-    return { error: error.message || 'Error al actualizar estado' }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al actualizar estado' }
   }
 }
 
@@ -84,8 +84,8 @@ export async function importFromMeli(meliId: string, categoryId?: string) {
     revalidatePath('/dashboard/marketplace')
     revalidatePath('/dashboard/catalog')
     return { success: true, data: await res.json() }
-  } catch (error: any) {
-    return { error: error.message || 'Error al importar' }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al importar' }
   }
 }
 
@@ -102,7 +102,7 @@ export async function syncStockFromSupabase(listingId: string) {
     }
     revalidatePath('/dashboard/marketplace')
     return { success: true }
-  } catch (error: any) {
-    return { error: error.message || 'Error al sincronizar stock' }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al sincronizar stock' }
   }
 }

@@ -8,8 +8,16 @@ import { Input } from '@/components/ui/input'
 import { Plus, User, Mail, Phone, CalendarClock } from 'lucide-react'
 import { addSupplier } from '../actions'
 
+export type Supplier = {
+  id: string
+  name: string
+  contact_email?: string | null
+  phone?: string | null
+  lead_time_days?: number | null
+}
+
 type Props = {
-  suppliers: any[]
+  suppliers: Supplier[]
   canWrite: boolean
 }
 

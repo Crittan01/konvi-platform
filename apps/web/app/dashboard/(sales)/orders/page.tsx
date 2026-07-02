@@ -1,12 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Package, Clock, ChevronRight, Plus, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList } from 'lucide-react'
-import OrdersNewForm from './orders-new-form'
 import OrdersManager from './_components/orders-manager'
-import Link from 'next/link'
-import AiInsightPanel from '@/components/ai-insight-panel'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 type Variation = { id: string; price: number | null; attributes: Record<string, string> | null }
@@ -22,41 +16,6 @@ type Order = {
   created_at: string
   contacts: Contact | Contact[] | null
   order_items: OrderItem[]
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  pending:    'Pendiente',
-  confirmed:  'Confirmado',
-  processing: 'En proceso',
-  shipped:    'Enviado',
-  delivered:  'Entregado',
-  cancelled:  'Cancelado',
-}
-
-const STATUS_NEXT: Record<string, string> = {
-  pending:    'confirmed',
-  confirmed:  'processing',
-  processing: 'shipped',
-  shipped:    'delivered',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  pending:    'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  confirmed:  'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  processing: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-  shipped:    'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
-  delivered:  'bg-green-500/15 text-green-400 border-green-500/30',
-  cancelled:  'bg-red-500/15 text-red-400 border-red-500/30',
-}
-
-const STATUS_ICONS: Record<string, React.ElementType> = {
-  all:        LayoutList,
-  pending:    Hourglass,
-  confirmed:  CheckCircle2,
-  processing: Settings2,
-  shipped:    Package,
-  delivered:  MapPin,
-  cancelled:  X,
 }
 
 export default async function OrdersPage({

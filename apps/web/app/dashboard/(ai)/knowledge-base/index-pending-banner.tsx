@@ -9,7 +9,7 @@ interface Props {
 
 export function IndexPendingBanner({ pendingCount }: Props) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
-  const [result, setResult] = useState<{ indexed: number; total: number } | null>(null)
+  const [, setResult] = useState<{ indexed: number; total: number } | null>(null)
 
   if (pendingCount === 0 || state === 'done') return null
 

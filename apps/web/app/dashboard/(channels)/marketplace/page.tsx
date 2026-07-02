@@ -2,7 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import { Store, ExternalLink } from 'lucide-react'
-import MarketplaceManager from './_components/marketplace-manager'
+import MarketplaceManager, { type MeliItem } from './_components/marketplace-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 export default async function MarketplacePage() {
@@ -52,7 +52,7 @@ export default async function MarketplacePage() {
 
   // ── Publicaciones MeLi (desde API — datos reales de MeLi) ─────────────────
   let connected = false
-  let items: any[] = []
+  let items: MeliItem[] = []
   let paging = { total: 0 }
   let marketplaceLoadError: string | null = null
 
@@ -145,7 +145,16 @@ export default async function MarketplacePage() {
 
   // ── Variantes del catálogo interno (Supabase directo con join de producto) ─
   // Usamos Supabase directo (no API) para poder resolver la categoría en el servidor
-  let rawVariations: any[] = []
+  type RawVariationProduct = { id: string; title: string; category_id: string | null }
+  type RawVariation = {
+    id: string
+    sku: string
+    stock_quantity: number
+    price: number
+    attributes: Record<string, string> | null
+    products: RawVariationProduct | RawVariationProduct[] | null
+  }
+  let rawVariations: RawVariation[] = []
   if (tenantId) {
     const { data } = await supabase
       .from('product_variations')

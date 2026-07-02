@@ -31,7 +31,7 @@ async function embedText(text: string, key: string): Promise<number[] | null> {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   const key = process.env.GEMINI_API_KEY
   if (!key) return NextResponse.json({ error: 'GEMINI_API_KEY no configurada' }, { status: 503 })
 

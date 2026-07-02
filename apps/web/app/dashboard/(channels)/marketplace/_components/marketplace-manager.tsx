@@ -5,7 +5,6 @@ import Image from 'next/image'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from '@/components/ui/sheet'
@@ -26,7 +25,7 @@ type MeliVariation = {
   available_quantity: number
 }
 
-type MeliItem = {
+export type MeliItem = {
   meli_id: string
   title: string
   status: 'active' | 'paused' | 'closed'
@@ -174,7 +173,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
     setLoading(meliId, false)
   }
 
-  const handleImport = async (meliId: string, meliTitle: string) => {
+  const handleImport = async (meliId: string, _meliTitle: string) => {
     clearError(meliId)
     setLoading(meliId, true)
     const resp = await importFromMeli(meliId, selectedCategoryId || undefined)

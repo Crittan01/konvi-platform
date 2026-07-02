@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { ShoppingCart } from 'lucide-react'
 import PurchasesClient from './_components/purchases-client'
+import type { PurchaseOrder } from './_components/purchase-orders-manager'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +40,10 @@ export default async function PurchasesPage() {
     .eq('tenant_id', meta.tenant_id)
     .order('created_at', { ascending: false })
   
-  const purchaseOrders = posRes || []
+  // Supabase infiere las relaciones anidadas (suppliers, product_variations) como
+  // arrays, pero al ser FKs to-one el runtime devuelve objeto — que es lo que el
+  // componente lee. Cast en el boundary para reflejar el shape real.
+  const purchaseOrders = (posRes || []) as unknown as PurchaseOrder[]
 
   // Fetch product variations to build new POs
   const { data: prods } = await supabase

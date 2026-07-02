@@ -6,11 +6,40 @@ import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Plus, PackageSearch, Trash2, Check, XCircle } from 'lucide-react'
 import { createPurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder } from '../actions'
+import type { Supplier } from './suppliers-manager'
+
+export type PurchaseProductVariation = {
+  id: string
+  sku?: string | null
+  cost_price?: number | null
+}
+
+export type PurchaseProduct = {
+  id: string
+  title: string
+  product_variations?: PurchaseProductVariation[] | null
+}
+
+export type PurchaseOrder = {
+  id: string
+  status: string
+  total_amount: number
+  created_at: string
+  suppliers?: { name: string } | null
+  purchase_order_items: {
+    quantity: number
+    unit_cost: number
+    product_variations?: {
+      sku?: string | null
+      products?: { title?: string | null } | null
+    } | null
+  }[]
+}
 
 type Props = {
-  orders: any[]
-  suppliers: any[]
-  products: any[]
+  orders: PurchaseOrder[]
+  suppliers: Supplier[]
+  products: PurchaseProduct[]
   canWrite: boolean
 }
 
@@ -160,7 +189,7 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
              </div>
              
              <div className="bg-muted/30 p-2 rounded text-xs space-y-1 mt-2">
-                {o.purchase_order_items.map((i: any, k: number) => (
+                {o.purchase_order_items.map((i, k: number) => (
                   <div key={k} className="flex justify-between w-full">
                      <span className="truncate">{i.quantity}x {i.product_variations?.products?.title} ({i.product_variations?.sku})</span>
                      <span className="font-mono tabular-nums text-muted-foreground ml-2">${i.unit_cost.toLocaleString()}/u.</span>

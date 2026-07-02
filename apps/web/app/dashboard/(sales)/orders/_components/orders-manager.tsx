@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Package, Clock, ChevronRight, Plus, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2, Truck } from 'lucide-react'
+import { Package, Clock, ChevronRight, Hourglass, CheckCircle2, Settings2, MapPin, X, LayoutList, Search, Loader2, Truck } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

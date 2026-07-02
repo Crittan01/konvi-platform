@@ -194,8 +194,6 @@ export default async function AveonlinePanelPage({
 
   const connected = integration?.status === 'connected'
   const empresaId = integration?.credentials.empresa_id as number | undefined
-  const asesorLogistico =
-    integration?.credentials.asesor_logistico as string | undefined
   const nombreAsesor =
     integration?.credentials.nombre_asesor as string | undefined
   const authVersion =

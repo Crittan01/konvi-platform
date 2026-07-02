@@ -1,15 +1,22 @@
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import ExpensesManager from './expenses-manager'
+import { XAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
+import ExpensesManager, { type Expense } from './expenses-manager'
 import { DollarSign, TrendingDown, TrendingUp, Activity, PieChart } from 'lucide-react'
 
 import { useState, useMemo } from 'react'
 
+type FinanceOrder = {
+  created_at?: string | null
+  status: string
+  total_amount: number
+  order_items: { unit_cost: number; quantity: number }[]
+}
+
 type Props = {
-  orders: any[]
-  expenses: any[]
+  orders: FinanceOrder[]
+  expenses: Expense[]
   canWrite: boolean
 }
 
@@ -55,7 +62,7 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
   filteredOrders.forEach(o => {
     if (o.status === 'cancelled') return
     totalRevenue += o.total_amount
-    o.order_items.forEach((item: any) => {
+    o.order_items.forEach((item) => {
       // Si unit_cost es 0, históricamente no teníamos costo. Lo manejamos como COGS 0
       totalCOGS += (item.unit_cost * item.quantity)
     })
@@ -64,8 +71,7 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
   const totalOpex = filteredExpenses.reduce((acc, e) => acc + e.amount, 0)
   
   const grossProfit = totalRevenue - totalCOGS
-  const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0
-  
+
   const netProfit = grossProfit - totalOpex
   const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
 
@@ -150,7 +156,7 @@ export default function FinanceDashboard({ orders, expenses, canWrite }: Props) 
                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
                    <XAxis dataKey="name" tick={{fill: '#888', fontSize: 10}} tickLine={false} axisLine={false} />
                    <Tooltip 
-                     formatter={(value: any) => [fmt(Number(value) || 0), 'Monto']}
+                     formatter={(value: unknown) => [fmt(Number(value) || 0), 'Monto']}
                      contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }}
                    />
                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>

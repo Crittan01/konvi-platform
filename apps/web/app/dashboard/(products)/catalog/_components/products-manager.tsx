@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useFormStatus } from 'react-dom'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -9,20 +8,12 @@ import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import {
-  Plus, Boxes, AlertTriangle, XCircle, SlidersHorizontal, Loader2, Package, Pencil, Check,
+  Plus, Boxes, AlertTriangle, XCircle, SlidersHorizontal, Package,
 } from 'lucide-react'
 import CatalogForm from './catalog-form'
 import MassImporter from './mass-importer'
 import CatalogTable from './catalog-table'
 import type { Product, AttributeDef } from '../types'
-
-type Movement = {
-  id: string
-  delta: number
-  new_stock: number
-  reason: string | null
-  created_at: string
-}
 
 type Props = {
   products: Product[]
@@ -45,14 +36,6 @@ type Props = {
   linkedVariationIds: string[]
 }
 
-function SaveThresholdButton() {
-  const { pending } = useFormStatus()
-  return (
-    <Button type="submit" size="sm" className="h-8 shrink-0" disabled={pending}>
-      {pending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Guardando...</> : 'Guardar'}
-    </Button>
-  )
-}
 
 export default function ProductsManager({
   products, archivedProducts, catMap, canWrite,
