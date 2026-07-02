@@ -17,7 +17,9 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { ScrollText } from 'lucide-react'
+import { CORE_API_URL } from '@/lib/runtime-env'
 import LegalAcceptanceClient from './_components/legal-acceptance-client'
+import { SicReportDownload } from './_components/sic-report-download'
 
 const CURRENT_VERSIONS = {
   dpa: 'v2026-05-01',
@@ -126,6 +128,8 @@ export default async function LegalAcceptancePage() {
         canAccept={canAccept}
         acceptAction={acceptDocument}
       />
+
+      {canAccept && <SicReportDownload apiUrl={CORE_API_URL} />}
     </div>
   )
 }
