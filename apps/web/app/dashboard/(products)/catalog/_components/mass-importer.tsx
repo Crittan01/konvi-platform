@@ -10,9 +10,9 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createClient } from '@/utils/supabase/client'
 import { buildCategoryPicker } from '../_lib/category-tree'
 
-interface Props { productCategories: {id: string, display_label: string, parent_id?: string | null}[]; onImported?: () => void; tenantId: string }
+interface Props { productCategories: {id: string, display_label: string, parent_id?: string | null}[]; onImported?: () => void; tenantId: string; apiUrl: string }
 
-export default function MassImporter({ productCategories, onImported = () => {}, tenantId }: Props) {
+export default function MassImporter({ productCategories, onImported = () => {}, tenantId, apiUrl }: Props) {
   // ADR-0027/0029: la categoría OPERATIVA (la que el bot usa para agrupar) es la ÚNICA que se captura.
   // La marketplace (platform_category_id) NO se pide por producto — se deriva por categoría al publicar.
   const [selectedOpCat, setSelectedOpCat] = useState('')
@@ -192,85 +192,57 @@ export default function MassImporter({ productCategories, onImported = () => {},
       const pNames = Object.keys(productsMap)
       if (pNames.length === 0) throw new Error("No se encontraron productos válidos para importar (falta Nombre o SKU). Revisa la plantilla.")
 
+      // F2: enruta por la API (POST /products/bulk) → hereda RBAC + @audit_log + validación de ownership;
+      // antes escribía DIRECTO a Supabase desde el browser (brecha de las 4 garantías).
       const supabase = createClient()
-      let totalVars = 0
-      
-      // Procesamos secuencialmente producto por producto
-      for (const pName of pNames) {
-        const prodData = productsMap[pName]
-        let productId: string
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.')
 
-        // 1. Check if base product already exists by title
-        const { data: existingProd, error: findErr } = await supabase
-          .from('products')
-          .select('id')
-          .eq('tenant_id', tenantId)
-          .eq('title', pName)
-          .limit(1)
-          .single()
-
-        if (existingProd) {
-          productId = existingProd.id
-          // Optional: Update existing product details? Let's leave them or update status to active
-          await supabase.from('products').update({ status: 'active', ...(selectedOpCat ? { category_id: selectedOpCat } : {}) }).eq('id', productId)
-        } else {
-          // Inyectamos Nuevo Producto Base
-          const { data: prodResp, error: prodErr } = await supabase.from('products').insert({
-            tenant_id: tenantId,
+      const bulkPayload = {
+        products: pNames.map(pName => {
+          const prodData = productsMap[pName]
+          return {
             title: pName,
             description: prodData.desc || null,
             cover_image_url: prodData.img || null,
-            platform_category_id: null,                   // ADR-0029: marketplace derivada por categoría, no por producto
-            category_id: selectedOpCat,                   // operativa = primaria (siempre presente)
-            status: 'active'
-          }).select().single()
-
-          if (prodErr || !prodResp) throw new Error(prodErr?.message || "Error insertando producto " + pName)
-          productId = prodResp.id
-        }
-
-        // 2. Inyectamos / Upsertamos Variantes
-        const varsToUpsert = prodData.variants.map((v: any) => {
-          let price = v.pNormal > 0 ? v.pNormal : 1;
-          let compare_at_price = null;
-          
-          if (v.pPromo && v.pPromo > 0) {
-            price = v.pPromo;
-            compare_at_price = v.pNormal;
+            category_id: selectedOpCat || null,
+            variations: prodData.variants.map((v: any) => {
+              let price = v.pNormal > 0 ? v.pNormal : 1
+              let compare_at_price = null
+              if (v.pPromo && v.pPromo > 0) { price = v.pPromo; compare_at_price = v.pNormal }
+              return {
+                sku: v.sku,
+                price,
+                compare_at_price,
+                cost_price: 0,
+                stock_quantity: v.stock,
+                attributes: Object.fromEntries([
+                  [v.attrKey, v.attrVal],
+                  ...(v.attrKey2 && v.attrVal2 ? [[v.attrKey2, v.attrVal2]] : []),
+                  ...(v.attrKey3 && v.attrVal3 ? [[v.attrKey3, v.attrVal3]] : []),
+                ].filter(([k]) => k && k !== 'Gen\u00e9rico')),
+                weight_kg: v.weight,
+                length_cm: v.length,
+                width_cm: v.width,
+                height_cm: v.height,
+                image_url: v.vImg,
+              }
+            }),
           }
-
-          return {
-            product_id: productId,
-            tenant_id: tenantId,
-            sku: v.sku,
-            price: price,
-            compare_at_price: compare_at_price,
-            stock_quantity: v.stock,
-            attributes: Object.fromEntries([
-              [v.attrKey, v.attrVal],
-              ...(v.attrKey2 && v.attrVal2 ? [[v.attrKey2, v.attrVal2]] : []),
-              ...(v.attrKey3 && v.attrVal3 ? [[v.attrKey3, v.attrVal3]] : []),
-            ].filter(([k]) => k !== 'Genérico')),
-            weight_kg: v.weight,
-            length_cm: v.length,
-            width_cm: v.width,
-            height_cm: v.height,
-            image_url: v.vImg
-          }
-        })
-
-        // Usamos upsert basado en onConflict (tenant_id y sku deben ser unique en DB uc_tenant_sku)
-        const { error: varErr } = await supabase.from('product_variations').upsert(varsToUpsert, {
-          onConflict: 'tenant_id, sku'
-        })
-
-        if (varErr) {
-          throw new Error(`Fallo guardando variantes de ${pName}: ${varErr.message}`)
-        }
-        totalVars += varsToUpsert.length
+        }),
       }
 
-      setSuccess(`¡Importación exitosa! Se procesaron ${pNames.length} productos con ${totalVars} variantes.`)
+      const res = await fetch(`${apiUrl}/api/v1/products/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify(bulkPayload),
+      })
+      if (!res.ok) throw new Error((await res.text()) || `Error ${res.status} en la importaci\u00f3n`)
+      const result = await res.json()
+      const totalVars = result.variants_upserted ?? 0
+      const errCount = Array.isArray(result.errors) ? result.errors.length : 0
+
+      setSuccess(`\u00a1Importaci\u00f3n! ${result.products_created ?? 0} creados, ${result.products_reused ?? 0} reusados, ${totalVars} variantes${errCount ? ` \u00b7 ${errCount} con error (revisa la plantilla)` : ''}.`)
       
       // Pequeño timeout antes de recargar la interfaz para que vean el éxito
       setTimeout(() => {

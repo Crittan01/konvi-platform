@@ -94,6 +94,33 @@ class VariationPatch(BaseModel):
     image_url: Optional[str] = None
 
 
+# ─── Importación masiva (bulk) — enruta el mass-importer por la API (RBAC + audit) ──
+class BulkVariation(BaseModel):
+    sku: str = Field(..., min_length=1, max_length=100)
+    price: float = Field(..., gt=0)
+    compare_at_price: Optional[float] = Field(default=None, ge=0)
+    cost_price: float = Field(default=0, ge=0)
+    stock_quantity: int = Field(default=0, ge=0)
+    attributes: Optional[dict] = None
+    weight_kg: Optional[float] = Field(default=None, ge=0)
+    length_cm: Optional[float] = Field(default=None, ge=0)
+    width_cm: Optional[float] = Field(default=None, ge=0)
+    height_cm: Optional[float] = Field(default=None, ge=0)
+    image_url: Optional[str] = None
+
+
+class BulkProduct(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    category_id: Optional[str] = None
+    variations: List[BulkVariation] = Field(default_factory=list)
+
+
+class BulkImport(BaseModel):
+    products: List[BulkProduct] = Field(default_factory=list, max_length=500)
+
+
 # Campos que NUNCA deben quedar en null vía PATCH (requeridos por el dominio).
 _PRODUCT_NEVER_CLEAR = {"title", "status"}
 _VARIATION_NEVER_CLEAR = {"sku", "price", "stock_quantity"}
@@ -315,6 +342,91 @@ async def create_product(
     except Exception as e:
         logger.error("Error creando producto tenant %s: %s", tenant_id, e)
         raise HTTPException(status_code=500, detail="Error al crear producto")
+
+
+@router.post("/bulk", response_model=dict, status_code=201)
+@audit_log(entity_type="product", action="created")
+async def bulk_import_products(
+    payload: BulkImport,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant),
+    supabase: Client = Depends(get_service_client),
+    _role: str = Depends(require_write_role),
+):
+    """Importación masiva vía API (antes: el importador escribía DIRECTO a Supabase desde el browser,
+    saltándose RBAC + @audit_log + validación de ownership). Por producto: reusa por título o crea; las
+    variantes se upsertan por (tenant_id, sku) — misma semántica que el importador. Tolerante: un producto
+    que falla NO detiene los demás (se acumula en errors). Solo owner/manager."""
+    created = reused = variants_upserted = 0
+    errors: list[dict] = []
+    owned_cats: set = set()
+    for prod in payload.products or []:
+        try:
+            # Ownership de la categoría (una vez por categoría; integridad multi-tenant ADR-0025).
+            if prod.category_id and prod.category_id not in owned_cats:
+                _assert_category_owned(supabase, tenant_id, prod.category_id)
+                owned_cats.add(prod.category_id)
+
+            # Producto: reusar por título (dentro del tenant) o crear.
+            existing = (
+                supabase.table("products").select("id")
+                .eq("tenant_id", tenant_id).eq("title", prod.title).limit(1).execute()
+            )
+            if existing.data:
+                product_id = existing.data[0]["id"]
+                upd = {"status": "active"}
+                if prod.category_id:
+                    upd["category_id"] = prod.category_id
+                supabase.table("products").update(upd).eq("id", product_id).eq("tenant_id", tenant_id).execute()
+                reused += 1
+            else:
+                ins = supabase.table("products").insert({
+                    "tenant_id": tenant_id,
+                    "title": prod.title,
+                    "description": prod.description,
+                    "cover_image_url": prod.cover_image_url,
+                    "category_id": prod.category_id,
+                    # marketplace se deriva por categoría, no per-producto (ADR-0029 D2).
+                    "platform_category_id": None,
+                    "status": "active",
+                }).execute()
+                if not ins.data:
+                    raise RuntimeError("insert de producto sin data")
+                product_id = ins.data[0]["id"]
+                created += 1
+
+            # Variantes: upsert por (tenant_id, sku) — misma clave que el importador (uc_tenant_sku).
+            vrows = [{
+                "product_id": product_id,
+                "tenant_id": tenant_id,
+                "sku": v.sku,
+                "price": v.price,
+                "compare_at_price": v.compare_at_price,
+                "cost_price": v.cost_price,
+                "stock_quantity": v.stock_quantity,
+                "attributes": v.attributes,
+                "weight_kg": v.weight_kg,
+                "length_cm": v.length_cm,
+                "width_cm": v.width_cm,
+                "height_cm": v.height_cm,
+                "image_url": v.image_url,
+            } for v in (prod.variations or [])]
+            if vrows:
+                # tenant_filter:exempt:payload_includes_tenant_id — cada row lleva "tenant_id": tenant_id (arriba)
+                supabase.table("product_variations").upsert(vrows, on_conflict="tenant_id,sku").execute()
+                variants_upserted += len(vrows)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("[BULK] producto '%s' falló: %s", prod.title, exc)
+            errors.append({"product": prod.title, "error": str(exc)})
+
+    return {
+        "products_created": created,
+        "products_reused": reused,
+        "variants_upserted": variants_upserted,
+        "errors": errors,
+    }
 
 
 @router.get("/{product_id}", response_model=dict)
