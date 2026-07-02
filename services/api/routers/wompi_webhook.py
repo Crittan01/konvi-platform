@@ -1417,11 +1417,19 @@ async def _generate_shipping_guide_async(
         # pasar `cod_enabled=True` + `valorrecaudo=total_amount` al cliente
         # Aveonline. El courier recauda al entregar (campo `contraentrega=1`).
         order_total = int(float(order.get("total_amount") or 0))
+        # valorDeclarado del seguro = valor de la MERCANCÍA (subtotal de productos), NO el total con envío
+        # (auditoría coherencia 2026-07-01, LOW #1): se asegura el producto, no el flete. Fallback al total
+        # si no hay shipping_cost. valorrecaudo (COD) SÍ es el total (el courier recauda productos + envío).
+        shipping_cost = int(float(order.get("shipping_cost") or 0))
+        merchandise_cop = max(order_total - shipping_cost, 0) or order_total
         is_cod = (order.get("payment_method") or "credit").lower() == "cod"
         package = {
+            # TODO(envíos follow-up): reusar el peso/dims COTIZADOS (compute_shipping_inputs → shipping_meta.weight_inputs)
+            # en vez de este 0.5kg hardcoded — hoy KAIU sobre-declara peso en productos pequeños. Pieza coordinada
+            # (wirear weight_inputs cotización→meta→guía), path sensible de despacho; no en este cambio.
             "weight_kg": 0.5,  # default conservador (KAIU son productos pequeños)
             "length_cm": 15, "width_cm": 10, "height_cm": 5,
-            "declared_value_cop": order_total,
+            "declared_value_cop": merchandise_cop,
             "units": 1,
             "content": "Productos cosmética artesanal",
             "cod_enabled": is_cod,
