@@ -1426,12 +1426,15 @@ async def _generate_shipping_guide_async(
         shipping_cost = int(float(order.get("shipping_cost") or 0))
         merchandise_cop = max(order_total - shipping_cost, 0) or order_total
         is_cod = (order.get("payment_method") or "credit").lower() == "cod"
+        # F5: reusar peso/dims COTIZADOS (shipping_meta.weight_inputs, persistidos por el quote) → la guía
+        # sale con el peso real y no sobre-declara ni dispara reajuste retroactivo. Fallback a default solo si
+        # el cart no cotizó (guía sin quote previo). `sm` = shipping_meta del cart de ESTA orden (arriba).
+        _wi = (sm or {}).get("weight_inputs") or {}
         package = {
-            # TODO(envíos follow-up): reusar el peso/dims COTIZADOS (compute_shipping_inputs → shipping_meta.weight_inputs)
-            # en vez de este 0.5kg hardcoded — hoy KAIU sobre-declara peso en productos pequeños. Pieza coordinada
-            # (wirear weight_inputs cotización→meta→guía), path sensible de despacho; no en este cambio.
-            "weight_kg": 0.5,  # default conservador (KAIU son productos pequeños)
-            "length_cm": 15, "width_cm": 10, "height_cm": 5,
+            "weight_kg": float(_wi.get("weight_kg") or 0.5),  # default conservador si no hay cotización
+            "length_cm": float(_wi.get("length_cm") or 15),
+            "width_cm": float(_wi.get("width_cm") or 10),
+            "height_cm": float(_wi.get("height_cm") or 5),
             "declared_value_cop": merchandise_cop,
             "units": 1,
             "content": "Productos cosmética artesanal",
@@ -1518,10 +1521,12 @@ async def _generate_shipping_guide_async(
         "building_type": addr.get("building_type"),
         "neighborhood": addr.get("neighborhood"),
     }
-    # Schema shipments requiere `parcels` NOT NULL (JSONB lista paquetes).
+    # Schema shipments requiere `parcels` NOT NULL. F5: refleja el mismo peso/dims cotizados que la guía.
     parcels_jsonb = [{
-        "weight_kg": 0.5,
-        "length_cm": 15, "width_cm": 10, "height_cm": 5,
+        "weight_kg": float(_wi.get("weight_kg") or 0.5),
+        "length_cm": float(_wi.get("length_cm") or 15),
+        "width_cm": float(_wi.get("width_cm") or 10),
+        "height_cm": float(_wi.get("height_cm") or 5),
         "declared_value_cop": int(float(order.get("total_amount") or 0)),
         "units": 1,
         "content": "Productos cosmética artesanal",

@@ -1987,6 +1987,13 @@ async def handle_shipping_quote_if_applicable(
                         cart_id=cart_row["id"],
                         tenant_id=tenant_id,
                         options=opts_to_persist,
+                        # F5: peso/dims REALES cotizados → la guía los reusa (no hardcode 0.5kg).
+                        weight_inputs={
+                            "weight_kg": round(float(package.weight_kg), 3),
+                            "length_cm": float(package.length_cm),
+                            "width_cm": float(package.width_cm),
+                            "height_cm": float(package.height_cm),
+                        },
                     )
                 # ADR-0026 Pieza A: persistir el DESTINO cotizado como dato de primera
                 # clase (mismo fix que el path agentic en legacy_adapters/aveonline.py).

@@ -802,6 +802,7 @@ def set_quoted_options(
     cart_id: str,
     tenant_id: str,
     options: list[dict],
+    weight_inputs: Optional[dict] = None,
 ) -> dict:
     """Persiste en cart.shipping_meta.quoted_options el array completo de
     opciones cotizadas (rate_id + carrier + service + price + eta).
@@ -861,6 +862,10 @@ def set_quoted_options(
 
     new_meta = dict(existing_meta)
     new_meta["quoted_options"] = sanitized
+    # F5: persistir el peso/dims COTIZADOS (weight_inputs) para que la guía (integrations.py) los reuse
+    # en lugar de hardcodear 0.5kg → la guía Aveonline sale con el peso real y no dispara reajuste retroactivo.
+    if isinstance(weight_inputs, dict) and weight_inputs:
+        new_meta["weight_inputs"] = weight_inputs
     (
         supabase.table("conversation_carts")
         .update({"shipping_meta": new_meta})

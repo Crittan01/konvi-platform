@@ -545,12 +545,15 @@ async def aveonline_guide_dry_run(
         ),
         "city": str(address.get("city") or ""),
     }
-    # Peso/dimensiones por default si la order no los tiene.
+    # F5: peso/dims REALES cotizados (el quote los persiste en shipping_meta.weight_inputs). La guía los
+    # REUSA para que Aveonline reciba el peso real y no dispare reajuste retroactivo en la factura semanal.
+    # Fallback a defaults SOLO si el cart no los tiene (p.ej. guía manual sin cotización previa).
+    _wi = shipping_meta.get("weight_inputs") or {}
     package = {
-        "weight_kg": 0.5,
-        "length_cm": 15,
-        "width_cm": 10,
-        "height_cm": 5,
+        "weight_kg": float(_wi.get("weight_kg") or 0.5),
+        "length_cm": float(_wi.get("length_cm") or 15),
+        "width_cm": float(_wi.get("width_cm") or 10),
+        "height_cm": float(_wi.get("height_cm") or 5),
         "declared_value_cop": int(order.get("total_amount") or 50000),
         "units": 1,
         "content": "Productos KAIU — dry-run",
