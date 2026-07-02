@@ -823,7 +823,7 @@
       "table_name": "conversation_carts"
     },
     {
-      "column_count": 9,
+      "column_count": 10,
       "columns": [
         {
           "col": "id",
@@ -878,6 +878,12 @@
           "default": "'whatsapp'::text",
           "nullable": "NO",
           "type": "text"
+        },
+        {
+          "col": "human_takeover_at",
+          "default": null,
+          "nullable": "YES",
+          "type": "timestamp with time zone"
         }
       ],
       "table_name": "conversations"

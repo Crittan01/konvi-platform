@@ -883,8 +883,10 @@ class OrchestratorWorker:
           5. Idempotencia: inserta audit row `content_type='sla_breach_audit'`
              para no re-alertar (append-only flag).
 
-        Esto NO requiere migration — usa la tabla `messages` existente
-        como sistema de eventos.
+        F6: la antigüedad de la escalación se ancla en `conversations.human_takeover_at`
+        (estampado por trigger BEFORE UPDATE al entrar a human_takeover), que NO se
+        renueva con inbounds del cliente. `escalation_audit` sigue delimitando "¿respondió
+        el operador?" y el texto de alerta.
         """
         now = time.time()
         if now - self._last_sla_check_at < max(60, HUMAN_TAKEOVER_SLA_CHECK_INTERVAL_SECONDS):
@@ -896,12 +898,19 @@ class OrchestratorWorker:
         ).isoformat()
 
         try:
-            # Convs en human_takeover desde hace ≥ SLA_HOURS.
+            # Convs en human_takeover desde hace ≥ SLA_HOURS. F6: se gatea por human_takeover_at (instante
+            # de escalación, estampado por trigger) que NO se renueva con inbounds — antes usaba
+            # last_interaction_at, que el cliente renovaba escribiendo → escaladas activas nunca disparaban.
+            # Fallback defensivo vía .or_(): si human_takeover_at es NULL (edge legacy/insert-directo), usa
+            # last_interaction_at para no perder cobertura (post-migración+backfill no debería haber NULLs).
             convs_res = (
                 self.supabase.table("conversations")  # tenant_filter:exempt:cron_cross_tenant_sla_check
-                .select("id, tenant_id, customer_phone, last_interaction_at")
+                .select("id, tenant_id, customer_phone, human_takeover_at, last_interaction_at")
                 .eq("status", "human_takeover")
-                .lt("last_interaction_at", sla_cutoff)
+                .or_(
+                    f"human_takeover_at.lt.{sla_cutoff},"
+                    f"and(human_takeover_at.is.null,last_interaction_at.lt.{sla_cutoff})"
+                )
                 .limit(50)
                 .execute()
             )

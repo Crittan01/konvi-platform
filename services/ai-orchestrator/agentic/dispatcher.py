@@ -164,6 +164,28 @@ async def dispatch_message(
             _mark_message_skipped(supabase, tenant_id, message_id)
             return
 
+    # F6 — Menor de edad gate (PRIORIDAD MÁXIMA, Decreto 1377/2013 Art. 7). Antes solo corría en el path
+    # legacy (orchestrator.py:7758) → en el agentic un menor autodeclarado seguía siendo atendido. Corre
+    # ANTES del gate data-rights porque es la prohibición más fuerte (no tratar datos de menor sin representante).
+    try:
+        if await _handle_minor_intent_if_applicable(
+            supabase,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            content=content,
+            content_type=content_type,
+        ):
+            return
+    except Exception as exc:
+        logger.warning("[MINOR_GATE] error en minor handler: %s", exc)
+        # FAIL-SAFE: si detectó menor y el handler falló, NO avanzar al LLM (tratar datos de menor es la
+        # dirección legalmente insegura) → skip.
+        from safety.consent_gates import detect_minor_intent
+        if content_type == "text" and detect_minor_intent(content):
+            _mark_message_skipped(supabase, tenant_id, message_id)
+            return
+
     # A11 2026-06-26 (palanca 3) — Habeas Data DSR gate: solicitudes de derechos
     # de datos NO-keyword ("borren mis datos", "retiro mi consentimiento", "derecho
     # al olvido") se escalan a humano + acusan recibo DETERMINÍSTICAMENTE (Ley 1581
@@ -460,6 +482,92 @@ async def _handle_data_rights_if_intent(
         "[HABEAS_DATA] DSR detectado conv=%s phrase=%r → escalado a humano",
         (conversation_id or "?")[:8], matched[:80],
     )
+    return True
+
+
+async def _handle_minor_intent_if_applicable(
+    supabase,
+    *,
+    message_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    content: str,
+    content_type: str,
+) -> bool:
+    """Decreto 1377/2013 Art. 7 (PRIORIDAD MÁXIMA): si el cliente declara/sugiere ser MENOR de edad, el
+    tratamiento de sus datos sin autorización del representante legal es ILEGAL → NO se continúa NINGÚN flujo
+    comercial. Responde pidiendo el representante + escala a humano (operador adulto valida identidad) +
+    notifica. Determinístico (pre-LLM), espejo del gate data-rights. Retorna True → el caller NO avanza al LLM.
+
+    Portado del path legacy (orchestrator.py:7758) que en el path AGENTIC no corría → un menor autodeclarado
+    seguía siendo atendido por el bot (gap de cumplimiento). El human_takeover_at lo estampa el trigger DB."""
+    if content_type != "text":
+        return False
+    from safety.consent_gates import detect_minor_intent
+    if not detect_minor_intent(content):
+        return False
+
+    from orchestrator import (
+        _send_outbound_text, _mark_message_processing, PROCESSING_STATUS_PROCESSED,
+    )
+    minor_text = (
+        "Por nuestra política de protección de datos no podemos continuar con la compra directamente "
+        "contigo (Habeas Data Ley 1581/2012, Decreto 1377 Art. 7). Necesitamos que tu padre, madre o "
+        "tutor legal nos escriba a este chat para autorizar la operación. Mientras tanto, un asesor del "
+        "equipo te contactará si lo necesitas."
+    )
+    # 1. Responder al cliente (cordial, cita legal).
+    try:
+        await _send_outbound_text(
+            supabase=supabase, conversation_id=conversation_id,
+            tenant_id=tenant_id, text=minor_text,
+        )
+    except Exception as exc:
+        logger.error("[MINOR] send falló conv=%s: %s", conversation_id, exc)
+    # 2. Escalar a humano (fail-safe con reintento — no dejar al bot atendiendo a un menor). El trigger
+    #    stamp_human_takeover_at pone human_takeover_at automáticamente.
+    status_set = False
+    for _attempt in range(2):
+        try:
+            supabase.table("conversations").update({
+                "status": "human_takeover",
+            }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+            status_set = True
+            break
+        except Exception as exc:
+            logger.warning("[MINOR] status update intento %d falló: %s", _attempt + 1, exc)
+    if not status_set:
+        logger.critical(
+            "[MINOR] NO se pudo pausar la conversación conv=%s tras detectar menor — "
+            "requiere PAUSA MANUAL del operador (Decreto 1377 Art. 7)", conversation_id,
+        )
+    # 3. Notificar al operador (INDEPENDIENTE del status).
+    _pause_warn = "" if status_set else (
+        "\n⚠️ *La auto-pausa del bot FALLÓ — pausa esta conversación MANUALMENTE ya.*"
+    )
+    try:
+        from telegram_notifications import notify_escalation_async
+        await notify_escalation_async(
+            supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+            reason=(
+                f"🚸 *Menor de edad autodeclarado (Decreto 1377/2013 Art. 7)*\n"
+                f"El cliente declaró/sugirió ser menor: «{content[:120]}».\n\nConversación pasó a "
+                f"human_takeover. Acción: validar identidad del representante legal antes de continuar."
+                f"{_pause_warn}"
+            ),
+            severity="critical",
+        )
+    except Exception as exc:
+        logger.warning("[MINOR] telegram notif falló: %s", exc)
+    # 4. Marcar procesado — NO avanzar al LLM.
+    try:
+        _mark_message_processing(
+            supabase, tenant_id, message_id,
+            processing_status=PROCESSING_STATUS_PROCESSED,
+        )
+    except Exception:
+        pass
+    logger.info("[MINOR] menor detectado conv=%s → escalado a humano", (conversation_id or "?")[:8])
     return True
 
 
