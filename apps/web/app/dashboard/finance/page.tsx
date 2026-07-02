@@ -12,6 +12,8 @@ export default async function FinancePage() {
   if (!user) redirect('/login')
 
   const { tenantId, role } = await getCachedTenantMeta()
+  // Guard server-side (matriz 2026-07-02): Finanzas (P&L) = owner. Sin esto manager/operator lo abren por URL directa.
+  if (role !== 'owner') redirect('/dashboard')
   if (!tenantId) {
     return <div className="p-8 text-center text-destructive">Error: Usuario no asociado a ningún tenant.</div>
   }

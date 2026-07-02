@@ -53,6 +53,8 @@ export default async function AuditPage({
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'
+  // Guard server-side (matriz 2026-07-02): Auditoría = owner (dato sensible: quién cambió qué). Sin esto se abre por URL.
+  if (role !== 'owner') redirect('/dashboard')
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>

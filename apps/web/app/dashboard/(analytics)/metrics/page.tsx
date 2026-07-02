@@ -49,6 +49,8 @@ export default async function MetricsPage({
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
   const role = meta.role ?? 'operator'
+  // Guard server-side (matriz 2026-07-02): Métricas = owner/manager. Sin esto un operator entra por URL directa.
+  if (role !== 'owner' && role !== 'manager') redirect('/dashboard')
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>
