@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Image from 'next/image'
 import { createClient } from '@/utils/supabase/client'
 import {
@@ -16,8 +16,9 @@ import {
 } from 'lucide-react'
 import { ImageUploadBox } from './image-upload-box'
 import { VariantMatrixGenerator } from './variant-matrix'
-import type { Product, Variation } from '../types'
+import type { Product, Variation, AttributeDef } from '../types'
 import { buildCategoryPicker } from '../_lib/category-tree'
+import { optionOf } from '../_lib/attribute-contract'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -170,6 +171,41 @@ export function ProductEditDrawer({
   const [showAddVar, setShowAddVar] = useState<'manual' | 'matrix' | false>(false)
   const [newVarAttrs, setNewVarAttrs] = useState([{ key: '', value: '' }])
 
+  // ADR-0029 D4: editor de atributos PRODUCT-LEVEL guiado por el contrato de la categoría. Auto-consulta las
+  // definiciones no-variante al abrir (RLS via JWT) → inputs guiados; el save va por el PATCH validado (page.tsx).
+  const [contractDefs, setContractDefs] = useState<AttributeDef[]>([])
+  const [prodAttrs, setProdAttrs] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries((product.attributes ?? {}) as Record<string, unknown>)) {
+      out[k] = String(v ?? '')
+    }
+    return out
+  })
+  useEffect(() => {
+    if (!open || !product.category_id) { setContractDefs([]); return }
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const { data } = await sb
+        .from('product_attribute_definitions')
+        .select('product_category_id, code, label, type, unit, allowed_values, is_variant_axis, sort_order')
+        .eq('tenant_id', tenantId)
+        .eq('product_category_id', product.category_id)
+        .eq('is_variant_axis', false)
+        .order('sort_order')
+      if (!cancelled) setContractDefs((data as AttributeDef[]) ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [open, product.category_id, tenantId])
+
+  const setProdAttr = (label: string, value: string) => setProdAttrs(p => ({ ...p, [label]: value }))
+  // Solo se envían atributos DEFINIDOS en el contrato y no vacíos (coherente con la validación HARD;
+  // los legacy fuera de contrato no se reenvían para no disparar 422). Sin contrato → no se toca attributes.
+  const contractLabels = new Set(contractDefs.map(d => d.label))
+  const attrsPayload = Object.fromEntries(
+    Object.entries(prodAttrs).filter(([k, v]) => contractLabels.has(k) && v.trim())
+  )
+
   // "Sugerir con IA" — refs a los textareas (form no-controlado) + draft.
   const descRef = useRef<HTMLTextAreaElement>(null)
   const safetyRef = useRef<HTMLTextAreaElement>(null)
@@ -267,6 +303,44 @@ export function ProductEditDrawer({
                 </div>
               </div>
               <ImageUploadBox name="cover_image_url" defaultUrl={product.cover_image_url ?? ''} tenantId={tenantId} size="lg" label="Imagen portada" />
+
+              {/* ADR-0029 D4: atributos PRODUCT-LEVEL guiados por el contrato (solo si la categoría lo tiene).
+                  El save va por el PATCH validado; el hidden field serializa solo los del contrato no vacíos. */}
+              {contractDefs.length > 0 && (
+                <div className="space-y-2 pt-3 border-t border-border/40">
+                  <input type="hidden" name="attributes" value={JSON.stringify(attrsPayload)} />
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase">
+                    Atributos de esta categoría <span className="normal-case font-normal text-muted-foreground/70">— el bot los cita como hechos</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {contractDefs.map(d => {
+                      const opts = (d.allowed_values ?? []).map(v => optionOf(d, String(v)))
+                      const cur = prodAttrs[d.label] ?? ''
+                      const orphan = cur && !opts.includes(cur) ? cur : null
+                      return (
+                        <div key={d.code || d.label} className="space-y-1">
+                          <label className="text-[10px] text-muted-foreground">{d.label}{d.unit ? ` (${d.unit})` : ''}</label>
+                          {opts.length > 0 ? (
+                            <select value={cur} onChange={e => setProdAttr(d.label, e.target.value)}
+                              className="w-full h-8 rounded-md border border-input bg-background text-sm px-2 text-foreground">
+                              <option value="">— sin definir —</option>
+                              {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                              {orphan && <option value={orphan}>{orphan} (fuera de contrato)</option>}
+                            </select>
+                          ) : (
+                            <Input value={cur} onChange={e => setProdAttr(d.label, e.target.value)}
+                              placeholder={d.type === 'boolean' ? 'Sí / No' : d.type === 'number' ? 'Número' : ''}
+                              className="h-8 text-sm" />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/70">
+                    Los de lista o número con unidad se validan contra sus opciones al guardar (anti-alucinación).
+                  </p>
+                </div>
+              )}
 
               {/* Rev. 109 backlog #1 — Retracto categories multi-tenant.
                   Tenant marca productos excluidos del Art. 47 Ley 1480

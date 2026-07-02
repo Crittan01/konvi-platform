@@ -48,7 +48,7 @@ export default async function CatalogPage() {
     const [activeRes, archivedRes, tenantRes, listingsRes] = await Promise.all([
       supabase
         .from('products')
-        .select(`id, title, description, safety_note, cover_image_url, platform_category_id, category_id,
+        .select(`id, title, description, safety_note, cover_image_url, platform_category_id, category_id, attributes,
                  retracto_excluded, retracto_excluded_reason,
                  product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
@@ -56,7 +56,7 @@ export default async function CatalogPage() {
         .order('title'),
       supabase
         .from('products')
-        .select(`id, title, description, safety_note, cover_image_url, platform_category_id, category_id,
+        .select(`id, title, description, safety_note, cover_image_url, platform_category_id, category_id, attributes,
                  retracto_excluded, retracto_excluded_reason,
                  product_variations(id, sku, cost_price, price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)`)
         .eq('tenant_id', tenantId)
@@ -110,6 +110,12 @@ export default async function CatalogPage() {
     }
     const coverUrl = formData.get('cover_image_url') as string
     if (coverUrl) payload.cover_image_url = coverUrl
+    // ADR-0029 D4: atributos product-level (JSON del editor guiado por el contrato). El backend los
+    // valida contra product_attribute_definitions de la categoría (rechaza fuera de contrato).
+    const attrsJson = formData.get('attributes') as string
+    if (attrsJson != null && attrsJson !== '') {
+      try { payload.attributes = JSON.parse(attrsJson) } catch { /* malformado → no se envía */ }
+    }
 
     try {
       const ctrl = new AbortController()
