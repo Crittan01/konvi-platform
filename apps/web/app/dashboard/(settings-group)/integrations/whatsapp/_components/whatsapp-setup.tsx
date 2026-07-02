@@ -19,15 +19,17 @@ type Props = {
   connected: boolean
   credentials: Record<string, string>
   canWrite: boolean
+  tenantId: string
 }
 
-export default function WhatsAppSetup({ connected, credentials }: Props) {
+export default function WhatsAppSetup({ connected, credentials, tenantId }: Props) {
   if (!connected) {
     return (
       <EmptyDisconnected
         icon={MessageSquareText}
         providerLabel="WhatsApp Business"
-        helpText="La conexión se realiza vía Embedded Signup desde el panel principal de Integraciones."
+        // ADR-0023 (Model B Direct Provider): cada tenant trae SU PROPIA Meta App. NO Embedded Signup.
+        helpText="Cada negocio conecta su propia Meta App (Direct Provider): captura tus credenciales de WhatsApp Cloud API (App Secret, Verify Token, Phone Number ID, WABA ID, Access Token) desde el panel de Integraciones."
       />
     )
   }
@@ -66,10 +68,12 @@ export default function WhatsAppSetup({ connected, credentials }: Props) {
       {/* 2. Webhook & Eventos */}
       <SetupSection icon={Webhook} title="Webhook & Eventos">
         <div className="space-y-2">
-          <div className="text-xs text-muted-foreground">URL recibida por Meta</div>
+          <div className="text-xs text-muted-foreground">
+            URL de Callback (Meta → Configuración → Webhooks). Es PER-TENANT: incluye tu ID. Sin el ID, Meta recibe 404.
+          </div>
           <div className="flex items-center gap-2">
             <code className="flex-1 truncate font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
-              https://api.konvi.co/api/v1/whatsapp/webhook
+              https://api.konvi.co/api/v1/whatsapp/webhook/{tenantId}
             </code>
             <button
               type="button"

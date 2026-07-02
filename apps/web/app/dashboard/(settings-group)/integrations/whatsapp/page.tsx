@@ -451,6 +451,7 @@ export default async function WhatsAppIntegrationPage({
           connected={connected}
           credentials={integration?.credentials ?? {}}
           canWrite={canWrite}
+          tenantId={tenantId ?? ''}
         />
       )}
 
