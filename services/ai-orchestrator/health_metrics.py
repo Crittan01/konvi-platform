@@ -128,18 +128,22 @@ def collect_whatsapp(supabase: Any, tenant_id: str) -> list[HealthMetric]:
             detail={"reason": "no access_token in Vault"},
         )]
 
-    # phone_number_id viene del meta del tenant_integrations.
+    # BUG F5: phone_number_id vive en tenant_integrations.CREDENTIALS (fuente canónica, igual que
+    # whatsapp_sender._get_tenant_wa_credentials), NO en meta → leer meta daba siempre None → el health
+    # reportaba "missing phone_number_id" / crítico falso aunque el tenant estuviera bien configurado.
     try:
-        meta_res = (
+        row_res = (
             supabase.table("tenant_integrations")
-            .select("meta")
+            .select("credentials, meta")
             .eq("tenant_id", tenant_id)
             .eq("provider", "whatsapp")
             .limit(1)
             .execute()
         )
-        meta = (meta_res.data or [{}])[0].get("meta") or {}
-        phone_id = meta.get("phone_number_id")
+        row = (row_res.data or [{}])[0]
+        creds = row.get("credentials") or {}
+        meta = row.get("meta") or {}
+        phone_id = creds.get("phone_number_id") or meta.get("phone_number_id")
     except Exception:
         phone_id = None
 
