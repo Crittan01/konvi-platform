@@ -3,8 +3,11 @@
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight, SlidersHorizontal } from 'lucide-react'
 import { createCategory, updateCategory, deleteCategory } from '../actions'
+import { AttributeContractEditor, type AttributeDef } from './attribute-contract-editor'
+
+export type { AttributeDef }
 
 export type CategoryRow = {
   id: string
@@ -30,9 +33,11 @@ const ROOT = '__root__'  // sentinel de <select> = sin padre (categoría raíz /
 
 export default function CategoriesManager({
   categories,
+  attributeDefs,
   canWrite,
 }: {
   categories: CategoryRow[]
+  attributeDefs: AttributeDef[]
   canWrite: boolean
 }) {
   const [pending, startTransition] = useTransition()
@@ -42,11 +47,13 @@ export default function CategoriesManager({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
   const [editParent, setEditParent] = useState<string>(ROOT)
+  const [editorCat, setEditorCat] = useState<CategoryRow | null>(null)   // categoría cuyo contrato de atributos se edita
 
   // Raíces = candidatos a padre (la API exige que el padre sea raíz → jerarquía de 2 niveles).
   const roots = categories.filter(c => !c.parent_id)
   const childrenOf = (id: string) => categories.filter(c => c.parent_id === id)
   const hasChildren = (id: string) => categories.some(c => c.parent_id === id)
+  const defsFor = (id: string) => attributeDefs.filter(d => d.product_category_id === id)
 
   function handleCreate() {
     const label = newLabel.trim()
@@ -168,6 +175,16 @@ export default function CategoriesManager({
                 {c.product_count} producto{c.product_count === 1 ? '' : 's'}
               </span>
             )}
+            {/* Contrato de atributos: solo en HOJAS (los productos cuelgan de hojas y heredan su contrato). */}
+            {!isParent && canWrite && (
+              <button
+                onClick={() => setEditorCat(c)}
+                className="text-[11px] h-7 px-2 inline-flex items-center gap-1 rounded-md border border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                title="Definir los atributos que describen los productos de esta categoría"
+              >
+                <SlidersHorizontal className="h-3 w-3" /> Atributos ({defsFor(c.id).length})
+              </button>
+            )}
             {canWrite && (
               <>
                 <button
@@ -266,6 +283,17 @@ export default function CategoriesManager({
           </div>
         ))}
       </div>
+
+      {/* Editor del contrato de atributos de la categoría hoja seleccionada. */}
+      {editorCat && (
+        <AttributeContractEditor
+          categoryId={editorCat.id}
+          categoryLabel={editorCat.display_label}
+          defs={defsFor(editorCat.id)}
+          open={!!editorCat}
+          onOpenChange={o => { if (!o) setEditorCat(null) }}
+        />
+      )}
     </div>
   )
 }

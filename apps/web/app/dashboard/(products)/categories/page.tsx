@@ -1,6 +1,6 @@
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { createClient } from '@/utils/supabase/server'
-import CategoriesManager, { type CategoryRow } from './_components/categories-manager'
+import CategoriesManager, { type CategoryRow, type AttributeDef } from './_components/categories-manager'
 
 // ADR-0027 — gestión de categorías OPERATIVAS per-tenant (las que el bot presenta al cliente).
 // READ directo (RLS via JWT, como el catálogo); WRITE vía API (actions.ts → RBAC + audit).
@@ -11,8 +11,9 @@ export default async function CategoriesPage() {
   const supabase = createClient()
 
   let categories: CategoryRow[] = []
+  let attributeDefs: AttributeDef[] = []
   if (tenantId) {
-    const [catsRes, prodsRes] = await Promise.all([
+    const [catsRes, prodsRes, defsRes] = await Promise.all([
       supabase
         .from('product_categories')
         .select('id, name, display_label, sort_order, parent_id')
@@ -24,6 +25,12 @@ export default async function CategoriesPage() {
         .select('category_id')
         .eq('tenant_id', tenantId)
         .eq('status', 'active'),
+      // ADR-0029 D3 — contrato de atributos por categoría (READ directo por RLS; WRITE vía actions.ts).
+      supabase
+        .from('product_attribute_definitions')
+        .select('id, product_category_id, label, type, unit, is_variant_axis, allowed_values, sort_order')
+        .eq('tenant_id', tenantId)
+        .order('sort_order'),
     ])
     const cats = (catsRes.data as Omit<CategoryRow, 'product_count'>[]) ?? []
     const counts: Record<string, number> = {}
@@ -31,7 +38,8 @@ export default async function CategoriesPage() {
       if (p.category_id) counts[p.category_id] = (counts[p.category_id] ?? 0) + 1
     }
     categories = cats.map(c => ({ ...c, product_count: counts[c.id] ?? 0 }))
+    attributeDefs = (defsRes.data as AttributeDef[]) ?? []
   }
 
-  return <CategoriesManager categories={categories} canWrite={canWrite} />
+  return <CategoriesManager categories={categories} attributeDefs={attributeDefs} canWrite={canWrite} />
 }
