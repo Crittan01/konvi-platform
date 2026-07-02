@@ -569,7 +569,7 @@ async def import_from_meli(
       3. INSERT product_variations      → crea variante con stock y precio de MeLi
       4. INSERT marketplace_listings    → vincula automáticamente
 
-    Body: { meli_id: "MLA123456", category_id: "uuid" (opcional) }
+    Body: { meli_id: "MLA123456", category_id: "uuid" (opcional, categoría OPERATIVA product_categories) }
 
     Solo importa: título, precio, stock disponible.
     Descripción, imágenes y atributos adicionales se completan desde el Catálogo.
@@ -577,7 +577,9 @@ async def import_from_meli(
     supabase = _get_service_client()
 
     meli_id = payload.get("meli_id", "").strip().upper()
-    category_id = payload.get("category_id")  # platform_categories.id — opcional
+    # Coherencia (ADR-0029 D2): el producto importado hereda una categoría OPERATIVA (product_categories,
+    # la que usa el bot y el listado), NO la de marketplace. platform_category_id nace null como en toda alta.
+    category_id = payload.get("category_id")  # product_categories.id (operativa) — opcional
 
     if not meli_id:
         raise HTTPException(status_code=400, detail="meli_id es requerido")
@@ -619,13 +621,25 @@ async def import_from_meli(
     # Generar SKU base desde el ID de MeLi
     sku = f"ML-{meli_id}"
 
-    # 2. Crear producto en Supabase
+    # Validar ownership de la categoría OPERATIVA (integridad multi-tenant, patrón _assert_category_owned).
+    if category_id:
+        owned = (
+            supabase.table("product_categories")
+            .select("id")
+            .eq("id", category_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not owned.data:
+            raise HTTPException(status_code=422, detail="Categoría de catálogo inválida para este tenant")
+
+    # 2. Crear producto en Supabase (category_id = operativa; platform_category_id nace null — se deriva por categoría).
     prod_payload = {
-        "tenant_id":            tenant_id,
-        "title":                title,
-        "description":          f"Importado desde Mercado Libre. ID: {meli_id}",
-        "status":               "active",
-        "platform_category_id": category_id,
+        "tenant_id":   tenant_id,
+        "title":       title,
+        "description": f"Importado desde Mercado Libre. ID: {meli_id}",
+        "status":      "active",
+        "category_id": category_id,
     }
     if cover_image_url:
         prod_payload["cover_image_url"] = cover_image_url

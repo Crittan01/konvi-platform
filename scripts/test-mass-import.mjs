@@ -153,7 +153,7 @@ async function runImport(rows, label) {
         title: pName,
         description: prodData.desc,
         cover_image_url: null,
-        platform_category_id: CATEGORY_ID,
+        category_id: CATEGORY_ID,   // categoría OPERATIVA (product_categories) — coherente con producción (ADR-0029 D2)
         status: 'active'
       })
       if (error?.code) throw new Error(`Error insertando "${pName}": ${JSON.stringify(error)}`)

@@ -62,7 +62,7 @@ type Variation = {
 
 type Category = {
   id: string
-  name: string
+  display_label: string   // categoría OPERATIVA (product_categories) — la que administra Categorías y usa el bot
 }
 
 type Props = {
@@ -579,7 +579,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                 </div>
 
                 <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground">Categoría (opcional):</p>
+                  <p className="text-xs text-muted-foreground">Categoría de catálogo (opcional):</p>
                   <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
                     <SelectTrigger className="h-9 text-sm">
                       <SelectValue placeholder="Sin categoría" />
@@ -587,7 +587,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                     <SelectContent className="max-h-60">
                       <SelectItem value="_none">Sin categoría</SelectItem>
                       {categories.map(c => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        <SelectItem key={c.id} value={c.id}>{c.display_label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

@@ -134,22 +134,14 @@ export default async function MarketplacePage() {
     )
   }
 
-  // ── Categorías globales (Supabase directo — igual que catalog/page.tsx) ────
-  const { data: cats } = await supabase
-    .from('platform_categories')
-    .select('id, name')
-    .eq('is_active', true)
-    .order('name')
-  const categories = (cats ?? []) as { id: string; name: string }[]
-  // Categorías OPERATIVAS per-tenant — el agrupado del catálogo interno usa ESTA taxonomía (la que
-  // administra el módulo Categorías y usa el bot), NO la de marketplace. `categories` (platform) se
-  // conserva porque lo consume el selector de "Importar desde MeLi".
+  // ── Categorías OPERATIVAS per-tenant (product_categories) — la ÚNICA taxonomía que se muestra al operador
+  // y se asigna al importar: la que administra el módulo Categorías y usa el bot (ADR-0027/0029 D2). La de
+  // marketplace (platform_categories) ya NO se usa aquí (ni para agrupar ni para el import → coherencia).
   const { data: pcats } = tenantId
-    ? await supabase.from('product_categories').select('id, display_label').eq('tenant_id', tenantId)
+    ? await supabase.from('product_categories').select('id, display_label').eq('tenant_id', tenantId).order('sort_order')
     : { data: [] }
-  const opCatMap = Object.fromEntries(
-    ((pcats ?? []) as { id: string; display_label: string }[]).map(c => [c.id, c.display_label])
-  )
+  const categories = (pcats ?? []) as { id: string; display_label: string }[]
+  const opCatMap = Object.fromEntries(categories.map(c => [c.id, c.display_label]))
 
   // ── Variantes del catálogo interno (Supabase directo con join de producto) ─
   // Usamos Supabase directo (no API) para poder resolver la categoría en el servidor

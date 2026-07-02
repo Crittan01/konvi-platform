@@ -57,8 +57,8 @@ class VariationCreate(BaseModel):
 
 
 class ProductCreate(BaseModel):
-    platform_category_id: Optional[str] = None
-    category_id: Optional[str] = None        # ADR-0027 categoría operativa per-tenant
+    # platform_category_id (marketplace) NO se captura por producto (ADR-0029 D2: se deriva por categoría).
+    category_id: Optional[str] = None        # ADR-0027 categoría operativa per-tenant (única taxonomía de alta)
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     safety_note: Optional[str] = None        # nota de seguridad (Ley 1480, customer-facing)
@@ -69,8 +69,7 @@ class ProductCreate(BaseModel):
 
 
 class ProductPatch(BaseModel):
-    platform_category_id: Optional[str] = None
-    category_id: Optional[str] = None        # ADR-0027 categoría operativa per-tenant
+    category_id: Optional[str] = None        # ADR-0027 categoría operativa per-tenant (marketplace se deriva, no per-producto)
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
     safety_note: Optional[str] = None
@@ -262,7 +261,8 @@ async def create_product(
 
         prod_result = supabase.table("products").insert({
             "tenant_id": tenant_id,
-            "platform_category_id": product.platform_category_id,
+            # platform_category_id nace null: la taxonomía marketplace se deriva por categoría (ADR-0029 D2).
+            "platform_category_id": None,
             "category_id": product.category_id,
             "title": product.title,
             "description": product.description,
