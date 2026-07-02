@@ -214,6 +214,105 @@ def _build_internal_headers(tenant_id: str) -> Optional[dict]:
     }
 
 
+def _reserve_checkout_stock(
+    supabase,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    cart_id: Optional[str],
+    items: list[dict],
+) -> tuple[list[str], list[str]]:
+    """Reserva stock para el checkout SIN doble-conteo (F4).
+
+    add_to_cart YA creó una reserva SOFT (15min) por cada ítem del cart. Crear
+    reservas NUEVAS aquí las contaba DOBLE contra el stock (rpc_stock_reserve
+    resta TODAS las reservas activas de la variation, sin dedup por cart) → en la
+    última unidad (stock < 2×qty) el 2º reserve veía available<qty → falso
+    "sin stock" y bloqueaba la venta legítima. Fix: EXTENDER las reservas del
+    cart al checkout window (35min) y reservar fresco SOLO el delta no cubierto.
+
+    Devuelve (reservation_ids_frescas, insufficient). El caller hace el rollback
+    de las reservas frescas si `insufficient` no está vacío.
+    """
+    from lib import stock_reservation as _stock_res
+    already_reserved: dict[str, int] = {}
+    if cart_id:
+        try:
+            _stock_res.extend_by_cart(
+                supabase, tenant_id=tenant_id, cart_id=cart_id,
+                ttl_minutes=_stock_res.TTL_CHECKOUT_HARD_MINUTES,
+            )
+            for r in _stock_res.get_active_for_cart(
+                supabase, tenant_id=tenant_id, cart_id=cart_id,
+            ):
+                already_reserved[r["variation_id"]] = (
+                    already_reserved.get(r["variation_id"], 0) + int(r.get("qty") or 0)
+                )
+        except Exception as exc:
+            logger.warning(
+                "[PAYMENT_LINK] extend_by_cart falló cart=%s err=%s — reservo fresco",
+                cart_id, exc,
+            )
+
+    reservation_ids: list[str] = []
+    insufficient: list[str] = []
+    for it in items:
+        var_id = it.get("variation_id")
+        qty_needed = int(it.get("quantity") or 1)
+        if not var_id or qty_needed <= 0:
+            continue
+        # El cart ya reserva este ítem (reserva soft extendida arriba) → NO reservar
+        # de nuevo. Solo reservar el faltante si la cobertura del cart es parcial.
+        covered = already_reserved.get(var_id, 0)
+        if covered >= qty_needed:
+            continue
+        qty_to_reserve = qty_needed - covered
+        try:
+            res = supabase.rpc("rpc_stock_reserve", {
+                "p_tenant_id": tenant_id,
+                "p_variation_id": var_id,
+                "p_qty": qty_to_reserve,
+                "p_cart_id": cart_id,
+                "p_conversation_id": conversation_id,
+                "p_ttl_minutes": 35,
+            }).execute()
+            rows = res.data or []
+            first = rows[0] if rows else None
+            # rpc_stock_reserve devuelve out_reservation_id (no reservation_id): leer solo
+            # reservation_id daba None → el rollback no liberaba. out_ primero (espeja lib).
+            rid = (first.get("out_reservation_id") or first.get("reservation_id")) if first else None
+            if rid:
+                reservation_ids.append(rid)
+            else:
+                logger.warning(
+                    "[PAYMENT_LINK] rpc_stock_reserve sin reservation_id var=%s rsp=%s",
+                    var_id, rows,
+                )
+        except Exception as exc:
+            # Detectar insufficient_stock por message (Postgres P0001).
+            msg = str(exc).lower()
+            if "insufficient_stock" in msg or "p0001" in msg:
+                # Lookup current available para mensaje informativo.
+                try:
+                    r = supabase.table("product_variations").select(
+                        "sku, stock_quantity"
+                    ).eq("tenant_id", tenant_id).eq("id", var_id).single().execute()
+                    sku = (r.data or {}).get("sku") or var_id[:8]
+                    have = (r.data or {}).get("stock_quantity") or 0
+                    insufficient.append(
+                        f"{sku} (pediste {qty_needed}, disponibles ~{have})"
+                    )
+                except Exception:
+                    insufficient.append(f"{var_id[:8]} (pediste {qty_needed})")
+            else:
+                logger.warning(
+                    "[PAYMENT_LINK] rpc_stock_reserve error var=%s err=%s",
+                    var_id, exc,
+                )
+                insufficient.append(f"{var_id[:8]} (error al reservar)")
+    return reservation_ids, insufficient
+
+
 async def handle_payment_link_if_applicable(
     *,
     tenant_id: str,
@@ -456,57 +555,14 @@ async def handle_payment_link_if_applicable(
     except Exception as exc:
         logger.warning("[PAYMENT_LINK] cart_id lookup falló conv=%s err=%s", conversation_id, exc)
 
-    reservation_ids: list[str] = []
-    insufficient: list[str] = []
-    for it in items_to_persist:
-        var_id = it.get("variation_id")
-        qty_needed = int(it.get("quantity") or 1)
-        if not var_id or qty_needed <= 0:
-            continue
-        try:
-            res = supabase.rpc("rpc_stock_reserve", {
-                "p_tenant_id": tenant_id,
-                "p_variation_id": var_id,
-                "p_qty": qty_needed,
-                "p_cart_id": cart_id_for_reserve,
-                "p_conversation_id": conversation_id,
-                "p_ttl_minutes": 35,
-            }).execute()
-            rows = res.data or []
-            first = rows[0] if rows else None
-            # BUG F4: rpc_stock_reserve devuelve out_reservation_id (no reservation_id). Leer solo
-            # reservation_id daba None → el id nunca se trackeaba → el rollback (abajo) no liberaba y el
-            # stock quedaba bloqueado hasta el barrido TTL. Espeja lib/stock_reservation.py (out_ primero).
-            rid = (first.get("out_reservation_id") or first.get("reservation_id")) if first else None
-            if rid:
-                reservation_ids.append(rid)
-            else:
-                logger.warning(
-                    "[PAYMENT_LINK] rpc_stock_reserve sin reservation_id var=%s rsp=%s",
-                    var_id, rows,
-                )
-        except Exception as exc:
-            # Detectar insufficient_stock por message (Postgres P0001).
-            msg = str(exc).lower()
-            if "insufficient_stock" in msg or "p0001" in msg:
-                # Lookup current available para mensaje informativo.
-                try:
-                    r = supabase.table("product_variations").select(
-                        "sku, stock_quantity"
-                    ).eq("tenant_id", tenant_id).eq("id", var_id).single().execute()
-                    sku = (r.data or {}).get("sku") or var_id[:8]
-                    have = (r.data or {}).get("stock_quantity") or 0
-                    insufficient.append(
-                        f"{sku} (pediste {qty_needed}, disponibles ~{have})"
-                    )
-                except Exception:
-                    insufficient.append(f"{var_id[:8]} (pediste {qty_needed})")
-            else:
-                logger.warning(
-                    "[PAYMENT_LINK] rpc_stock_reserve error var=%s err=%s",
-                    var_id, exc,
-                )
-                insufficient.append(f"{var_id[:8]} (error al reservar)")
+    # F4: reservar el stock del checkout sin doble-conteo (ver _reserve_checkout_stock).
+    reservation_ids, insufficient = _reserve_checkout_stock(
+        supabase,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        cart_id=cart_id_for_reserve,
+        items=items_to_persist,
+    )
 
     if insufficient:
         # Rollback: liberar reservas creadas en este intento.
