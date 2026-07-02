@@ -289,6 +289,12 @@ services:
       # AVEONLINE generación REAL de guías (true=factura) vs simulado (false=dry-run).
       - key: AVEONLINE_GENERATE_REAL_GUIDES
         value: "false"
+      # F6 — hard-delete de tenants con grace period expirado (Ley 1581 derecho de supresión).
+      # Habilitado tras verificar prerequisitos: RPC fn_hard_delete_tenant ✓, bucket offboarding-archive ✓,
+      # grace period + snapshot-antes-de-borrar ✓, 0 pendientes al activar. Solo actúa sobre solicitudes de
+      # borrado cuyo grace period YA expiró; archiva a Storage antes de borrar (atómico vía RPC).
+      - key: TENANT_HARD_DELETE_ENABLED
+        value: "true"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
