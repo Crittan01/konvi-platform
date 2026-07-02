@@ -407,6 +407,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
     }
   }
   const [productCategoryId, setProductCategoryId] = useState('')  // ADR-0027 categoría operativa
+  const [productAttrs, setProductAttrs] = useState<Attr[]>([])    // ADR-0029 F2: atributos product-level (no-variante)
   const [coverUrl, setCoverUrl]     = useState('')
   const [variants, setVariants]     = useState<VariantDraft[]>([{ ...DEFAULT_VARIANT }])
   const [showMatrix, setShowMatrix] = useState(false)
@@ -424,6 +425,20 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
   const variantContractAttrs = attributeDefs
     .filter(d => d.product_category_id === productCategoryId && d.is_variant_axis)
     .sort((a, b) => a.sort_order - b.sort_order)
+
+  // ADR-0029 F2: atributos PRODUCT-LEVEL del contrato (no-variante) — describen el producto entero
+  // (ej. Ingrediente activo, FPS, 100% puro), NO generan variantes. El bot los cita como hechos.
+  const productContractAttrs = attributeDefs
+    .filter(d => d.product_category_id === productCategoryId && !d.is_variant_axis)
+    .sort((a, b) => a.sort_order - b.sort_order)
+
+  const setProdAttr = (label: string, value: string) => {
+    setProductAttrs(prev => {
+      const i = prev.findIndex(a => normKey(a.key) === normKey(label))
+      if (i >= 0) return prev.map((a, j) => j === i ? { key: label, value } : a)
+      return [...prev, { key: label, value }]
+    })
+  }
 
   const handleSubmit = async () => {
     if (!title.trim()) { setError('El nombre del producto es obligatorio'); return }
@@ -472,6 +487,8 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
           description: description.trim() || null,
           safety_note: safetyNote.trim() || null,
           cover_image_url: coverUrl.trim() || null,
+          // ADR-0029 F2: atributos product-level (no-variante) canonicalizados contra el contrato.
+          attributes: attrsToObj(finalizeAttrs(productAttrs, productContractAttrs)),
           variations: variationsPayload,
         }),
       })
@@ -481,7 +498,7 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
         throw new Error(typeof d === 'string' ? d : Array.isArray(d) ? ((d[0] as { msg?: string })?.msg ?? 'Datos inválidos') : `Error ${res.status}`)
       }
 
-      setTitle(''); setDescription(''); setSafetyNote(''); setVariants([{ ...DEFAULT_VARIANT }]); setCoverUrl('')
+      setTitle(''); setDescription(''); setSafetyNote(''); setVariants([{ ...DEFAULT_VARIANT }]); setCoverUrl(''); setProductAttrs([])
       onCreated(); router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al crear producto')
@@ -531,6 +548,36 @@ export default function CatalogForm({ apiUrl, onCreated = () => {}, productCateg
                 .map(d => `${d.label}${d.is_variant_axis ? ' (variante)' : ''}${d.allowed_values?.length ? ': ' + d.allowed_values.join(d.unit ? d.unit + ', ' : ', ') + (d.unit ?? '') : ''}`)
                 .join(' · ')}
               <span className="block text-muted-foreground mt-0.5">Usa estos nombres/valores para mantener el catálogo consistente (el bot los lee).</span>
+            </div>
+          )}
+          {/* ADR-0029 F2: atributos PRODUCT-LEVEL guiados (Ingrediente activo, FPS, 100% puro…). Describen el
+              producto entero (no generan variantes) → el bot los CITA como hechos. Los variant-axis van en cada variante. */}
+          {productContractAttrs.length > 0 && (
+            <div className="sm:col-span-2 space-y-1.5">
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase">Atributos del producto (el bot los cita)</label>
+              {productContractAttrs.map(d => {
+                const cur = getAttrValue(productAttrs, d.label)
+                const opts = optionsFor(d)
+                const orphan = orphanValue(cur, opts)
+                return (
+                  <div key={d.code} className="flex gap-1.5 items-center">
+                    <span className="text-xs flex-1 text-muted-foreground truncate" title={d.label}>
+                      {d.label}{d.unit ? ` (${d.unit})` : ''}
+                    </span>
+                    {opts.length ? (
+                      <select value={cur} onChange={e => setProdAttr(d.label, e.target.value)}
+                        className="h-7 text-xs flex-[2] rounded-md border border-input bg-background px-2 text-foreground">
+                        <option value="">-- elegir --</option>
+                        {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                        {orphan && <option value={orphan}>{orphan} (fuera de contrato)</option>}
+                      </select>
+                    ) : (
+                      <Input value={cur} onChange={e => setProdAttr(d.label, e.target.value)}
+                        placeholder={d.unit ? `Ej: 30${d.unit}` : d.label} className="h-7 text-xs flex-[2]" />
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
           <div className="sm:col-span-2">
