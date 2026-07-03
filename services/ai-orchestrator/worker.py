@@ -511,6 +511,11 @@ class OrchestratorWorker:
 
         # Procesar en secuencia (reclamar atómicamente + despachar) para no sobrecargar Gemini.
         for msg in pending:
+            # F45: latir POR MENSAJE — un batch de N mensajes con Gemini lento (cascada ~63s/mensaje)
+            # superaba HEALTH_HEARTBEAT_STALE_SECONDS=120 → /health 503 → Render reiniciaba a mitad del
+            # batch (riesgo de respuesta duplicada si el kill cae entre send y mark). El worker está VIVO
+            # aunque Gemini esté lento; un solo mensaje colgado >120s sigue disparando el restart real.
+            self.last_heartbeat_ts = time.time()
             attempts = int(msg.get("processing_attempts") or 0) + 1
             if attempts > MAX_PROCESSING_ATTEMPTS:
                 try:
@@ -1338,7 +1343,7 @@ class OrchestratorWorker:
             try:
                 contact_res = (
                     self.supabase.table("contacts")
-                    .select("first_name, full_name")
+                    .select("name")   # F44: la columna real es `name` (first_name/full_name no existen)
                     .eq("id", contact_id)
                     .eq("tenant_id", tenant_id)
                     .limit(1)
@@ -1346,9 +1351,8 @@ class OrchestratorWorker:
                 )
                 contact_rows = contact_res.data or []
                 if contact_rows:
-                    first = (contact_rows[0].get("first_name") or "").strip()
-                    full = (contact_rows[0].get("full_name") or "").strip()
-                    customer_name = first or (full.split(" ")[0] if full else "cliente")
+                    full = (contact_rows[0].get("name") or "").strip()
+                    customer_name = full.split(" ")[0] if full else "cliente"
             except Exception:
                 pass
 
@@ -1523,12 +1527,15 @@ class OrchestratorWorker:
             # enviar marketing HSM a quien dijo STOP viola Ley 1581 Art.9 +
             # Meta Policy. El gate antes solo miraba consent_given.
             consent_ok = False
+            lookup_failed = False   # F44: distinguir "lookup falló" de "consent denegado"
             customer_name = "cliente"
             if contact_id:
                 try:
                     contact_res = (
                         self.supabase.table("contacts")
-                        .select("consent_given, consent_revoked_at, first_name, full_name")
+                        # F44: la columna real es `name` (first_name/full_name NO existen → APIError
+                        # tragado → consent_ok siempre False → skipeaba TODO quemando la idempotencia).
+                        .select("consent_given, consent_revoked_at, name")
                         .eq("id", contact_id)
                         .eq("tenant_id", tenant_id)
                         .limit(1)
@@ -1540,11 +1547,18 @@ class OrchestratorWorker:
                             bool(contact_rows[0].get("consent_given"))
                             and not contact_rows[0].get("consent_revoked_at")
                         )
-                        first = (contact_rows[0].get("first_name") or "").strip()
-                        full = (contact_rows[0].get("full_name") or "").strip()
-                        customer_name = first or (full.split(" ")[0] if full else "cliente")
-                except Exception:
-                    pass
+                        full = (contact_rows[0].get("name") or "").strip()
+                        customer_name = full.split(" ")[0] if full else "cliente"
+                except Exception as exc:
+                    lookup_failed = True
+                    logger.warning(
+                        "[CART_ABANDONED] lookup contacto falló cart=%s: %s — reintentar luego",
+                        str(cart_id)[:8], exc,
+                    )
+
+            if lookup_failed:
+                # F44: NO quemar la idempotencia si el lookup falló (transitorio) — reintentar próximo ciclo.
+                continue
 
             if not consent_ok:
                 self._metrics["cart_abandoned_reminders_skipped_no_consent"] += 1
@@ -1569,7 +1583,8 @@ class OrchestratorWorker:
             try:
                 items_res = (
                     self.supabase.table("conversation_cart_items")
-                    .select("product_title, quantity")
+                    # F44: conversation_cart_items NO tiene product_title → embed a products(title).
+                    .select("quantity, products(title)")
                     .eq("cart_id", cart_id)
                     .eq("tenant_id", tenant_id)
                     .limit(3)
@@ -1579,7 +1594,7 @@ class OrchestratorWorker:
                 if items:
                     parts = []
                     for it in items:
-                        title = (it.get("product_title") or "").strip()
+                        title = ((it.get("products") or {}).get("title") or "").strip()
                         qty = int(it.get("quantity") or 1)
                         if title:
                             parts.append(f"{title} x{qty}" if qty > 1 else title)

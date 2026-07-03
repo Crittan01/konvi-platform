@@ -147,14 +147,12 @@ async def create_kb_doc(
 
     res = (
         supabase.table("kb_documents")  # tenant_filter:exempt:payload_includes_tenant_id
-        .insert(payload)
-        .select("id, title, content, category, is_active, created_at, updated_at, embedding")
-        .single()
+        .insert(payload)   # F18: insert ya retorna representation; .select().single() no existe en postgrest 2.28.3 → 500 en toda escritura
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=500, detail="No fue posible crear el documento KB")
-    return _strip_embedding(res.data)
+    return _strip_embedding(res.data[0])
 
 
 @router.get("/{doc_id}", response_model=dict)
@@ -221,14 +219,12 @@ async def patch_kb_doc(
         supabase.table("kb_documents")
         .update(update)
         .eq("id", doc_id)
-        .eq("tenant_id", tenant_id)
-        .select("id, title, content, category, is_active, created_at, updated_at, embedding")
-        .single()
+        .eq("tenant_id", tenant_id)   # F18: update ya retorna representation; sin .select().single()
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Documento KB no encontrado")
-    return _strip_embedding(res.data)
+    return _strip_embedding(res.data[0])
 
 
 @router.delete("/{doc_id}", response_model=dict)
@@ -245,14 +241,12 @@ async def delete_kb_doc(
         supabase.table("kb_documents")
         .update({"is_active": False, "embedding": None})
         .eq("id", doc_id)
-        .eq("tenant_id", tenant_id)
-        .select("id, title, category, is_active")
-        .single()
+        .eq("tenant_id", tenant_id)   # F18: update ya retorna representation
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Documento KB no encontrado")
-    return res.data
+    return res.data[0]
 
 
 @router.post("/{doc_id}/reindex", response_model=dict)
@@ -287,11 +281,9 @@ async def reindex_kb_doc(
         supabase.table("kb_documents")
         .update({"embedding": _embedding_to_pgvector(vec)})
         .eq("id", doc_id)
-        .eq("tenant_id", tenant_id)
-        .select("id, title, category, is_active")
-        .single()
+        .eq("tenant_id", tenant_id)   # F18: update ya retorna representation
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Documento KB no encontrado")
-    return {**res.data, "indexed": True}
+    return {**res.data[0], "indexed": True}

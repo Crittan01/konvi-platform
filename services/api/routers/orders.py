@@ -316,12 +316,15 @@ async def get_order(
             .select("*, contacts(phone, name), order_items(id, title, unit_price, unit_cost, quantity, product_id, variation_id)")
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            # F19: .single() lanza APIError (PGRST116) en not-found → 500 genérico (el frontend no puede
+            # distinguir not-found de error real). .limit(1) + unwrap devuelve el 404 correcto.
+            .limit(1)
             .execute()
         )
-        if not result.data:
+        row = (result.data or [None])[0]
+        if not row:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
-        return result.data
+        return row
     except HTTPException:
         raise
     except Exception as e:

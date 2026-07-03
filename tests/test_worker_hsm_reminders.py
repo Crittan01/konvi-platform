@@ -229,8 +229,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
         self.sb._tables["contacts"].append({
             "id": "contact_1",
             "tenant_id": "tenant-A",
-            "first_name": "Camila",
-            "full_name": "Camila Pérez",
+            "name": "Camila Pérez",   # F44: columna real (first_name/full_name no existen)
             "consent_given": True,
         })
         self.now_dt = datetime.now(timezone.utc)
@@ -304,8 +303,7 @@ class TrySendPaymentReminderHSMTests(unittest.TestCase):
         mock_send.assert_not_called()
 
     def test_customer_sin_first_name_usa_cliente_default(self):
-        self.sb._tables["contacts"][0]["first_name"] = ""
-        self.sb._tables["contacts"][0]["full_name"] = ""
+        self.sb._tables["contacts"][0]["name"] = ""
         captured = {}
 
         async def fake_send_template(*a, **kw):
@@ -374,12 +372,12 @@ class CartAbandonedCronTests(unittest.TestCase):
                 "tenant_id": "tenant-A",
                 "consent_given": consent,
                 "consent_revoked_at": revoked_at,
-                "first_name": "Camila",
+                "name": "Camila",   # F44: columna real
             })
         self.sb._tables["conversation_cart_items"].append({
             "cart_id": cart_id,
             "tenant_id": "tenant-A",
-            "product_title": "Jabón artesanal de coco",
+            "products": {"title": "Jabón artesanal de coco"},   # F44: embed real (no product_title)
             "quantity": 2,
         })
 

@@ -305,13 +305,16 @@ async def receive_purchase_order(
             .select("stock_quantity, cost_price, product_id")
             .eq("id", item["variation_id"])
             .eq("tenant_id", tenant_id)
-            .single()
+            # F19: .limit(1) en vez de .single() — con .single(), una variación borrada hacía que
+            # execute() lanzara APIError (PGRST116) SIN try/except → 500 DESPUÉS de marcar la PO
+            # 'received' → stock aplicado parcial (corrupción no-atómica). El `continue` era inalcanzable.
+            .limit(1)
             .execute()
         )
-        if not var_res.data:
+        var_row = (var_res.data or [None])[0]
+        if not var_row:
             logger.warning("[PURCHASES] receive: variation %s no existe; skip", item["variation_id"])
             continue
-        var_row = var_res.data
         old_stock = int(var_row.get("stock_quantity") or 0)
         old_cost = float(var_row.get("cost_price") or 0.0)
         po_qty = int(item["quantity"])
