@@ -119,7 +119,7 @@ async def fetch_media_bytes(media_id: str, access_token: str) -> tuple[bytes, st
         raise MediaDownloadError(f"HTTP error descargando media_id={media_id}: {exc}") from exc
 
 
-# Mime types soportados por gemini-2.5-flash para audio.
+# Mime types soportados por gemini-3.5-flash para audio.
 # Fuente: https://ai.google.dev/gemini-api/docs/audio
 SUPPORTED_AUDIO_MIMES: frozenset[str] = frozenset({
     "audio/wav",

@@ -19,7 +19,7 @@ ENV:
   MULTIMODAL_AUDIO_ENABLED  — default true.
   MULTIMODAL_IMAGE_ENABLED  — default true.
   MULTIMODAL_VIDEO_ENABLED  — default true.
-  MULTIMODAL_MODEL          — modelo Gemini (default gemini-2.5-flash).
+  MULTIMODAL_MODEL          — modelo Gemini (default gemini-3.5-flash).
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from typing import Optional
 logger = logging.getLogger("orchestrator.agentic.multimodal")
 
 
-_DEFAULT_MODEL = os.getenv("MULTIMODAL_MODEL", "gemini-2.5-flash")
+_DEFAULT_MODEL = os.getenv("MULTIMODAL_MODEL", "gemini-3.5-flash")
 
 
 # Mime types soportados — Gemini documenta estos como nativos.
@@ -213,7 +213,7 @@ async def process_inbound_media(
 
         tiers = (
             [model] if model else
-            ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+            ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"]
         )
         # Cascade params (rev. 109 fix UAT live founder feedback):
         # 3 attempts × 3 tiers = hasta 9 intentos. Backoff 1s→2s→4s (max 16s).

@@ -108,15 +108,15 @@ def _cfg(key: str, default: str) -> str:
 
 def _models_simple() -> tuple[str, str]:
     """Para intent simple: lite primario, flash fallback."""
-    primary = _cfg("GEMINI_SIMPLE_MODEL", _cfg("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite"))
-    fallback = _cfg("GEMINI_MODEL", "gemini-2.5-flash")
+    primary = _cfg("GEMINI_SIMPLE_MODEL", _cfg("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite"))
+    fallback = _cfg("GEMINI_MODEL", "gemini-3.5-flash")
     return primary, fallback
 
 
 def _models_transactional() -> tuple[str, str]:
     """Para intent transactional: flash primario, lite fallback."""
-    primary = _cfg("GEMINI_MODEL", "gemini-2.5-flash")
-    fallback = _cfg("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+    primary = _cfg("GEMINI_MODEL", "gemini-3.5-flash")
+    fallback = _cfg("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
     return primary, fallback
 
 

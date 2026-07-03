@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_TURNS = int(os.getenv("AGENTIC_MAX_TOOL_TURNS", "8"))
 MAX_TOTAL_TOOL_CALLS = int(os.getenv("AGENTIC_MAX_TOOL_CALLS", "20"))
 AGENTIC_TEMPERATURE = float(os.getenv("AGENTIC_TEMPERATURE", "0.0"))
-AGENTIC_MODEL = os.getenv("AGENTIC_MODEL", "gemini-2.5-flash")
+AGENTIC_MODEL = os.getenv("AGENTIC_MODEL", "gemini-3.5-flash")
 
 
 @dataclass
@@ -557,7 +557,7 @@ async def _gemini_generate_async(
     Rev. 106 — envuelve la invocación en `generate_with_cascade` de
     `llm_invoke.py` (Rev. 80, ADR-0001). Garantiza:
       • 4 intentos en `model` (primary) con backoff exponencial 1-16s.
-      • 4 intentos en `GEMINI_FALLBACK_MODEL` (default gemini-2.5-flash-lite)
+      • 4 intentos en `GEMINI_FALLBACK_MODEL` (default gemini-3.1-flash-lite)
         si el primary mantiene 503/429.
       • Errores no-transitorios (bug schema/prompt) se re-lanzan inmediato.
       • Si TODOS los intentos transitorios fallan → raise

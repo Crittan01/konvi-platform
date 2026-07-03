@@ -3,14 +3,14 @@ LLM cascade wrapper — Rev. 80.
 
 Robustece la invocación de Gemini ante 503/UNAVAILABLE/429/RESOURCE_EXHAUSTED:
 
-  Intentos 1-N1: modelo primario (gemini-2.5-flash) con backoff exponencial.
-  Intentos N1-N2: modelo fallback (gemini-2.5-flash-lite) con backoff.
+  Intentos 1-N1: modelo primario (gemini-3.5-flash) con backoff exponencial.
+  Intentos N1-N2: modelo fallback (gemini-3.1-flash-lite) con backoff.
   Si TODO falla: retorna respuesta degradada con requires_human=True para
   que el bot escale a un asesor en vez de quedarse mudo.
 
 Configurable vía .env:
-  GEMINI_MODEL              — modelo primario (default: gemini-2.5-flash)
-  GEMINI_FALLBACK_MODEL     — modelo de respaldo (default: gemini-2.5-flash-lite)
+  GEMINI_MODEL              — modelo primario (default: gemini-3.5-flash)
+  GEMINI_FALLBACK_MODEL     — modelo de respaldo (default: gemini-3.1-flash-lite)
   GEMINI_MAX_RETRIES        — total de intentos (default: 8)
   GEMINI_FALLBACK_AFTER     — switch a fallback tras N intentos (default: 4)
 
@@ -30,8 +30,8 @@ logger = logging.getLogger("orchestrator.llm")
 
 # ─── Configuración ───────────────────────────────────────────────────────────
 
-DEFAULT_PRIMARY_MODEL = "gemini-2.5-flash"
-DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_PRIMARY_MODEL = "gemini-3.5-flash"
+DEFAULT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_MAX_RETRIES = 8
 DEFAULT_FALLBACK_AFTER = 4
 

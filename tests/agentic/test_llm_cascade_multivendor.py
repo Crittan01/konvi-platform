@@ -21,9 +21,9 @@ from llm_cascade import cascade_invoke, CascadeOutcome, _vendor_of, _is_transien
 
 class VendorInferenceTests(unittest.TestCase):
     def test_gemini_models(self):
-        self.assertEqual(_vendor_of("gemini-2.5-flash"), "gemini")
-        self.assertEqual(_vendor_of("gemini-2.5-pro"), "gemini")
-        self.assertEqual(_vendor_of("google/gemini-2.5-flash"), "gemini")
+        self.assertEqual(_vendor_of("gemini-3.5-flash"), "gemini")
+        self.assertEqual(_vendor_of("gemini-3.1-pro-preview"), "gemini")
+        self.assertEqual(_vendor_of("google/gemini-3.5-flash"), "gemini")
 
     def test_claude_models(self):
         self.assertEqual(_vendor_of("claude-sonnet-4-5"), "anthropic")
@@ -66,38 +66,38 @@ class CascadeFlowTests(unittest.TestCase):
             return {"text": f"ok from {model}"}
         out = cascade_invoke(
             gemini_invoker=invoker,
-            tiers=["gemini-2.5-flash-lite", "gemini-2.5-flash"],
+            tiers=["gemini-3.1-flash-lite", "gemini-3.5-flash"],
             sleep_fn=lambda _s: None,
         )
         self.assertFalse(out.degraded)
-        self.assertEqual(out.model_used, "gemini-2.5-flash-lite")
+        self.assertEqual(out.model_used, "gemini-3.1-flash-lite")
         self.assertEqual(out.vendor_used, "gemini")
         self.assertEqual(out.tier_index, 0)
         self.assertEqual(out.total_attempts, 1)
-        self.assertEqual(calls, ["gemini-2.5-flash-lite"])
+        self.assertEqual(calls, ["gemini-3.1-flash-lite"])
 
     def test_promote_after_transient_fail(self):
         calls = []
         def invoker(model):
             calls.append(model)
-            if model == "gemini-2.5-flash-lite":
+            if model == "gemini-3.1-flash-lite":
                 raise Exception("503 Service Unavailable")
             return {"text": "ok from flash"}
         out = cascade_invoke(
             gemini_invoker=invoker,
-            tiers=["gemini-2.5-flash-lite", "gemini-2.5-flash"],
+            tiers=["gemini-3.1-flash-lite", "gemini-3.5-flash"],
             attempts_per_tier=2,
             sleep_fn=lambda _s: None,
         )
         self.assertFalse(out.degraded)
-        self.assertEqual(out.model_used, "gemini-2.5-flash")
+        self.assertEqual(out.model_used, "gemini-3.5-flash")
         self.assertEqual(out.tier_index, 1)
         # 2 intentos en tier 0 (Flash Lite) + 1 en tier 1 (Flash).
         self.assertEqual(out.total_attempts, 3)
         self.assertEqual(calls, [
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
         ])
 
     def test_skip_claude_tier_without_api_key(self):
@@ -113,7 +113,7 @@ class CascadeFlowTests(unittest.TestCase):
         out = cascade_invoke(
             gemini_invoker=gemini_invoker,
             claude_invoker=claude_invoker,
-            tiers=["gemini-2.5-flash-lite", "claude-sonnet-4-5"],
+            tiers=["gemini-3.1-flash-lite", "claude-sonnet-4-5"],
             attempts_per_tier=1,
             sleep_fn=lambda _s: None,
         )
@@ -133,7 +133,7 @@ class CascadeFlowTests(unittest.TestCase):
         out = cascade_invoke(
             gemini_invoker=gemini_invoker,
             claude_invoker=claude_invoker,
-            tiers=["gemini-2.5-flash-lite", "claude-sonnet-4-5"],
+            tiers=["gemini-3.1-flash-lite", "claude-sonnet-4-5"],
             attempts_per_tier=1,
             sleep_fn=lambda _s: None,
         )
@@ -147,7 +147,7 @@ class CascadeFlowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cascade_invoke(
                 gemini_invoker=invoker,
-                tiers=["gemini-2.5-flash"],
+                tiers=["gemini-3.5-flash"],
                 sleep_fn=lambda _s: None,
             )
 
@@ -156,7 +156,7 @@ class CascadeFlowTests(unittest.TestCase):
             raise Exception("503 Service Unavailable")
         out = cascade_invoke(
             gemini_invoker=invoker,
-            tiers=["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
+            tiers=["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-pro-preview"],
             attempts_per_tier=1,
             sleep_fn=lambda _s: None,
         )
@@ -164,7 +164,7 @@ class CascadeFlowTests(unittest.TestCase):
         self.assertEqual(out.total_attempts, 3)
         self.assertIn("Service Unavailable", out.last_error or "")
         self.assertEqual(out.tiers_tried, [
-            "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro",
+            "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-pro-preview",
         ])
 
 

@@ -438,7 +438,7 @@ class SectionM_Cascade(unittest.TestCase):
             return {"text": "ok"}
         out = cascade_invoke(
             gemini_invoker=invoker,
-            tiers=["gemini-2.5-flash-lite"],
+            tiers=["gemini-3.1-flash-lite"],
             sleep_fn=lambda _s: None,
         )
         self.assertFalse(out.degraded)
@@ -452,12 +452,12 @@ class SectionM_Cascade(unittest.TestCase):
             return {"text": "ok"}
         out = cascade_invoke(
             gemini_invoker=invoker,
-            tiers=["gemini-2.5-flash-lite", "gemini-2.5-flash"],
+            tiers=["gemini-3.1-flash-lite", "gemini-3.5-flash"],
             attempts_per_tier=1,
             sleep_fn=lambda _s: None,
         )
         self.assertFalse(out.degraded)
-        self.assertEqual(out.model_used, "gemini-2.5-flash")
+        self.assertEqual(out.model_used, "gemini-3.5-flash")
 
     def test_m3_skip_claude_without_key(self):
         from llm_cascade import cascade_invoke
@@ -472,7 +472,7 @@ class SectionM_Cascade(unittest.TestCase):
             out = cascade_invoke(
                 gemini_invoker=gemini_invoker,
                 claude_invoker=claude_invoker,
-                tiers=["gemini-2.5-flash", "claude-sonnet-4-5"],
+                tiers=["gemini-3.5-flash", "claude-sonnet-4-5"],
                 attempts_per_tier=1,
                 sleep_fn=lambda _s: None,
             )
@@ -492,7 +492,7 @@ class SectionM_Cascade(unittest.TestCase):
             raise Exception("503")
         out = cascade_invoke(
             gemini_invoker=invoker,
-            tiers=["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
+            tiers=["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-pro-preview"],
             attempts_per_tier=1,
             sleep_fn=lambda _s: None,
         )

@@ -306,7 +306,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash
       # LLM cascade tier 4 (rev. 109) — Claude rescue cuando Gemini falla cascada
       # 3 tiers. Sin la var, cascade se queda en 3 tiers (degraded path → human).
       - key: ANTHROPIC_API_KEY

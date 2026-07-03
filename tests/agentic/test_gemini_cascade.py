@@ -65,10 +65,10 @@ class GeminiCascadeTests(unittest.TestCase):
 
         def gen_content(model, contents, config):
             call_log.append(model)
-            if model == "gemini-2.5-flash":
+            if model == "gemini-3.5-flash":
                 # Simula 503 todos los intentos en flash.
                 raise RuntimeError("503 UNAVAILABLE — high demand")
-            elif model == "gemini-2.5-flash-lite":
+            elif model == "gemini-3.1-flash-lite":
                 return _FakeResponse("Hola desde lite")
             raise RuntimeError(f"unexpected model: {model}")
 
@@ -78,7 +78,7 @@ class GeminiCascadeTests(unittest.TestCase):
         with patch("llm_invoke.time.sleep", lambda s: None):
             result = _run(agentic_agent._gemini_generate_async(
                 client,
-                model="gemini-2.5-flash",
+                model="gemini-3.5-flash",
                 messages=[{"role": "user", "parts": [{"text": "hola"}]}],
                 system_prompt="Eres un test bot.",
                 tools_config=[],
@@ -87,8 +87,8 @@ class GeminiCascadeTests(unittest.TestCase):
 
         # La cascada llamó flash al menos una vez, falló transitorio,
         # luego intentó flash-lite y obtuvo éxito.
-        self.assertIn("gemini-2.5-flash", call_log)
-        self.assertIn("gemini-2.5-flash-lite", call_log)
+        self.assertIn("gemini-3.5-flash", call_log)
+        self.assertIn("gemini-3.1-flash-lite", call_log)
         # Verificar que el fallback respondió.
         text = "".join(
             getattr(p, "text", "") or ""
@@ -114,7 +114,7 @@ class GeminiCascadeTests(unittest.TestCase):
         with patch("llm_invoke.time.sleep", lambda s: None):
             result = _run(agentic_agent._gemini_generate_async(
                 client,
-                model="gemini-2.5-flash",
+                model="gemini-3.5-flash",
                 messages=[{"role": "user", "parts": [{"text": "x"}]}],
                 system_prompt="t",
                 tools_config=[],
@@ -146,7 +146,7 @@ class GeminiCascadeTests(unittest.TestCase):
             with self.assertRaises(Exception) as ctx:
                 _run(agentic_agent._gemini_generate_async(
                     client,
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     messages=[{"role": "user", "parts": [{"text": "x"}]}],
                     system_prompt="t",
                     tools_config=[],
@@ -172,7 +172,7 @@ class GeminiCascadeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 _run(agentic_agent._gemini_generate_async(
                     client,
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     messages=[{"role": "user", "parts": [{"text": "x"}]}],
                     system_prompt="t",
                     tools_config=[],

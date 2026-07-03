@@ -1,9 +1,9 @@
 """LLM Cascade multi-vendor — rev. 109 Día 3.
 
 Extiende llm_invoke.py (2-tier Gemini) a cascade 4-tier:
-  Tier 1: gemini-2.5-flash-lite       (default — barato, rápido)
-  Tier 2: gemini-2.5-flash             (escalado — tool calling complejo)
-  Tier 3: gemini-2.5-pro               (rescue tier 1 — razonamiento)
+  Tier 1: gemini-3.1-flash-lite       (default — barato, rápido)
+  Tier 2: gemini-3.5-flash             (escalado — tool calling complejo)
+  Tier 3: gemini-3.1-pro-preview               (rescue tier 1 — razonamiento)
   Tier 4: claude-sonnet-4-5            (rescue tier 2 — vendor distinto)
 
 Tier 4 (Claude) es text-only "ultimo recurso": cuando los 3 tiers Gemini
@@ -11,8 +11,8 @@ fallan, generamos un texto de respuesta natural sin tool calling para
 NO dejar al cliente con mensaje degraded. Es resilience cross-vendor.
 
 ENV configurables:
-  LLM_CASCADE_TIERS  — lista separada por coma: "gemini-2.5-flash-lite,
-                       gemini-2.5-flash,gemini-2.5-pro,claude-sonnet-4-5"
+  LLM_CASCADE_TIERS  — lista separada por coma: "gemini-3.1-flash-lite,
+                       gemini-3.5-flash,gemini-3.1-pro-preview,claude-sonnet-4-5"
   LLM_TIER_PROMOTE_AFTER  — promueve al siguiente tier tras N fails (default: 2)
   ANTHROPIC_API_KEY        — opcional; sin esta key, Claude tier se omite.
 
@@ -20,8 +20,8 @@ API:
     result = cascade_invoke(
         gemini_invoker=lambda model: client.models.generate_content(...),
         claude_invoker=lambda: claude_rescue(system_prompt, user_msg),
-        tiers=["gemini-2.5-flash-lite", "gemini-2.5-flash",
-               "gemini-2.5-pro", "claude-sonnet-4-5"],
+        tiers=["gemini-3.1-flash-lite", "gemini-3.5-flash",
+               "gemini-3.1-pro-preview", "claude-sonnet-4-5"],
     )
 
 Compatible con llm_invoke.generate_with_cascade existente (2-tier
@@ -39,9 +39,9 @@ logger = logging.getLogger("orchestrator.llm.cascade")
 
 
 _DEFAULT_TIERS = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
     "claude-sonnet-4-5",
 ]
 

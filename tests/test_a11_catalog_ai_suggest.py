@@ -48,7 +48,7 @@ class CatalogAISuggestTests(unittest.TestCase):
         data = {"description": "Aceite de lavanda relajante para aromaterapia y masajes.",
                 "safety_note": "Diluir antes de usar, no aplicar directo en la piel.",
                 "is_sensitive_category": True}
-        r = _call(payload, SuggestionResult(text="{}", data=data, model_used="gemini-2.5-flash", degraded=False))
+        r = _call(payload, SuggestionResult(text="{}", data=data, model_used="gemini-3.5-flash", degraded=False))
         self.assertIn("relajante", r.description)
         self.assertIn("Diluir", r.safety_note)
         self.assertTrue(r.is_sensitive_category)
