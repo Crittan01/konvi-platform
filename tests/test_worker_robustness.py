@@ -232,5 +232,44 @@ class DebounceNonBlockingTests(unittest.TestCase):
         self.assertEqual({r["conversation_id"] for r in result}, {"cA"})
 
 
+class CoalesceClaimNonTerminalTests(unittest.TestCase):
+    """F48 — _combine_by_conversation reclama los fragmentos viejos a 'processing'
+    (NO 'processed' terminal) y adjunta _coalesced_ids al dict combinado, para que un
+    dispatch fallido pueda recuperar el TURNO COMPLETO (el sweep periódico solo
+    reclama 'processing'; un 'processed' antes del dispatch era irrecuperable)."""
+
+    def test_older_fragments_claimed_non_terminal(self):
+        from worker import PROCESSING_STATUS_PROCESSING
+        store = {}
+        w = _worker(store)
+        combined = w._combine_by_conversation([
+            _msg("m1", "c1", "Hola", 10),
+            _msg("m2", "c1", "quiero jabón", 9),
+            _msg("m3", "c1", "de coco", 8),
+        ])
+        # 1 dict combinado (el último con el content unido).
+        self.assertEqual(len(combined), 1)
+        last = combined[0]
+        self.assertEqual(last["id"], "m3")
+        # Adjunta ids de los fragmentos viejos + tenant para finalizar/resetear luego.
+        self.assertEqual(last["_coalesced_ids"], ["m1", "m2"])
+        self.assertEqual(last["_coalesced_tenant_id"], "t1")
+        # El claim de los viejos es NO-terminal 'processing' — nunca 'processed'.
+        updates = store.get("updates", [])
+        self.assertTrue(updates, "no se registró el claim de los fragmentos viejos")
+        claim = updates[0]
+        self.assertEqual(claim["processing_status"], PROCESSING_STATUS_PROCESSING)
+        self.assertNotIn("processed", claim)      # no marca terminal antes del dispatch
+        self.assertNotIn("skip_reason", claim)    # skip_reason se pone SOLO al finalizar
+
+    def test_single_message_no_claim(self):
+        store = {}
+        w = _worker(store)
+        combined = w._combine_by_conversation([_msg("m1", "c1", "Hola", 10)])
+        self.assertEqual(len(combined), 1)
+        self.assertNotIn("_coalesced_ids", combined[0])
+        self.assertEqual(store.get("updates", []), [])  # sin coalesce → sin claim
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -349,17 +349,28 @@ class OrchestratorWorker:
             if len(conv_msgs) >= 2:
                 conv_msgs = sorted(conv_msgs, key=lambda m: str(m.get("created_at") or ""))
                 older_ids = [m["id"] for m in conv_msgs[:-1]]
+                conv_tenant_id = conv_msgs[0]["tenant_id"]
+                # F48 — Claim NO-terminal (patrón claim->work->finalize). Antes se
+                # marcaban los fragmentos viejos a estado TERMINAL 'processed' ANTES
+                # del CAS/dispatch → si el dispatch fallaba quedaban IRRECUPERABLES
+                # (el sweep periódico solo reclama 'processing') y el retry perdía el
+                # turno combinado. Ahora se reclaman a 'processing'; se finalizan a
+                # 'coalesced_into_next' SOLO tras dispatch OK; en except vuelven a
+                # 'pending' (el próximo poll re-combina el turno COMPLETO); si el
+                # worker muere, el sweep periódico los reclama. El CAS-guard
+                # 'pending' evita pisar el claim de otro worker.
                 try:
                     self.supabase.table("messages").update({
-                        "processing_status": "processed",
-                        "processed": True,
-                        "processed_at": datetime.now(timezone.utc).isoformat(),
-                        "skip_reason": "coalesced_into_next",
-                    }).in_("id", older_ids).eq("tenant_id", conv_msgs[0]["tenant_id"]).execute()
+                        "processing_status": PROCESSING_STATUS_PROCESSING,
+                        "last_error": None,
+                    }).in_("id", older_ids).eq("tenant_id", conv_tenant_id).eq(
+                        "processing_status", "pending").execute()
                 except Exception as exc:
-                    logger.warning("[COALESCE] no pude marcar coalesced: %s", exc)
+                    logger.warning("[COALESCE] no pude reclamar fragmentos viejos: %s", exc)
                 last = dict(conv_msgs[-1])
                 last["content"] = "\n\n".join(str(m.get("content") or "") for m in conv_msgs)
+                last["_coalesced_ids"] = older_ids
+                last["_coalesced_tenant_id"] = conv_tenant_id
                 logger.info(
                     "[COALESCE] conv=%s coalesce %d mensajes en uno (chars=%d)",
                     conv_id[:8], len(conv_msgs), len(last["content"]),
@@ -555,6 +566,26 @@ class OrchestratorWorker:
                     content=msg["content"],
                     content_type=msg["content_type"],
                 )
+                # F48 — Dispatch OK: recién AHORA finalizamos los fragmentos coalesced
+                # a terminal (antes se marcaban 'processed' antes del dispatch, lo que
+                # los volvía irrecuperables ante fallo). Si el dispatch hubiera fallado,
+                # el except los devuelve a 'pending' para re-combinar el turno completo.
+                _coalesced_ids = msg.get("_coalesced_ids")
+                if _coalesced_ids:
+                    try:
+                        self.supabase.table("messages").update({
+                            "processing_status": "processed",
+                            "processed": True,
+                            "processed_at": datetime.now(timezone.utc).isoformat(),
+                            "skip_reason": "coalesced_into_next",
+                        }).in_("id", _coalesced_ids).eq(
+                            "tenant_id", msg["_coalesced_tenant_id"]).eq(
+                            "processing_status", PROCESSING_STATUS_PROCESSING).execute()
+                    except Exception as _fin_exc:
+                        logger.warning(
+                            "[COALESCE] no pude finalizar fragmentos coalesced %s: %s",
+                            _coalesced_ids, _fin_exc,
+                        )
             except Exception as e:
                 logger.error(
                     f"Error procesando mensaje {msg['id']}: {e}", exc_info=True
@@ -564,6 +595,12 @@ class OrchestratorWorker:
                 # (solo si SIGUE 'processing', sin pisar lo que el core ya marcó): failed si
                 # superó max attempts, si no pending para reintentar.
                 try:
+                    # F48 — mismo destino para el último fragmento Y los coalesced:
+                    # retry->'pending' (el próximo poll re-combina el turno completo),
+                    # max-attempts->'failed' (evita que el sweep los resucite como
+                    # turnos parciales sueltos). CAS-guard 'processing' en todos.
+                    _coalesced_ids = msg.get("_coalesced_ids") or []
+                    _coalesced_tid = msg.get("_coalesced_tenant_id")
                     if attempts >= MAX_PROCESSING_ATTEMPTS:
                         self.supabase.table("messages").update({
                             "processing_status": "failed",
@@ -572,12 +609,30 @@ class OrchestratorWorker:
                             "last_error": f"dispatch_exception_max_attempts: {str(e)[:180]}",
                         }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
                             "processing_status", "processing").execute()
+                        # Turno agotado: cerrar también los fragmentos coalesced.
+                        if _coalesced_ids:
+                            self.supabase.table("messages").update({
+                                "processing_status": "failed",
+                                "processed": True,
+                                "processed_at": datetime.now(timezone.utc).isoformat(),
+                                "last_error": "coalesced_turn_failed_max_attempts",
+                            }).in_("id", _coalesced_ids).eq(
+                                "tenant_id", _coalesced_tid).eq(
+                                "processing_status", "processing").execute()
                     else:
                         self.supabase.table("messages").update({
                             "processing_status": "pending",
                             "last_error": f"dispatch_exception_retry: {str(e)[:180]}",
                         }).eq("id", msg["id"]).eq("tenant_id", msg["tenant_id"]).eq(
                             "processing_status", "processing").execute()
+                        # Devolver los fragmentos coalesced a 'pending': el próximo poll
+                        # re-combina el TURNO COMPLETO (no solo el último fragmento).
+                        if _coalesced_ids:
+                            self.supabase.table("messages").update({
+                                "processing_status": "pending",
+                            }).in_("id", _coalesced_ids).eq(
+                                "tenant_id", _coalesced_tid).eq(
+                                "processing_status", "processing").execute()
                 except Exception as _reset_exc:
                     logger.error(
                         "No pude resetear mensaje %s tras excepción de dispatch: %s",
