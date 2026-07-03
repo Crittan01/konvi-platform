@@ -840,14 +840,20 @@ class AveonlineClient:
         }
 
     # ─── Cancel guía (Rev. 109 — Ley 1480 cancelación) ───────────────────
-    # `cancelarGuia` documentado en dossier sec 4 (API v1.0).
-    # Endpoint: webservices.aveonline.co/cotizar/cotizar.php con
-    # tipo='cancelarGuia'. Solo aplica si la guía aún NO ha sido recogida
-    # por el courier (status: 'labeled', no 'picked_up' o posterior).
+    # F-doc (Fase 6): `cancelarGuia` NO está en la documentación oficial de Aveonline
+    # (integraciones.aveonline.co) — solo lo usan plugins de terceros (WooCommerce). El
+    # POST real va a AVEONLINE_NAL_URL (app.aveonline.co/api/nal/.../generarGuiaTransporteNacional.php),
+    # NO a webservices.aveonline.co como decía el comentario anterior. La ÚNICA primitiva
+    # de cancelación documentada es `eliminarRelacionEnvios` (v2.0), que opera sobre una
+    # RELACIÓN de envíos (batch), no sobre una guía individual ya generada — el dossier
+    # §8.2 confirma que NO existe endpoint público para anular una guía individual.
     #
-    # Carriers que soportan según dossier: Servientrega, Coordinadora, Envia,
-    # Interrapidisimo, TCC, Domina. Verificable en runtime; si el carrier
-    # retorna error, caller debe escalar a operador manual con el courier.
+    # Por eso este método es best-effort: si Aveonline retorna no-'exitoso' devuelve
+    # ok=False y el caller ESCALA A OPERADOR para coordinar manual con el courier (el
+    # fallback correcto dado que la cancelación individual no está oficialmente soportada).
+    # Solo tiene chance de funcionar si la guía aún NO fue recogida ('labeled').
+    # TODO (verificar con Aveonline): reimplementar sobre eliminarRelacionEnvios si el
+    # flujo real usa relaciones, o formalizar la escalación a operador como el camino único.
 
     async def cancel_guide(self, *, tracking_number: str) -> dict:
         """Solicita cancelación de una guía Aveonline.
