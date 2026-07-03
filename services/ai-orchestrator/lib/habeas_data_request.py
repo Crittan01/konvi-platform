@@ -19,23 +19,35 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-_DATA_RIGHTS_PATTERNS = [
-    # Revocación de consentimiento / objeción al tratamiento
+# Supresión / revocación / objeción (Art. 15/16 supresión) → ESCALAR a humano (un DSR de
+# borrado exige verificación de identidad + plazo legal; el bot NO auto-borra).
+_SUPPRESSION_PATTERNS = [
     r"retir[oa]\w*\b.{0,15}\bconsentimiento",
     r"revoc[oa]\w*\b.{0,15}\b(consentimiento|autorizaci[oó]n)",
     r"no\s+autoriz[oa]\w*\b.{0,20}\btratamiento",
     r"no\s+quiero\s+que\s+\w*\s*(guarden|usen|traten|tengan|almacenen)\b.{0,15}\bmis\s+datos",
     r"dej[ea]n?\s+de\s+(usar|tratar|guardar)\b.{0,15}\bmis\s+datos",
-    # Supresión / derecho al olvido
     r"(borr[ea]\w*|elimin[ea]\w*)\b.{0,20}\bmis\s+datos",
     r"(borr[ea]\w*|elimin[ea]\w*)\b.{0,20}\bmi\s+(informaci[oó]n|cuenta)",
     r"derecho\s+al\s+olvido",
     r"quiero\s+que\s+(borren|eliminen)\b.{0,20}\b(mis\s+datos|mi\s+informaci[oó]n)",
-    # Acceso a datos
+]
+# Acceso (Art. 14) → el bot responde SELF-SERVICE con un resumen ENMASCARADO.
+_ACCESS_PATTERNS = [
     r"qu[eé]\s+datos\s+(tienen|guardan|almacenan)\b.{0,12}\b(de\s+m[ií]|m[ií]os)",
     r"(ver|acceder\s+a|copia\s+de)\b.{0,8}\bmis\s+datos\s+personales",
 ]
+# Rectificación (Art. 16) → ESCALAR a humano (el bot NO auto-edita PII desde el chat).
+_RECTIFICATION_PATTERNS = [
+    r"(corrig|corrij|actualic|actualiz|rectific|modific|cambi)\w*\b.{0,20}\bmis\s+datos",
+    r"(corrig|corrij|actualic|actualiz|rectific|modific|cambi)\w*\b.{0,25}\bmi\s+(informaci[oó]n|direcci[oó]n|correo|tel[eé]fono|nombre|email)",
+    r"mis\s+datos\b.{0,15}\b(est[aá]n?\s+)?(mal|incorrect\w*|err[oó]ne\w*|desactualiz\w*)",
+]
+_DATA_RIGHTS_PATTERNS = _SUPPRESSION_PATTERNS + _ACCESS_PATTERNS + _RECTIFICATION_PATTERNS
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in _DATA_RIGHTS_PATTERNS]
+_COMPILED_SUPPRESSION = [re.compile(p, re.IGNORECASE) for p in _SUPPRESSION_PATTERNS]
+_COMPILED_ACCESS = [re.compile(p, re.IGNORECASE) for p in _ACCESS_PATTERNS]
+_COMPILED_RECTIFICATION = [re.compile(p, re.IGNORECASE) for p in _RECTIFICATION_PATTERNS]
 
 # Acuse de recibo (Ley 1581): registra + escala a humano + recuerda STOP para
 # el caso simple de dejar de recibir mensajes.
@@ -62,3 +74,24 @@ def detect_data_rights_request(text: Optional[str]) -> Optional[str]:
 
 def is_data_rights_request(text: Optional[str]) -> bool:
     return detect_data_rights_request(text) is not None
+
+
+def classify_data_rights_request(text: Optional[str]) -> Optional[str]:
+    """Clasifica el tipo de DSR: 'suppression' | 'access' | 'rectification' | None.
+
+    Orden: supresión primero (lo más consecuente → escalar), luego acceso
+    (self-service), luego rectificación (escalar). Un falso-positivo erra hacia
+    la categoría más segura (escalar), consistente con detect_data_rights_request.
+    """
+    if not text or not isinstance(text, str):
+        return None
+    for p in _COMPILED_SUPPRESSION:
+        if p.search(text):
+            return "suppression"
+    for p in _COMPILED_ACCESS:
+        if p.search(text):
+            return "access"
+    for p in _COMPILED_RECTIFICATION:
+        if p.search(text):
+            return "rectification"
+    return None

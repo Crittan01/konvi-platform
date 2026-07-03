@@ -395,6 +395,18 @@ async def _emit_degraded_response_and_escalate(
     )
 
 
+def _resolve_contact_id(supabase: Any, tenant_id: str, conversation_id: str):
+    """Resuelve el contact_id de una conversación (None si no se encuentra)."""
+    try:
+        c = (
+            supabase.table("conversations").select("contact_id")
+            .eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
+        )
+        return (c.data or {}).get("contact_id")
+    except Exception:
+        return None
+
+
 def _log_habeas_event(
     supabase: Any, *, tenant_id: str, conversation_id: str, event: str, evidence: dict,
 ) -> None:
@@ -449,8 +461,60 @@ async def _handle_data_rights_if_intent(
     matched = detect_data_rights_request(content)
     if not matched:
         return False
+    from lib.habeas_data_request import classify_data_rights_request
+    kind = classify_data_rights_request(content) or "suppression"
 
-    # 0. Paper-trail Ley 1581: registrar la solicitud (append-only) ANTES de escalar.
+    from orchestrator import (
+        _send_outbound_text, _mark_message_processing, PROCESSING_STATUS_PROCESSED,
+    )
+
+    # ── Art. 14 (ACCESO) → SELF-SERVICE: el bot responde con el resumen ENMASCARADO
+    #    de los datos del titular (decisión founder Opción A). NO escala — lo resuelve
+    #    el bot. El resumen enmascara teléfono/documento; el reporte completo se pide
+    #    formalmente al tenant. Si no hay contacto resoluble, cae a escalación (no
+    #    exponer datos sin titular claro).
+    if kind == "access":
+        contact_id = _resolve_contact_id(supabase, tenant_id, conversation_id)
+        if contact_id:
+            _log_habeas_event(
+                supabase, tenant_id=tenant_id, conversation_id=conversation_id,
+                event="export_request",
+                evidence={
+                    "message_text": content[:200],
+                    "matched_phrase": matched[:120],
+                    "gate": "agentic.dispatcher._handle_data_rights_if_intent",
+                    "kind": "access",
+                    "action": "self_service_masked_summary",
+                },
+            )
+            try:
+                from orchestrator import _build_customer_data_summary
+                summary = _build_customer_data_summary(supabase, contact_id, tenant_id)
+                await _send_outbound_text(
+                    supabase=supabase, conversation_id=conversation_id,
+                    tenant_id=tenant_id, text=summary,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[HABEAS_DATA] resumen self-service Art.14 falló conv=%s: %s",
+                    conversation_id, exc,
+                )
+            try:
+                _mark_message_processing(
+                    supabase, tenant_id, message_id,
+                    processing_status=PROCESSING_STATUS_PROCESSED,
+                )
+            except Exception:
+                pass
+            logger.info(
+                "[HABEAS_DATA] acceso Art.14 self-service conv=%s contact=%s",
+                (conversation_id or "?")[:8], contact_id[:8],
+            )
+            return True
+
+    # ── Supresión / rectificación (o acceso sin contacto) → ESCALAR + paper-trail.
+    # Un borrado (Art.15/16) exige verificación de identidad + plazo legal; una
+    # rectificación (Art.16) NO se auto-edita desde el chat. Lo tramita un asesor.
     _log_habeas_event(
         supabase, tenant_id=tenant_id, conversation_id=conversation_id,
         event="data_rights_request",
@@ -458,12 +522,9 @@ async def _handle_data_rights_if_intent(
             "message_text": content[:200],
             "matched_phrase": matched[:120],
             "gate": "agentic.dispatcher._handle_data_rights_if_intent",
+            "kind": kind,
             "action": "escalated_human_takeover",
         },
-    )
-
-    from orchestrator import (
-        _send_outbound_text, _mark_message_processing, PROCESSING_STATUS_PROCESSED,
     )
     # 1. Acuse de recibo al cliente (Ley 1581: confirmar que se registró).
     try:
