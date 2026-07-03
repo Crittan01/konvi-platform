@@ -66,6 +66,113 @@ def _emit_cart_event(
         logger.debug("[CART_EVENT] emit wrapper falló: %s", exc)
 
 
+def _fresh_coupon_discount(
+    supabase: Client,
+    *,
+    tenant_id: str,
+    cart_id: str,
+    coupon_id: Optional[str],
+    subtotal_cents: int,
+    shipping_cents: int,
+    fallback_discount_cents: int = 0,
+) -> int:
+    """F50: recomputa el descuento del cupón contra el estado ACTUAL del cart.
+
+    El descuento se materializaba al aplicar el cupón y quedaba CONGELADO
+    (`conversation_carts.discount_cents`). Cualquier mutación posterior lo
+    dejaba stale y el total cobrado divergía de lo prometido:
+
+      · free_shipping: al elegir un carrier más caro se cobraba el diferencial
+        de envío pese al cupón; o se regalaba el shipping ya reseteado a 0.
+      · percent / fixed_amount: tras add/remove item se daba el descuento del
+        subtotal viejo (menos descuento del prometido, o descuento sobre un
+        subtotal que ya no existe).
+      · min_subtotal: el cupón seguía aplicando aunque el cart bajara del mínimo
+        al quitar ítems.
+
+    Recalcula con subtotal+shipping frescos usando las funciones puras del motor
+    de cupones.
+
+    Política de revocación (deliberadamente acotada, coherente con `consume_redemption`,
+    ADR-0015 D5): solo se REVOCA cuando el cart deja de calificar por SU PROPIO
+    contenido — `min_subtotal_not_met` (el cliente quitó ítems y bajó del mínimo).
+    NO se revoca por expiración / inactivo / max_redemptions a mitad de conversación:
+    el motor honra un cupón válidamente aplicado hasta el pago ("overhang aceptado",
+    D5) y `consume_redemption` tampoco revalida esas condiciones. Revocar por un límite
+    temporal mid-cart sería conducta nueva e inconsistente. Para esos casos se honra el
+    valor recomputado (igual que hoy), solo actualizado al subtotal/shipping vigentes.
+
+    Cuando revoca: limpia cart + marca redemption revocada (`revoke_coupon`) y emite
+    `coupon_auto_revoked` para trazabilidad.
+
+    Fail-safe: ante cualquier error inesperado retorna `fallback_discount_cents`
+    (el comportamiento previo — descuento congelado) en vez de tumbar la mutación
+    del cart. Nunca lanza.
+
+    Returns: discount_cents fresco (0 si no hay cupón o se revocó).
+    """
+    if not coupon_id:
+        return 0
+    try:
+        from lib.coupons import (  # noqa: PLC0415
+            compute_discount,
+            revoke_coupon,
+            validate_coupon_applicable,
+        )
+
+        cres = (
+            supabase.table("coupons")
+            .select(
+                "id, code, discount_type, discount_value, min_subtotal_cents, "
+                "max_redemptions, redemptions_count, valid_from, valid_until, is_active"
+            )
+            .eq("tenant_id", tenant_id)
+            .eq("id", coupon_id)
+            .limit(1)
+            .execute()
+        )
+        crows = cres.data or []
+        if not crows:
+            # El cupón se borró del catálogo mientras seguía aplicado al cart.
+            revoke_coupon(supabase, tenant_id, cart_id, reason="coupon_deleted")
+            return 0
+        coupon = crows[0]
+
+        validation = validate_coupon_applicable(coupon, int(subtotal_cents))
+        if not validation.ok and validation.reason == "min_subtotal_not_met":
+            # El cart cayó bajo el mínimo del cupón al quitar ítems → ya no califica.
+            revoke_coupon(
+                supabase, tenant_id, cart_id,
+                reason="recompute:min_subtotal_not_met",
+            )
+            _emit_cart_event(
+                supabase, cart_id=cart_id, tenant_id=tenant_id,
+                event_type="coupon_auto_revoked",
+                payload={
+                    "reason": "min_subtotal_not_met",
+                    "coupon_code": coupon.get("code"),
+                    "subtotal_cents": int(subtotal_cents),
+                    "min_subtotal_cents": int(coupon.get("min_subtotal_cents") or 0),
+                },
+            )
+            logger.info(
+                "[CART] cupón auto-revocado cart=%s code=%s (subtotal %s < min %s, recompute F50)",
+                cart_id[:8], coupon.get("code"), int(subtotal_cents),
+                int(coupon.get("min_subtotal_cents") or 0),
+            )
+            return 0
+
+        # Válido, o inválido por causa temporal (expiró/inactivo/límite): honrar el
+        # valor recomputado sobre subtotal/shipping vigentes (consistente con D5).
+        return compute_discount(coupon, int(subtotal_cents), int(shipping_cents))
+    except Exception as e:  # noqa: BLE001 — fail-safe: no tumbar la mutación del cart
+        logger.warning(
+            "[CART] _fresh_coupon_discount error cart=%s coupon=%s: %s — fallback %s",
+            cart_id[:8], coupon_id, e, fallback_discount_cents,
+        )
+        return int(fallback_discount_cents or 0)
+
+
 def invalidate_pending_order_on_cart_change(
     supabase: Client,
     *,
@@ -641,7 +748,7 @@ def set_shipping_meta(
     # rompiendo el fuzzy match de select_carrier en re-selecciones).
     cur = (
         supabase.table("conversation_carts")
-        .select("subtotal_cents, shipping_meta, discount_cents")
+        .select("subtotal_cents, shipping_meta, discount_cents, coupon_id")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -650,11 +757,18 @@ def set_shipping_meta(
     if not cur.data:
         raise RuntimeError(f"set_shipping_meta: cart {cart_id} no encontrado")
     subtotal = int(cur.data[0].get("subtotal_cents") or 0)
-    # Rev. 109 fix UAT live BUG 34 — preservar descuento de cupón ya
-    # aplicado. Sin este max(), set_shipping_meta sobrescribía total_cents
-    # ignorando discount_cents → cliente perdía el descuento al elegir
-    # carrier post-cupón.
-    discount = int(cur.data[0].get("discount_cents") or 0)
+    # Rev. 109 fix UAT live BUG 34 — preservar descuento de cupón ya aplicado.
+    # F50: además RECOMPUTAR. Antes reutilizaba discount_cents congelado; con un
+    # cupón free_shipping, elegir un carrier distinto al cotizado dejaba el
+    # descuento en el shipping viejo → se cobraba el diferencial (o se regalaba).
+    # Recompute con el shipping recién elegido → free_shipping = shipping actual
+    # (envío realmente gratis); percent/fixed sin cambio (subtotal no varió).
+    discount = _fresh_coupon_discount(
+        supabase, tenant_id=tenant_id, cart_id=cart_id,
+        coupon_id=cur.data[0].get("coupon_id"),
+        subtotal_cents=subtotal, shipping_cents=int(shipping_cents),
+        fallback_discount_cents=int(cur.data[0].get("discount_cents") or 0),
+    )
     new_total = max(0, subtotal + int(shipping_cents) - discount)
     existing_meta = cur.data[0].get("shipping_meta") or {}
 
@@ -687,6 +801,9 @@ def set_shipping_meta(
             "shipping_cents": int(shipping_cents),
             "shipping_meta": shipping_meta,
             "total_cents": new_total,
+            # F50: persistir el descuento recomputado para mantener el estado
+            # materializado coherente (0 si el cupón fue auto-revocado arriba).
+            "discount_cents": discount,
             "requires_requote": False,
         })
         .eq("id", cart_id)
@@ -992,7 +1109,7 @@ def set_shipping_city(
     """
     cur = (
         supabase.table("conversation_carts")
-        .select("shipping_meta, subtotal_cents, discount_cents")
+        .select("shipping_meta, subtotal_cents, discount_cents, coupon_id")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -1014,12 +1131,22 @@ def set_shipping_city(
         ).isoformat(),
     }
     # Rev. 109 fix UAT live BUG 34 — preservar discount aplicado por cupón.
-    _disc = int(row.get("discount_cents") or 0)
-    new_total = max(0, int(row.get("subtotal_cents") or 0) - _disc)
+    # F50: el cambio de ciudad resetea shipping_cents=0 → recomputar con shipping=0.
+    # free_shipping vuelve a 0 hasta la nueva cotización (correcto: aún no hay envío);
+    # percent/fixed se mantienen sobre el subtotal; si cayó del mínimo → revoca.
+    _subtotal = int(row.get("subtotal_cents") or 0)
+    _disc = _fresh_coupon_discount(
+        supabase, tenant_id=tenant_id, cart_id=cart_id,
+        coupon_id=row.get("coupon_id"),
+        subtotal_cents=_subtotal, shipping_cents=0,
+        fallback_discount_cents=int(row.get("discount_cents") or 0),
+    )
+    new_total = max(0, _subtotal - _disc)
     supabase.table("conversation_carts").update({
         "shipping_cents": 0,
         "shipping_meta": new_meta,
         "total_cents": new_total,
+        "discount_cents": _disc,  # F50: mantener estado materializado coherente
         "requires_requote": True,
     }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
     logger.info(
@@ -1053,7 +1180,7 @@ def invalidate_shipping(
     address en shipping_meta para que el bot no tenga que repreguntar."""
     cur = (
         supabase.table("conversation_carts")
-        .select("shipping_meta, subtotal_cents, discount_cents, shipping_cents")
+        .select("shipping_meta, subtotal_cents, discount_cents, shipping_cents, coupon_id")
         .eq("id", cart_id)
         .eq("tenant_id", tenant_id)
         .limit(1)
@@ -1079,12 +1206,23 @@ def invalidate_shipping(
     }
     preserved["invalidated_reason"] = reason
     # Rev. 109 fix UAT live BUG 34 — preservar discount aplicado.
-    _disc = int(row.get("discount_cents") or 0)
-    new_total = max(0, int(row.get("subtotal_cents") or 0) - _disc)
+    # F50: invalidate_shipping se llama tras CADA add/remove item (subtotal cambió)
+    # con shipping reseteado a 0 → recomputar. percent/fixed escalan al nuevo
+    # subtotal; free_shipping cae a 0 hasta recotizar; si el cart bajó del mínimo
+    # al quitar ítems → el cupón se auto-revoca (antes seguía aplicando indefinido).
+    _subtotal = int(row.get("subtotal_cents") or 0)
+    _disc = _fresh_coupon_discount(
+        supabase, tenant_id=tenant_id, cart_id=cart_id,
+        coupon_id=row.get("coupon_id"),
+        subtotal_cents=_subtotal, shipping_cents=0,
+        fallback_discount_cents=int(row.get("discount_cents") or 0),
+    )
+    new_total = max(0, _subtotal - _disc)
     supabase.table("conversation_carts").update({
         "shipping_cents": 0,
         "shipping_meta": preserved,
         "total_cents": new_total,
+        "discount_cents": _disc,  # F50: mantener estado materializado coherente
         "requires_requote": had_shipping,
     }).eq("id", cart_id).eq("tenant_id", tenant_id).execute()
     logger.info("[CART] shipping invalidated cart=%s reason=%s", cart_id[:8], reason)
