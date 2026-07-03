@@ -15,7 +15,8 @@ Scopes disponibles (NO granulares por recurso):
   - write         → GET + POST/PUT (items, orders, shipping)
   - offline_access → habilita refresh_token (obligatorio para uso sin interacción)
 
-Access token: válido 180 días. Refresh automático cuando expira.
+Access token: válido 6 horas (expires_in=21600, doc oficial MeLi). Refresh automático
+cuando expira (expires_at se calcula desde expires_in del token, no del comentario).
 
 Endpoints de items usados:
   - GET  /users/{user_id}/items/search          → listar IDs de items del seller
