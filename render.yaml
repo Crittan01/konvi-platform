@@ -197,9 +197,9 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_EMBEDDING_MODEL
-        value: gemini-embedding-001
+        value: gemini-embedding-2          # Fase 6: embedding-001 se retira (doc oficial); 2 = 3072-dim (schema OK)
       - key: GEMINI_EMBEDDING_FALLBACK_MODEL
-        value: text-embedding-004
+        value: gemini-embedding-2          # text-embedding-004 apagado ene-2026; único modelo vigente compatible
       # ── MeLi OAuth (Fase 10) — requiere IH-007: registrar app en MeLi Developers ──
       - key: MELI_CLIENT_ID
         sync: false
@@ -315,9 +315,9 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: GEMINI_EMBEDDING_MODEL
-        value: gemini-embedding-001
+        value: gemini-embedding-2          # Fase 6: embedding-001 se retira (doc oficial); 2 = 3072-dim (schema OK)
       - key: GEMINI_EMBEDDING_FALLBACK_MODEL
-        value: text-embedding-004
+        value: gemini-embedding-2          # text-embedding-004 apagado ene-2026; único modelo vigente compatible
       - key: INBOX_SHIPPING_DEFAULT_WEIGHT_KG
         value: "1"
       - key: INBOX_SHIPPING_DEFAULT_LENGTH_CM
