@@ -46,7 +46,7 @@ export default function SuppliersManager({ suppliers, canWrite }: Props) {
             <CardTitle className="text-sm">Nuevo Proveedor</CardTitle>
           </CardHeader>
           <CardContent className="pt-4">
-            <form action={async (fd) => { await addSupplier(fd); setShowAdd(false) }} className="space-y-4">
+            <form action={async (fd) => { const r = await addSupplier(fd); if (!r.ok) { window.alert(r.error || 'No se pudo guardar el proveedor.'); return } setShowAdd(false) }} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-muted-foreground uppercase">Nombre de la Empresa *</label>

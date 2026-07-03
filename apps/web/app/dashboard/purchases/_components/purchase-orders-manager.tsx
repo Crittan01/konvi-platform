@@ -75,7 +75,11 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
     
     const payload = items.map(i => ({ variation_id: i.variation_id, quantity: i.qty, unit_cost: i.cost }))
     fd.append('items', JSON.stringify(payload))
-    await createPurchaseOrder(fd)
+    const res = await createPurchaseOrder(fd)
+    if (!res.ok) {
+      window.alert(res.error || 'No se pudo crear la orden de compra.')
+      return
+    }
     setShowAdd(false)
     setItems([])
   }
@@ -199,12 +203,12 @@ export default function PurchaseOrdersManager({ orders, suppliers, products, can
 
              {o.status === 'ordered' && canWrite && (
                <div className="mt-3 flex flex-wrap gap-2 justify-end pt-3 border-t">
-                  <form action={async () => await cancelPurchaseOrder(o.id)}>
+                  <form action={async () => { const r = await cancelPurchaseOrder(o.id); if (!r.ok) window.alert(r.error || 'No se pudo cancelar la orden.') }}>
                     <SubmitButton variant="outline" size="sm" pendingText="Cancelando..." savedText="Cancelada" className="h-8 text-xs text-red-500 hover:text-red-600 hover:bg-red-500/10 gap-2 border-red-500/20">
                       <XCircle className="h-3.5 w-3.5" /> Cancelar Orden
                     </SubmitButton>
                   </form>
-                  <form action={async () => await receivePurchaseOrder(o.id)}>
+                  <form action={async () => { const r = await receivePurchaseOrder(o.id); if (!r.ok) window.alert(r.error || 'No se pudo recibir la orden.') }}>
                     <SubmitButton size="sm" pendingText="Registrando..." savedText="Recibida ✓" className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white gap-2">
                       <Check className="h-3.5 w-3.5" /> Marcar como Recibida (Ingresar al Inventario)
                     </SubmitButton>
