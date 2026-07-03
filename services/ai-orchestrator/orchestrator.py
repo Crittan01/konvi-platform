@@ -10398,16 +10398,12 @@ async def build_and_run_orchestration(
                     except Exception as e:
                         logger.warning(f"[CONTACT USYNC] Error en DANE lookup: {e}")
                 
-                # Normalización DIAN para almacenamiento unificado
-                try:
-                    from dian_normalization import normalize_dian_address
-                    if merged_address.get("street"):
-                        merged_address["street"] = normalize_dian_address(merged_address["street"])
-                    if merged_address.get("number"):
-                        merged_address["number"] = normalize_dian_address(merged_address["number"])
-                except Exception as e:
-                    logger.warning(f"[CONTACT USYNC] Error en DIAN normalizer: {e}")
-
+                # F31: NO DIAN-normalizar street/number al escribir. La abreviatura DIAN
+                # (uppercase + 'Calle'→'CL') no alimentaba ningún consumidor downstream
+                # (Aveonline/Wompi reciben el street como string passthrough;
+                # normalize_dian_address no tenía otros callsites) y divergía del path
+                # agentic primario, que persiste el street humano legible. Ambos paths
+                # ahora almacenan el formato tal cual lo escribió el cliente.
                 update_data["address"] = merged_address
             if update_data:
                 try:

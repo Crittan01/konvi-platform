@@ -86,6 +86,18 @@ class TestBuildAddressDict(unittest.TestCase):
         self.assertIn("street", d)
         self.assertEqual(d["street"], "Calle 10 #5-23")
 
+    def test_street_persiste_verbatim_sin_dian(self):
+        """F31: el street se persiste tal cual (case + '#' preservados), NUNCA
+        uppercased/abreviado DIAN. Tras remover la normalización DIAN muerta del
+        path legacy, ambos paths (agentic + legacy) almacenan el formato humano
+        legible. Guarda contra reintroducir normalize-on-write."""
+        args = SaveAddressArgs(
+            street="Calle 36A # 6-87", city="Bogotá", building_type="casa",
+        )
+        d = _build_address_dict(args)
+        self.assertEqual(d["street"], "Calle 36A # 6-87")
+        self.assertNotEqual(d["street"], d["street"].upper())
+
     def test_persiste_opcionales_cuando_presentes(self):
         args = SaveAddressArgs(
             street="Calle 10", city="Bogotá", building_type="casa",
