@@ -655,6 +655,52 @@ def _consume_cart_reservations_if_any(
         return 0
 
 
+def _fire_meli_sync_for_order(supabase: Client, order_id: str, tenant_id: str) -> None:
+    """F4 — empuja a MeLi el stock actualizado de las variantes de una orden tras
+    consumir reservas (flujo bot WhatsApp). El path de decremento directo ya
+    sincroniza inline; el consume de reservas NO lo hacía → MeLi mostraba stock
+    viejo tras una venta por WhatsApp (oversell cross-canal). sync_meli_stock es
+    no-op si la variante no tiene listing MeLi activo (guardado)."""
+    try:
+        items = (
+            supabase.table("order_items")
+            .select("variation_id")
+            .eq("order_id", order_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        ).data or []
+    except Exception as exc:
+        logger.warning("[STOCK] MeLi sync: lookup order_items falló order=%s: %s", order_id, exc)
+        return
+    seen: set = set()
+    for it in items:
+        var_id = it.get("variation_id")
+        if not var_id or var_id in seen:
+            continue
+        seen.add(var_id)
+        try:
+            vr = (
+                supabase.table("product_variations")
+                .select("stock_quantity")
+                .eq("id", var_id).eq("tenant_id", tenant_id).single().execute()
+            )
+            new_stock = (vr.data or {}).get("stock_quantity")
+            if new_stock is None:
+                continue
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(sync_meli_stock(var_id, new_stock, supabase))
+            except RuntimeError:
+                try:
+                    asyncio.run(sync_meli_stock(var_id, new_stock, supabase))
+                except Exception as meli_err:
+                    logger.warning(
+                        "[STOCK] Sync MeLi falló variation=%s (no bloquea): %s", var_id, meli_err,
+                    )
+        except Exception as exc:
+            logger.warning("[STOCK] MeLi sync: variation=%s falló: %s", var_id, exc)
+
+
 def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str) -> None:
     """
     Decrementa stock de las variantes incluidas en el pedido al confirmarlo.
@@ -674,6 +720,9 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
             "[STOCK] orden %s consumió %d reservas activas — skip decrement directo",
             order_id, consumed_reservations,
         )
+        # F4: el consume de reservas ya decrementó stock (vía RPC) pero NO sincronizaba
+        # MeLi → sincronizar aquí también (el path directo de abajo ya lo hace inline).
+        _fire_meli_sync_for_order(supabase, order_id, tenant_id)
         return
 
     try:
