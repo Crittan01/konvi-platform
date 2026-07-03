@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager
 
 from observability import init_sentry
 
@@ -35,10 +36,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("orchestrator-server")
 
+
+# ─── Lifespan — arrancar el worker al iniciar uvicorn ─────────────────────────
+# F-doc (Fase 6): migrado de @app.on_event("startup") (deprecado en FastAPI) al patrón
+# lifespan idiomático (mismo que services/api/main.py). `_run_worker_thread` se resuelve
+# en runtime (definido más abajo), por eso la forward-reference es válida.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    t = threading.Thread(target=_run_worker_thread, daemon=True, name="orchestrator-worker")
+    t.start()
+    logger.info("Worker thread iniciado. Servidor HTTP escuchando en $PORT.")
+    yield
+
+
 # ─── FastAPI — solo para satisfacer el requisito de puerto de Render ───────────
 app = FastAPI(
     title="AI Orchestrator",
     description="Worker de polling de Supabase → Gemini → WhatsApp. El endpoint /health es solo para que Render detecte el servicio activo.",
+    lifespan=lifespan,
 )
 
 # Estado global del worker (para /status)
@@ -173,12 +188,3 @@ def _run_worker_thread():
     finally:
         _worker_status["running"] = False
         logger.warning("⚠️  Worker detenido. El servidor HTTP sigue activo.")
-
-
-# ─── Lifespan — lanzar worker al arrancar uvicorn ─────────────────────────────
-@app.on_event("startup")
-def startup_event():
-    """Arrancar el worker en un daemon thread al iniciar el servidor."""
-    t = threading.Thread(target=_run_worker_thread, daemon=True, name="orchestrator-worker")
-    t.start()
-    logger.info("Worker thread iniciado. Servidor HTTP escuchando en $PORT.")
