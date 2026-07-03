@@ -16,6 +16,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 from agentic.tools.base import ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
 from lib.address_format import format_address_line
+from lib.phone_format import format_phone_co  # F33: fuente única de formateo display CO
 
 logger = logging.getLogger(__name__)
 
@@ -171,15 +172,10 @@ class GetContactInfoTool:
         # "Torre/Apto") y renderiza oficina/Piso/Empresa/complex_name (antes omitidos).
         address_line: Optional[str] = format_address_line(addr) or None
 
+        # F33 — fuente única (lib.phone_format). Antes era una copia inline que caía
+        # a str(phone) crudo para 10 dígitos; format_phone_co sí los formatea.
         phone = contact.get("phone") or contact.get("shipping_phone")
-        phone_fmt = None
-        if phone:
-            digits = "".join(c for c in str(phone) if c.isdigit())
-            if digits.startswith("57") and len(digits) == 12:
-                rest = digits[2:]
-                phone_fmt = f"+57 {rest[:3]} {rest[3:6]} {rest[6:]}"
-            else:
-                phone_fmt = str(phone)
+        phone_fmt = format_phone_co(phone) if phone else None
 
         return tool_success({
             "exists": True,

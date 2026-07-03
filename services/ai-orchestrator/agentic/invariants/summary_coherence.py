@@ -40,6 +40,9 @@ from tools.catalog_contract import variant_presentation  # ADR-0029 F5: extracto
 # F32 — render único (lib.address_format). Se conserva el nombre `_format_address_compact`
 # para los call-sites (:255, :278) y el test; delega al helper canónico.
 from lib.address_format import format_address_line as _format_address_compact
+# F33: fuente única de formateo display CO. Antes copia local divergente que
+# perdía el formato de 10 dígitos (caía a str(raw) crudo). Alias conserva el nombre.
+from lib.phone_format import format_phone_co as _format_phone
 
 
 # Detector heurístico de resumen.
@@ -285,15 +288,6 @@ def _build_canonical_summary(
     lines.append("")
     lines.append("Confirmas el pedido para generar el link de pago?")
     return "\n".join(lines)
-
-
-def _format_phone(raw: str) -> str:
-    """+57 312 583 5649 style si phone está en formato CO digits."""
-    digits = "".join(c for c in str(raw or "") if c.isdigit())
-    if digits.startswith("57") and len(digits) == 12:
-        rest = digits[2:]
-        return f"+57 {rest[:3]} {rest[3:6]} {rest[6:]}"
-    return str(raw)
 
 
 class SummaryCoherenceInvariant:

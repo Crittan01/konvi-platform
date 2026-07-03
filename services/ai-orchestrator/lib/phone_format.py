@@ -15,6 +15,9 @@ def format_phone_co(phone: str | None) -> str:
     """'573125835649' → '+57 312 583 5649'. Devuelve el input si no matchea CO."""
     if not phone:
         return ""
+    # F33: los inline reemplazados coercían a str; preserva robustez ante no-string
+    # (int accidental / MagicMock en tests) y alinea el passthrough con el 'str(raw)' viejo.
+    phone = str(phone)
     digits = re.sub(r"\D", "", phone)
     if len(digits) == 12 and digits.startswith("57"):
         return f"+57 {digits[2:5]} {digits[5:8]} {digits[8:]}"
