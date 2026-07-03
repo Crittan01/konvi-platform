@@ -396,13 +396,29 @@ async def _emit_degraded_response_and_escalate(
 
 
 def _resolve_contact_id(supabase: Any, tenant_id: str, conversation_id: str):
-    """Resuelve el contact_id de una conversación (None si no se encuentra)."""
+    """Resuelve el contact_id de una conversación (None si no se encuentra).
+
+    F2: `conversations` NO tiene columna contact_id — el vínculo canónico es
+    customer_phone → contacts.phone (patrón rev.104, orchestrator.py:1942). La versión
+    previa consultaba conversations.contact_id → APIError 400 silenciado → SIEMPRE None →
+    mi F6 self-service (Art.14) nunca corría y el paper-trail quedaba con contact_id NULL.
+    """
     try:
-        c = (
-            supabase.table("conversations").select("contact_id")
-            .eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
+        conv = (
+            supabase.table("conversations").select("customer_phone")
+            .eq("id", conversation_id).eq("tenant_id", tenant_id)
+            .limit(1).execute()
         )
-        return (c.data or {}).get("contact_id")
+        phone = ((conv.data or [{}])[0].get("customer_phone") or "").lstrip("+")
+        if not phone:
+            return None
+        ctc = (
+            supabase.table("contacts").select("id")
+            .eq("tenant_id", tenant_id)
+            .or_(f"phone.eq.{phone},phone.eq.+{phone}")
+            .limit(1).execute()
+        )
+        return (ctc.data or [{}])[0].get("id")
     except Exception:
         return None
 
@@ -414,15 +430,8 @@ def _log_habeas_event(
     canónico para la SIC. Best-effort: NO bloquea la escalación (la seguridad es escalar; esto es el
     paper-trail). Resuelve contact_id de la conversación (nullable si no se encuentra)."""
     try:
-        contact_id = None
-        try:
-            c = (
-                supabase.table("conversations").select("contact_id")
-                .eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
-            )
-            contact_id = (c.data or {}).get("contact_id")
-        except Exception:
-            pass
+        # F2: resolver por customer_phone→contacts (conversations no tiene contact_id).
+        contact_id = _resolve_contact_id(supabase, tenant_id, conversation_id)
         supabase.table("consent_audit_log").insert({
             "tenant_id": tenant_id,
             "contact_id": contact_id,

@@ -1008,6 +1008,7 @@ def set_shipping_city(
         "dane_code": new_dane_code or meta.get("dane_code"),
         "address_line": meta.get("address_line"),
         "weight_inputs": meta.get("weight_inputs"),
+        "recipient": meta.get("recipient"),   # F43: preservar destinatario alterno (Ley 1581 BUG 37)
         "city_changed_at": __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
         ).isoformat(),
@@ -1068,10 +1069,12 @@ def invalidate_shipping(
     # si no el invariant de recotización dispara un falso "recalculo el envío" antes
     # de siquiera pedir la dirección. Bug que el script quemado nunca habría pillado.
     had_shipping = bool(meta.get("quoted_options")) or int(row.get("shipping_cents") or 0) > 0
-    # Conservar address (city, dane_code, address_line) y limpiar el resto.
+    # Conservar address (city, dane_code, address_line) + el receptor alterno y limpiar el resto.
+    # F43: 'recipient' (destinatario alterno, envío a tercero — fix Habeas Data BUG 37) se perdía en
+    # CADA add/remove item → el resumen mostraba al titular WhatsApp como quien recibe (regresión Ley 1581).
     preserved = {
         k: meta.get(k)
-        for k in ("city", "dane_code", "address_line")
+        for k in ("city", "dane_code", "address_line", "recipient")
         if meta.get(k)
     }
     preserved["invalidated_reason"] = reason

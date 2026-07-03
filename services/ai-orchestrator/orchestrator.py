@@ -7668,10 +7668,24 @@ async def build_and_run_orchestration(
                 ),
             )
             try:
+                # F1: `conversations` NO tiene human_takeover_reason — incluirla hacía FALLAR el UPDATE
+                # entero (42703 undefined_column), así que status='human_takeover' NUNCA se aplicaba →
+                # el trigger de human_takeover_notifications_queue nunca disparaba → NADIE era notificado
+                # de una crisis de salud mental. La razón se persiste append-only en messages
+                # (content_type='escalation_audit'), patrón canónico de escalation.py.
                 supabase.table("conversations").update({
                     "status": "human_takeover",
-                    "human_takeover_reason": "mental_health_crisis",
-                }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()  # A6.2.7
+                }).eq("id", conversation_id).eq("tenant_id", tenant_id).execute()
+                supabase.table("messages").insert({
+                    "conversation_id": conversation_id,
+                    "tenant_id": tenant_id,
+                    "direction": "outbound",
+                    "content_type": "escalation_audit",
+                    "content": "",
+                    "payload": {"reason": "mental_health_crisis", "source": "crisis_detector"},
+                    "processed": True,
+                    "processing_status": "processed",
+                }).execute()
             except Exception as _crisis_err:
                 logger.error("[CRISIS] no pude marcar takeover: %s", _crisis_err)
             _mark_message_processing(supabase, tenant_id, message_id, processing_status=PROCESSING_STATUS_PROCESSED)

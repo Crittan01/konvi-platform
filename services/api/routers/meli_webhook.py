@@ -422,6 +422,7 @@ def _upsert_meli_contact(
         "consent_given": True,
         "consent_source": "marketplace_meli",
         "consent_date": now_iso,
+        "consent_given_at": now_iso,   # F116: sync con la columna v2 que lee el export legal SAR/SIC
         "consent_channel": "marketplace_meli",
         "consent_notice_version": CURRENT_PRIVACY_NOTICE_VERSION,
         "consent_evidence": {

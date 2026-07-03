@@ -173,7 +173,7 @@ class BuildSicPayloadTests(unittest.TestCase):
         self.sb = MagicMock()
         # tenants read.
         self.sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=[{"id": "t-1", "name": "Test Tenant", "document_number": "900-X"}]
+            data=[{"id": "t-1", "name": "Test Tenant", "nit": "900-X"}]  # F4: columna real
         )
 
     def _setup_consent(self, rows):

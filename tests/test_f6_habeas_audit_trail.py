@@ -43,6 +43,12 @@ class _FakeSb:
     def single(self):
         return self
 
+    def limit(self, *a, **k):
+        return self
+
+    def or_(self, *a, **k):
+        return self
+
     def insert(self, data):
         self._pending = ("insert", self._tbl, data)
         return self
@@ -53,9 +59,13 @@ class _FakeSb:
                 raise Exception("insert boom")
             self.inserts.append(self._pending)
             return types.SimpleNamespace(data=[{}])
+        # F2: _resolve_contact_id → conversations.customer_phone → contacts.phone.
         if self._tbl == "conversations":
-            data = {"contact_id": self._contact_id} if self._contact_id is not None else {}
-            return types.SimpleNamespace(data=data)
+            return types.SimpleNamespace(data=[{"customer_phone": "573001112222"}])
+        if self._tbl == "contacts":
+            return types.SimpleNamespace(
+                data=[{"id": self._contact_id}] if self._contact_id is not None else []
+            )
         return types.SimpleNamespace(data=[])
 
 

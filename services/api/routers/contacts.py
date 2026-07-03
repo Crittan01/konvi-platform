@@ -258,6 +258,7 @@ def _compute_consent_update(
     return {
         "consent_given": effective,
         "consent_date": effective_date,
+        "consent_given_at": effective_date,   # F116: sync con la columna v2 que lee el export legal
         "consent_source": patch.consent_source or current.get("consent_source"),
         "consent_channel": (patch.consent_channel or "dashboard_console") if effective else None,
         "consent_notice_version": patch.consent_notice_version or current.get("consent_notice_version"),
@@ -334,6 +335,9 @@ async def create_contact(
             "shipping_phone": contact.shipping_phone,
             "consent_given": contact.consent_given,
             "consent_date": now_iso if contact.consent_given else None,
+            # F116: escribir TAMBIÉN consent_given_at (columna v2 que lee el export legal SAR/SIC).
+            # Antes solo se escribía consent_date → "Otorgado en" salía NULL en el reporte Habeas Data.
+            "consent_given_at": now_iso if contact.consent_given else None,
             "consent_source": contact.consent_source if contact.consent_given else None,
             "consent_channel": contact.consent_channel if contact.consent_given else None,
             "consent_actor_email": _email if contact.consent_given else None,

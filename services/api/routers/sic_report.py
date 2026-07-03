@@ -52,7 +52,9 @@ def _build_sic_payload(
     """Compone el reporte SIC para el rango dado (Art. 9 + Art. 14)."""
     # Tenant info.
     try:
-        t_res = sb.table("tenants").select("id, name, document_number").eq(
+        # F4: la columna real es `nit` (20260415020000); document_number NO existe → el select
+        # lanzaba APIError → 503 SIEMPRE → el reporte SIC (Ley 1581) era imposible de generar.
+        t_res = sb.table("tenants").select("id, name, nit").eq(
             "id", tenant_id).limit(1).execute()
     except Exception as exc:
         logger.error("[SIC] tenants read err: %s", exc)
@@ -112,7 +114,7 @@ def _build_sic_payload(
         "tenant": {
             "id": tenant_row.get("id"),
             "name": tenant_row.get("name"),
-            "document_number": tenant_row.get("document_number"),
+            "document_number": tenant_row.get("nit"),   # F4: mapea la columna real `nit`
             "role": "Responsable del Tratamiento (Ley 1581/2012)",
         },
         "platform": {
