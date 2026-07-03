@@ -101,10 +101,14 @@ class DeleteContactServerActionTests(unittest.TestCase):
         self.assertIn('reason: reason || null', self.page_src)
 
     def test_purge_propagates_errors_to_ui(self):
-        """Si el endpoint falla, el UI debe propagar el error al cliente
-        (no fallar silente)."""
+        """F68 — el server action propaga el error del guard Wompi al cliente vía
+        ActionResult {ok:false,error}, NO por throw. En producción Next.js reemplaza
+        el message de un throw en un Server Action por texto genérico + digest, y el
+        operador perdía la instrucción accionable (esperar ~30 min / cancelar orden)."""
         self.assertIn('Purge falló', self.page_src)
-        self.assertIn('throw new Error', self.page_src)
+        # El error viaja por el contrato ActionResult (return {ok:false,error}),
+        # no por throw — que es exactamente lo que F68 corrigió.
+        self.assertIn('return { ok: false, error:', self.page_src)
 
 
 class DeleteUIRev103Tests(unittest.TestCase):
