@@ -17,8 +17,10 @@ Flujo de sync automático (llamado desde orders.py y products.py):
 """
 import logging
 from datetime import datetime, timezone
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from dependencies.audit import audit_log
 from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, require_write_role
@@ -35,6 +37,24 @@ from integrations.meli_client import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
+
+
+# ── Request bodies (F24: validación Pydantic, reemplaza dict crudo = Body(...)) ──
+
+class LinkListingBody(BaseModel):
+    meli_id: str = Field(..., min_length=1, max_length=32)
+    variation_id: str = Field(..., min_length=1, max_length=64)
+    meli_price: Optional[float] = Field(default=None, ge=0)
+    meli_variation_id: Optional[int] = Field(default=None, ge=1)
+
+
+class ListingStatusBody(BaseModel):
+    status: Literal["active", "paused"]
+
+
+class ImportBody(BaseModel):
+    meli_id: str = Field(..., min_length=1, max_length=32)
+    category_id: Optional[str] = None
 
 
 # ─── Sync utility (llamado desde otros routers) ───────────────────────────────
@@ -265,11 +285,11 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
         raise HTTPException(status_code=502, detail=f"Error al consultar Mercado Libre: {str(e)}")
 
 
-@router.post("/link")
+@router.post("/link", status_code=201)
 @audit_log(entity_type="marketplace_listing", action="created")
 async def link_listing(
     request: Request,
-    payload: dict = Body(...),
+    payload: LinkListingBody,
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
     supabase = Depends(get_service_client),
@@ -287,13 +307,14 @@ async def link_listing(
     Si no, el sync usa available_quantity a nivel item (item sin variaciones) o la primera variación (fallback).
     """
 
-    meli_id           = payload.get("meli_id", "").strip().upper()
-    variation_id      = payload.get("variation_id")
-    meli_price        = payload.get("meli_price")
-    meli_variation_id = payload.get("meli_variation_id")  # bigint — variación MeLi específica (opcional)
+    meli_id           = payload.meli_id.strip().upper()
+    variation_id      = payload.variation_id
+    meli_price        = payload.meli_price
+    meli_variation_id = payload.meli_variation_id  # int validado por Pydantic (o None)
 
-    if not meli_id or not variation_id:
-        raise HTTPException(status_code=400, detail="meli_id y variation_id son requeridos")
+    # Guard post-strip: input whitespace-only pasa min_length=1 pero strippea a "".
+    if not meli_id:
+        raise HTTPException(status_code=400, detail="meli_id es requerido")
 
     # Verificar que la variante pertenece al tenant
     var_check = (
@@ -325,7 +346,9 @@ async def link_listing(
             "external_url": external_url,
         }
         if meli_variation_id is not None:
-            insert_data["meli_variation_id"] = int(meli_variation_id)
+            # F24: Pydantic ya garantiza int (o None) → sin int() manual que
+            # convertía un string no-numérico en ValueError→500 (ahora 422 upstream).
+            insert_data["meli_variation_id"] = meli_variation_id
 
         res = supabase.table("marketplace_listings").insert(insert_data).execute()  # tenant_filter:exempt:payload_includes_tenant_id
 
@@ -389,7 +412,7 @@ async def unlink_listing(
 async def update_listing_status(
     listing_id: str,
     request: Request,
-    payload: dict = Body(...),
+    payload: ListingStatusBody,
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
     supabase = Depends(get_service_client),
@@ -400,10 +423,8 @@ async def update_listing_status(
 
     Nota: "closed" es irreversible en MeLi — no se expone desde esta UI.
     """
-    new_status = payload.get("status")
-
-    if new_status not in ("active", "paused"):
-        raise HTTPException(status_code=400, detail="Status válido: active | paused")
+    # F24: Literal["active","paused"] valida el enum → 422 automático (antes 400 manual).
+    new_status = payload.status
 
     # Obtener el listing con external_id
     listing_res = (
@@ -563,11 +584,11 @@ async def sync_stock_from_supabase(
         raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
 
 
-@router.post("/import")
+@router.post("/import", status_code=201)
 @audit_log(entity_type="product", action="created")
 async def import_from_meli(
     request: Request,
-    payload: dict = Body(...),
+    payload: ImportBody,
     tenant_id: str = Depends(get_current_tenant),
     _role: str = Depends(require_write_role),  # A7: gestión de canal = owner/manager
     supabase = Depends(get_service_client),
@@ -587,11 +608,12 @@ async def import_from_meli(
     Descripción, imágenes y atributos adicionales se completan desde el Catálogo.
     """
 
-    meli_id = payload.get("meli_id", "").strip().upper()
+    meli_id = payload.meli_id.strip().upper()
     # Coherencia (ADR-0029 D2): el producto importado hereda una categoría OPERATIVA (product_categories,
     # la que usa el bot y el listado), NO la de marketplace. platform_category_id nace null como en toda alta.
-    category_id = payload.get("category_id")  # product_categories.id (operativa) — opcional
+    category_id = payload.category_id  # product_categories.id (operativa) — opcional
 
+    # Guard post-strip: whitespace-only pasa min_length=1 pero strippea a "".
     if not meli_id:
         raise HTTPException(status_code=400, detail="meli_id es requerido")
 

@@ -501,7 +501,7 @@ class UpdateCartItemQtyTool:
             )
             # Reservar nueva qty.
             try:
-                _stock_res.reserve(
+                _res_upd = _stock_res.reserve(
                     ctx.supabase,
                     tenant_id=ctx.tenant_id,
                     variation_id=variation_id,
@@ -534,6 +534,30 @@ class UpdateCartItemQtyTool:
                         "requested": exc.requested,
                         "variation_id": variation_id,
                     },
+                )
+            # F47 — reserve() puede retornar ok=False SIN lanzar (VARIATION_NOT_FOUND /
+            # INTERNAL). Antes se ignoraba el retorno → se actualizaba la qty del cart
+            # SIN reserva válida (riesgo de oversell). Gap ya cerrado en AddToCartTool;
+            # aquí faltaba. ABORTAR + restaurar la reserva al qty previo (best-effort),
+            # porque el release_by_cart de arriba ya soltó la reserva anterior.
+            if not getattr(_res_upd, "ok", False):
+                try:
+                    _stock_res.reserve(
+                        ctx.supabase,
+                        tenant_id=ctx.tenant_id,
+                        variation_id=variation_id,
+                        qty=previous_qty,
+                        cart_id=cart["id"],
+                        conversation_id=ctx.conversation_id,
+                        ttl_minutes=_stock_res.TTL_CART_SOFT_MINUTES,
+                    )
+                except Exception:
+                    pass
+                return tool_failure(
+                    f"No pude reservar el stock para actualizar la cantidad en este "
+                    f"momento. ¿Lo intentamos de nuevo? (se mantiene en {previous_qty})",
+                    code=(getattr(_res_upd, "error_code", None) or "STOCK_RESERVE_FAILED"),
+                    extra={"variation_id": variation_id},
                 )
 
         try:
