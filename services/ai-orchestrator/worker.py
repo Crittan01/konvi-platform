@@ -1854,6 +1854,42 @@ class OrchestratorWorker:
 
             cancelled = 0
             for order in stale:
+                # F5 reconciliación (dinero) — NUNCA cancelar una orden con un pago
+                # APPROVED. Si el pago quedó registrado approved pero el confirm de la
+                # orden falló (partial failure), la orden sigue en pending_payment; el
+                # cron la cancelaría → se perdería el dinero del cliente. En su lugar la
+                # dejamos viva (los reintentos de webhook de Wompi 30m/3h/24h la
+                # confirman; si no, confirmación manual) + CRITICAL + métrica.
+                try:
+                    paid_res = (
+                        self.supabase.table("payments")
+                        .select("id, wompi_txn_id")
+                        .eq("order_id", order["id"])
+                        .eq("tenant_id", order["tenant_id"])
+                        .eq("status", "approved")
+                        .limit(1)
+                        .execute()
+                    )
+                    if paid_res.data:
+                        logger.critical(
+                            "[RELEASE] order=%s tiene pago APPROVED (txn=%s) pero sigue "
+                            "pending_payment — NO se cancela (confirm fallido). Reconciliar: "
+                            "esperar reintento webhook Wompi o confirmar manualmente.",
+                            order["id"][:8],
+                            (paid_res.data[0].get("wompi_txn_id") or "?"),
+                        )
+                        self._metrics.setdefault("paid_orders_protected_from_cancel", 0)
+                        self._metrics["paid_orders_protected_from_cancel"] += 1
+                        continue
+                except Exception as exc:
+                    # Conservador ante error: no cancelar (mejor un zombie que cancelar
+                    # una orden potencialmente pagada).
+                    logger.warning(
+                        "[RELEASE] lookup pago approved falló order=%s: %s — skip",
+                        order["id"][:8], exc,
+                    )
+                    continue
+
                 # Guard: no cancelar si hay payment pending fresco (cliente
                 # regeneró link recientemente vía bucket (b)).
                 try:

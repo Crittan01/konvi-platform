@@ -43,6 +43,7 @@ def _stub_supabase_for_release(
     *,
     stale_orders: list[dict],
     fresh_payments_by_order: dict[str, list[dict]] | None = None,
+    approved_payments_by_order: dict[str, list[dict]] | None = None,
 ):
     """Construye un supabase mock route-by-table:
 
@@ -50,10 +51,11 @@ def _stub_supabase_for_release(
         data=stale_orders
       table("orders").update(...).eq(...).eq(...).execute() →
         data=[{"id": ...}] (cancelación exitosa)
-      table("payments").select(...).eq(...).eq(...).gte(...).limit(...).execute() →
-        data=fresh_payments_by_order.get(order_id, [])
+      table("payments")...eq("status","approved")... → approved_payments_by_order.get(order_id, [])
+      table("payments")...eq("status","pending").gte(...) → fresh_payments_by_order.get(order_id, [])
     """
     fresh = fresh_payments_by_order or {}
+    approved = approved_payments_by_order or {}
     update_calls: list[str] = []
 
     def _make_orders_chain():
@@ -97,18 +99,22 @@ def _stub_supabase_for_release(
     def _make_payments_chain():
         select_chain = MagicMock()
 
-        captured = {"order_id": None}
+        captured = {"order_id": None, "status": None}
 
         def _eq_capture(col, val):
             if col == "order_id":
                 captured["order_id"] = val
+            elif col == "status":
+                captured["status"] = val
             return select_chain
 
         select_chain.eq = _eq_capture
         select_chain.gte.return_value = select_chain
         select_chain.limit.return_value = select_chain
         select_chain.execute = lambda: MagicMock(
-            data=fresh.get(captured["order_id"], [])
+            data=(approved if captured["status"] == "approved" else fresh).get(
+                captured["order_id"], []
+            )
         )
 
         payments_table = MagicMock()
@@ -175,6 +181,29 @@ class PendingPaymentReleaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(worker._metrics["expired_orders_cancelled"], 1)
         self.assertEqual(worker.supabase._update_calls, ["order-stale-no-regen"])
+
+    async def test_never_cancels_order_with_approved_payment(self):
+        """F5 reconciliación (dinero): una orden pending_payment con pago APPROVED
+        (confirm fallido) NO se cancela — se protege + métrica; los reintentos de
+        Wompi la confirman. Cancelarla perdería el dinero del cliente."""
+        worker = _make_worker()
+        worker._last_release_at = 0.0
+
+        worker.supabase = _stub_supabase_for_release(
+            stale_orders=[
+                {"id": "order-paid", "tenant_id": "tenant-1"},    # pago approved → proteger
+                {"id": "order-unpaid", "tenant_id": "tenant-1"},  # sin pago → cancelar
+            ],
+            approved_payments_by_order={
+                "order-paid": [{"id": "pay-ok", "wompi_txn_id": "txn-123"}],
+            },
+        )
+
+        await worker._release_expired_pending_payment_orders()
+
+        self.assertEqual(worker.supabase._update_calls, ["order-unpaid"])
+        self.assertEqual(worker._metrics["expired_orders_cancelled"], 1)
+        self.assertEqual(worker._metrics.get("paid_orders_protected_from_cancel"), 1)
 
     async def test_skips_cancellation_when_payments_lookup_fails(self):
         """Si el lookup de payments explota, el cron es conservador y NO
