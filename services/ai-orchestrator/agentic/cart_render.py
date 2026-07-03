@@ -18,14 +18,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-
-def _cop(cents) -> str:
-    """Centavos → '$85.000' (formato COP con punto de miles)."""
-    try:
-        pesos = int(cents) // 100
-    except (TypeError, ValueError):
-        pesos = 0
-    return f"${pesos:,}".replace(",", ".")
+# F36 — fuente única de formateo COP. Antes copia local; format_cents_cop es
+# byte-idéntico para centavos enteros y None→'$0' (mismo fallback).
+from text_utils import format_cents_cop as _cop
 
 
 def _item_bullets(items: list[dict]) -> list[str]:

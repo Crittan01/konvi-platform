@@ -36,9 +36,14 @@ from __future__ import annotations
 from typing import Optional
 
 
-def _format_price_cop(price: float) -> str:
-    """Formatea precio entero COP con punto de miles (estilo Colombia)."""
-    return f"${int(price):,}".replace(",", ".")
+from text_utils import format_pesos  # noqa: E402  (F36: fuente única de formateo COP)
+
+
+def _format_price_cop(price) -> str:
+    """Precio COP (pesos) con separador de miles. Trunca a entero — paridad con el
+    comportamiento previo int(price) y con agentic/tools/catalog.py int(float(price));
+    evita divergencia +1 peso en variantes DECIMAL(10,2) (format_pesos redondea)."""
+    return format_pesos(int(float(price or 0)))
 
 
 def _normalize_for_match(text: str) -> str:

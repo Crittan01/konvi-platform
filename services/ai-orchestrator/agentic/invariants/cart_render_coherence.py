@@ -98,8 +98,9 @@ _CATEGORY_LIST_ANCHORS = (
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 
-def _format_cop(cop: int) -> str:
-    return f"${int(cop):,}".replace(",", ".")
+# F36 — fuente única de formateo COP (pesos). Input siempre int()-derivado
+# (unit_price/line_total/subtotal); byte-idéntico al viejo para enteros (floor==round).
+from text_utils import format_pesos as _format_cop  # noqa: E402
 
 
 def _llm_affirms_cart_change(text: str) -> bool:
