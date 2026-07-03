@@ -22,6 +22,12 @@ Símil de `tenant_carriers.py` legacy (mismo patrón fallback-open).
 
 NO machetazos — solo lookup + cache. Toda business logic vive en
 consumidores específicos (cada uno aplica reglas según su contexto).
+
+⚠️  COPIA GEMELA BYTE-IDÉNTICA. Este archivo existe duplicado en
+    `services/api/lib/tenant_payment_methods.py` y
+    `services/ai-orchestrator/lib/tenant_payment_methods.py` (NO es un wrapper
+    sys.path como coupons.py). El test `tests/test_shared_lib_pact.py` valida
+    byte-equality. Cualquier cambio: actualizar AMBAS copias o el pact falla.
 """
 from __future__ import annotations
 
