@@ -77,7 +77,14 @@ export async function middleware(request: NextRequest) {
   //     /api/mfa/recovery-codes/verify cuando recovery code OK.
   //     Vigencia 24h. Permite acceso AAL1 si el user usó código de respaldo
   //     (no podemos forzar TOTP factor si lo perdió).
-  if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
+  // F85: el enforcement AAL2 ahora cubre TAMBIÉN /api/* (antes el matcher excluía `api`, así que
+  // una sesión solo-password podía llamar GET /api/audit/export, POST /api/conversations/{id}/send,
+  // etc. — MFA era cosmético a nivel API). Excepción: /api/mfa/* (flujo de recovery pre-AAL2).
+  const _path = request.nextUrl.pathname
+  const _isApi = _path.startsWith('/api')
+  const _isMfaApi = _path.startsWith('/api/mfa/')
+  const _mfaGated = _path.startsWith('/dashboard') || (_isApi && !_isMfaApi)
+  if (user && _mfaGated) {
     // F83: verificar la FIRMA HMAC de la cookie (ligada a este user + no expirada), no su mera
     // presencia. Antes `=== '1'` dejaba fabricar el bypass con la contraseña robada (sesión AAL1).
     const recoveryBypass = await verifyRecoveryCookie(
@@ -91,6 +98,10 @@ export async function middleware(request: NextRequest) {
         const needsMfa =
           aalData?.nextLevel === 'aal2' && aalData.currentLevel === 'aal1'
         if (needsMfa) {
+          // F85: /api → 401 JSON (no redirect); /dashboard → challenge TOTP.
+          if (_isApi) {
+            return NextResponse.json({ detail: 'MFA requerida' }, { status: 401 })
+          }
           const url = request.nextUrl.clone()
           url.pathname = '/login/mfa'
           return NextResponse.redirect(url)
@@ -111,6 +122,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|login|forgot-password|auth/confirm|auth/callback|cuenta-suspendida|api).*)',
+    // F85: `api` YA NO se excluye — el gate MFA debe correr también para /api/* (los route
+    // handlers autenticaban con sesiones AAL1). Los endpoints pre-AAL2 (/api/mfa/*) se exceptúan
+    // dentro del handler, no aquí.
+    '/((?!_next/static|_next/image|favicon.ico|login|forgot-password|auth/confirm|auth/callback|cuenta-suspendida).*)',
   ],
 }
