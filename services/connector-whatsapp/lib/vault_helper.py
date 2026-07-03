@@ -44,12 +44,19 @@ class VaultHelper:
             return None
 
     def update_secret(self, secret_id: str, new_secret: str) -> bool:
-        """Actualiza un secreto existente en Vault."""
+        """Actualiza un secreto existente en Vault. True = RPC ejecutó sin error.
+
+        F63: la RPC `pgsec_update_secret` es RETURNS void (y no-op silencioso si el
+        secret no pertenece al tenant, hardening de ownership), así que PostgREST no
+        devuelve body → `bool(r.data)` era SIEMPRE False y reportaba fallo en updates
+        exitosos. No podemos leer éxito real del retorno; el contrato honesto (y el que
+        ya usaba el orchestrator) es True si no hubo excepción. Las 3 copias coinciden.
+        """
         try:
-            r = self._sb.rpc("pgsec_update_secret", {
+            self._sb.rpc("pgsec_update_secret", {
                 "p_id": secret_id, "p_secret": new_secret,
             }).execute()
-            return bool(r.data)
+            return True
         except Exception as e:
             logger.error("[VAULT] update '%s' error: %s", secret_id, e)
             return False
