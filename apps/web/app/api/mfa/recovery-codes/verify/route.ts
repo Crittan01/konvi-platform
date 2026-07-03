@@ -21,8 +21,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { signRecoveryCookie, RECOVERY_SESSION_COOKIE } from '@/lib/mfa-recovery-cookie'
 
-const RECOVERY_SESSION_COOKIE = 'mfa_recovery_session'
 const RECOVERY_SESSION_MAX_AGE_SECONDS = 24 * 60 * 60 // 24h
 
 export async function POST(req: NextRequest) {
@@ -61,10 +61,18 @@ export async function POST(req: NextRequest) {
 
     // Si el backend OK → setear cookie bypass AAL.
     if (upstream.ok && data.ok) {
+      // F83: la cookie se FIRMA con HMAC ligado al user + expiry (antes era el literal '1',
+      // fabricable por cualquiera con la contraseña robada → bypass total de AAL2). Sin usuario
+      // resoluble no se concede el bypass.
+      const { data: { user } } = await sb.auth.getUser()
+      if (!user) {
+        return NextResponse.json({ detail: 'Sesión inválida' }, { status: 401 })
+      }
+      const exp = Math.floor(Date.now() / 1000) + RECOVERY_SESSION_MAX_AGE_SECONDS
       const response = NextResponse.json(data, { status: 200 })
       response.cookies.set({
         name: RECOVERY_SESSION_COOKIE,
-        value: '1',
+        value: await signRecoveryCookie(user.id, exp),
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',

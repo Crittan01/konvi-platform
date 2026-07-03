@@ -19,6 +19,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { KeyRound } from 'lucide-react'
 import SetPasswordForm from '@/app/set-password/set-password-form'
@@ -84,7 +85,12 @@ export default async function SecurityPage({
   // unenroll) deben pasar por endpoints backend que validan recovery code
   // adicional + admin API bypass.
   const { cookies: cookieStore } = await import('next/headers')
-  const isRecoverySession = cookieStore().get('mfa_recovery_session')?.value === '1'
+  // F83: verificar firma HMAC (ligada al user + expiry), no `=== '1'`.
+  const isRecoverySession = await verifyRecoveryCookie(
+    cookieStore().get('mfa_recovery_session')?.value,
+    user.id,
+    Math.floor(Date.now() / 1000),
+  )
 
   // Server action: cambiar contraseña.
   // - Si AAL2 (sesión normal): usa supabase.auth.updateUser directo.

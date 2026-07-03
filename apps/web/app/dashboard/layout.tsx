@@ -6,6 +6,7 @@ import {
   getCachedUser, getCachedTenantMeta, getCachedTenantName,
 } from '@/utils/supabase/cached-user'
 import { getMarketplaceBadgeCount } from '@/lib/marketplace-badges'
+import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 import SidebarClient from './sidebar-client'
 
 /**
@@ -58,7 +59,12 @@ export default async function DashboardLayout({
   // Rev. 109 J.2.4.3 — detectar si el user entró vía recovery code
   // para mostrar banner urgente: regenerar TOTP idealmente esta sesión.
   const { cookies: cookieStore } = await import('next/headers')
-  const usedRecoveryCode = cookieStore().get('mfa_recovery_session')?.value === '1'
+  // F83: verificar firma HMAC (ligada al user + expiry), no `=== '1'`.
+  const usedRecoveryCode = await verifyRecoveryCookie(
+    cookieStore().get('mfa_recovery_session')?.value,
+    user.id,
+    Math.floor(Date.now() / 1000),
+  )
 
   // ── Ronda 2: todas las queries del tenant en paralelo ─────────────────────
   let tenantName: string | null = null

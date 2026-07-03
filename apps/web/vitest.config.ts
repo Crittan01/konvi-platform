@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 // (otra convención) y NO los ejecuta vitest.
 export default defineConfig({
   test: {
-    include: ['app/**/*.test.{ts,tsx}'],
+    include: ['app/**/*.test.{ts,tsx}', 'lib/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 })

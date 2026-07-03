@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { verifyRecoveryCookie } from '@/lib/mfa-recovery-cookie'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -77,7 +78,13 @@ export async function middleware(request: NextRequest) {
   //     Vigencia 24h. Permite acceso AAL1 si el user usó código de respaldo
   //     (no podemos forzar TOTP factor si lo perdió).
   if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    const recoveryBypass = request.cookies.get('mfa_recovery_session')?.value === '1'
+    // F83: verificar la FIRMA HMAC de la cookie (ligada a este user + no expirada), no su mera
+    // presencia. Antes `=== '1'` dejaba fabricar el bypass con la contraseña robada (sesión AAL1).
+    const recoveryBypass = await verifyRecoveryCookie(
+      request.cookies.get('mfa_recovery_session')?.value,
+      user.id,
+      Math.floor(Date.now() / 1000),
+    )
     if (!recoveryBypass) {
       try {
         const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
