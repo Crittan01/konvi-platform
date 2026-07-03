@@ -40,9 +40,12 @@ export default async function AiAgentsPage() {
       .select('is_active, embedding, category')
       .eq('tenant_id', tenantId),
     supabase.from('products')
+      // F7 (twin): products usa status (no is_active, inexistente) → el query erraba,
+      // catalogStats quedaba null y el panel 'Estado del bot' marcaba SIN catálogo aunque
+      // hubiera productos. Mismo root cause que el preview del agente.
       .select('id', { count: 'exact', head: false })
       .eq('tenant_id', tenantId)
-      .eq('is_active', true)
+      .eq('status', 'active')
       .limit(1),
     supabase.from('tenant_integrations')
       .select('provider, status')

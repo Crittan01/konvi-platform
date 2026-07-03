@@ -80,14 +80,17 @@ export async function POST(request: NextRequest) {
       .select('name, role_description, strict_guardrails')
       .eq('tenant_id', tenantId).maybeSingle(),
     supabase.from('products')
-      .select('name, description, product_variations(price, stock_quantity, attributes)')
+      // F7: la tabla products usa columnas title/status (no name/is_active, que nunca
+      // existieron) — PostgREST erroraba y el catálogo salía SIEMPRE vacío → el preview
+      // respondía sin conocer producto alguno. Alineado con dashboard/catalog/orders pages.
+      .select('title, description, product_variations(price, stock_quantity, attributes)')
       .eq('tenant_id', tenantId)
-      .eq('is_active', true)
+      .eq('status', 'active')
       .limit(20),
   ])
 
   const tenant  = tenantRes.data
-  const catalog = (catalogRes.data ?? []) as Array<{ name: string; description?: string; product_variations?: Array<{ price: number; stock_quantity: number; attributes?: Record<string, string> }> }>
+  const catalog = (catalogRes.data ?? []) as Array<{ title: string; description?: string; product_variations?: Array<{ price: number; stock_quantity: number; attributes?: Record<string, string> }> }>
   const agent  = agentRes.data ?? {
     name: 'Vendedor Oficial',
     role_description: 'Eres el asistente de ventas. Ayuda al cliente cordialmente.',
@@ -156,7 +159,7 @@ export async function POST(request: NextRequest) {
           const attrs = v.attributes ? Object.entries(v.attributes).map(([k,val]) => `${k}: ${val}`).join(', ') : ''
           return `  - $${v.price?.toLocaleString('es-CO')} COP${attrs ? ` (${attrs})` : ''}${v.stock_quantity <= 0 ? ' [Agotado]' : ''}`
         }).join('\n')
-        return `• ${p.name}${p.description ? ` — ${p.description}` : ''}${vars ? '\n' + vars : ''}`
+        return `• ${p.title}${p.description ? ` — ${p.description}` : ''}${vars ? '\n' + vars : ''}`
       }).join('\n')
       return `\nCATÁLOGO DE PRODUCTOS:\n${lines}`
     })() : '',
