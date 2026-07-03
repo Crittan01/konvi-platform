@@ -76,9 +76,13 @@ class StateResolver:
             return AgenticState.HUMAN_HANDOFF
 
         # 2. Orden activa + pago resuelto = POST_PAYMENT
-        if ctx.has_active_order and ctx.payment_status in {
-            "approved", "cod_pending", "cod_collected", "refunded",
-        }:
+        # F49: COD crea la orden 'confirmed' SIN fila en payments → payment_status None → POST_PAYMENT
+        # era inalcanzable para COD (el cliente post-venta caía a EXPLORING). Derivar también del estado
+        # de la orden es determinístico (ADR-0024, lookup DB binario sin NLP).
+        if ctx.has_active_order and (
+            ctx.payment_status in {"approved", "cod_pending", "cod_collected", "refunded"}
+            or ctx.extra.get("order_status") in {"confirmed", "processing", "shipped", "delivered"}
+        ):
             return AgenticState.POST_PAYMENT
 
         # 3. Pago en curso (link generado o COD confirmado pendiente)
@@ -200,6 +204,7 @@ def build_context_from_records(
 
     has_order = bool(order_row.get("id"))
     payment_status = (payment_row.get("status") or "").lower() or None
+    order_status = (order_row.get("status") or "").lower() or None  # F49
 
     return ResolutionContext(
         conversation_status=(conv.get("status") or "bot_active").lower(),
@@ -215,4 +220,5 @@ def build_context_from_records(
         contact_has_required_pii=has_required_pii,
         has_active_order=has_order,
         payment_status=payment_status,
+        extra={"order_status": order_status},   # F49: para derivar POST_PAYMENT en COD
     )

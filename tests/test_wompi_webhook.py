@@ -244,7 +244,7 @@ class WompiWebhookTests(unittest.TestCase):
         supabase = _make_supabase_mock({
             "link_to_order": {"plink-2": "order-2"},
             "orders": {
-                "order-2": {"id": "order-2", "tenant_id": "tenant-1", "status": "pending_payment", "conversation_id": "conv-2"}
+                "order-2": {"id": "order-2", "tenant_id": "tenant-1", "status": "pending_payment", "conversation_id": "conv-2", "total_amount": 1350.0}  # F16: matchea 135_000 cents del webhook
             },
             "messages_insert": [{"id": "msg-1"}],
             "conversations": {"conv-2": {"customer_phone": "573001112233"}},
@@ -305,7 +305,7 @@ class WompiWebhookTests(unittest.TestCase):
         supabase = _make_supabase_mock({
             "link_to_order": {"plink-5": "order-5"},
             "orders": {
-                "order-5": {"id": "order-5", "tenant_id": "tenant-1", "status": "pending_payment", "conversation_id": "conv-5"}
+                "order-5": {"id": "order-5", "tenant_id": "tenant-1", "status": "pending_payment", "conversation_id": "conv-5", "total_amount": 1350.0}  # F16: matchea 135_000 cents del webhook
             },
         })
         mock_get_client.return_value = supabase

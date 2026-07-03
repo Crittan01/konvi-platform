@@ -35,7 +35,8 @@ async def select_carrier_for_cart(
         return {"ok": False, "error": "No hay cart activo.", "code": "NO_CART"}
 
     try:
-        set_shipping_meta(
+        # F46: capturar el snapshot que set_shipping_meta ya calcula (total_cents CON descuento).
+        snapshot = set_shipping_meta(
             supabase,
             cart_id=cart["id"],
             tenant_id=tenant_id,
@@ -51,12 +52,12 @@ async def select_carrier_for_cart(
             "code": "CART_WRITE_ERROR",
         }
 
-    subtotal_cents = int(cart.get("subtotal_cents") or 0)
-    shipping_cents = int(rate_data.get("price_cents") or 0)
+    # F46: usar total_cents del snapshot (con descuento del cupón). Antes se recomponía como
+    # subtotal+shipping SIN descuento → el LLM reportaba al cliente un total inflado tras aplicar cupón.
     return {
         "ok": True,
         "carrier": rate_data.get("carrier"),
         "service_level": rate_data.get("service_level"),
-        "shipping_cents": shipping_cents,
-        "total_cents": subtotal_cents + shipping_cents,
+        "shipping_cents": snapshot["shipping_cents"],
+        "total_cents": snapshot["total_cents"],
     }

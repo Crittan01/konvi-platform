@@ -418,7 +418,10 @@ async def create_payment_link(
     Válido por WOMPI_PAYMENT_LINK_TTL_MINUTES minutos (default 30).
     """
     try:
-        from integrations.wompi_client import create_payment_link as wompi_create_link
+        # F105: usar el wrapper resiliente (retry exponencial + circuit breaker) — cierra el riesgo P0
+        # del dossier Wompi (un 5xx/timeout transitorio rompía el pago al primer intento). max_attempts=2
+        # para no exceder el timeout ~20s del cliente orquestador (3×15s lo superaría → ReadTimeout).
+        from integrations.wompi_client import create_payment_link_with_resilience as wompi_create_link
         from integrations.wompi_client import get_tenant_wompi_creds
 
         private_key, _, wompi_environment = get_tenant_wompi_creds(supabase, tenant_id)
@@ -474,6 +477,7 @@ async def create_payment_link(
             amount_in_cents=amount_in_cents,
             expires_at=expires_at,
             contact=contact,  # rev. 68 — pre-popula customer_data
+            max_attempts=2,   # F105: 2 intentos (retry solo errores donde Wompi NO creó el link)
         )
 
         # Persistir en tabla payments

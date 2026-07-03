@@ -214,6 +214,27 @@ def _build_internal_headers(tenant_id: str) -> Optional[dict]:
     }
 
 
+def _invalidate_stale_pending_order(supabase, order_id: str, tenant_id: str) -> None:
+    """F42: cancela una orden pending_payment cuyo monto quedó STALE (el cliente aplicó un cupón o cambió
+    de carrier DESPUÉS de generar el link) y anula sus payments pendientes, para que el flujo cree una
+    orden + link NUEVOS con el monto correcto. CAS por status='pending_payment' (no pisa una orden ya
+    confirmada). Espeja invalidate_pending_order_on_cart_change (cart_tool.py:159-184)."""
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        supabase.table("orders").update({
+            "status": "cancelled",
+            "notes": "cancelled_due_to_amount_mismatch_on_reuse",
+            "updated_at": _dt.now(_tz.utc).isoformat(),
+        }).eq("id", order_id).eq("tenant_id", tenant_id).eq("status", "pending_payment").execute()
+    except Exception as exc:
+        logger.error("[PAYMENT_LINK] F42 no pude cancelar orden stale %s: %s", str(order_id)[:8], exc)
+    try:
+        supabase.table("payments").update({"status": "voided"}).eq(
+            "tenant_id", tenant_id).eq("order_id", order_id).eq("status", "pending").execute()
+    except Exception as exc:
+        logger.warning("[PAYMENT_LINK] F42 no pude anular payments de %s: %s", str(order_id)[:8], exc)
+
+
 def _reserve_checkout_stock(
     supabase,
     *,
@@ -405,6 +426,24 @@ async def handle_payment_link_if_applicable(
     if not headers:
         logger.error("[PAYMENT_LINK] INTERNAL_SERVICE_SECRET no configurado — fallback a human")
         return None
+
+    if pending_order:
+        # F42 (CRÍTICO dinero): si el monto vigente (link activo o total de la orden pending) NO coincide
+        # con el total ACTUAL del cart (el cliente aplicó cupón o cambió de carrier DESPUÉS de generar el
+        # link), reutilizarlo cobraría un monto distinto al acordado. Invalidar la orden vieja y crear una
+        # nueva con el monto correcto. Se cancela por order_id (en scope), NO por cart_id (aún sin definir).
+        _link0 = pending_order.get("active_link")
+        _reuse_cents = (
+            int(_link0["amount_in_cents"]) if _link0
+            else int(round(float(pending_order.get("total_amount") or 0) * 100))
+        )
+        if int(_reuse_cents) != int(total_in_cents):
+            logger.warning(
+                "[PAYMENT_LINK] F42 monto stale (reuse=%s != actual=%s) — invalido orden %s y creo nueva",
+                _reuse_cents, total_in_cents, pending_order["order_id"],
+            )
+            _invalidate_stale_pending_order(supabase, pending_order["order_id"], tenant_id)
+            pending_order = None
 
     if pending_order:
         order_id_existing = pending_order["order_id"]

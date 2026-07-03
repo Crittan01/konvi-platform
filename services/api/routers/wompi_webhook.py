@@ -231,15 +231,22 @@ def _process_wompi_event(payload: dict) -> None:
     # mismatch (link mal correlacionado, tampering, cobro parcial) NO debe
     # confirmar la orden — fail-closed + log para revisión manual.
     order_total = order.get("total_amount")
-    if order_total is not None:
-        expected_cents = int(round(float(order_total) * 100))
-        if int(amount_in_cents or 0) != expected_cents:
-            logger.error(
-                "[WOMPI] monto_mismatch order_id=%s txn_id=%s amount_cents=%s "
-                "esperado_cents=%s — NO se confirma (revisión manual)",
-                order_id, txn_id, amount_in_cents, expected_cents,
-            )
-            return
+    # F16: fail-closed si falta el total (antes `is not None` saltaba la validación en silencio y
+    # confirmaba con cualquier monto). Con el select corregido esto solo ocurriría en un dato corrupto.
+    if order_total is None:
+        logger.error(
+            "[WOMPI] order sin total_amount order_id=%s txn_id=%s — NO se confirma (revisión manual)",
+            order_id, txn_id,
+        )
+        return
+    expected_cents = int(round(float(order_total) * 100))
+    if int(amount_in_cents or 0) != expected_cents:
+        logger.error(
+            "[WOMPI] monto_mismatch order_id=%s txn_id=%s amount_cents=%s "
+            "esperado_cents=%s — NO se confirma (revisión manual)",
+            order_id, txn_id, amount_in_cents, expected_cents,
+        )
+        return
     _txn_currency = (txn.get("currency") or "").upper()
     if _txn_currency and _txn_currency != "COP":
         logger.error(
@@ -689,7 +696,10 @@ def _get_order_by_id(supabase, order_id: str):
     try:
         res = (
             supabase.table("orders")  # tenant_filter:exempt:webhook_resolution_lookup
-            .select("id, tenant_id, status, conversation_id, contact_id")
+            # F16: total_amount es OBLIGATORIO — sin él el guard de monto (5b) quedaba muerto
+            # (order_total siempre None → salta la comparación → confirmaba con CUALQUIER monto) y el
+            # retry post-DECLINED leía 0 → siempre "monto bajo" → nunca regeneraba link (venta perdida).
+            .select("id, tenant_id, status, conversation_id, contact_id, total_amount")
             .eq("id", order_id)
             .limit(1)
             .execute()
