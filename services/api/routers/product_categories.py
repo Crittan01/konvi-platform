@@ -16,6 +16,7 @@ from supabase import Client
 
 from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Product Categories"])
@@ -72,7 +73,7 @@ async def list_product_categories(
         raise HTTPException(status_code=500, detail="Error al obtener categorías") from e
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product_category", action="created")
 async def create_product_category(
     category: ProductCategoryCreate,
@@ -116,7 +117,7 @@ async def create_product_category(
         raise HTTPException(status_code=500, detail="Error al crear categoría") from e
 
 
-@router.patch("/{category_id}", response_model=dict)
+@router.patch("/{category_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product_category", action="updated")
 async def patch_product_category(
     category_id: str,
@@ -179,7 +180,7 @@ async def patch_product_category(
         raise HTTPException(status_code=500, detail="Error al editar categoría") from e
 
 
-@router.delete("/{category_id}", response_model=dict)
+@router.delete("/{category_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product_category", action="deleted")
 async def delete_product_category(
     category_id: str,

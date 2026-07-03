@@ -44,6 +44,7 @@ from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse
 
 from dependencies.auth import _get_service_client
+from dependencies.security import webhook_rate_limit_check
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +394,24 @@ async def _handle_aveonline_webhook(
     request: Request, tenant_id: str, path_token: Optional[str],
 ) -> JSONResponse:
     supabase = _get_service_client()
+
+    # F25 — Rate-limit por IP ANTES del lookup de secret. Aveonline no tiene HMAC ni
+    # IP allowlist (dossier 6.2) → el rate-limit por IP es la única barrera previa al
+    # DB lookup de _verify_secret. Consistente con meli_webhook (limit=200/60s per-IP;
+    # el bucket NO incluye tenant_id a propósito: el límite protege por-atacante).
+    xff = request.headers.get("x-forwarded-for", "")
+    ip = xff.split(",")[0].strip() if xff else (request.client.host if request.client else "unknown")
+    allowed, retry_after = webhook_rate_limit_check(
+        supabase, ip=ip, bucket="webhook.aveonline", limit=200, window_seconds=60,
+    )
+    if not allowed:
+        logger.warning("[AVEONLINE_WH] rate_limited ip=%s retry_after=%s", ip, retry_after)
+        return JSONResponse(
+            status_code=429,
+            content={"status": "error", "message": "rate limited"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
     raw_body = await request.body()
     parsed = _try_parse_json(raw_body)
     query = dict(request.query_params)

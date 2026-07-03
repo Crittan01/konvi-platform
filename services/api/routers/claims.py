@@ -32,6 +32,7 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Claims"])
@@ -126,7 +127,7 @@ async def list_claims(
     return res.data or []
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="created")
 async def create_claim(
     body: ClaimCreate,
@@ -178,7 +179,7 @@ async def get_claim(
     return res.data
 
 
-@router.patch("/{claim_id}", response_model=dict)
+@router.patch("/{claim_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="updated")
 async def patch_claim(
     claim_id: str,
@@ -211,7 +212,7 @@ async def patch_claim(
     return res.data[0]
 
 
-@router.post("/{claim_id}/resolve", response_model=dict)
+@router.post("/{claim_id}/resolve", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="claim", action="status_changed")
 async def resolve_claim(
     claim_id: str,

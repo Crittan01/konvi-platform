@@ -31,6 +31,7 @@ from supabase import Client
 
 from dependencies.audit import audit_log
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
+from dependencies.security import RL_WRITE_DEFAULT
 from routers.marketplace import sync_meli_stock
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,7 @@ async def list_products(
         raise HTTPException(status_code=500, detail="Error al obtener productos")
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="created")
 async def create_product(
     product: ProductCreate,
@@ -344,7 +345,7 @@ async def create_product(
         raise HTTPException(status_code=500, detail="Error al crear producto")
 
 
-@router.post("/bulk", response_model=dict, status_code=201)
+@router.post("/bulk", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="created")
 async def bulk_import_products(
     payload: BulkImport,
@@ -455,7 +456,7 @@ async def get_product(
         raise HTTPException(status_code=500, detail="Error al obtener producto")
 
 
-@router.patch("/{product_id}", response_model=dict)
+@router.patch("/{product_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="updated")
 async def patch_product(
     product_id: str,
@@ -509,7 +510,7 @@ async def patch_product(
         raise HTTPException(status_code=500, detail="Error al editar producto")
 
 
-@router.patch("/{product_id}/variations/{variation_id}", response_model=dict)
+@router.patch("/{product_id}/variations/{variation_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="variation", action="updated")
 async def patch_variation(
     product_id: str,
@@ -566,7 +567,7 @@ async def patch_variation(
         raise HTTPException(status_code=500, detail="Error al editar variante")
 
 
-@router.post("/{product_id}/variations", response_model=dict, status_code=201)
+@router.post("/{product_id}/variations", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="variation", action="created")
 async def add_variation(
     product_id: str,
@@ -619,7 +620,7 @@ async def add_variation(
         raise HTTPException(status_code=500, detail="Error al añadir variante")
 
 
-@router.delete("/{product_id}/variations/{variation_id}", status_code=204)
+@router.delete("/{product_id}/variations/{variation_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="variation", action="deleted")
 async def delete_variation(
     product_id: str,
@@ -666,7 +667,7 @@ async def delete_variation(
         raise HTTPException(status_code=500, detail="Error al eliminar variante")
 
 
-@router.delete("/{product_id}", status_code=204)
+@router.delete("/{product_id}", status_code=204, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="deleted")
 async def delete_product(
     product_id: str,

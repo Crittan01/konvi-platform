@@ -29,6 +29,7 @@ from dependencies.auth import (
     get_service_client,
 )
 from dependencies.plans import PLAN_INTEGRATIONS_MELI
+from dependencies.security import RL_WRITE_DEFAULT
 from integrations import meli_client
 from vault_helper import VaultHelper
 
@@ -87,7 +88,7 @@ def _mask_token(token: str) -> str:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
-@router.post("/whatsapp/credentials", response_model=dict)
+@router.post("/whatsapp/credentials", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])  # F25: escribe secretos a Vault
 @audit_log(entity_type="integration", action="connected")
 async def upsert_whatsapp_credentials(
     payload: WhatsAppCredentialsInput,

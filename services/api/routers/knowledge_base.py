@@ -35,6 +35,7 @@ from dependencies.auth import (
     require_write_role,
 )
 from dependencies.embeddings import embed_kb_document
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["KnowledgeBase"])
@@ -109,7 +110,7 @@ async def list_kb_docs(
     return [_strip_embedding(r) for r in (res.data or [])]
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="created")
 async def create_kb_doc(
     body: KbDocCreate,
@@ -174,7 +175,7 @@ async def get_kb_doc(
     return _strip_embedding(res.data)
 
 
-@router.patch("/{doc_id}", response_model=dict)
+@router.patch("/{doc_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="updated")
 async def patch_kb_doc(
     doc_id: str,
@@ -227,7 +228,7 @@ async def patch_kb_doc(
     return _strip_embedding(res.data[0])
 
 
-@router.delete("/{doc_id}", response_model=dict)
+@router.delete("/{doc_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="deleted")
 async def delete_kb_doc(
     doc_id: str,
@@ -249,7 +250,7 @@ async def delete_kb_doc(
     return res.data[0]
 
 
-@router.post("/{doc_id}/reindex", response_model=dict)
+@router.post("/{doc_id}/reindex", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="kb_doc", action="updated")
 async def reindex_kb_doc(
     doc_id: str,

@@ -34,6 +34,7 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Purchases"])
@@ -124,7 +125,7 @@ async def list_suppliers(
     return res.data or []
 
 
-@router.post("/suppliers", response_model=dict, status_code=201)
+@router.post("/suppliers", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="supplier", action="created")
 async def create_supplier(
     body: SupplierCreate,
@@ -170,7 +171,7 @@ async def list_purchase_orders(
     return res.data or []
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="created")
 async def create_purchase_order(
     body: PurchaseOrderCreate,
@@ -235,7 +236,7 @@ async def get_purchase_order(
     return {**po_res.data, "items": items_res.data or []}
 
 
-@router.post("/{po_id}/cancel", response_model=dict)
+@router.post("/{po_id}/cancel", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="status_changed")
 async def cancel_purchase_order(
     po_id: str,
@@ -261,7 +262,7 @@ async def cancel_purchase_order(
     return res.data[0]
 
 
-@router.post("/{po_id}/receive", response_model=dict)
+@router.post("/{po_id}/receive", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="purchase_order", action="status_changed")
 async def receive_purchase_order(
     po_id: str,

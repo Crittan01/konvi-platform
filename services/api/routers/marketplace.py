@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from dependencies.audit import audit_log
 from dependencies.auth import _get_service_client, get_current_tenant, get_service_client, require_write_role
+from dependencies.security import RL_WRITE_DEFAULT
 from integrations.meli_client import (
     get_item,
     get_items_details,
@@ -285,7 +286,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
         raise HTTPException(status_code=502, detail="No se pudo consultar Mercado Libre. Intenta de nuevo.")  # F23
 
 
-@router.post("/link", status_code=201)
+@router.post("/link", status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="marketplace_listing", action="created")
 async def link_listing(
     request: Request,
@@ -380,7 +381,7 @@ async def link_listing(
         raise HTTPException(status_code=500, detail="Error al crear vinculación")
 
 
-@router.delete("/link/{listing_id}")
+@router.delete("/link/{listing_id}", dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="marketplace_listing", action="deleted")
 async def unlink_listing(
     listing_id: str,
@@ -407,7 +408,7 @@ async def unlink_listing(
     return {"ok": True}
 
 
-@router.patch("/{listing_id}/status")
+@router.patch("/{listing_id}/status", dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="marketplace_listing", action="status_changed")
 async def update_listing_status(
     listing_id: str,
@@ -463,7 +464,7 @@ async def update_listing_status(
         raise HTTPException(status_code=502, detail="No se pudo actualizar el estado en Mercado Libre. Intenta de nuevo.")  # F23
 
 
-@router.patch("/{listing_id}/sync-stock")
+@router.patch("/{listing_id}/sync-stock", dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="marketplace_listing", action="updated")
 async def sync_stock_from_supabase(
     listing_id: str,
@@ -584,7 +585,7 @@ async def sync_stock_from_supabase(
         raise HTTPException(status_code=502, detail="No se pudo sincronizar el stock con Mercado Libre. Intenta de nuevo.")  # F23
 
 
-@router.post("/import", status_code=201)
+@router.post("/import", status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="product", action="created")
 async def import_from_meli(
     request: Request,

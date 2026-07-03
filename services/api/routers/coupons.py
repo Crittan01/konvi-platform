@@ -24,6 +24,7 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
+from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Coupons"])
@@ -99,7 +100,7 @@ def validate_coupon(d: dict, *, require_code: bool) -> Optional[str]:
     return _validate_amounts(d) or _validate_dates(d.get("valid_from"), d.get("valid_until"))
 
 
-@router.post("/", response_model=dict, status_code=201)
+@router.post("/", response_model=dict, status_code=201, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="coupon", action="created")
 async def create_coupon(
     coupon: CouponCreate,
@@ -143,7 +144,7 @@ async def create_coupon(
         raise HTTPException(status_code=500, detail="Error al crear el cupón") from e
 
 
-@router.patch("/{coupon_id}", response_model=dict)
+@router.patch("/{coupon_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="coupon", action="updated")
 async def patch_coupon(
     coupon_id: str,
@@ -179,7 +180,7 @@ async def patch_coupon(
         raise HTTPException(status_code=500, detail="Error al editar el cupón") from e
 
 
-@router.delete("/{coupon_id}", response_model=dict)
+@router.delete("/{coupon_id}", response_model=dict, dependencies=[Depends(RL_WRITE_DEFAULT)])
 @audit_log(entity_type="coupon", action="deleted")
 async def delete_coupon(
     coupon_id: str,
