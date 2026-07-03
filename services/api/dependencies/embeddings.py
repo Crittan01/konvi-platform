@@ -40,8 +40,8 @@ def embed_text(text: str) -> Optional[list[float]]:
 
     Comportamiento (rev. 106):
       • Cache hit → retorna directo (LRU 256/5min).
-      • 4 intentos primary (gemini-embedding-001) con backoff 1-8s.
-      • 3 intentos fallback (text-embedding-004) con backoff hasta 16s.
+      • 4 intentos primary (GEMINI_EMBEDDING_MODEL, default gemini-embedding-2) con backoff 1-8s.
+      • 3 intentos fallback (GEMINI_EMBEDDING_FALLBACK_MODEL) con backoff hasta 16s.
       • "Model unavailable" salta inmediato al fallback.
       • Errores no-transitorios (400 schema) se re-lanzan (no None).
       • Si cascada agotada → retorna None + log error.

@@ -39,14 +39,24 @@ logger = logging.getLogger(__name__)
 
 # ─── Configuración ───────────────────────────────────────────────────────────
 
+# F-doc (Fase 6): gemini-embedding-001 se retira (doc oficial Google) y su fallback
+# histórico text-embedding-004 YA está apagado (ene-2026). Default → gemini-embedding-2
+# (reemplazo oficial; default 3072-dim MRL → coincide con el schema vector(3072) sin
+# migración). Verificado en ai.google.dev/gemini-api/docs/deprecations + embeddings.
+# NOTA: la Gemini API ofrece hoy UN solo modelo de embedding vigente, así que el fallback
+# apunta al MISMO modelo (la cascada degrada a más reintentos, no a otro modelo — no hay
+# modelo alterno compatible en 3072). Ambos overridables por env.
+# CRÍTICO — CAMBIAR EL MODELO EXIGE RE-EMBEBER kb_documents: los vectores viejos
+# (gemini-embedding-001) son incompatibles con queries de gemini-embedding-2 → RAG roto
+# hasta re-embeber. Ver scripts/admin/reembed_kb_documents.py. Deploy + re-embed = atómico.
 GEMINI_EMBEDDING_MODEL = os.getenv(
-    "GEMINI_EMBEDDING_MODEL", "gemini-embedding-001",
+    "GEMINI_EMBEDDING_MODEL", "gemini-embedding-2",
 )
 GEMINI_EMBEDDING_FALLBACK_MODEL = os.getenv(
-    "GEMINI_EMBEDDING_FALLBACK_MODEL", "text-embedding-004",
+    "GEMINI_EMBEDDING_FALLBACK_MODEL", "gemini-embedding-2",
 )
 # 3072 corresponde al schema actual `kb_documents.embedding vector(3072)`
-# (migración 20260427010000_kb_embedding_3072.sql).
+# (migración 20260427010000_kb_embedding_3072.sql). gemini-embedding-2 default = 3072.
 EMBEDDING_DIM = int(os.getenv("GEMINI_EMBEDDING_DIM", "3072"))
 EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "6"))
 EMBEDDING_FALLBACK_AFTER = int(os.getenv("EMBEDDING_FALLBACK_AFTER", "3"))

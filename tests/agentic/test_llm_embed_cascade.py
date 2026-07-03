@@ -84,19 +84,24 @@ class EmbedCascadeTests(unittest.TestCase):
 
         def side(**kw):
             calls.append(kw["model"])
-            if kw["model"] == "gemini-embedding-001":
+            if kw["model"] == "model-primary":
                 raise RuntimeError("model not found 404")
             return _make_resp([0.7])
 
         client.models.embed_content.side_effect = side
+        # F-doc: se pasan modelos EXPLÍCITOS para probar el MECANISMO de fallback
+        # cross-model independiente de los defaults (hoy la Gemini API tiene un solo
+        # modelo de embedding vigente → el default primary==fallback).
         result = embed_with_cascade(
-            client, "x", sleep_fn=lambda s: None, use_cache=False,
+            client, "x",
+            primary_model="model-primary", fallback_model="model-fallback",
+            sleep_fn=lambda s: None, use_cache=False,
         )
         self.assertFalse(result.degraded)
         # Saltó inmediato al fallback — 1 intento primary failed, 1 fallback ok.
-        self.assertEqual(calls[0], "gemini-embedding-001")
-        self.assertEqual(calls[1], "text-embedding-004")
-        self.assertEqual(result.model_used, "text-embedding-004")
+        self.assertEqual(calls[0], "model-primary")
+        self.assertEqual(calls[1], "model-fallback")
+        self.assertEqual(result.model_used, "model-fallback")
 
     def test_error_no_transitorio_se_relanza(self):
         from llm_embed import embed_with_cascade
