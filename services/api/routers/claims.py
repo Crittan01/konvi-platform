@@ -97,7 +97,7 @@ def _ensure_order_belongs_to_tenant(supabase: Client, tenant_id: str, order_id: 
         .maybe_single()
         .execute()
     )
-    if not res.data:
+    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Pedido no encontrado para este tenant")
     return res.data
 
@@ -174,7 +174,7 @@ async def get_claim(
         .maybe_single()
         .execute()
     )
-    if not res.data:
+    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Reclamo no encontrado")
     return res.data
 

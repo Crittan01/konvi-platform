@@ -451,7 +451,7 @@ async def patch_contact(
             .maybe_single()
             .execute()
         )
-        if not current_res.data:
+        if not current_res or not current_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
             raise HTTPException(status_code=404, detail="Contacto no encontrado")
 
         current = current_res.data

@@ -371,7 +371,7 @@ async def patch_order(
             .maybe_single()
             .execute()
         )
-        if not current_result.data:
+        if not current_result or not current_result.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
         current_status = current_result.data["status"]
@@ -445,7 +445,7 @@ async def create_payment_link(
             .maybe_single()
             .execute()
         )
-        if not order_res.data:
+        if not order_res or not order_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
         order = order_res.data
@@ -781,7 +781,7 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
                 .maybe_single()
                 .execute()
             )
-            if not var_result.data:
+            if not var_result or not var_result.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
                 continue
 
             current_stock = var_result.data["stock_quantity"]

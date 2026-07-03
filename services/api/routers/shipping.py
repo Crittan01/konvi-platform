@@ -580,7 +580,7 @@ async def confirm_rate(
             .maybe_single()
             .execute()
         )
-        if not result.data:
+        if not result or not result.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
             raise HTTPException(status_code=404, detail="Envío no encontrado")
         if result.data["status"] != "quoted":
             raise HTTPException(status_code=400, detail="Solo se puede confirmar tarifa en estado 'quoted'")

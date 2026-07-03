@@ -353,7 +353,7 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
                 .maybe_single()
                 .execute()
             )
-            if not var_result.data:
+            if not var_result or not var_result.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
                 continue
 
             new_stock = var_result.data["stock_quantity"] - quantity

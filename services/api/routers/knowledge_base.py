@@ -170,7 +170,7 @@ async def get_kb_doc(
         .maybe_single()
         .execute()
     )
-    if not res.data:
+    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Documento KB no encontrado")
     return _strip_embedding(res.data)
 
@@ -209,7 +209,7 @@ async def patch_kb_doc(
             .maybe_single()
             .execute()
         )
-        if not cur_res.data:
+        if not cur_res or not cur_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
             raise HTTPException(status_code=404, detail="Documento KB no encontrado")
         new_title = update.get("title", cur_res.data["title"])
         new_content = update.get("content", cur_res.data["content"])
@@ -268,7 +268,7 @@ async def reindex_kb_doc(
         .maybe_single()
         .execute()
     )
-    if not cur.data:
+    if not cur or not cur.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Documento KB no encontrado")
 
     vec = embed_kb_document(cur.data["title"], cur.data["content"])

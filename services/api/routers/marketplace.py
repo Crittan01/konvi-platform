@@ -436,7 +436,7 @@ async def update_listing_status(
         .maybe_single()
         .execute()
     )
-    if not listing_res.data:
+    if not listing_res or not listing_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Listing no encontrado")
 
     external_id = listing_res.data["external_id"]
@@ -487,7 +487,7 @@ async def sync_stock_from_supabase(
         .maybe_single()
         .execute()
     )
-    if not listing_res.data:
+    if not listing_res or not listing_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Listing no encontrado")
 
     listing = listing_res.data
@@ -507,7 +507,7 @@ async def sync_stock_from_supabase(
         .maybe_single()
         .execute()
     )
-    if not var_res.data:
+    if not var_res or not var_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Variante no encontrada")
 
     current_stock  = var_res.data["stock_quantity"]

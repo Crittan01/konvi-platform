@@ -74,7 +74,7 @@ def _ensure_supplier_belongs_to_tenant(supabase: Client, tenant_id: str, supplie
         .maybe_single()
         .execute()
     )
-    if not res.data:
+    if not res or not res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="Proveedor no encontrado para este tenant")
 
 
@@ -187,16 +187,20 @@ async def create_purchase_order(
 
     total_amount = sum(i.quantity * i.unit_cost for i in body.items)
 
+    # F-doc (Fase 6): .insert() en postgrest 2.28.3 devuelve SyncQueryRequestBuilder
+    # SIN .select()/.single() — el chain '.insert().select("*").single()' lanzaba
+    # AttributeError → create_purchase_order roto al 100%. Mismo bug que F18 cerró en
+    # knowledge_base.py:151 pero omitió aquí. insert ya retorna representation → data[0].
     po_res = supabase.table("purchase_orders").insert({
         "tenant_id":     tenant_id,
         "supplier_id":   body.supplier_id,
         "status":        "ordered",
         "expected_date": body.expected_date,
         "total_amount":  total_amount,
-    }).select("*").single().execute()
+    }).execute()
     if not po_res.data:
         raise HTTPException(status_code=500, detail="No fue posible crear la OC")
-    po = po_res.data
+    po = po_res.data[0]
 
     items_payload = [{
         "tenant_id":    tenant_id,
@@ -224,7 +228,7 @@ async def get_purchase_order(
         .maybe_single()
         .execute()
     )
-    if not po_res.data:
+    if not po_res or not po_res.data:  # F-doc: maybe_single() retorna None en 0 filas (postgrest 2.28.3)
         raise HTTPException(status_code=404, detail="OC no encontrada")
     items_res = (
         supabase.table("purchase_order_items")
