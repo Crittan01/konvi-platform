@@ -14,6 +14,7 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role")
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
+from fastapi import HTTPException  # noqa: E402
 from routers import orders as orders_mod  # noqa: E402
 from routers.orders import OrderCreate, OrderItemCreate  # noqa: E402
 
@@ -94,8 +95,9 @@ class OrderDiscountCoherenceTests(unittest.IsolatedAsyncioTestCase):
         # subtotal 100 + envío 12 - descuento 10 = 102 ; discount_amount snapshot 10.
         ctrl = _Ctrl({
             ("conversation_carts", "select"): [{"discount_cents": 1000}],  # $10 (en cents)
+            ("conversations", "select"): [{"id": "conv-1"}],               # F27: ownership FK
             ("orders", "insert"): [{"id": "order-1"}],
-            ("product_variations", "select"): [],
+            ("product_variations", "select"): [{"id": "v1", "cost_price": 0}],  # F27: variation del tenant
             ("order_items", "insert"): [{"id": "oi-1"}],
         })
         await _create(ctrl, _payload(conversation_id="conv-1", shipping_cost=12.0, unit_price=100.0, qty=1))
@@ -106,8 +108,9 @@ class OrderDiscountCoherenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_cart_means_no_discount(self):
         ctrl = _Ctrl({
             ("conversation_carts", "select"): [],  # sin cart para esta conversación
+            ("conversations", "select"): [{"id": "conv-x"}],               # F27: ownership FK
             ("orders", "insert"): [{"id": "order-2"}],
-            ("product_variations", "select"): [],
+            ("product_variations", "select"): [{"id": "v1", "cost_price": 0}],  # F27: variation del tenant
             ("order_items", "insert"): [{"id": "oi-2"}],
         })
         await _create(ctrl, _payload(conversation_id="conv-x", shipping_cost=5.0, unit_price=50.0, qty=2))
@@ -119,13 +122,32 @@ class OrderDiscountCoherenceTests(unittest.IsolatedAsyncioTestCase):
         # Path Inbox/manual (sin conversation_id): no toca conversation_carts, sin descuento.
         ctrl = _Ctrl({
             ("orders", "insert"): [{"id": "order-3"}],
-            ("product_variations", "select"): [],
+            ("product_variations", "select"): [{"id": "v1", "cost_price": 0}],  # F27: variation del tenant
             ("order_items", "insert"): [{"id": "oi-3"}],
         })
         await _create(ctrl, _payload(shipping_cost=8.0, unit_price=40.0, qty=1))
         ins = ctrl.captured["orders"][0]
         self.assertEqual(ins["total_amount"], 48.0)
         self.assertEqual(ins["discount_amount"], 0.0)
+
+    async def test_rejects_contact_from_other_tenant(self):
+        # F27: contact_id que no pertenece al tenant → 404 (no fuga PII cross-tenant vía embed).
+        ctrl = _Ctrl({
+            ("contacts", "select"): [],  # el contacto NO existe en este tenant
+            ("product_variations", "select"): [{"id": "v1", "cost_price": 0}],
+        })
+        with self.assertRaises(HTTPException) as cm:
+            await _create(ctrl, _payload(contact_id="ajeno", shipping_cost=0.0, unit_price=10.0, qty=1))
+        self.assertEqual(cm.exception.status_code, 404)
+
+    async def test_rejects_variation_from_other_tenant(self):
+        # F27: variation_id que no pertenece al tenant → 422.
+        ctrl = _Ctrl({
+            ("product_variations", "select"): [],  # v1 no pertenece al tenant
+        })
+        with self.assertRaises(HTTPException) as cm:
+            await _create(ctrl, _payload(shipping_cost=0.0, unit_price=10.0, qty=1))
+        self.assertEqual(cm.exception.status_code, 422)
 
 
 if __name__ == "__main__":

@@ -224,11 +224,15 @@ export default async function TeamPage({
     if (!['manager', 'operator'].includes(newRole)) return
 
     // Actualizar tenant_users — el Custom Access Token Hook leerá el nuevo rol en el próximo JWT
-    await sb.from('tenant_users')
+    const { data: changed } = await sb.from('tenant_users')
       .update({ role: newRole })
       .eq('user_id', targetId)
       .eq('tenant_id', m.tenant_id)
       .neq('role', 'owner')
+      .select('user_id')
+    // F82: abortar si el target NO pertenece al tenant del caller (0 filas) ANTES de cualquier
+    // op admin con service_role (global sobre auth.users, NO scoped por tenant → destrucción cross-tenant).
+    if (!changed?.length) redirect('/dashboard/team?error=miembro-no-encontrado')
 
     // signOut fuerza al miembro a re-autenticarse → hook inyecta claims frescos de inmediato
     const adminSb = createAdminClient()
@@ -248,10 +252,14 @@ export default async function TeamPage({
     const targetId = formData.get('user_id') as string
 
     // 1. Eliminar del tenant — el hook ya no inyectará tenant_id sin esta fila
-    await sb.from('tenant_users').delete()
+    const { data: removed } = await sb.from('tenant_users').delete()
       .eq('user_id', targetId)
       .eq('tenant_id', m.tenant_id)
       .neq('role', 'owner')
+      .select('user_id')
+    // F82: abortar si el target NO pertenece al tenant del caller (0 filas) ANTES de las ops
+    // admin service_role (deleteUser/signOut son globales sobre auth.users → destrucción cross-tenant).
+    if (!removed?.length) redirect('/dashboard/team?error=miembro-no-encontrado')
 
     const adminSb = createAdminClient()
 
@@ -278,12 +286,15 @@ export default async function TeamPage({
     const reason   = (formData.get('reason') as string)?.trim() || null
 
     // 1. Marcar como inactivo en tenant_users — el hook no inyectará claims
-    await sb.from('tenant_users').update({
+    const { data: inactivated } = await sb.from('tenant_users').update({
       status:             'inactive',
       inactivated_at:     new Date().toISOString(),
       inactivated_reason: reason,
       inactivated_by:     u!.id,
-    }).eq('user_id', targetId).eq('tenant_id', m.tenant_id).neq('role', 'owner')
+    }).eq('user_id', targetId).eq('tenant_id', m.tenant_id).neq('role', 'owner').select('user_id')
+    // F82: abortar si el target NO pertenece al tenant del caller (0 filas) ANTES del ban
+    // service_role (updateUserById es global sobre auth.users → ban cross-tenant).
+    if (!inactivated?.length) redirect('/dashboard/team?error=miembro-no-encontrado')
 
     const adminSb = createAdminClient()
 
@@ -310,12 +321,15 @@ export default async function TeamPage({
     const targetId = formData.get('user_id') as string
 
     // 1. Restaurar en tenant_users — el hook inyectará claims en próximo login
-    await sb.from('tenant_users').update({
+    const { data: activated } = await sb.from('tenant_users').update({
       status:             'active',
       inactivated_at:     null,
       inactivated_reason: null,
       inactivated_by:     null,
-    }).eq('user_id', targetId).eq('tenant_id', m.tenant_id)
+    }).eq('user_id', targetId).eq('tenant_id', m.tenant_id).select('user_id')
+    // F82: abortar si el target NO pertenece al tenant del caller (0 filas) ANTES del unban
+    // service_role (updateUserById es global sobre auth.users → unban cross-tenant).
+    if (!activated?.length) redirect('/dashboard/team?error=miembro-no-encontrado')
 
     // 2. Levantar el ban nativo de Supabase Auth — permite login de nuevo
     const adminSb = createAdminClient()

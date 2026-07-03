@@ -174,7 +174,11 @@ app.include_router(wompi_webhook.router, prefix="/api/v1/webhooks")
 # Rev. 108 — Aveonline webhook estados de guía (dossier §6.2). Provider único
 # de shipping post-pivote rev. 107 (ver ADR-0019). Envia eliminado en rev. 109.
 app.include_router(aveonline_webhook.router, prefix="/api/v1/webhooks/aveonline")
-app.include_router(telegram_webhook.router, prefix="/api/v1/integrations", dependencies=_OFFBOARDING_GATE)
+# Webhook externo Telegram (comandos /resolver /estado de la escalación humana):
+# autenticado por X-Telegram-Bot-Api-Secret-Token (hmac.compare_digest en el handler),
+# NO por JWT → SIN _OFFBOARDING_GATE, igual que meli/wompi/aveonline. Con el gate, todo
+# POST de Telegram recibía 401 (no manda Authorization) y la feature estaba muerta (F17).
+app.include_router(telegram_webhook.router, prefix="/api/v1/integrations")
 # Rev. 109 ADR-0017 — Multi-agente per tenant (templates + AI suggest).
 from routers import ai_agents as _ai_agents  # noqa: E402
 from routers import catalog_ai as _catalog_ai  # noqa: E402

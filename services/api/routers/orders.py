@@ -175,6 +175,42 @@ async def create_order(
                 logger.warning("[ORDER] lookup descuento del cart falló conv=%s: %s", order.conversation_id, exc)
         total = max(0.0, subtotal + order.shipping_cost - discount_amount)
 
+        # F27 (IDOR / fuga PII cross-tenant): validar ownership de los FK del body ANTES del INSERT.
+        # Sin esto un order del tenant A podía apuntar a contact_id/conversation_id de OTRO tenant, y los
+        # embeds PostgREST de get_order/create_payment_link (contacts(name,phone,email,documento)) seguían
+        # el FK sin re-filtrar tenant → fuga de PII (incl. cédula, Ley 1581).
+        if order.contact_id:
+            _c = (
+                supabase.table("contacts").select("id")
+                .eq("id", order.contact_id).eq("tenant_id", tenant_id).limit(1).execute()
+            )
+            if not _c.data:
+                raise HTTPException(status_code=404, detail="Contacto no encontrado en este tenant")
+        if order.conversation_id:
+            _cv = (
+                supabase.table("conversations").select("id")
+                .eq("id", order.conversation_id).eq("tenant_id", tenant_id).limit(1).execute()
+            )
+            if not _cv.data:
+                raise HTTPException(status_code=404, detail="Conversación no encontrada en este tenant")
+
+        # Lookup de cost_price (tenant-scoped) — ANTES del insert para (a) validar que cada variation_id
+        # del body pertenezca al tenant y (b) reusarlo en items_data.
+        variation_ids = [str(item.variation_id) for item in order.items if item.variation_id]
+        variation_costs = {}
+        if variation_ids:
+            var_res = (
+                supabase.table("product_variations")
+                .select("id, cost_price")
+                .eq("tenant_id", tenant_id)
+                .in_("id", variation_ids)
+                .execute()
+            )
+            variation_costs = {v["id"]: float(v["cost_price"] or 0) for v in (var_res.data or [])}
+        for item in order.items:
+            if item.variation_id and str(item.variation_id) not in variation_costs:
+                raise HTTPException(status_code=422, detail="variation_id no pertenece a este tenant")
+
         # Rev. 108 Fase B — COD bypass: si payment_method='cod', orden directo
         # confirmed (no hay pago anticipado a esperar). payment_link flag
         # se ignora en COD.
@@ -200,19 +236,6 @@ async def create_order(
             raise HTTPException(status_code=500, detail="Error al crear pedido")
 
         order_id = order_result.data[0]["id"]
-
-        # Lookup cost_price for the variations since we shouldn't rely on frontend
-        variation_ids = [str(item.variation_id) for item in order.items if item.variation_id]
-        variation_costs = {}
-        if variation_ids:
-            var_res = (
-                supabase.table("product_variations")
-                .select("id, cost_price")
-                .eq("tenant_id", tenant_id)
-                .in_("id", variation_ids)
-                .execute()
-            )
-            variation_costs = {v["id"]: float(v["cost_price"] or 0) for v in (var_res.data or [])}
 
         items_data = [
             {
