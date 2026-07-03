@@ -99,14 +99,20 @@ export default async function OrdersPage({
     try {
       const ctrl = new AbortController()
       const timeout = setTimeout(() => ctrl.abort(), 15000)
-      await fetch(`${CORE_API_URL}/api/v1/orders/${orderId}`, {
+      const res = await fetch(`${CORE_API_URL}/api/v1/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ status: targetStatus }),
         signal: ctrl.signal,
       })
       clearTimeout(timeout)
-    } catch { /* non-fatal */ }
+      // F139: NO tragar el fallo (antes: sin check de res.ok + catch vacío) — una transición inválida
+      // (400/409), RBAC (403) o timeout dejaban al operador sin ningún aviso (el spinner terminaba y se
+      // repintaba el mismo estado). Lanzar lo surface vía el error boundary.
+      if (!res.ok) throw new Error((await res.text()).slice(0, 200) || `Error ${res.status}`)
+    } catch (e) {
+      throw e instanceof Error ? e : new Error('No se pudo actualizar el pedido (timeout o red)')
+    }
 
     revalidatePath('/dashboard/orders')
   }

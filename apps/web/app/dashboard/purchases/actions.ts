@@ -42,7 +42,8 @@ export async function addSupplier(formData: FormData) {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  if (!res.ok) console.error('addSupplier failed:', await res.text())
+  // F140: lanzar en vez de tragar → el usuario no ve "Guardado ✓" falso ante un fallo del API.
+  if (!res.ok) throw new Error((await res.text()).slice(0, 200) || 'No se pudo guardar el proveedor')
   revalidatePath('/dashboard/purchases')
 }
 
@@ -67,18 +68,18 @@ export async function createPurchaseOrder(formData: FormData) {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  if (!res.ok) console.error('createPurchaseOrder failed:', await res.text())
+  if (!res.ok) throw new Error((await res.text()).slice(0, 200) || 'No se pudo crear la orden de compra')
   revalidatePath('/dashboard/purchases')
 }
 
 export async function cancelPurchaseOrder(poId: string) {
   const res = await apiFetch(`/api/v1/purchases/${poId}/cancel`, { method: 'POST' })
-  if (!res.ok) console.error('cancelPurchaseOrder failed:', await res.text())
+  if (!res.ok) throw new Error((await res.text()).slice(0, 200) || 'No se pudo cancelar la orden')
   revalidatePath('/dashboard/purchases')
 }
 
 export async function receivePurchaseOrder(poId: string) {
   const res = await apiFetch(`/api/v1/purchases/${poId}/receive`, { method: 'POST' })
-  if (!res.ok) console.error('receivePurchaseOrder failed:', await res.text())
+  if (!res.ok) throw new Error((await res.text()).slice(0, 200) || 'No se pudo recibir la orden')
   revalidatePath('/dashboard/purchases')
 }

@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { CORE_API_URL } from '@/lib/runtime-env'
 import { IntegrationsManager } from './_components/integrations-manager'
 import {
   connectAveonline as connectAveonlineCore,
@@ -91,8 +92,20 @@ export default async function IntegrationsPage({
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
-    await sb.from('tenant_integrations').update({ status: 'disconnected', credentials: {}, meta: {} })
-      .eq('tenant_id', m.tenant_id).eq('provider', 'mercadolibre')
+    // F104: llamar al endpoint DELETE (revoca el token en MeLi + BORRA los secretos de Vault + persiste
+    // meta.last_disconnected_user_id). El update directo dejaba los tokens OAuth vivos y HUÉRFANOS en
+    // Vault (se perdía el puntero secret_id al vaciar credentials) y MeLi seguía enviando webhooks al
+    // tenant "desconectado".
+    const { data: { session } } = await sb.auth.getSession()
+    if (!session) return
+    const res = await fetch(`${CORE_API_URL}/api/v1/integrations/meli`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    if (!res.ok && res.status !== 204) {
+      console.error('[disconnectMeli] core API', res.status)
+      redirect(`/dashboard/integrations?error=${encodeURIComponent('No se pudo desconectar MeLi')}`)
+    }
     revalidatePath('/dashboard/integrations')
   }
 

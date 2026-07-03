@@ -25,7 +25,10 @@ function revalidateSettings() {
 
 async function updateTenant(tenantId: string, data: Record<string, unknown>) {
   const sb = createClient()
-  await sb.from('tenants').update(data).eq('id', tenantId)
+  // F140: supabase-js NO lanza, retorna { error }. Sin este check, un UPDATE bloqueado (RLS/constraint)
+  // pasaba en silencio y el usuario veía "Guardado ✓" aunque no persistió.
+  const { error } = await sb.from('tenants').update(data).eq('id', tenantId)
+  if (error) throw new Error(`No se pudo guardar: ${error.message}`)
 }
 
 // ── Acciones exportadas ───────────────────────────────────────────────────────

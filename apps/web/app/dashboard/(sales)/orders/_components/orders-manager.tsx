@@ -42,8 +42,12 @@ type Props = {
 }
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
+// F62: 'pending_payment' es el estado con que el backend crea TODA orden bot con link Wompi
+// (VALID_STATUSES en orders.py). Faltaba en el enum → el operador veía el string crudo, no podía
+// avanzar (sin STATUS_NEXT) ni filtrar esas órdenes.
 const STATUS_LABELS: Record<string, string> = {
-  pending:    'Pendiente',
+  pending:         'Pendiente',
+  pending_payment: 'Esperando pago',
   confirmed:  'Confirmado',
   processing: 'En proceso',
   shipped:    'Enviado',
@@ -52,14 +56,16 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_NEXT: Record<string, string> = {
-  pending:    'confirmed',
+  pending:         'confirmed',
+  pending_payment: 'confirmed',   // F62: la API permite pending_payment→confirmed (orders.py)
   confirmed:  'processing',
   processing: 'shipped',
   shipped:    'delivered',
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:    'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  pending:         'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  pending_payment: 'bg-amber-500/15 text-amber-600 border-amber-500/30',
   confirmed:  'bg-blue-500/15 text-blue-400 border-blue-500/30',
   processing: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
   shipped:    'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
@@ -70,6 +76,7 @@ const STATUS_COLORS: Record<string, string> = {
 const STATUS_ICONS: Record<string, React.ElementType> = {
   all:        LayoutList,
   pending:    Hourglass,
+  pending_payment: Hourglass,
   confirmed:  CheckCircle2,
   processing: Settings2,
   shipped:    Package,
@@ -83,7 +90,7 @@ const ROLE_LABELS: Record<string, string> = {
   operator: 'Gestor',
 }
 
-const TAB_FILTERS = ['all', 'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
+const TAB_FILTERS = ['all', 'pending', 'pending_payment', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
 const ITEMS_PER_PAGE = 20
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
