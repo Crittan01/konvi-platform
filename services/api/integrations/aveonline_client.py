@@ -299,8 +299,16 @@ class AveonlineClient:
             )
 
         new_jwt = data["token"]
+        # F-doc (Fase 6): la doc oficial de auth Aveonline dice vigencia de 1 HORA y NO
+        # documenta `tiempoToken` como extensor server-side (solo lo respaldan plugins de
+        # terceros). Cachear 100000s (~27.8h) arriesga usar un JWT ya inválido server-side
+        # → AveonlineAuthError al caller. Se capa el TTL CACHEADO a <=3600s: si tiempoToken
+        # sí extiende la vigencia, solo refrescamos un poco más seguido (inofensivo); si no
+        # (la doc es correcta), evitamos usar un token stale. Confirmar con Aveonline para
+        # subir el cap si aplica.
+        cache_ttl = min(int(tiempo_token), 3600)
         new_expires = (
-            datetime.now(timezone.utc) + timedelta(seconds=tiempo_token)
+            datetime.now(timezone.utc) + timedelta(seconds=cache_ttl)
         ).isoformat()
 
         # Persistir en DB via RPC (migración 20260527020000).
