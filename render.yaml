@@ -93,8 +93,14 @@ services:
         value: konvi-web
       - key: SENTRY_AUTH_TOKEN
         sync: false                              # sntrys_... con scope project:releases
+      # F83 seguridad — secreto HMAC para firmar la cookie de sesión de recovery MFA.
+      # Sin esto la cookie era el literal '1' (bypass total de AAL2). Generar con:
+      # openssl rand -hex 32. El middleware (Edge) verifica la firma con Web Crypto.
+      - key: MFA_RECOVERY_COOKIE_SECRET
+        sync: false                              # openssl rand -hex 32
     healthCheckPath: /
-    autoDeploy: false
+    branch: production
+    autoDeploy: true
 
   # ─────────────────────────────────────────────────────────────────────────
   # 2. WHATSAPP CONNECTOR — FastAPI Webhook Gateway
@@ -134,7 +140,8 @@ services:
       - key: SENTRY_ENV
         value: production
     healthCheckPath: /health
-    autoDeploy: false
+    branch: production
+    autoDeploy: true
 
   # ─────────────────────────────────────────────────────────────────────────
   # 3. CORE API — FastAPI REST Gateway (Fase 6 ✅)
@@ -249,7 +256,8 @@ services:
       - key: SENTRY_ENV
         value: production
     healthCheckPath: /health
-    autoDeploy: false
+    branch: production
+    autoDeploy: true
 
   # ─────────────────────────────────────────────────────────────────────────
   # 4. AI ORCHESTRATOR — Web Service con worker en thread de fondo
@@ -421,4 +429,5 @@ services:
     # localmente sin que cada push a develop lance redeploy en Render.
     # Para promover una versión a Render: "Manual Deploy" desde
     # dashboard. Re-activar a `true` cuando termine la iteración.
-    autoDeploy: false
+    branch: production
+    autoDeploy: true
