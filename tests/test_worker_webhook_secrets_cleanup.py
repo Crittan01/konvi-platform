@@ -141,6 +141,27 @@ class WorkerWebhookSecretsCleanupTests(unittest.TestCase):
             )
         asyncio.run(go())
 
+    def test_worker_agenda_outbound_idempotency_cleanup(self):
+        """F111 — el cleanup de outbound_idempotency_cache (MA-1) debe estar agendado
+        en el batch (antes NADIE lo llamaba → tabla crecería sin poda si se usara)."""
+        async def go():
+            w = self._build_worker_with_fake_supabase()
+            await w._run_idempotency_cleanup_if_due()
+            fn_names = [c["fn"] for c in w.supabase.rpc_calls]
+            self.assertIn("outbound_idempotency_cleanup", fn_names)
+        asyncio.run(go())
+
+    def test_worker_tolera_outbound_idempotency_inexistente(self):
+        """Si la migración MA-1 no está aplicada, el worker NO debe crashear."""
+        async def go():
+            w = self._build_worker_with_fake_supabase(
+                fail_for={"outbound_idempotency_cleanup"},
+            )
+            await w._run_idempotency_cleanup_if_due()  # no debe levantar
+            fn_names = [c["fn"] for c in w.supabase.rpc_calls]
+            self.assertIn("outbound_idempotency_cleanup", fn_names)
+        asyncio.run(go())
+
 
 if __name__ == "__main__":
     unittest.main()

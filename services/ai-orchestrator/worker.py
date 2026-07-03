@@ -866,6 +866,15 @@ class OrchestratorWorker:
         except Exception:
             pass  # La función puede no existir si la migración rev. 71 no está aplicada
 
+        # F111 (audit 2026-07-03) — cleanup de outbound_idempotency_cache (MA-1). La
+        # migración 20260514150000 creó tabla + RPC outbound_idempotency_cleanup ('llamar
+        # daily') pero NADIE la agendó → si algún IntegrationClient empieza a registrar
+        # entradas, la tabla crecería sin poda. Se agenda junto al resto del cleanup.
+        try:
+            self.supabase.rpc("outbound_idempotency_cleanup", {}).execute()
+        except Exception:
+            pass  # La función puede no existir si la migración MA-1 no está aplicada
+
         try:
             res = self.supabase.rpc(
                 "cleanup_expired_idempotency_keys",
