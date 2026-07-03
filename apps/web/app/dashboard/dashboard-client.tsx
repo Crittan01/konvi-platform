@@ -54,6 +54,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 const ORDER_STATUS_COLORS: Record<string, string> = {
   pending:    '#D4A843',
+  pending_payment: '#E0A82E',  // F62: ámbar distinto de pending para el chart
   confirmed:  '#38A875',
   processing: '#60a5fa',
   shipped:    '#a78bfa',
@@ -63,6 +64,7 @@ const ORDER_STATUS_COLORS: Record<string, string> = {
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending:    'Pendiente',
+  pending_payment: 'Esperando pago',  // F62: órdenes bot con link Wompi
   confirmed:  'Confirmado',
   processing: 'En proceso',
   shipped:    'Enviado',

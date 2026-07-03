@@ -10,6 +10,7 @@ const DAY_LABELS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá']
 
 const STATUS_COLORS: Record<string, string> = {
   pending:    'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30',
+  pending_payment: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',  // F62
   confirmed:  'bg-blue-500/15 text-blue-400 border border-blue-500/30',
   processing: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
   shipped:    'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30',
@@ -19,6 +20,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   pending:    'Pendiente',
+  pending_payment: 'Esperando pago',  // F62: órdenes bot con link Wompi
   confirmed:  'Confirmado',
   processing: 'En proceso',
   shipped:    'Enviado',

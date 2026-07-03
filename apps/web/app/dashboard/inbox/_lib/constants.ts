@@ -16,6 +16,7 @@ export const SLA_BREACH_MS = SLA_BREACH_HOURS * 60 * 60 * 1000
 
 export const ORDER_STATUS_LABEL: Record<string, string> = {
   pending:    'Pendiente',
+  pending_payment: 'Esperando pago',  // F62: estado con que el bot crea órdenes con link Wompi
   confirmed:  'Confirmado',
   processing: 'En proceso',
   shipped:    'Enviado',
@@ -25,6 +26,7 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
 
 export const ORDER_STATUS_COLOR: Record<string, string> = {
   pending:    'bg-yellow-500/10 text-yellow-700 border-yellow-500/20',
+  pending_payment: 'bg-amber-500/10 text-amber-700 border-amber-500/20',  // F62
   confirmed:  'bg-blue-500/10 text-blue-700 border-blue-500/20',
   processing: 'bg-purple-500/10 text-purple-700 border-purple-500/20',
   shipped:    'bg-sky-500/10 text-sky-700 border-sky-500/20',

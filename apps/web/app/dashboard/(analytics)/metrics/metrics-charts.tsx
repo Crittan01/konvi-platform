@@ -12,6 +12,7 @@ const COLORS = ['#a3e635', '#facc15', '#60a5fa', '#f472b6', '#34d399', '#f87171'
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending:    'Pendiente',
+  pending_payment: 'Esperando pago',  // F62: órdenes bot con link Wompi
   confirmed:  'Confirmado',
   processing: 'En proceso',
   shipped:    'Enviado',
