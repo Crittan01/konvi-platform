@@ -15,7 +15,7 @@ type StoreLocation = { name?: string; city?: string; state?: string; street?: st
 
 interface Props {
   initialData?:    ShippingOrigin | null
-  action:          (formData: FormData) => Promise<void>
+  action:          (formData: FormData) => Promise<{ ok: boolean; error?: string }>
   tenantName?:     string
   tenantPhone?:    string
   storeLocations?: StoreLocation[]
@@ -81,8 +81,13 @@ export default function ShippingOriginForm({ initialData, action, tenantName, te
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
-    await action(new FormData(e.currentTarget))
+    const result = await action(new FormData(e.currentTarget))
     setLoading(false)
+    // F-doc: no mostrar "Guardado ✓" si la action falló (antes era incondicional).
+    if (!result.ok) {
+      window.alert(result.error || 'No se pudo guardar la dirección de despacho.')
+      return
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }

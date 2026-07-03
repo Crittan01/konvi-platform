@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { saveTenant, savePresenciaDigital, saveShippingOrigin, saveFilosofia, saveHorarioAsesor, savePaymentMethods } from './actions'
+import ActionResultForm from './action-result-form'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
 import {
@@ -150,7 +151,7 @@ export default async function SettingsPage() {
                 )}
 
                 {/* Campos de identidad */}
-                <form action={saveTenant} className="space-y-4">
+                <ActionResultForm action={saveTenant} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium" htmlFor="tenant-name">
@@ -206,7 +207,7 @@ export default async function SettingsPage() {
                     </div>
                   </div>
                   <SubmitButton size="sm">Guardar cambios</SubmitButton>
-                </form>
+                </ActionResultForm>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">
@@ -226,7 +227,7 @@ export default async function SettingsPage() {
                 <Bot className="h-3.5 w-3.5 shrink-0" />
                 Identidad del negocio (qué/por qué). El COMPORTAMIENTO del bot (cómo responde, ejemplos) se configura en IA y Conocimiento → Agentes IA.
               </div>
-              <form action={saveFilosofia} className="space-y-4">
+              <ActionResultForm action={saveFilosofia} className="space-y-4">
                 {/* Tono de comunicación */}
                 <div className="space-y-2">
                   <Label className="text-xs font-medium">Tono de comunicación</Label>
@@ -299,7 +300,7 @@ export default async function SettingsPage() {
                   Todos los campos son opcionales. El asistente IA usa estos datos para responder preguntas sobre la marca.
                 </p>
                 <SubmitButton size="sm">Guardar filosofía</SubmitButton>
-              </form>
+              </ActionResultForm>
             </FormSection>
           )}
 
@@ -322,7 +323,7 @@ export default async function SettingsPage() {
             return isOwner && (
               <FormSection id="section-horario" icon={Clock} title="Horario y disponibilidad"
                 description="Configura cuándo hay asesores disponibles. El bot informará a clientes que escriban fuera de ese horario.">
-                <form action={saveHorarioAsesor} className="space-y-4">
+                <ActionResultForm action={saveHorarioAsesor} className="space-y-4">
 
                   {/* Indicador: bot 24/7 */}
                   <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
@@ -384,7 +385,7 @@ export default async function SettingsPage() {
                   </div>
 
                   <SubmitButton size="sm">Guardar horario</SubmitButton>
-                </form>
+                </ActionResultForm>
               </FormSection>
             )
           })()}

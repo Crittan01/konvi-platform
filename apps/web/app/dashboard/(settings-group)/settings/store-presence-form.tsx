@@ -20,7 +20,7 @@ interface Props {
   initialStoreType:   StoreType
   initialLocations:   Location[]
   initialSocialLinks: SocialLinks
-  action:             (formData: FormData) => Promise<void>
+  action:             (formData: FormData) => Promise<{ ok: boolean; error?: string }>
 }
 
 const STORE_TYPE_OPTIONS = [
@@ -243,8 +243,13 @@ export default function StorePresenceForm({ initialStoreType, initialLocations, 
       }
     }
     setLoading(true)
-    await action(fd)
+    const result = await action(fd)
     setLoading(false)
+    // F-doc: no mostrar "Guardado ✓" si la action falló (antes era incondicional).
+    if (!result.ok) {
+      window.alert(result.error || 'No se pudo guardar la presencia digital.')
+      return
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }

@@ -23,30 +23,38 @@ function revalidateSettings() {
   revalidatePath('/dashboard')
 }
 
-async function updateTenant(tenantId: string, data: Record<string, unknown>) {
+// F-doc (Fase 6): las server actions devuelven ActionResult en vez de throw (Next.js
+// enmascara el message de un throw en prod). El wrapper client <ActionForm> lee res.error.
+// NOTA: getOwnerTenantId() usa redirect() (throw NEXT_REDIRECT) — eso DEBE propagar; por
+// eso updateTenant retorna ActionResult (no lanza) y las actions NO envuelven en try/catch.
+export type ActionResult = { ok: boolean; error?: string }
+
+async function updateTenant(tenantId: string, data: Record<string, unknown>): Promise<ActionResult> {
   const sb = createClient()
   // F140: supabase-js NO lanza, retorna { error }. Sin este check, un UPDATE bloqueado (RLS/constraint)
   // pasaba en silencio y el usuario veía "Guardado ✓" aunque no persistió.
   const { error } = await sb.from('tenants').update(data).eq('id', tenantId)
-  if (error) throw new Error(`No se pudo guardar: ${error.message}`)
+  if (error) return { ok: false, error: `No se pudo guardar: ${error.message}` }
+  return { ok: true }
 }
 
 // ── Acciones exportadas ───────────────────────────────────────────────────────
 
-export async function saveTenant(formData: FormData) {
+export async function saveTenant(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
-  await updateTenant(tenantId, {
+  const res = await updateTenant(tenantId, {
     name:              (formData.get('name') as string)?.trim() || undefined,
     nit:               (formData.get('nit') as string)?.trim()  || null,
     email_contacto:    (formData.get('email_contacto') as string)?.trim() || null,
     telefono_contacto: (formData.get('telefono_contacto') as string)?.trim() || null,
   })
-  revalidateSettings()
+  if (res.ok) revalidateSettings()
+  return res
 }
 
-export async function saveFilosofia(formData: FormData) {
+export async function saveFilosofia(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
-  await updateTenant(tenantId, {
+  const res = await updateTenant(tenantId, {
     tono_comunicacion: (formData.get('tono_comunicacion') as string) || 'amigable',
     mision:            (formData.get('mision') as string)?.trim() || null,
     vision:            (formData.get('vision') as string)?.trim() || null,
@@ -55,10 +63,11 @@ export async function saveFilosofia(formData: FormData) {
     // Antes solo se podía setear por SQL; ahora editable aquí (gap de coherencia bot↔web).
     business_pitch:    (formData.get('business_pitch') as string)?.trim() || null,
   })
-  revalidatePath('/dashboard/settings')
+  if (res.ok) revalidatePath('/dashboard/settings')
+  return res
 }
 
-export async function saveHorarioAsesor(formData: FormData) {
+export async function saveHorarioAsesor(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
   const daysRaw = formData.getAll('support_days') as string[]
   const days = daysRaw.map(Number).filter(d => d >= 1 && d <= 7)
@@ -70,12 +79,13 @@ export async function saveHorarioAsesor(formData: FormData) {
   const raw_role = (formData.get('escalation_role') as string)?.trim() || 'asesor'
   const escalation_role = ALLOWED_ROLES.has(raw_role) ? raw_role : 'asesor'
   const support_schedule = days.length && open && close ? { days, open, close } : null
-  await updateTenant(tenantId, { support_schedule, after_hours_message, escalation_role })
-  revalidatePath('/dashboard/settings')
+  const res = await updateTenant(tenantId, { support_schedule, after_hours_message, escalation_role })
+  if (res.ok) revalidatePath('/dashboard/settings')
+  return res
 }
 
 
-export async function savePresenciaDigital(formData: FormData) {
+export async function savePresenciaDigital(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
 
   const store_type = (formData.get('store_type') as string) || 'fisica'
@@ -110,8 +120,9 @@ export async function savePresenciaDigital(formData: FormData) {
     if (val) social_links[red] = val
   }
 
-  await updateTenant(tenantId, { store_type, store_locations, social_links })
-  revalidatePath('/dashboard/settings')
+  const res = await updateTenant(tenantId, { store_type, store_locations, social_links })
+  if (res.ok) revalidatePath('/dashboard/settings')
+  return res
 }
 
 /**
@@ -162,7 +173,7 @@ export async function savePaymentMethods(
   }
 }
 
-export async function saveShippingOrigin(formData: FormData) {
+export async function saveShippingOrigin(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
 
   const fields = ['name', 'company', 'street', 'city', 'state', 'postal_code', 'country', 'phone', 'dane_code']
@@ -175,6 +186,7 @@ export async function saveShippingOrigin(formData: FormData) {
   if (origin.dane_code && !origin.postal_code) origin.postal_code = origin.dane_code
   if (origin.postal_code && !origin.dane_code)  origin.dane_code  = origin.postal_code
 
-  await updateTenant(tenantId, { shipping_origin: origin })
-  revalidatePath('/dashboard/settings')
+  const res = await updateTenant(tenantId, { shipping_origin: origin })
+  if (res.ok) revalidatePath('/dashboard/settings')
+  return res
 }
