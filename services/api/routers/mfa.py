@@ -113,7 +113,12 @@ async def regenerate_recovery_codes(
     try:
         plaintexts = regenerate_for_user(sb, user_id, num=8)
     except MFARecoveryCodesError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        # F23: no filtrar el detalle interno (APIError PostgREST) al cliente.
+        logger.error("[MFA] regenerate recovery codes falló user=%s: %s", user_id[:8], exc)
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudieron regenerar los códigos de respaldo. Intenta de nuevo.",
+        )
 
     logger.info("[MFA] Regenerated recovery codes for user=%s", user_id[:8])
     return {
@@ -172,7 +177,12 @@ async def clear_recovery_codes(
     try:
         deleted = clear_all_for_user(sb, user_id)
     except MFARecoveryCodesError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        # F23: no filtrar el detalle interno al cliente.
+        logger.error("[MFA] clear recovery codes falló user=%s: %s", user_id[:8], exc)
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudieron borrar los códigos de respaldo. Intenta de nuevo.",
+        )
 
     return {"ok": True, "deleted": deleted}
 
@@ -289,7 +299,7 @@ async def recovery_change_password(
         logger.error("[MFA] Error cambiando password user=%s: %s", user_id, exc)
         raise HTTPException(
             status_code=500,
-            detail=f"No se pudo actualizar la contraseña: {exc}",
+            detail="No se pudo actualizar la contraseña. Intenta de nuevo.",  # F23: sin filtrar {exc}
         )
 
     return {"ok": True}

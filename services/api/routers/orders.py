@@ -517,7 +517,8 @@ async def create_payment_link(
         raise
     except Exception as e:
         logger.error("Error generando payment link para order %s: %s", order_id, e)
-        raise HTTPException(status_code=500, detail=f"Error al generar link de pago: {e}")
+        # F23: no filtrar {e} al cliente; se conserva la causa vía `from e` (como expenses.py).
+        raise HTTPException(status_code=500, detail="Error al generar link de pago") from e
 
 
 def _consume_cart_reservations_if_any(

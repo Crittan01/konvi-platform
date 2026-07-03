@@ -282,7 +282,7 @@ async def get_listings(tenant_id: str = Depends(get_current_tenant)):
 
     except Exception as e:
         logger.error("Error obteniendo listings MeLi tenant %s: %s", tenant_id, e)
-        raise HTTPException(status_code=502, detail=f"Error al consultar Mercado Libre: {str(e)}")
+        raise HTTPException(status_code=502, detail="No se pudo consultar Mercado Libre. Intenta de nuevo.")  # F23
 
 
 @router.post("/link", status_code=201)
@@ -460,7 +460,7 @@ async def update_listing_status(
 
     except Exception as e:
         logger.error("Error actualizando status MeLi item %s: %s", external_id, e)
-        raise HTTPException(status_code=502, detail=f"Error al actualizar Mercado Libre: {str(e)}")
+        raise HTTPException(status_code=502, detail="No se pudo actualizar el estado en Mercado Libre. Intenta de nuevo.")  # F23
 
 
 @router.patch("/{listing_id}/sync-stock")
@@ -527,7 +527,7 @@ async def sync_stock_from_supabase(
             logger.error("Error GET /items/%s: %s | response: %s", external_id, get_err, get_body)
             raise HTTPException(
                 status_code=502,
-                detail=f"No se pudo leer el item de Mercado Libre: {get_body}"
+                detail="No se pudo leer la publicación en Mercado Libre. Intenta de nuevo.",  # F23: get_body ya en el log
             )
 
         meli_status = meli_item.get("status")
@@ -567,7 +567,7 @@ async def sync_stock_from_supabase(
             logger.error("Error PUT /items/%s: %s | response: %s", external_id, put_err, put_body)
             raise HTTPException(
                 status_code=502,
-                detail=f"MeLi rechazó la actualización: {put_body}"
+                detail="Mercado Libre rechazó la actualización. Revisa el estado de la publicación e intenta de nuevo.",  # F23
             )
 
         return {
@@ -581,7 +581,7 @@ async def sync_stock_from_supabase(
         raise
     except Exception as e:
         logger.error("Error inesperado sync MeLi item %s: %s", external_id, e)
-        raise HTTPException(status_code=502, detail=f"Error al sincronizar con Mercado Libre: {str(e)}")
+        raise HTTPException(status_code=502, detail="No se pudo sincronizar el stock con Mercado Libre. Intenta de nuevo.")  # F23
 
 
 @router.post("/import", status_code=201)
@@ -638,7 +638,9 @@ async def import_from_meli(
     try:
         meli_item = await get_item(meli_id, access_token)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"No se pudo obtener el item de Mercado Libre: {str(e)}")
+        # F23: único sitio que no logueaba — añadir trazabilidad + detail genérico.
+        logger.error("Error obteniendo item MeLi %s para import tenant %s: %s", meli_id, tenant_id, e)
+        raise HTTPException(status_code=502, detail="No se pudo obtener la publicación de Mercado Libre. Intenta de nuevo.")
 
     title             = meli_item.get("title", meli_id)
     price             = float(meli_item.get("price") or 0)
