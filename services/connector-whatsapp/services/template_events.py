@@ -26,7 +26,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from services.db_persistence import get_supabase, _resolve_tenant_by_waba
+from services.db_persistence import get_supabase
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ VALID_TEMPLATE_STATUSES = frozenset({
 VALID_QUALITY_RATINGS = frozenset({"GREEN", "YELLOW", "RED", "UNKNOWN"})
 
 
-def persist_template_status_update(event: Dict[str, Any]) -> bool:
+def persist_template_status_update(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
     """Recibe evento `EVENT_TYPE_TEMPLATE_STATUS_UPDATE` del parser y
     actualiza `whatsapp_templates.status` + `status_reason` + (si APPROVED)
     `approved_at`.
@@ -56,6 +56,14 @@ def persist_template_status_update(event: Dict[str, Any]) -> bool:
         True si actualizó al menos 1 fila, False si template no encontrado.
         NO levanta excepciones — log + return False para fallos silenciosos.
     """
+    # F52: solo el tenant HMAC-verificado (del path del webhook) tiene autoridad para mutar sus
+    # templates. Antes el UPDATE filtraba SOLO por meta_template_id (no UNIQUE, sin tenant) → un tenant
+    # con HMAC válido podía firmar un payload con el meta_template_id de OTRO tenant y corromper su
+    # status. Fail-closed si no llega el tenant verificado.
+    if not tenant_id_verified:
+        logger.error("[WA_TPL_STATUS] sin tenant HMAC-verificado — update rechazado (F52)")
+        return False
+
     meta_template_id = (event or {}).get("meta_template_id")
     new_status = (event or {}).get("new_status")
 
@@ -89,8 +97,9 @@ def persist_template_status_update(event: Dict[str, Any]) -> bool:
 
     try:
         res = (
-            sb.table("whatsapp_templates")  # tenant_filter:exempt:resolution_lookup_by_external_meta_template_id
+            sb.table("whatsapp_templates")
             .update(update_fields)
+            .eq("tenant_id", tenant_id_verified)   # F52: autoridad del tenant HMAC-verificado
             .eq("meta_template_id", str(meta_template_id))
             .execute()
         )
@@ -117,7 +126,7 @@ def persist_template_status_update(event: Dict[str, Any]) -> bool:
         return False
 
 
-def persist_template_quality_update(event: Dict[str, Any]) -> bool:
+def persist_template_quality_update(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
     """Recibe evento `EVENT_TYPE_TEMPLATE_QUALITY_UPDATE` y actualiza
     `whatsapp_templates.quality_rating`.
 
@@ -128,6 +137,11 @@ def persist_template_quality_update(event: Dict[str, Any]) -> bool:
     Returns:
         True si update OK, False si no matchea.
     """
+    # F52: fail-closed sin tenant HMAC-verificado (evita corromper quality de otro tenant).
+    if not tenant_id_verified:
+        logger.error("[WA_TPL_QUALITY] sin tenant HMAC-verificado — update rechazado (F52)")
+        return False
+
     meta_template_id = (event or {}).get("meta_template_id")
     new_quality = (event or {}).get("new_quality")
 
@@ -153,8 +167,9 @@ def persist_template_quality_update(event: Dict[str, Any]) -> bool:
 
     try:
         res = (
-            sb.table("whatsapp_templates")  # tenant_filter:exempt:resolution_lookup_by_external_meta_template_id
+            sb.table("whatsapp_templates")
             .update({"quality_rating": new_quality})
+            .eq("tenant_id", tenant_id_verified)   # F52: autoridad del tenant HMAC-verificado
             .eq("meta_template_id", str(meta_template_id))
             .execute()
         )
@@ -180,7 +195,7 @@ def persist_template_quality_update(event: Dict[str, Any]) -> bool:
         return False
 
 
-def persist_phone_quality_update(event: Dict[str, Any]) -> bool:
+def persist_phone_quality_update(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
     """Recibe evento `EVENT_TYPE_PHONE_QUALITY_UPDATE` (tier del phone+quality
     del WABA) y actualiza `tenant_integrations.credentials.tier`.
 
@@ -194,6 +209,12 @@ def persist_phone_quality_update(event: Dict[str, Any]) -> bool:
     Returns:
         True si update OK, False si tenant no resuelve o no hay current_limit.
     """
+    # F52: el tenant es el HMAC-verificado del path, NO se resuelve por meta_waba_id del body
+    # (attacker-influenciable post-HMAC → sobreescribir el tier de otro tenant). Fail-closed.
+    if not tenant_id_verified:
+        logger.error("[PHONE_QUALITY] sin tenant HMAC-verificado — update rechazado (F52)")
+        return False
+
     meta_waba_id = (event or {}).get("meta_waba_id")
     current_limit = (event or {}).get("current_limit")
     event_type = (event or {}).get("event")
@@ -211,13 +232,7 @@ def persist_phone_quality_update(event: Dict[str, Any]) -> bool:
         logger.error("[PHONE_QUALITY] no se pudo obtener supabase: %s", exc)
         return False
 
-    tenant_id = _resolve_tenant_by_waba(sb, meta_waba_id)
-    if not tenant_id:
-        logger.warning(
-            "[PHONE_QUALITY] waba=%s no resuelve tenant. event=%s",
-            meta_waba_id, event_type,
-        )
-        return False
+    tenant_id = tenant_id_verified
 
     # Update tier en tenant_integrations.credentials JSONB.
     # JSONB partial update via SET credentials = credentials || jsonb_build_object()
@@ -241,6 +256,14 @@ def persist_phone_quality_update(event: Dict[str, Any]) -> bool:
         creds = (rows[0] or {}).get("credentials") or {}
         if not isinstance(creds, dict):
             creds = {}
+        # F52 (defensa simétrica): el waba del payload debe coincidir con el del tenant verificado.
+        own_waba = creds.get("waba_id")
+        if own_waba and str(meta_waba_id) != str(own_waba):
+            logger.warning(
+                "[PHONE_QUALITY] waba del payload (%s) != waba del tenant %s (%s) — abortado (F52)",
+                meta_waba_id, tenant_id, own_waba,
+            )
+            return False
         creds["tier"] = str(current_limit).strip().upper()
         # Si Meta envía evento FLAGGED/UNFLAGGED quality también queda registrado
         if event_type in ("FLAGGED", "UNFLAGGED"):
@@ -262,11 +285,13 @@ def persist_phone_quality_update(event: Dict[str, Any]) -> bool:
         return False
 
 
-def handle_event(event: Dict[str, Any]) -> Optional[bool]:
+def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> Optional[bool]:
     """Dispatcher: rutea un evento al handler correspondiente según event_type.
 
     Args:
         event: dict emitido por `parser.parse_webhook_events`.
+        tenant_id_verified: tenant HMAC-verificado del path del webhook (F52) — autoridad para
+            mutar templates/tier. Sin él los handlers de escritura fallan cerrado.
 
     Returns:
         - True si handler procesó OK
@@ -285,11 +310,11 @@ def handle_event(event: Dict[str, Any]) -> Optional[bool]:
     )
 
     if event_type == EVENT_TYPE_TEMPLATE_STATUS_UPDATE:
-        return persist_template_status_update(event)
+        return persist_template_status_update(event, tenant_id_verified)
     if event_type == EVENT_TYPE_TEMPLATE_QUALITY_UPDATE:
-        return persist_template_quality_update(event)
+        return persist_template_quality_update(event, tenant_id_verified)
     if event_type == EVENT_TYPE_PHONE_QUALITY_UPDATE:
-        return persist_phone_quality_update(event)
+        return persist_phone_quality_update(event, tenant_id_verified)
 
     # outbound_status, account_alert, etc. → no persistence todavía (futuro Sem 11)
     return None

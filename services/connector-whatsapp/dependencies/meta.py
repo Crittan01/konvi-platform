@@ -56,6 +56,8 @@ import threading
 import time
 from typing import Optional
 
+from starlette.concurrency import run_in_threadpool
+
 from fastapi import Request, HTTPException, Header
 
 logger = logging.getLogger(__name__)
@@ -397,7 +399,8 @@ async def verify_meta_signature_for_tenant(
         _incr_metric("hmac_fail_no_tenant_in_path")
         raise HTTPException(status_code=403, detail="Missing tenant_id")
 
-    app_secret = _resolve_tenant_app_secret(tenant_id)
+    # F53: lookup con HTTP síncrono (Supabase + Vault) — al threadpool para no bloquear el event loop.
+    app_secret = await run_in_threadpool(_resolve_tenant_app_secret, tenant_id)
     if not app_secret:
         _incr_metric("hmac_fail_no_secret_for_tenant")
         logger.warning(
@@ -423,7 +426,7 @@ async def verify_meta_signature_for_tenant(
     # al endpoint /webhook/{tenant_a_id}. Cierre del scope.
     phone_number_id = _extract_phone_number_id(raw_body)
     if phone_number_id:
-        tenant_id_resolved = _resolve_tenant_id_for_phone_number(phone_number_id)
+        tenant_id_resolved = await run_in_threadpool(_resolve_tenant_id_for_phone_number, phone_number_id)
         if tenant_id_resolved and tenant_id_resolved != tenant_id:
             _incr_metric("hmac_fail_cross_tenant_invariant")
             logger.warning(

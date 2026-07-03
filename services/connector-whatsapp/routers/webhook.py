@@ -11,6 +11,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Request, Response, BackgroundTasks, Depends, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from dependencies.meta import (
     verify_meta_signature_for_tenant,
@@ -44,7 +45,8 @@ async def verify_webhook_for_tenant(
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Missing tenant_id")
 
-    expected_token = _resolve_tenant_verify_token(tenant_id)
+    # F53: el lookup hace HTTP síncrono (Supabase) — al threadpool para no bloquear el event loop.
+    expected_token = await run_in_threadpool(_resolve_tenant_verify_token, tenant_id)
     if not expected_token:
         logger.warning(
             "[WH_VERIFY] tenant=%s verify_token no configurado en credentials "
@@ -65,7 +67,10 @@ async def verify_webhook_for_tenant(
     raise HTTPException(status_code=400, detail="Bad Request")
 
 
-async def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
+def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
+    # F53: SIN async — no contiene ningún await y hace I/O síncrona pesada (persist_whatsapp_message:
+    # varios .execute() de Supabase). Como background task sync, Starlette la corre en el threadpool
+    # → no bloquea el event loop del webhook (que debe ACKear 200 a Meta de inmediato).
     """Background task que parsea + persiste mensajes + dispatches eventos HSM.
 
     A11 audit WH-01: `tenant_id_from_path` es el tenant HMAC-verificado
@@ -93,7 +98,9 @@ async def decouple_and_enqueue(body_dict: dict, tenant_id_from_path: str):
             events = parse_webhook_events(body_dict)
             for event in events:
                 event_type = event.get("event_type")
-                result = handle_template_event(event)
+                # F52: pasar el tenant HMAC-verificado del path como autoridad (los handlers fallan
+                # cerrado sin él → no más escritura cross-tenant de eventos template/tier).
+                result = handle_template_event(event, tenant_id_verified=tenant_id_from_path)
                 if result is None:
                     logger.info(
                         "[WH_EVENT] tenant=%s type=%s waba=%s (no persistence) payload=%s",

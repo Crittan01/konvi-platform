@@ -29,12 +29,16 @@ from supabase import Client
 
 from dependencies.auth import get_current_tenant, get_service_client, require_write_role
 
-# Path injection para acceder al orchestrator lib.
+# Path injection para acceder a módulos top-level del orchestrator (llm_cascade, etc.).
+# F30: APPEND, nunca insert(0). Con insert(0) el orchestrator ganaba la resolución del
+# namespace package `lib` (ambos servicios tienen lib/ sin __init__.py, PEP-420), así que
+# imports lazy posteriores de lib.* en la API (wompi_webhook, integrations, orders) cargaban
+# las copias del ORCHESTRATOR. Con append, el lib de la API (que está antes en sys.path) gana.
 _ORCHESTRATOR_DIR = (
     Path(__file__).resolve().parents[2] / "ai-orchestrator"
 )
 if str(_ORCHESTRATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(_ORCHESTRATOR_DIR))
+    sys.path.append(str(_ORCHESTRATOR_DIR))
 
 
 logger = logging.getLogger("api.ai_agents")

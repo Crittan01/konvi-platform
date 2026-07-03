@@ -109,7 +109,12 @@ async def _notify_sar_safe(
     try:
         import os as _os
         import sys
-        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "ai-orchestrator"))
+        # F30: APPEND, no insert(0) — insert(0) hacía que el namespace package `lib` resolviera a las
+        # copias del orchestrator para todo import lazy posterior de la API. `notifications` es top-level
+        # solo del orchestrator → append lo encuentra igual sin secuestrar `lib`.
+        _orch = _os.path.join(_os.path.dirname(__file__), "..", "..", "ai-orchestrator")
+        if _orch not in sys.path:
+            sys.path.append(_orch)
         from notifications import notify_sar_received  # type: ignore
         await notify_sar_received(
             sb, tenant_id=tenant_id, contact_id=contact_id,

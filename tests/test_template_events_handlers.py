@@ -187,7 +187,7 @@ class StatusUpdateTests(unittest.TestCase):
             "new_status": "APPROVED",
             "reason": None,
         }
-        result = te.persist_template_status_update(event)
+        result = te.persist_template_status_update(event, tenant_id_verified="tenant-A")
         self.assertTrue(result)
         row = sb._tables["whatsapp_templates"][0]
         self.assertEqual(row["status"], "APPROVED")
@@ -204,7 +204,7 @@ class StatusUpdateTests(unittest.TestCase):
             "new_status": "REJECTED",
             "reason": "INCORRECT_CATEGORY",
         }
-        result = te.persist_template_status_update(event)
+        result = te.persist_template_status_update(event, tenant_id_verified="tenant-A")
         self.assertTrue(result)
         row = sb._tables["whatsapp_templates"][0]
         self.assertEqual(row["status"], "REJECTED")
@@ -223,7 +223,7 @@ class StatusUpdateTests(unittest.TestCase):
                 "new_status": status,
                 "reason": "QUALITY_DROP" if status == "PAUSED" else None,
             }
-            te.persist_template_status_update(event)
+            te.persist_template_status_update(event, tenant_id_verified="tenant-A")
             row = sb._tables["whatsapp_templates"][0]
             self.assertEqual(row["status"], status)
 
@@ -237,7 +237,7 @@ class StatusUpdateTests(unittest.TestCase):
             "new_status": "APPROVED",
             "reason": None,
         }
-        result = te.persist_template_status_update(event)
+        result = te.persist_template_status_update(event, tenant_id_verified="tenant-A")
         self.assertFalse(result)
 
     def test_evento_sin_meta_template_id_returns_false(self):
@@ -246,7 +246,7 @@ class StatusUpdateTests(unittest.TestCase):
         result = te.persist_template_status_update({
             "event_type": _parser.EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
             "new_status": "APPROVED",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertFalse(result)
 
     def test_evento_sin_new_status_returns_false(self):
@@ -255,7 +255,7 @@ class StatusUpdateTests(unittest.TestCase):
         result = te.persist_template_status_update({
             "event_type": _parser.EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
             "meta_template_id": "META_T1",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertFalse(result)
 
 
@@ -273,7 +273,7 @@ class QualityUpdateTests(unittest.TestCase):
             "previous_quality": "GREEN",
             "new_quality": "YELLOW",
         }
-        result = te.persist_template_quality_update(event)
+        result = te.persist_template_quality_update(event, tenant_id_verified="tenant-A")
         self.assertTrue(result)
         row = sb._tables["whatsapp_templates"][0]
         self.assertEqual(row["quality_rating"], "YELLOW")
@@ -286,7 +286,7 @@ class QualityUpdateTests(unittest.TestCase):
             "event_type": _parser.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE,
             "meta_template_id": "META_T1",
             "new_quality": "RED",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertEqual(sb._tables["whatsapp_templates"][0]["quality_rating"], "RED")
 
     def test_template_no_existe_returns_false(self):
@@ -296,7 +296,7 @@ class QualityUpdateTests(unittest.TestCase):
             "event_type": _parser.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE,
             "meta_template_id": "META_NEVER",
             "new_quality": "YELLOW",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertFalse(result)
 
 
@@ -315,7 +315,7 @@ class PhoneQualityUpdateTests(unittest.TestCase):
             "current_limit": "TIER_1K",
             "event": "UPGRADED",
         }
-        result = te.persist_phone_quality_update(event)
+        result = te.persist_phone_quality_update(event, tenant_id_verified="tenant-A")
         self.assertTrue(result)
         row = sb._tables["tenant_integrations"][0]
         # tier actualizado, phone_number_id preservado
@@ -332,21 +332,48 @@ class PhoneQualityUpdateTests(unittest.TestCase):
             "meta_waba_id": "WABA_X",
             "current_limit": "TIER_1K",
             "event": "FLAGGED",
-        })
+        }, tenant_id_verified="tenant-A")
         row = sb._tables["tenant_integrations"][0]
         self.assertEqual(row["credentials"]["quality_signal"], "FLAGGED")
 
-    def test_waba_no_resuelve_tenant_returns_false(self):
+    def test_sin_tenant_integration_returns_false(self):
         sb = _FakeSupabase()
         te = _setup_modules(sb)
-        # No seed tenant
+        # No seed tenant_integration → el lookup de credentials devuelve [] → False.
         result = te.persist_phone_quality_update({
             "event_type": _parser.EVENT_TYPE_PHONE_QUALITY_UPDATE,
-            "meta_waba_id": "WABA_HUERFANO",
+            "meta_waba_id": "WABA_X",
             "current_limit": "TIER_250",
             "event": "UPGRADED",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertFalse(result)
+
+    def test_f52_fail_closed_sin_tenant_verificado(self):
+        # F52: sin tenant HMAC-verificado, los 3 handlers de escritura fallan cerrado.
+        sb = _FakeSupabase()
+        te = _setup_modules(sb)
+        _seed_template(sb, status="PENDING")
+        _seed_tenant_integration(sb, tier="TIER_250")
+        self.assertFalse(te.persist_template_status_update(
+            {"meta_template_id": "META_T1", "new_status": "APPROVED"}))
+        self.assertFalse(te.persist_template_quality_update(
+            {"meta_template_id": "META_T1", "new_quality": "YELLOW"}))
+        self.assertFalse(te.persist_phone_quality_update(
+            {"meta_waba_id": "WABA_X", "current_limit": "TIER_1K", "event": "UPGRADED"}))
+        # Nada se modificó.
+        self.assertEqual(sb._tables["whatsapp_templates"][0]["status"], "PENDING")
+
+    def test_f52_cross_tenant_rechazado(self):
+        # F52: un tenant B (HMAC válido) NO puede mutar el template de A (0 filas matchean).
+        sb = _FakeSupabase()
+        te = _setup_modules(sb)
+        _seed_template(sb, tenant_id="tenant-A", status="PENDING")
+        result = te.persist_template_status_update(
+            {"meta_template_id": "META_T1", "new_status": "APPROVED"},
+            tenant_id_verified="tenant-B",   # atacante
+        )
+        self.assertFalse(result)
+        self.assertEqual(sb._tables["whatsapp_templates"][0]["status"], "PENDING")  # intacto
 
 
 # ─── handle_event dispatcher ─────────────────────────────────────────────────
@@ -361,7 +388,7 @@ class HandleEventDispatcherTests(unittest.TestCase):
             "event_type": _parser.EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
             "meta_template_id": "META_T1",
             "new_status": "APPROVED",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertTrue(result)
 
     def test_dispatch_template_quality(self):
@@ -372,7 +399,7 @@ class HandleEventDispatcherTests(unittest.TestCase):
             "event_type": _parser.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE,
             "meta_template_id": "META_T1",
             "new_quality": "YELLOW",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertTrue(result)
 
     def test_dispatch_phone_quality(self):
@@ -384,7 +411,7 @@ class HandleEventDispatcherTests(unittest.TestCase):
             "meta_waba_id": "WABA_X",
             "current_limit": "TIER_1K",
             "event": "UPGRADED",
-        })
+        }, tenant_id_verified="tenant-A")
         self.assertTrue(result)
 
     def test_event_sin_handler_returns_none(self):
