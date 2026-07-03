@@ -1347,16 +1347,11 @@ def _load_customer_context_block(
         if _doc_t and _doc_n:
             contact_lines.append(f"- Documento: {_doc_t} {_doc_n}")
         if isinstance(_addr, dict) and _addr:
-            _addr_parts = [
-                _addr.get("street"), _addr.get("complex_name"),
-            ]
-            if _addr.get("tower"):
-                _addr_parts.append(f"Torre {_addr['tower']}")
-            if _addr.get("apartment"):
-                _addr_parts.append(f"Apto {_addr['apartment']}")
-            if _addr.get("city"):
-                _addr_parts.append(_addr["city"])
-            _addr_str = " — ".join(p for p in _addr_parts if p)
+            # F32 — render único (lib.address_format). Este bloque es el 6º
+            # renderizador (ruta por DEFECTO del dispatcher): antes ponía "Torre X"
+            # sin mirar building_type y omitía Piso/Oficina/Casa#/Empresa/neighborhood.
+            from lib.address_format import format_address_line  # noqa: PLC0415
+            _addr_str = format_address_line(_addr)
             if _addr_str:
                 contact_lines.append(f"- Dirección: {_addr_str}")
         # Bandera Habeas Data (mirror Inbox badges)

@@ -19,6 +19,7 @@ import os
 from typing import Optional
 
 from lib.phone_format import format_phone_co
+from lib.address_format import format_address_line
 
 
 def _variant_line(v: dict) -> Optional[str]:
@@ -664,18 +665,13 @@ def _render_contact_block(
         # por compatibilidad con cualquier registro legacy residual
         # durante la ventana de deploy (regla #4 ejecución).
         addr = contact_record.get("address") or {}
-        addr_parts = []
-        # Canónico `street`; legacy fallback `line1` (defensivo, 30 días).
-        street_value = addr.get("street") or addr.get("line1")
-        if street_value:
-            addr_parts.append(str(street_value))
-        if addr.get("neighborhood"):
-            addr_parts.append(str(addr["neighborhood"]))
-        if addr.get("city"):
-            addr_parts.append(str(addr["city"]))
-        if addr.get("state"):
-            addr_parts.append(str(addr["state"]))
-        addr_str = ", ".join(addr_parts) if addr_parts else "(sin dirección guardada)"
+        # F32 — render único (lib.address_format) para PARIDAD con el resumen:
+        # incluye Torre/Apto/Casa#/Oficina/Piso/Empresa/complex_name (antes se
+        # omitían → el cliente confirmaba el envío sin Torre/Apto). Se conserva el
+        # fallback legacy line1→street (defensivo, ventana de deploy).
+        if isinstance(addr, dict) and not addr.get("street") and addr.get("line1"):
+            addr = {**addr, "street": addr.get("line1")}
+        addr_str = format_address_line(addr) or "(sin dirección guardada)"
         return (
             f"**CONTEXTO_CLIENTE**: cliente CONOCIDO (PII completa pre-existente):\n"
             f"  • Nombre: {name}\n"

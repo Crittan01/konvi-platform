@@ -15,6 +15,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 
 from agentic.tools.base import ToolContext, ToolResult, tool_failure, tool_success
 from agentic.tools.registry import register_tool
+from lib.address_format import format_address_line
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,9 @@ def _build_address_dict(args) -> dict:
         address["apartment"] = args.apartment
     if getattr(args, "tower", None):
         address["tower"] = args.tower
+    # F32 — persistir conjunto_type para que el render distinga casas vs torres.
+    if getattr(args, "conjunto_type", None):
+        address["conjunto_type"] = str(args.conjunto_type).strip().lower()
     if getattr(args, "floor", None):
         address["floor"] = args.floor
     if getattr(args, "neighborhood", None):
@@ -162,36 +166,10 @@ class GetContactInfoTool:
         # el resumen. El LLM no debe parsear el JSON `address` ni inventar
         # detalles; las líneas vienen renderizadas, el LLM las pega tal cual.
         addr = contact.get("address") or {}
-        address_line: Optional[str] = None
-        if isinstance(addr, dict):
-            parts: list[str] = []
-            street = str(addr.get("street") or "").strip()
-            apartment = str(addr.get("apartment") or "").strip()
-            tower = str(addr.get("tower") or "").strip()
-            floor = str(addr.get("floor") or "").strip()
-            neighborhood = str(addr.get("neighborhood") or "").strip()
-            city = str(addr.get("city") or "").strip()
-            btype = str(addr.get("building_type") or "").lower()
-            if street:
-                parts.append(street)
-            if btype in {"edificio", "apartamento"}:
-                if floor:
-                    parts.append(f"Piso {floor}")
-                if apartment:
-                    parts.append(f"Apto {apartment}")
-            elif btype == "conjunto":
-                if tower:
-                    parts.append(
-                        f"Torre {tower}" if not tower.lower().startswith("torre")
-                        else tower
-                    )
-                if apartment:
-                    parts.append(f"Apto {apartment}")
-            if neighborhood:
-                parts.append(neighborhood)
-            if city:
-                parts.append(city)
-            address_line = ", ".join(p for p in parts if p) or None
+        # F32 — render único (lib.address_format): mismo formato que el resumen y el
+        # CONTEXTO_CLIENTE. Corrige el mislabel de conjunto de CASAS ("Casa #X", no
+        # "Torre/Apto") y renderiza oficina/Piso/Empresa/complex_name (antes omitidos).
+        address_line: Optional[str] = format_address_line(addr) or None
 
         phone = contact.get("phone") or contact.get("shipping_phone")
         phone_fmt = None
@@ -712,6 +690,15 @@ class SaveAddressArgs(BaseModel):
         default=None, max_length=40,
         description="Torre/bloque (opcional, solo conjunto).",
     )
+    # F32 — distingue conjunto de torres vs casas (cierra el mislabel: sin este
+    # dato un conjunto de casas se renderizaba "Torre X"/"Apto Y").
+    conjunto_type: Optional[Literal["torres", "casas"]] = Field(
+        default=None,
+        description="Solo si building_type=conjunto: 'torres' (apartamentos → se "
+                    "muestra 'Torre X' + 'Apto Y') o 'casas' (casas individuales → "
+                    "'Manzana X' + 'Casa #Y'). Pregúntalo cuando el cliente diga que "
+                    "vive en conjunto.",
+    )
     floor: Optional[str] = Field(
         default=None, max_length=10,
         description="Piso (opcional).",
@@ -896,6 +883,11 @@ class SaveContactFieldArgs(BaseModel):
     tower: Optional[str] = Field(
         default=None,
         description="Para field=address: torre/bloque (opcional, solo conjunto).",
+    )
+    conjunto_type: Optional[Literal["torres", "casas"]] = Field(
+        default=None,
+        description="Para field=address: solo si building_type=conjunto — 'torres' "
+                    "(apartamentos) o 'casas' (casas individuales).",
     )
     floor: Optional[str] = Field(
         default=None,

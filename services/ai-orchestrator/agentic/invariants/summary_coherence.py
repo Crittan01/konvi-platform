@@ -37,6 +37,9 @@ from agentic.invariants.base import (
     InvariantResult,
 )
 from tools.catalog_contract import variant_presentation  # ADR-0029 F5: extractor canónico único
+# F32 — render único (lib.address_format). Se conserva el nombre `_format_address_compact`
+# para los call-sites (:255, :278) y el test; delega al helper canónico.
+from lib.address_format import format_address_line as _format_address_compact
 
 
 # Detector heurístico de resumen.
@@ -291,30 +294,6 @@ def _format_phone(raw: str) -> str:
         rest = digits[2:]
         return f"+57 {rest[:3]} {rest[3:6]} {rest[6:]}"
     return str(raw)
-
-
-def _format_address_compact(addr: dict) -> str:
-    """Render compacto: 'Calle 100 #15-20, Apto 502, Chico Norte, Bogotá'."""
-    if not isinstance(addr, dict):
-        return ""
-    parts = []
-    street = (addr.get("street") or "").strip()
-    if street:
-        parts.append(street)
-    btype = (addr.get("building_type") or "").lower()
-    apt = (addr.get("apartment") or "").strip()
-    if btype in ("edificio", "conjunto", "apartamento") and apt:
-        parts.append(f"Apto {apt}")
-    floor = (addr.get("floor") or "").strip()
-    if floor and btype in ("edificio", "oficina"):
-        parts.append(f"Piso {floor}")
-    nb = (addr.get("neighborhood") or "").strip()
-    if nb:
-        parts.append(nb)
-    city = (addr.get("city") or "").strip()
-    if city:
-        parts.append(city)
-    return ", ".join(parts)
 
 
 class SummaryCoherenceInvariant:
