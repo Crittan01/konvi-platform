@@ -10,7 +10,9 @@ Cubre:
 """
 import os
 import sys
+import types
 import unittest
+from unittest.mock import MagicMock
 
 os.environ.setdefault("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-key")
@@ -18,8 +20,20 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "jwt-secret")
 
 sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/services/api")
 
+from fastapi import HTTPException
 from pydantic import ValidationError
+from routers import settings as settings_router
 from routers.settings import TeamRolePatch, VALID_ROLES, ASSIGNABLE_ROLES
+
+
+def _team_chain(data):
+    """Chain mock supabase.table().update().eq().eq().neq().execute()."""
+    q = MagicMock()
+    q.update.return_value = q
+    q.eq.return_value = q
+    q.neq.return_value = q
+    q.execute.return_value = types.SimpleNamespace(data=data)
+    return q
 
 
 class AssignableRolesTests(unittest.TestCase):
@@ -110,6 +124,63 @@ class LogoUploadSecurityTests(unittest.TestCase):
         }
         ext = MIME_TO_EXT.get('image/svg+xml')
         self.assertIsNone(ext)
+
+
+class OwnerDowngradeProtectionTests(unittest.IsolatedAsyncioTestCase):
+    """F22 — PATCH /settings/team no puede degradar al owner (paridad con DELETE)."""
+
+    async def test_patch_owner_target_returns_404(self):
+        """Degradar al owner: el .neq('role','owner') excluye la fila → 404, no cambia."""
+        supabase = MagicMock()
+        query = _team_chain([])  # owner excluido por neq → sin filas afectadas
+        supabase.table.return_value = query
+        request = MagicMock()
+        request.headers = {}
+        with self.assertRaises(HTTPException) as ctx:
+            await settings_router.patch_team_member(
+                member_user_id="owner-uid",
+                patch=TeamRolePatch(role="operator"),
+                request=request,
+                tenant_id="t-1",
+                supabase=supabase,
+                _role="owner",
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+        # El guard debe estar presente en el UPDATE.
+        neq_calls = [c.args for c in query.neq.call_args_list]
+        self.assertIn(("role", "owner"), neq_calls)
+
+    async def test_patch_regular_member_succeeds(self):
+        """Un miembro no-owner sí se actualiza (el neq no lo excluye)."""
+        supabase = MagicMock()
+        query = _team_chain([{"user_id": "u-2", "role": "manager"}])
+        supabase.table.return_value = query
+        request = MagicMock()
+        request.headers = {}
+        result = await settings_router.patch_team_member(
+            member_user_id="u-2",
+            patch=TeamRolePatch(role="manager"),
+            request=request,
+            tenant_id="t-1",
+            supabase=supabase,
+            _role="owner",
+        )
+        self.assertEqual(result["role"], "manager")
+        neq_calls = [c.args for c in query.neq.call_args_list]
+        self.assertIn(("role", "owner"), neq_calls)
+
+
+class DeadTeamEndpointRemovedTests(unittest.TestCase):
+    """F21 — el GET /team muerto (RPC bajo service_role → [] siempre) no debe reaparecer."""
+
+    def test_get_team_endpoint_removed(self):
+        offending = [
+            (m, r.path)
+            for r in settings_router.router.routes
+            for m in getattr(r, "methods", set())
+            if m == "GET" and r.path.endswith("/team")
+        ]
+        self.assertEqual(offending, [], f"GET /team reintroducido: {offending}")
 
 
 if __name__ == "__main__":

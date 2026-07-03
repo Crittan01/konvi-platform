@@ -84,6 +84,24 @@ class ConversationContractTests(unittest.IsolatedAsyncioTestCase):
         eq_calls = [c.args for c in query.eq.call_args_list]
         self.assertIn(("agentic_state", "PII_COLLECTION"), eq_calls)
 
+    async def test_list_conversations_invalid_status_returns_422(self):
+        """F20 — un status inválido debe propagar 422, no tragarse como 500.
+
+        El raise ocurre antes de cualquier query (validación al inicio del try),
+        así que un MagicMock basta. Sin el `except HTTPException: raise`, el
+        catch-all convertía este 422 en 500.
+        """
+        with self.assertRaises(HTTPException) as ctx:
+            await conversations.list_conversations(
+                tenant_id="t-1",
+                supabase=MagicMock(),
+                status="bogus",
+                agentic_state=None,
+                limit=30,
+                offset=0,
+            )
+        self.assertEqual(ctx.exception.status_code, 422)
+
     async def test_stats_includes_agentic_state_counts(self):
         """Rev. 109 — get_inbox_stats debe retornar funnel agentic."""
         supabase = MagicMock()

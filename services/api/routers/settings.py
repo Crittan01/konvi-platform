@@ -6,7 +6,6 @@ Endpoints:
   PATCH  /api/v1/settings/tenant              — editar nombre/waba_id  [owner]
   GET    /api/v1/settings/plan-capabilities   — plan + capabilities + cuotas
   POST   /api/v1/settings/maintenance/idempotency-cleanup — limpieza de llaves expiradas [owner]
-  GET    /api/v1/settings/team                — listar equipo con emails
   PATCH  /api/v1/settings/team/{user_id}      — cambiar rol             [owner]
   DELETE /api/v1/settings/team/{user_id}      — eliminar miembro        [owner]
   GET    /api/v1/settings/notifications       — config de notificaciones
@@ -186,18 +185,10 @@ async def patch_tenant(
 
 # ─── Team ─────────────────────────────────────────────────────────────────────
 
-@router.get("/team", response_model=list)
-async def get_team(
-    tenant_id: str = Depends(get_current_tenant),
-    supabase: Client = Depends(get_service_client),
-):
-    """Lista miembros del equipo con email y rol. Usa función SECURITY DEFINER."""
-    try:
-        result = supabase.rpc("get_tenant_team").execute()
-        return result.data or []
-    except Exception as e:
-        logger.error("Error listando equipo tenant %s: %s", tenant_id, e)
-        raise HTTPException(status_code=500, detail="Error al obtener equipo")
+# F21: GET /team eliminado (código muerto). La RPC get_tenant_team resuelve el tenant
+# vía auth.jwt()->app_metadata, pero este handler la invocaba con el cliente service_role
+# (sin ese claim) → devolvía SIEMPRE [] con HTTP 200. Sin callers (el frontend usa la RPC
+# directo bajo JWT de usuario con RLS, no este endpoint). La RPC se conserva intacta.
 
 
 @router.patch("/team/{member_user_id}", response_model=dict)
@@ -222,10 +213,14 @@ async def patch_team_member(
             .update({"role": patch.role})
             .eq("user_id", member_user_id)
             .eq("tenant_id", tenant_id)
+            .neq("role", "owner")  # F22: el rol del owner no se cambia vía API (simétrico al DELETE)
             .execute()
         )
         if not result.data:
-            raise HTTPException(status_code=404, detail="Miembro no encontrado en este tenant")
+            raise HTTPException(
+                status_code=404,
+                detail="Miembro no encontrado o es el owner (rol no modificable vía API)",
+            )
         return result.data[0]
     except HTTPException:
         raise

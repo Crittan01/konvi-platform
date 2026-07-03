@@ -175,6 +175,10 @@ async def list_conversations(
             conversations.append(conv)
 
         return conversations
+    except HTTPException:
+        # F20: el 422 de status inválido (y cualquier HTTPException futura del try)
+        # debe propagar con su status/detalle; el catch-all de abajo lo convertía en 500.
+        raise
     except Exception as e:
         logger.error("Error listando conversaciones para tenant %s: %s", tenant_id, e)
         raise HTTPException(status_code=500, detail="Error al obtener conversaciones")
