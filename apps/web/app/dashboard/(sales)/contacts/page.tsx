@@ -70,6 +70,12 @@ const normalizeDaneCode = (raw?: string | null) => {
   return digits.slice(0, 5)
 }
 
+// F68: contrato canónico de resultado de server action (mismo shape que
+// promotions-manager.tsx). Sustituye a `throw new Error(msg)`, que en producción
+// Next.js reemplaza por texto genérico + digest → el operador nunca veía la causa
+// (teléfono duplicado 409, guard Wompi, validación de consent Ley 1581).
+type ActionResult = { ok: boolean; error?: string }
+
 type Contact = {
   id: string
   phone: string
@@ -132,12 +138,14 @@ export default async function ContactsPage({
 
   // ── Server Actions ─────────────────────────────────────────────────────────
 
-  async function addContact(formData: FormData) {
+  async function addContact(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos (se requiere owner o manager).' }
+    }
 
     // Rev. 103 (SaaS B2B) — la plataforma es Encargado puro. El tenant
     // firma DPA y certifica tener base legal apropiada para los datos
@@ -150,10 +158,9 @@ export default async function ContactsPage({
     // Rev. 102 — Canal ahora vacío + required en UI; backend rechaza si
     // consent_given=true sin canal seleccionado.
     if (consentGiven && (!sourceRaw || !CONSENT_SOURCES.has(sourceRaw))) {
-      throw new Error(
+      return { ok: false, error:
         'Falta seleccionar el canal por el que el titular dio consent. ' +
-        'Es obligatorio para audit (Ley 1581 Art. 9).'
-      )
+        'Es obligatorio para audit (Ley 1581 Art. 9).' }
     }
     const consentSource = sourceRaw
     // Rev. 102 — versión auto-estampada con la constante vigente.
@@ -162,10 +169,9 @@ export default async function ContactsPage({
     // Rev. 102 — canal "other" exige Evidencia ≥ 20 chars (catch-all
     // legítimo solo si el operador puede describir de dónde vino).
     if (consentGiven && consentSource === 'other' && consentEvidenceNote.length < 20) {
-      throw new Error(
+      return { ok: false, error:
         'Cuando el canal es "Otro" la Evidencia debe describir de dónde vino el ' +
-        'consentimiento (mínimo 20 caracteres). Si no puedes describirlo, el canal no aplica.'
-      )
+        'consentimiento (mínimo 20 caracteres). Si no puedes describirlo, el canal no aplica.' }
     }
     const revocationReason = ((formData.get('consent_revoked_reason') as string) || '').trim()
     const street   = (formData.get('addr_street') as string) || null
@@ -208,9 +214,8 @@ export default async function ContactsPage({
     // E.164: phone total (country + número) entre 8 y 15 dígitos.
     // Validación laxa por país: número (sin country) entre 7 y 14.
     if (digits.length < 7 || digits.length > 14) {
-      throw new Error(
-        `Teléfono inválido. Debe tener entre 7 y 14 dígitos (sin contar el código de país +${phoneCountry}).`
-      )
+      return { ok: false, error:
+        `Teléfono inválido. Debe tener entre 7 y 14 dígitos (sin contar el código de país +${phoneCountry}).` }
     }
     const phoneE164 = `+${phoneCountry}${digits}`
     // Rev. 103 — phone alternativo de envío (opcional). Si el usuario lo
@@ -232,32 +237,38 @@ export default async function ContactsPage({
     // El API computa consent_date / consent_revoked_at / consent_actor_email
     // server-side (actor autoritativo del JWT, no client-supplied).
     const token = (await sb.auth.getSession()).data.session?.access_token
-    if (!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.')
-    const res = await fetch(`${CORE_API_URL}/api/v1/contacts/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        phone:           phoneE164,
-        shipping_phone:  shippingPhoneE164,
-        name:            (formData.get('name') as string) || null,
-        email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
-        notes:           (formData.get('notes') as string) || null,
-        document_type:   docType && docNumber ? docType : null,
-        document_number: docType && docNumber ? docNumber : null,
-        address,
-        consent_given:   consentGiven,
-        consent_source:  consentGiven ? consentSource : null,
-        consent_channel: consentGiven ? 'dashboard_console' : null,
-        consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
-        consent_evidence: initialEvidence,
-        consent_revoked_reason: !consentGiven ? (revocationReason || null) : null,
-      }),
-    })
+    if (!token) return { ok: false, error: 'Sesión expirada. Vuelve a iniciar sesión.' }
+    let res: Response
+    try {
+      res = await fetch(`${CORE_API_URL}/api/v1/contacts/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          phone:           phoneE164,
+          shipping_phone:  shippingPhoneE164,
+          name:            (formData.get('name') as string) || null,
+          email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
+          notes:           (formData.get('notes') as string) || null,
+          document_type:   docType && docNumber ? docType : null,
+          document_number: docType && docNumber ? docNumber : null,
+          address,
+          consent_given:   consentGiven,
+          consent_source:  consentGiven ? consentSource : null,
+          consent_channel: consentGiven ? 'dashboard_console' : null,
+          consent_notice_version: consentGiven ? (consentNoticeVersion || null) : null,
+          consent_evidence: initialEvidence,
+          consent_revoked_reason: !consentGiven ? (revocationReason || null) : null,
+        }),
+      })
+    } catch (e) {
+      console.error('[addContact] network error', e)
+      return { ok: false, error: 'Error de red al crear el contacto. Intenta de nuevo.' }
+    }
     if (!res.ok) {
       const detail = await res.text()
       // 409 = teléfono duplicado (UNIQUE tenant+phone). Mensaje claro al operador.
-      if (res.status === 409) throw new Error('Ya existe un contacto con ese teléfono.')
-      throw new Error(detail || 'Error al crear el contacto.')
+      if (res.status === 409) return { ok: false, error: 'Ya existe un contacto con ese teléfono.' }
+      return { ok: false, error: detail || 'Error al crear el contacto.' }
     }
     const inserted = await res.json() as { id?: string }
 
@@ -304,9 +315,10 @@ export default async function ContactsPage({
       }
     }
     revalidatePath('/dashboard/contacts')
+    return { ok: true }
   }
 
-  async function editContact(formData: FormData) {
+  async function editContact(formData: FormData): Promise<ActionResult> {
     'use server'
     // A9 finiquito — editContact migró a PATCH /api/v1/contacts/{id} (router con
     // RBAC + idempotency + audit_log + pii_access_log Art. 9). La MÁQUINA DE
@@ -319,9 +331,11 @@ export default async function ContactsPage({
     const sb = createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return { ok: false, error: 'Sin permisos (se requiere owner o manager).' }
+    }
     const editContactId = (formData.get('contact_id') as string) || ''
-    if (!editContactId) return
+    if (!editContactId) return { ok: false, error: 'contact_id requerido.' }
 
     const consentGiven = formData.get('consent_given') === 'on'
     const sourceRaw = ((formData.get('consent_source') as string) || '').trim()
@@ -335,16 +349,14 @@ export default async function ContactsPage({
     // Validaciones UX inmediatas (la API también las enforce server-side; estos
     // throws dan feedback rápido al operador sin round-trip).
     if (consentGiven && (!sourceRaw || !CONSENT_SOURCES.has(sourceRaw))) {
-      throw new Error(
+      return { ok: false, error:
         'Falta seleccionar el canal por el que el titular dio consent. ' +
-        'Es obligatorio para audit (Ley 1581 Art. 9).'
-      )
+        'Es obligatorio para audit (Ley 1581 Art. 9).' }
     }
     if (consentGiven && consentSource === 'other' && consentEvidenceNote.length < 20) {
-      throw new Error(
+      return { ok: false, error:
         'Cuando el canal es "Otro" la Evidencia debe describir de dónde vino el ' +
-        'consentimiento (mínimo 20 caracteres).'
-      )
+        'consentimiento (mínimo 20 caracteres).' }
     }
     const street   = (formData.get('addr_street') as string) || null
     const addrCity = (formData.get('addr_city')   as string) || null
@@ -411,39 +423,46 @@ export default async function ContactsPage({
       : undefined
 
     const token = (await sb.auth.getSession()).data.session?.access_token
-    if (!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.')
-    const res = await fetch(`${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(editContactId)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        name:            (formData.get('name') as string) || null,
-        email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
-        notes:           (formData.get('notes') as string) || null,
-        ...(editShippingE164 ? { shipping_phone: editShippingE164 } : {}),
-        document_type:   editDocType && editDocNumber ? editDocType : null,
-        document_number: editDocType && editDocNumber ? editDocNumber : null,
-        address,
-        // Inputs CRUDOS del flujo de consent — el API computa la máquina de
-        // estados (guards soft-revoke/renovación + mergedEvidence + fechas).
-        consent_given:   consentGiven,
-        consent_source:  consentSource || null,
-        consent_channel: 'dashboard_console',
-        consent_notice_version: consentNoticeVersion || null,
-        consent_evidence_note: consentEvidenceNote || null,
-        consent_revoked_reason: revocationReason || null,
-        renewed_consent: renewedConsentChecked,
-        renewed_consent_evidence: renewedConsentEvidence || null,
-        ...(consentAttachment ? { consent_attachment: consentAttachment } : {}),
-      }),
-    })
+    if (!token) return { ok: false, error: 'Sesión expirada. Vuelve a iniciar sesión.' }
+    let res: Response
+    try {
+      res = await fetch(`${CORE_API_URL}/api/v1/contacts/${encodeURIComponent(editContactId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          name:            (formData.get('name') as string) || null,
+          email:           (((formData.get('email') as string) || '').trim().toLowerCase()) || null,
+          notes:           (formData.get('notes') as string) || null,
+          ...(editShippingE164 ? { shipping_phone: editShippingE164 } : {}),
+          document_type:   editDocType && editDocNumber ? editDocType : null,
+          document_number: editDocType && editDocNumber ? editDocNumber : null,
+          address,
+          // Inputs CRUDOS del flujo de consent — el API computa la máquina de
+          // estados (guards soft-revoke/renovación + mergedEvidence + fechas).
+          consent_given:   consentGiven,
+          consent_source:  consentSource || null,
+          consent_channel: 'dashboard_console',
+          consent_notice_version: consentNoticeVersion || null,
+          consent_evidence_note: consentEvidenceNote || null,
+          consent_revoked_reason: revocationReason || null,
+          renewed_consent: renewedConsentChecked,
+          renewed_consent_evidence: renewedConsentEvidence || null,
+          ...(consentAttachment ? { consent_attachment: consentAttachment } : {}),
+        }),
+      })
+    } catch (e) {
+      console.error('[editContact] network error', e)
+      return { ok: false, error: 'Error de red al actualizar el contacto. Intenta de nuevo.' }
+    }
     if (!res.ok) {
       const detail = await res.text()
-      throw new Error(detail || 'Error al actualizar el contacto.')
+      return { ok: false, error: detail || 'Error al actualizar el contacto.' }
     }
     revalidatePath('/dashboard/contacts')
+    return { ok: true }
   }
 
-  async function deleteContact(formData: FormData) {
+  async function deleteContact(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = createClient()
     // Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (web.log alerta):
@@ -457,15 +476,15 @@ export default async function ContactsPage({
     // Sem 7 F2 cierre 2026-05-19 — purge endpoint requiere role 'owner'
     // (hard cascade es destructivo, no debe ser permitido a 'manager').
     if (!m.tenant_id || m.role !== 'owner') {
-      throw new Error('Solo el owner puede eliminar contactos en cascade.')
+      return { ok: false, error: 'Solo el owner puede eliminar contactos en cascade.' }
     }
     const contactId = (formData.get('contact_id') as string) || ''
-    if (!contactId) return
+    if (!contactId) return { ok: false, error: 'contact_id requerido.' }
     const reason = ((formData.get('delete_reason') as string) || '').trim()
     const { data: { session } } = await sb.auth.getSession()
     const token = session?.access_token
     if (!token) {
-      throw new Error('Sesión expirada — recarga la página.')
+      return { ok: false, error: 'Sesión expirada — recarga la página.' }
     }
 
     // Sem 7 F2 cierre 2026-05-19 — Bug founder UAT (conv 056490b8):
@@ -512,24 +531,25 @@ export default async function ContactsPage({
             const count = Array.isArray(parsed.pending_payments)
               ? parsed.pending_payments.length
               : 0
-            throw new Error(
+            return { ok: false, error:
               parsed.message ||
                 `No se puede eliminar: el contacto tiene ${count} link(s) de pago Wompi activo(s). ` +
                   'Wompi no permite invalidar links existentes — espera ~30 min a que expire(n) ' +
-                  'o cancela la(s) orden(es) manualmente antes de reintentar.'
-            )
+                  'o cancela la(s) orden(es) manualmente antes de reintentar.' }
           }
         }
         const errText = await res.text()
-        throw new Error(
-          `Purge falló (${res.status}): ${errText.slice(0, 200)}`
-        )
+        return { ok: false, error: `Purge falló (${res.status}): ${errText.slice(0, 200)}` }
       }
     } catch (e) {
+      // F68: los return {ok:false} internos ya salieron de la función; este catch
+      // solo captura rechazos reales de red (fetch reject) — antes re-lanzaba y en
+      // prod Next.js enmascaraba el mensaje.
       console.error('[deleteContact] purge API call falló', e)
-      throw e
+      return { ok: false, error: 'Error de red al eliminar el contacto. Intenta de nuevo.' }
     }
     revalidatePath('/dashboard/contacts')
+    return { ok: true }
   }
 
   // Rev. 101 (F1) — HTML imprimible del SAR. Endpoint GET (no POST).

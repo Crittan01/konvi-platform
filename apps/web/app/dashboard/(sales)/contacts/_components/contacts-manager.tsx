@@ -64,17 +64,21 @@ type SarResult = {
   error?: string
 }
 
+// F68: las server actions ahora devuelven {ok,error} en vez de lanzar (Next.js
+// enmascaraba el message del throw en producción). El cliente lee res.error.
+type ActionResult = { ok: boolean; error?: string }
+
 type Props = {
   initialContacts: Contact[]
   canWrite: boolean
-  addAction:    (fd: FormData) => Promise<void>
-  editAction:   (fd: FormData) => Promise<void>
+  addAction:    (fd: FormData) => Promise<ActionResult>
+  editAction:   (fd: FormData) => Promise<ActionResult>
   // Rev. 105 H.4.1.x — Reactivar consent tras soft opt-out (STOP keyword).
   reactivateConsentAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; message: string }>
   // Rev. 105 H.4.1.x.gov — userRole para gobierno regulatorio: reactivar
   // consent es owner-only (Habeas Data ART. 11).
   userRole?: string
-  deleteAction: (fd: FormData) => Promise<void>
+  deleteAction: (fd: FormData) => Promise<ActionResult>
   sarAction?:   (fd: FormData) => Promise<SarResult>
   sarPrintableAction?: (fd: FormData) => Promise<{ ok: boolean; status: number; html?: string; error?: string }>
 }
@@ -333,7 +337,11 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       return
     }
     startTransition(async () => {
-      await addAction(fd)
+      const res = await addAction(fd)
+      if (!res.ok) {
+        window.alert(`No se pudo guardar: ${res.error || 'Error desconocido.'}`)
+        return
+      }
       addFormRef.current?.reset()
       setAddressResetKey(k => k + 1)
       setAddConsentChecked(false)
@@ -351,7 +359,11 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
       return
     }
     startTransition(async () => {
-      await editAction(fd)
+      const res = await editAction(fd)
+      if (!res.ok) {
+        window.alert(`No se pudo actualizar: ${res.error || 'Error desconocido.'}`)
+        return
+      }
       router.refresh()
       showSuccess('Cambios guardados correctamente.')
     })
@@ -379,19 +391,19 @@ export default function ContactsManager({ initialContacts, canWrite, userRole, a
     setPendingDeleteId(null)
     setPendingDeleteReason('')
     startTransition(async () => {
-      try {
-        await deleteAction(fd)
-        router.refresh()
-        showSuccess('Contacto eliminado.')
-      } catch (e) {
+      const res = await deleteAction(fd)
+      if (!res.ok) {
         // Sem 7 F2 cierre 2026-05-21 — Capa A.3 (Wompi payment link guard):
-        // si la purge falla por link Wompi activo (HTTP 409), el server
-        // action propaga el mensaje en e.message. `alert` es bloqueante a
-        // propósito: operador DEBE leer la condición (esperar 30 min o
-        // cancelar orden) antes de reintentar.
-        const msg = e instanceof Error ? e.message : 'No se pudo eliminar el contacto.'
-        window.alert(msg)
+        // si la purge falla por link Wompi activo (HTTP 409), el server action
+        // devuelve el mensaje claro en res.error. F68: antes venía como throw y
+        // Next.js enmascaraba el message en producción. `alert` es bloqueante a
+        // propósito: el operador DEBE leer la condición (esperar ~30 min o
+        // cancelar la orden) antes de reintentar.
+        window.alert(res.error || 'No se pudo eliminar el contacto.')
+        return
       }
+      router.refresh()
+      showSuccess('Contacto eliminado.')
     })
   }
 
