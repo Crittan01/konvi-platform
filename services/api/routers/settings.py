@@ -123,7 +123,7 @@ async def get_tenant(
                     "mision, vision, valores, tono_comunicacion, "
                     "support_schedule, after_hours_message, escalation_role, created_at")
             .eq("id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not result.data:

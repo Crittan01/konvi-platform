@@ -577,7 +577,7 @@ async def confirm_rate(
             .select("id, order_id, status")
             .eq("id", shipment_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not result.data:

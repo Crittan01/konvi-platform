@@ -94,7 +94,7 @@ def _ensure_order_belongs_to_tenant(supabase: Client, tenant_id: str, order_id: 
         .select("id, tenant_id, contact_id, status")
         .eq("id", order_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not res.data:
@@ -171,7 +171,7 @@ async def get_claim(
         .select("*")
         .eq("id", claim_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not res.data:

@@ -35,6 +35,9 @@ class _Query:
     def single(self, *_args, **_kwargs):
         return self
 
+    def maybe_single(self, *_args, **_kwargs):  # F19: send_agent_message usa maybe_single
+        return self
+
     def insert(self, *_args, **_kwargs):
         return self
 

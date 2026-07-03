@@ -167,7 +167,7 @@ async def get_kb_doc(
         .select("id, title, content, category, is_active, created_at, updated_at, embedding")
         .eq("id", doc_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not res.data:
@@ -206,7 +206,7 @@ async def patch_kb_doc(
             .select("title, content")
             .eq("id", doc_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not cur_res.data:
@@ -265,7 +265,7 @@ async def reindex_kb_doc(
         .select("title, content")
         .eq("id", doc_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not cur.data:

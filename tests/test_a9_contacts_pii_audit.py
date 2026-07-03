@@ -71,6 +71,9 @@ class _FakeQuery:
     def single(self):
         return self
 
+    def maybe_single(self):  # F19: patch_contact usa maybe_single
+        return self
+
     def execute(self):
         if self.name == "contacts" and self._mode == "insert":
             return SimpleNamespace(data=[{"id": "contact-new", **(self._payload or {})}])

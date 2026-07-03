@@ -200,10 +200,10 @@ async def get_conversation(
             )
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not result.data:
+        if not result or not result.data:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
         # Ordenar mensajes cronológicamente
@@ -238,10 +238,10 @@ async def get_conversation_messages(
             .select("id")
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not conv_check.data:
+        if not conv_check or not conv_check.data:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
         result = (
@@ -789,10 +789,10 @@ async def send_agent_message(
             .select("id, customer_phone, status, tenant_id")
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not conv_result.data:
+        if not conv_result or not conv_result.data:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
         conv = conv_result.data
@@ -1294,10 +1294,10 @@ async def send_agent_image(
             .select("id, customer_phone, status, tenant_id")
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not conv_result.data:
+        if not conv_result or not conv_result.data:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
         conv = conv_result.data
@@ -1455,10 +1455,10 @@ async def get_conversation_cart(
             .select("id")
             .eq("id", conversation_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not conv.data:
+        if not conv or not conv.data:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
         cart_res = (

@@ -350,7 +350,7 @@ def _decrement_stock_for_meli_order(order_id: str, tenant_id: str, supabase) -> 
                 .select("stock_quantity")
                 .eq("id", variation_id)
                 .eq("tenant_id", tenant_id)
-                .single()
+                .maybe_single()
                 .execute()
             )
             if not var_result.data:

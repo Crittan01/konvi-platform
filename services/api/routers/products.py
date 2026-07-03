@@ -443,7 +443,7 @@ async def get_product(
             .select("id, title, description, status, platform_category_id, category_id, safety_note, attributes, retracto_excluded, cover_image_url, created_at, product_variations(id, sku, price, cost_price, compare_at_price, stock_quantity, attributes, weight_kg, length_cm, width_cm, height_cm, image_url)")
             .eq("id", product_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not result.data:
@@ -487,7 +487,7 @@ async def patch_product(
                     .select("category_id")
                     .eq("id", product_id)
                     .eq("tenant_id", tenant_id)
-                    .single()
+                    .maybe_single()
                     .execute()
                 )
                 eff_cat = (cur.data or {}).get("category_id")

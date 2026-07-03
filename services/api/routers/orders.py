@@ -368,7 +368,7 @@ async def patch_order(
             .select("id, status")
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not current_result.data:
@@ -442,7 +442,7 @@ async def create_payment_link(
             )
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not order_res.data:
@@ -778,7 +778,7 @@ def _decrement_stock_on_confirm(supabase: Client, order_id: str, tenant_id: str)
                 .select("id, stock_quantity")
                 .eq("id", variation_id)
                 .eq("tenant_id", tenant_id)
-                .single()
+                .maybe_single()
                 .execute()
             )
             if not var_result.data:

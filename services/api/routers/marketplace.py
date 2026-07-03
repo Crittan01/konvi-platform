@@ -433,7 +433,7 @@ async def update_listing_status(
         .select("id, external_id")
         .eq("id", listing_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not listing_res.data:
@@ -484,7 +484,7 @@ async def sync_stock_from_supabase(
         .select("id, external_id, variation_id, meli_variation_id")
         .eq("id", listing_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not listing_res.data:
@@ -504,7 +504,7 @@ async def sync_stock_from_supabase(
         .select("stock_quantity, price, compare_at_price")
         .eq("id", variation_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not var_res.data:

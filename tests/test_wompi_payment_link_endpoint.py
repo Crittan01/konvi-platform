@@ -38,6 +38,7 @@ def _make_supabase_mock(state):
             single_mock.execute.return_value = types.SimpleNamespace(data=state.get("orders_single", None))
             eq_mock = MagicMock()
             eq_mock.single.return_value = single_mock
+            eq_mock.maybe_single.return_value = single_mock  # F19: create_payment_link usa maybe_single
             eq_mock.eq.return_value = eq_mock
             select_mock = MagicMock()
             select_mock.eq.return_value = eq_mock

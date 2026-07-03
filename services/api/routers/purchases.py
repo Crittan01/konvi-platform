@@ -71,7 +71,7 @@ def _ensure_supplier_belongs_to_tenant(supabase: Client, tenant_id: str, supplie
         .select("id")
         .eq("id", supplier_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not res.data:
@@ -221,7 +221,7 @@ async def get_purchase_order(
         .select("*")
         .eq("id", po_id)
         .eq("tenant_id", tenant_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not po_res.data:

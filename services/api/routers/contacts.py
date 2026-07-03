@@ -448,7 +448,7 @@ async def patch_contact(
             )
             .eq("id", contact_id)
             .eq("tenant_id", tenant_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not current_res.data:
