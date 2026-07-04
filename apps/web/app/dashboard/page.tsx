@@ -2,6 +2,8 @@ import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
 import DashboardClient from './dashboard-client'
+import { AlertTriangle } from 'lucide-react'
+import { buildQuickLinks, messageDayBuckets, ORDER_STATUSES } from './dashboard-logic'
 
 export default async function DashboardPage() {
   // Sem 5 perf: getCachedUser/Meta comparten cache con DashboardLayout
@@ -10,133 +12,158 @@ export default async function DashboardPage() {
   if (!user) redirect('/login')
 
   const { tenantId, role } = await getCachedTenantMeta()
-  const canWrite = role === 'owner' || role === 'manager'
-  const supabase = await createClient()
 
-  let tenantName = 'Tu tienda'
-  let stats = { conversations: 0, orders: 0, contacts: 0, products: 0 }
-  let ops = { activeConversations: 0, humanTakeovers: 0, pendingOrders: 0, lowStockCount: 0 }
-  let messagesPerDay: { day: string; total: number }[] = []
-  let ordersByStatus: { status: string; count: number }[] = []
-
-  if (tenantId) {
-    // ─── Queries en paralelo ──────────────────────────────────────────────────
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-
-    // Primero obtenemos el tenant para sacar low_stock_threshold antes de las queries paralelas
-    const tenantRes = await supabase
-      .from('tenants')
-      .select('name, low_stock_threshold')
-      .eq('id', tenantId)
-      .single()
-
-    const lowStockThreshold = tenantRes.data?.low_stock_threshold ?? 5
-
-    const [
-      convRes,
-      ordersRes,
-      contactsRes,
-      productsRes,
-      activeConvRes,
-      takeoverConvRes,
-      pendingOrdersRes,
-      lowStockRes,
-      messagesRes,
-      orderStatusRes,
-    ] = await Promise.all([
-      supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
-      // Ops: conversaciones activas con bot
-      supabase.from('conversations').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('status', 'bot_active'),
-      // Ops: conversaciones en takeover humano
-      supabase.from('conversations').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('status', 'human_takeover'),
-      // Ops: pedidos pendientes
-      supabase.from('orders').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('status', 'pending'),
-      // Ops: variantes bajo umbral configurable del tenant (tenants.low_stock_threshold)
-      supabase.from('product_variations').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).lte('stock_quantity', lowStockThreshold),
-      // Negocio: mensajes últimos 7 días con fecha
-      supabase.from('messages').select('created_at')
-        .eq('tenant_id', tenantId)
-        .gte('created_at', sevenDaysAgo)
-        .order('created_at', { ascending: true }),
-      // Negocio: pedidos por estado
-      supabase.from('orders').select('status').eq('tenant_id', tenantId),
-    ])
-
-    tenantName = tenantRes.data?.name ?? 'Tu tienda'
-
-    stats = {
-      conversations: convRes.count ?? 0,
-      orders:        ordersRes.count ?? 0,
-      contacts:      contactsRes.count ?? 0,
-      products:      productsRes.count ?? 0,
-    }
-
-    ops = {
-      activeConversations: activeConvRes.count ?? 0,
-      humanTakeovers:      takeoverConvRes.count ?? 0,
-      pendingOrders:       pendingOrdersRes.count ?? 0,
-      lowStockCount:       lowStockRes.count ?? 0,
-    }
-
-    // Agrupar mensajes por día (formato "Lu", "Ma", etc.)
-    const dayLabels = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá']
-    const dayMap = new Map<string, number>()
-
-    // Inicializar los últimos 7 días
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
-      const key = d.toISOString().split('T')[0]
-      dayMap.set(key, 0)
-    }
-
-    for (const msg of messagesRes.data ?? []) {
-      const key = (msg.created_at as string).split('T')[0]
-      if (dayMap.has(key)) {
-        dayMap.set(key, (dayMap.get(key) ?? 0) + 1)
-      }
-    }
-
-    messagesPerDay = Array.from(dayMap.entries()).map(([dateStr, total]) => {
-      const d = new Date(dateStr + 'T12:00:00')
-      return { day: dayLabels[d.getDay()], total }
-    })
-
-    // Agrupar pedidos por estado
-    const statusMap = new Map<string, number>()
-    for (const order of orderStatusRes.data ?? []) {
-      const s = (order as { status: string }).status
-      statusMap.set(s, (statusMap.get(s) ?? 0) + 1)
-    }
-    ordersByStatus = Array.from(statusMap.entries()).map(([status, count]) => ({ status, count }))
+  // cached-user.ts:59 — un usuario sin tenant_id es malformado; el caller DEBE
+  // rechazarlo, no renderizar la consola vacía en ceros (falso "todo en 0").
+  if (!tenantId) {
+    console.error('[dashboard] usuario sin tenant_id — cuenta malformada', { userId: user.id })
+    return (
+      <div className="flex items-center justify-center p-12">
+        <div className="max-w-md w-full rounded-xl border border-amber-700/25 bg-amber-500/10 p-6 text-center space-y-3">
+          <div className="flex justify-center">
+            <div className="h-12 w-12 rounded-full bg-amber-500/15 flex items-center justify-center">
+              <AlertTriangle className="h-6 w-6 text-amber-700" />
+            </div>
+          </div>
+          <h2 className="text-lg font-semibold text-foreground">Tu cuenta no tiene una tienda asignada</h2>
+          <p className="text-sm text-amber-800">
+            {user.email} está autenticado pero no está vinculado a ningún tenant.
+            Contacta al administrador de la plataforma para completar la asignación.
+          </p>
+        </div>
+      </div>
+    )
   }
 
-  const quickLinks = [
-    { href: '/dashboard/inbox',         label: 'Inbox AI',      icon: 'MessageSquare', desc: 'Conversaciones WhatsApp', show: true },
-    { href: '/dashboard/orders',         label: 'Pedidos',       icon: 'Package',       desc: 'Gestionar pedidos',       show: true },
-    { href: '/dashboard/contacts',       label: 'Contactos',     icon: 'Users',         desc: 'Base de clientes',        show: true },
-    { href: '/dashboard/catalog',        label: 'Catálogo',      icon: 'ShoppingCart',  desc: 'Productos activos',       show: canWrite },
-    { href: '/dashboard/metrics',        label: 'Métricas',      icon: 'BarChart2',     desc: 'KPIs del negocio',        show: canWrite },
-    { href: '/dashboard/integrations',   label: 'Integraciones', icon: 'Plug',          desc: 'MeLi · Envia',           show: role === 'owner' },
-  ].filter(l => l.show).map(({ show: _show, ...rest }) => rest)
+  const supabase = await createClient()
+
+  // ─── Ronda 0: tenant (threshold + nombre) antes de las queries dependientes ──
+  const tenantRes = await supabase
+    .from('tenants')
+    .select('name, low_stock_threshold')
+    .eq('id', tenantId)
+    .single()
+
+  if (tenantRes.error) console.error('[dashboard] fallo cargando tenant', tenantRes.error.message)
+  const tenantName = tenantRes.data?.name ?? 'Tu tienda'
+  const lowStockThreshold = tenantRes.data?.low_stock_threshold ?? 5
+  const thresholdConfigured = tenantRes.data?.low_stock_threshold != null
+
+  // Buckets de día (hora Colombia) y estados de pedido: se cuenta POR bucket con
+  // head:true (sin traer filas) → exacto y acotado. Evita el fetch-all que
+  // PostgREST trunca a 1000 sin avisar (data-fetching.md §1).
+  const dayBuckets = messageDayBuckets(7)
+
+  const [
+    convRes,
+    ordersRes,
+    contactsRes,
+    productsRes,
+    activeConvRes,
+    takeoverConvRes,
+    pendingOrdersRes,
+    lowStockRes,
+    whatsappRes,
+    messagesDayRes,
+    ordersStatusRes,
+  ] = await Promise.all([
+    supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+    supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+    supabase.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
+    // Ops: conversaciones activas con bot
+    supabase.from('conversations').select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId).eq('status', 'bot_active'),
+    // Ops: conversaciones en takeover humano
+    supabase.from('conversations').select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId).eq('status', 'human_takeover'),
+    // Ops: pedidos pendientes (solo 'pending'; ver needs_founder: incluir pending_payment)
+    supabase.from('orders').select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId).eq('status', 'pending'),
+    // Ops: "Bajo stock" — MISMA fórmula que el destino /dashboard/catalog
+    // (products-manager.tsx:58: stock>0 && stock<=threshold, sobre productos
+    // status='active'). El inner join a products acota a productos activos;
+    // .gt('stock_quantity',0) excluye los agotados (que el catálogo cuenta aparte).
+    supabase.from('product_variations').select('id, products!inner(status)', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('products.status', 'active')
+      .gt('stock_quantity', 0)
+      .lte('stock_quantity', lowStockThreshold),
+    // First-run: ¿WhatsApp conectado?
+    supabase.from('tenant_integrations').select('status')
+      .eq('tenant_id', tenantId).eq('provider', 'whatsapp').limit(1).maybeSingle(),
+    // Negocio: mensajes por día → un count exacto por bucket Colombia (sin filas)
+    Promise.all(dayBuckets.map(b =>
+      supabase.from('messages').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .gte('created_at', b.fromUTC)
+        .lt('created_at', b.toUTC),
+    )),
+    // Negocio: pedidos por estado → un count exacto por estado (sin filas)
+    Promise.all(ORDER_STATUSES.map(s =>
+      supabase.from('orders').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('status', s),
+    )),
+  ])
+
+  // ─── Surfacear errores: un fallo RLS/red NO puede pintar "0" como verdad ─────
+  const responses = [
+    convRes, ordersRes, contactsRes, productsRes, activeConvRes,
+    takeoverConvRes, pendingOrdersRes, lowStockRes, whatsappRes,
+    ...messagesDayRes, ...ordersStatusRes,
+  ]
+  const readError = tenantRes.error != null || responses.some(r => r.error != null)
+  for (const r of responses) {
+    if (r.error) console.error('[dashboard] fallo de lectura', r.error.message)
+  }
+
+  const stats = {
+    conversations: convRes.count ?? 0,
+    orders: ordersRes.count ?? 0,
+    contacts: contactsRes.count ?? 0,
+    products: productsRes.count ?? 0,
+  }
+
+  const ops = {
+    activeConversations: activeConvRes.count ?? 0,
+    humanTakeovers: takeoverConvRes.count ?? 0,
+    pendingOrders: pendingOrdersRes.count ?? 0,
+    lowStockCount: lowStockRes.count ?? 0,
+  }
+
+  const messagesPerDay = dayBuckets.map((b, i) => ({ day: b.label, total: messagesDayRes[i].count ?? 0 }))
+
+  const ordersByStatus = ORDER_STATUSES
+    .map((status, i) => ({ status, count: ordersStatusRes[i].count ?? 0 }))
+    .filter(s => s.count > 0)
+
+  // ─── Onboarding first-run: sin actividad todavía ────────────────────────────
+  const whatsappConnected = whatsappRes.data?.status === 'connected'
+  const firstRun = !readError &&
+    stats.conversations === 0 && stats.orders === 0 && stats.contacts === 0
+  const onboarding = {
+    whatsapp: whatsappConnected,
+    catalog: stats.products > 0,
+    threshold: thresholdConfigured,
+  }
+
+  const quickLinks = buildQuickLinks(role)
 
   return (
     <DashboardClient
-      tenantId={tenantId ?? ''}
+      tenantId={tenantId}
       tenantName={tenantName}
       userEmail={user.email ?? ''}
       role={role}
       stats={stats}
       ops={ops}
+      lowStockThreshold={lowStockThreshold}
       messagesPerDay={messagesPerDay}
       ordersByStatus={ordersByStatus}
       quickLinks={quickLinks}
+      readError={readError}
+      firstRun={firstRun}
+      onboarding={onboarding}
     />
   )
 }

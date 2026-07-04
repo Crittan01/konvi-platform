@@ -1,20 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import {
   MessageSquare, Package, Users, ShoppingCart,
   Boxes, BarChart2, Plug, ArrowRight,
-  AlertTriangle, UserCheck, Clock, TrendingUp,
-  TrendingDown, Minus, Zap, Activity,
+  AlertTriangle, UserCheck, Clock, Zap, Activity,
+  RefreshCw, CheckCircle2, Circle, WifiOff,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, CartesianGrid,
   AreaChart, Area,
 } from 'recharts'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -35,9 +36,13 @@ export interface DashboardProps {
     pendingOrders: number
     lowStockCount: number
   }
+  lowStockThreshold: number
   messagesPerDay: { day: string; total: number }[]
   ordersByStatus: { status: string; count: number }[]
   quickLinks: { href: string; label: string; icon: string; desc: string }[]
+  readError: boolean
+  firstRun: boolean
+  onboarding: { whatsapp: boolean; catalog: boolean; threshold: boolean }
 }
 
 // ─── Maps ─────────────────────────────────────────────────────────────────────
@@ -56,10 +61,10 @@ const ORDER_STATUS_COLORS: Record<string, string> = {
   pending:    '#D4A843',
   pending_payment: '#E0A82E',  // F62: ámbar distinto de pending para el chart
   confirmed:  '#38A875',
-  processing: '#60a5fa',
-  shipped:    '#a78bfa',
-  delivered:  '#34d399',
-  cancelled:  '#f87171',
+  processing: '#2563eb',
+  shipped:    '#7c3aed',
+  delivered:  '#059669',
+  cancelled:  '#dc2626',
 }
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
@@ -94,30 +99,60 @@ const CustomTooltip = ({ active, payload, label }: {
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
+const TABS = ['operaciones', 'negocio'] as const
+type Tab = (typeof TABS)[number]
+
 export default function DashboardClient({
-  tenantId, tenantName, userEmail, role, stats, ops,
-  messagesPerDay, ordersByStatus, quickLinks,
+  tenantId, tenantName, userEmail, role, stats, ops, lowStockThreshold,
+  messagesPerDay, ordersByStatus, quickLinks, readError, firstRun, onboarding,
 }: DashboardProps) {
-  const [tab, setTab] = useState<'operaciones' | 'negocio'>('operaciones')
+  const [tab, setTab] = useState<Tab>('operaciones')
   const canWrite = role === 'owner' || role === 'manager'
   const router = useRouter()
+
+  // Estado del canal realtime: 'connected' | 'reconnecting' | 'down'. El topbar
+  // 'Live' del layout es estático; aquí sí reflejamos el estado real del canal.
+  const [rtState, setRtState] = useState<'connected' | 'reconnecting' | 'down'>('connected')
+
+  // router.refresh() re-ejecuta ~22 queries SSR; una ráfaga de N eventos realtime
+  // debe coalescerse en un solo refresh (debounce), no N renders consecutivos.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedRefresh = useCallback(() => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current)
+    refreshTimer.current = setTimeout(() => router.refresh(), 700)
+  }, [router])
 
   useEffect(() => {
     if (!tenantId) return
     const supabase = createClient()
     const channel = supabase.channel(`dashboard_ops_${tenantId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, () => {
-        router.refresh()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, debouncedRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${tenantId}` }, debouncedRefresh)
+      .subscribe((status) => {
+        // Sin callback, CHANNEL_ERROR/TIMED_OUT pasaban invisibles y la UI seguía
+        // prometiendo tiempo real con el canal caído.
+        if (status === 'SUBSCRIBED') setRtState('connected')
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[dashboard] canal realtime en fallo:', status)
+          setRtState('down')
+        } else if (status === 'CLOSED') setRtState('reconnecting')
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${tenantId}` }, () => {
-        router.refresh()
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [tenantId, router])
-
+    return () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      supabase.removeChannel(channel)
+    }
+  }, [tenantId, debouncedRefresh])
 
   const totalOpsAlerts = ops.humanTakeovers + ops.pendingOrders + ops.lowStockCount
+
+  // Navegación por flechas entre tabs (accesibilidad WAI-ARIA tabs).
+  const onTabKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    e.preventDefault()
+    const idx = TABS.indexOf(tab)
+    const next = e.key === 'ArrowRight' ? (idx + 1) % TABS.length : (idx - 1 + TABS.length) % TABS.length
+    setTab(TABS[next])
+  }
 
   return (
     <div className="space-y-5 max-w-7xl">
@@ -133,43 +168,124 @@ export default function DashboardClient({
             {userEmail} · {ROLE_LABELS[role] ?? role}
           </p>
         </div>
-        {totalOpsAlerts > 0 && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 text-sm font-medium shadow-sm">
-            <Zap className="h-4 w-4 shrink-0" />
-            <span>{totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {rtState !== 'connected' && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-medium" title="El canal de tiempo real se reconecta; los datos pueden tardar en actualizarse.">
+              <WifiOff className="h-3.5 w-3.5" />
+              {rtState === 'down' ? 'Sin tiempo real' : 'Reconectando…'}
+            </span>
+          )}
+          {totalOpsAlerts > 0 && (
+            <button
+              type="button"
+              onClick={() => setTab('operaciones')}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium shadow-sm hover:bg-amber-100 transition-colors"
+            >
+              <Zap className="h-4 w-4 shrink-0" />
+              <span>Ver {totalOpsAlerts} alerta{totalOpsAlerts !== 1 ? 's' : ''} activa{totalOpsAlerts !== 1 ? 's' : ''}</span>
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* ── Aviso de error de lectura: NO pintar falsos ceros como verdad ──── */}
+      {readError && (
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Algunos datos no se pudieron cargar</AlertTitle>
+          <AlertDescription className="flex flex-col gap-2">
+            <span>Las cifras de abajo pueden estar incompletas. No las tomes como definitivas.</span>
+            <button
+              type="button"
+              onClick={() => router.refresh()}
+              className="inline-flex items-center gap-1.5 self-start rounded-lg border border-red-700/30 px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-500/10 transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" /> Reintentar
+            </button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* ── Onboarding de primer uso ──────────────────────────────────────── */}
+      {firstRun && (
+        <div className="rounded-xl border border-primary/25 bg-primary/5 p-5">
+          <div className="flex items-start gap-3">
+            <div className="h-9 w-9 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
+              <Zap className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">Pon tu tienda en marcha</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Completa estos 3 pasos para que tu bot empiece a vender por WhatsApp.
+              </p>
+              <ul className="mt-4 space-y-2.5">
+                <OnboardingStep
+                  done={onboarding.whatsapp}
+                  href="/dashboard/integrations"
+                  title="Conecta WhatsApp"
+                  desc="Vincula tu número oficial para recibir conversaciones."
+                />
+                <OnboardingStep
+                  done={onboarding.catalog}
+                  href={canWrite ? '/dashboard/catalog' : undefined}
+                  title="Carga tu catálogo"
+                  desc="Agrega productos y variantes con stock y precio."
+                />
+                <OnboardingStep
+                  done={onboarding.threshold}
+                  href={canWrite ? '/dashboard/catalog' : undefined}
+                  title="Configura tu umbral de stock bajo"
+                  desc="Define desde qué cantidad una variante se marca como crítica."
+                />
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Tabs ──────────────────────────────────────────────────────────── */}
-      <div className="flex gap-0.5 border-b border-border">
-        {(['operaciones', 'negocio'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`relative px-4 py-2.5 text-sm font-medium capitalize transition-colors border-b-2 -mb-px flex items-center gap-2 ${
-              tab === t
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {t === 'operaciones' ? (
-              <><Activity className="h-3.5 w-3.5" /> Operaciones</>
-            ) : (
-              <><BarChart2 className="h-3.5 w-3.5" /> Negocio</>
-            )}
-            {t === 'operaciones' && totalOpsAlerts > 0 && (
-              <span className="ml-1 h-4 w-4 rounded-full bg-amber-400 text-[10px] font-bold text-black flex items-center justify-center">
-                {totalOpsAlerts}
-              </span>
-            )}
-          </button>
-        ))}
+      <div role="tablist" aria-label="Vistas del panel" className="flex gap-0.5 border-b border-border">
+        {TABS.map(t => {
+          const selected = tab === t
+          return (
+            <button
+              key={t}
+              role="tab"
+              id={`dash-tab-${t}`}
+              aria-selected={selected}
+              aria-controls={`dash-panel-${t}`}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => setTab(t)}
+              onKeyDown={onTabKeyDown}
+              className={`relative px-4 py-2.5 text-sm font-medium capitalize transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+                selected
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t === 'operaciones' ? (
+                <><Activity className="h-3.5 w-3.5" /> Operaciones</>
+              ) : (
+                <><BarChart2 className="h-3.5 w-3.5" /> Negocio</>
+              )}
+              {t === 'operaciones' && totalOpsAlerts > 0 && (
+                <span className="ml-1 h-4 min-w-4 px-1 rounded-full bg-amber-600 text-[10px] font-bold text-white flex items-center justify-center">
+                  {totalOpsAlerts}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* ── Tab: Operaciones ─────────────────────────────────────────────── */}
       {tab === 'operaciones' && (
-        <div className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+        <div
+          role="tabpanel"
+          id="dash-panel-operaciones"
+          aria-labelledby="dash-tab-operaciones"
+          className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
+        >
 
           {/* Alertas operacionales */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -201,11 +317,11 @@ export default function DashboardClient({
             />
             <OpsCard
               href="/dashboard/catalog"
-              label="Bajo stock"
+              label="Productos con poco stock"
               value={ops.lowStockCount}
               icon={AlertTriangle}
               color="text-red-700"
-              description="Variantes críticas"
+              description={`Stock entre 1 y ${lowStockThreshold} u.`}
               urgent={ops.lowStockCount > 0}
             />
           </div>
@@ -239,12 +355,9 @@ export default function DashboardClient({
           </div>
 
           {/* Actividad reciente — mini gráfica inline */}
-          {messagesPerDay.length > 0 && (
+          {messagesPerDay.some(d => d.total > 0) && (
             <div className="rounded-xl border border-border bg-card p-5">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-sm font-medium text-foreground">Actividad de mensajes — 7 días</p>
-                <span className="text-xs text-muted-foreground">Últimos 7 días</span>
-              </div>
+              <p className="text-sm font-medium text-foreground mb-4">Actividad de mensajes — últimos 7 días</p>
               <ResponsiveContainer width="100%" height={100}>
                 <AreaChart data={messagesPerDay} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
                   <defs>
@@ -266,23 +379,28 @@ export default function DashboardClient({
 
       {/* ── Tab: Negocio ──────────────────────────────────────────────────── */}
       {tab === 'negocio' && (
-        <div className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+        <div
+          role="tabpanel"
+          id="dash-panel-negocio"
+          aria-labelledby="dash-tab-negocio"
+          className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
+        >
 
-          {/* KPI Cards con comparativa */}
+          {/* Totales acumulados */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <KpiCard label="Conversaciones" value={stats.conversations} trend="neutral" />
-            <KpiCard label="Pedidos"        value={stats.orders}        trend="neutral" />
-            <KpiCard label="Contactos"      value={stats.contacts}      trend="neutral" />
-            <KpiCard label="Productos"      value={stats.products}      trend="neutral" />
+            <KpiCard label="Conversaciones" value={stats.conversations} />
+            <KpiCard label="Pedidos"        value={stats.orders} />
+            <KpiCard label="Contactos"      value={stats.contacts} />
+            <KpiCard label="Productos"      value={stats.products} />
           </div>
 
           {/* Gráficas */}
           <div className="grid md:grid-cols-2 gap-5">
 
-            {/* Mensajes por día — área */}
+            {/* Mensajes por día — barras */}
             <div className="rounded-xl border border-border bg-card p-5">
               <p className="text-sm font-medium text-foreground mb-4">Mensajes — últimos 7 días</p>
-              {messagesPerDay.length > 0 ? (
+              {messagesPerDay.some(d => d.total > 0) ? (
                 <ResponsiveContainer width="100%" height={180}>
                   <BarChart data={messagesPerDay} barSize={20} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
@@ -293,7 +411,7 @@ export default function DashboardClient({
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyChart label="Sin datos en los últimos 7 días" />
+                <EmptyChart label="Sin mensajes en los últimos 7 días" />
               )}
             </div>
 
@@ -343,26 +461,25 @@ export default function DashboardClient({
             </div>
           </div>
 
-          {/* Resumen de KPIs acumulados */}
-          {canWrite && (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <p className="text-sm font-medium text-foreground mb-4">Resumen general del negocio</p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: 'Tasa de conversión', value: stats.conversations > 0 ? `${Math.round((stats.orders / stats.conversations) * 100)}%` : '0%', note: 'Conv → Pedido' },
-                  { label: 'Promedio pedidos', value: stats.contacts > 0 ? `${(stats.orders / stats.contacts).toFixed(1)}` : '0', note: 'por contacto' },
-                  { label: 'Productos activos', value: String(stats.products), note: 'en catálogo' },
-                  { label: 'Contactos totales', value: String(stats.contacts), note: 'registrados' },
-                ].map(item => (
-                  <div key={item.label} className="text-center">
-                    <p className="text-2xl font-bold text-primary">{item.value}</p>
-                    <p className="text-xs font-medium text-foreground mt-1">{item.label}</p>
-                    <p className="text-xs text-muted-foreground">{item.note}</p>
-                  </div>
-                ))}
-              </div>
+          {/* Resumen de KPIs acumulados — derivado de cifras ya visibles arriba,
+              no protege nada por rol (antes gated tras canWrite sin motivo). */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <p className="text-sm font-medium text-foreground mb-4">Resumen general del negocio</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: 'Tasa de conversión', value: stats.conversations > 0 ? `${Math.round((stats.orders / stats.conversations) * 100)}%` : '0%', note: 'Conv → Pedido' },
+                { label: 'Promedio pedidos', value: stats.contacts > 0 ? `${(stats.orders / stats.contacts).toFixed(1)}` : '0', note: 'por contacto' },
+                { label: 'Productos activos', value: String(stats.products), note: 'en catálogo' },
+                { label: 'Contactos totales', value: String(stats.contacts), note: 'registrados' },
+              ].map(item => (
+                <div key={item.label} className="text-center">
+                  <p className="text-2xl font-bold text-primary">{item.value}</p>
+                  <p className="text-xs font-medium text-foreground mt-1">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{item.note}</p>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
@@ -370,6 +487,36 @@ export default function DashboardClient({
 }
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
+
+function OnboardingStep({
+  done, href, title, desc,
+}: {
+  done: boolean
+  href?: string
+  title: string
+  desc: string
+}) {
+  const inner = (
+    <div className="flex items-start gap-3">
+      {done
+        ? <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0 mt-0.5" />
+        : <Circle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />}
+      <div className="min-w-0">
+        <p className={`text-sm font-medium ${done ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{title}</p>
+        {!done && <p className="text-xs text-muted-foreground leading-snug">{desc}</p>}
+      </div>
+      {!done && href && <ArrowRight className="h-4 w-4 text-primary shrink-0 ml-auto mt-0.5" />}
+    </div>
+  )
+  if (done || !href) return <li>{inner}</li>
+  return (
+    <li>
+      <Link href={href} className="block rounded-lg -mx-2 px-2 py-1 hover:bg-primary/10 transition-colors">
+        {inner}
+      </Link>
+    </li>
+  )
+}
 
 function OpsCard({
   href, label, value, icon: Icon, color, description, urgent = false,
@@ -391,7 +538,7 @@ function OpsCard({
     >
       <div className="flex items-center justify-between mb-2">
         <Icon className={`h-4 w-4 ${color}`} />
-        {urgent && <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />}
+        {urgent && <span className="h-2 w-2 rounded-full bg-amber-600 animate-pulse" />}
       </div>
       <p className={`text-2xl sm:text-3xl font-bold ${color}`}>{value}</p>
       <p className="text-xs font-medium text-foreground mt-1 leading-snug">{label}</p>
@@ -400,25 +547,12 @@ function OpsCard({
   )
 }
 
-function KpiCard({
-  label, value, trend, trendValue,
-}: {
-  label: string
-  value: number
-  trend: 'up' | 'down' | 'neutral'
-  trendValue?: string
-}) {
-  const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus
-  const trendColor = trend === 'up' ? 'text-emerald-700' : trend === 'down' ? 'text-red-700' : 'text-muted-foreground'
-
+function KpiCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-sm">
       <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
       <p className="text-2xl sm:text-3xl font-bold text-primary">{value}</p>
-      <p className={`text-xs mt-1 flex items-center gap-1 ${trendColor}`}>
-        <TrendIcon className="h-3 w-3" />
-        {trendValue ?? 'Total acumulado'}
-      </p>
+      <p className="text-xs mt-1 text-muted-foreground">Total acumulado</p>
     </div>
   )
 }
