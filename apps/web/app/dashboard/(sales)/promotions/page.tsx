@@ -320,8 +320,12 @@ export default async function PromotionsPage() {
   const supabase = await createClient()
 
   let coupons: Coupon[] = []
+  // Error de carga surfaceado a la UI: sin esto un fallo de Supabase caía en
+  // el empty-state ("Aún no tienes cupones") — un falso-0 que oculta el
+  // incidente. La UI distingue error (con reintento) de lista vacía real.
+  let loadError: string | null = null
   if (tenantId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('coupons')
       .select(
         'id, code, description, discount_type, discount_value, ' +
@@ -332,25 +336,36 @@ export default async function PromotionsPage() {
       .order('is_active', { ascending: false })
       .order('created_at', { ascending: false })
 
+    if (error) {
+      loadError = 'No pudimos cargar los cupones. Reintenta en un momento.'
+    }
+
     const couponsRaw = Array.isArray(data)
       ? (data as unknown as Omit<Coupon, 'has_historical_redemptions'>[])
       : []
 
-    // Lookup batch: redemptions históricas (cualquier status) per cupón.
-    // 1 query con todas las rows + agrupación in-memory evita N
-    // round-trips. Para tenants con cientos de cupones puede crecer pero
-    // sigue siendo 1 query — escala razonablemente.
+    // Conteo de redenciones históricas (cualquier status) per cupón.
+    // Antes: 1 query `.select('coupon_id')` sin count → supabase-js capa a
+    // 1000 filas por default y subcontaba en silencio para cupones populares.
+    // Ahora: un COUNT exacto (head:true, no transfiere filas) por cupón, en
+    // paralelo. head+count devuelve el total real sin el cap de 1000.
     const histCounts = new Map<string, number>()
     if (couponsRaw.length > 0) {
-      const ids = couponsRaw.map((c) => c.id)
-      const { data: redData } = await supabase
-        .from('coupon_redemptions')
-        .select('coupon_id')
-        .in('coupon_id', ids)
-        .eq('tenant_id', tenantId)
-      for (const r of (redData ?? [])) {
-        const cid = r.coupon_id as string
-        histCounts.set(cid, (histCounts.get(cid) ?? 0) + 1)
+      const results = await Promise.all(
+        couponsRaw.map(async (c) => {
+          const { count, error: cErr } = await supabase
+            .from('coupon_redemptions')
+            .select('id', { count: 'exact', head: true })
+            .eq('coupon_id', c.id)
+            .eq('tenant_id', tenantId)
+          return { id: c.id, count: count ?? 0, err: cErr }
+        })
+      )
+      for (const r of results) {
+        if (r.err && !loadError) {
+          loadError = 'No pudimos cargar el historial de redenciones. Reintenta en un momento.'
+        }
+        histCounts.set(r.id, r.count)
       }
     }
 
@@ -388,6 +403,7 @@ export default async function PromotionsPage() {
 
       <PromotionsManager
         initialCoupons={coupons}
+        loadError={loadError}
         canWrite={canWrite}
         createCouponAction={createCouponAction}
         updateCouponAction={updateCouponAction}

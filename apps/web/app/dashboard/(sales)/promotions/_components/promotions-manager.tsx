@@ -4,11 +4,18 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Tag, Plus, Pencil, Power, AlertTriangle, CheckCircle2, Loader2,
-  Percent, DollarSign, Truck, Trash2, ShieldCheck, HelpCircle,
+  Percent, DollarSign, Truck, Trash2, ShieldCheck, HelpCircle, RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+} from '@/components/ui/table'
+import {
+  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
+} from '@/components/ui/tooltip'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
@@ -20,6 +27,7 @@ type ActionResult = { ok: boolean; error?: string }
 
 type Props = {
   initialCoupons: Coupon[]
+  loadError?: string | null
   canWrite: boolean
   createCouponAction: (formData: FormData) => Promise<ActionResult>
   updateCouponAction: (formData: FormData) => Promise<ActionResult>
@@ -58,8 +66,57 @@ function formatDate(iso: string | null): string {
   return d.toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: '2-digit' })
 }
 
+/**
+ * Estado REAL del cupón desde la perspectiva del bot — no solo `is_active`.
+ *
+ * El engine (services/api/lib/coupons.py) rechaza un cupón activo si expiró
+ * (`valid_until` pasado) o agotó `max_redemptions`, y aún no lo aplica si su
+ * `valid_from` es futuro. La tabla debe reflejar ese estado efectivo: antes,
+ * un cupón expirado/agotado seguía en verde "Activo" mientras el bot ya lo
+ * rechazaba. Prioridad: inactivo → expirado → agotado → programado → activo.
+ */
+type CouponStatus = {
+  label: string
+  variant: 'success' | 'warning' | 'info' | 'secondary'
+  hint: string
+}
+
+function deriveStatus(c: Coupon, now: number): CouponStatus {
+  if (!c.is_active) {
+    return {
+      label: 'Inactivo', variant: 'secondary',
+      hint: 'Desactivado manualmente. El bot no lo aplica ni lo anuncia.',
+    }
+  }
+  const until = c.valid_until ? new Date(c.valid_until).getTime() : null
+  if (until !== null && !isNaN(until) && until <= now) {
+    return {
+      label: 'Expirado', variant: 'warning',
+      hint: 'Pasó su fecha "Válido hasta". El bot ya rechaza nuevas aplicaciones aunque siga marcado como activo. Ajusta la vigencia o desactívalo.',
+    }
+  }
+  if (c.max_redemptions !== null && c.redemptions_count >= c.max_redemptions) {
+    return {
+      label: 'Agotado', variant: 'warning',
+      hint: 'Alcanzó el máximo de usos permitidos. El bot ya no lo acepta. Sube el máximo para reactivarlo.',
+    }
+  }
+  const from = c.valid_from ? new Date(c.valid_from).getTime() : null
+  if (from !== null && !isNaN(from) && from > now) {
+    return {
+      label: 'Programado', variant: 'info',
+      hint: 'Su vigencia aún no empieza ("Válido desde" es futuro). El bot lo aplicará cuando llegue la fecha.',
+    }
+  }
+  return {
+    label: 'Activo', variant: 'success',
+    hint: 'Vigente y disponible. El bot lo acepta cuando el cliente escribe el código.',
+  }
+}
+
 export default function PromotionsManager({
   initialCoupons,
+  loadError,
   canWrite,
   createCouponAction,
   updateCouponAction,
@@ -67,6 +124,7 @@ export default function PromotionsManager({
   deleteCouponAction,
 }: Props) {
   const router = useRouter()
+  const now = Date.now()
   const [pending, startTransition] = useTransition()
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<Coupon | null>(null)
@@ -144,6 +202,7 @@ export default function PromotionsManager({
   }
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-4">
       {successMsg && (
         <div className="rounded-md border border-emerald-700/40 bg-emerald-700/5 p-3 text-sm text-emerald-900">
@@ -167,113 +226,161 @@ export default function PromotionsManager({
         </Button>
       )}
 
-      {initialCoupons.length === 0 ? (
+      {loadError ? (
+        <div className="rounded-md border border-rose-700/40 bg-rose-700/5 p-6 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-rose-700 mb-2" />
+          <p className="text-sm text-rose-900">{loadError}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3 border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
+            onClick={() => router.refresh()}
+          >
+            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+            Reintentar
+          </Button>
+        </div>
+      ) : initialCoupons.length === 0 ? (
         <div className="rounded-md border border-border bg-muted/20 p-6 text-center text-muted-foreground">
           <Tag className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
           <p className="text-sm">Aún no tienes cupones. Crea el primero arriba.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-border bg-card">
-          <table className="min-w-full text-sm">
-            <thead className="bg-muted/30 text-left text-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">Código</th>
-                <th className="px-3 py-2 font-medium">Tipo</th>
-                <th className="px-3 py-2 font-medium">Valor</th>
-                <th className="px-3 py-2 font-medium">Mín. compra</th>
-                <th className="px-3 py-2 font-medium">Usos</th>
-                <th className="px-3 py-2 font-medium">Vigencia</th>
-                <th className="px-3 py-2 font-medium">Estado</th>
-                <th className="px-3 py-2 font-medium text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
+        <div className="rounded-md border border-border bg-card">
+          <Table>
+            <TableHeader className="bg-muted/30">
+              <TableRow>
+                <TableHead>Código</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Valor</TableHead>
+                <TableHead>Mín. compra</TableHead>
+                <TableHead>Usos</TableHead>
+                <TableHead>Visible</TableHead>
+                <TableHead>Vigencia</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {initialCoupons.map((c) => {
                 const Icon = DISCOUNT_TYPE_ICON[c.discount_type]
                 const usageStr = c.max_redemptions
                   ? `${c.redemptions_count} / ${c.max_redemptions}`
                   : `${c.redemptions_count} / ∞`
+                const status = deriveStatus(c, now)
                 return (
-                  <tr key={c.id} className={c.is_active ? '' : 'bg-muted/20 text-muted-foreground'}>
-                    <td className="px-3 py-2">
+                  <TableRow key={c.id} className={c.is_active ? '' : 'bg-muted/20 text-muted-foreground'}>
+                    <TableCell>
                       <div className="font-mono font-semibold">{c.code}</div>
                       {c.description && (
                         <div className="text-xs text-muted-foreground mt-0.5">{c.description}</div>
                       )}
-                    </td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell>
                       <span className="inline-flex items-center gap-1">
                         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                         {DISCOUNT_TYPE_LABEL[c.discount_type]}
                       </span>
-                    </td>
-                    <td className="px-3 py-2 font-medium">{formatDiscountValue(c)}</td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell className="font-medium">{formatDiscountValue(c)}</TableCell>
+                    <TableCell>
                       {c.min_subtotal_cents > 0
                         ? formatCOP(c.min_subtotal_cents)
                         : '—'}
-                    </td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <span title="Veces consumido (orden con pago APROBADO)">
-                          {usageStr}
-                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help">{usageStr}</span>
+                          </TooltipTrigger>
+                          <TooltipContent>Veces consumido (orden con pago APROBADO) sobre el máximo.</TooltipContent>
+                        </Tooltip>
                         {c.total_historical_redemptions > c.redemptions_count && (
-                          <span
-                            className="inline-flex items-center rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                            title={
-                              `${c.total_historical_redemptions} aplicaciones en historial ` +
-                              `(incluye revocadas y consumidas). El contador principal solo ` +
-                              `cuenta órdenes con pago aprobado.`
-                            }
-                          >
-                            {c.total_historical_redemptions} hist.
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex cursor-help items-center rounded-full border border-border bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                {c.total_historical_redemptions} hist.
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {c.total_historical_redemptions} aplicaciones en historial (incluye
+                              revocadas y consumidas). El contador principal solo cuenta órdenes con
+                              pago aprobado.
+                            </TooltipContent>
+                          </Tooltip>
                         )}
                       </div>
-                    </td>
-                    <td className="px-3 py-2 text-xs">
+                    </TableCell>
+                    <TableCell>
+                      {/* F4.2: is_customer_visible gobierna si el bot lo anuncia
+                          proactivamente. Antes solo visible abriendo el modal. */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help">
+                            <Badge variant={c.is_customer_visible ? 'info' : 'secondary'}>
+                              {c.is_customer_visible ? 'Anunciable' : 'Interno'}
+                            </Badge>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {c.is_customer_visible
+                            ? 'El bot puede mencionarlo proactivamente al cliente.'
+                            : 'Interno: el bot no lo anuncia; solo se aplica si el cliente escribe el código exacto.'}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell className="text-xs">
                       {c.valid_from || c.valid_until ? (
                         <>
                           {formatDate(c.valid_from)} → {formatDate(c.valid_until)}
                         </>
                       ) : 'Sin límite'}
-                    </td>
-                    <td className="px-3 py-2">
-                      {c.is_active ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-700/40 bg-emerald-700/5 px-2 py-0.5 text-xs text-emerald-900">
-                          Activo
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2 py-0.5 text-xs text-muted-foreground">
-                          Inactivo
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right">
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help">
+                            <Badge variant={status.variant}>{status.label}</Badge>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{status.hint}</TooltipContent>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell className="text-right">
                       {canWrite && (
                         <div className="flex justify-end gap-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={pending}
-                            onClick={() => { setFormError(null); setEditing(c) }}
-                            title="Editar"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={pending}
-                            onClick={() => handleToggle(c)}
-                            title={c.is_active ? 'Desactivar' : 'Activar'}
-                            className={c.is_active
-                              ? 'border-amber-700/40 text-amber-900 hover:bg-amber-700/5'
-                              : 'border-emerald-700/40 text-emerald-900 hover:bg-emerald-700/5'}
-                          >
-                            <Power className="h-3.5 w-3.5" />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={pending}
+                                onClick={() => { setFormError(null); setEditing(c) }}
+                                aria-label={`Editar cupón ${c.code}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Editar</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={pending}
+                                onClick={() => handleToggle(c)}
+                                aria-label={`${c.is_active ? 'Desactivar' : 'Activar'} cupón ${c.code}`}
+                                className={c.is_active
+                                  ? 'border-amber-700/40 text-amber-900 hover:bg-amber-700/5'
+                                  : 'border-emerald-700/40 text-emerald-900 hover:bg-emerald-700/5'}
+                              >
+                                <Power className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{c.is_active ? 'Desactivar' : 'Activar'}</TooltipContent>
+                          </Tooltip>
                           {/*
                             * Trash condicional (ADR-0015 D6): SOLO si nunca
                             * tuvo redenciones (Habeas Data Ley 1581 audit
@@ -282,32 +389,46 @@ export default function PromotionsManager({
                             * para que el owner entienda por qué no puede.
                             */}
                           {c.has_historical_redemptions ? (
-                            <span
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/20 text-muted-foreground"
-                              title="No se puede eliminar: este cupón ya tuvo redenciones (audit Habeas Data). Usa Desactivar."
-                            >
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span
+                                  role="img"
+                                  aria-label={`El cupón ${c.code} no se puede eliminar: ya tuvo redenciones (audit Habeas Data)`}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/20 text-muted-foreground"
+                                >
+                                  <ShieldCheck className="h-3.5 w-3.5" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                No se puede eliminar: este cupón ya tuvo redenciones (audit Habeas
+                                Data). Usa Desactivar.
+                              </TooltipContent>
+                            </Tooltip>
                           ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={pending}
-                              onClick={() => { setFormError(null); setDeleting(c) }}
-                              title="Eliminar permanentemente"
-                              className="border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={pending}
+                                  onClick={() => { setFormError(null); setDeleting(c) }}
+                                  aria-label={`Eliminar cupón ${c.code} permanentemente`}
+                                  className="border-rose-700/40 text-rose-900 hover:bg-rose-700/5"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Eliminar permanentemente</TooltipContent>
+                            </Tooltip>
                           )}
                         </div>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
@@ -400,6 +521,7 @@ export default function PromotionsManager({
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   )
 }
 
@@ -411,12 +533,18 @@ function LabelWithHelp({
   return (
     <Label htmlFor={htmlFor} className="flex items-center gap-1.5">
       <span>{label}</span>
-      <span
-        className="inline-flex cursor-help text-muted-foreground hover:text-foreground"
-        title={help}
-      >
-        <HelpCircle className="h-3.5 w-3.5" />
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            role="img"
+            aria-label={help}
+            className="inline-flex cursor-help text-muted-foreground hover:text-foreground"
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{help}</TooltipContent>
+      </Tooltip>
     </Label>
   )
 }
