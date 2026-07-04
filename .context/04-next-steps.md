@@ -6,6 +6,55 @@
 
 ---
 
+## ⏳ PENDIENTE GATE — 2026-07-03 — Validar coherencia del bot con gemini-3.5-flash ANTES de merge a production
+
+**Contexto.** El retiro de modelos Gemini deprecados (2026-10-16) normalizó
+`gemini-2.5-flash → gemini-3.5-flash` (commit `5d388a4f`, en `origin/develop`,
+**NO desplegado**). `origin/production` (`5a0a142f`) sigue con `gemini-2.5-flash`.
+Un cambio de modelo del bot puede alterar adherencia a prompt, tool-calling y
+coherencia FSM. **No se debe mergear `5d388a4f` a production sin validar el bot
+live con el modelo nuevo** (instrucción founder: "ajustar el bot, con pruebas
+respectivas").
+
+Nota de entanglement: en `develop` el commit del modelo `5d388a4f` va **debajo**
+del upgrade Next 15 (`e831096e`) y del harness (`450eec2b`). El próximo merge
+`develop→production` arrastra los tres juntos → correr el harness ANTES de ese
+merge, no después.
+
+**INTERVENCIÓN HUMANA REQUERIDA** (founder — requiere stack local vivo).
+
+**INSUMOS**
+- Stack local arriba: connector `:8000` + orchestrator + DB (los logs en
+  `/home/ansible/konvi-local/logs/` son la fuente de verdad de errores runtime).
+- Orchestrator configurado con `GEMINI_MODEL=gemini-3.5-flash` (env local, para
+  ejercer el modelo nuevo antes de que toque production).
+
+**PASOS**
+1. Exportar `GEMINI_MODEL=gemini-3.5-flash` en el entorno del orchestrator local
+   y reiniciarlo (verificar en log que carga el modelo nuevo).
+2. Correr la red de regresión conversacional completa (bot LIVE, dinámico):
+   ```bash
+   python3.11 scripts/uat/coherence_scenarios.py            # los 15 escenarios
+   ```
+   Es dinámico y adversarial — NO scripts estáticos (memoria `feedback_no_static_uat`).
+3. Ante cualquier ❌: `grep AGENTIC_TRACE <orchestrator.log> | grep conv=<id8>`
+   → estado FSM + tools + invariant que disparó. Ajustar prompt/tools/invariant
+   (NO relajar la assertion) y re-correr hasta verde.
+4. Si un bug es nuevo y estable, codificarlo como escenario permanente en
+   `SCENARIOS` (+ assertion pura en `coherence_assertions.py` con su test).
+
+**CRITERIO DE ÉXITO**
+- `coherence_scenarios.py` → `15/15 escenarios pasaron` con `gemini-3.5-flash`.
+- `pytest tests/test_a11_coherence_assertions.py` → verde (núcleo puro, 13 tests).
+- Recién entonces: `git push origin origin/develop:production` (merge que
+  despliega modelo + Next 15 + harness juntos).
+
+**Tests que gatean** (ya commiteados, `450eec2b`): 15 escenarios en
+`scripts/uat/coherence_scenarios.py` + 13 assertions puras en
+`tests/test_a11_coherence_assertions.py`.
+
+---
+
 ## 🚨 CIERRE REV. 111 — 2026-06-23/24 — Cura crónica Inbox + Fase A NIVEL 2 (A6)
 
 **Cura raíz crónica Inbox** (cierre dev en `develop`): bot improvisaba horarios/despacho
