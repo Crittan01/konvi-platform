@@ -125,6 +125,7 @@ def _setup_modules(fake_sb):
 
     # Stub services.parser con event_type constants
     parser_stub = type(sys)("services.parser")
+    parser_stub.EVENT_TYPE_OUTBOUND_STATUS = _parser.EVENT_TYPE_OUTBOUND_STATUS
     parser_stub.EVENT_TYPE_TEMPLATE_STATUS_UPDATE = _parser.EVENT_TYPE_TEMPLATE_STATUS_UPDATE
     parser_stub.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE = _parser.EVENT_TYPE_TEMPLATE_QUALITY_UPDATE
     parser_stub.EVENT_TYPE_PHONE_QUALITY_UPDATE = _parser.EVENT_TYPE_PHONE_QUALITY_UPDATE
@@ -159,6 +160,18 @@ def _seed_template(sb, *, meta_template_id="META_T1", tenant_id="tenant-A",
         "parameter_format": "POSITIONAL",
         "status": status,
         "quality_rating": quality,
+    })
+
+
+def _seed_message(sb, *, meta_message_id="wamid.OUT1", tenant_id="tenant-A",
+                  direction="outbound", delivery_status=None):
+    sb._tables.setdefault("messages", []).append({
+        "id": "msg-1",
+        "tenant_id": tenant_id,
+        "conversation_id": "conv-1",
+        "direction": direction,
+        "meta_message_id": meta_message_id,
+        "delivery_status": delivery_status,
     })
 
 
@@ -443,12 +456,27 @@ class HandleEventDispatcherTests(unittest.TestCase):
         }, tenant_id_verified="tenant-A")
         self.assertTrue(result)
 
-    def test_event_sin_handler_returns_none(self):
-        """outbound_status, account_alert, unknown — sin handler → None."""
+    def test_dispatch_outbound_status(self):
+        """outbound_status (delivery receipt) — ahora SÍ tiene handler y persiste."""
         sb = _FakeSupabase()
         te = _setup_modules(sb)
-        for et in (_parser.EVENT_TYPE_OUTBOUND_STATUS,
-                   _parser.EVENT_TYPE_ACCOUNT_ALERT,
+        _seed_message(sb, delivery_status="sent")
+        result = te.handle_event({
+            "event_type": _parser.EVENT_TYPE_OUTBOUND_STATUS,
+            "meta_message_id": "wamid.OUT1",
+            "status": "delivered",
+            "timestamp": "1700000000",
+        }, tenant_id_verified="tenant-A")
+        self.assertTrue(result)
+        row = sb._tables["messages"][0]
+        self.assertEqual(row["delivery_status"], "delivered")
+        self.assertIsNotNone(row.get("delivered_at"))
+
+    def test_event_sin_handler_returns_none(self):
+        """account_alert, unknown — sin handler → None."""
+        sb = _FakeSupabase()
+        te = _setup_modules(sb)
+        for et in (_parser.EVENT_TYPE_ACCOUNT_ALERT,
                    _parser.EVENT_TYPE_UNKNOWN):
             result = te.handle_event({"event_type": et, "meta_waba_id": "X"})
             self.assertIsNone(result, f"Esperado None para {et}")
@@ -459,6 +487,98 @@ class HandleEventDispatcherTests(unittest.TestCase):
         self.assertIsNone(te.handle_event(None))
         self.assertIsNone(te.handle_event("string"))
         self.assertIsNone(te.handle_event([{"x": 1}]))
+
+
+# ─── persist_outbound_status (delivery receipts) ─────────────────────────────
+
+
+class PersistOutboundStatusTests(unittest.TestCase):
+    def _handler(self, sb):
+        return _setup_modules(sb).persist_outbound_status
+
+    def test_fail_closed_sin_tenant(self):
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb)
+        self.assertFalse(persist({
+            "meta_message_id": "wamid.OUT1", "status": "delivered",
+        }, tenant_id_verified=None))
+
+    def test_status_invalido_rechazado(self):
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb)
+        self.assertFalse(persist({
+            "meta_message_id": "wamid.OUT1", "status": "teleported",
+        }, tenant_id_verified="tenant-A"))
+
+    def test_sin_fila_outbound_devuelve_false(self):
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        # No se sembró ningún mensaje → carrera worker/receipt.
+        self.assertFalse(persist({
+            "meta_message_id": "wamid.MISSING", "status": "delivered",
+        }, tenant_id_verified="tenant-A"))
+
+    def test_avance_monotono_read_gana(self):
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb, delivery_status="delivered")
+        r = persist({
+            "meta_message_id": "wamid.OUT1", "status": "read",
+            "timestamp": "1700000100",
+        }, tenant_id_verified="tenant-A")
+        self.assertTrue(r)
+        row = sb._tables["messages"][0]
+        self.assertEqual(row["delivery_status"], "read")
+        self.assertIsNotNone(row.get("read_at"))
+
+    def test_idempotente_no_degrada(self):
+        """Un 'delivered' tardío tras 'read' es no-op (Meta reordena/reenvía)."""
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb, delivery_status="read")
+        r = persist({
+            "meta_message_id": "wamid.OUT1", "status": "delivered",
+        }, tenant_id_verified="tenant-A")
+        self.assertIsNone(r)  # no-op idempotente
+        self.assertEqual(sb._tables["messages"][0]["delivery_status"], "read")
+
+    def test_reenvio_mismo_status_es_noop(self):
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb, delivery_status="delivered")
+        self.assertIsNone(persist({
+            "meta_message_id": "wamid.OUT1", "status": "delivered",
+        }, tenant_id_verified="tenant-A"))
+
+    def test_failed_persiste_error_meta(self):
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb, delivery_status="sent")
+        r = persist({
+            "meta_message_id": "wamid.OUT1", "status": "failed",
+            "timestamp": "1700000200",
+            "errors": [{"code": 131047, "title": "Re-engagement message",
+                        "message": "Ventana 24h cerrada"}],
+        }, tenant_id_verified="tenant-A")
+        self.assertTrue(r)
+        row = sb._tables["messages"][0]
+        self.assertEqual(row["delivery_status"], "failed")
+        self.assertIsNotNone(row.get("failed_at"))
+        self.assertEqual(row["delivery_error"][0]["code"], 131047)
+
+    def test_cross_tenant_no_matchea(self):
+        """El receipt de tenant-A no puede mutar la fila de tenant-A si el
+        UPDATE filtra por otro tenant verificado (aislamiento F52)."""
+        sb = _FakeSupabase()
+        persist = self._handler(sb)
+        _seed_message(sb, tenant_id="tenant-A", delivery_status="sent")
+        r = persist({
+            "meta_message_id": "wamid.OUT1", "status": "delivered",
+        }, tenant_id_verified="tenant-B")
+        self.assertFalse(r)
+        self.assertEqual(sb._tables["messages"][0]["delivery_status"], "sent")
 
 
 if __name__ == "__main__":

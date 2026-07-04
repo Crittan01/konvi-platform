@@ -165,8 +165,14 @@ def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 #                                → alertas comerciales/operativas
 #
 # Esta función NO ejecuta side-effects — devuelve eventos tipados. Los
-# handlers downstream (DB persistence per tipo) se implementan en F2 HSM
-# cuando lleguen las tablas (`whatsapp_templates`, `whatsapp_status_events`).
+# handlers downstream (DB persistence per tipo) viven en `template_events.py`:
+#   - template/phone status/quality → `whatsapp_templates` / `tenant_integrations`.
+#   - outbound_status (delivery receipt) → columnas de entrega en `messages`
+#     (`delivery_status`/`delivered_at`/`read_at`/`failed_at`/`delivery_error`/
+#     pricing), NO una tabla `whatsapp_status_events` aparte: el receipt pertenece
+#     a la fila del mensaje ya persistido (match por meta_message_id UNIQUE), lo
+#     que da idempotencia por avance monótono y lo hace visible directo en Inbox.
+#     Ver migración `20260704000000_messages_delivery_receipts.sql`.
 
 
 # Tipos canónicos del dispatcher. Strings (no enum) para serialización

@@ -39,6 +39,27 @@ VALID_TEMPLATE_STATUSES = frozenset({
 
 VALID_QUALITY_RATINGS = frozenset({"GREEN", "YELLOW", "RED", "UNKNOWN"})
 
+# Estados de entrega Meta (value.statuses[].status). El rank define el avance
+# MONÓTONO: sólo se persiste un estado si supera estrictamente al actual, lo que
+# da idempotencia (Meta reenvía webhooks) y tolerancia a reordenamientos (un
+# 'delivered' tardío jamás pisa un 'read' ya registrado). 'failed' comparte rank
+# con 'delivered' (terminal negativo): puede pisar 'sent'/None pero no 'read',
+# y no se re-dispara sobre sí mismo.
+DELIVERY_STATUS_RANK = {"sent": 1, "delivered": 2, "failed": 2, "read": 3}
+
+
+def _meta_ts_to_iso(ts: Any) -> Optional[str]:
+    """Convierte el timestamp Unix (string/int) de Meta a ISO-8601 UTC.
+
+    Devuelve None si el valor es inválido — el caller usa NOW()/omite el campo.
+    """
+    if ts is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(str(ts)), tz=timezone.utc).isoformat()
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
 
 def persist_template_status_update(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> bool:
     """Recibe evento `EVENT_TYPE_TEMPLATE_STATUS_UPDATE` del parser y
@@ -291,6 +312,152 @@ def persist_phone_quality_update(event: Dict[str, Any], tenant_id_verified: Opti
         return False
 
 
+def persist_outbound_status(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> Optional[bool]:
+    """Recibe evento `EVENT_TYPE_OUTBOUND_STATUS` (delivery receipt de Meta) y
+    persiste el estado de entrega REAL en la fila outbound de `messages`.
+
+    Mapea `value.statuses[].status` → `messages.delivery_status` + timestamps
+    (`delivered_at`/`read_at`/`failed_at`) + `delivery_error` (rechazos Meta) +
+    pricing (insight de billing).
+
+    Idempotencia + orden (Meta reenvía y puede reordenar webhooks): el avance es
+    MONÓTONO por `DELIVERY_STATUS_RANK` — sólo escribe si el nuevo estado supera
+    estrictamente al persistido. Un reenvío del mismo estado, o un 'delivered'
+    tardío tras un 'read', son no-ops silenciosos (patrón dedup análogo al inbound
+    de db_persistence.py, aquí resuelto por rank en lugar de fila-nueva).
+
+    Autoridad (F52): el UPDATE filtra por el tenant HMAC-verificado del path del
+    webhook + meta_message_id (UNIQUE) + direction='outbound'. Fail-closed sin
+    tenant verificado → un tenant no puede mutar receipts de otro.
+
+    Args:
+        event: dict emitido por `_parse_status_event`:
+          {event_type, meta_message_id, status, timestamp, errors,
+           pricing_category, pricing_billable, ...}
+
+    Returns:
+        True si actualizó la fila; False si no matchea, estado inválido o fallo
+        de DB; None si el avance monótono no aplica (no-op idempotente).
+        NO levanta — el webhook debe responder 200 OK aunque la persistencia falle.
+    """
+    if not tenant_id_verified:
+        logger.error("[WA_DELIVERY] sin tenant HMAC-verificado — update rechazado (F52)")
+        return False
+
+    meta_message_id = (event or {}).get("meta_message_id")
+    status = (event or {}).get("status")
+
+    if not meta_message_id or not status:
+        logger.error(
+            "[WA_DELIVERY] evento inválido (falta meta_message_id o status): %s", event,
+        )
+        return False
+
+    status = str(status).strip().lower()
+    new_rank = DELIVERY_STATUS_RANK.get(status)
+    if new_rank is None:
+        logger.warning(
+            "[WA_DELIVERY] status %r fuera del set canónico (sent|delivered|read|failed) — ignorado",
+            status,
+        )
+        return False
+
+    try:
+        sb = get_supabase()
+    except Exception as exc:
+        logger.error("[WA_DELIVERY] no se pudo obtener supabase client: %s", exc)
+        return False
+
+    try:
+        # 1) Lookup de la fila outbound + estado actual (para el avance monótono).
+        res = (
+            sb.table("messages")
+            .select("id, delivery_status")
+            .eq("tenant_id", tenant_id_verified)
+            .eq("meta_message_id", str(meta_message_id))
+            .eq("direction", "outbound")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            # Carrera esperable: el worker aún no persistió la fila outbound, o el
+            # mensaje se envió fuera del Inbox. Meta emite sent/delivered/read como
+            # webhooks separados en el tiempo → un receipt posterior sí matcheará.
+            logger.info(
+                "[WA_DELIVERY] meta_message_id=%s sin fila outbound (tenant=%s) — "
+                "receipt '%s' omitido (se reintenta con el siguiente receipt)",
+                meta_message_id, tenant_id_verified, status,
+            )
+            return False
+
+        current_status = (rows[0] or {}).get("delivery_status")
+        current_rank = DELIVERY_STATUS_RANK.get(str(current_status).lower(), 0) if current_status else 0
+        if new_rank <= current_rank:
+            # Reenvío / reordenamiento: no degradar ni re-disparar. No-op idempotente.
+            logger.debug(
+                "[WA_DELIVERY] meta_message_id=%s status=%s <= actual=%s — no-op idempotente",
+                meta_message_id, status, current_status,
+            )
+            return None
+
+        # 2) Construir el UPDATE. delivery_status siempre avanza; el timestamp
+        #    específico se llena para el estado entrante (los previos se conservan).
+        update_fields: Dict[str, Any] = {"delivery_status": status}
+        event_iso = _meta_ts_to_iso((event or {}).get("timestamp"))
+        stamp = event_iso or datetime.now(timezone.utc).isoformat()
+        if status == "delivered":
+            update_fields["delivered_at"] = stamp
+        elif status == "read":
+            update_fields["read_at"] = stamp
+            # Un 'read' implica entrega previa: si el 'delivered' se perdió/reordenó,
+            # dejamos delivered_at coherente para no mostrar "leído sin entregar".
+            if not current_status or str(current_status).lower() == "sent":
+                update_fields["delivered_at"] = stamp
+        elif status == "failed":
+            update_fields["failed_at"] = stamp
+            errors = (event or {}).get("errors") or []
+            if errors:
+                update_fields["delivery_error"] = errors
+
+        # Pricing/billing insight (llega en el mismo receipt — se descartaba antes).
+        pricing_category = (event or {}).get("pricing_category")
+        if pricing_category is not None:
+            update_fields["pricing_category"] = pricing_category
+        pricing_billable = (event or {}).get("pricing_billable")
+        if pricing_billable is not None:
+            update_fields["pricing_billable"] = pricing_billable
+
+        upd = (
+            sb.table("messages")
+            .update(update_fields)
+            .eq("tenant_id", tenant_id_verified)
+            .eq("meta_message_id", str(meta_message_id))
+            .eq("direction", "outbound")
+            .execute()
+        )
+        if not (upd.data or []):
+            logger.warning(
+                "[WA_DELIVERY] UPDATE no afectó filas meta_message_id=%s tenant=%s status=%s",
+                meta_message_id, tenant_id_verified, status,
+            )
+            return False
+
+        log_fn = logger.warning if status == "failed" else logger.info
+        log_fn(
+            "[WA_DELIVERY] receipt persistido meta_message_id=%s tenant=%s status=%s errors=%s",
+            meta_message_id, tenant_id_verified, status,
+            (event or {}).get("errors") if status == "failed" else None,
+        )
+        return True
+    except Exception as exc:
+        logger.error(
+            "[WA_DELIVERY] error persistiendo receipt meta_message_id=%s: %s",
+            meta_message_id, exc,
+        )
+        return False
+
+
 def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None) -> Optional[bool]:
     """Dispatcher: rutea un evento al handler correspondiente según event_type.
 
@@ -310,11 +477,14 @@ def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None
 
     # Lazy imports — evita circular si parser eventualmente importa este módulo
     from services.parser import (
+        EVENT_TYPE_OUTBOUND_STATUS,
         EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
         EVENT_TYPE_TEMPLATE_QUALITY_UPDATE,
         EVENT_TYPE_PHONE_QUALITY_UPDATE,
     )
 
+    if event_type == EVENT_TYPE_OUTBOUND_STATUS:
+        return persist_outbound_status(event, tenant_id_verified)
     if event_type == EVENT_TYPE_TEMPLATE_STATUS_UPDATE:
         return persist_template_status_update(event, tenant_id_verified)
     if event_type == EVENT_TYPE_TEMPLATE_QUALITY_UPDATE:
@@ -322,5 +492,5 @@ def handle_event(event: Dict[str, Any], tenant_id_verified: Optional[str] = None
     if event_type == EVENT_TYPE_PHONE_QUALITY_UPDATE:
         return persist_phone_quality_update(event, tenant_id_verified)
 
-    # outbound_status, account_alert, etc. → no persistence todavía (futuro Sem 11)
+    # account_alert, etc. → no persistence todavía (futuro Sem 11)
     return None

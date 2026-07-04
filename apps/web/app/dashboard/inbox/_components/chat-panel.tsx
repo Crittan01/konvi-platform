@@ -390,11 +390,52 @@ export function ChatPanel({
                     )}
                     <p className={`text-[11px] mt-1 flex items-center gap-1.5 flex-wrap ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
                       {timeAgo(msg.created_at)}
-                      {!isInbound && (
-                        msg.processed
-                          ? <CheckCheck className="h-3 w-3" />
-                          : <Check className="h-3 w-3" />
-                      )}
+                      {!isInbound && (() => {
+                        // Estado de ENTREGA real (delivery receipts de Meta), no el
+                        // flag interno `processed` del orquestador. Convenciones:
+                        // ✓ enviado · ✓✓ entregado · ✓✓ leído · ⚠ no entregado.
+                        const ds = msg.delivery_status
+                        if (ds === 'failed') {
+                          const err = msg.delivery_error?.[0]
+                          const detail = [err?.title, err?.message].filter(Boolean).join(' — ')
+                          return (
+                            <span
+                              className="text-[10px] bg-red-500/20 text-red-700 px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                              title={detail || 'Meta no pudo entregar este mensaje'}
+                            >
+                              <AlertCircle className="h-3 w-3" /> No entregado
+                            </span>
+                          )
+                        }
+                        if (ds === 'read') {
+                          return (
+                            <span
+                              className="inline-flex items-center gap-0.5"
+                              title={`Leído${msg.read_at ? ` · ${formatDateTime(msg.read_at)}` : ''}`}
+                            >
+                              <CheckCheck className="h-3 w-3" />
+                              <span className="text-[10px]">Leído</span>
+                            </span>
+                          )
+                        }
+                        if (ds === 'delivered') {
+                          return (
+                            <CheckCheck
+                              className="h-3 w-3 opacity-90"
+                              aria-label="Entregado"
+                            />
+                          )
+                        }
+                        if (ds === 'sent') {
+                          return <Check className="h-3 w-3" aria-label="Enviado" />
+                        }
+                        // Sin receipt (histórico / mensaje sin tracking Meta):
+                        // heurístico previo basado en `processed`, atenuado para
+                        // distinguirlo de un estado de entrega confirmado.
+                        return msg.processed
+                          ? <CheckCheck className="h-3 w-3 opacity-50" aria-label="Procesado" />
+                          : <Check className="h-3 w-3 opacity-50" aria-label="Pendiente" />
+                      })()}
                       {!isInbound && msg.processing_status === 'failed' && (
                         <span className="text-[10px] bg-red-500/20 text-red-700 px-1.5 py-0.5 rounded-full"
                           title={msg.skip_reason ?? 'Error al procesar'}>

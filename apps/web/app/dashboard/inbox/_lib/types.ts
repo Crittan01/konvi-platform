@@ -55,6 +55,14 @@ export interface Message {
   processed: boolean
   processing_status?: 'pending' | 'processed' | 'skipped' | 'failed'
   skip_reason?: string | null
+  // Estado de entrega REAL reportado por Meta (delivery receipts). Sólo aplica a
+  // outbound trackeado; NULL en inbound/históricos → el Inbox cae al heurístico
+  // `processed`. Poblado por el connector (persist_outbound_status).
+  delivery_status?: 'sent' | 'delivered' | 'read' | 'failed' | null
+  delivered_at?: string | null
+  read_at?: string | null
+  failed_at?: string | null
+  delivery_error?: Array<{ code?: number; title?: string; message?: string }> | null
 }
 
 export interface ProductVariation {
