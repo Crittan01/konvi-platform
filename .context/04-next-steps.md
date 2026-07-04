@@ -6,7 +6,13 @@
 
 ---
 
-## ⏳ PENDIENTE GATE — 2026-07-03 — Validar coherencia del bot con gemini-3.5-flash ANTES de merge a production
+## ⏳ VALIDACIÓN FINAL DEL PLAN MAESTRO — 2026-07-03 — Coherencia del bot con gemini-3.5-flash
+
+**Posición en el plan.** Esta es la **última tarea del plan de trabajo maestro**
+(audit remediation Fases 0-6 + 4 puntos founder + upgrade Next 15 + normalización
+de modelos). Todo lo demás está commiteado en `origin/develop`; esta validación es
+el capstone que habilita el merge a production (decisión founder 2026-07-03:
+"validar coherencia del bot al final del plan de trabajo maestro").
 
 **Contexto.** El retiro de modelos Gemini deprecados (2026-10-16) normalizó
 `gemini-2.5-flash → gemini-3.5-flash` (commit `5d388a4f`, en `origin/develop`,
