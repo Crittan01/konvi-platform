@@ -1022,9 +1022,92 @@ def _notify_client_shipment_exception(
 
 # ─── Email post-pago al cliente (Rev. 107) ────────────────────────────────────
 
+# Rev. 112 GAP emails_tx — el enum interno (inglés) NO debe filtrarse al
+# cliente. Cuando existe el nombre_estado real del courier (Aveonline, es-CO)
+# lo mostramos; si no, traducimos el enum canónico a una etiqueta es-CO.
+_INTERNAL_STATUS_ES = {
+    "pending": "En preparación",
+    "pending_generation": "En preparación",
+    "quoted": "En preparación",
+    "simulated": "En preparación",
+    "labeled": "Guía generada",
+    "picked_up": "Recogido por el courier",
+    "in_transit": "En camino",
+    "delivered": "Entregado",
+    "exception": "Novedad en la entrega",
+    "returned": "Devuelto",
+    "cancelled": "Cancelado",
+}
+
+
+def _humanize_shipment_status(raw_status: str = "", internal_status: str = "") -> str:
+    """Etiqueta es-CO para el cliente.
+
+    Prioridad:
+      1. `raw_status` = nombre_estado real del courier (p. ej. "EN REPARTO",
+         "CLIENTE AUSENTE"). Se presenta capitalizado (evita el ALL CAPS del
+         courier) manteniendo paridad con la notificación WhatsApp.
+      2. Traducción del enum canónico interno → es-CO (nunca inglés crudo).
+    """
+    rs = (raw_status or "").strip()
+    if rs:
+        return rs.capitalize() if rs.isupper() else rs
+    return _INTERNAL_STATUS_ES.get((internal_status or "").strip().lower(), "")
+
+
+def _mask_email(email: str) -> str:
+    """Enmascara el local-part para logs (Habeas Data — coherente con el
+    hasheo de teléfonos del resto de la plataforma). Conserva el dominio,
+    útil para diagnosticar deliverability por proveedor."""
+    e = (email or "").strip()
+    local, sep, domain = e.partition("@")
+    if not sep:
+        return "***"
+    head = local[:2]
+    return f"{head}{'*' * max(1, len(local) - len(head))}@{domain}"
+
+
+def _html_to_text(html: str) -> str:
+    """Deriva un cuerpo text/plain mínimo del HTML (mejor scoring anti-spam;
+    Resend recomienda multipart). Best-effort: strip de tags + colapso de
+    espacios. No pretende fidelidad tipográfica."""
+    import re
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html or "")
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|h1|h2|h3|tr|li)>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+    return text.strip()
+
+
+def _surface_email_failure(
+    reason: str, *, tenant_id: str = "", order_id: str = "",
+    template_mode: str = "", status_code=None, detail: str = "",
+) -> None:
+    """Surfacing de fallos de envío a Sentry (no-op si SENTRY_DSN vacío).
+
+    NO rompe el flujo (best-effort). El log ya se emitió en el caller; esto
+    añade una señal alertable distinta del éxito silencioso."""
+    try:
+        from observability import capture_exception
+        capture_exception(
+            RuntimeError(f"resend_email_failed: {reason}"),
+            tenant_id=tenant_id,
+            order_id=(order_id or "")[:8],
+            template_mode=template_mode,
+            status_code=status_code,
+            detail=(detail or "")[:200],
+        )
+    except Exception:
+        pass
+
+
 def _send_payment_confirmation_email(
     supabase, *, order_id: str, tenant_id: str,
     template_mode: str = "payment_confirmed",
+    raw_status: str = "",
 ) -> None:
     """Envía email al cliente con el detalle del pedido pagado.
 
@@ -1111,10 +1194,15 @@ def _send_payment_confirmation_email(
     label_url = ""
     shipment_status = ""
     try:
+        # Rev. 112 GAP — puede haber 2 filas por orden (fallo
+        # pending_generation + retry con tracking). Ordenar por created_at desc
+        # para leer la fila más reciente (la del retry exitoso con tracking),
+        # evitando el email shipment_label_ready sin guía por leer la stale.
         sh_res = (
             supabase.table("shipments")
             .select("carrier, tracking_number, tracking_url, label_url, status")
             .eq("order_id", order_id).eq("tenant_id", tenant_id)
+            .order("created_at", desc=True)
             .limit(1).execute()
         )
         sh = (sh_res.data or [{}])[0]
@@ -1162,7 +1250,7 @@ def _send_payment_confirmation_email(
             customer_name=name, order_short=order_short,
             carrier=carrier, tenant_name=tenant_name,
             tracking_number=tracking_number, tracking_url=tracking_url,
-            raw_status=shipment_status,
+            raw_status=_humanize_shipment_status(raw_status, shipment_status),
         )
         subject = f"🚚 Tu envío salió en ruta — Pedido #{order_short}"
     elif template_mode == "shipment_delivered":
@@ -1176,32 +1264,19 @@ def _send_payment_confirmation_email(
         html = _compose_shipment_exception_email_html(
             customer_name=name, order_short=order_short,
             carrier=carrier, tenant_name=tenant_name,
-            tracking_number=tracking_number, raw_status=shipment_status,
+            tracking_number=tracking_number,
+            raw_status=_humanize_shipment_status(raw_status, shipment_status),
         )
         subject = f"⚠️ Novedad con tu envío — Pedido #{order_short}"
     elif template_mode == "refund_completed":
         # Rev. 109 fix UAT live BUG 33 — confirmación cliente que el void
         # llegó al ciclo bancario (status=VOIDED en Wompi). El dinero
         # aparece en su tarjeta en 1-2 días hábiles típicos post-VOIDED.
-        amount_fmt = f"${total:,.0f}".replace(",", ".")
-        html = (
-            f"<!DOCTYPE html><html><body style='font-family:-apple-system,"
-            f"Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;"
-            f"padding:24px;color:#1f2937'>"
-            f"<h2 style='color:#059669'>✅ Reembolso confirmado</h2>"
-            f"<p>Hola {name},</p>"
-            f"<p>Tu reembolso de <strong>{amount_fmt} COP</strong> del "
-            f"pedido <strong>#{order_short}</strong> ya fue procesado por "
-            f"Wompi y enviado al sistema bancario.</p>"
-            f"<p>El dinero aparecerá en tu tarjeta en "
-            f"<strong>1-2 días hábiles</strong> típicos. Puede tardar más "
-            f"según tu banco emisor.</p>"
-            f"<p style='color:#6b7280;font-size:14px;margin-top:32px'>"
-            f"Si en 7 días no lo ves reflejado, escríbenos y te ayudamos "
-            f"a rastrearlo con Wompi.</p>"
-            f"<p style='color:#9ca3af;font-size:12px;margin-top:24px'>"
-            f"— {tenant_name}</p>"
-            f"</body></html>"
+        # Rev. 112 GAP — extraído a composer (antes inline en el dispatcher:
+        # inconsistencia estructural con los otros 6 templates).
+        html = _compose_refund_completed_email_html(
+            customer_name=name, order_short=order_short,
+            total=total, tenant_name=tenant_name,
         )
         subject = f"✅ Reembolso confirmado — Pedido #{order_short}"
     else:
@@ -1215,9 +1290,15 @@ def _send_payment_confirmation_email(
         )
         subject = f"Confirmación pedido #{order_short} — {tenant_name or 'tu compra'}"
 
+    # Default NO productivo (noreply@commerce-ops.local). El dominio remitente
+    # productivo (verificado en Resend) es config externa → RESEND_FROM_EMAIL.
     from_email = os.getenv(
         "RESEND_FROM_EMAIL", "Konvi <noreply@commerce-ops.local>",
     )
+    # Rev. 112 GAP — Idempotency-Key (Resend, doc §2.1 dossier: 256 chars,
+    # expira 24 h). Determinístico por orden+etapa → un reprocesamiento de
+    # webhook con checksum distinto NO duplica el email al cliente.
+    idempotency_key = f"{tenant_id}:{order_id}:{template_mode}"[:256]
     import httpx
     try:
         with httpx.Client(timeout=15.0) as client:
@@ -1226,26 +1307,77 @@ def _send_payment_confirmation_email(
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
+                    "Idempotency-Key": idempotency_key,
                 },
                 json={
                     "from": from_email,
                     "to": [email],
                     "subject": subject,
                     "html": html,
+                    # Rev. 112 GAP — parte text/plain (mejor scoring anti-spam;
+                    # multipart recomendado por Resend).
+                    "text": _html_to_text(html),
                 },
             )
+        # Parseamos el id de Resend para trazabilidad (antes se descartaba).
+        resend_id = ""
+        try:
+            resend_id = ((resp.json() or {}).get("id") or "")
+        except Exception:
+            resend_id = ""
+
+        masked = _mask_email(email)
         if resp.status_code in (200, 202):
             logger.info(
-                "[WOMPI][EMAIL] enviado a=%s order=%s",
-                email, order_id[:8],
+                "[WOMPI][EMAIL] enviado to=%s order=%s mode=%s resend_id=%s",
+                masked, order_id[:8], template_mode, resend_id or "?",
+            )
+        elif resp.status_code == 429:
+            # Cuota (free tier 100/día) o rate-limit — señal distinta, alertable.
+            logger.error(
+                "[WOMPI][EMAIL] resend RATE/QUOTA 429 to=%s order=%s mode=%s body=%s",
+                masked, order_id[:8], template_mode, resp.text[:200],
+            )
+            _surface_email_failure(
+                "rate_or_quota_429", tenant_id=tenant_id, order_id=order_id,
+                template_mode=template_mode, status_code=429,
+                detail=resp.text[:200],
+            )
+        elif 400 <= resp.status_code < 500:
+            # 4xx = config/payload (from no verificado, key inválida) — bug de
+            # activación, requiere acción operador.
+            logger.error(
+                "[WOMPI][EMAIL] resend 4xx status=%s to=%s order=%s mode=%s body=%s",
+                resp.status_code, masked, order_id[:8], template_mode,
+                resp.text[:200],
+            )
+            _surface_email_failure(
+                "client_4xx", tenant_id=tenant_id, order_id=order_id,
+                template_mode=template_mode, status_code=resp.status_code,
+                detail=resp.text[:200],
             )
         else:
-            logger.warning(
-                "[WOMPI][EMAIL] resend status=%s body=%s",
-                resp.status_code, resp.text[:200],
+            # 5xx = Resend caído — transitorio (Wompi/Aveonline reintentan el
+            # webhook; el Idempotency-Key evita duplicar si el 5xx fue parcial).
+            logger.error(
+                "[WOMPI][EMAIL] resend 5xx status=%s to=%s order=%s mode=%s body=%s",
+                resp.status_code, masked, order_id[:8], template_mode,
+                resp.text[:200],
+            )
+            _surface_email_failure(
+                "server_5xx", tenant_id=tenant_id, order_id=order_id,
+                template_mode=template_mode, status_code=resp.status_code,
+                detail=resp.text[:200],
             )
     except Exception as exc:
-        logger.warning("[WOMPI][EMAIL] httpx err: %s", exc)
+        logger.warning(
+            "[WOMPI][EMAIL] httpx err to=%s order=%s mode=%s: %s",
+            _mask_email(email), order_id[:8], template_mode, exc,
+        )
+        _surface_email_failure(
+            "transport_exception", tenant_id=tenant_id, order_id=order_id,
+            template_mode=template_mode, detail=str(exc)[:200],
+        )
 
 
 # ─── Guía Aveonline post-pago (Rev. 107) ──────────────────────────────────────
@@ -1687,7 +1819,7 @@ def _compose_payment_email_html(
     )
 
     return f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<html lang="es"><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
 <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
   <h2 style="margin:0 0 8px;font-size:22px">Pago confirmado, {customer_name}</h2>
   <p style="margin:0 0 16px;color:#5a6772">
@@ -1758,7 +1890,7 @@ def _compose_payment_failed_email_html(
     )
 
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Pago no procesado</title></head>
+<html lang="es"><head><meta charset="utf-8"><title>Pago no procesado</title></head>
 <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,
              BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <div style="max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
@@ -1779,9 +1911,9 @@ def _compose_payment_failed_email_html(
               border-left:3px solid #f59e0b;margin:20px 0;">
     <strong style="color:#92400e;">¿Qué hacer ahora?</strong><br/>
     <span style="color:#78350f;font-size:14px;">
-      Te enviaremos un nuevo link de pago por WhatsApp en unos minutos.
-      Si necesitas ayuda, responde a ese chat y un especialista de
-      nuestro equipo te asiste.
+      Revisa tu WhatsApp: allí seguimos el proceso para completar tu pago.
+      Si necesitas ayuda o no recibes un nuevo mensaje, responde a ese chat
+      y un especialista de nuestro equipo te asiste.
     </span>
   </div>
 
@@ -1869,7 +2001,7 @@ def _compose_shipment_label_ready_email_html(
     items_html = "".join(rows) or "<li>(sin detalle)</li>"
 
     return f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<html lang="es"><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
 <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
   <h2 style="margin:0 0 8px;font-size:22px">📋 Guía asignada, {customer_name}{sim_tag}</h2>
   <p style="margin:0 0 16px;color:#5a6772">
@@ -1927,7 +2059,7 @@ def _compose_shipment_in_transit_email_html(
         if raw_status else ""
     )
     return f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<html lang="es"><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
 <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
   <h2 style="margin:0 0 8px;font-size:22px">🚚 Tu envío salió en ruta, {customer_name}</h2>
   <p style="margin:0 0 16px;color:#5a6772">
@@ -1960,7 +2092,7 @@ def _compose_shipment_delivered_email_html(
     """Email etapa 4 (post-webhook ENTREGADA): pedido entregado."""
     carrier_str = (carrier or "el courier").strip()
     return f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<html lang="es"><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
 <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
   <h2 style="margin:0 0 8px;font-size:22px">📬 Pedido entregado, {customer_name}</h2>
   <p style="margin:0 0 16px;color:#5a6772">
@@ -1995,7 +2127,7 @@ def _compose_shipment_exception_email_html(
         if raw_status else ""
     )
     return f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<html lang="es"><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
 <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
   <h2 style="margin:0 0 8px;font-size:22px">⚠️ Novedad con tu envío, {customer_name}</h2>
   <p style="margin:0 0 16px;color:#5a6772">
@@ -2013,6 +2145,40 @@ def _compose_shipment_exception_email_html(
     Ya estamos revisando con la transportadora. Si tienes información
     relevante (dirección alterna, horario disponible) responde a este
     email o por WhatsApp para acelerar la solución.
+  </p>
+</div>
+</body></html>"""
+
+
+def _compose_refund_completed_email_html(
+    *,
+    customer_name: str,
+    order_short: str,
+    total: int,
+    tenant_name: str,
+) -> str:
+    """Rev. 112 GAP — confirmación de reembolso (VOIDED en Wompi).
+
+    Extraído del dispatcher a composer para paridad estructural con los
+    demás templates. Usa `_fmt_cop` (pesos, no cents) y la misma tipografía
+    Arial/#2c3e50 del resto del ciclo de vida.
+    """
+    return f"""<!doctype html>
+<html lang="es"><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#2c3e50">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+  <h2 style="margin:0 0 8px;font-size:22px;color:#059669">✅ Reembolso confirmado, {customer_name}</h2>
+  <p style="margin:0 0 16px;color:#5a6772">
+    Tu reembolso de <strong>{_fmt_cop(total)} COP</strong> del pedido
+    <strong>#{order_short}</strong> ya fue procesado por Wompi y enviado
+    al sistema bancario.
+  </p>
+  <p style="margin:0 0 16px;color:#5a6772">
+    El dinero aparecerá en tu tarjeta en <strong>1-2 días hábiles</strong>
+    típicos. Puede tardar más según tu banco emisor.
+  </p>
+  <p style="margin:24px 0 0;color:#9aa4ad;font-size:12px;border-top:1px solid #e8eef2;padding-top:16px">
+    Si en 7 días no lo ves reflejado, escríbenos y te ayudamos a rastrearlo
+    con Wompi.<br/>— {tenant_name or 'nuestra tienda'}
   </p>
 </div>
 </body></html>"""

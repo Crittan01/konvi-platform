@@ -327,10 +327,14 @@ def _notify_status_change(
         except Exception as e:
             logger.warning("[AVEONLINE_WH] WA in_transit notif err: %s", e)
         try:
+            # Rev. 112 GAP — pasamos el nombre_estado real del courier
+            # (raw_status, p. ej. "EN REPARTO") para que el email NO muestre
+            # el enum interno inglés ('in_transit'). Paridad con el WhatsApp.
             _send_payment_confirmation_email(
                 supabase=supabase_client,
                 order_id=order_id, tenant_id=tenant_id,
                 template_mode="shipment_in_transit",
+                raw_status=raw_status,
             )
         except Exception as e:
             logger.warning("[AVEONLINE_WH] email in_transit err: %s", e)
@@ -370,10 +374,13 @@ def _notify_status_change(
         except Exception as e:
             logger.warning("[AVEONLINE_WH] WA exception notif err: %s", e)
         try:
+            # Rev. 112 GAP — nombre_estado real del courier (p. ej.
+            # "CLIENTE AUSENTE") al email, no el enum interno 'exception'.
             _send_payment_confirmation_email(
                 supabase=supabase_client,
                 order_id=order_id, tenant_id=tenant_id,
                 template_mode="shipment_exception",
+                raw_status=raw_status,
             )
         except Exception as e:
             logger.warning("[AVEONLINE_WH] email exception err: %s", e)
