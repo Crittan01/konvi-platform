@@ -347,9 +347,11 @@ export function ChatPanel({
                       </a>
                     ) : null}
                     {msg.content && (
-                      <p className="whitespace-pre-wrap break-words">
+                      // div (no <p>): renderWhatsAppFormat emite bloques <ul>/<ol>,
+                      // inválidos dentro de <p> → hydration error en React 19 / Next 15.
+                      <div className="whitespace-pre-wrap break-words">
                         {renderWhatsAppFormat(msg.content)}
-                      </p>
+                      </div>
                     )}
                     <p className={`text-[11px] mt-1 flex items-center gap-1.5 flex-wrap ${isInbound ? 'text-muted-foreground' : 'text-primary-foreground/70'}`}>
                       {timeAgo(msg.created_at)}
