@@ -14,6 +14,7 @@ import {
   ComplianceSection, DangerZoneSection,
   MigrationBanner, EmptyDisconnected,
 } from '../../_components/setup-primitives'
+import { webhookUrl } from '@/lib/webhook-urls'
 
 type Props = {
   connected: boolean
@@ -76,8 +77,8 @@ export default function MeLiSetup({
       <SetupSection icon={Webhook} title="Webhook & Eventos">
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground">URL configurada en panel MeLi</div>
-          <code className="block font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
-            https://api.konvi.co/api/v1/meli/webhook
+          <code className="block font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border break-all">
+            {webhookUrl('mercadolibre')}
           </code>
         </div>
         <div className="text-xs text-muted-foreground pt-1 border-t border-border">
@@ -109,11 +110,11 @@ export default function MeLiSetup({
 
       {/* Banner migración */}
       <MigrationBanner>
-        Editar OAuth o reconectar se hace desde{' '}
+        Reconectar o desconectar Mercado Libre se hace desde{' '}
         <a href="/dashboard/integrations" className="underline font-medium">
-          /dashboard/integrations
+          el panel de Integraciones
         </a>
-        . Migración a este panel: Sem 9.
+        . Este panel es de solo lectura.
       </MigrationBanner>
     </div>
   )

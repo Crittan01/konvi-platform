@@ -142,6 +142,13 @@ export default async function IntegrationsPage(
       secretId = data as string | null
     }
 
+    if (!secretId) {
+      // Vault falló — NO persistir una fila 'habilitada' con secret_id null
+      // (quedaría inservible: token no recuperable pero preview visible).
+      console.error('[saveTelegram] Vault upsert falló', { tenant: m.tenant_id })
+      redirect(`/dashboard/integrations?error=${encodeURIComponent('No se pudo guardar el Bot Token de Telegram de forma segura (Vault). Intenta de nuevo.')}`)
+    }
+
     await sb.from('notification_settings').upsert({
       tenant_id: m.tenant_id, channel: 'telegram', enabled: true,
       config: {
@@ -352,7 +359,9 @@ export default async function IntegrationsPage(
     const eventsKey   = (formData.get('events_key') as string)?.trim()
     const environment = (formData.get('environment') as string) === 'production' ? 'production' : 'sandbox'
 
-    if (!privateKey || !eventsKey) return
+    if (!privateKey || !eventsKey) {
+      redirect(`/dashboard/integrations?error=${encodeURIComponent('Ingresa la Llave Privada y la Llave de Eventos de Wompi.')}`)
+    }
 
     const { data: existing } = await sb.from('tenant_integrations').select('credentials')
       .eq('tenant_id', m.tenant_id).eq('provider', 'wompi').maybeSingle()
@@ -380,7 +389,14 @@ export default async function IntegrationsPage(
       eventsSid = data as string | null
     }
 
-    if (!privateSid || !eventsSid) return  // Vault failure — no persistir estado incompleto
+    if (!privateSid || !eventsSid) {
+      // Vault failure — no persistir estado incompleto. Log accionable para
+      // distinguir en producción "no guardó por Vault" de otros fallos.
+      console.error('[saveWompi] Vault upsert falló', {
+        tenant: m.tenant_id, privateSid: !!privateSid, eventsSid: !!eventsSid,
+      })
+      redirect(`/dashboard/integrations?error=${encodeURIComponent('No se pudieron guardar las llaves de Wompi de forma segura (Vault). Intenta de nuevo.')}`)
+    }
 
     await sb.from('tenant_integrations').upsert({
       tenant_id: m.tenant_id, provider: 'wompi', status: 'connected',

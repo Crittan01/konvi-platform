@@ -46,7 +46,18 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
     online_wompi: initialMethods.find(m => m.method === 'online_wompi')?.enabled ?? true,
   }
 
+  const seedText = (m: Method, field: 'display_label' | 'notes') =>
+    initialMethods.find(x => x.method === m)?.[field] ?? ''
+
   const [methods, setMethods] = useState<Record<Method, boolean>>(initialState)
+  const [labels, setLabels] = useState<Record<Method, string>>({
+    cod: seedText('cod', 'display_label'),
+    online_wompi: seedText('online_wompi', 'display_label'),
+  })
+  const [notes, setNotes] = useState<Record<Method, string>>({
+    cod: seedText('cod', 'notes'),
+    online_wompi: seedText('online_wompi', 'notes'),
+  })
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +78,10 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
     const fd = new FormData()
     fd.set('cod_enabled', methods.cod ? '1' : '0')
     fd.set('online_wompi_enabled', methods.online_wompi ? '1' : '0')
+    fd.set('cod_display_label', labels.cod)
+    fd.set('cod_notes', notes.cod)
+    fd.set('online_wompi_display_label', labels.online_wompi)
+    fd.set('online_wompi_notes', notes.online_wompi)
     const result = await action(fd)
     setLoading(false)
     if (result.ok) {
@@ -122,6 +137,42 @@ export default function PaymentMethodsForm({ initialMethods, action }: Props) {
                     <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
                     <span>{meta.consequence}</span>
                   </p>
+                )}
+
+                {/* display_label / notes — el bot los usa al presentar este método al cliente */}
+                {enabled && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground" htmlFor={`${m}_label`}>
+                        Nombre para el cliente <span className="text-muted-foreground/60">(opcional)</span>
+                      </Label>
+                      <input
+                        id={`${m}_label`}
+                        type="text"
+                        value={labels[m]}
+                        onChange={e => { setLabels(prev => ({ ...prev, [m]: e.target.value })); setSaved(false) }}
+                        maxLength={60}
+                        placeholder={meta.title}
+                        className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                      <p className="text-[10px] text-muted-foreground/70">Cómo nombra el bot este método al cliente.</p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground" htmlFor={`${m}_notes`}>
+                        Nota / aclaración <span className="text-muted-foreground/60">(opcional)</span>
+                      </Label>
+                      <input
+                        id={`${m}_notes`}
+                        type="text"
+                        value={notes[m]}
+                        onChange={e => { setNotes(prev => ({ ...prev, [m]: e.target.value })); setSaved(false) }}
+                        maxLength={240}
+                        placeholder="Ej: recargo del 3% · liquidación a 5 días"
+                        className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                      <p className="text-[10px] text-muted-foreground/70">El bot puede mencionarla al ofrecer el método.</p>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

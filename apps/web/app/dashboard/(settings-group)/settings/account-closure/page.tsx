@@ -100,8 +100,8 @@ export default async function AccountClosurePage() {
           5 años post-cierre (Art. 22).
         </p>
         <p>
-          ¿Dudas? Escribe a soporte@konvi.com con tu document_number como
-          asunto.
+          ¿Dudas? Escríbenos a soporte@konvi.co e indica en el asunto tu número
+          de documento (el NIT o la cédula con la que registraste el negocio).
         </p>
       </footer>
     </div>

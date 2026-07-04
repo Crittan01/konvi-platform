@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { CheckCircle2, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
@@ -13,13 +14,15 @@ type Acceptance = {
   accepted_at: string
 }
 
+type ActionResult = { ok: boolean; error?: string; message?: string }
+
 type Props = {
   currentVersions: Record<string, string>
   documentLabels: Record<string, { label: string; description: string; href: string }>
   acceptedByDoc: Record<string, Acceptance | undefined>
   history: Acceptance[]
   canAccept: boolean
-  acceptAction: (fd: FormData) => Promise<void>
+  acceptAction: (fd: FormData) => Promise<ActionResult>
 }
 
 export default function LegalAcceptanceClient({
@@ -43,7 +46,13 @@ export default function LegalAcceptanceClient({
     fd.set('document_id', docId)
     fd.set('document_version', docVersion)
     startTransition(async () => {
-      try { await acceptAction(fd) } finally { setBusyDoc(null) }
+      try {
+        const r = await acceptAction(fd)
+        if (r.ok) toast.success(r.message || 'Aceptación registrada.')
+        else toast.error(r.error || 'No se pudo registrar la aceptación.')
+      } catch {
+        toast.error('Error inesperado al registrar la aceptación.')
+      } finally { setBusyDoc(null) }
     })
   }
 

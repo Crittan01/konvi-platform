@@ -6,6 +6,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Loader2 } from 'lucide-react'
 
 interface Props {
@@ -29,15 +30,24 @@ export default function RemoveMemberButton({ userId, memberEmail, action }: Prop
 
   return (
     <>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        onClick={() => setOpen(true)}
-        className="text-xs h-7 px-2 text-destructive hover:bg-destructive/10"
-      >
-        Eliminar
-      </Button>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setOpen(true)}
+              className="text-xs h-7 px-2 text-destructive hover:bg-destructive/10"
+            >
+              Eliminar
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Quita al miembro del equipo de forma permanente. No es reversible: para volver a darle acceso tendrás que invitarlo de nuevo. ¿Es temporal? Usa &quot;Inactivar&quot;.
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">

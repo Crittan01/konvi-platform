@@ -2,15 +2,17 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import * as Sentry from '@sentry/nextjs'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones } from 'lucide-react'
+import { Users, ShieldCheck, UserPlus, Mail, AlertCircle, CheckCircle2, Crown, Briefcase, Headphones, RefreshCw } from 'lucide-react'
 import { WEB_APP_URL } from '@/lib/runtime-env'
 import RemoveMemberButton from './remove-member-button'
 import ChangeRoleButton from './change-role-button'
 import InactivateMemberButton from './inactivate-member-button'
 import { TeamUrlCleaner } from './url-cleaner'
+import { mapTeamError } from './error-copy'
 
 export const metadata = {
   title: 'Usuarios y Acceso',
@@ -50,7 +52,7 @@ const ROLES = {
     headerColor: 'border-blue-700/20 bg-blue-500/5',
     textColor: 'text-blue-700',
     iconColor: 'text-blue-700',
-    description: 'Gestiona operaciones: pedidos, catálogo, inventario, métricas, IA.',
+    description: 'Gestiona la operación: pedidos, contactos, catálogo, promociones, canales, métricas y base de conocimiento.',
   },
   operator: {
     label: 'Gestor',
@@ -59,7 +61,7 @@ const ROLES = {
     headerColor: 'border-border bg-muted/20',
     textColor: 'text-muted-foreground',
     iconColor: 'text-muted-foreground',
-    description: 'Acceso operativo: Inbox, Pedidos, Contactos y Reclamos.',
+    description: 'Acceso operativo del día a día: Inbox, Pedidos, Contactos, Reclamos y Cotizador de envíos.',
   },
 } as const
 
@@ -96,6 +98,96 @@ function Section({ icon: Icon, title, description, children, className = '' }: {
   )
 }
 
+// ─── Audit log helper (paridad con whatsapp/ai-agents/claims) ─────────────────
+//
+// Las server actions de este panel escriben directo a Supabase (no pasan por el
+// API router auditado — ver needs_founder "doble implementación"), así que el
+// audit_log se inserta aquí mismo con el cliente user-scoped: audit_log usa
+// app_current_tenant() del JWT del owner, por lo que el WITH CHECK pasa.
+async function writeTeamAudit(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  args: {
+    tenantId: string
+    userId: string | null
+    userEmail: string | null
+    action: string          // 'team.member_invited' | 'team.role_changed' | ...
+    entityId: string | null // user_id o email del afectado
+    payload: Record<string, unknown>
+  },
+): Promise<void> {
+  try {
+    await sb.from('audit_log').insert({
+      tenant_id:   args.tenantId,
+      user_id:     args.userId,
+      user_email:  args.userEmail,
+      action:      args.action,
+      entity_type: 'team_member',
+      entity_id:   args.entityId,
+      payload:     args.payload,
+    })
+  } catch (e) {
+    // El audit no debe tumbar la operación de negocio; log + Sentry y seguir.
+    console.error('[team] audit_log insert falló', { action: args.action, tenantId: args.tenantId, error: e })
+    Sentry.captureException(e, { extra: { where: 'team.audit_log', action: args.action, tenantId: args.tenantId } })
+  }
+}
+
+// ─── Rate-limit aplicativo per-tenant para invitaciones ───────────────────────
+//
+// Complementa (no reemplaza) el límite SMTP compartido de Supabase: cuenta los
+// eventos de invitación/reenvío del tenant en la ventana reciente vía audit_log.
+// Best-effort: si el conteo falla, NO bloquea la operación (fail-open) para no
+// convertir un problema de observabilidad en indisponibilidad.
+const INVITE_WINDOW_SECONDS = 60
+const INVITE_MAX_PER_WINDOW = 5
+
+async function inviteRateLimited(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  tenantId: string,
+): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - INVITE_WINDOW_SECONDS * 1000).toISOString()
+    const { count, error } = await sb
+      .from('audit_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .in('action', ['team.member_invited', 'team.invite_resent'])
+      .gte('created_at', since)
+    if (error) return false
+    return (count ?? 0) >= INVITE_MAX_PER_WINDOW
+  } catch {
+    return false
+  }
+}
+
+// ─── Lookup de usuario existente por email (paginado) ─────────────────────────
+//
+// supabase-js no expone getUserByEmail; auth.admin.listUsers() es global
+// (cross-tenant) y pagina de a `perPage` (default 50). Resolver con la primera
+// página + .find() rompe en silencio en cuanto auth.users supera 50 usuarios:
+// el usuario existente "no se encuentra" aunque exista. Paginamos y cortamos
+// apenas hay match (mejor caso: 1 página) para no traer toda la tabla.
+async function findUserByEmail(
+  adminSb: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<{ id: string } | null> {
+  const target = email.trim().toLowerCase()
+  const perPage = 1000
+  for (let page = 1; page <= 1000; page++) {
+    const { data, error } = await adminSb.auth.admin.listUsers({ page, perPage })
+    if (error) {
+      console.error('[team] listUsers error:', error.message)
+      Sentry.captureException(error, { extra: { where: 'team.findUserByEmail', page } })
+      return null
+    }
+    const users = data?.users ?? []
+    const hit = users.find(x => x.email?.toLowerCase() === target)
+    if (hit) return { id: hit.id }
+    if (users.length < perPage) break // última página
+  }
+  return null
+}
+
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 export default async function TeamPage(
@@ -116,10 +208,18 @@ export default async function TeamPage(
   if (!isOwner) redirect('/dashboard')
 
   let team: TeamMember[] = []
+  let teamLoadFailed = false
   if (tenantId) {
     const { data, error: teamErr } = await supabase.rpc('get_tenant_team')
-    if (teamErr) console.error('[team] get_tenant_team:', teamErr.message, teamErr.code)
+    if (teamErr) {
+      // No enmascarar el fallo como "equipo vacío": eso miente al operador.
+      teamLoadFailed = true
+      console.error('[team] get_tenant_team:', teamErr.message, teamErr.code)
+      Sentry.captureException(teamErr, { extra: { where: 'team.get_tenant_team', tenantId } })
+    }
     team = (data as TeamMember[]) || []
+  } else {
+    teamLoadFailed = true
   }
 
   // ─── Counts por rol ───────────────────────────────────────────────────────
@@ -134,8 +234,10 @@ export default async function TeamPage(
 
   /**
    * inviteMember — solo Owner
-   * Flujo: adminClient.inviteUserByEmail → add_member_to_tenant → trigger inyecta JWT claims
-   * El tenant_id viene del JWT del caller, nunca del form.
+   * Flujo: adminClient.inviteUserByEmail → add_member_to_tenant.
+   * El custom_access_token_hook (no un trigger) inyecta los claims tenant_id/role
+   * en el próximo login del invitado. El tenant_id viene del JWT del caller,
+   * nunca del form.
    */
   async function inviteMember(formData: FormData) {
     'use server'
@@ -152,6 +254,11 @@ export default async function TeamPage(
       redirect('/dashboard/team?error=datos-invalidos')
     }
 
+    // Rate-limit aplicativo per-tenant (además del límite SMTP compartido).
+    if (await inviteRateLimited(sb, m.tenant_id)) {
+      redirect('/dashboard/team?error=rate-limit')
+    }
+
     // Validar que el email no sea ya miembro del tenant
     const { data: currentTeam } = await sb.rpc('get_tenant_team')
     if ((currentTeam as Array<{email: string}> | null)?.some(m => m.email === email)) {
@@ -162,49 +269,67 @@ export default async function TeamPage(
     const appUrl  = WEB_APP_URL
     const adminSb = createAdminClient()
 
+    // Nombre del negocio → user_metadata del invitado, disponible en la plantilla de
+    // email como {{ .Data.tenant_name }}. Sin esto, en multi-tenant el invitado no sabe
+    // a QUÉ negocio se le invita (gap branding). Lectura RLS-scoped al tenant del owner.
+    const { data: tenantRow } = await sb.from('tenants').select('name').eq('id', m.tenant_id).single()
+    const tenantName = tenantRow?.name ?? undefined
+
     const { data: inviteData, error: inviteError } = await adminSb.auth.admin.inviteUserByEmail(
       email,
-      { redirectTo: `${appUrl}/auth/callback?next=/set-password`, data: { invited_by: u?.id } }
+      {
+        redirectTo: `${appUrl}/auth/callback?next=/set-password`,
+        data: { invited_by: u?.id, tenant_name: tenantName, invited_role: newRole },
+      }
     )
 
     let wasExistingUser = false
+    let addedUserId: string | null = null
 
     if (inviteError) {
       // Usuario ya existente en Supabase Auth — asignar directamente al tenant (sin email)
       if (inviteError.message.includes('already been registered')) {
         wasExistingUser = true
-        const { data: list, error: listError } = await adminSb.auth.admin.listUsers()
-        if (listError) {
-          console.error('[invite] listUsers error:', listError.message)
-          redirect(`/dashboard/team?error=${encodeURIComponent(listError.message)}`)
-        }
-        const existing = list?.users?.find(x => x.email === email)
+        const existing = await findUserByEmail(adminSb, email)
         if (!existing) {
           redirect('/dashboard/team?error=usuario-no-encontrado')
         }
+        addedUserId = existing!.id
         const { error: rpcErr } = await adminSb.rpc('add_member_to_tenant', {
           p_user_id: existing!.id, p_tenant_id: m.tenant_id, p_role: newRole,
         })
         if (rpcErr) {
           console.error('[invite] add_member_to_tenant (existing):', rpcErr.message)
-          redirect(`/dashboard/team?error=${encodeURIComponent(rpcErr.message)}`)
+          Sentry.captureException(rpcErr, { extra: { where: 'team.invite.add_existing', tenantId: m.tenant_id } })
+          redirect('/dashboard/team?error=respuesta-inesperada')
         }
       } else {
         console.error('[invite] inviteUserByEmail error:', inviteError.message)
-        redirect(`/dashboard/team?error=${encodeURIComponent(inviteError.message)}`)
+        Sentry.captureException(inviteError, { extra: { where: 'team.invite.inviteUserByEmail', tenantId: m.tenant_id } })
+        const isRate = inviteError.message.toLowerCase().includes('rate') || inviteError.message.toLowerCase().includes('limit')
+        redirect(`/dashboard/team?error=${isRate ? 'rate-limit' : 'respuesta-inesperada'}`)
       }
     } else if (inviteData?.user?.id) {
+      addedUserId = inviteData.user.id
       const { error: rpcErr } = await adminSb.rpc('add_member_to_tenant', {
         p_user_id: inviteData.user.id, p_tenant_id: m.tenant_id, p_role: newRole,
       })
       if (rpcErr) {
         console.error('[invite] add_member_to_tenant (new):', rpcErr.message)
-        redirect(`/dashboard/team?error=${encodeURIComponent(rpcErr.message)}`)
+        Sentry.captureException(rpcErr, { extra: { where: 'team.invite.add_new', tenantId: m.tenant_id } })
+        redirect('/dashboard/team?error=respuesta-inesperada')
       }
     } else {
       console.error('[invite] inviteUserByEmail returned no user and no error')
+      Sentry.captureException(new Error('inviteUserByEmail returned no user and no error'), { extra: { where: 'team.invite', tenantId: m.tenant_id } })
       redirect('/dashboard/team?error=respuesta-inesperada')
     }
+
+    await writeTeamAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id ?? null, userEmail: u?.email ?? null,
+      action: 'team.member_invited', entityId: addedUserId ?? email,
+      payload: { email, role: newRole, was_existing_user: wasExistingUser },
+    })
 
     revalidatePath('/dashboard/team')
     // Distinguir: usuario nuevo (email enviado) vs usuario existente (acceso directo, sin email)
@@ -219,12 +344,15 @@ export default async function TeamPage(
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
+    // Claims stale / sesión sin permiso → feedback explícito (no cierre silencioso del dialog).
+    if (!m.tenant_id || m.role !== 'owner') redirect('/dashboard/team?error=sin-permiso')
     const newRole  = formData.get('role') as string
     const targetId = formData.get('user_id') as string
-    if (!['manager', 'operator'].includes(newRole)) return
+    if (!['manager', 'operator'].includes(newRole)) redirect('/dashboard/team?error=rol-invalido')
 
-    // Actualizar tenant_users — el Custom Access Token Hook leerá el nuevo rol en el próximo JWT
+    // Actualizar tenant_users — el Custom Access Token Hook leerá el nuevo rol en el próximo JWT.
+    // .neq('role','owner') preserva el guard anti-degradar-al-último-owner: nunca se puede
+    // cambiar (ni bajar) el rol de un owner desde esta acción.
     const { data: changed } = await sb.from('tenant_users')
       .update({ role: newRole })
       .eq('user_id', targetId)
@@ -239,6 +367,12 @@ export default async function TeamPage(
     const adminSb = createAdminClient()
     await adminSb.auth.admin.signOut(targetId, 'global')
 
+    await writeTeamAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id ?? null, userEmail: u?.email ?? null,
+      action: 'team.role_changed', entityId: targetId,
+      payload: { new_role: newRole },
+    })
+
     revalidatePath('/dashboard/team')
     redirect('/dashboard/team?role_changed=1')
   }
@@ -248,11 +382,12 @@ export default async function TeamPage(
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
+    if (!m.tenant_id || m.role !== 'owner') redirect('/dashboard/team?error=sin-permiso')
 
     const targetId = formData.get('user_id') as string
 
-    // 1. Eliminar del tenant — el hook ya no inyectará tenant_id sin esta fila
+    // 1. Eliminar del tenant — el hook ya no inyectará tenant_id sin esta fila.
+    //    .neq('role','owner') = guard anti-eliminar-al-owner.
     const { data: removed } = await sb.from('tenant_users').delete()
       .eq('user_id', targetId)
       .eq('tenant_id', m.tenant_id)
@@ -268,9 +403,28 @@ export default async function TeamPage(
     //    El hook ya no encontrará tenant_users activo → JWT sin tenant_id en próximo login
     await adminSb.auth.admin.signOut(targetId, 'global')
 
-    // 3. Soft-delete en auth.users — preserva el ID para audit trails pero anonimiza PII
-    //    Si necesita volver, se le puede re-invitar (recibe nuevo enlace de onboarding)
-    await adminSb.auth.admin.deleteUser(targetId, true)
+    // 3. Soft-delete en auth.users SOLO si el usuario ya no pertenece a ningún otro tenant.
+    //    deleteUser opera global sobre auth.users; si el usuario es miembro de otro tenant
+    //    (membresía multi-tenant permitida por el schema), soft-borrarlo destruiría su cuenta
+    //    en ese otro tenant. En ese caso solo lo desvinculamos de ESTE tenant.
+    let accountDeleted = false
+    const { data: otherMemberships } = await adminSb
+      .from('tenant_users')
+      .select('tenant_id')
+      .eq('user_id', targetId)
+      .limit(1)
+    if (!otherMemberships?.length) {
+      // Sin otras membresías → seguro anonimizar. Preserva el ID para audit trails.
+      //    Si necesita volver, se le puede re-invitar (recibe nuevo enlace de onboarding).
+      await adminSb.auth.admin.deleteUser(targetId, true)
+      accountDeleted = true
+    }
+
+    await writeTeamAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id ?? null, userEmail: u?.email ?? null,
+      action: 'team.member_removed', entityId: targetId,
+      payload: { account_soft_deleted: accountDeleted },
+    })
 
     revalidatePath('/dashboard/team')
     redirect('/dashboard/team?removed=1')
@@ -281,7 +435,7 @@ export default async function TeamPage(
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
+    if (!m.tenant_id || m.role !== 'owner') redirect('/dashboard/team?error=sin-permiso')
 
     const targetId = formData.get('user_id') as string
     const reason   = (formData.get('reason') as string)?.trim() || null
@@ -308,6 +462,12 @@ export default async function TeamPage(
     // 3. signOut global — corta la sesión activa inmediatamente (no esperar expiración del JWT)
     await adminSb.auth.admin.signOut(targetId, 'global')
 
+    await writeTeamAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id ?? null, userEmail: u?.email ?? null,
+      action: 'team.member_inactivated', entityId: targetId,
+      payload: { reason },
+    })
+
     revalidatePath('/dashboard/team')
     redirect('/dashboard/team?inactivated=1')
   }
@@ -317,7 +477,7 @@ export default async function TeamPage(
     const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || m.role !== 'owner') return
+    if (!m.tenant_id || m.role !== 'owner') redirect('/dashboard/team?error=sin-permiso')
 
     const targetId = formData.get('user_id') as string
 
@@ -338,6 +498,12 @@ export default async function TeamPage(
       ban_duration: 'none',
     })
 
+    await writeTeamAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id ?? null, userEmail: u?.email ?? null,
+      action: 'team.member_activated', entityId: targetId,
+      payload: {},
+    })
+
     revalidatePath('/dashboard/team')
     redirect('/dashboard/team?activated=1')
   }
@@ -350,22 +516,53 @@ export default async function TeamPage(
     if (!m.tenant_id || m.role !== 'owner') {
       redirect('/dashboard/team?error=sin-permiso')
     }
-    const email   = formData.get('email') as string
+    const email = (formData.get('email') as string)?.trim().toLowerCase()
+    if (!email) redirect('/dashboard/team?error=datos-invalidos')
+
+    // Cotejar el email contra el equipo del tenant: sin esto, un owner podría disparar
+    // inviteUserByEmail a CUALQUIER dirección (crea usuarios auth huérfanos y convierte a
+    // Konvi en remitente de spam/phishing). Solo se reenvía a miembros pendientes de aceptar.
+    const { data: currentTeam } = await sb.rpc('get_tenant_team')
+    const member = (currentTeam as Array<{ email: string; confirmed: boolean }> | null)
+      ?.find(t => t.email.toLowerCase() === email)
+    if (!member) redirect('/dashboard/team?error=miembro-no-encontrado')
+    if (member!.confirmed) redirect('/dashboard/team?error=datos-invalidos')
+
+    // Rate-limit aplicativo per-tenant (además del límite SMTP compartido).
+    if (await inviteRateLimited(sb, m.tenant_id)) {
+      redirect('/dashboard/team?error=rate-limit')
+    }
+
     const appUrl  = WEB_APP_URL
     const adminSb = createAdminClient()
+
+    // Reenvío branded: repone el nombre del negocio en la plantilla (mismo criterio que
+    // la invitación inicial). {{ .Data.tenant_name }} en el template.
+    const { data: tenantRow } = await sb.from('tenants').select('name').eq('id', m.tenant_id).single()
+    const tenantName = tenantRow?.name ?? undefined
 
     // inviteUserByEmail para usuario NO confirmado = reenvía el email de invitación
     // generateLink() solo retorna el link sin enviar email — NO usar para reenvío
     const { error } = await adminSb.auth.admin.inviteUserByEmail(email, {
       redirectTo: `${appUrl}/auth/callback?next=/set-password`,
+      data: { invited_by: u?.id, tenant_name: tenantName },
     })
 
     // "already been registered" solo ocurre para usuarios CONFIRMADOS
     // para no-confirmados, Supabase reenvía sin error
     if (error && !error.message.toLowerCase().includes('already')) {
       console.error('[resend] inviteUserByEmail:', error.message)
-      redirect(`/dashboard/team?error=${encodeURIComponent(error.message)}`)
+      Sentry.captureException(error, { extra: { where: 'team.resendInvite', tenantId: m.tenant_id } })
+      const isRate = error.message.toLowerCase().includes('rate') || error.message.toLowerCase().includes('limit')
+      redirect(`/dashboard/team?error=${isRate ? 'rate-limit' : 'respuesta-inesperada'}`)
     }
+
+    await writeTeamAudit(sb, {
+      tenantId: m.tenant_id, userId: u?.id ?? null, userEmail: u?.email ?? null,
+      action: 'team.invite_resent', entityId: email,
+      payload: { email },
+    })
+
     revalidatePath('/dashboard/team')
     redirect(`/dashboard/team?resent=${encodeURIComponent(email)}`)
   }
@@ -414,28 +611,15 @@ export default async function TeamPage(
           </div>
         </div>
       )}
-      {searchParams.error && (() => {
-        const raw = decodeURIComponent(searchParams.error).toLowerCase()
-        const msg = raw.includes('rate') || raw.includes('limit')
-          ? 'Demasiados intentos. Espera unos minutos antes de reenviar otra invitación. En producción, configura un SMTP propio en Supabase para eliminar este límite.'
-          : raw.includes('sin-permiso') || raw.includes('permission')
-          ? 'No tienes permiso para realizar esta acción.'
-          : raw.includes('datos-invalidos')
-          ? 'Email o rol inválido. Verifica los datos e inténtalo de nuevo.'
-          : raw.includes('ya-es-miembro')
-          ? 'Este email ya es miembro del equipo.'
-          : decodeURIComponent(searchParams.error)
-
-        return (
-          <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/8 text-sm text-red-700">
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">Error al procesar la acción</p>
-              <p className="text-xs text-red-700/70 mt-0.5">{msg}</p>
-            </div>
+      {searchParams.error && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-red-700/30 bg-red-500/8 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Error al procesar la acción</p>
+            <p className="text-xs text-red-700/70 mt-0.5">{mapTeamError(decodeURIComponent(searchParams.error))}</p>
           </div>
-        )
-      })()}
+        </div>
+      )}
       {searchParams.inactivated && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-700/30 bg-amber-500/8 text-sm text-amber-700">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -532,6 +716,7 @@ export default async function TeamPage(
                 <select
                   name="role"
                   defaultValue="operator"
+                  aria-label="Rol del nuevo miembro"
                   className="text-xs rounded-lg border border-input bg-background px-2.5 h-9 focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value="manager">Supervisor</option>
@@ -552,7 +737,25 @@ export default async function TeamPage(
 
       {/* Equipo */}
       <Section icon={Users} title="Equipo" description="Miembros del equipo — confirmados y pendientes de aceptar invitación.">
-        {team.length === 0 ? (
+        {teamLoadFailed ? (
+          // No mentir con "equipo vacío" cuando el RPC falló: estado de error explícito + retry.
+          <div className="flex flex-col items-center text-center py-8 gap-3">
+            <AlertCircle className="h-8 w-8 text-red-700/60" />
+            <div>
+              <p className="text-sm font-medium text-red-700">No se pudo cargar el equipo</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                Hubo un problema al leer los miembros de tu equipo. Puede ser temporal; vuelve a intentarlo.
+              </p>
+            </div>
+            <a
+              href="/dashboard/team"
+              className="inline-flex items-center gap-1.5 text-xs font-medium h-8 px-3 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors text-foreground"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reintentar
+            </a>
+          </div>
+        ) : team.length === 0 ? (
           <div className="text-center py-8">
             <Users className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">Aún no hay miembros registrados.</p>
@@ -571,6 +774,9 @@ export default async function TeamPage(
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-sm truncate">{m.email}</p>
+                        {/* Rol visible SIEMPRE — incluido pendiente e inactivo, para que el owner
+                            vea (y pueda corregir vía re-invitación) qué rol tendrá cada miembro. */}
+                        <RoleBadge role={m.role} />
                         {m.user_id === myUserId && (
                           <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5 shrink-0">Tú</span>
                         )}
@@ -591,67 +797,58 @@ export default async function TeamPage(
                     </div>
                   </div>
 
-                  {/* Acciones según estado */}
-                  <div className="flex items-center gap-2 pl-11 sm:pl-0">
-                    {isOwner && m.user_id !== myUserId ? (
-                      <>
-                        {/* PENDIENTE: solo reenviar o eliminar */}
-                        {!m.confirmed && (
-                          <>
-                            <form action={resendInvite}>
-                              <input type="hidden" name="email" value={m.email} />
-                              <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Enviado"
-                                className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10">
-                                Reenviar
-                              </SubmitButton>
-                            </form>
-                            <span className="text-[10px] text-muted-foreground italic">Pendiente</span>
-                          </>
-                        )}
+                  {/* Acciones según estado. Solo owners llegan a esta página (redirect arriba);
+                      un owner no se auto-gestiona, y un segundo owner (m.role==='owner') no es
+                      degradable/eliminable — guard anti-degradar-al-último-owner. */}
+                  {isOwner && m.user_id !== myUserId && m.role !== 'owner' && (
+                    <div className="flex items-center gap-2 pl-11 sm:pl-0">
+                      {/* PENDIENTE: solo reenviar o eliminar */}
+                      {!m.confirmed && (
+                        <form action={resendInvite}>
+                          <input type="hidden" name="email" value={m.email} />
+                          <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Enviado"
+                            className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10">
+                            Reenviar
+                          </SubmitButton>
+                        </form>
+                      )}
 
-                        {/* INACTIVO: solo activar o eliminar */}
-                        {m.confirmed && m.status === 'inactive' && (
-                          <form action={activateMember}>
-                            <input type="hidden" name="user_id" value={m.user_id} />
-                            <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Activado"
-                              className="text-xs h-7 px-2.5 text-emerald-700 border-emerald-700/30 hover:bg-emerald-500/10">
-                              Activar
-                            </SubmitButton>
-                          </form>
-                        )}
+                      {/* INACTIVO: solo activar o eliminar */}
+                      {m.confirmed && m.status === 'inactive' && (
+                        <form action={activateMember}>
+                          <input type="hidden" name="user_id" value={m.user_id} />
+                          <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Activado"
+                            className="text-xs h-7 px-2.5 text-emerald-700 border-emerald-700/30 hover:bg-emerald-500/10">
+                            Activar
+                          </SubmitButton>
+                        </form>
+                      )}
 
-                        {/* ACTIVO: cambiar rol + inactivar */}
-                        {m.confirmed && m.status === 'active' && (
-                          <>
-                            <ChangeRoleButton
-                              userId={m.user_id}
-                              memberEmail={m.email}
-                              currentRole={m.role}
-                              action={changeRole}
-                            />
-                            {m.role !== 'owner' && (
-                              <InactivateMemberButton
-                                userId={m.user_id}
-                                memberEmail={m.email}
-                                action={inactivateMember}
-                              />
-                            )}
-                          </>
-                        )}
-
-                        {/* Eliminar — disponible para activo, inactivo y pendiente (no owner) */}
-                        {m.role !== 'owner' && (
-                          <RemoveMemberButton
+                      {/* ACTIVO: cambiar rol + inactivar */}
+                      {m.confirmed && m.status === 'active' && (
+                        <>
+                          <ChangeRoleButton
                             userId={m.user_id}
                             memberEmail={m.email}
-                            action={removeMember}
+                            currentRole={m.role}
+                            action={changeRole}
                           />
-                        )}
-                      </>
-                    ) : (
-                      <RoleBadge role={m.role} />
-                    )}
-                  </div>
+                          <InactivateMemberButton
+                            userId={m.user_id}
+                            memberEmail={m.email}
+                            action={inactivateMember}
+                          />
+                        </>
+                      )}
+
+                      {/* Eliminar — disponible para activo, inactivo y pendiente */}
+                      <RemoveMemberButton
+                        userId={m.user_id}
+                        memberEmail={m.email}
+                        action={removeMember}
+                      />
+                    </div>
+                  )}
                 </div>
               )
             })}

@@ -14,6 +14,7 @@ import {
   ComplianceSection, DangerZoneSection,
   MigrationBanner, EmptyDisconnected,
 } from '../../_components/setup-primitives'
+import { webhookUrl } from '@/lib/webhook-urls'
 
 type Props = {
   connected: boolean
@@ -67,8 +68,8 @@ export default function TelegramSetup({ connected, config }: Props) {
       <SetupSection icon={Webhook} title="Webhook & Eventos">
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground">URL configurada en Telegram</div>
-          <code className="block font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border">
-            https://api.konvi.co/api/v1/telegram/webhook
+          <code className="block font-mono text-xs bg-muted/30 rounded px-2 py-1.5 border break-all">
+            {webhookUrl('telegram')}
           </code>
         </div>
         <div className="text-xs text-muted-foreground pt-1 border-t border-border">
@@ -99,11 +100,11 @@ export default function TelegramSetup({ connected, config }: Props) {
 
       {/* Banner migración */}
       <MigrationBanner>
-        Editar bot_token, chat_id o probar conexión se hace desde{' '}
+        Editar el bot_token, el chat_id o probar la conexión se hace desde{' '}
         <a href="/dashboard/integrations" className="underline font-medium">
-          /dashboard/integrations
+          el panel de Integraciones
         </a>
-        . Migración a este panel: Sem 11 (H.6).
+        . Este panel es de solo lectura.
       </MigrationBanner>
     </div>
   )

@@ -24,6 +24,10 @@ export function DaysSelector({ initialDays }: Props) {
     })
   }
 
+  const DAY_FULL: Record<number, string> = {
+    1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado', 7: 'Domingo',
+  }
+
   return (
     <div className="flex gap-1.5 flex-wrap">
       {[1, 2, 3, 4, 5, 6, 7].map(d => (
@@ -31,6 +35,8 @@ export function DaysSelector({ initialDays }: Props) {
           key={d}
           type="button"
           onClick={() => toggle(d)}
+          aria-pressed={selected.has(d)}
+          aria-label={DAY_FULL[d]}
           className={[
             'h-8 w-9 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors',
             selected.has(d)

@@ -188,7 +188,7 @@ export function EmptyDisconnected({
     <div className="rounded-xl border border-dashed border-muted-foreground/30 p-10 text-center space-y-3">
       <Icon className="h-8 w-8 mx-auto text-muted-foreground/60" />
       <p className="text-sm text-muted-foreground">
-        <strong>{providerLabel}</strong> aún no está conectado para este tenant.
+        <strong>{providerLabel}</strong> aún no está conectado para tu negocio.
       </p>
       {helpText && (
         <p className="text-xs text-muted-foreground max-w-md mx-auto">

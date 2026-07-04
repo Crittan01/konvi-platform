@@ -34,19 +34,43 @@ async function updateTenant(tenantId: string, data: Record<string, unknown>): Pr
   // F140: supabase-js NO lanza, retorna { error }. Sin este check, un UPDATE bloqueado (RLS/constraint)
   // pasaba en silencio y el usuario veía "Guardado ✓" aunque no persistió.
   const { error } = await sb.from('tenants').update(data).eq('id', tenantId)
-  if (error) return { ok: false, error: `No se pudo guardar: ${error.message}` }
+  if (error) {
+    // F6 observabilidad: sin este log el error nunca aparece en los logs de Render
+    // (server actions no imprimen nada por defecto) → imposible diagnosticar en prod.
+    console.error('[settings.updateTenant] tenant=%s error=%s', tenantId, error.message)
+    return { ok: false, error: `No se pudo guardar: ${error.message}` }
+  }
   return { ok: true }
 }
+
+// ── Validadores server-side ────────────────────────────────────────────────────
+// El frontend NO es seguridad (principio 2): el pattern HTML es UX, la validación
+// real vive aquí. Estos datos alimentan guías de envío + prompt del bot.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+const CO_CEL_RE = /^3\d{9}$/ // celular Colombia: 10 dígitos, empieza en 3
 
 // ── Acciones exportadas ───────────────────────────────────────────────────────
 
 export async function saveTenant(formData: FormData): Promise<ActionResult> {
   const tenantId = await getOwnerTenantId()
+
+  const name    = (formData.get('name') as string)?.trim() || ''
+  const email   = (formData.get('email_contacto') as string)?.trim() || ''
+  const celular = (formData.get('telefono_contacto') as string)?.trim() || ''
+
+  if (!name) return { ok: false, error: 'El nombre del negocio es obligatorio.' }
+  if (email && !EMAIL_RE.test(email)) {
+    return { ok: false, error: 'El email de contacto no tiene un formato válido (ej: contacto@minegocio.com).' }
+  }
+  if (celular && !CO_CEL_RE.test(celular)) {
+    return { ok: false, error: 'El celular debe tener 10 dígitos y empezar por 3 (ej: 3121234567).' }
+  }
+
   const res = await updateTenant(tenantId, {
-    name:              (formData.get('name') as string)?.trim() || undefined,
+    name,
     nit:               (formData.get('nit') as string)?.trim()  || null,
-    email_contacto:    (formData.get('email_contacto') as string)?.trim() || null,
-    telefono_contacto: (formData.get('telefono_contacto') as string)?.trim() || null,
+    email_contacto:    email || null,
+    telefono_contacto: celular || null,
   })
   if (res.ok) revalidateSettings()
   return res
@@ -78,7 +102,19 @@ export async function saveHorarioAsesor(formData: FormData): Promise<ActionResul
   const ALLOWED_ROLES = new Set(['asesor', 'especialista', 'consultor', 'agente'])
   const raw_role = (formData.get('escalation_role') as string)?.trim() || 'asesor'
   const escalation_role = ALLOWED_ROLES.has(raw_role) ? raw_role : 'asesor'
-  const support_schedule = days.length && open && close ? { days, open, close } : null
+
+  // F6: validar coherencia del horario ANTES de persistir. Antes se aceptaba
+  // close < open (horario imposible) y se anulaba el schedule en silencio si
+  // faltaban días — el operador creía tener asesor configurado y no lo tenía.
+  if (open && close && open >= close) {
+    return { ok: false, error: 'La hora de cierre debe ser posterior a la de apertura.' }
+  }
+  const partialSchedule = (days.length > 0 || !!open || !!close)
+  const completeSchedule = days.length > 0 && !!open && !!close
+  if (partialSchedule && !completeSchedule) {
+    return { ok: false, error: 'Para definir el horario de asesor selecciona al menos un día y las horas de apertura y cierre. Déjalos todos vacíos si no atiendes con asesor humano.' }
+  }
+  const support_schedule = completeSchedule ? { days, open, close } : null
   const res = await updateTenant(tenantId, { support_schedule, after_hours_message, escalation_role })
   if (res.ok) revalidatePath('/dashboard/settings')
   return res
@@ -151,21 +187,35 @@ export async function savePaymentMethods(
       }
     }
 
+    // display_label / notes: el bot los inyecta al prompt (tenant_payment_methods.py).
+    // Antes no eran editables desde la UI — el tenant no podía personalizar cómo el
+    // bot nombra/explica cada método. null los deja en el default del prompt.
+    const clean = (v: FormDataEntryValue | null, max: number) => {
+      const s = (v as string | null)?.trim()
+      return s ? s.slice(0, max) : null
+    }
+    const codLabel   = clean(formData.get('cod_display_label'), 60)
+    const codNotes   = clean(formData.get('cod_notes'), 240)
+    const onlineLabel = clean(formData.get('online_wompi_display_label'), 60)
+    const onlineNotes = clean(formData.get('online_wompi_notes'), 240)
+
     // Upsert per método. UNIQUE(tenant_id, method) en tabla.
     const rows = [
-      { tenant_id: tenantId, method: 'cod', enabled: codEnabled },
-      { tenant_id: tenantId, method: 'online_wompi', enabled: onlineEnabled },
+      { tenant_id: tenantId, method: 'cod', enabled: codEnabled, display_label: codLabel, notes: codNotes },
+      { tenant_id: tenantId, method: 'online_wompi', enabled: onlineEnabled, display_label: onlineLabel, notes: onlineNotes },
     ]
     const { error } = await sb
       .from('tenant_payment_methods')
       .upsert(rows, { onConflict: 'tenant_id,method' })
 
     if (error) {
+      console.error('[settings.savePaymentMethods] tenant=%s error=%s', tenantId, error.message)
       return { ok: false, error: `Error guardando: ${error.message}` }
     }
     revalidatePath('/dashboard/settings')
     return { ok: true }
   } catch (e) {
+    console.error('[settings.savePaymentMethods] excepción:', e)
     return {
       ok: false,
       error: e instanceof Error ? e.message : 'Error desconocido',
@@ -182,7 +232,7 @@ export async function saveShippingOrigin(formData: FormData): Promise<ActionResu
     const val = (formData.get(`origin_${f}`) as string)?.trim()
     if (val) origin[f] = val
   }
-  // Mantener postal_code y dane_code alineados para Envia quote (CO, DANE 8 dígitos)
+  // Mantener postal_code y dane_code alineados para la cotización Aveonline (CO, DANE 5 dígitos)
   if (origin.dane_code && !origin.postal_code) origin.postal_code = origin.dane_code
   if (origin.postal_code && !origin.dane_code)  origin.dane_code  = origin.postal_code
 

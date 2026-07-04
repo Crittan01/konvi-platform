@@ -18,6 +18,7 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { ScrollText } from 'lucide-react'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { ok, fail, type ActionResult } from '@/lib/action-result'
 import LegalAcceptanceClient from './_components/legal-acceptance-client'
 import { SicReportDownload } from './_components/sic-report-download'
 
@@ -31,17 +32,17 @@ const DOCUMENT_LABELS: Record<keyof typeof CURRENT_VERSIONS, { label: string; de
   dpa: {
     label: 'Data Processing Agreement (DPA)',
     description: 'Acuerdo de tratamiento de datos. Define que el tenant es Responsable y la plataforma es Encargado.',
-    href: '/docs/legal/dpa.md',
+    href: '/dashboard/settings/legal/view/dpa',
   },
   privacy_policy: {
     label: 'Política de Privacidad (template)',
     description: 'Template para que el tenant publique al titular. El tenant adapta a su operación.',
-    href: '/docs/legal/privacy-policy.md',
+    href: '/dashboard/settings/legal/view/privacy-policy',
   },
   subprocessors: {
     label: 'Lista de Subprocesadores',
     description: 'Terceros con quienes la plataforma comparte datos para operar.',
-    href: '/docs/legal/subprocessors.md',
+    href: '/dashboard/settings/legal/view/subprocessors',
   },
 }
 
@@ -79,15 +80,22 @@ export default async function LegalAcceptancePage() {
   }
 
   // Server action: append acceptance row.
-  async function acceptDocument(formData: FormData) {
+  // F6: devuelve ActionResult (antes era void con return silencioso). Un INSERT
+  // bloqueado por RLS/trigger o un rol inválido antes pasaba en silencio y el
+  // operador creía haber aceptado el documento sin que quedara registro legal.
+  async function acceptDocument(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb2 = await createClient()
     const { data: { user: u } } = await sb2.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
-    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
+    if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
+      return fail('No tienes permiso para aceptar documentos legales (requiere owner o manager).')
+    }
     const docId = String(formData.get('document_id') || '')
     const docVersion = String(formData.get('document_version') || '')
-    if (!(docId in CURRENT_VERSIONS) || !docVersion) return
+    if (!(docId in CURRENT_VERSIONS) || !docVersion) {
+      return fail('Documento o versión inválidos.')
+    }
     const hdrs = await headers()
     const ip =
       hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -96,7 +104,7 @@ export default async function LegalAcceptancePage() {
     const ua = hdrs.get('user-agent')?.slice(0, 500) || null
     // Triggers en DB son append-only — INSERT directo. Unique idx
     // (tenant_id, document_id, document_version) protege duplicados.
-    await sb2.from('tenant_legal_acceptance').insert({
+    const { error } = await sb2.from('tenant_legal_acceptance').insert({
       tenant_id: m.tenant_id,
       document_id: docId,
       document_version: docVersion,
@@ -105,7 +113,17 @@ export default async function LegalAcceptancePage() {
       ip_address: ip,
       user_agent: ua,
     })
+    if (error) {
+      console.error('[legal.acceptDocument] tenant=%s doc=%s error=%s', m.tenant_id, docId, error.message)
+      // 23505 = unique_violation → ya estaba aceptado; tratamos como éxito idempotente.
+      if (error.code === '23505') {
+        revalidatePath('/dashboard/settings/legal')
+        return ok('Este documento ya estaba aceptado.')
+      }
+      return fail(`No se pudo registrar la aceptación: ${error.message}`)
+    }
     revalidatePath('/dashboard/settings/legal')
+    return ok('Aceptación registrada.')
   }
 
   return (

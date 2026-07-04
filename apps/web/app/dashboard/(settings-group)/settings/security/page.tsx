@@ -32,9 +32,12 @@ interface MfaState {
   totpEnrolled: boolean
   factorId: string | null
   recoveryCodesCount: number
+  /** false si CORE_API no respondió el conteo — la UI NO debe mostrar "0
+   *  códigos" ni la alarma de "pocos códigos" en ese caso (sería falsa). */
+  recoveryCountAvailable: boolean
 }
 
-async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
+async function getMfaState(): Promise<{ state: MfaState; userId: string; userEmail: string | undefined }> {
   const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const { data: { session } } = await sb.auth.getSession()
@@ -44,8 +47,11 @@ async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
   const { data: factorsData } = await sb.auth.mfa.listFactors()
   const totpFactor = factorsData?.totp?.find(f => f.status === 'verified') || null
 
-  // Contar recovery codes (backend custom).
+  // Contar recovery codes (backend custom). Distinguimos "0 códigos" (dato
+  // real) de "no se pudo consultar" (fallo de red/servicio) — enmascarar el
+  // segundo como 0 dispararía una alarma falsa de "te quedan pocos códigos".
   let count = 0
+  let countAvailable = false
   try {
     const res = await fetch(`${CORE_API_URL}/api/v1/mfa/recovery-codes/count`, {
       headers: { 'Authorization': `Bearer ${session.access_token}` },
@@ -54,9 +60,10 @@ async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
     if (res.ok) {
       const data = await res.json()
       count = Number(data.count || 0)
+      countAvailable = true
     }
   } catch {
-    // best-effort
+    // best-effort — countAvailable queda en false y la UI lo surfacea.
   }
 
   return {
@@ -64,8 +71,10 @@ async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
       totpEnrolled: !!totpFactor,
       factorId: totpFactor?.id || null,
       recoveryCodesCount: count,
+      recoveryCountAvailable: countAvailable,
     },
     userId: user.id,
+    userEmail: user.email,
   }
 }
 
@@ -75,10 +84,9 @@ export default async function SecurityPage(
   }
 ) {
   const searchParams = await props.searchParams;
-  const { state, userId } = await getMfaState()
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  // getMfaState ya autentica (getUser) y redirige a /login si no hay sesión;
+  // reutilizamos su resultado en vez de crear un segundo client + getUser.
+  const { state, userId, userEmail } = await getMfaState()
 
   // Rev. 109 J.2.4.3 — detectar sesión recovery (cookie HttpOnly seteada
   // por /api/mfa/recovery-codes/verify cuando user usó recovery code).
@@ -90,7 +98,7 @@ export default async function SecurityPage(
   // F83: verificar firma HMAC (ligada al user + expiry), no `=== '1'`.
   const isRecoverySession = await verifyRecoveryCookie(
     recoveryCookieStore.get('mfa_recovery_session')?.value,
-    user.id,
+    userId,
     Math.floor(Date.now() / 1000),
   )
 
@@ -128,7 +136,7 @@ export default async function SecurityPage(
         <h1 className="text-2xl font-semibold">Seguridad</h1>
         <p className="text-sm text-muted-foreground">
           Gestiona tu contraseña y autenticación de dos factores (MFA TOTP) para
-          proteger tu cuenta personal: <code className="text-xs">{user.email}</code>.
+          proteger tu cuenta personal: <code className="text-xs">{userEmail}</code>.
         </p>
       </header>
 
@@ -182,7 +190,7 @@ export default async function SecurityPage(
         <p>
           <strong>¿Perdiste tu authenticator?</strong> Inicia sesión con uno de
           tus códigos de respaldo. Si también los perdiste, escribe a
-          soporte@konvi.com.
+          soporte@konvi.co.
         </p>
         <p>
           Recomendado: regenera los códigos cada 3-6 meses o si sospechas

@@ -346,7 +346,8 @@ export default function AveonlineCarriersSection() {
         </div>
       ) : prefs.length === 0 ? null : (
         <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[32rem]">
             <thead className="bg-muted/40">
               <tr className="text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Carrier</th>
@@ -448,6 +449,7 @@ export default function AveonlineCarriersSection() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

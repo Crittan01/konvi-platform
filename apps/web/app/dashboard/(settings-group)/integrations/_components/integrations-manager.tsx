@@ -8,6 +8,7 @@ import { DisconnectIntegrationButton } from './disconnect-button'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { webhookUrl } from '@/lib/webhook-urls'
 import {
   Plug, CheckCircle2, XCircle, AlertCircle, ExternalLink,
   Bot, SendHorizonal, ShieldCheck, Package, Store, Clock,
@@ -263,7 +264,7 @@ export function IntegrationsManager(props: Props) {
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al probar Telegram</p>
-            {tgMsg && <p className="text-xs text-red-700/80 mt-0.5 font-mono">{decodeURIComponent(tgMsg)}</p>}
+            {tgMsg && <p className="text-xs text-red-700/80 mt-0.5 font-mono">{tgMsg}</p>}
             {tgMsg?.includes('403') && <p className="text-xs text-red-700/90 mt-1.5">El grupo fue eliminado o el bot fue expulsado. Desconecta Telegram, crea un nuevo grupo, agrega el bot como miembro y reconecta.</p>}
             {tgMsg?.includes('400') && <p className="text-xs text-red-700/90 mt-1.5">El Chat ID no es válido. Debe ser negativo (ej: -1001234567890).</p>}
             {tgMsg?.includes('401') && <p className="text-xs text-red-700/90 mt-1.5">Bot Token inválido o revocado. Desconecta y regenera en @BotFather → /token.</p>}
@@ -283,7 +284,7 @@ export function IntegrationsManager(props: Props) {
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al probar WhatsApp</p>
-            {waMsg && <p className="text-xs text-red-700/80 mt-0.5">{decodeURIComponent(waMsg)}</p>}
+            {waMsg && <p className="text-xs text-red-700/80 mt-0.5">{waMsg}</p>}
           </div>
         </div>
       )}
@@ -300,16 +301,18 @@ export function IntegrationsManager(props: Props) {
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Error al conectar/probar Aveonline</p>
-            {aveMsg && <p className="text-xs text-red-700/80 mt-0.5">{decodeURIComponent(aveMsg)}</p>}
+            {aveMsg && <p className="text-xs text-red-700/80 mt-0.5">{aveMsg}</p>}
           </div>
         </div>
       )}
 
       {/* Filter tabs */}
-      <div className="flex gap-1 flex-wrap">
+      <div role="tablist" aria-label="Filtrar conectores por categoría" className="flex gap-1 flex-wrap">
         {TABS.map(tab => (
           <button
             key={tab.key}
+            role="tab"
+            aria-selected={activeFilter === tab.key}
             onClick={() => setActiveFilter(tab.key)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               activeFilter === tab.key
@@ -772,7 +775,7 @@ export function IntegrationsManager(props: Props) {
                           <div className="flex gap-2">
                             <span className="h-4 w-4 rounded-full bg-violet-500/25 text-violet-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-px">3</span>
                             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">https://konvi-api.onrender.com/api/v1/webhooks/wompi</span>
+                              Configura el webhook en Wompi: <span className="font-mono text-[10px] text-foreground break-all">{webhookUrl('wompi')}</span>
                             </p>
                           </div>
                         </div>
@@ -965,9 +968,9 @@ export function IntegrationsManager(props: Props) {
             <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>
               <b className="text-foreground">¿Necesitas configuración detallada?</b>
-              {' '}Selecciona la categoría correspondiente arriba (Logística para Envía,
-              Canal para WhatsApp, Pagos para Wompi, etc.) — verás opciones avanzadas
-              específicas de cada conector.
+              {' '}Los filtros de arriba solo muestran u ocultan las tarjetas por categoría.
+              Para las opciones avanzadas de cada conector (webhooks, plantillas, carriers,
+              rotación de secretos) usa el botón <b className="text-foreground">Gestionar panel completo</b> dentro de la tarjeta.
             </span>
           </div>
         </div>

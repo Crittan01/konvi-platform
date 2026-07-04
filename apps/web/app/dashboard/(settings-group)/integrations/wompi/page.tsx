@@ -71,7 +71,14 @@ export default async function WompiPanelPage(
   }
 
   const connected = integration?.status === 'connected'
-  const mode = (integration?.meta_data?.mode as string) ?? (connected ? 'producción' : null)
+  // El hub persiste meta.environment ('production' | 'sandbox') — NO meta.mode.
+  // Leerlo de la fuente correcta evita mostrar 'producción' a tenants sandbox.
+  const environment = (integration?.meta_data?.environment as string) ?? null
+  const mode = environment === 'production'
+    ? 'Producción'
+    : environment === 'sandbox'
+      ? 'Sandbox'
+      : null
   const merchantId = (integration?.meta_data?.merchant_id as string)
     ?? (integration?.credentials?.merchant_id as string)
     ?? null

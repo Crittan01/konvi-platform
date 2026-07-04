@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Loader2, PauseCircle } from 'lucide-react'
 
 interface Props {
@@ -33,16 +34,25 @@ export default function InactivateMemberButton({ userId, memberEmail, action }: 
 
   return (
     <>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={() => setOpen(true)}
-        className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10"
-      >
-        <PauseCircle className="h-3 w-3 mr-1" />
-        Inactivar
-      </Button>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setOpen(true)}
+              className="text-xs h-7 px-2.5 text-amber-700 border-amber-700/30 hover:bg-amber-500/10"
+            >
+              <PauseCircle className="h-3 w-3 mr-1" />
+              Inactivar
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Suspende el acceso de forma temporal. Es reversible: puedes reactivar al miembro cuando quieras y conserva su historial.
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
@@ -72,7 +82,7 @@ export default function InactivateMemberButton({ userId, memberEmail, action }: 
             </Button>
             <Button
               size="sm"
-              className="bg-amber-500 hover:bg-amber-400 text-white"
+              className="bg-amber-700 hover:bg-amber-800 text-white"
               onClick={handleConfirm}
               disabled={isPending}
             >

@@ -17,6 +17,7 @@ import {
   CheckCircle2, X, Loader2, KeyRound, RefreshCw, Trash2,
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,9 @@ interface MfaState {
   totpEnrolled: boolean
   factorId: string | null
   recoveryCodesCount: number
+  /** false si el conteo de códigos no se pudo leer del backend (no
+   *  confundir con "0 códigos"). Ver security/page.tsx getMfaState. */
+  recoveryCountAvailable: boolean
 }
 
 interface Props {
@@ -41,6 +45,7 @@ interface Props {
 }
 
 export function SecurityForm({ initialState, userId, isRecoverySession }: Props) {
+  const confirm = useConfirm()
   const [state, setState] = useState(initialState)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -141,12 +146,29 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
       if (!res.ok) throw new Error('Error generando códigos')
       const data = await res.json()
       setRecoveryCodes(data.codes)
-      setState(s => ({ ...s, recoveryCodesCount: data.codes.length }))
+      setState(s => ({ ...s, recoveryCodesCount: data.codes.length, recoveryCountAvailable: true }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error desconocido')
     } finally {
       setBusy(null)
     }
+  }
+
+  // Regenerar desde el botón "Regenerar códigos": destructivo — invalida los
+  // 8 códigos anteriores de inmediato. Exige confirmación explícita (a
+  // diferencia de la generación interna del enroll, que no tiene previos que
+  // revocar). Ver gap security_mfa "Regenerar revoca sin confirmación".
+  const regenerateRecoveryCodes = async () => {
+    const ok = await confirm({
+      title: '¿Regenerar códigos de respaldo?',
+      description:
+        'Los códigos anteriores dejarán de funcionar de inmediato. Si tenías una copia guardada o descargada, ya no servirá. Guarda los nuevos apenas se muestren.',
+      confirmLabel: 'Regenerar',
+      cancelLabel: 'Cancelar',
+      destructive: true,
+    })
+    if (!ok) return
+    await generateRecoveryCodes()
   }
 
   const downloadCodes = () => {
@@ -161,7 +183,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
       ...recoveryCodes,
       ``,
       `Si pierdes acceso al authenticator + estos códigos:`,
-      `Escribe a soporte@konvi.com con tu document_number.`,
+      `Escribe a soporte@konvi.co con tu número de documento.`,
     ].join('\n')
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -200,7 +222,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
     try {
       const { error: unenrollErr } = await sb.auth.mfa.unenroll({ factorId: state.factorId })
       if (unenrollErr) throw new Error(unenrollErr.message)
-      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0 })
+      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0, recoveryCountAvailable: true })
       setFeedback('Autenticador anterior desactivado. Escanea el nuevo QR con tu authenticator.')
 
       const { data, error: e } = await sb.auth.mfa.enroll({ factorType: 'totp' })
@@ -248,7 +270,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
       }
       if (!res.ok || !data.ok) throw new Error(data.detail || 'Código inválido o expirado')
 
-      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0 })
+      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0, recoveryCountAvailable: true })
       setFeedback('Autenticador anterior desactivado. Escanea el nuevo QR.')
       setOpenDialog(null)
       setRecoveryCodeInput('')
@@ -285,16 +307,31 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
     try {
       const { error: e } = await sb.auth.mfa.unenroll({ factorId: state.factorId })
       if (e) throw new Error(e.message)
-      // Limpiar recovery codes también.
+      // Limpiar recovery codes también. El factor TOTP ya quedó desactivado;
+      // si el clear falla NO revertimos, pero SÍ lo surfaceamos: prometemos en
+      // el diálogo que "los códigos también se eliminarán", así que un fallo
+      // silencioso dejaría códigos vivos contradiciendo la UI.
       const { data: { session } } = await sb.auth.getSession()
+      let clearFailed = false
       if (session) {
-        await fetch('/api/mfa/recovery-codes/clear', {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${session.access_token}` },
-        }).catch(() => null)
+        try {
+          const clearRes = await fetch('/api/mfa/recovery-codes/clear', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${session.access_token}` },
+          })
+          if (!clearRes.ok) clearFailed = true
+        } catch {
+          clearFailed = true
+        }
+      } else {
+        clearFailed = true
       }
-      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0 })
-      setFeedback('MFA desactivada.')
+      setState({ totpEnrolled: false, factorId: null, recoveryCodesCount: 0, recoveryCountAvailable: true })
+      if (clearFailed) {
+        setFeedback('MFA desactivada. Nota: no pudimos eliminar los códigos de respaldo anteriores en el servidor; ya no dan acceso porque MFA está apagado, pero regenera si reactivas MFA.')
+      } else {
+        setFeedback('MFA desactivada.')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error desconocido')
     } finally {
@@ -307,14 +344,14 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
   return (
     <div className="space-y-4">
       {feedback && (
-        <div className="rounded-md border border-emerald-700 bg-emerald-50 p-3 flex items-start gap-2">
+        <div role="status" aria-live="polite" className="rounded-md border border-emerald-700 bg-emerald-50 p-3 flex items-start gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-700 mt-0.5 shrink-0" />
           <p className="text-sm text-emerald-800">{feedback}</p>
         </div>
       )}
 
       {error && (
-        <div className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
+        <div role="alert" aria-live="assertive" className="rounded-md border border-red-700 bg-red-50 p-3 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
           <p className="text-sm text-red-800">{error}</p>
         </div>
@@ -403,10 +440,11 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
               </p>
             </div>
             <div className="space-y-2">
-              <label className="block text-sm font-medium">
+              <label htmlFor="mfa-enroll-code" className="block text-sm font-medium">
                 Código de 6 dígitos
               </label>
               <input
+                id="mfa-enroll-code"
                 type="text"
                 value={enrollment.code}
                 onChange={e =>
@@ -457,13 +495,26 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
                 {state.totpEnrolled
-                  ? `Tu cuenta requiere código de 6 dígitos al iniciar sesión. Tienes ${state.recoveryCodesCount} código(s) de respaldo disponibles.`
+                  ? (state.recoveryCountAvailable
+                      ? `Tu cuenta requiere código de 6 dígitos al iniciar sesión. Tienes ${state.recoveryCodesCount} código(s) de respaldo disponibles.`
+                      : 'Tu cuenta requiere código de 6 dígitos al iniciar sesión.')
                   : 'Recomendado para proteger tu cuenta contra accesos no autorizados.'}
               </p>
             </div>
           </div>
 
-          {state.totpEnrolled && state.recoveryCodesCount < 3 && (
+          {state.totpEnrolled && !state.recoveryCountAvailable && (
+            <div role="status" className="rounded-md border border-amber-700 bg-amber-50 p-2 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-800">
+                No pudimos consultar cuántos códigos de respaldo te quedan (el
+                servicio no respondió). Recarga la página; si persiste, regenera
+                tus códigos para asegurarte de tener acceso de respaldo.
+              </p>
+            </div>
+          )}
+
+          {state.totpEnrolled && state.recoveryCountAvailable && state.recoveryCodesCount < 3 && (
             <div className="rounded-md border border-amber-700 bg-amber-50 p-2 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
               <p className="text-xs text-amber-800">
@@ -495,7 +546,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
               <>
                 <button
                   type="button"
-                  onClick={generateRecoveryCodes}
+                  onClick={regenerateRecoveryCodes}
                   disabled={busy === 'codes'}
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border hover:bg-accent disabled:opacity-50 text-sm"
                 >
@@ -585,8 +636,9 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 my-2">
-            <label className="block text-sm font-medium">Código de respaldo</label>
+            <label htmlFor="mfa-reenroll-recovery-code" className="block text-sm font-medium">Código de respaldo</label>
             <input
+              id="mfa-reenroll-recovery-code"
               type="text"
               value={recoveryCodeInput}
               onChange={e => setRecoveryCodeInput(e.target.value.toUpperCase())}
@@ -601,7 +653,7 @@ export function SecurityForm({ initialState, userId, isRecoverySession }: Props)
               className="w-full px-3 py-2 rounded-md border border-border bg-background font-mono text-base text-center"
             />
             {error && (
-              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+              <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-700 rounded px-2 py-1">
                 {error}
               </p>
             )}

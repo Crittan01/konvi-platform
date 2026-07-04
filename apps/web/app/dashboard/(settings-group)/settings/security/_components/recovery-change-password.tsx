@@ -72,7 +72,7 @@ export function RecoveryChangePassword() {
   return (
     <div className="space-y-3">
       {success && (
-        <div className="rounded-md border border-emerald-700 bg-emerald-50 p-2 flex items-start gap-2">
+        <div role="status" aria-live="polite" className="rounded-md border border-emerald-700 bg-emerald-50 p-2 flex items-start gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-700 mt-0.5 shrink-0" />
           <p className="text-sm text-emerald-800">
             Contraseña actualizada. Tu próximo inicio de sesión usará la nueva.
@@ -80,17 +80,18 @@ export function RecoveryChangePassword() {
         </div>
       )}
       {error && (
-        <div className="rounded-md border border-red-700 bg-red-50 p-2 flex items-start gap-2">
+        <div role="alert" aria-live="assertive" className="rounded-md border border-red-700 bg-red-50 p-2 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
           <p className="text-sm text-red-800">{error}</p>
         </div>
       )}
 
       <div>
-        <label className="block text-sm font-medium mb-1">
+        <label htmlFor="recovery-pwd-code" className="block text-sm font-medium mb-1">
           Código de respaldo (verificación adicional)
         </label>
         <input
+          id="recovery-pwd-code"
           type="text"
           value={recoveryCode}
           onChange={e => setRecoveryCode(e.target.value.toUpperCase())}
@@ -104,8 +105,9 @@ export function RecoveryChangePassword() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">Nueva contraseña</label>
+        <label htmlFor="recovery-pwd-new" className="block text-sm font-medium mb-1">Nueva contraseña</label>
         <input
+          id="recovery-pwd-new"
           type="password"
           value={newPassword}
           onChange={e => setNewPassword(e.target.value)}
@@ -116,8 +118,9 @@ export function RecoveryChangePassword() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">Confirmar contraseña</label>
+        <label htmlFor="recovery-pwd-confirm" className="block text-sm font-medium mb-1">Confirmar contraseña</label>
         <input
+          id="recovery-pwd-confirm"
           type="password"
           value={confirmPassword}
           onChange={e => setConfirmPassword(e.target.value)}

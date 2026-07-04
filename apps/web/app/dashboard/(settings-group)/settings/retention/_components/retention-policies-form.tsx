@@ -1,14 +1,38 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2, Save, Trash2 } from 'lucide-react'
 
-type Entity = 'messages' | 'conversations' | 'contacts_inactive' | 'pii_access_log'
+export type Entity = 'messages' | 'conversations' | 'contacts_inactive' | 'pii_access_log'
 type Action = 'archive' | 'soft_delete' | 'hard_delete' | 'anonymize'
+type ActionResult = { ok: boolean; error?: string; message?: string }
+
+/**
+ * Única acción implementada por entidad en fn_apply_retention
+ * (supabase/migrations/20260508010000_retention_per_tenant_fix.sql).
+ * El cron hace `ELSE CONTINUE` para cualquier otra combinación → si la UI
+ * dejara elegir archive/anonymize, el tenant creería configurar una política
+ * de purga que en realidad NUNCA se ejecuta (gap de cumplimiento). Por eso la
+ * acción es fija por entidad y el server la fuerza a este valor.
+ */
+export const IMPLEMENTED_ACTION: Record<Entity, Action> = {
+  messages: 'hard_delete',
+  conversations: 'soft_delete',
+  contacts_inactive: 'soft_delete',
+  pii_access_log: 'hard_delete',
+}
+
+const ACTION_LABEL_ES: Record<Action, string> = {
+  hard_delete: 'Eliminación definitiva',
+  soft_delete: 'Archivado (reversible)',
+  archive: 'Archivado',
+  anonymize: 'Anonimización',
+}
 
 type Policy = {
   id: string
@@ -24,8 +48,8 @@ type Props = {
   overrides: Policy[]
   canWrite: boolean
   entityLabels: Record<Entity, { label: string; description: string }>
-  saveAction: (fd: FormData) => Promise<void>
-  deleteAction: (fd: FormData) => Promise<void>
+  saveAction: (fd: FormData) => Promise<ActionResult>
+  deleteAction: (fd: FormData) => Promise<ActionResult>
 }
 
 const ALL_ENTITIES: Entity[] = ['messages', 'conversations', 'contacts_inactive', 'pii_access_log']
@@ -43,22 +67,34 @@ export default function RetentionPoliciesForm({
   const handleSave = (entity: Entity, fd: FormData) => {
     setBusyEntity(entity)
     startTransition(async () => {
-      try { await saveAction(fd) } finally { setBusyEntity(null) }
+      try {
+        const r = await saveAction(fd)
+        if (r.ok) toast.success(r.message || 'Plazo de retención guardado.')
+        else toast.error(r.error || 'No se pudo guardar el plazo.')
+      } catch {
+        toast.error('Error inesperado al guardar el plazo.')
+      } finally { setBusyEntity(null) }
     })
   }
 
   const handleDelete = async (entity: Entity, id: string) => {
     if (!(await confirmar({
-      title: `¿Eliminar el override de ${entityLabels[entity].label}?`,
-      description: 'La retención de tu tenant volverá a regirse por el default global.',
-      confirmLabel: 'Eliminar override',
+      title: `¿Restaurar el plazo predeterminado de ${entityLabels[entity].label}?`,
+      description: 'La retención de tu cuenta volverá a regirse por el plazo global.',
+      confirmLabel: 'Restaurar predeterminado',
       destructive: true,
     }))) return
     setBusyEntity(entity)
     const fd = new FormData()
     fd.set('id', id)
     startTransition(async () => {
-      try { await deleteAction(fd) } finally { setBusyEntity(null) }
+      try {
+        const r = await deleteAction(fd)
+        if (r.ok) toast.success(r.message || 'Restaurado al plazo predeterminado.')
+        else toast.error(r.error || 'No se pudo restaurar el plazo.')
+      } catch {
+        toast.error('Error inesperado al restaurar el plazo.')
+      } finally { setBusyEntity(null) }
     })
   }
 
@@ -69,7 +105,7 @@ export default function RetentionPoliciesForm({
         const ov = overridesByEntity.get(entity)
         const labels = entityLabels[entity]
         const effectiveTtl = ov?.ttl_days ?? def?.ttl_days ?? 0
-        const effectiveAction = ov?.action ?? def?.action ?? 'hard_delete'
+        const action = IMPLEMENTED_ACTION[entity]
         const isOverridden = !!ov
         const busy = busyEntity === entity && isPending
         return (
@@ -85,15 +121,16 @@ export default function RetentionPoliciesForm({
                   {labels.label}
                   {isOverridden && (
                     <span className="text-xs font-normal text-blue-700 bg-blue-700/10 px-1.5 py-0.5 rounded">
-                      Override per-tenant
+                      Plazo personalizado
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{labels.description}</p>
                 <p className="text-xs text-muted-foreground/70 mt-0.5">
-                  Default global: <strong>{def?.ttl_days ?? '?'} días · {def?.action ?? '?'}</strong>
+                  Al cumplirse el plazo: <strong>{ACTION_LABEL_ES[action]}</strong>
+                  {' · '}Predeterminado global: <strong>{def?.ttl_days ?? '?'} días</strong>
                   {isOverridden && (
-                    <> → Tu tenant: <strong className="text-blue-700">{effectiveTtl} días · {effectiveAction}</strong></>
+                    <> → Tu cuenta: <strong className="text-blue-700">{effectiveTtl} días</strong></>
                   )}
                 </p>
               </div>
@@ -106,29 +143,16 @@ export default function RetentionPoliciesForm({
               >
                 <input type="hidden" name="entity" value={entity} />
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">TTL días (1-3650)</Label>
+                  <Label className="text-xs text-muted-foreground">Conservar durante (días, 1-3650)</Label>
                   <Input
                     type="number"
                     name="ttl_days"
                     min={1}
                     max={3650}
                     defaultValue={effectiveTtl}
-                    className="h-8 w-28 text-sm"
+                    className="h-8 w-32 text-sm"
                     required
                   />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Acción</Label>
-                  <select
-                    name="action"
-                    defaultValue={effectiveAction}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    <option value="archive">archive</option>
-                    <option value="soft_delete">soft_delete</option>
-                    <option value="hard_delete">hard_delete</option>
-                    <option value="anonymize">anonymize</option>
-                  </select>
                 </div>
                 <Button
                   type="submit"
@@ -139,7 +163,7 @@ export default function RetentionPoliciesForm({
                 >
                   {busy
                     ? <><Loader2 className="h-3 w-3 animate-spin" />Guardando...</>
-                    : <><Save className="h-3 w-3" />Guardar override</>}
+                    : <><Save className="h-3 w-3" />Guardar plazo</>}
                 </Button>
                 {isOverridden && ov && (
                   <Button
@@ -151,7 +175,7 @@ export default function RetentionPoliciesForm({
                     className="h-8 text-xs text-amber-700 hover:bg-amber-700/10 gap-1.5"
                   >
                     <Trash2 className="h-3 w-3" />
-                    Volver al default
+                    Volver al predeterminado
                   </Button>
                 )}
               </form>

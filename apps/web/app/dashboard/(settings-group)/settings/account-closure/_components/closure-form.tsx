@@ -8,7 +8,7 @@
  *  - soft_deleted_grace_period: banner amber + Cancelar eliminación + countdown
  *  - hard_deleted: not-reachable (page redirect a /dashboard antes)
  */
-import { useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { AlertTriangle, Download, Trash2, X, Loader2, CheckCircle2, ChevronRight } from 'lucide-react'
 import {
   requestTenantExport,
@@ -40,6 +40,31 @@ export function ClosureForm({ tenantName, status }: Props) {
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [confirmationPhrase, setConfirmationPhrase] = useState('')
   const [reason, setReason] = useState('')
+  const modalRef = useRef<HTMLDivElement>(null)
+  const firstFieldRef = useRef<HTMLInputElement>(null)
+
+  // a11y del modal destructivo: Escape para cerrar, foco inicial al 1er campo y
+  // focus-trap con Tab (antes el foco se quedaba tras el overlay).
+  useEffect(() => {
+    if (!showRequestModal) return
+    firstFieldRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !pending) { setShowRequestModal(false); return }
+      if (e.key !== 'Tab') return
+      const root = modalRef.current
+      if (!root) return
+      const focusables = root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      if (focusables.length === 0) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [showRequestModal, pending])
 
   const expectedPhrase = `ELIMINAR ${tenantName}`
   const phraseOk = confirmationPhrase.trim() === expectedPhrase
@@ -67,10 +92,25 @@ export function ClosureForm({ tenantName, status }: Props) {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      setFeedback({
-        kind: 'ok',
-        text: 'Export descargado. Guárdalo en lugar seguro — contiene PII.',
-      })
+      // El backend trunca a 10.000 filas por tabla (MAX_ROWS_PER_TABLE) y lo marca
+      // en summary.truncated_tables. Antes solo vivía dentro del JSON: el usuario
+      // creía tener "TODA" su información sin saber que faltaban filas.
+      const truncated = (result.data as { summary?: { truncated_tables?: string[] } })
+        ?.summary?.truncated_tables
+      if (truncated && truncated.length > 0) {
+        setFeedback({
+          kind: 'ok',
+          text:
+            `Export descargado (contiene PII, guárdalo seguro). Aviso: algunas tablas ` +
+            `superan 10.000 filas y se truncaron a ese máximo (${truncated.join(', ')}). ` +
+            `Para un export completo escríbenos a soporte.`,
+        })
+      } else {
+        setFeedback({
+          kind: 'ok',
+          text: 'Export descargado. Guárdalo en lugar seguro — contiene PII.',
+        })
+      }
     })
   }
 
@@ -132,7 +172,7 @@ export function ClosureForm({ tenantName, status }: Props) {
                 </p>
               )}
               <p className="text-xs text-amber-700 mt-2">
-                Tus credenciales de integraciones (Wompi/Envia/Meta/MeLi/
+                Tus credenciales de integraciones (Wompi/Aveonline/Meta/MeLi/
                 Telegram) fueron invalidadas. Si cancelas, deberás
                 reconectarlas.
               </p>
@@ -211,7 +251,7 @@ export function ClosureForm({ tenantName, status }: Props) {
             </p>
             <ul className="text-sm text-red-800 mt-2 space-y-1 list-disc list-inside">
               <li>Período de gracia de <strong>30 días</strong> — cancelable.</li>
-              <li>Tus integraciones (Wompi/Envia/Meta/MeLi/Telegram) se invalidan inmediatamente.</li>
+              <li>Tus integraciones (Wompi/Aveonline/Meta/MeLi/Telegram) se invalidan inmediatamente.</li>
               <li>Audit log + consent se preservan 5 años (Ley 1581 Art. 22).</li>
               <li>Tras 30d, eliminación PERMANENTE e irreversible.</li>
             </ul>
@@ -234,10 +274,16 @@ export function ClosureForm({ tenantName, status }: Props) {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="closure-modal-title"
+          onClick={() => { if (!pending) setShowRequestModal(false) }}
         >
-          <div className="w-full max-w-lg rounded-lg border border-red-700 bg-card shadow-xl">
+          <div
+            ref={modalRef}
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-lg rounded-lg border border-red-700 bg-card shadow-xl"
+          >
             <header className="flex items-center justify-between p-4 border-b border-border">
-              <h2 className="text-base font-semibold text-red-900 inline-flex items-center gap-2">
+              <h2 id="closure-modal-title" className="text-base font-semibold text-red-900 inline-flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5" /> Confirmar eliminación
               </h2>
               <button
@@ -256,6 +302,7 @@ export function ClosureForm({ tenantName, status }: Props) {
                   Escribe exactamente <code className="font-mono bg-muted px-1.5 py-0.5 rounded">ELIMINAR {tenantName}</code> para confirmar
                 </label>
                 <input
+                  ref={firstFieldRef}
                   type="text"
                   value={confirmationPhrase}
                   onChange={e => setConfirmationPhrase(e.target.value)}

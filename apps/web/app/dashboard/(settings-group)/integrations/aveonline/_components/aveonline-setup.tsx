@@ -475,8 +475,8 @@ export default function AveonlineSetup({
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-5 space-y-3">
         <h3 className="font-semibold text-destructive">Zona de riesgo</h3>
         <p className="text-sm text-muted-foreground">
-          Desconectar Aveonline detiene cotizaciones de este provider. El bot
-          volverá a usar Envia si está configurado como provider activo. Las
+          Desconectar Aveonline detiene las cotizaciones de envío: el bot dejará
+          de ofrecer costos de despacho hasta que vuelvas a conectarlo. Las
           guías ya generadas siguen rastreándose por sus tracking_numbers.
         </p>
         {error && (

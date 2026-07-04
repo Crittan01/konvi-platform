@@ -43,6 +43,7 @@ export default function ChangeRoleButton({ userId, memberEmail, currentRole, act
         <select
           value={selectedRole}
           onChange={e => setSelectedRole(e.target.value)}
+          aria-label={`Nuevo rol para ${memberEmail}`}
           className="text-xs rounded-lg border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
         >
           <option value="manager">Supervisor</option>

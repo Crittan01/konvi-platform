@@ -151,7 +151,7 @@ export default async function SettingsPage() {
                 )}
 
                 {/* Campos de identidad */}
-                <ActionResultForm action={saveTenant} className="space-y-4">
+                <ActionResultForm action={saveTenant} successMessage="Identidad del negocio guardada" className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium" htmlFor="tenant-name">
@@ -227,7 +227,7 @@ export default async function SettingsPage() {
                 <Bot className="h-3.5 w-3.5 shrink-0" />
                 Identidad del negocio (qué/por qué). El COMPORTAMIENTO del bot (cómo responde, ejemplos) se configura en IA y Conocimiento → Agentes IA.
               </div>
-              <ActionResultForm action={saveFilosofia} className="space-y-4">
+              <ActionResultForm action={saveFilosofia} successMessage="Filosofía guardada" className="space-y-4">
                 {/* Tono de comunicación */}
                 <div className="space-y-2">
                   <Label className="text-xs font-medium">Tono de comunicación</Label>
@@ -323,11 +323,11 @@ export default async function SettingsPage() {
             return isOwner && (
               <FormSection id="section-horario" icon={Clock} title="Horario y disponibilidad"
                 description="Configura cuándo hay asesores disponibles. El bot informará a clientes que escriban fuera de ese horario.">
-                <ActionResultForm action={saveHorarioAsesor} className="space-y-4">
+                <ActionResultForm action={saveHorarioAsesor} successMessage="Horario guardado" className="space-y-4">
 
                   {/* Indicador: bot 24/7 */}
                   <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-700/20 px-3 py-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="h-2 w-2 rounded-full bg-emerald-600 shrink-0" />
                     <span className="text-xs text-emerald-700 font-medium">Bot de ventas: activo 24/7 (automático)</span>
                   </div>
 
@@ -390,10 +390,10 @@ export default async function SettingsPage() {
             )
           })()}
 
-          {/* Dirección de despacho — solo para cotizaciones Envia */}
+          {/* Dirección de despacho — solo para cotizaciones Aveonline (ADR-0019) */}
           {isOwner && (
-            <FormSection id="section-despacho" icon={Truck} title="Dirección de despacho principal — Envia"
-              description="Dirección desde donde salen físicamente los paquetes (puede ser bodega, no necesariamente una sede pública). Usada por Envia para calcular costos y tiempos de envío.">
+            <FormSection id="section-despacho" icon={Truck} title="Dirección de despacho principal — Aveonline"
+              description="Dirección desde donde salen físicamente los paquetes (puede ser bodega, no necesariamente una sede pública). Usada por Aveonline para calcular costos y tiempos de envío.">
               <ShippingOriginForm
                 initialData={tenant?.shipping_origin}
                 action={saveShippingOrigin}
@@ -469,7 +469,7 @@ export default async function SettingsPage() {
                 anchor: 'section-horario',
               },
               {
-                label: 'Despacho Envia',
+                label: 'Despacho Aveonline',
                 value: hasDespacho ? 'Configurado' : 'Sin configurar',
                 ok: hasDespacho,
                 anchor: 'section-despacho',
@@ -552,7 +552,7 @@ export default async function SettingsPage() {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm">Salud de integraciones</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Estado en tiempo real de WhatsApp, Wompi, Envia, MeLi, Telegram.
+                    Estado en tiempo real de WhatsApp, Wompi, Aveonline, MeLi, Telegram.
                   </p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 mt-2" />
