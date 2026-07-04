@@ -3,15 +3,14 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { CORE_API_URL } from '@/lib/runtime-env'
+import { ok, fail, type ActionResult } from '@/lib/action-result'
 
-// F-doc (Fase 6): las server actions devuelven ActionResult en vez de throw. En prod
-// Next.js reemplaza el message de un throw en Server Action por texto genérico + digest;
-// el operador perdía la causa (fallo del API, validación). Patrón canónico ya en contacts.
-type ActionResult = { ok: boolean; error?: string }
-
-// Rev. 72 — Purchases ahora pasa por el router API (cierra drift D2).
-// Antes este archivo escribía directo a Supabase desde RSC, sin RBAC ni audit.
-// El router /api/v1/purchases valida tenant, RBAC, persiste y dispara audit_log.
+// Rev. 72 — Purchases pasa por el router API (cierra drift D2). El router
+// /api/v1/purchases valida tenant, RBAC, persiste y dispara audit_log.
+//
+// F3 — los fallos ya NO llegan como JSON crudo de FastAPI al alert del browser:
+// apiError() traduce el 422/detalle a copy es-CO y deja rastro server-side
+// (console.error) — antes el error solo existía en el alert efímero del operador.
 
 async function getToken(): Promise<string> {
   const supabase = await createClient()
@@ -31,41 +30,95 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
   })
 }
 
+/**
+ * Traduce el cuerpo de un error del API a copy es-CO. FastAPI devuelve 422 como
+ * `{"detail":[{"type":"greater_than","loc":[...],"msg":"..."}]}` y 4xx de negocio
+ * como `{"detail":"texto"}`. Sin esto, el JSON crudo terminaba en el toast.
+ */
+async function apiError(res: Response, fallback: string): Promise<string> {
+  let raw = ''
+  try {
+    raw = await res.text()
+  } catch {
+    /* sin cuerpo */
+  }
+  // Log server-side para diagnóstico (el operador solo ve copy amable).
+  console.error(`[purchases] API ${res.status} ${res.statusText}: ${raw.slice(0, 500)}`)
+
+  if (res.status === 401 || res.status === 403) {
+    return 'No tienes permisos para esta operación.'
+  }
+  if (res.status === 404) {
+    return 'La orden ya no existe o fue modificada. Refresca la página.'
+  }
+  if (res.status === 409) {
+    return 'La orden cambió de estado. Refresca la página e intenta de nuevo.'
+  }
+  try {
+    const body = JSON.parse(raw) as { detail?: unknown }
+    if (typeof body.detail === 'string') return body.detail
+    if (Array.isArray(body.detail)) {
+      const msgs = body.detail
+        .map((d: { msg?: string }) => (typeof d?.msg === 'string' ? d.msg : null))
+        .filter(Boolean)
+      if (msgs.length) return `Datos inválidos: ${msgs.join('; ')}`
+    }
+  } catch {
+    /* no era JSON */
+  }
+  if (res.status >= 500) return 'El servidor tuvo un problema. Intenta de nuevo en un momento.'
+  return fallback
+}
+
 export async function addSupplier(formData: FormData): Promise<ActionResult> {
   const name = (formData.get('name') as string)?.trim() || ''
-  if (!name) return { ok: false, error: 'El nombre del proveedor es requerido.' }
+  if (!name) return fail('El nombre del proveedor es requerido.')
 
   const body: Record<string, unknown> = { name }
   const email = (formData.get('contact_email') as string)?.trim()
   const phone = (formData.get('phone') as string)?.trim()
-  const lead = parseInt((formData.get('lead_time_days') as string) || '0', 10)
+  const leadRaw = (formData.get('lead_time_days') as string) || ''
   if (email) body.contact_email = email
   if (phone) body.phone = phone
-  if (!Number.isNaN(lead)) body.lead_time_days = lead
+  if (leadRaw.trim() !== '') {
+    const lead = parseInt(leadRaw, 10)
+    if (!Number.isNaN(lead) && lead >= 0) body.lead_time_days = lead
+  }
 
   const res = await apiFetch('/api/v1/purchases/suppliers', {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  // F140/F-doc: no tragar el fallo, pero devolverlo como ActionResult (no throw, que
-  // Next.js enmascara en prod) → el consumidor muestra res.error.
-  if (!res.ok) return { ok: false, error: (await res.text()).slice(0, 200) || 'No se pudo guardar el proveedor' }
+  if (!res.ok) return fail(await apiError(res, 'No se pudo guardar el proveedor.'))
   revalidatePath('/dashboard/purchases')
-  return { ok: true }
+  return ok('Proveedor guardado.')
 }
 
 export async function createPurchaseOrder(formData: FormData): Promise<ActionResult> {
   const supplier_id = (formData.get('supplier_id') as string) || ''
   const itemsStr = (formData.get('items') as string) || ''
-  if (!supplier_id || !itemsStr) return { ok: false, error: 'Falta proveedor o ítems.' }
+  if (!supplier_id) return fail('Selecciona un proveedor.')
+  if (!itemsStr) return fail('Agrega al menos un ítem a la orden.')
 
   let items: Array<{ variation_id: string; quantity: number; unit_cost: number }>
   try {
     items = JSON.parse(itemsStr)
   } catch {
-    return { ok: false, error: 'Ítems con formato inválido.' }
+    return fail('Los ítems tienen un formato inválido.')
   }
-  if (!items.length) return { ok: false, error: 'La orden debe tener al menos un ítem.' }
+  if (!Array.isArray(items) || !items.length) return fail('La orden debe tener al menos un ítem.')
+
+  // Validación de negocio en el boundary: qty entera > 0 y costo >= 0. El backend
+  // también lo valida (gt=0), pero surfaceamos el error en es-CO antes del round-trip.
+  for (const it of items) {
+    if (!it.variation_id) return fail('Hay un ítem sin producto seleccionado.')
+    if (!Number.isInteger(it.quantity) || it.quantity <= 0) {
+      return fail('La cantidad de cada ítem debe ser un número entero mayor a 0.')
+    }
+    if (typeof it.unit_cost !== 'number' || Number.isNaN(it.unit_cost) || it.unit_cost < 0) {
+      return fail('El costo de cada ítem no puede ser negativo.')
+    }
+  }
 
   const expected_str = (formData.get('expected_date') as string) || ''
   const body: Record<string, unknown> = { supplier_id, items }
@@ -75,21 +128,21 @@ export async function createPurchaseOrder(formData: FormData): Promise<ActionRes
     method: 'POST',
     body: JSON.stringify(body),
   })
-  if (!res.ok) return { ok: false, error: (await res.text()).slice(0, 200) || 'No se pudo crear la orden de compra' }
+  if (!res.ok) return fail(await apiError(res, 'No se pudo crear la orden de compra.'))
   revalidatePath('/dashboard/purchases')
-  return { ok: true }
+  return ok('Orden de compra creada.')
 }
 
 export async function cancelPurchaseOrder(poId: string): Promise<ActionResult> {
   const res = await apiFetch(`/api/v1/purchases/${poId}/cancel`, { method: 'POST' })
-  if (!res.ok) return { ok: false, error: (await res.text()).slice(0, 200) || 'No se pudo cancelar la orden' }
+  if (!res.ok) return fail(await apiError(res, 'No se pudo cancelar la orden.'))
   revalidatePath('/dashboard/purchases')
-  return { ok: true }
+  return ok('Orden cancelada.')
 }
 
 export async function receivePurchaseOrder(poId: string): Promise<ActionResult> {
   const res = await apiFetch(`/api/v1/purchases/${poId}/receive`, { method: 'POST' })
-  if (!res.ok) return { ok: false, error: (await res.text()).slice(0, 200) || 'No se pudo recibir la orden' }
+  if (!res.ok) return fail(await apiError(res, 'No se pudo recibir la orden.'))
   revalidatePath('/dashboard/purchases')
-  return { ok: true }
+  return ok('Orden recibida — inventario y costos actualizados.')
 }
