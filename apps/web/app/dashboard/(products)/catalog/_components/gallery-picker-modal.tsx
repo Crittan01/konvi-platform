@@ -12,10 +12,12 @@
  * Este picker permite asociar manualmente desde UI: click en cualquier
  * imagen del grid → setea cover_image_url al public URL del archivo.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { X, Loader2, Image as ImageIcon, Trash2 } from 'lucide-react'
+import { X, Loader2, Image as ImageIcon, Trash2, Info } from 'lucide-react'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+
+const GALLERY_LIMIT = 200
 
 type FileEntry = {
   name: string
@@ -38,6 +40,8 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletingName, setDeletingName] = useState<string | null>(null)
+  const [truncated, setTruncated] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   const fetchGallery = async () => {
     setLoading(true)
@@ -48,22 +52,36 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
       const { data, error: listErr } = await supabase
         .storage
         .from('tenant-media')
-        .list(tenantId, { limit: 200, sortBy: { column: 'created_at', order: 'desc' } })
+        .list(tenantId, { limit: GALLERY_LIMIT, sortBy: { column: 'created_at', order: 'desc' } })
       if (listErr) throw new Error(listErr.message)
+      setTruncated((data?.length ?? 0) >= GALLERY_LIMIT)
 
-      // 2) Cargar productos del tenant para mapear cover_image_url → título.
-      //    Reverse lookup: ¿qué producto, si alguno, usa cada archivo?
-      const { data: prodData, error: prodErr } = await supabase
-        .from('products')
-        .select('title, cover_image_url')
-        .eq('tenant_id', tenantId)
-        .not('cover_image_url', 'is', null)
+      // 2) Reverse lookup: ¿qué producto, si alguno, usa cada archivo? Se consideran TANTO la portada
+      //    del producto (products.cover_image_url) COMO la foto de cada variante (product_variations.image_url)
+      //    — antes solo miraba la portada y marcaba como "sin asignar" fotos que sí usaban las variantes.
+      const [{ data: prodData, error: prodErr }, { data: varData, error: varErr }] = await Promise.all([
+        supabase
+          .from('products')
+          .select('title, cover_image_url')
+          .eq('tenant_id', tenantId)
+          .not('cover_image_url', 'is', null),
+        supabase
+          .from('product_variations')
+          .select('image_url, products(title)')
+          .eq('tenant_id', tenantId)
+          .not('image_url', 'is', null),
+      ])
       if (prodErr) throw new Error(prodErr.message)
+      if (varErr) throw new Error(varErr.message)
       const urlToProduct = new Map<string, string>()
       for (const p of (prodData || [])) {
-        if (p.cover_image_url && p.title) {
-          urlToProduct.set(p.cover_image_url, p.title)
-        }
+        if (p.cover_image_url && p.title) urlToProduct.set(p.cover_image_url, p.title)
+      }
+      for (const v of (varData || []) as { image_url: string | null; products: { title?: string } | { title?: string }[] | null }[]) {
+        if (!v.image_url) continue
+        const prod = Array.isArray(v.products) ? v.products[0] : v.products
+        const title = prod?.title
+        if (title && !urlToProduct.has(v.image_url)) urlToProduct.set(v.image_url, title)
       }
 
       const entries: FileEntry[] = (data || [])
@@ -112,6 +130,15 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tenantId])
 
+  // A11y: cerrar con Escape + enfocar el diálogo al abrir (semántica de diálogo modal).
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    dialogRef.current?.focus()
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   /**
    * Borra el archivo de Storage. Operación destructiva — confirm antes.
    * Si el cover_image_url de algún producto apunta a este archivo, el
@@ -152,16 +179,21 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
       onClick={onClose}
     >
       <div
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] flex flex-col"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gallery-picker-title"
+        tabIndex={-1}
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] flex flex-col focus:outline-none"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
           <div className="flex items-center gap-2">
             <ImageIcon className="h-5 w-5 text-primary" />
-            <h3 className="text-sm font-semibold">Galería del tenant</h3>
+            <h3 id="gallery-picker-title" className="text-sm font-semibold">Galería de imágenes</h3>
             <span className="text-xs text-muted-foreground">
-              · imágenes ya subidas a Storage
+              · fotos que ya subiste
             </span>
           </div>
           <button
@@ -190,6 +222,12 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
             <div className="text-center py-12 text-sm text-muted-foreground">
               No hay imágenes en la galería todavía. Sube alguna desde el
               botón &quot;Subir&quot; del producto.
+            </div>
+          )}
+          {!loading && !error && truncated && (
+            <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-700/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700">
+              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>Mostrando las {GALLERY_LIMIT} imágenes más recientes. Si buscas una más antigua, súbela de nuevo desde el producto.</span>
             </div>
           )}
           {!loading && files.length > 0 && (

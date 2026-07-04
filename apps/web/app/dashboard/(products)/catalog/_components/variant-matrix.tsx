@@ -13,7 +13,8 @@
 import { useState, useCallback } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2, Zap, X } from 'lucide-react'
+import { Plus, Trash2, Zap, X, AlertTriangle } from 'lucide-react'
+import type { ActionResult } from '@/lib/action-result'
 
 interface AttrDef { name: string; values: string[] }
 interface VariantRow { attrs: Record<string, string>; price: string; stock: string; sku: string }
@@ -33,15 +34,17 @@ function labelFromAttrs(attrs: Record<string, string>): string {
 
 interface Props {
   productId: string
-  addVariationAction: (fd: FormData) => Promise<void>
+  addVariationAction: (fd: FormData) => Promise<ActionResult>
   onDone?: () => void
 }
+
+type SaveSummary = { created: number; skipped: number; failed: number; total: number; firstError?: string }
 
 export function VariantMatrixGenerator({ productId, addVariationAction, onDone }: Props) {
   const [defs, setDefs] = useState<AttrDef[]>([{ name: '', values: [''] }])
   const [matrix, setMatrix] = useState<VariantRow[] | null>(null)
   const [saving, setSaving] = useState(false)
-  const [done, setDone] = useState(false)
+  const [summary, setSummary] = useState<SaveSummary | null>(null)
 
   // ── Gestión de atributos ─────────────────────────────────────────────────────
 
@@ -93,29 +96,45 @@ export function VariantMatrixGenerator({ productId, addVariationAction, onDone }
   const handleSave = async () => {
     if (!matrix) return
     setSaving(true)
+    // Conteo HONESTO: se separan las creadas, las saltadas por falta de precio y las que la API rechazó.
+    let created = 0, skipped = 0, failed = 0, firstError: string | undefined
     try {
       for (const row of matrix) {
-        if (!row.price || parseFloat(row.price) <= 0) continue
+        if (!row.price || parseFloat(row.price) <= 0) { skipped++; continue }
         const fd = new FormData()
         fd.append('product_id', productId)
         fd.append('attrs_json', JSON.stringify(row.attrs))
         fd.append('price', row.price)
         fd.append('stock', row.stock || '0')
         if (row.sku) fd.append('sku', row.sku)
-        await addVariationAction(fd)
+        const r = await addVariationAction(fd)
+        if (r.ok) created++
+        else { failed++; if (!firstError) firstError = r.error }
       }
-      setDone(true)
-      onDone?.()
+      setSummary({ created, skipped, failed, total: matrix.length, firstError })
+      // Solo se cierra el generador si todo salió bien; si hubo omitidas/fallos, se deja el reporte visible.
+      if (skipped === 0 && failed === 0) onDone?.()
     } finally {
       setSaving(false)
     }
   }
 
-  if (done) {
+  if (summary) {
+    const clean = summary.skipped === 0 && summary.failed === 0
     return (
-      <div className="p-4 rounded-xl border border-emerald-700/30 bg-emerald-500/5 text-sm text-emerald-700 flex items-center gap-2">
-        <Zap className="h-4 w-4" />
-        {matrix?.length} variantes creadas exitosamente.
+      <div className={`p-4 rounded-xl border text-sm flex items-start gap-2 ${clean ? 'border-emerald-700/30 bg-emerald-500/5 text-emerald-700' : 'border-amber-700/30 bg-amber-500/5 text-amber-700'}`}>
+        {clean ? <Zap className="h-4 w-4 shrink-0 mt-0.5" /> : <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />}
+        <div className="space-y-1">
+          <p className="font-medium">
+            {summary.created} de {summary.total} variante{summary.total !== 1 ? 's' : ''} creada{summary.created !== 1 ? 's' : ''}.
+          </p>
+          {summary.skipped > 0 && <p>{summary.skipped} se omitieron por no tener precio.</p>}
+          {summary.failed > 0 && <p>{summary.failed} fallaron{summary.firstError ? `: ${summary.firstError}` : '.'}</p>}
+          {!clean && (
+            <button type="button" onClick={() => setSummary(null)}
+              className="text-xs underline underline-offset-2 hover:no-underline">Volver a la tabla</button>
+          )}
+        </div>
       </div>
     )
   }

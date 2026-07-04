@@ -9,27 +9,9 @@ import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { createClient } from '@/utils/supabase/client'
 import { buildCategoryPicker } from '../_lib/category-tree'
+import { IMPORT_COLUMNS, buildExampleRow, groupRowsToProducts } from '../_lib/import-template'
 
 interface Props { productCategories: {id: string, display_label: string, parent_id?: string | null}[]; onImported?: () => void; tenantId: string; apiUrl: string }
-
-// Forma de una variante derivada de una fila del Excel (post-parseo de celdas)
-type ImportVariant = {
-  sku: string
-  attrKey: string
-  attrVal: string
-  attrKey2: string
-  attrVal2: string
-  attrKey3: string
-  attrVal3: string
-  pNormal: number
-  pPromo: number | null
-  stock: number
-  weight: number | null
-  length: number | null
-  width: number | null
-  height: number | null
-  vImg: string | null
-}
 
 export default function MassImporter({ productCategories, onImported = () => {}, apiUrl }: Props) {
   // ADR-0027/0029: la categoría OPERATIVA (la que el bot usa para agrupar) es la ÚNICA que se captura.
@@ -40,25 +22,8 @@ export default function MassImporter({ productCategories, onImported = () => {},
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Columnas amigables, ancho, obligatoriedad y descripción
-  const COLUMNS: { label: string; key: string; width: number; req: boolean; desc: string }[] = [
-    { label: 'SKU (Obligatorio)',           key: 'sku',        width: 24, req: true,  desc: 'Identificador único del producto o variante (Ej: JAB-001-20M)' },
-    { label: 'Nombre del Producto',         key: 'nombre',     width: 30, req: true,  desc: 'Nombre principal. Si varias filas tienen el mismo nombre, se agrupan en un solo producto con varias opciones.' },
-    { label: 'Descripción',                key: 'desc',       width: 40, req: false, desc: 'Detalle largo del producto (Solo se procesará el de la primera fila del grupo)' },
-    { label: 'Atributo 1 (Ej: Color)',       key: 'attrKey',   width: 24, req: false, desc: 'Primera propiedad que distingue esta variante. Ej: Color, Talla, Tamaño.' },
-    { label: 'Valor 1 (Ej: Rojo)',           key: 'attrVal',   width: 22, req: false, desc: 'Valor del atributo 1. Ej: Rojo, M, 50ml.' },
-    { label: 'Atributo 2 (Ej: Talla)',       key: 'attrKey2',  width: 24, req: false, desc: 'Segunda propiedad (opcional). Ej: si ya usaste Color, aquí Talla.' },
-    { label: 'Valor 2 (Ej: M)',              key: 'attrVal2',  width: 22, req: false, desc: 'Valor del atributo 2. Ej: M, XL, 100ml.' },
-    { label: 'Atributo 3 (Ej: Aroma)',       key: 'attrKey3',  width: 24, req: false, desc: 'Tercera propiedad (opcional). Para productos con 3 variantes.' },
-    { label: 'Valor 3 (Ej: Lavanda)',        key: 'attrVal3',  width: 22, req: false, desc: 'Valor del atributo 3. Ej: Lavanda, Natural, Extra.' },
-    { label: 'Precio Normal ($)',           key: 'precioNormal', width: 22, req: true,  desc: 'Precio base de venta al público. Solo números y sin comas.' },
-    { label: 'Precio Promocional ($)',      key: 'precioPromo',  width: 26, req: false, desc: 'Opcional. Si lo llenas, este será el precio final y el Normal aparecerá tachado.' },
-    { label: 'Cantidad en Stock',           key: 'stock',      width: 20, req: true,  desc: 'Unidades exactas disponibles en tu bodega.' },
-    { label: 'Peso en kilos (kg)',          key: 'peso',       width: 20, req: false, desc: 'Valor numérico para calcular costos de envío (Ej: 1.5).' },
-    { label: 'Largo del empaque (cm)',      key: 'largo',      width: 24, req: false, desc: 'Medida del paquete enviado.' },
-    { label: 'Ancho del empaque (cm)',      key: 'ancho',      width: 24, req: false, desc: 'Medida del paquete enviado.' },
-    { label: 'Alto del empaque (cm)',       key: 'alto',       width: 24, req: false, desc: 'Medida del paquete enviado.' }
-  ]
+  // Columnas de la plantilla — fuente única en _lib/import-template (compartida con el parser y el test).
+  const COLUMNS = IMPORT_COLUMNS
 
   const handleDownloadTemplate = () => {
     if (!selectedOpCat) { setError('Selecciona la categoría de catálogo primero para la plantilla.'); return }
@@ -99,10 +64,8 @@ export default function MassImporter({ productCategories, onImported = () => {},
       alignment: { horizontal: 'left' as const }
     }
 
-    const exampleRow = [
-      'VAR-ZAP-001-ROJO', 'Zapatillas Comfort Pro', 'Zapatilla deportiva premium para hombre y mujer',
-      'Color', 'Rojo', 120000, 85000, 10, 0.65, 32, 18, 12
-    ]
+    // Fila de ejemplo ALINEADA 1:1 con COLUMNS (16 celdas) — fuente única en _lib/import-template.
+    const exampleRow = buildExampleRow()
 
     COLUMNS.forEach((col, i) => {
       const cellRef  = XLSX.utils.encode_cell({ r: 0, c: i })
@@ -174,42 +137,9 @@ export default function MassImporter({ productCategories, onImported = () => {},
 
       if (rows.length === 0) throw new Error("El archivo está vacío o mal formateado.")
 
-      // Agrupamos filas por Nombre del Producto para saber qué son Variantes del mismo
-      const productsMap: Record<string, { desc: string, img: string | null, variants: ImportVariant[] }> = {}
-      for (const row of rows) {
-        const pName = row['Nombre del Producto']?.toString().trim()
-        const sku = row['SKU (Obligatorio)']?.toString().trim()
-        if (!pName || !sku) continue
-
-        if (!productsMap[pName]) {
-          productsMap[pName] = {
-            desc: row['Descripción']?.toString().trim(),
-            img: null,
-            variants: []
-          }
-        }
-        
-        productsMap[pName].variants.push({
-          sku: sku,
-          attrKey: row['Atributo 1 (Ej: Color)']?.toString().trim() || 'Genérico',
-          attrVal: row['Valor 1 (Ej: Rojo)']?.toString().trim()    || 'Estándar',
-          attrKey2: row['Atributo 2 (Ej: Talla)']?.toString().trim() || '',
-          attrVal2: row['Valor 2 (Ej: M)']?.toString().trim()        || '',
-          attrKey3: row['Atributo 3 (Ej: Aroma)']?.toString().trim() || '',
-          attrVal3: row['Valor 3 (Ej: Lavanda)']?.toString().trim()   || '',
-          pNormal: parseFloat(row['Precio Normal ($)']) || 0,
-          pPromo: parseFloat(row['Precio Promocional ($)']) || null,
-          stock: parseInt(row['Cantidad en Stock']) || 0,
-          weight: parseFloat(row['Peso en kilos (kg)']) || null,
-          length: parseFloat(row['Largo del empaque (cm)']) || null,
-          width: parseFloat(row['Ancho del empaque (cm)']) || null,
-          height: parseFloat(row['Alto del empaque (cm)']) || null,
-          vImg: null
-        })
-      }
-
-      const pNames = Object.keys(productsMap)
-      if (pNames.length === 0) throw new Error("No se encontraron productos válidos para importar (falta Nombre o SKU). Revisa la plantilla.")
+      // Agrupación + parseo puro (compartido con el test que verifica la plantilla).
+      const bulkProducts = groupRowsToProducts(rows, selectedOpCat || null)
+      if (bulkProducts.length === 0) throw new Error("No se encontraron productos válidos para importar (falta Nombre o SKU). Revisa la plantilla.")
 
       // F2: enruta por la API (POST /products/bulk) → hereda RBAC + @audit_log + validación de ownership;
       // antes escribía DIRECTO a Supabase desde el browser (brecha de las 4 garantías).
@@ -217,39 +147,7 @@ export default function MassImporter({ productCategories, onImported = () => {},
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.')
 
-      const bulkPayload = {
-        products: pNames.map(pName => {
-          const prodData = productsMap[pName]
-          return {
-            title: pName,
-            description: prodData.desc || null,
-            cover_image_url: prodData.img || null,
-            category_id: selectedOpCat || null,
-            variations: prodData.variants.map((v) => {
-              let price = v.pNormal > 0 ? v.pNormal : 1
-              let compare_at_price = null
-              if (v.pPromo && v.pPromo > 0) { price = v.pPromo; compare_at_price = v.pNormal }
-              return {
-                sku: v.sku,
-                price,
-                compare_at_price,
-                cost_price: 0,
-                stock_quantity: v.stock,
-                attributes: Object.fromEntries([
-                  [v.attrKey, v.attrVal],
-                  ...(v.attrKey2 && v.attrVal2 ? [[v.attrKey2, v.attrVal2]] : []),
-                  ...(v.attrKey3 && v.attrVal3 ? [[v.attrKey3, v.attrVal3]] : []),
-                ].filter(([k]) => k && k !== 'Gen\u00e9rico')),
-                weight_kg: v.weight,
-                length_cm: v.length,
-                width_cm: v.width,
-                height_cm: v.height,
-                image_url: v.vImg,
-              }
-            }),
-          }
-        }),
-      }
+      const bulkPayload = { products: bulkProducts }
 
       const res = await fetch(`${apiUrl}/api/v1/products/bulk`, {
         method: 'POST',
@@ -330,7 +228,7 @@ export default function MassImporter({ productCategories, onImported = () => {},
         <div className="pt-2">
           <Button type="button" className="w-full gap-2 font-medium" onClick={handleProcessImport} disabled={uploading}>
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            {uploading ? 'Procesando inyección...' : 'Iniciar Inyección Automática'}
+            {uploading ? 'Importando productos...' : 'Importar productos'}
           </Button>
         </div>
       </CardContent>

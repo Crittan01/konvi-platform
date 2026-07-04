@@ -1,24 +1,30 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useTransition } from 'react'
 import Image from 'next/image'
+import { toast } from 'sonner'
 import { createClient } from '@/utils/supabase/client'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
+import ActionResultForm from '@/components/action-result-form'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Button } from '@/components/ui/button'
 import {
-  Info, Package2, ArrowUpDown, Archive,
-  Plus, Zap, Edit3, X, ImageOff, ChevronDown, ChevronUp, Sparkles, Loader2,
+  Info, Package2, ArrowUpDown, Archive, History,
+  Plus, Zap, Edit3, Trash2, X, ImageOff, ChevronDown, ChevronUp, Sparkles, Loader2,
 } from 'lucide-react'
 import { ImageUploadBox } from './image-upload-box'
 import { VariantMatrixGenerator } from './variant-matrix'
 import type { Product, Variation, AttributeDef } from '../types'
+import type { ActionResult } from '@/lib/action-result'
 import { buildCategoryPicker } from '../_lib/category-tree'
 import { optionOf } from '../_lib/attribute-contract'
+
+type Action = (fd: FormData) => Promise<ActionResult>
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,12 +63,37 @@ function Section({ icon: Icon, title, children, defaultOpen = true }: {
 
 // ── Variante editable dentro del drawer ───────────────────────────────────────
 
-function VariantEditRow({ v, productId, threshold, tenantId, editVariationAction }: {
-  v: Variation; productId: string; threshold: number; tenantId: string
-  editVariationAction: (fd: FormData) => Promise<void>
+function VariantEditRow({ v, productId, threshold, tenantId, variantCount, editVariationAction, deleteVariationAction }: {
+  v: Variation; productId: string; threshold: number; tenantId: string; variantCount: number
+  editVariationAction: Action
+  deleteVariationAction: Action
 }) {
   const [editing, setEditing] = useState(false)
   const [showDims, setShowDims] = useState(false)
+  const confirmar = useConfirm()
+  const [deleting, startDelete] = useTransition()
+
+  const onDelete = async () => {
+    // El backend rechaza borrar la única variante; se anticipa con un mensaje claro sin pegarle a la API.
+    if (variantCount <= 1) {
+      toast.error('No puedes eliminar la única variante. Archiva el producto si deseas retirarlo.')
+      return
+    }
+    const okConfirm = await confirmar({
+      title: '¿Eliminar esta variante?',
+      description: `${fmtAttrs(v.attributes)}${v.sku ? ` · ${v.sku}` : ''}. Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar', destructive: true,
+    })
+    if (!okConfirm) return
+    startDelete(async () => {
+      const fd = new FormData()
+      fd.append('product_id', productId)
+      fd.append('variation_id', v.id)
+      const r = await deleteVariationAction(fd)
+      if (!r.ok) toast.error(r.error || 'No se pudo eliminar la variante.')
+      else toast.success(r.message || 'Variante eliminada.')
+    })
+  }
 
   if (!editing) {
     return (
@@ -86,16 +117,20 @@ function VariantEditRow({ v, productId, threshold, tenantId, editVariationAction
             {v.stock_quantity} u.
           </p>
         </div>
-        <button onClick={() => setEditing(true)}
+        <button onClick={() => setEditing(true)} aria-label={`Editar variante ${fmtAttrs(v.attributes)}`}
           className="text-muted-foreground hover:text-primary transition-colors shrink-0">
           <Edit3 className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={onDelete} disabled={deleting} aria-label={`Eliminar variante ${fmtAttrs(v.attributes)}`}
+          className="text-muted-foreground hover:text-destructive transition-colors shrink-0 disabled:opacity-50">
+          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
         </button>
       </div>
     )
   }
 
   return (
-    <form action={editVariationAction} onSubmit={() => setEditing(false)}
+    <ActionResultForm action={editVariationAction}
       className="py-2 border-b border-border/40 last:border-0 space-y-2">
       <input type="hidden" name="variation_id" value={v.id} />
       <input type="hidden" name="product_id" value={productId} />
@@ -140,9 +175,123 @@ function VariantEditRow({ v, productId, threshold, tenantId, editVariationAction
       )}
       <div className="flex gap-2">
         <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado" className="h-7 text-xs">Guardar</SubmitButton>
-        <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground px-2">Cancelar</button>
+        <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground px-2">Cerrar</button>
       </div>
-    </form>
+    </ActionResultForm>
+  )
+}
+
+// ── Historial de movimientos de stock (colapsable) ───────────────────────────
+// Árbol funcional (00-product.md): "historial de movimientos colapsable". Hasta ahora stock_movements
+// solo se ESCRIBÍA; aquí se LEE (RLS por tenant vía JWT) para que el operador vea/audite cada ajuste.
+
+type StockMovement = {
+  id: string
+  variation_id: string
+  delta: number
+  new_stock: number
+  reason: string | null
+  created_at: string
+}
+
+function StockMovementHistory({ product, tenantId }: { product: Product; tenantId: string }) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [rows, setRows] = useState<StockMovement[] | null>(null)
+
+  // Map variation_id → etiqueta legible (las variantes ya están en el producto).
+  const varLabel = (id: string) => {
+    const v = (product.product_variations ?? []).find(x => x.id === id)
+    return v ? fmtAttrs(v.attributes) : 'Variante eliminada'
+  }
+
+  const load = async () => {
+    setLoading(true); setError(null)
+    try {
+      const sb = createClient()
+      const { data, error: err } = await sb
+        .from('stock_movements')
+        .select('id, variation_id, delta, new_stock, reason, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('product_id', product.id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      if (err) throw new Error(err.message)
+      setRows((data as StockMovement[]) ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo cargar el historial')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (next && rows === null && !loading) void load()
+  }
+
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleString('es-CO', {
+      timeZone: 'America/Bogota', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    })
+
+  return (
+    <div className="pt-3 border-t border-border/30">
+      <button type="button" onClick={toggle} aria-expanded={open}
+        className="flex items-center gap-1.5 text-[11px] font-medium text-primary/80 hover:text-primary transition-colors">
+        <History className="h-3.5 w-3.5" />
+        {open ? 'Ocultar historial de movimientos' : 'Ver historial de movimientos'}
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </button>
+      {open && (
+        <div className="mt-2">
+          {loading && (
+            <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando historial…
+            </div>
+          )}
+          {error && (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-red-700/30 bg-red-500/5 px-3 py-2 text-xs text-red-700">
+              <span>{error}</span>
+              <button type="button" onClick={load} className="underline underline-offset-2 hover:no-underline">Reintentar</button>
+            </div>
+          )}
+          {!loading && !error && rows && rows.length === 0 && (
+            <p className="py-3 text-xs text-muted-foreground">Aún no hay movimientos registrados para este producto.</p>
+          )}
+          {!loading && !error && rows && rows.length > 0 && (
+            <div className="rounded-lg border border-border/60 overflow-hidden">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="bg-muted/30 text-muted-foreground">
+                    <th className="text-left px-2.5 py-1.5 font-semibold">Fecha</th>
+                    <th className="text-left px-2.5 py-1.5 font-semibold">Variante</th>
+                    <th className="text-left px-2.5 py-1.5 font-semibold">Motivo</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">Cambio</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">Resultante</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {rows.map(mv => (
+                    <tr key={mv.id}>
+                      <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(mv.created_at)}</td>
+                      <td className="px-2.5 py-1.5 truncate max-w-[120px]" title={varLabel(mv.variation_id)}>{varLabel(mv.variation_id)}</td>
+                      <td className="px-2.5 py-1.5 text-muted-foreground truncate max-w-[140px]" title={mv.reason ?? ''}>{mv.reason || '—'}</td>
+                      <td className={`px-2.5 py-1.5 text-right font-mono tabular-nums font-semibold ${mv.delta > 0 ? 'text-emerald-700' : mv.delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        {mv.delta > 0 ? '+' : ''}{mv.delta}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right font-mono tabular-nums">{mv.new_stock}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -155,16 +304,17 @@ interface Props {
   productCategories: { id: string; display_label: string; parent_id?: string | null }[]
   tenantId: string
   threshold: number
-  editProductAction:   (fd: FormData) => Promise<void>
-  editVariationAction: (fd: FormData) => Promise<void>
-  addVariationAction:  (fd: FormData) => Promise<void>
-  adjustStockAction:   (fd: FormData) => Promise<void>
-  deactivateProductAction: (fd: FormData) => Promise<void>
+  editProductAction:   Action
+  editVariationAction: Action
+  addVariationAction:  Action
+  deleteVariationAction: Action
+  adjustStockAction:   Action
+  deactivateProductAction: Action
 }
 
 export function ProductEditDrawer({
   product, open, onOpenChange, productCategories, tenantId, threshold,
-  editProductAction, editVariationAction, addVariationAction,
+  editProductAction, editVariationAction, addVariationAction, deleteVariationAction,
   adjustStockAction, deactivateProductAction,
 }: Props) {
   const vars = product.product_variations ?? []
@@ -260,7 +410,7 @@ export function ProductEditDrawer({
 
           {/* ① INFORMACIÓN */}
           <Section icon={Info} title="Información del producto">
-            <form action={editProductAction} className="space-y-3">
+            <ActionResultForm action={editProductAction} className="space-y-3">
               <input type="hidden" name="product_id" value={product.id} />
               <div className="flex items-center justify-end">
                 <Button type="button" variant="outline" size="sm" disabled={suggesting}
@@ -378,7 +528,7 @@ export function ProductEditDrawer({
               <div className="flex justify-end pt-1">
                 <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado">Guardar información</SubmitButton>
               </div>
-            </form>
+            </ActionResultForm>
           </Section>
 
           {/* ② VARIANTES */}
@@ -386,7 +536,9 @@ export function ProductEditDrawer({
             {/* Lista de variantes */}
             <div>
               {vars.map(v => (
-                <VariantEditRow key={v.id} v={v} productId={product.id} threshold={threshold} tenantId={tenantId} editVariationAction={editVariationAction} />
+                <VariantEditRow key={v.id} v={v} productId={product.id} threshold={threshold} tenantId={tenantId}
+                  variantCount={vars.length}
+                  editVariationAction={editVariationAction} deleteVariationAction={deleteVariationAction} />
               ))}
             </div>
 
@@ -411,7 +563,7 @@ export function ProductEditDrawer({
                 <VariantMatrixGenerator productId={product.id} addVariationAction={addVariationAction} onDone={() => setShowAddVar(false)} />
               </div>
             ) : (
-              <form action={addVariationAction} onSubmit={() => setShowAddVar(false as const)}
+              <ActionResultForm action={addVariationAction}
                 className="space-y-3 p-3 bg-muted/20 rounded-lg border border-border/40">
                 <input type="hidden" name="product_id" value={product.id} />
                 <input type="hidden" name="attrs_json" value={JSON.stringify(
@@ -439,9 +591,9 @@ export function ProductEditDrawer({
                 </div>
                 <div className="flex gap-2 justify-end">
                   <SubmitButton size="sm" pendingText="Guardando..." savedText="Guardado" className="h-7 text-xs">Guardar variante</SubmitButton>
-                  <button type="button" onClick={() => setShowAddVar(false)} className="text-xs text-muted-foreground hover:text-foreground px-2">Cancelar</button>
+                  <button type="button" onClick={() => setShowAddVar(false)} className="text-xs text-muted-foreground hover:text-foreground px-2">Cerrar</button>
                 </div>
-              </form>
+              </ActionResultForm>
             )}
           </Section>
 
@@ -453,7 +605,7 @@ export function ProductEditDrawer({
                 <span>Variante</span><span className="text-right">Actual</span><span>Motivo (obligatorio)</span><span className="text-center">+/−</span><span />
               </div>
               {vars.map(v => (
-                <form key={v.id} action={adjustStockAction} className="grid grid-cols-[1fr_52px_1fr_56px_44px] gap-2 items-center px-3 py-2">
+                <ActionResultForm key={v.id} action={adjustStockAction} className="grid grid-cols-[1fr_52px_1fr_56px_44px] gap-2 items-center px-3 py-2">
                   <input type="hidden" name="variation_id" value={v.id} />
                   <input type="hidden" name="product_id" value={product.id} />
                   <span className="text-xs font-medium truncate">{fmtAttrs(v.attributes)}</span>
@@ -461,20 +613,22 @@ export function ProductEditDrawer({
                   <Input name="reason" placeholder="Ej: Compra proveedor..." required className="h-7 text-xs" />
                   <Input name="delta" type="number" placeholder="±0" required className="h-7 text-xs font-mono text-center" />
                   <SubmitButton size="sm" pendingText="..." savedText="✓" className="h-7 w-10 p-0 text-xs">OK</SubmitButton>
-                </form>
+                </ActionResultForm>
               ))}
             </div>
+            {/* Historial de movimientos — cierra la promesa del árbol funcional */}
+            <StockMovementHistory product={product} tenantId={tenantId} />
           </Section>
 
           {/* Zona de peligro */}
           <div className="border-t border-border/40 pt-4">
-            <form action={deactivateProductAction}>
+            <ActionResultForm action={deactivateProductAction}>
               <input type="hidden" name="product_id" value={product.id} />
               <Button type="submit" variant="ghost" size="sm"
                 className="h-7 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/5 border border-transparent hover:border-destructive/20 gap-1.5">
                 <Archive className="h-3 w-3" /> Archivar producto
               </Button>
-            </form>
+            </ActionResultForm>
           </div>
         </div>
       </SheetContent>

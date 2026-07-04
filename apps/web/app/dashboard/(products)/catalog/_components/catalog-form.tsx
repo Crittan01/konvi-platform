@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Loader2, Zap, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+import { Plus, Loader2, Zap, X, Trash2, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -64,6 +64,7 @@ function InlineMatrixBuilder({ onGenerate, onClose, productTitle, attrSuggestion
   const [preview, setPreview] = useState<Record<string, string>[] | null>(null)
 
   const addDef = () => setDefs(d => [...d, { name: '', values: [''] }])
+  const removeDef = (i: number) => setDefs(d => d.filter((_, idx) => idx !== i))
   const updateName = (i: number, name: string) => setDefs(d => d.map((def, idx) => idx === i ? { ...def, name } : def))
   const addValue = (i: number) => setDefs(d => d.map((def, idx) => idx === i ? { ...def, values: [...def.values, ''] } : def))
   const updateValue = (di: number, vi: number, val: string) =>
@@ -119,6 +120,12 @@ function InlineMatrixBuilder({ onGenerate, onClose, productTitle, attrSuggestion
             <div className="flex items-center gap-2">
               <Input value={def.name} onChange={e => updateName(di, e.target.value)} list="imb-attr-names"
                 placeholder="Atributo (Ej: Volumen, Color, Talla)" className="h-8 text-xs font-semibold" />
+              {defs.length > 1 && (
+                <button type="button" onClick={() => removeDef(di)} aria-label={`Quitar atributo ${def.name || di + 1}`}
+                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
             <div className="flex flex-wrap gap-1.5 pl-2">
               {def.values.map((val, vi) => (

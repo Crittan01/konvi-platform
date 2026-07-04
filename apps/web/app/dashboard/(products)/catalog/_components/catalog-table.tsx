@@ -1,19 +1,24 @@
 'use client'
 
-import { useState, useMemo, useCallback, memo, useRef } from 'react'
+import { useState, useMemo, useCallback, memo, useTransition } from 'react'
 import Image from 'next/image'
+import { toast } from 'sonner'
+import ActionResultForm from '@/components/action-result-form'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   Search, LayoutGrid, List as ListIcon,
-  ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X,
+  ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X, Loader2,
   ArrowUp, ArrowDown, ChevronsUpDown,
 } from 'lucide-react'
 import { ProductEditDrawer } from './product-edit-drawer'
 import type { Product, Variation } from '../types'
+import type { ActionResult } from '@/lib/action-result'
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+type Action = (fd: FormData) => Promise<ActionResult>
 
 type Props = {
   products: Product[]
@@ -23,13 +28,14 @@ type Props = {
   canWrite: boolean
   threshold: number
   tenantId: string
-  editProductAction: (fd: FormData) => Promise<void>
-  editVariationAction: (fd: FormData) => Promise<void>
-  addVariationAction: (fd: FormData) => Promise<void>
-  deactivateProductAction: (fd: FormData) => Promise<void>
-  restoreProductAction: (fd: FormData) => Promise<void>
-  deleteProductAction: (fd: FormData) => Promise<void>
-  adjustStockAction?: (fd: FormData) => Promise<void>
+  editProductAction: Action
+  editVariationAction: Action
+  addVariationAction: Action
+  deleteVariationAction: Action
+  deactivateProductAction: Action
+  restoreProductAction: Action
+  deleteProductAction: Action
+  adjustStockAction?: Action
   linkedVariationIds?: string[]
 }
 
@@ -53,14 +59,15 @@ function fmtPrice(vars: Variation[]): string {
 // ── ExpandedPanel — lean: solo tabla de variantes + botón Editar ─────────────
 
 const ExpandedPanel = memo(function ExpandedPanel({
-  p, canWrite, productCategories, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
+  p, canWrite, productCategories, threshold, tenantId, editProductAction, editVariationAction, addVariationAction, deleteVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
   p: Product; canWrite: boolean; catMap: Record<string, string>; productCategories: { id: string; display_label: string }[]; threshold: number; tenantId: string;
-  editProductAction: (fd: FormData) => Promise<void>
-  editVariationAction: (fd: FormData) => Promise<void>
-  addVariationAction: (fd: FormData) => Promise<void>
-  deactivateProductAction: (fd: FormData) => Promise<void>
-  adjustStockAction?: (fd: FormData) => Promise<void>
+  editProductAction: Action
+  editVariationAction: Action
+  addVariationAction: Action
+  deleteVariationAction: Action
+  deactivateProductAction: Action
+  adjustStockAction?: Action
   linkedVariationIds?: string[]
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -127,6 +134,7 @@ const ExpandedPanel = memo(function ExpandedPanel({
           editProductAction={editProductAction}
           editVariationAction={editVariationAction}
           addVariationAction={addVariationAction}
+          deleteVariationAction={deleteVariationAction}
           adjustStockAction={adjustStockAction}
           deactivateProductAction={deactivateProductAction}
         />
@@ -139,14 +147,15 @@ const ExpandedPanel = memo(function ExpandedPanel({
 
 const ProductMobileCard = memo(function ProductMobileCard({
   p, catName, catMap, productCategories, threshold, tenantId, isExpanded, onToggle, canWrite,
-  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
+  editProductAction, editVariationAction, addVariationAction, deleteVariationAction, deactivateProductAction, adjustStockAction, linkedVariationIds
 }: {
   p: Product; catName: string | null; catMap: Record<string, string>; productCategories: { id: string; display_label: string }[]; threshold: number; tenantId: string; isExpanded: boolean; onToggle: () => void; canWrite: boolean;
-  editProductAction: (fd: FormData) => Promise<void>
-  editVariationAction: (fd: FormData) => Promise<void>
-  addVariationAction: (fd: FormData) => Promise<void>
-  deactivateProductAction: (fd: FormData) => Promise<void>
-  adjustStockAction?: (fd: FormData) => Promise<void>
+  editProductAction: Action
+  editVariationAction: Action
+  addVariationAction: Action
+  deleteVariationAction: Action
+  deactivateProductAction: Action
+  adjustStockAction?: Action
   linkedVariationIds?: string[]
 }) {
   const vars = p.product_variations ?? []
@@ -204,6 +213,7 @@ const ProductMobileCard = memo(function ProductMobileCard({
           editProductAction={editProductAction}
           editVariationAction={editVariationAction}
           addVariationAction={addVariationAction}
+          deleteVariationAction={deleteVariationAction}
           deactivateProductAction={deactivateProductAction}
           adjustStockAction={adjustStockAction}
           linkedVariationIds={linkedVariationIds}
@@ -213,35 +223,40 @@ const ProductMobileCard = memo(function ProductMobileCard({
   )
 })
 
-// ── DeleteProductForm — submit de server action con confirmación del DS ──────
-// F1 2026-07-04: reemplaza el window.confirm() síncrono en onSubmit. Como el
-// ConfirmDialog es async, se preventDefault + confirma + requestSubmit (guardado
-// por okRef para no re-abrir el diálogo en el segundo submit).
+// ── DeleteProductForm — botón destructivo con confirmación del DS + toast ────
+// F1: confirma con el ConfirmDialog async, llama la server action directamente y
+// surfacea el resultado (ActionResult) por toast — un fallo ya no queda invisible.
+// aria-label explícito para el botón icon-only (a11y).
 function DeleteProductForm({
   productId, action,
-}: { productId: string; action: (fd: FormData) => Promise<void> }) {
+}: { productId: string; action: Action }) {
   const confirmar = useConfirm()
-  const formRef = useRef<HTMLFormElement>(null)
-  const okRef = useRef(false)
+  const [pending, startTransition] = useTransition()
+  const onClick = async () => {
+    const okConfirm = await confirmar({
+      title: '¿Eliminar permanentemente este producto?',
+      description: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar', destructive: true,
+    })
+    if (!okConfirm) return
+    startTransition(async () => {
+      const fd = new FormData()
+      fd.append('product_id', productId)
+      const r = await action(fd)
+      if (!r.ok) toast.error(r.error || 'No se pudo eliminar el producto.')
+      else toast.success(r.message || 'Producto eliminado.')
+    })
+  }
   return (
-    <form
-      ref={formRef}
-      action={action}
-      onSubmit={(e) => {
-        if (okRef.current) { okRef.current = false; return }
-        e.preventDefault()
-        confirmar({
-          title: '¿Eliminar permanentemente este producto?',
-          description: 'Esta acción no se puede deshacer.',
-          confirmLabel: 'Eliminar', destructive: true,
-        }).then((ok) => { if (ok) { okRef.current = true; formRef.current?.requestSubmit() } })
-      }}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      aria-label="Eliminar producto permanentemente"
+      className="h-7 w-7 p-0 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
     >
-      <input type="hidden" name="product_id" value={productId} />
-      <SubmitButton size="sm" variant="ghost" pendingText="" savedText="" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-        <Trash2 className="h-3.5 w-3.5" />
-      </SubmitButton>
-    </form>
+      {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+    </button>
   )
 }
 
@@ -252,8 +267,8 @@ const ArchivedSection = memo(function ArchivedSection({
 }: {
   archivedProducts: Product[]
   catMap: Record<string, string>
-  restoreProductAction: (fd: FormData) => Promise<void>
-  deleteProductAction: (fd: FormData) => Promise<void>
+  restoreProductAction: Action
+  deleteProductAction: Action
 }) {
   const [open, setOpen] = useState(false)
   if (archivedProducts.length === 0) return null
@@ -290,12 +305,12 @@ const ArchivedSection = memo(function ArchivedSection({
                 )}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <form action={restoreProductAction}>
+                <ActionResultForm action={restoreProductAction}>
                   <input type="hidden" name="product_id" value={p.id} />
                   <SubmitButton size="sm" variant="outline" pendingText="..." savedText="Restaurado" className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
                     <RotateCcw className="h-3 w-3" /> Restaurar
                   </SubmitButton>
-                </form>
+                </ActionResultForm>
                 <DeleteProductForm productId={p.id} action={deleteProductAction} />
               </div>
             </div>
@@ -310,7 +325,7 @@ const ArchivedSection = memo(function ArchivedSection({
 
 export default function CatalogTable({
   products, archivedProducts, catMap, productCategories, canWrite, threshold, tenantId,
-  editProductAction, editVariationAction, addVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
+  editProductAction, editVariationAction, addVariationAction, deleteVariationAction, deactivateProductAction, restoreProductAction, deleteProductAction,
   adjustStockAction, linkedVariationIds,
 }: Props) {
   const [search, setSearch]           = useState('')
@@ -472,6 +487,7 @@ export default function CatalogTable({
               editProductAction={editProductAction}
               editVariationAction={editVariationAction}
               addVariationAction={addVariationAction}
+              deleteVariationAction={deleteVariationAction}
               deactivateProductAction={deactivateProductAction}
               adjustStockAction={adjustStockAction}
               linkedVariationIds={linkedVariationIds}
@@ -515,8 +531,13 @@ export default function CatalogTable({
                 return [
                   <tr
                     key={p.id}
-                    className="cursor-pointer hover:bg-muted/30 transition-colors"
+                    className="cursor-pointer hover:bg-muted/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     onClick={() => toggle(p.id)}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    aria-label={`${isExpanded ? 'Contraer' : 'Expandir'} ${p.title}`}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(p.id) } }}
                   >
                     <td className="px-3 py-3">
                       <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-muted border border-border flex-shrink-0">
@@ -572,6 +593,7 @@ export default function CatalogTable({
                           editProductAction={editProductAction}
                           editVariationAction={editVariationAction}
                           addVariationAction={addVariationAction}
+                          deleteVariationAction={deleteVariationAction}
                           deactivateProductAction={deactivateProductAction}
                           adjustStockAction={adjustStockAction}
                           linkedVariationIds={linkedVariationIds}
@@ -623,8 +645,13 @@ export default function CatalogTable({
               >
                 {/* Card image */}
                 <div
-                  className="relative aspect-[4/3] bg-muted cursor-pointer overflow-hidden"
+                  className="relative aspect-[4/3] bg-muted cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   onClick={() => toggle(p.id)}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  aria-label={`${isExpanded ? 'Contraer' : 'Ver detalle de'} ${p.title}`}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(p.id) } }}
                 >
                   {p.cover_image_url ? (
                     <Image src={p.cover_image_url} alt={p.title} fill className="object-cover transition-transform duration-300 hover:scale-105" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" />
@@ -682,6 +709,7 @@ export default function CatalogTable({
                       editProductAction={editProductAction}
                       editVariationAction={editVariationAction}
                       addVariationAction={addVariationAction}
+                      deleteVariationAction={deleteVariationAction}
                       deactivateProductAction={deactivateProductAction}
                       adjustStockAction={adjustStockAction}
                       linkedVariationIds={linkedVariationIds}

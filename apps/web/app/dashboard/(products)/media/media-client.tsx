@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
-import { Upload, Copy, Check, Trash2, Image as ImageIcon, X } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
+import { Upload, Copy, Check, Trash2, Image as ImageIcon, X, Info } from 'lucide-react'
+
+const MEDIA_LIMIT = 100
 
 type StorageFile = {
   name: string
@@ -33,8 +36,17 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
   const [preview, setPreview]   = useState<{ url: string; name: string } | null>(null)
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const confirmar = useConfirm()
   const supabase = createClient()
   const BUCKET = 'tenant-media'
+
+  // A11y: cerrar el lightbox con Escape.
+  useEffect(() => {
+    if (!preview) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreview(null) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [preview])
 
   const getPublicUrl = useCallback((filename: string) => {
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(`${tenantId}/${filename}`)
@@ -77,6 +89,14 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
   }
 
   async function handleDelete(filename: string) {
+    // Confirmación destructiva (antes borraba de Storage sin preguntar). No hay cascada: si un producto
+    // usa la imagen, dejará de mostrarse hasta que le asignes otra.
+    const okConfirm = await confirmar({
+      title: '¿Eliminar esta imagen?',
+      description: 'Se borra del almacenamiento. Si algún producto la usa, dejará de mostrarse hasta que le asignes otra. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar', destructive: true,
+    })
+    if (!okConfirm) return
     setDeleting(filename)
     const { error: deleteError } = await supabase.storage.from(BUCKET).remove([`${tenantId}/${filename}`])
     if (deleteError) { setError(`Error al eliminar: ${deleteError.message}`); setDeleting(null); return }
@@ -133,6 +153,14 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
             <p className="text-xs text-muted-foreground">
               {formatBytes(files.reduce((acc, f) => acc + (f.metadata?.size ?? 0), 0))} total
             </p>
+          </div>
+        )}
+
+        {/* Aviso de truncamiento: la lista trae como máximo MEDIA_LIMIT archivos */}
+        {files.length >= MEDIA_LIMIT && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-700/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
+            <Info className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>Mostrando las {MEDIA_LIMIT} imágenes más recientes. Puede haber más en el almacenamiento.</span>
           </div>
         )}
 
@@ -194,6 +222,9 @@ export default function MediaClient({ tenantId, initialFiles, canWrite }: Props)
       {/* Lightbox */}
       {preview && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Vista previa: ${preview.name}`}
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setPreview(null)}
         >

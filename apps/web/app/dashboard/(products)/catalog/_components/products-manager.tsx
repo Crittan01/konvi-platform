@@ -4,16 +4,18 @@ import { useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import ActionResultForm from '@/components/action-result-form'
 import { Button } from '@/components/ui/button'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
 import {
-  Plus, Boxes, AlertTriangle, XCircle, SlidersHorizontal, Package,
+  Plus, Boxes, AlertTriangle, XCircle, SlidersHorizontal, Package, Info,
 } from 'lucide-react'
 import CatalogForm from './catalog-form'
 import MassImporter from './mass-importer'
 import CatalogTable from './catalog-table'
 import type { Product, AttributeDef } from '../types'
+import type { ActionResult } from '@/lib/action-result'
 
 type Props = {
   products: Product[]
@@ -25,14 +27,17 @@ type Props = {
   tenantId: string
   apiUrl: string
   threshold: number
-  editProductAction: (fd: FormData) => Promise<void>
-  editVariationAction: (fd: FormData) => Promise<void>
-  addVariationAction: (fd: FormData) => Promise<void>
-  deactivateProductAction: (fd: FormData) => Promise<void>
-  restoreProductAction: (fd: FormData) => Promise<void>
-  deleteProductAction: (fd: FormData) => Promise<void>
-  adjustStockAction: (fd: FormData) => Promise<void>
-  saveThresholdAction: (fd: FormData) => Promise<void>
+  activeTotal: number   // total real de productos activos (para detectar truncamiento del listado)
+  loadError: boolean    // el fetch del listado falló → avisar en vez de mostrar catálogo falso-vacío
+  editProductAction: (fd: FormData) => Promise<ActionResult>
+  editVariationAction: (fd: FormData) => Promise<ActionResult>
+  addVariationAction: (fd: FormData) => Promise<ActionResult>
+  deleteVariationAction: (fd: FormData) => Promise<ActionResult>
+  deactivateProductAction: (fd: FormData) => Promise<ActionResult>
+  restoreProductAction: (fd: FormData) => Promise<ActionResult>
+  deleteProductAction: (fd: FormData) => Promise<ActionResult>
+  adjustStockAction: (fd: FormData) => Promise<ActionResult>
+  saveThresholdAction: (fd: FormData) => Promise<ActionResult>
   linkedVariationIds: string[]
 }
 
@@ -40,8 +45,8 @@ type Props = {
 export default function ProductsManager({
   products, archivedProducts, catMap, canWrite,
   productCategories, attributeDefs, tenantId, apiUrl,
-  threshold,
-  editProductAction, editVariationAction, addVariationAction,
+  threshold, activeTotal, loadError,
+  editProductAction, editVariationAction, addVariationAction, deleteVariationAction,
   deactivateProductAction, restoreProductAction, deleteProductAction,
   adjustStockAction, saveThresholdAction, linkedVariationIds,
 }: Props) {
@@ -72,6 +77,24 @@ export default function ProductsManager({
           </Button>
         )}
       </div>
+
+      {/* Aviso: el listado no se pudo cargar (no mostrar un catálogo falso-vacío) */}
+      {loadError && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-700/30 bg-red-500/5 px-4 py-3 text-sm text-red-700">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>No pudimos cargar el catálogo completo. Recarga la página; si persiste, avísanos.</span>
+        </div>
+      )}
+
+      {/* Aviso: el catálogo excede la ventana mostrada (PostgREST trunca sin avisar) */}
+      {activeTotal > products.length && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-700/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
+          <Info className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            Mostrando {products.length} de {activeTotal} productos activos. Usa el buscador para encontrar los que no ves aquí.
+          </span>
+        </div>
+      )}
 
       {/* KPI Bar — 4 cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -117,7 +140,7 @@ export default function ProductsManager({
             </p>
           </div>
           {editingThreshold && canWrite ? (
-            <form action={saveThresholdAction} onSubmit={() => setEditingThreshold(false)}
+            <ActionResultForm action={saveThresholdAction}
               className="flex items-center gap-2">
               <Input name="threshold" type="number" min="1" max="999"
                 defaultValue={threshold} autoFocus
@@ -127,8 +150,8 @@ export default function ProductsManager({
                 Guardar
               </SubmitButton>
               <button type="button" onClick={() => setEditingThreshold(false)}
-                className="text-xs text-muted-foreground hover:text-foreground">Cancelar</button>
-            </form>
+                className="text-xs text-muted-foreground hover:text-foreground">Cerrar</button>
+            </ActionResultForm>
           ) : (
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm text-foreground">
@@ -157,6 +180,7 @@ export default function ProductsManager({
         editProductAction={editProductAction}
         editVariationAction={editVariationAction}
         addVariationAction={addVariationAction}
+        deleteVariationAction={deleteVariationAction}
         deactivateProductAction={deactivateProductAction}
         restoreProductAction={restoreProductAction}
         deleteProductAction={deleteProductAction}
