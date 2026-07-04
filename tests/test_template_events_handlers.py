@@ -45,6 +45,7 @@ class _FakeQuery:
         self._op = op
         self._payload = payload
         self._filters: list[tuple] = []
+        self._neq_filters: list[tuple] = []
         self._limit_n: int | None = None
 
     def select(self, *a, **k):
@@ -57,21 +58,30 @@ class _FakeQuery:
         self._filters.append((col, val))
         return self
 
+    def neq(self, col, val):
+        self._neq_filters.append((col, val))
+        return self
+
     def limit(self, n):
         self._limit_n = n
         return self
 
+    def _matches(self, r) -> bool:
+        return (
+            all(r.get(c) == v for c, v in self._filters)
+            and all(r.get(c) != v for c, v in self._neq_filters)
+        )
+
     def execute(self):
         if self._op == "select":
-            rows = [r for r in self._store
-                    if all(r.get(c) == v for c, v in self._filters)]
+            rows = [r for r in self._store if self._matches(r)]
             if self._limit_n is not None:
                 rows = rows[: self._limit_n]
             return SimpleNamespace(data=rows)
         if self._op == "update":
             updated = []
             for row in self._store:
-                if all(row.get(c) == v for c, v in self._filters):
+                if self._matches(row):
                     for k, v in self._payload.items():
                         row[k] = v
                     updated.append(row)
@@ -226,6 +236,25 @@ class StatusUpdateTests(unittest.TestCase):
             te.persist_template_status_update(event, tenant_id_verified="tenant-A")
             row = sb._tables["whatsapp_templates"][0]
             self.assertEqual(row["status"], status)
+
+    def test_local_draft_reabierto_no_es_pisado_por_webhook_tardio(self):
+        # El usuario editó el template (volvió a LOCAL_DRAFT). Un webhook tardío del
+        # submit viejo NO debe pisar el borrador local: el .neq("status","LOCAL_DRAFT")
+        # deja la fila intacta y el handler retorna False.
+        sb = _FakeSupabase()
+        te = _setup_modules(sb)
+        _seed_template(sb, status="LOCAL_DRAFT")
+        event = {
+            "event_type": _parser.EVENT_TYPE_TEMPLATE_STATUS_UPDATE,
+            "meta_template_id": "META_T1",
+            "new_status": "APPROVED",
+            "reason": None,
+        }
+        result = te.persist_template_status_update(event, tenant_id_verified="tenant-A")
+        self.assertFalse(result)
+        row = sb._tables["whatsapp_templates"][0]
+        self.assertEqual(row["status"], "LOCAL_DRAFT")
+        self.assertIsNone(row.get("approved_at"))
 
     def test_meta_template_id_no_existe_returns_false(self):
         sb = _FakeSupabase()

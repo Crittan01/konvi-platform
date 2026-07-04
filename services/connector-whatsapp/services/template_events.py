@@ -101,15 +101,21 @@ def persist_template_status_update(event: Dict[str, Any], tenant_id_verified: Op
             .update(update_fields)
             .eq("tenant_id", tenant_id_verified)   # F52: autoridad del tenant HMAC-verificado
             .eq("meta_template_id", str(meta_template_id))
+            # Un template que el usuario reabrió a LOCAL_DRAFT (editar) se desliga del submit
+            # anterior (la UI nulea meta_template_id). Este .neq es defensa en profundidad: si un
+            # webhook tardío del submit viejo aún trajera el meta_template_id, jamás pisa un
+            # borrador local en curso.
+            .neq("status", "LOCAL_DRAFT")
             .execute()
         )
         rows = res.data or []
         if not rows:
             logger.warning(
-                "[WA_TPL_STATUS] meta_template_id=%s no matchea ningún row en "
-                "whatsapp_templates — template puede haberse creado fuera de "
-                "Konvi (via API Meta directa). Omitiendo. event_name=%s",
-                meta_template_id, event.get("template_name"),
+                "[WA_TPL_STATUS] meta_template_id=%s no matchea ningún row ACTUALIZABLE en "
+                "whatsapp_templates (tenant=%s) — el template puede haberse creado fuera de "
+                "Konvi (via API Meta directa) o estar como LOCAL_DRAFT reabierto. Omitiendo. "
+                "event_name=%s new_status=%s",
+                meta_template_id, tenant_id_verified, event.get("template_name"), new_status,
             )
             return False
         logger.info(
