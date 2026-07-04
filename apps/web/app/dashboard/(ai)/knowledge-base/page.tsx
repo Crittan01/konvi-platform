@@ -3,13 +3,15 @@ import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { Button } from '@/components/ui/button'
-import { BookOpen, Search, BrainCircuit, HelpCircle, FileText, Building2, Package, StickyNote, PenLine, AlertCircle } from 'lucide-react'
+import { BookOpen, Search, BrainCircuit, PenLine, AlertCircle } from 'lucide-react'
 import { DocCard } from './doc-card'
 import { TemplatesSection } from './templates-section'
 import { STARTER_TEMPLATES } from './starter-templates'
 import { IndexPendingBanner } from './index-pending-banner'
 import { KbMigrationBanner } from './kb-migration-banner'
 import { NewDocForm } from './new-doc-form'
+import { KB_CATEGORIES } from './categories'
+import { ok, fail, type ActionResult } from '@/lib/action-result'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 const MAX_DOCS    = 30
@@ -32,16 +34,24 @@ async function authedApi(supabase: Awaited<ReturnType<typeof createClient>>, pat
   })
 }
 
+// Traduce el status del API a un mensaje accionable en es-CO para el toast.
+// Consume el body una sola vez (Response.json no es reutilizable).
+async function friendlyError(res: Response, fallback: string): Promise<string> {
+  let detail = ''
+  try {
+    const j = await res.json()
+    detail = typeof j?.detail === 'string' ? j.detail : ''
+  } catch { /* body vacío o no-JSON */ }
+  if (res.status === 401 || res.status === 403) return 'No tienes permiso para realizar esta acción.'
+  if (res.status === 409) return detail || `Alcanzaste el límite de ${MAX_DOCS} documentos. Elimina o desactiva alguno para agregar nuevos.`
+  if (res.status === 422) return detail || 'Los datos del documento no son válidos.'
+  if (res.status === 502 || res.status === 503) return 'El servicio de preparación para IA no está disponible. Reintenta en unos minutos.'
+  return detail || fallback
+}
+
 // Rev. 68 — 6 categorías canónicas con CHECK constraint en DB.
-// "general" eliminada (cajón de sastre). "envios" + "pagos" agregadas.
-const CATEGORIES = [
-  { value: 'faq',       label: 'FAQ',          icon: HelpCircle },
-  { value: 'negocio',   label: 'Negocio',      icon: Building2 },
-  { value: 'politicas', label: 'Políticas',    icon: FileText },
-  { value: 'productos', label: 'Productos',    icon: Package },
-  { value: 'envios',    label: 'Envíos',       icon: StickyNote },
-  { value: 'pagos',     label: 'Pagos',        icon: StickyNote },
-]
+// Fuente única en ./categories.ts (empata router + DB, evita el drift legacy).
+const CATEGORIES = KB_CATEGORIES
 
 // Rev. 68 — guía por categoría: qué SÍ y qué NO escribir para evitar
 // duplicación con otras fuentes (catálogo, Filosofía del negocio).
@@ -114,11 +124,14 @@ export default async function KnowledgeBasePage(
       .eq('tenant_id', tenantId)
       .order('category')
       .order('updated_at', { ascending: false }),
-    // IDs de documentos que ya tienen embedding (RAG activo)
+    // IDs de documentos LISTOS para IA. match_kb_documents exige is_active=true,
+    // así que un doc inactivo con embedding NO cuenta como "listo" (evita inflar
+    // el contador del header con docs que el bot nunca usa).
     supabase
       .from('kb_documents')
       .select('id')
       .eq('tenant_id', tenantId)
+      .eq('is_active', true)
       .not('embedding', 'is', null),
   ])
 
@@ -140,7 +153,9 @@ export default async function KnowledgeBasePage(
   const totalCount   = allDocs.length
   const embCount     = embeddingIds.size
   const pendingCount = allDocs.filter(d => d.is_active && !embeddingIds.has(d.id)).length
-  const atLimit      = totalCount >= MAX_DOCS
+  // El cap acota los docs ACTIVOS (los inactivos no participan en RAG ni consumen
+  // cupo). Empata knowledge_base.py: desactivar/eliminar libera cupo sin borrar datos.
+  const atLimit      = activeCount >= MAX_DOCS
 
   // Rev. 71 — categorías sin docs activos. Se exponen al form para destacar
   // visualmente cuáles faltan (el bot no puede responder con verdad sin ellas).
@@ -151,100 +166,165 @@ export default async function KnowledgeBasePage(
 
   // Rev. 72 — todas las server actions delegan al router /api/v1/knowledge-base.
   // El embedding se calcula server-side en el API (GEMINI_API_KEY ya NO se expone al frontend).
-  async function createDocument(formData: FormData) {
+  // F1 2026-07 — devuelven ActionResult: el fallo (409/422/403/502) se surfacea al
+  // operador vía toast en vez de morir en un console.error del server.
+  async function createDocument(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = await createClient()
-    const title    = (formData.get('title') as string).trim()
-    const content  = (formData.get('content') as string).trim()
+    const title    = (formData.get('title') as string || '').trim()
+    const content  = (formData.get('content') as string || '').trim()
     const category = (formData.get('category') as string) || 'faq'
-    if (!title || !content) return
-    if (content.length > MAX_CONTENT || title.length > MAX_TITLE) return
+    if (!title || !content) return fail('El título y el contenido son obligatorios.')
+    if (title.length > MAX_TITLE) return fail(`El título excede ${MAX_TITLE} caracteres.`)
+    if (content.length > MAX_CONTENT) return fail(`El contenido excede ${MAX_CONTENT} caracteres.`)
     const res = await authedApi(sb, '/api/v1/knowledge-base/', {
       method: 'POST',
       body: JSON.stringify({ title, content, category }),
     })
-    if (!res.ok) console.error('createDocument failed:', await res.text())
+    if (!res.ok) {
+      const msg = await friendlyError(res, 'No se pudo crear el documento.')
+      console.error(`[kb] createDocument failed tenant=${tenantId} status=${res.status}: ${msg}`)
+      return fail(msg)
+    }
     revalidatePath('/dashboard/knowledge-base')
+    return ok()
   }
 
-  async function updateDocument(formData: FormData) {
+  async function updateDocument(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = await createClient()
-    const docId    = (formData.get('doc_id') as string).trim()
-    const title    = (formData.get('title') as string).trim()
-    const content  = (formData.get('content') as string).trim()
+    const docId    = (formData.get('doc_id') as string || '').trim()
+    const title    = (formData.get('title') as string || '').trim()
+    const content  = (formData.get('content') as string || '').trim()
     const category = (formData.get('category') as string) || 'faq'
-    if (!docId || !title || !content) return
-    if (content.length > MAX_CONTENT || title.length > MAX_TITLE) return
+    if (!docId) return fail('Documento no identificado.')
+    if (!title || !content) return fail('El título y el contenido son obligatorios.')
+    if (title.length > MAX_TITLE) return fail(`El título excede ${MAX_TITLE} caracteres.`)
+    if (content.length > MAX_CONTENT) return fail(`El contenido excede ${MAX_CONTENT} caracteres.`)
     const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
       method: 'PATCH',
       body: JSON.stringify({ title, content, category }),
     })
-    if (!res.ok) console.error('updateDocument failed:', await res.text())
-    redirect('/dashboard/knowledge-base')
+    if (!res.ok) {
+      const msg = await friendlyError(res, 'No se pudieron guardar los cambios.')
+      console.error(`[kb] updateDocument failed tenant=${tenantId} doc=${docId} status=${res.status}: ${msg}`)
+      return fail(msg)
+    }
+    revalidatePath('/dashboard/knowledge-base')
+    return ok()
   }
 
-  async function activateDocument(formData: FormData) {
+  async function activateDocument(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = await createClient()
-    const docId = formData.get('doc_id') as string
-    // Activar = PATCH is_active=true. El backend re-genera embedding si content cambió;
-    // si solo cambia is_active, el embedding existente se conserva.
+    const docId = (formData.get('doc_id') as string || '').trim()
+    if (!docId) return fail('Documento no identificado.')
+    // Activar = solo PATCH is_active=true. Desactivar NO borra el embedding, así que
+    // reactivar restaura el RAG sin re-embeber. Si el doc quedó sin preparar (embedding
+    // NULL), la card muestra "Error al preparar — reintentar" → reindexDocument.
     const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
       method: 'PATCH',
       body: JSON.stringify({ is_active: true }),
     })
-    if (!res.ok) console.error('activateDocument failed:', await res.text())
-    // Si quedó sin embedding (ej. doc viejo creado antes de rev. 72), forzar reindex.
-    const reindex = await authedApi(sb, `/api/v1/knowledge-base/${docId}/reindex`, { method: 'POST' })
-    if (!reindex.ok) console.warn('reindex skipped:', await reindex.text())
+    if (!res.ok) {
+      const msg = await friendlyError(res, 'No se pudo activar el documento.')
+      console.error(`[kb] activateDocument failed tenant=${tenantId} doc=${docId} status=${res.status}: ${msg}`)
+      return fail(msg)
+    }
     revalidatePath('/dashboard/knowledge-base')
+    return ok()
   }
 
-  async function desactivateDocument(formData: FormData) {
+  async function reindexDocument(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = await createClient()
-    const docId = formData.get('doc_id') as string
+    const docId = (formData.get('doc_id') as string || '').trim()
+    if (!docId) return fail('Documento no identificado.')
+    // Fuerza re-preparación (re-embed) — solo para docs que quedaron con embedding NULL
+    // (Gemini caído al crear). NO se llama en cada activación (evita gasto Gemini inútil).
+    const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}/reindex`, { method: 'POST' })
+    if (!res.ok) {
+      const msg = await friendlyError(res, 'No se pudo preparar el documento para la IA.')
+      console.error(`[kb] reindexDocument failed tenant=${tenantId} doc=${docId} status=${res.status}: ${msg}`)
+      return fail(msg)
+    }
+    revalidatePath('/dashboard/knowledge-base')
+    return ok()
+  }
+
+  async function desactivateDocument(formData: FormData): Promise<ActionResult> {
+    'use server'
+    const sb = await createClient()
+    const docId = (formData.get('doc_id') as string || '').trim()
+    if (!docId) return fail('Documento no identificado.')
     const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
       method: 'PATCH',
       body: JSON.stringify({ is_active: false }),
     })
-    if (!res.ok) console.error('desactivateDocument failed:', await res.text())
+    if (!res.ok) {
+      const msg = await friendlyError(res, 'No se pudo desactivar el documento.')
+      console.error(`[kb] desactivateDocument failed tenant=${tenantId} doc=${docId} status=${res.status}: ${msg}`)
+      return fail(msg)
+    }
     revalidatePath('/dashboard/knowledge-base')
+    return ok()
   }
 
-  async function deleteDocument(formData: FormData) {
+  async function deleteDocument(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = await createClient()
-    const docId = formData.get('doc_id') as string
+    const docId = (formData.get('doc_id') as string || '').trim()
+    if (!docId) return fail('Documento no identificado.')
     const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, { method: 'DELETE' })
-    if (!res.ok) console.error('deleteDocument failed:', await res.text())
+    if (!res.ok) {
+      const msg = await friendlyError(res, 'No se pudo eliminar el documento.')
+      console.error(`[kb] deleteDocument failed tenant=${tenantId} doc=${docId} status=${res.status}: ${msg}`)
+      return fail(msg)
+    }
     revalidatePath('/dashboard/knowledge-base')
+    return ok()
   }
 
-  async function loadSelectedTemplates(formData: FormData) {
+  async function loadSelectedTemplates(formData: FormData): Promise<ActionResult> {
     'use server'
     const sb = await createClient()
     const selectedIds = formData.getAll('template_ids') as string[]
-    if (!selectedIds.length) return
+    if (!selectedIds.length) return fail('No seleccionaste ninguna plantilla.')
 
     const templates = STARTER_TEMPLATES.filter(t => selectedIds.includes(t.id))
-    if (!templates.length) return
+    if (!templates.length) return fail('No seleccionaste ninguna plantilla válida.')
+
+    // Idempotencia: no dupliques plantillas ya cargadas (doble clic / reintento).
+    // Se dedupe por título contra los docs existentes del tenant.
+    const { data: existing } = await sb
+      .from('kb_documents')
+      .select('title')
+      .eq('tenant_id', tenantId)
+    const existingTitles = new Set((existing ?? []).map((r: { title: string }) => r.title.trim()))
+    const toCreate = templates.filter(t => !existingTitles.has(t.title.trim()))
+    const skipped = templates.length - toCreate.length
 
     // Rev. 72 — cada template pasa por POST /api/v1/knowledge-base que calcula
-    // embedding server-side. Serial para respetar rate-limit de Gemini y dar
-    // feedback claro si alguno excede el cap por tenant (409).
-    for (const t of templates) {
+    // embedding server-side. Serial para respetar rate-limit de Gemini.
+    let created = 0
+    for (const t of toCreate) {
       const res = await authedApi(sb, '/api/v1/knowledge-base/', {
         method: 'POST',
         body: JSON.stringify({ title: t.title, content: t.content, category: t.category }),
       })
       if (!res.ok) {
-        console.error(`loadSelectedTemplates: template ${t.id} failed:`, await res.text())
-        break
+        const msg = await friendlyError(res, 'No se pudo cargar una de las plantillas.')
+        console.error(`[kb] loadSelectedTemplates failed tenant=${tenantId} template=${t.id} status=${res.status}: ${msg}`)
+        revalidatePath('/dashboard/knowledge-base')
+        // Reporta lo que sí entró antes de abortar.
+        return fail(created > 0 ? `Se cargaron ${created} plantilla(s); la siguiente falló: ${msg}` : msg)
       }
+      created++
     }
     revalidatePath('/dashboard/knowledge-base')
+    if (created === 0) return ok('Esas plantillas ya estaban cargadas.')
+    const suffix = skipped > 0 ? ` (${skipped} ya existían y se omitieron)` : ''
+    return ok(`${created} plantilla(s) cargada(s)${suffix}.`)
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
@@ -256,15 +336,15 @@ export default async function KnowledgeBasePage(
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-primary" /> Knowledge Base
+            <BookOpen className="h-5 w-5 text-primary" /> Base de Conocimiento
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            <span className={totalCount >= MAX_DOCS ? 'text-amber-700 font-medium' : ''}>
-              {totalCount}/{MAX_DOCS} documentos
+            <span className={atLimit ? 'text-amber-700 font-medium' : ''}>
+              {activeCount}/{MAX_DOCS} activos
             </span>
-            {' · '}{activeCount} activos
-            {' · '}<span className="text-emerald-700">{embCount} con RAG</span>
-            {embCount < activeCount && <span className="text-muted-foreground/60"> · {activeCount - embCount} sin embedding</span>}
+            {totalCount > activeCount && <>{' · '}{totalCount - activeCount} inactivos</>}
+            {' · '}<span className="text-emerald-700">{embCount} listos para IA</span>
+            {embCount < activeCount && <span className="text-muted-foreground/60"> · {activeCount - embCount} por preparar</span>}
           </p>
         </div>
       </div>
@@ -341,7 +421,7 @@ export default async function KnowledgeBasePage(
               {atLimit ? (
                 <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-700/30 bg-amber-500/8 text-xs text-amber-700 mt-3">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Límite de {MAX_DOCS} documentos alcanzado. Elimina alguno para agregar nuevos.</span>
+                  <span>Límite de {MAX_DOCS} documentos activos alcanzado. Desactiva o elimina alguno para agregar nuevos.</span>
                 </div>
               ) : (
                 <NewDocForm
@@ -375,8 +455,10 @@ export default async function KnowledgeBasePage(
                 <DocCard
                   key={doc.id}
                   doc={{ ...doc, has_embedding: doc.has_embedding ?? false }}
+                  canWrite={canWrite}
                   updateDocument={updateDocument}
                   activateDocument={activateDocument}
+                  reindexDocument={reindexDocument}
                   desactivateDocument={desactivateDocument}
                   deleteDocument={deleteDocument}
                 />

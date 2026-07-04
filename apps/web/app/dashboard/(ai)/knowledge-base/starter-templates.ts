@@ -15,7 +15,7 @@ Los costos de envío de devolución corren por cuenta del cliente, salvo en caso
   {
     id: 'pagos',
     title: 'Métodos de pago aceptados',
-    category: 'faq',
+    category: 'pagos',
     content: `Aceptamos los siguientes métodos de pago:
 • Tarjeta de crédito y débito (Visa, Mastercard)
 • PSE — Transferencia bancaria
@@ -28,7 +28,7 @@ El pago se procesa de forma segura a través de nuestra pasarela de pagos.`,
   {
     id: 'tiempos',
     title: 'Tiempos de entrega por ciudad',
-    category: 'faq',
+    category: 'envios',
     content: `Realizamos envíos a todo Colombia. Tiempos estimados desde el despacho:
 • Bogotá y área metropolitana: 1-2 días hábiles
 • Ciudades principales (Medellín, Cali, Barranquilla): 2-3 días hábiles

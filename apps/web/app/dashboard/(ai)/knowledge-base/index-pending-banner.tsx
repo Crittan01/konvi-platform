@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Loader2, Zap } from 'lucide-react'
 
 interface Props {
@@ -9,7 +10,6 @@ interface Props {
 
 export function IndexPendingBanner({ pendingCount }: Props) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
-  const [, setResult] = useState<{ indexed: number; total: number } | null>(null)
 
   if (pendingCount === 0 || state === 'done') return null
 
@@ -17,12 +17,24 @@ export function IndexPendingBanner({ pendingCount }: Props) {
     setState('loading')
     try {
       const res = await fetch('/api/ai/index-pending', { method: 'POST' })
-      const data = await res.json() as { indexed: number; total: number }
-      setResult(data)
+      const data = await res.json().catch(() => ({})) as { indexed?: number; total?: number; error?: string }
+      if (!res.ok) {
+        toast.error(data.error || 'No se pudieron preparar los documentos. Reintenta en unos minutos.')
+        setState('idle')
+        return
+      }
+      const indexed = data.indexed ?? 0
+      const total = data.total ?? 0
+      if (indexed < total) {
+        toast.warning(`Se prepararon ${indexed} de ${total}. Reintenta los pendientes en unos minutos.`)
+      } else if (indexed > 0) {
+        toast.success(`${indexed} documento${indexed !== 1 ? 's' : ''} listo${indexed !== 1 ? 's' : ''} para IA`)
+      }
       setState('done')
       // Recargar la página para reflejar los badges actualizados
       window.location.reload()
     } catch {
+      toast.error('No se pudieron preparar los documentos. Revisa tu conexión e intenta de nuevo.')
       setState('idle')
     }
   }

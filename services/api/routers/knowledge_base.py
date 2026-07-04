@@ -34,7 +34,7 @@ from dependencies.auth import (
     get_service_client,
     require_write_role,
 )
-from dependencies.embeddings import embed_kb_document
+from dependencies.embeddings import embed_kb_document, get_embedding_model_version
 from dependencies.security import RL_WRITE_DEFAULT
 
 logger = logging.getLogger(__name__)
@@ -121,17 +121,22 @@ async def create_kb_doc(
 ):
     _validate_category(body.category)
 
-    # Cap por tenant.
+    # Cap por tenant — cuenta SOLO docs activos. El cap acota el corpus RAG activo
+    # (los inactivos no participan en match_kb_documents ni consumen espacio útil),
+    # así desactivar/eliminar libera cupo de forma reversible sin borrar datos.
+    # NOTA founder (pd[0]): la alternativa es hard-delete real; ver needs_founder.
     count_res = (
         supabase.table("kb_documents")
         .select("id", count="exact")
         .eq("tenant_id", tenant_id)
+        .eq("is_active", True)
         .execute()
     )
     if (count_res.count or 0) >= MAX_DOCS_PER_TENANT:
         raise HTTPException(
             status_code=409,
-            detail=f"Límite de {MAX_DOCS_PER_TENANT} documentos alcanzado para este tenant",
+            detail=f"Límite de {MAX_DOCS_PER_TENANT} documentos activos alcanzado. "
+                   f"Desactiva o elimina alguno para agregar nuevos.",
         )
 
     # Embedding síncrono. Si falla, persistimos con NULL → banner "pending" en UI.
@@ -145,6 +150,9 @@ async def create_kb_doc(
     }
     if vec:
         payload["embedding"] = _embedding_to_pgvector(vec)
+        # Versiona el modelo usado → permite detectar embeddings obsoletos y
+        # disparar re-index masivo cuando se cambia de modelo (migración 20260527010000).
+        payload["embedding_model_version"] = get_embedding_model_version()
 
     res = (
         supabase.table("kb_documents")  # tenant_filter:exempt:payload_includes_tenant_id
@@ -215,6 +223,8 @@ async def patch_kb_doc(
         new_content = update.get("content", cur_res.data["content"])
         vec = embed_kb_document(new_title, new_content)
         update["embedding"] = _embedding_to_pgvector(vec) if vec else None
+        # NULL cuando el embed falló (doc queda "por preparar"); versión conocida si ok.
+        update["embedding_model_version"] = get_embedding_model_version() if vec else None
 
     res = (
         supabase.table("kb_documents")
@@ -280,11 +290,14 @@ async def reindex_kb_doc(
 
     res = (
         supabase.table("kb_documents")
-        .update({"embedding": _embedding_to_pgvector(vec)})
+        .update({
+            "embedding": _embedding_to_pgvector(vec),
+            "embedding_model_version": get_embedding_model_version(),
+        })
         .eq("id", doc_id)
         .eq("tenant_id", tenant_id)   # F18: update ya retorna representation
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Documento KB no encontrado")
-    return {**res.data[0], "indexed": True}
+    return _strip_embedding({**res.data[0], "indexed": True})

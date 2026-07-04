@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SubmitButton } from '@/components/ui/submit-button'
+import ActionResultForm from '@/components/action-result-form'
+import type { ActionResult } from '@/lib/action-result'
 
 interface CategoryDef { value: string; label: string }
 interface CategoryGuide { placeholder: string; doYes: string; doNo: string }
@@ -14,7 +16,7 @@ interface Props {
   emptyCategories: string[]
   maxTitle:       number
   maxContent:     number
-  createDocument: (formData: FormData) => Promise<void>
+  createDocument: (formData: FormData) => Promise<ActionResult>
 }
 
 export function NewDocForm({
@@ -28,17 +30,18 @@ export function NewDocForm({
   const guide = guides[category]
 
   return (
-    <form action={createDocument} className="space-y-3 mt-3">
+    <ActionResultForm action={createDocument} successMessage="Documento agregado" className="space-y-3 mt-3">
       <div className="space-y-1">
-        <Label className="text-xs">
+        <Label htmlFor="kb-new-title" className="text-xs">
           Título * <span className="text-muted-foreground font-normal">(máx {maxTitle} chars)</span>
         </Label>
-        <Input name="title" placeholder="Ej: Política de devoluciones" required maxLength={maxTitle} className="h-8 text-sm" />
+        <Input id="kb-new-title" name="title" placeholder="Ej: Política de devoluciones" required maxLength={maxTitle} className="h-8 text-sm" />
       </div>
 
       <div className="space-y-1">
-        <Label className="text-xs">Categoría</Label>
+        <Label htmlFor="kb-new-category" className="text-xs">Categoría</Label>
         <select
+          id="kb-new-category"
           name="category"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
@@ -72,10 +75,11 @@ export function NewDocForm({
       )}
 
       <div className="space-y-1">
-        <Label className="text-xs">
+        <Label htmlFor="kb-new-content" className="text-xs">
           Contenido * <span className="text-muted-foreground font-normal">(máx {maxContent} chars)</span>
         </Label>
         <textarea
+          id="kb-new-content"
           name="content"
           rows={7}
           required
@@ -110,9 +114,9 @@ export function NewDocForm({
         </div>
       </details>
 
-      <SubmitButton className="w-full h-8 text-sm" pendingText="Guardando y generando embedding...">
+      <SubmitButton className="w-full h-8 text-sm" pendingText="Guardando y preparando para IA...">
         Agregar documento
       </SubmitButton>
-    </form>
+    </ActionResultForm>
   )
 }

@@ -4,18 +4,9 @@ import { useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { BrainCircuit, Loader2 } from 'lucide-react'
 import { STARTER_TEMPLATES } from './starter-templates'
-
-const CATEGORY_COLORS: Record<string, string> = {
-  faq:      'bg-blue-500/15 text-blue-700 border border-blue-700/30',
-  politica: 'bg-purple-500/15 text-purple-700 border border-purple-700/30',
-  negocio:  'bg-green-500/15 text-green-700 border border-green-700/30',
-  producto: 'bg-orange-500/15 text-orange-700 border border-orange-700/30',
-  general:  'bg-muted text-muted-foreground border border-border',
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  faq: 'FAQ', politica: 'Políticas', negocio: 'Negocio', producto: 'Productos', general: 'General',
-}
+import { categoryBadgeClass, categoryLabel } from './categories'
+import ActionResultForm from '@/components/action-result-form'
+import type { ActionResult } from '@/lib/action-result'
 
 function LoadButton({ count }: { count: number }) {
   const { pending } = useFormStatus()
@@ -34,7 +25,7 @@ function LoadButton({ count }: { count: number }) {
 }
 
 interface Props {
-  loadSelectedTemplates: (fd: FormData) => Promise<void>
+  loadSelectedTemplates: (fd: FormData) => Promise<ActionResult>
   defaultExpanded?: boolean
 }
 
@@ -64,12 +55,12 @@ export function TemplatesSection({ loadSelectedTemplates, defaultExpanded = true
         </div>
         <div className="flex items-center gap-2">
           {expanded && (
-            <form action={loadSelectedTemplates} className="flex items-center gap-2">
+            <ActionResultForm action={loadSelectedTemplates} className="flex items-center gap-2">
               {Array.from(selected).map(id => (
                 <input key={id} type="hidden" name="template_ids" value={id} />
               ))}
               <LoadButton count={selected.size} />
-            </form>
+            </ActionResultForm>
           )}
           <button
             type="button"
@@ -100,6 +91,8 @@ export function TemplatesSection({ loadSelectedTemplates, defaultExpanded = true
                   key={t.id}
                   type="button"
                   onClick={() => toggle(t.id)}
+                  aria-pressed={isSelected}
+                  aria-label={`${isSelected ? 'Quitar' : 'Seleccionar'} plantilla: ${t.title}`}
                   className={`text-left rounded-lg border p-3 space-y-1.5 transition-all ${
                     isSelected
                       ? 'border-primary/50 bg-primary/8 ring-1 ring-primary/30'
@@ -107,10 +100,10 @@ export function TemplatesSection({ loadSelectedTemplates, defaultExpanded = true
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[t.category]}`}>
-                      {CATEGORY_LABELS[t.category] ?? t.category}
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${categoryBadgeClass(t.category)}`}>
+                      {categoryLabel(t.category)}
                     </span>
-                    <span className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
+                    <span aria-hidden="true" className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
                       isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/40'
                     }`}>
                       {isSelected && (

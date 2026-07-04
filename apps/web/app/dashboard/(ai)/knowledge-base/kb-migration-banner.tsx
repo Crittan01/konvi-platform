@@ -75,10 +75,11 @@ export function KbMigrationBanner({ canWrite }: { canWrite: boolean }) {
       <button
         onClick={handleDismiss}
         disabled={dismissing}
-        className="text-amber-600 hover:text-amber-700 shrink-0 p-1 rounded hover:bg-amber-500/10 disabled:opacity-50"
+        className="text-amber-700 hover:text-amber-800 shrink-0 p-1 rounded hover:bg-amber-500/10 disabled:opacity-50"
         title="Entendido"
+        aria-label="Descartar aviso de categorías actualizadas"
       >
-        <X className="h-4 w-4" />
+        <X className="h-4 w-4" aria-hidden="true" />
       </button>
     </div>
   )
