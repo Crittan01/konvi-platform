@@ -14,6 +14,28 @@ async function getToken(): Promise<string> {
   return session?.access_token ?? ''
 }
 
+// Convierte el cuerpo de error de FastAPI en un mensaje legible en es-CO.
+// FastAPI devuelve {"detail": "..."} (HTTPException) o {"detail": [{msg,loc}]} (422 Pydantic).
+// Sin esto, el banner del operador mostraba el JSON crudo (gap ux_ui).
+async function readApiError(res: Response, fallback: string): Promise<string> {
+  const raw = await res.text()
+  if (!raw) return `${fallback} (${res.status})`
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown }
+    const detail = parsed?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map(d => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : null))
+        .filter(Boolean)
+      if (msgs.length) return msgs.join('; ')
+    }
+  } catch {
+    // no era JSON — cae al texto plano (truncado para no volcar HTML de un 502)
+  }
+  return raw.slice(0, 200)
+}
+
 export async function createClaim(data: {
   order_id: string
   customer_id: string | null
@@ -39,8 +61,7 @@ export async function createClaim(data: {
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      const detail = await res.text()
-      return { error: detail || res.statusText }
+      return { error: await readApiError(res, 'No se pudo crear el reclamo') }
     }
     revalidatePath('/dashboard/claims')
     return { success: true }
@@ -64,8 +85,7 @@ export async function updateClaimStatus(claimId: string, status: string, notes?:
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      const detail = await res.text()
-      return { error: detail || res.statusText }
+      return { error: await readApiError(res, 'No se pudo actualizar el reclamo') }
     }
     revalidatePath('/dashboard/claims')
     return { success: true }
