@@ -10,7 +10,7 @@ export default async function MarketplacePage() {
   const user = await getCachedUser()
   if (!user) redirect('/login')
 
-  const supabase = createClient()
+  const supabase = await createClient()
   // getUser() ya validó el usuario. getSession() solo extrae el token para llamar la API interna.
   const { data: { session } } = await supabase.auth.getSession()
   const { tenantId, role } = await getCachedTenantMeta()

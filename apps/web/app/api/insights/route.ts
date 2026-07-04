@@ -131,7 +131,7 @@ async function fetchModuleData(
   module: InsightModule,
   tenantId: string
 ): Promise<Record<string, unknown>> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
   if (module === 'inventory') {
@@ -210,7 +210,7 @@ async function fetchModuleData(
 export async function POST(req: NextRequest) {
   try {
     // 1. Auth
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 

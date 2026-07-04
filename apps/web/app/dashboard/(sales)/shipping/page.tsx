@@ -37,11 +37,12 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled:  'Cancelado',
 }
 
-export default async function ShippingPage({
-  searchParams,
-}: {
-  searchParams?: { order?: string }
-}) {
+export default async function ShippingPage(
+  props: {
+    searchParams?: Promise<{ order?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   const normalizeDaneCode = (raw?: string | null) => {
     const digits = String(raw ?? '').replace(/\D/g, '')
     if (digits.length === 8 && digits.endsWith('000')) return digits.slice(0, 5)
@@ -53,7 +54,7 @@ export default async function ShippingPage({
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let shipments: Shipment[] = []
   const activeProvider = 'aveonline' as const

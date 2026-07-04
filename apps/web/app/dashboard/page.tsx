@@ -11,7 +11,7 @@ export default async function DashboardPage() {
 
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let tenantName = 'Tu tienda'
   let stats = { conversations: 0, orders: 0, contacts: 0, products: 0 }

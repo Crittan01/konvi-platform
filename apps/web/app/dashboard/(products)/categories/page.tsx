@@ -8,7 +8,7 @@ export default async function CategoriesPage() {
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let categories: CategoryRow[] = []
   let attributeDefs: AttributeDef[] = []

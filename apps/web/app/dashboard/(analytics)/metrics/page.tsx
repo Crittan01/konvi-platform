@@ -35,17 +35,18 @@ function getPeriodDays(period: string): number | null {
   return null
 }
 
-export default async function MetricsPage({
-  searchParams,
-}: {
-  searchParams: { period?: string }
-}) {
+export default async function MetricsPage(
+  props: {
+    searchParams: Promise<{ period?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   const period = searchParams?.period ?? '30'
   const days   = getPeriodDays(period)
 
   const ROLE_LABELS: Record<string, string> = { owner: 'Administrador', manager: 'Supervisor', operator: 'Gestor' }
 
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }

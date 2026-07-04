@@ -10,7 +10,7 @@ import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 async function authToken() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   const { data: { session } } = await supabase.auth.getSession()

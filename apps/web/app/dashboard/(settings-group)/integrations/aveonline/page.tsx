@@ -46,11 +46,12 @@ const TABS: TabDef[] = [
 ]
 const VALID_TABS = new Set(TABS.map(t => t.id))
 
-export default async function AveonlinePanelPage({
-  searchParams,
-}: {
-  searchParams: { tab?: string }
-}) {
+export default async function AveonlinePanelPage(
+  props: {
+    searchParams: Promise<{ tab?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   if (role === 'operator') redirect('/dashboard')
@@ -58,7 +59,7 @@ export default async function AveonlinePanelPage({
   const requestedTab = (searchParams.tab || 'setup').toLowerCase()
   const tab = VALID_TABS.has(requestedTab) ? requestedTab : 'setup'
 
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // ─── Server Action: connectAveonline ─────────────────────────────────────
   // O.3 — POST de prueba a autenticarusuario.php con credenciales del tenant.
@@ -69,7 +70,7 @@ export default async function AveonlinePanelPage({
     formData: FormData,
   ): Promise<{ ok: boolean; error?: string }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -95,7 +96,7 @@ export default async function AveonlinePanelPage({
     error?: string
   }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -120,7 +121,7 @@ export default async function AveonlinePanelPage({
     formData: FormData,
   ): Promise<{ ok: boolean; error?: string }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {

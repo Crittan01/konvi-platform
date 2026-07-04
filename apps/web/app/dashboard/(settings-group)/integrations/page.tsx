@@ -17,18 +17,19 @@ export const metadata = {
 type Integration  = { provider: string; status: string; meta: Record<string, string> }
 type NotifSetting = { channel: string; enabled: boolean; config: Record<string, string> }
 
-export default async function IntegrationsPage({
-  searchParams,
-}: {
-  searchParams: {
-    connected?: string; error?: string
-    meli_same_user?: string  // baseline 2026-05-29 — campo faltante en type detectado al validar `next build`
-    tg_test?: string; tg_msg?: string
-    wa_test?: string; wa_msg?: string
-    ave_test?: string; ave_msg?: string
+export default async function IntegrationsPage(
+  props: {
+    searchParams: Promise<{
+      connected?: string; error?: string
+      meli_same_user?: string  // baseline 2026-05-29 — campo faltante en type detectado al validar `next build`
+      tg_test?: string; tg_msg?: string
+      wa_test?: string; wa_msg?: string
+      ave_test?: string; ave_msg?: string
+    }>
   }
-}) {
-  const supabase = createClient()
+) {
+  const searchParams = await props.searchParams;
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta     = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
@@ -88,7 +89,7 @@ export default async function IntegrationsPage({
 
   async function disconnectMeli() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -111,7 +112,7 @@ export default async function IntegrationsPage({
 
   async function saveTelegram(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -149,7 +150,7 @@ export default async function IntegrationsPage({
 
   async function disconnectTelegram() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -165,7 +166,7 @@ export default async function IntegrationsPage({
 
   async function testTelegram() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -229,7 +230,7 @@ export default async function IntegrationsPage({
 
   async function testWhatsApp() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -282,7 +283,7 @@ export default async function IntegrationsPage({
 
   async function saveWhatsApp(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -337,7 +338,7 @@ export default async function IntegrationsPage({
 
   async function saveWompi(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -389,7 +390,7 @@ export default async function IntegrationsPage({
 
   async function disconnectWompi() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -407,7 +408,7 @@ export default async function IntegrationsPage({
 
   async function disconnectWhatsApp() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -427,7 +428,7 @@ export default async function IntegrationsPage({
 
   async function saveAveonline(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -447,7 +448,7 @@ export default async function IntegrationsPage({
 
   async function disconnectAveonline() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -457,7 +458,7 @@ export default async function IntegrationsPage({
 
   async function testAveonline() {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return

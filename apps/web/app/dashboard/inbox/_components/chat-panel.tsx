@@ -50,12 +50,12 @@ interface Props {
   loadingMore: boolean
   loadMore: () => void
   messagesContainerRef: React.MutableRefObject<HTMLDivElement | null>
-  messagesEndRef: React.RefObject<HTMLDivElement>
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
 
   /** State del editor + acción enviar (vive en el padre). */
   replyText: string
   setReplyText: (v: string) => void
-  replyInputRef: React.RefObject<HTMLTextAreaElement>
+  replyInputRef: React.RefObject<HTMLTextAreaElement | null>
   sending: boolean
   sendError: string | null
   onSendMessage: () => void

@@ -9,7 +9,7 @@ import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 export async function GET() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ detail: 'No autenticado' }, { status: 401 })
 

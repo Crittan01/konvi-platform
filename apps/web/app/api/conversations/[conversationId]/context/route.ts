@@ -19,11 +19,9 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 
 const UPSTREAM_TIMEOUT_MS = 20000
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { conversationId: string } }
-) {
-  const supabase = createClient()
+export async function GET(req: NextRequest, props: { params: Promise<{ conversationId: string }> }) {
+  const params = await props.params;
+  const supabase = await createClient()
 
   const {
     data: { user },

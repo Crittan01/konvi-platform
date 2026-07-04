@@ -17,7 +17,7 @@ export default async function PurchasesPage() {
     return <div className="p-8 text-center text-destructive">Error: Usuario no asociado a ningún tenant.</div>
   }
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
   const meta = user.app_metadata as { tenant_id?: string; role?: string }
 
   // Fetch Suppliers

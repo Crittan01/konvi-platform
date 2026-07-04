@@ -54,7 +54,7 @@ type Acceptance = {
 }
 
 export default async function LegalAcceptancePage() {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
@@ -81,14 +81,14 @@ export default async function LegalAcceptancePage() {
   // Server action: append acceptance row.
   async function acceptDocument(formData: FormData) {
     'use server'
-    const sb2 = createClient()
+    const sb2 = await createClient()
     const { data: { user: u } } = await sb2.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
     const docId = String(formData.get('document_id') || '')
     const docVersion = String(formData.get('document_version') || '')
     if (!(docId in CURRENT_VERSIONS) || !docVersion) return
-    const hdrs = headers()
+    const hdrs = await headers()
     const ip =
       hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       hdrs.get('x-real-ip') ||

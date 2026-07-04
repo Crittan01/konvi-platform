@@ -18,17 +18,18 @@ type Order = {
   order_items: OrderItem[]
 }
 
-export default async function OrdersPage({
-  searchParams,
-}: {
-  searchParams?: { status?: string }
-}) {
+export default async function OrdersPage(
+  props: {
+    searchParams?: Promise<{ status?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   // Sem 5 perf: cached.
   const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const filterStatus = searchParams?.status ?? 'all'
 
@@ -80,7 +81,7 @@ export default async function OrdersPage({
   // ── Server Actions ────────────────────────────────────────────────────────
   async function updateOrderStatus(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -124,7 +125,7 @@ export default async function OrdersPage({
     formData: FormData,
   ): Promise<{ ok: boolean; message?: string; tracking?: string }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {

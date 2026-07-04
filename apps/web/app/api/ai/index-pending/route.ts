@@ -35,7 +35,7 @@ export async function POST(_request: NextRequest) {
   const key = process.env.GEMINI_API_KEY
   if (!key) return NextResponse.json({ error: 'GEMINI_API_KEY no configurada' }, { status: 503 })
 
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
 

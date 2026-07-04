@@ -98,12 +98,13 @@ function Section({ icon: Icon, title, description, children, className = '' }: {
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 
-export default async function TeamPage({
-  searchParams,
-}: {
-  searchParams: { invited?: string; added?: string; removed?: string; inactivated?: string; activated?: string; error?: string; tab?: string; resent?: string; role_changed?: string }
-}) {
-  const supabase = createClient()
+export default async function TeamPage(
+  props: {
+    searchParams: Promise<{ invited?: string; added?: string; removed?: string; inactivated?: string; activated?: string; error?: string; tab?: string; resent?: string; role_changed?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
@@ -138,7 +139,7 @@ export default async function TeamPage({
    */
   async function inviteMember(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') {
@@ -215,7 +216,7 @@ export default async function TeamPage({
 
   async function changeRole(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -244,7 +245,7 @@ export default async function TeamPage({
 
   async function removeMember(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -277,7 +278,7 @@ export default async function TeamPage({
 
   async function inactivateMember(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -313,7 +314,7 @@ export default async function TeamPage({
 
   async function activateMember(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') return
@@ -343,7 +344,7 @@ export default async function TeamPage({
 
   async function resendInvite(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || m.role !== 'owner') {

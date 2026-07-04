@@ -52,7 +52,7 @@ interface Result {
   loadingMore: boolean
   loadMore: () => Promise<void>
   messagesContainerRef: React.MutableRefObject<HTMLDivElement | null>
-  messagesEndRef: React.RefObject<HTMLDivElement>
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
 }
 
 const MESSAGE_COLUMNS =

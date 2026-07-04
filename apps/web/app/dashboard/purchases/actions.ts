@@ -14,7 +14,7 @@ type ActionResult = { ok: boolean; error?: string }
 // El router /api/v1/purchases valida tenant, RBAC, persiste y dispara audit_log.
 
 async function getToken(): Promise<string> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
   return session?.access_token ?? ''
 }

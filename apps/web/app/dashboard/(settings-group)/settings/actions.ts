@@ -9,7 +9,7 @@ import { redirect } from 'next/navigation'
 // Si no tiene permiso, redirige a /dashboard — nunca retorna null silenciosamente.
 
 async function getOwnerTenantId(): Promise<string> {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const m = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!m.tenant_id || m.role !== 'owner') {
@@ -30,7 +30,7 @@ function revalidateSettings() {
 export type ActionResult = { ok: boolean; error?: string }
 
 async function updateTenant(tenantId: string, data: Record<string, unknown>): Promise<ActionResult> {
-  const sb = createClient()
+  const sb = await createClient()
   // F140: supabase-js NO lanza, retorna { error }. Sin este check, un UPDATE bloqueado (RLS/constraint)
   // pasaba en silencio y el usuario veía "Guardado ✓" aunque no persistió.
   const { error } = await sb.from('tenants').update(data).eq('id', tenantId)
@@ -138,7 +138,7 @@ export async function savePaymentMethods(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const tenantId = await getOwnerTenantId()
-    const sb = createClient()
+    const sb = await createClient()
 
     const codEnabled = formData.get('cod_enabled') === '1'
     const onlineEnabled = formData.get('online_wompi_enabled') === '1'

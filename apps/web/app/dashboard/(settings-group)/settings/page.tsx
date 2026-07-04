@@ -82,7 +82,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 export default async function SettingsPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id

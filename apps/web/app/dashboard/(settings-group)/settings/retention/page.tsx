@@ -43,7 +43,7 @@ const ENTITY_LABELS: Record<Policy['entity'], { label: string; description: stri
 }
 
 export default async function RetentionPoliciesPage() {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   const tenantId = meta.tenant_id
@@ -70,7 +70,7 @@ export default async function RetentionPoliciesPage() {
   // Server action: guarda override per-tenant (upsert).
   async function saveOverride(formData: FormData) {
     'use server'
-    const sb2 = createClient()
+    const sb2 = await createClient()
     const { data: { user: u } } = await sb2.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -100,7 +100,7 @@ export default async function RetentionPoliciesPage() {
 
   async function deleteOverride(formData: FormData) {
     'use server'
-    const sb2 = createClient()
+    const sb2 = await createClient()
     const { data: { user: u } } = await sb2.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return

@@ -26,7 +26,7 @@ import { signRecoveryCookie, RECOVERY_SESSION_COOKIE } from '@/lib/mfa-recovery-
 const RECOVERY_SESSION_MAX_AGE_SECONDS = 24 * 60 * 60 // 24h
 
 export async function POST(req: NextRequest) {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { session } } = await sb.auth.getSession()
   const headerAuth = req.headers.get('Authorization') || ''
   const token = session?.access_token ?? (

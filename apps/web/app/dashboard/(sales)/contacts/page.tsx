@@ -95,17 +95,18 @@ type Contact = {
   address: Record<string, string> | null
 }
 
-export default async function ContactsPage({
-  searchParams,
-}: {
-  searchParams?: { q?: string; consent?: string }
-}) {
+export default async function ContactsPage(
+  props: {
+    searchParams?: Promise<{ q?: string; consent?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   // Sem 5 perf: cached comparte con DashboardLayout.
   const { getCachedUser, getCachedTenantMeta } = await import('@/utils/supabase/cached-user')
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const consentFilter = searchParams?.consent ?? 'all'
 
@@ -140,7 +141,7 @@ export default async function ContactsPage({
 
   async function addContact(formData: FormData): Promise<ActionResult> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -328,7 +329,7 @@ export default async function ContactsPage({
     // comportamiento previo (verificada con tests). Antes era escritura directa
     // a Supabase con la lógica acá (drift §3, sin audit). El server action solo
     // parsea el form, sube el adjunto client-side y envía los inputs crudos.
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -464,7 +465,7 @@ export default async function ContactsPage({
 
   async function deleteContact(formData: FormData): Promise<ActionResult> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     // Sem 7 F2 cierre 2026-05-20 — Bug founder UAT (web.log alerta):
     // ANTES usábamos `session.user` directamente — Supabase lo marcaba
     // como `insecure` porque viene de cookies sin verificación de JWT.
@@ -560,7 +561,7 @@ export default async function ContactsPage({
     error?: string
   }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { session } } = await sb.auth.getSession()
     const m = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -597,7 +598,7 @@ export default async function ContactsPage({
     error?: string
   }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { session } } = await sb.auth.getSession()
     const m = (session?.user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     const sarType = String(formData.get('sar_type') || 'export')
@@ -647,7 +648,7 @@ export default async function ContactsPage({
     formData: FormData,
   ): Promise<{ ok: boolean; status: number; message: string }> {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     // Rev. 105 H.4.1.x — owner-only (Habeas Data ART. 11). Manager NO

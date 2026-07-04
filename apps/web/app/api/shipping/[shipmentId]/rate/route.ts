@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { shipmentId: string } }
-) {
-  const supabase = createClient()
+export async function PATCH(req: NextRequest, props: { params: Promise<{ shipmentId: string }> }) {
+  const params = await props.params;
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ detail: 'No autenticado' }, { status: 401 })
 

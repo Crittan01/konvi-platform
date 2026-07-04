@@ -10,12 +10,13 @@ export const metadata = {
   description: 'Establece tu contraseña para acceder a la consola.',
 }
 
-export default async function SetPasswordPage({
-  searchParams,
-}: {
-  searchParams: { error?: string }
-}) {
-  const supabase = createClient()
+export default async function SetPasswordPage(
+  props: {
+    searchParams: Promise<{ error?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   // Si no hay sesión activa el enlace expiró o ya fue usado
@@ -29,7 +30,7 @@ export default async function SetPasswordPage({
 
   async function setPassword(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     if (!u) redirect('/login')
 

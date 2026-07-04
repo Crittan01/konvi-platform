@@ -12,7 +12,7 @@ export default async function ClaimsPage() {
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite   = ['owner', 'manager', 'operator'].includes(role)
   const canResolve = ['owner', 'manager'].includes(role)
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // Fetch claims with relationships — filtrado por tenant (defensa en profundidad + RLS)
   const { data: claimsData } = await supabase

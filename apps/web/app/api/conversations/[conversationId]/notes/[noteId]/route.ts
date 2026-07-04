@@ -12,7 +12,7 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 const UPSTREAM_TIMEOUT_MS = 10000
 
 async function _authToken(req: NextRequest): Promise<string | null> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
   if (session?.access_token) return session.access_token
   const auth = req.headers.get('Authorization') || ''
@@ -21,8 +21,9 @@ async function _authToken(req: NextRequest): Promise<string | null> {
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { conversationId: string; noteId: string } },
+  props: { params: Promise<{ conversationId: string; noteId: string }> }
 ) {
+  const params = await props.params;
   const token = await _authToken(req)
   if (!token) return NextResponse.json({ detail: 'Sesión expirada' }, { status: 401 })
 
@@ -51,8 +52,9 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { conversationId: string; noteId: string } },
+  props: { params: Promise<{ conversationId: string; noteId: string }> }
 ) {
+  const params = await props.params;
   const token = await _authToken(req)
   if (!token) return NextResponse.json({ detail: 'Sesión expirada' }, { status: 401 })
 

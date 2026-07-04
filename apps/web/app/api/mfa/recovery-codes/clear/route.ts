@@ -8,7 +8,7 @@ import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 export async function DELETE(req: NextRequest) {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { session } } = await sb.auth.getSession()
   const headerAuth = req.headers.get('Authorization') || ''
   const token = session?.access_token ?? (

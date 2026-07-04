@@ -29,7 +29,7 @@ interface OffboardingStatus {
 }
 
 async function getOwnerTenant(): Promise<{ tenantId: string; tenantName: string }> {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || meta.role !== 'owner') {
@@ -50,7 +50,7 @@ async function getOffboardingStatus(tenantId: string): Promise<OffboardingStatus
   // El status lo expone backend via /api/v1/tenant/offboarding/status, pero
   // como hay session cookie + RLS owner-only en tenant_offboarding_log, podemos
   // leer directo de la tabla tenants con campos públicos.
-  const sb = createClient()
+  const sb = await createClient()
   const { data } = await sb
     .from('tenants')
     .select('id, deletion_requested_at, deletion_scheduled_for, deletion_reason, deleted_at')

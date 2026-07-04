@@ -75,7 +75,7 @@ export async function uploadConsentEvidence(
     }
   }
 
-  const sb = createClient()
+  const sb = await createClient()
   const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 100)
   const path = `${tenantId}/${contactId}/${Date.now()}-${safeName}`
 
@@ -113,7 +113,7 @@ export async function getConsentEvidenceSignedUrl(
   contactId: string,
 ): Promise<{ url: string } | { error: string }> {
   if (!contactId) return { error: 'contact_id requerido' }
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user: u } } = await sb.auth.getUser()
   const m = (u?.app_metadata ?? {}) as { tenant_id?: string }
   if (!m.tenant_id) return { error: 'No autenticado' }

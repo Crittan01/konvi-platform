@@ -19,7 +19,7 @@ const MAX_TITLE   = 120
 // Rev. 72 — los embeddings se calculan ahora server-side en el API
 // (POST /api/v1/knowledge-base). GEMINI_API_KEY ya NO se expone al
 // frontend (cierra drift D3). Helper local para autorizar las llamadas.
-async function authedApi(supabase: ReturnType<typeof createClient>, path: string, options: RequestInit = {}): Promise<Response> {
+async function authedApi(supabase: Awaited<ReturnType<typeof createClient>>, path: string, options: RequestInit = {}): Promise<Response> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token ?? ''
   return fetch(`${CORE_API_URL}${path}`, {
@@ -88,17 +88,18 @@ type KbDocument = {
   has_embedding?: boolean
 }
 
-export default async function KnowledgeBasePage({
-  searchParams,
-}: {
-  searchParams?: { q?: string; cat?: string }
-}) {
+export default async function KnowledgeBasePage(
+  props: {
+    searchParams?: Promise<{ q?: string; cat?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   // Sem 5 perf: cached.
   const user = await getCachedUser()
   if (!user) redirect('/login')
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
   const q   = searchParams?.q ?? ''
   const cat = searchParams?.cat ?? ''
 
@@ -152,7 +153,7 @@ export default async function KnowledgeBasePage({
   // El embedding se calcula server-side en el API (GEMINI_API_KEY ya NO se expone al frontend).
   async function createDocument(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const title    = (formData.get('title') as string).trim()
     const content  = (formData.get('content') as string).trim()
     const category = (formData.get('category') as string) || 'faq'
@@ -168,7 +169,7 @@ export default async function KnowledgeBasePage({
 
   async function updateDocument(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const docId    = (formData.get('doc_id') as string).trim()
     const title    = (formData.get('title') as string).trim()
     const content  = (formData.get('content') as string).trim()
@@ -185,7 +186,7 @@ export default async function KnowledgeBasePage({
 
   async function activateDocument(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const docId = formData.get('doc_id') as string
     // Activar = PATCH is_active=true. El backend re-genera embedding si content cambió;
     // si solo cambia is_active, el embedding existente se conserva.
@@ -202,7 +203,7 @@ export default async function KnowledgeBasePage({
 
   async function desactivateDocument(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const docId = formData.get('doc_id') as string
     const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, {
       method: 'PATCH',
@@ -214,7 +215,7 @@ export default async function KnowledgeBasePage({
 
   async function deleteDocument(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const docId = formData.get('doc_id') as string
     const res = await authedApi(sb, `/api/v1/knowledge-base/${docId}`, { method: 'DELETE' })
     if (!res.ok) console.error('deleteDocument failed:', await res.text())
@@ -223,7 +224,7 @@ export default async function KnowledgeBasePage({
 
   async function loadSelectedTemplates(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const selectedIds = formData.getAll('template_ids') as string[]
     if (!selectedIds.length) return
 

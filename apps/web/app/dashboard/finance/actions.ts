@@ -5,7 +5,7 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 import { revalidatePath } from 'next/cache'
 
 export async function addExpense(formData: FormData) {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const m = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return

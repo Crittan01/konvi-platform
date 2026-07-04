@@ -14,11 +14,9 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 
 const UPSTREAM_TIMEOUT_MS = 10000
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { conversationId: string } },
-) {
-  const supabase = createClient()
+export async function POST(req: NextRequest, props: { params: Promise<{ conversationId: string }> }) {
+  const params = await props.params;
+  const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
   const headerAuth = req.headers.get('Authorization') || ''
   const token = session?.access_token ?? (

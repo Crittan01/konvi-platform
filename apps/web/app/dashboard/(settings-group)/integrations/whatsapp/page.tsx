@@ -127,7 +127,7 @@ async function createDraftAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -216,7 +216,7 @@ async function updateDraftAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -278,7 +278,7 @@ async function deleteDraftAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -321,11 +321,12 @@ async function deleteDraftAction(
 type Tab = 'setup' | 'plantillas' | 'calidad' | 'optouts'
 const VALID_TABS: Tab[] = ['setup', 'plantillas', 'calidad', 'optouts']
 
-export default async function WhatsAppIntegrationPage({
-  searchParams,
-}: {
-  searchParams: { tab?: string }
-}) {
+export default async function WhatsAppIntegrationPage(
+  props: {
+    searchParams: Promise<{ tab?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   if (role === 'operator') redirect('/dashboard')
@@ -337,7 +338,7 @@ export default async function WhatsAppIntegrationPage({
     ? (requestedTab as Tab)
     : 'setup'
 
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // Lookup integration + templates en paralelo
   let integration: {

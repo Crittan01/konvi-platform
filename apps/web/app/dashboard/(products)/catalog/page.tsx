@@ -12,7 +12,7 @@ export default async function CatalogPage() {
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // ADR-0027 — categorías OPERATIVAS per-tenant (las que el bot presenta). RLS via JWT.
   const { data: pcats } = tenantId
@@ -84,7 +84,7 @@ export default async function CatalogPage() {
 
   async function editProduct(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -133,7 +133,7 @@ export default async function CatalogPage() {
 
   async function addVariation(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -179,7 +179,7 @@ export default async function CatalogPage() {
 
   async function editVariation(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -238,7 +238,7 @@ export default async function CatalogPage() {
 
   async function restoreProduct(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -262,7 +262,7 @@ export default async function CatalogPage() {
 
   async function deactivateProduct(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -286,7 +286,7 @@ export default async function CatalogPage() {
 
   async function deleteProduct(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -314,7 +314,7 @@ export default async function CatalogPage() {
 
   async function adjustStock(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return
@@ -349,7 +349,7 @@ export default async function CatalogPage() {
 
   async function saveThreshold(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) return

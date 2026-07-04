@@ -131,7 +131,7 @@ async function writeCouponApi(
 
 async function createCouponAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -175,7 +175,7 @@ async function updateCouponAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -233,7 +233,7 @@ async function toggleCouponActiveAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -275,7 +275,7 @@ async function deleteCouponAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   'use server'
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !['owner', 'manager'].includes(meta.role ?? '')) {
@@ -305,7 +305,7 @@ export default async function PromotionsPage() {
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let coupons: Coupon[] = []
   if (tenantId) {

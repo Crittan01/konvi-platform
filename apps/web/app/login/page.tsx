@@ -3,12 +3,13 @@ import { redirect } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import LoginForm from './login-form'
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: { message?: string; error?: string; force?: string }
-}) {
-  const supabase = createClient()
+export default async function LoginPage(
+  props: {
+    searchParams: Promise<{ message?: string; error?: string; force?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
+  const supabase = await createClient()
   const { data } = await supabase.auth.getUser()
 
   // Rev. 109 J.2.4.3 — flow multi-user en mismo browser.
@@ -33,7 +34,7 @@ export default async function LoginPage({
 
   const switchUserAction = async () => {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     await sb.auth.signOut()
     redirect('/login?force=1')
   }
@@ -42,7 +43,7 @@ export default async function LoginPage({
     'use server'
     const email = formData.get('email') as string
     const password = formData.get('password') as string
-    const supabase = createClient()
+    const supabase = await createClient()
 
     // Rev. 109 J.2.4.3 — Si hay sesión activa de otro usuario, cerrarla
     // antes de iniciar sesión nueva. Evita que la cookie residual de A
@@ -77,7 +78,6 @@ export default async function LoginPage({
   return (
     <div className="flex h-screen w-full items-center justify-center bg-[#131A19]">
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 mix-blend-overlay pointer-events-none"></div>
-      
       <div className="relative w-full max-w-[420px] p-6 sm:p-8">
         <div className="flex flex-col items-center mb-8">
           {/* Logo mock / Brand */}
@@ -100,7 +100,7 @@ export default async function LoginPage({
 
         {data?.user && !forceLogin ? (
           /* Sesión activa SIN ?force → pantalla intermedia con opciones */
-          <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
+          (<Card className="border-0 shadow-2xl bg-[#FBFAF6]">
             <CardContent className="pt-6 space-y-4">
               <div className="text-center space-y-1">
                 <p className="text-sm text-muted-foreground">Sesión activa</p>
@@ -127,7 +127,7 @@ export default async function LoginPage({
                 usa "Cambiar de cuenta" para iniciar como otro usuario.
               </p>
             </CardContent>
-          </Card>
+          </Card>)
         ) : (
           <Card className="border-0 shadow-2xl bg-[#FBFAF6]">
             <CardContent className="pt-6">
@@ -137,5 +137,5 @@ export default async function LoginPage({
         )}
       </div>
     </div>
-  )
+  );
 }

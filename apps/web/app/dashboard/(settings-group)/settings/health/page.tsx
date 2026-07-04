@@ -28,7 +28,7 @@ interface HealthRow {
 }
 
 async function getOwnerOrManagerTenant(): Promise<string> {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
   if (!meta.tenant_id || !meta.role || !['owner', 'manager'].includes(meta.role)) {
@@ -40,7 +40,7 @@ async function getOwnerOrManagerTenant(): Promise<string> {
 async function getHealthMetrics(tenantId: string): Promise<HealthRow[]> {
   // RLS filtra por tenant automáticamente. Service-role NO necesario
   // porque la policy de SELECT permite authenticated del tenant correcto.
-  const sb = createClient()
+  const sb = await createClient()
   const { data, error } = await sb
     .from('tenant_provider_health')
     .select('*')

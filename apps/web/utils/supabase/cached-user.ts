@@ -46,7 +46,7 @@ import { createClient } from './server'
  * Returns null si no hay sesión válida (caller decide redirect).
  */
 export const getCachedUser = cache(async () => {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   return user
 })
@@ -100,7 +100,7 @@ export const getCachedTenantMeta = cache(async (): Promise<TenantMeta> => {
 export const getCachedTenantName = cache(async (): Promise<string | null> => {
   const { tenantId } = await getCachedTenantMeta()
   if (!tenantId) return null
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data } = await supabase
     .from('tenants')
     .select('name')

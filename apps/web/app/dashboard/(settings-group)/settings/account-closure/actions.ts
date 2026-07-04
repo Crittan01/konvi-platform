@@ -15,7 +15,7 @@ import { createClient } from '@/utils/supabase/server'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
 async function getOwnerToken(): Promise<string> {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { session } } = await sb.auth.getSession()
   const { data: { user } } = await sb.auth.getUser()
   const meta = (user?.app_metadata ?? {}) as { role?: string }

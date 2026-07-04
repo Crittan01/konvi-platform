@@ -14,7 +14,7 @@ export default async function MediaPage() {
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   const canWrite = role === 'owner' || role === 'manager'
-  const supabase = createClient()
+  const supabase = await createClient()
 
   if (!tenantId) {
     return <div className="p-8 text-center text-muted-foreground">Sin acceso — tenant no configurado.</div>

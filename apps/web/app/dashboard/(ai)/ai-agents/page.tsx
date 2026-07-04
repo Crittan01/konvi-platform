@@ -14,7 +14,7 @@ const TONO_LABEL: Record<string, string> = {
 }
 
 export default async function AiAgentsPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
@@ -105,7 +105,7 @@ export default async function AiAgentsPage() {
 
   async function createAgent(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -150,7 +150,7 @@ export default async function AiAgentsPage() {
 
   async function updateAgent(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {
@@ -222,7 +222,7 @@ export default async function AiAgentsPage() {
 
   async function deleteAgent(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     const m = (u?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
     if (!m.tenant_id || !['owner', 'manager'].includes(m.role ?? '')) {

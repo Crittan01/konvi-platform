@@ -35,7 +35,7 @@ interface MfaState {
 }
 
 async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
-  const sb = createClient()
+  const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   const { data: { session } } = await sb.auth.getSession()
   if (!user || !session) redirect('/login')
@@ -69,13 +69,14 @@ async function getMfaState(): Promise<{ state: MfaState; userId: string }> {
   }
 }
 
-export default async function SecurityPage({
-  searchParams,
-}: {
-  searchParams: { pwd_success?: string; pwd_error?: string }
-}) {
+export default async function SecurityPage(
+  props: {
+    searchParams: Promise<{ pwd_success?: string; pwd_error?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   const { state, userId } = await getMfaState()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -84,10 +85,11 @@ export default async function SecurityPage({
   // En esa sesión, AAL=1 y operaciones AAL2-required (changePassword,
   // unenroll) deben pasar por endpoints backend que validan recovery code
   // adicional + admin API bypass.
-  const { cookies: cookieStore } = await import('next/headers')
+  const { cookies: cookiesFn } = await import('next/headers')
+  const recoveryCookieStore = await cookiesFn()   // Next 15: cookies() es async
   // F83: verificar firma HMAC (ligada al user + expiry), no `=== '1'`.
   const isRecoverySession = await verifyRecoveryCookie(
-    cookieStore().get('mfa_recovery_session')?.value,
+    recoveryCookieStore.get('mfa_recovery_session')?.value,
     user.id,
     Math.floor(Date.now() / 1000),
   )
@@ -98,7 +100,7 @@ export default async function SecurityPage({
   //   dialog que pide recovery code y llama al endpoint backend.
   async function changePassword(formData: FormData) {
     'use server'
-    const sb = createClient()
+    const sb = await createClient()
     const { data: { user: u } } = await sb.auth.getUser()
     if (!u) redirect('/login')
 

@@ -33,11 +33,12 @@ const TABS: TabDef[] = [
 ]
 const VALID_TABS = new Set(TABS.map(t => t.id))
 
-export default async function WompiPanelPage({
-  searchParams,
-}: {
-  searchParams: { tab?: string }
-}) {
+export default async function WompiPanelPage(
+  props: {
+    searchParams: Promise<{ tab?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   if (role === 'operator') redirect('/dashboard')
@@ -45,7 +46,7 @@ export default async function WompiPanelPage({
   const requestedTab = (searchParams.tab || 'setup').toLowerCase()
   const tab = VALID_TABS.has(requestedTab) ? requestedTab : 'setup'
 
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let integration: {
     status: string

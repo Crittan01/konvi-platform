@@ -37,11 +37,12 @@ const TABS: TabDef[] = [
 ]
 const VALID_TABS = new Set(TABS.map(t => t.id))
 
-export default async function TelegramPanelPage({
-  searchParams,
-}: {
-  searchParams: { tab?: string }
-}) {
+export default async function TelegramPanelPage(
+  props: {
+    searchParams: Promise<{ tab?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   await getCachedUser()
   const { tenantId, role } = await getCachedTenantMeta()
   if (role === 'operator') redirect('/dashboard')
@@ -49,7 +50,7 @@ export default async function TelegramPanelPage({
   const requestedTab = (searchParams.tab || 'bot').toLowerCase()
   const tab = VALID_TABS.has(requestedTab) ? requestedTab : 'bot'
 
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let notif: {
     enabled: boolean

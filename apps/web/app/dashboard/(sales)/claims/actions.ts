@@ -9,7 +9,7 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 // El router /api/v1/claims valida tenant, RBAC, persiste y dispara audit_log.
 
 async function getToken(): Promise<string> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
   return session?.access_token ?? ''
 }

@@ -8,7 +8,7 @@ import { CORE_API_URL } from '@/lib/runtime-env'
 // router API /api/v1/product-categories: RBAC + audit_log + tenant scoping. NO escritura directa.
 
 async function getToken(): Promise<string> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
   return session?.access_token ?? ''
 }

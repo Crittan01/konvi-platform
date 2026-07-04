@@ -19,12 +19,13 @@ import { MfaChallengeForm } from './_components/mfa-challenge-form'
 
 export const dynamic = 'force-dynamic'
 
-export default async function MfaChallengePage({
-  searchParams,
-}: {
-  searchParams: { message?: string; error?: string }
-}) {
-  const supabase = createClient()
+export default async function MfaChallengePage(
+  props: {
+    searchParams: Promise<{ message?: string; error?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   // Sin sesión → al login.

@@ -42,26 +42,28 @@ export default async function DashboardLayout({
   if (!user) redirect('/login')
 
   const { role, tenantId } = await getCachedTenantMeta()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const logoutAction = async () => {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     await supabase.auth.signOut()
     // Rev. 109 J.2.4.3 — limpiar cookie de recovery bypass al cerrar sesión.
     // Si el user usó recovery code en esta sesión, la cookie HttpOnly debe
     // borrarse para que el próximo login REQUIERA TOTP o nuevo recovery.
     const { cookies } = await import('next/headers')
-    cookies().delete('mfa_recovery_session')
+    const cookieStore = await cookies()   // Next 15: cookies() es async
+    cookieStore.delete('mfa_recovery_session')
     redirect('/login')
   }
 
   // Rev. 109 J.2.4.3 — detectar si el user entró vía recovery code
   // para mostrar banner urgente: regenerar TOTP idealmente esta sesión.
-  const { cookies: cookieStore } = await import('next/headers')
+  const { cookies: cookiesFn } = await import('next/headers')
+  const recoveryCookieStore = await cookiesFn()   // Next 15: cookies() es async
   // F83: verificar firma HMAC (ligada al user + expiry), no `=== '1'`.
   const usedRecoveryCode = await verifyRecoveryCookie(
-    cookieStore().get('mfa_recovery_session')?.value,
+    recoveryCookieStore.get('mfa_recovery_session')?.value,
     user.id,
     Math.floor(Date.now() / 1000),
   )

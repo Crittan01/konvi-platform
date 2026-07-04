@@ -29,7 +29,7 @@ function actionColor(action: string): string {
 }
 
 function formatAction(action: string): string {
-  return action.replace('.', ' → ').replace(/_/g, ' ')
+  return action.replace('.', ' → ').replace(/_/g, ' ');
 }
 
 type AuditEntry = {
@@ -42,12 +42,13 @@ type AuditEntry = {
   created_at: string
 }
 
-export default async function AuditPage({
-  searchParams,
-}: {
-  searchParams: { entity?: string; page?: string; user?: string; from_date?: string; to_date?: string }
-}) {
-  const supabase = createClient()
+export default async function AuditPage(
+  props: {
+    searchParams: Promise<{ entity?: string; page?: string; user?: string; from_date?: string; to_date?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
   const meta = (user?.app_metadata ?? {}) as { tenant_id?: string; role?: string }
