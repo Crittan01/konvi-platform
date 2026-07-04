@@ -7,6 +7,24 @@
 
 ---
 
+> ## ⚠️ SUPERSEDED PARCIAL por ADR-0023 (Model B · Direct Provider per-tenant) — 2026-06-03
+>
+> Este checklist se redactó bajo el modelo **Tech Provider / "1 Konvi App + N tenants"**, que fue
+> **cancelado**. Bajo Model B (ADR-0023):
+>
+> - **H2.2 (transferir la Konvi App `819229210624423` a un BP platform) — YA NO APLICA.** La Konvi App
+>   sirve sólo al entorno de desarrollo interno de Konvi (self-tenant). **Cada tenant crea SU PROPIA Meta
+>   App** en SU propio Business Portfolio y trae SUS 6 credenciales.
+> - **H3 (Business Verification) y H4 (App Review) — pasan a ser trámites DEL TENANT**, con su propia App y
+>   su propio Business, NO de una "Konvi App" compartida. Konvi NO tramita en nombre del tenant.
+> - **H1 (nombre/marca Konvi)** sigue vigente como identidad de la plataforma.
+>
+> El flujo tenant vigente vive en `docs/onboarding/whatsapp-tenant-setup.md` (Model B) y el runbook interno
+> en `docs/operations/onboarding-tenants.md`. Las secciones de abajo se conservan como historial; leelas con
+> este banner en mente. Fuente: `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md`.
+
+---
+
 ## H1 — Decidir nombre platform (sesión aparte)
 
 **Estado**: 🟡 EN PROGRESO — **Konvi** seleccionado en sesión 2026-05-08, pendiente verificación SIC + registro dominios.
@@ -90,6 +108,9 @@
 
 ### H2.2 — Transferir Meta App `819229210624423` al nuevo Business Portfolio
 
+> ❌ **YA NO APLICA (ADR-0023)**. No se transfiere la Konvi App a un BP platform ni se comparte con tenants.
+> La Konvi App queda como entorno de desarrollo interno (self-tenant). Cada tenant crea su propia App.
+
 1. En el nuevo Business Portfolio: **Configuración → Cuentas → Apps** → **Agregar**.
 2. Seleccionar **Reclamar una app existente**.
 3. Pegar App ID: `819229210624423`.
@@ -158,6 +179,10 @@ Estados posibles en Business Verification dashboard:
 ---
 
 ## H4 — Submit App Review (Advanced Access)
+
+> 🔄 **CAMBIA con ADR-0023**: el App Review no lo hace "la Konvi App" para todos los tenants. **Cada tenant
+> hace App Review de SU propia Meta App** (Direct Provider). Lo de abajo aplica, pero por-tenant y con la App
+> del tenant — Konvi no tramita en su nombre. Ver `docs/onboarding/whatsapp-tenant-setup.md`.
 
 **Estado**: pendiente.
 **Tiempo estimado**: 30 min preparación + screencast + **1 a 2 semanas review Meta**.

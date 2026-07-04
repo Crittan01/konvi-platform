@@ -1,191 +1,228 @@
-# Onboarding WhatsApp — Guía para tenants nuevos
+# Onboarding WhatsApp — Guía para tenants nuevos (Model B · Direct Provider)
 
 **Audiencia**: tenant nuevo que quiere conectar su WhatsApp Business a Konvi.
-**Tiempo estimado**: 20-40 min (depende de si ya tiene Business Manager configurado).
-**Pre-requisito**: tener un número WhatsApp Business activo (no es el WhatsApp personal).
+**Modelo**: **Direct Provider per-tenant (ADR-0023)**. Vos creás **TU PROPIA Meta App**, con tus propias
+credenciales y tu propio webhook. Konvi NO es Partner Meta y NO comparte su App con vos.
+**Tiempo estimado**: 30-60 min de configuración + **2-5 semanas calendario** de trámites Meta (Business
+Verification + App Review propios). El bot funciona en Development Mode mientras tanto (hasta 5 números de
+prueba), así que podés probar antes de terminar los trámites.
+**Pre-requisito**: número WhatsApp Business activo (NO tu WhatsApp personal).
+
+> ⚠️ Esta guía **reemplaza** la versión anterior (Modelo A — "conectar la Konvi App a tu Business
+> Portfolio"). Ese modelo fue **superseded por ADR-0023**. Si alguien te pidió reclamar/autorizar la Konvi
+> App (`819229210624423`), ignoralo: bajo Model B cada tenant crea su App. La Konvi App es sólo para el
+> entorno de desarrollo interno de Konvi.
 
 ---
 
 ## Resumen del flow (qué pasa al final)
 
-Al terminar este onboarding, tu WhatsApp Business va a recibir mensajes de tus clientes y el bot de Konvi va a responder automáticamente: cotizar envíos, generar links de pago, enviar resumen del pedido, etc.
-
-Esquema técnico:
+Al terminar, tu WhatsApp Business recibe mensajes de tus clientes y el bot de Konvi responde
+automáticamente: cotizar envíos, generar links de pago, resumen del pedido, etc.
 
 ```
-Tu cliente WhatsApp ────► Tu WhatsApp Business ────► Meta Cloud API
-                                                          │
-                                                          ▼
-                                             Konvi Connector
-                                                          │
-                                                          ▼
-                                                 Bot orquesta + responde
-                                                          │
-                                                          ▼
-                                                    Tu cliente
+Tu cliente WhatsApp ─► Tu WhatsApp Business ─► Meta Cloud API (TU Meta App)
+                                                     │  webhook per-tenant
+                                                     ▼
+                                          Konvi Connector  /api/v1/whatsapp/webhook/{tu_tenant_id}
+                                                     │  (valida HMAC con TU app_secret)
+                                                     ▼
+                                             Bot orquesta + responde ─► Tu cliente
 ```
 
----
+Las **6 credenciales** que vas a capturar en Konvi (Integraciones → WhatsApp → panel completo):
 
-## Pre-requisitos (tener listos antes de empezar)
+| # | Credencial | Para qué sirve | Dónde la obtenés |
+|---|---|---|---|
+| 1 | **app_id** | Identifica tu Meta App | developers.facebook.com → tu App → Settings → Basic |
+| 2 | **app_secret** | Firma HMAC del webhook (Konvi valida cada payload con esto) | idem, "App Secret" → **Mostrar** |
+| 3 | **verify_token** | Handshake GET del webhook (lo elegís vos, cadena secreta) | lo inventás (ej. `mi-negocio-wh-2026`) |
+| 4 | **phone_number_id** | Identifica tu número en Cloud API | WhatsApp → API Setup |
+| 5 | **waba_id** | WhatsApp Business Account ID | WhatsApp → API Setup |
+| 6 | **access_token** | Token System User (never-expires) para enviar mensajes | Business Settings → System Users → Generar token |
 
-| # | Item | Dónde lo obtenés |
-|---|---|---|
-| 1 | Cuenta Facebook personal | facebook.com (debe existir, es lo que usás para entrar a Business Manager) |
-| 2 | Business Portfolio de tu negocio | business.facebook.com → crear si no existe (5 min) |
-| 3 | Página de Facebook de tu negocio | business.facebook.com → Configuración → Páginas → conectar la página |
-| 4 | Número telefónico para WhatsApp Business (NO usado en WhatsApp personal) | Tu propio celular nuevo o una línea SIM nueva |
-| 5 | Acceso al panel admin Konvi como **Administrador** del tenant | te lo otorga el founder de Konvi |
-
----
-
-## Paso 1 — Crear/verificar tu Business Portfolio
-
-(Skip este paso si ya tenés Business Portfolio activo con tu negocio.)
-
-1. Entrá a [business.facebook.com](https://business.facebook.com)
-2. Si no tenés Business Portfolio: clic **Crear cuenta** → llenar nombre legal del negocio + tu nombre + email comercial.
-3. En **Configuración → Información del negocio**, llenar todos los campos (NIT, dirección, sector, sitio web).
-4. En **Configuración → Páginas**, agregar la página de Facebook de tu negocio (si no la tenés, crearla).
-
-> ✅ Verificación: en la esquina superior izquierda debería aparecer el nombre de tu negocio + un avatar. Si decís cosas como "Personal account" o "Mi cuenta", aún estás en personal — buscá tu Business Portfolio en el selector.
+`app_secret` y `access_token` se guardan cifrados en Vault. El resto viaja en `credentials`. Konvi **nunca**
+ve tu contraseña de Facebook.
 
 ---
 
-## Paso 2 — Activar WhatsApp Business en tu Business Portfolio
+## Paso 0 — Pedí tu acceso a Konvi + tu tenant_id
 
-1. En [business.facebook.com](https://business.facebook.com) → **Configuración del negocio** (`/settings`).
-2. En el menú izquierdo: **Cuentas → Cuentas de WhatsApp** → **Agregar** → **Crear una cuenta nueva de WhatsApp Business**.
-3. Llenar: nombre del negocio (verá tu cliente), zona horaria, descripción.
-4. Asignar el número de teléfono (Paso 1.4 pre-requisito):
-   - Verificación SMS o llamada al número.
-   - El número quedará registrado a nombre de WhatsApp Business — **no funcionará más en WhatsApp personal**.
-5. Anotá:
-   - **WhatsApp Business Account ID (WABA ID)** — número largo, ej: `2159052118202272`.
-   - **Phone Number ID** — número largo, ej: `990364080831295`.
-
-> ⚠️ Si ya tenías el número en WhatsApp Business app: tendrás que migrarlo a Meta Cloud API. El proceso desactiva el WhatsApp Business app de ese número (la API toma control).
-
----
-
-## Paso 3 — Conectar Konvi App a tu Business Portfolio
-
-(Esta es la pieza clave que permite que Konvi actúe en nombre de tu WhatsApp.)
-
-1. En **Configuración del negocio → Cuentas → Apps** → **Agregar**.
-2. Pegar el ID público de la Meta App de Konvi:
+1. El founder de Konvi te provisiona (script `provision_tenant.py`) y te entrega un **enlace de recuperación**
+   (o contraseña temporal) para tu primer login. Cambiá la contraseña al entrar.
+2. Entrá a Konvi → **Integraciones → WhatsApp → panel completo**. Ahí verás **tu URL de webhook per-tenant**,
+   que incluye tu `tenant_id`:
 
    ```
-   App ID: 819229210624423
+   https://<host-connector-konvi>/api/v1/whatsapp/webhook/<tu_tenant_id>
    ```
 
-   (Si Konvi está corriendo bajo otro nombre/App ID, te lo darán al onboardear.)
-3. Aceptar permisos:
-   - ✅ Mensajería WhatsApp (`whatsapp_business_messaging`)
-   - ✅ Gestión WhatsApp (`whatsapp_business_management`) — necesario para HSM templates futuros.
-4. Asignar el WABA del Paso 2 a Konvi App con todos los permisos.
-
-> ⚠️ Si Konvi App aún está en App Review pendiente o en Development Mode, este paso puede requerir que el founder agregue tu Business como tester. Avisá al founder con tu **Business ID** (lo ves en `/settings/info`).
+   Copiala con el botón **Copiar** — la vas a pegar en Meta (Paso 5). Contiene tu `tenant_id`, no la tipees
+   a mano.
 
 ---
 
-## Paso 4 — Crear System User + Token
+## Paso 1 — Crear tu Business Portfolio y tu Meta App
 
-(El System User es como un "usuario robot" de tu Business que Konvi usará para enviar mensajes en tu nombre.)
-
-1. **Configuración del negocio → Usuarios → Usuarios del sistema** → **Agregar**.
-2. Crear System User:
-   - **Nombre**: `commerce-ops` (o lo que prefieras).
-   - **Rol**: Empleado.
-3. Asignar permisos al System User:
-   - Click en el System User recién creado → **Asignar activos** → seleccionar la WABA del Paso 2 → permisos: **Acceso completo** o al menos `whatsapp_business_messaging` + `whatsapp_business_management`.
-4. Generar token:
-   - Click **Generar token** → seleccionar Konvi App → permisos: `whatsapp_business_messaging` + `whatsapp_business_management`.
-   - Token expira: **Nunca** (System User tokens de Meta son de larga duración por default).
-   - **COPIAR EL TOKEN** — sólo se muestra una vez. Si lo perdés, generás otro.
-
-> 🔐 El token es como una contraseña — **no lo compartas en chat público o emails sin cifrar**. Pegarlo SÓLO en el panel de Konvi (Paso 5).
+1. Entrá a [business.facebook.com](https://business.facebook.com) con tu cuenta personal de Facebook.
+2. Si no tenés Business Portfolio: **Crear cuenta** → nombre legal del negocio + tu nombre + email comercial.
+3. En **Configuración → Información del negocio**, llená todo (NIT, dirección, sector, sitio web).
+4. Entrá a [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create App**.
+   - Tipo: **Business**.
+   - Vinculá la App a **tu** Business Portfolio.
+5. En tu App → **Add Product → WhatsApp → Set up**.
+6. Anotá de **Settings → Basic**: **App ID** (#1) y **App Secret** (#2, click "Show").
 
 ---
 
-## Paso 5 — Conectar en Konvi
+## Paso 2 — Registrar tu número en WhatsApp Cloud API
 
-1. Entrá a Konvi como Administrador del tenant.
-2. Sidebar → **Integraciones**.
-3. En el card de WhatsApp → **Configurar**.
-4. Pegar:
+1. En tu App → **WhatsApp → API Setup**.
+2. Agregá el número WhatsApp Business (Paso pre-requisito). Verificación por SMS/llamada.
+   - El número queda registrado en Cloud API — **no funcionará más en la app WhatsApp Business** de ese
+     número.
+3. Anotá: **Phone Number ID** (#4) y **WhatsApp Business Account ID / WABA ID** (#5).
+
+> ⚠️ Si el número ya estaba en la app WhatsApp Business, tenés que migrarlo a Cloud API (la API toma control).
+
+---
+
+## Paso 3 — Crear System User + token never-expires
+
+(El System User es un "usuario robot" de TU Business que Konvi usa para enviar mensajes en tu nombre.)
+
+1. **Business Settings → Usuarios → Usuarios del sistema → Agregar**.
+   - Nombre: `konvi-bot` (o el que prefieras). Rol: Admin.
+2. **Asignar activos** → seleccioná tu WABA (Paso 2) → permisos: **Acceso completo**.
+3. **Generar token** → seleccioná **TU App** → permisos:
+   `whatsapp_business_messaging` + `whatsapp_business_management`.
+   - Expiración: **Never** (System User tokens son de larga duración).
+   - **COPIÁ EL TOKEN** — se muestra una sola vez (#6).
+
+> 🔐 El token y el app_secret son como contraseñas. Pegalos SÓLO en el panel de Konvi (Paso 6), nunca en
+> chat/email sin cifrar.
+
+---
+
+## Paso 4 — Elegí tu verify_token
+
+Inventá una cadena secreta, ej. `mi-negocio-wh-2026` (#3). La vas a poner en dos lugares idénticos: en el
+webhook de Meta (Paso 5) y en el panel de Konvi (Paso 6). Meta la usa para el handshake inicial (GET).
+
+---
+
+## Paso 5 — Configurar el webhook en TU Meta App
+
+1. En tu App → **WhatsApp → Configuration → Webhook → Edit**.
+2. **Callback URL**: pegá tu URL per-tenant del Paso 0:
+
+   ```
+   https://<host-connector-konvi>/api/v1/whatsapp/webhook/<tu_tenant_id>
+   ```
+
+3. **Verify token**: pegá el mismo `verify_token` del Paso 4.
+4. Click **Verify and save**. Meta hace un GET a esa URL con tu verify_token; el connector responde el
+   challenge. Si falla, revisá que el verify_token sea idéntico y que ya lo hayas guardado en Konvi (Paso 6
+   primero) — el connector necesita conocerlo para responder el handshake.
+5. En **Webhook fields**, suscribite a **messages** (mínimo). Opcional: `message_template_status_update`.
+
+> El orden recomendado es: **Paso 6 primero** (guardar en Konvi) → **luego Verify and save en Meta**. Así el
+> connector ya conoce tu verify_token cuando Meta hace el handshake.
+
+---
+
+## Paso 6 — Conectar en Konvi (form de 6 campos)
+
+1. Konvi → **Integraciones → WhatsApp → panel completo** (form Model B).
+2. Pegá las 6 credenciales:
 
    | Campo Konvi | Valor |
    |---|---|
-   | **WABA ID** | El del Paso 2.5 (`2159052118202272`) |
-   | **Phone Number ID** | El del Paso 2.5 (`990364080831295`) |
-   | **Token de Acceso (System User)** | El del Paso 4.4 |
+   | App ID | #1 |
+   | App Secret | #2 → se cifra en Vault |
+   | Verify Token | #3 (el que inventaste) |
+   | Phone Number ID | #4 |
+   | WABA ID | #5 |
+   | Access Token | #6 → se cifra en Vault |
 
-5. Click **Conectar WhatsApp**.
-6. Esperá a ver el badge **Conectado** en color naranja (color de marca Envia/WhatsApp en Konvi).
-7. Click **Probar** para verificar que el token + número están vivos. Mensaje de éxito esperado: *"WhatsApp verificado — el token es válido y el número está activo"*.
+3. Guardar. El estado pasa a **Conectado**.
+4. Volvé al Paso 5.4 y hacé **Verify and save** en Meta si no lo habías hecho.
 
-> ⚠️ Si el botón **Probar** sale **Error**:
-> - "Token inválido" → re-generar el System User token (Paso 4.4) y probar de nuevo.
-> - "Phone number not registered" → confirmar que terminaste el Paso 2 (registro del número en Meta Cloud API).
-> - "Permission denied" → Konvi App no tiene permisos sobre tu WABA — re-revisar Paso 3.4.
-
----
-
-## Paso 6 — Probar end-to-end con un mensaje real
-
-1. Desde tu celular personal, mandá un mensaje al número WhatsApp Business del tenant: por ejemplo, *"Hola"*.
-2. Esperá ~5 segundos.
-3. El bot debería responder con el saludo configurado en Settings → Agente IA (sin esto se ve un saludo genérico).
-4. Verificar en Konvi → **Inbox** → debería aparecer la conversación con tu mensaje + la respuesta del bot.
-
-> ✅ Si todo funcionó: tu WhatsApp Business está activo en Konvi. El bot va a responder automáticamente a tus clientes 24/7.
+> El form de 3 campos (WABA + Phone Number ID + Token) que aparece en el hub de integraciones es **legacy** y
+> NO alcanza para Model B (falta app_secret + verify_token). Usá siempre el **panel completo** de 6 campos.
 
 ---
 
-## Resolución de problemas comunes
+## Paso 7 — Probar end-to-end
+
+1. Desde otro celular, mandá "Hola" al número WhatsApp Business del negocio.
+2. Esperá ~5 s. El bot debería responder con el saludo configurado en Settings → Agente IA.
+3. Verificá en Konvi → **Inbox**: aparece la conversación con tu mensaje + la respuesta del bot.
+
+> ✅ Si funcionó: tu WhatsApp Business está activo en Konvi.
+
+---
+
+## Trámites Meta para producción (fuera de Development Mode)
+
+En Development Mode tu App sólo puede mensajear con hasta ~5 números de prueba. Para atender clientes reales
+necesitás, **con TU propia App y TU propio Business** (no los de Konvi):
+
+1. **Business Verification** de tu Business Portfolio (10 min trámite + **1-3 semanas** review Meta).
+   Documentos: RUT, certificación bancaria, factura de servicios a nombre del negocio, sitio web con SSL.
+2. **App Review** de TU App para Advanced Access de `whatsapp_business_messaging` (+ `..._management` si vas
+   a usar HSM templates): 30 min + screencast + **1-2 semanas** review Meta.
+
+Estos trámites NO los hace Konvi por vos (Model B) — sos Direct Provider. El founder puede orientarte pero la
+titularidad es tuya.
+
+---
+
+## Resolución de problemas
+
+### El handshake del webhook falla (Verify and save da error)
+
+- El `verify_token` en Meta y en Konvi deben ser **idénticos** (sin espacios).
+- Guardá primero en Konvi (Paso 6), luego "Verify and save" en Meta.
+- La URL debe incluir tu `tenant_id` correcto (copiala del panel, no la tipees).
 
 ### Bot no responde
 
-1. Verificar **Inbox** — ¿aparece tu mensaje? Si **NO**:
-   - Webhook no llega → revisar Paso 3.4 (permisos al WABA).
-   - Si el founder confirma que Konvi Connector recibe webhooks pero no se procesan → puede ser issue de phone_number_id mal mapeado en DB. Reportar.
-2. Si tu mensaje aparece pero no hay respuesta:
-   - Settings → Agente IA → ¿el agente está activo?
-   - Settings → Agente IA → ¿prompt configurado?
-3. Si todo lo anterior OK y aún no responde: revisar logs con el founder.
-
-### Bot responde pero "yo no entiendo"
-
-- Revisar Settings → Catálogo → ¿hay productos? Sin productos el bot no puede cotizar.
-- Revisar Settings → Despachos → ¿origen configurado? Sin esto el bot no sabe desde dónde cotizar envíos.
+1. **Inbox** — ¿aparece tu mensaje?
+   - **No** → el webhook no llega o la firma HMAC falla: revisá que el **app_secret** en Konvi sea el de TU
+     App (Settings → Basic) y que estés suscrito al campo `messages` en Meta.
+   - **Sí, sin respuesta** → Settings → Agente IA: ¿activo? ¿prompt configurado?
+2. Sin catálogo el bot no cotiza: Settings → Catálogo. Sin origen de despacho no cotiza envíos.
 
 ### Token expirado o revocado
 
-- Vas a ver mensaje de error en `Probar` o webhooks empezando a fallar (lado founder).
-- Repetir Paso 4.4 (regenerar System User token) y Paso 5 (re-pegar en Konvi).
-- El cambio es transparente para los clientes — las conversaciones existentes siguen.
+- Regenerá el System User token (Paso 3) y re-pegalo en el panel (Paso 6). Transparente para tus clientes.
 
 ---
 
 ## Mantenimiento
 
-| Acción | Cuándo | Cómo |
-|---|---|---|
-| Cambiar foto de perfil WhatsApp Business | Branding | business.facebook.com → WABA → Configuración del perfil |
-| Cambiar mensaje de bienvenida del agente | Personalización | Konvi → Settings → Agente IA |
-| Agregar templates HSM (proactivos fuera CSW 24h) | Cuando F2 HSM esté implementado | Konvi → Settings → Templates |
-| Cambiar carriers de despacho | Operativo | Konvi → Integraciones → Envia → Configurar |
-| Pausar respuestas del bot temporalmente | Vacaciones, mantenimiento | Settings → Agente IA → Toggle off |
+| Acción | Cómo |
+|---|---|
+| Cambiar foto/branding WhatsApp Business | business.facebook.com → WABA → Perfil |
+| Cambiar saludo del agente | Konvi → Settings → Agente IA |
+| Rotar access_token | Regenerar System User token → re-pegar en panel WhatsApp |
+| Cambiar carriers de despacho | Konvi → Integraciones → **Aveonline** → Configurar |
+| Pausar el bot | Settings → Agente IA → Toggle off |
 
 ---
 
 ## Política y compliance
 
-- **Habeas Data Ley 1581 Colombia**: vos sos Responsable del Tratamiento. Konvi actúa como Encargado. Tus clientes ven banners de consentimiento + tienen derecho a SAR (Solicitud de Acceso del Sujeto).
-- **Meta Business Messaging Policy**: aplica a tu WABA. NO mandes spam ni contenido prohibido (drogas, armas, esquemas piramidales). Meta puede degradar quality o suspender tu WABA.
-- **Conversation window 24h (CSW)**: podés responder gratis dentro de 24h del último mensaje del cliente. Fuera de eso, Meta cobra por mensaje (utility/marketing/authentication tier). Konvi respeta esto automáticamente.
+- **Habeas Data Ley 1581 (Colombia)**: vos sos Responsable del Tratamiento; Konvi es Encargado. Tus clientes
+  ven banners de consentimiento y pueden ejercer SAR.
+- **Meta Business Messaging Policy**: aplica a TU WABA. Nada de spam/contenido prohibido.
+- **Conversation window 24h (CSW)**: respondés gratis dentro de 24h del último mensaje del cliente; fuera de
+  eso Meta cobra por template. Konvi lo respeta automáticamente.
+- **Custodia de app_secret**: al compartir tu app_secret con Konvi (para validar HMAC) aplica el DPA
+  tenant-Konvi (ADR-0023 OQ-1, template legal pendiente founder).
 
 ---
 
-**¿Dudas?** Contactá al founder de Konvi o al equipo de soporte del tenant.
+**Referencia arquitectónica**: `docs/adr/0023-meta-model-b-direct-provider-per-tenant.md`.
+**¿Dudas?** Contactá al founder de Konvi.
