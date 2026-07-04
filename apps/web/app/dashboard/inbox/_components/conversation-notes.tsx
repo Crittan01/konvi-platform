@@ -22,12 +22,14 @@ import {
 } from 'lucide-react'
 import type { ConversationNote } from '../_lib/types'
 import { timeAgo } from '../_lib/format'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 interface Props {
   conversationId: string
 }
 
 export function ConversationNotes({ conversationId }: Props) {
+  const confirmar = useConfirm()
   const [notes, setNotes] = useState<ConversationNote[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -129,7 +131,11 @@ export function ConversationNotes({ conversationId }: Props) {
   }
 
   const onDelete = async (note: ConversationNote) => {
-    if (!confirm('¿Eliminar esta nota? Solo el autor o owner/manager pueden hacerlo. La nota queda en audit trail.')) return
+    if (!(await confirmar({
+      title: '¿Eliminar esta nota?',
+      description: 'Solo el autor o un owner/manager pueden hacerlo. La nota queda en el audit trail.',
+      confirmLabel: 'Eliminar', destructive: true,
+    }))) return
     try {
       const sb = createClient()
       const { data: { session } } = await sb.auth.getSession()

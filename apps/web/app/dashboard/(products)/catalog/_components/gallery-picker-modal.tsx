@@ -15,6 +15,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { X, Loader2, Image as ImageIcon, Trash2 } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 type FileEntry = {
   name: string
@@ -32,6 +33,7 @@ interface Props {
 }
 
 export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props) {
+  const confirmar = useConfirm()
   const [files, setFiles] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -118,11 +120,11 @@ export function GalleryPickerModal({ open, onClose, tenantId, onSelect }: Props)
    */
   const handleDelete = async (fileName: string) => {
     const sizeKb = Math.round((files.find(f => f.name === fileName)?.size ?? 0) / 1024)
-    const confirmMsg =
-      `¿Borrar definitivamente "${fileName}" (${sizeKb} KB)?\n\n` +
-      `Si algún producto está usando esta imagen, dejará de mostrarse ` +
-      `hasta que le asignes otra. Esta acción NO se puede deshacer.`
-    if (!window.confirm(confirmMsg)) return
+    if (!(await confirmar({
+      title: `¿Borrar definitivamente "${fileName}"?`,
+      description: `${sizeKb} KB. Si algún producto usa esta imagen, dejará de mostrarse hasta que le asignes otra. Esta acción no se puede deshacer.`,
+      confirmLabel: 'Borrar', destructive: true,
+    }))) return
 
     setDeletingName(fileName)
     setError(null)

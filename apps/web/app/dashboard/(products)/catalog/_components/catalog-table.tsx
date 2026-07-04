@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useMemo, useCallback, memo } from 'react'
+import { useState, useMemo, useCallback, memo, useRef } from 'react'
 import Image from 'next/image'
 import { SubmitButton } from '@/components/ui/submit-button'
 import { Input } from '@/components/ui/input'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   Search, LayoutGrid, List as ListIcon,
   ChevronRight, ChevronDown, ImageOff, Tag, Edit3, Archive, RotateCcw, Trash2, Store, Package, X,
@@ -212,6 +213,38 @@ const ProductMobileCard = memo(function ProductMobileCard({
   )
 })
 
+// ── DeleteProductForm — submit de server action con confirmación del DS ──────
+// F1 2026-07-04: reemplaza el window.confirm() síncrono en onSubmit. Como el
+// ConfirmDialog es async, se preventDefault + confirma + requestSubmit (guardado
+// por okRef para no re-abrir el diálogo en el segundo submit).
+function DeleteProductForm({
+  productId, action,
+}: { productId: string; action: (fd: FormData) => Promise<void> }) {
+  const confirmar = useConfirm()
+  const formRef = useRef<HTMLFormElement>(null)
+  const okRef = useRef(false)
+  return (
+    <form
+      ref={formRef}
+      action={action}
+      onSubmit={(e) => {
+        if (okRef.current) { okRef.current = false; return }
+        e.preventDefault()
+        confirmar({
+          title: '¿Eliminar permanentemente este producto?',
+          description: 'Esta acción no se puede deshacer.',
+          confirmLabel: 'Eliminar', destructive: true,
+        }).then((ok) => { if (ok) { okRef.current = true; formRef.current?.requestSubmit() } })
+      }}
+    >
+      <input type="hidden" name="product_id" value={productId} />
+      <SubmitButton size="sm" variant="ghost" pendingText="" savedText="" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+        <Trash2 className="h-3.5 w-3.5" />
+      </SubmitButton>
+    </form>
+  )
+}
+
 // ── ArchivedSection — muestra productos inactivos con opción de restaurar ────
 
 const ArchivedSection = memo(function ArchivedSection({
@@ -263,17 +296,7 @@ const ArchivedSection = memo(function ArchivedSection({
                     <RotateCcw className="h-3 w-3" /> Restaurar
                   </SubmitButton>
                 </form>
-                <form
-                  action={deleteProductAction}
-                  onSubmit={(e) => {
-                    if (!window.confirm('¿Eliminar permanentemente este producto? Esta acción no se puede deshacer.')) e.preventDefault()
-                  }}
-                >
-                  <input type="hidden" name="product_id" value={p.id} />
-                  <SubmitButton size="sm" variant="ghost" pendingText="" savedText="" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </SubmitButton>
-                </form>
+                <DeleteProductForm productId={p.id} action={deleteProductAction} />
               </div>
             </div>
           ))}

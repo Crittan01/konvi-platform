@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Plus, Pencil, Trash2, Check, X, Tag, Loader2, FolderTree, CornerDownRight, SlidersHorizontal } from 'lucide-react'
 import { createCategory, updateCategory, deleteCategory } from '../actions'
 import { AttributeContractEditor, type AttributeDef } from './attribute-contract-editor'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 export type { AttributeDef }
 
@@ -40,6 +41,7 @@ export default function CategoriesManager({
   attributeDefs: AttributeDef[]
   canWrite: boolean
 }) {
+  const confirmar = useConfirm()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState('')
@@ -87,14 +89,17 @@ export default function CategoriesManager({
     })
   }
 
-  function handleDelete(id: string, count: number) {
+  async function handleDelete(id: string, count: number) {
     const kids = hasChildren(id)
-    const msg = kids
-      ? 'Esta categoría es una VERTICAL con subcategorías. Si la eliminas, sus subcategorías quedarán como raíz (no se borran). ¿Continuar?'
+    const description = kids
+      ? 'Es una VERTICAL con subcategorías. Si la eliminas, sus subcategorías quedarán como raíz (no se borran).'
       : count > 0
-        ? `Esta categoría tiene ${count} producto(s). Si la eliminas, esos productos quedarán SIN categoría (el bot caería a la heurística por título). ¿Continuar?`
-        : '¿Eliminar esta categoría?'
-    if (!confirm(msg)) return
+        ? `Tiene ${count} producto(s). Si la eliminas, esos productos quedarán SIN categoría (el bot caería a la heurística por título).`
+        : undefined
+    if (!(await confirmar({
+      title: '¿Eliminar esta categoría?',
+      description, confirmLabel: 'Eliminar', destructive: true,
+    }))) return
     setError(null)
     startTransition(async () => {
       const res = await deleteCategory(id)

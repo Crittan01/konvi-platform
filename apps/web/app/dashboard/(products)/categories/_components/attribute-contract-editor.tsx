@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Plus, Trash2, Pencil, X, Loader2, Check } from 'lucide-react'
 import { createAttributeDef, updateAttributeDef, deleteAttributeDef, type AttributeDefInput } from '../actions'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 // ADR-0029 D3 — editor del CONTRATO de atributos de UNA categoría (hoja). El bot cita estos atributos
 // como HECHOS (SET membership); definirlos aquí guía el alta y habilita la validación HARD server-side.
@@ -44,6 +45,7 @@ export function AttributeContractEditor({
   onOpenChange: (o: boolean) => void
 }) {
   const router = useRouter()
+  const confirmar = useConfirm()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)  // null = modo alta
@@ -90,7 +92,11 @@ export function AttributeContractEditor({
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('¿Eliminar este atributo del contrato? Los valores ya guardados en productos no se tocan.')) return
+    if (!(await confirmar({
+      title: '¿Eliminar este atributo del contrato?',
+      description: 'Los valores ya guardados en productos no se tocan.',
+      confirmLabel: 'Eliminar', destructive: true,
+    }))) return
     setPending(true); setError(null)
     const res = await deleteAttributeDef(id)
     setPending(false)

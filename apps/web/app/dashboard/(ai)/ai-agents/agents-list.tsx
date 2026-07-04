@@ -21,6 +21,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Bot, Plus, Sparkles, Loader2, Check, Pencil, Trash2 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
+import { useConfirm } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface Agent {
   id?: string
@@ -63,6 +65,7 @@ const ROLE_BADGE: Record<string, string> = {
 type Mode = 'create' | 'edit'
 
 export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteAgent }: Props) {
+  const confirmar = useConfirm()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [mode, setMode] = useState<Mode>('create')
   const [editing, setEditing] = useState<Agent | null>(null)
@@ -181,15 +184,19 @@ export function AgentsList({ agents, canWrite, createAgent, updateAgent, deleteA
     })
   }
 
-  const onDelete = (a: Agent) => {
+  const onDelete = async (a: Agent) => {
     if (!a.id) return
-    if (a.is_default) { alert('No puedes borrar el agente default.'); return }
-    if (!confirm(`Borrar agente "${a.name}"? Esta acción no se puede deshacer.`)) return
+    if (a.is_default) { toast.error('No puedes borrar el agente default.'); return }
+    if (!(await confirmar({
+      title: `¿Borrar agente "${a.name}"?`,
+      description: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Borrar', destructive: true,
+    }))) return
     const fd = new FormData()
     fd.set('id', a.id)
     startTransition(async () => {
       const result = await deleteAgent(fd)
-      if (!result.ok) alert(result.error ?? 'Error al borrar')
+      if (!result.ok) toast.error(result.error ?? 'Error al borrar')
     })
   }
 
