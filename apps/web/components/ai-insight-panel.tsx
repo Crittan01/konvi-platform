@@ -133,11 +133,11 @@ export default function AiInsightPanel({ module, label = module }: Props) {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={generate} title="Regenerar"
+          <button onClick={generate} title="Regenerar" aria-label="Regenerar análisis"
             className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
-          <button onClick={() => setState('idle')} title="Cerrar"
+          <button onClick={() => setState('idle')} title="Cerrar" aria-label="Cerrar panel de análisis"
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
             <X className="h-3.5 w-3.5" />
           </button>
@@ -196,7 +196,7 @@ export default function AiInsightPanel({ module, label = module }: Props) {
 
         {/* Footer */}
         <p className="text-[10px] text-muted-foreground/60 text-right">
-          Generado el {new Date(insight.generated_at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}
+          Generado el {new Date(insight.generated_at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
         </p>
       </div>
     </div>
