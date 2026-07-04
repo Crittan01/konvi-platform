@@ -34,8 +34,14 @@ services:
     # Render build container = más RAM que runtime (runtime free=512 MB; build
     # container típicamente 2-4 GB en Free tier). 1500 MB Node heap deja margen.
     # Si vuelve OOM: subir a 2048 o migrar el wrap Sentry (sin auth token skip).
-    buildCommand: npm install --include=dev && NODE_OPTIONS='--max-old-space-size=1500' npm run build
-    startCommand: npm run start
+    #
+    # pnpm (via corepack, versión pineada en package.json packageManager) — NO npm.
+    # El repo es un workspace pnpm con lockfile: CI usa `pnpm --frozen-lockfile` y
+    # se valida con pnpm. `npm install` resolvía versiones DISTINTAS (@types/react /
+    # @radix-ui drift) → type-errors que no aparecen con pnpm. --frozen-lockfile
+    # garantiza que Render construya el árbol exacto validado.
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS='--max-old-space-size=1500' pnpm run build
+    startCommand: pnpm run start
     envVars:
       - key: NODE_ENV
         value: production

@@ -51,7 +51,11 @@ const sheetVariants = cva(
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  // React 19: `children` ya no es implícito en props derivadas de forwardRef.
+  // Explícito para robustez ante drift de versiones de @types/react / @radix-ui.
+  children?: React.ReactNode
+}
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
