@@ -410,7 +410,11 @@ async def run_agentic_turn(
         messages.append({
             "role": "model",
             "parts": [
-                {"function_call": {"name": fc["name"], "args": fc["args"]}}
+                {
+                    "function_call": {"name": fc["name"], "args": fc["args"]},
+                    # Gemini 3.x: preservar la firma para el round-trip de tools.
+                    "thought_signature": fc.get("thought_signature"),
+                }
                 for fc in function_calls
             ],
         })
@@ -624,9 +628,12 @@ def _part_from_dict(part_dict: dict):
         return genai_types.Part(text=part_dict["text"])
     if "function_call" in part_dict:
         fc = part_dict["function_call"]
-        return genai_types.Part(function_call=genai_types.FunctionCall(
-            name=fc["name"], args=fc["args"],
-        ))
+        return genai_types.Part(
+            function_call=genai_types.FunctionCall(name=fc["name"], args=fc["args"]),
+            # Gemini 3.x: reinyectar la firma capturada del response del modelo,
+            # requisito para que el tool-call multi-turno sea aceptado por la API.
+            thought_signature=part_dict.get("thought_signature"),
+        )
     if "function_response" in part_dict:
         fr = part_dict["function_response"]
         return genai_types.Part(function_response=genai_types.FunctionResponse(
@@ -649,6 +656,11 @@ def _extract_function_calls(response: Any) -> list[dict]:
                 calls.append({
                     "name": fc.name,
                     "args": dict(fc.args) if fc.args else {},
+                    # Gemini 3.x: la firma del pensamiento viaja en el Part (no en
+                    # el FunctionCall) y DEBE reenviarse en el turno siguiente del
+                    # loop de tools, o la API rechaza con 400 INVALID_ARGUMENT
+                    # ("missing a thought_signature"). Gemini 2.5 no la exigía.
+                    "thought_signature": getattr(part, "thought_signature", None),
                 })
     return calls
 

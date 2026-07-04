@@ -52,11 +52,16 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
         return True
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+
+    async def _post(use_markdown: bool) -> httpx.Response:
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if use_markdown:
+            payload["parse_mode"] = "Markdown"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            return await client.post(url, json=payload)
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            res = await client.post(url, json=payload)
+        res = await _post(use_markdown=True)
     except Exception as exc:
         logger.error("Telegram unreachable: %s", exc)
         return False
@@ -71,6 +76,26 @@ async def _send_telegram_notification(config: dict[str, Any], text: str) -> bool
 
     error_code = int(body.get("error_code") or res.status_code)
     description = body.get("description") or res.text
+
+    # Markdown desbalanceado en contenido dinámico (nombre/mensaje del cliente)
+    # rompe el parser legacy con "can't parse entities" y la notificación se
+    # perdía silenciosamente. La escalación es crítica → reintentar en texto
+    # plano para GARANTIZAR entrega (se pierde el negrita, no el aviso).
+    if error_code == 400 and "parse entities" in str(description).lower():
+        logger.warning("Telegram Markdown inválido; reintento en texto plano.")
+        try:
+            res2 = await _post(use_markdown=False)
+            body2 = res2.json() if res2.content else {}
+            if 200 <= res2.status_code < 300 and body2.get("ok") is True:
+                return True
+            logger.error(
+                "Telegram plain-text retry falló [%s]: %s",
+                res2.status_code, body2.get("description") or res2.text,
+            )
+        except Exception as exc:
+            logger.error("Telegram plain-text retry unreachable: %s", exc)
+        return True  # permanente: no re-encolar
+
     logger.error("Telegram error [%s]: %s", error_code, description)
 
     # Errores permanentes de configuración/token/chat => no reintentar.
