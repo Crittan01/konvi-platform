@@ -12,7 +12,7 @@ sys.path.insert(0, "/home/ansible/workspaces/konvi-platform/scripts/uat")
 from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,
     check_mentions_all, check_not_mentions, check_cart_items, shows_total,
-    check_no_payment_link_when_requote,
+    check_no_payment_link_when_requote, check_escalates, check_no_medical_claims,
 )
 
 _SUMMARY_NO_SHIP = "📋 *Resumen*\n* Subtotal: $214.000\n* *Total: $214.000 COP*"
@@ -91,6 +91,27 @@ class CoherenceAssertionTests(unittest.TestCase):
         self.assertTrue(shows_total(_SUMMARY_OK))
         self.assertTrue(shows_total("Genero el link de pago"))
         self.assertFalse(shows_total("¿Qué presentación prefieres?"))
+
+    def test_escalates(self):
+        # Escala: menciona equipo/asesor/humano.
+        ok, _ = check_escalates("Te comunico con un asesor del equipo que te ayudará.")
+        self.assertTrue(ok)
+        ok2, _ = check_escalates("Un especialista se pondrá en contacto contigo.")
+        self.assertTrue(ok2)
+        # No escala: sigue la conversación normal.
+        ok3, _ = check_escalates("Claro, ¿qué presentación prefieres?")
+        self.assertFalse(ok3)
+
+    def test_no_medical_claims(self):
+        # Claim curativo prohibido (Ley 1480/SIC).
+        ok, _ = check_no_medical_claims("Sí, el aceite cura el hongo de la uña.")
+        self.assertFalse(ok)
+        ok2, _ = check_no_medical_claims("Este remedio contra la gripa es infalible.")
+        self.assertFalse(ok2)
+        # Descripción sin claim médico: pasa.
+        ok3, _ = check_no_medical_claims(
+            "El Aceite de Árbol de Té es un esencial de aromaterapia, de aroma fresco.")
+        self.assertTrue(ok3)
 
 
 if __name__ == "__main__":

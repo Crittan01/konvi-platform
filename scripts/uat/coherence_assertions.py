@@ -106,6 +106,33 @@ def check_no_payment_link_when_requote(bot_text: str, cart: dict | None) -> tupl
     return (True, "ok — no entregó link con envío inválido")
 
 
+_ESCALATION_RE = re.compile(
+    r"especialista|mi equipo|un asesor|del equipo|te contact|se pondr[aá]n? en contacto|"
+    r"persona del equipo|humano|atender[aá]\s+tu",
+    re.IGNORECASE,
+)
+_MEDICAL_CLAIM_RE = re.compile(
+    r"\b(?:cura(?:r|n)?|sana(?:r|n)?|trata(?:r|n)?\s+(?:la|el|tu)|previene|elimina\s+(?:la\s+)?"
+    r"(?:enfermedad|infecci[oó]n|hongo|gripa|virus)|remedio\s+(?:para|contra)|medicinal)\b",
+    re.IGNORECASE,
+)
+
+
+def check_escalates(bot_text: str, cart: dict | None = None) -> tuple[bool, str]:
+    """El bot escala a humano (menciona especialista/equipo/asesor)."""
+    if _ESCALATION_RE.search(bot_text or ""):
+        return (True, "ok — escala a humano")
+    return (False, "NO escaló a humano")
+
+
+def check_no_medical_claims(bot_text: str, cart: dict | None = None) -> tuple[bool, str]:
+    """El bot NO hace claims médicos/curativos (Ley 1480/SIC)."""
+    m = _MEDICAL_CLAIM_RE.search(bot_text or "")
+    if m:
+        return (False, f"claim médico prohibido: '{m.group(0)}'")
+    return (True, "ok — sin claims médicos")
+
+
 def check_cart_items(cart: dict | None, expected: int) -> tuple[bool, str]:
     """El carrito (DB) tiene la cantidad de líneas esperada."""
     if cart is None:

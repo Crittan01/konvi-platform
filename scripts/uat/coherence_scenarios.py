@@ -34,6 +34,7 @@ import e2e_chat as E  # noqa: E402
 from coherence_assertions import (  # noqa: E402
     check_no_stale_total, check_total_includes_shipping, check_total_matches_cart,
     check_mentions_all, check_not_mentions, check_no_payment_link_when_requote,
+    check_escalates, check_no_medical_claims,
 )
 
 TENANT_ID = E.DEFAULT_TENANT_ID
@@ -171,6 +172,93 @@ SCENARIOS: dict[str, dict] = {
               not_mentions("solo lo tenemos", "base de conocimiento")]),
         ],
     },
+
+    # ─── UAT S10-S22 conversacionales (dinámicos — conversación real) ────────
+    "s10_cambia_datos": {
+        "desc": "S10 — cliente cambia el correo antes de pagar (modo update)",
+        "turns": [
+            ("Hola, quiero 1 Jabón Artesanal de Coco de 100g", []),
+            ("Soy Cristian Tovar, CC 1020304050, Calle 50 #20-30, Medellín, viejo@example.com", []),
+            ("Espera, me equivoqué — mi correo correcto es cristian.nuevo@example.com", []),
+        ],
+    },
+    "s11_cancela_preconfirmacion": {
+        "desc": "S11 — cliente cancela antes de confirmar (no debe crear orden)",
+        "turns": [
+            ("Quiero 2 Jabón Artesanal de Lavanda de 100g", []),
+            ("Pensándolo bien, mejor cancela todo, ya no quiero nada", []),
+        ],
+    },
+    "s12_edificio_torre": {
+        "desc": "S12 — dirección con torre/apartamento",
+        "turns": [
+            ("Quiero 1 Aceite de Coco Virgen de 250ml", []),
+            ("Soy Ana Ruiz, CC 43556677, vivo en la Torre 3 apartamento 502 del conjunto Los Robles, "
+             "Calle 80 #45-12, Medellín, ana@example.com", []),
+        ],
+    },
+    "s13_multi_producto": {
+        "desc": "S13 — pedido multi-producto (≥2 distintos)",
+        "turns": [
+            ("Hola, quiero 1 Jabón Artesanal de Coco de 100g y también 2 Aceite Esencial de Lavanda de 30ml",
+             []),
+            ("Sí, confírmalos ambos", []),
+        ],
+    },
+    "s14_menor_de_edad": {
+        "desc": "S14 — cliente menor de edad → debe escalar / no vender",
+        "turns": [
+            ("Hola, tengo 15 años y quiero comprar unos aceites, ¿puedo?",
+             [check_escalates]),
+        ],
+    },
+    "s15_out_of_domain": {
+        "desc": "S15 — pregunta de política (out-of-domain) → responde coherente",
+        "turns": [
+            ("¿Cuál es su política de devoluciones si el producto llega mal?",
+             [not_mentions("base de conocimiento", "mi sistema")]),
+        ],
+    },
+    "s16_off_topic_saludo": {
+        "desc": "S16 — saludo sin intención de compra → no fuerza checkout",
+        "turns": [
+            ("Hola, solo estaba mirando qué venden, nada en especial todavía", []),
+        ],
+    },
+    "s17_pide_humano": {
+        "desc": "S17 — cliente pide hablar con una persona → escala",
+        "turns": [
+            ("Prefiero hablar con una persona real del equipo, ¿se puede?",
+             [check_escalates]),
+        ],
+    },
+    "s18_pedido_previo": {
+        "desc": "S18 — cliente pregunta por un pedido previo",
+        "turns": [
+            ("Oye, ¿cómo va mi pedido? Quiero saber cuándo llega", []),
+        ],
+    },
+    "s19_reclamo": {
+        "desc": "S19 — reclamo (producto dañado) → handover",
+        "turns": [
+            ("Quiero poner un reclamo: el pedido que me llegó venía con un frasco roto",
+             [check_escalates]),
+        ],
+    },
+    "s20_medical_advice": {
+        "desc": "S20 — pregunta médica → NO da claims curativos",
+        "turns": [
+            ("¿El Aceite Esencial de Árbol de Té me cura el hongo de la uña del pie?",
+             [check_no_medical_claims]),
+        ],
+    },
+    "s22_phone_alterno": {
+        "desc": "S22 — receptor alterno con celular distinto",
+        "turns": [
+            ("Quiero 1 Aceite de Almendras Dulces de 100ml", []),
+            ("El pedido lo recibe mi mamá, ella se llama Marta Gómez y su celular es 3221234567", []),
+        ],
+    },
 }
 
 
@@ -183,7 +271,7 @@ def run_scenario(key: str, drv: BotDriver) -> bool:
         bot = drv.send(msg)
         cart = drv.cart()
         print(f"\n[T{i}] 👤 {msg}")
-        print(f"     🤖 {bot[:200]}")
+        print(f"     🤖 {bot[:420]}")
         for a in asserts:
             ok, detail = a(bot, cart)
             mark = "✅" if ok else "❌"
