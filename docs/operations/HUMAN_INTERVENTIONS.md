@@ -1,161 +1,210 @@
-# Intervenciones Humanas Requeridas (vigente)
+# Intervención humana — cierre del ecosistema tenant (F1–F7, 2026-07-04)
 
-Última actualización: 2026-04-21
+> Generado tras cerrar F1–F7. Todo lo que tiene respuesta técnica clara YA se implementó, certificó y commiteó a `develop`. Este documento junta lo que **NO** se hizo porque requiere tu decisión, config externa, o aplicar una migración a producción.
 
-Este documento conserva solo intervenciones activas reales.
+## A. Migraciones a aplicar a producción (protocolo seguro, antes del próximo deploy)
 
----
+Creadas como archivo (sin aplicar). Algunas GATEAN el deploy (el código nuevo las asume):
 
-## IH-SEC-01 — Rotación preventiva de credenciales sensibles
+| Migración | Qué habilita | Gate |
+|---|---|---|
+| `20260704000000_messages_delivery_receipts.sql` | Columnas de estado de entrega WhatsApp (✓✓/leído/fallo) | **Sí** — el connector escribe estas columnas |
+| `20260704120000_f3_provision_tenant_audit.sql` | Audit trail de provisión de tenant | No |
+| `20260704130000_f7_offboarding_erasure_orphans_fk.sql` | FK/erasure de huérfanos en offboarding | No |
+| `20260704140000_tenant_media_bucket_rls.sql` | RLS versionada del bucket tenant-media (aislamiento) | Seguridad — verificar vs policies manuales |
 
-**INTERVENCION HUMANA REQUERIDA**: Sí  
-**RESPONSABLE**: Owner/DevOps  
-**MOMENTO**: Inmediato (antes de siguiente release candidato)  
-**PASOS DUMMY O GUIADOS**:
-1. Rotar `SUPABASE_SERVICE_ROLE_KEY` en Supabase.
-2. Actualizar key nueva en Render (`web`, `connector`, `api`, `orchestrator`) y entorno local.
-3. Validar health checks y operaciones críticas.
-**INSUMOS NECESARIOS**: Acceso Supabase + Render.  
-**CRITERIO DE EXITO**: key anterior inválida, key nueva funcionando, sin errores de auth backend.
+**Acción:** aplicar con `supabase db query --linked` + `supabase migration repair --status applied <version>` (protocolo del proyecto). La de storage requiere revisar policies manuales previas primero.
 
----
+## B. Configuración externa (fuera del repo)
 
-## IH-SEC-02 — Auditoría de exposición histórica de credenciales
+- **Contacto de último recurso (lockout total) — buzón de rescate** — El código ahora apunta a soporte@konvi.co (dominio real, con Email Routing receive-only). ¿Está provisionado el alias soporte@konvi.co en Cloudflare Email Routing y monitoreado por un humano? Es el único canal de rescate para un usuario bloqueado sin authenticator ni códigos. Además account-closure/
+- **soporte@konvi.com hardcodeado (dominio configurado es konvi.co)** — El canal de soporte publicado usa @konvi.com en health/page.tsx, account-closure/page.tsx y security/**; el dominio con Email Routing es konvi.co. No cambié el dominio para no fijar un buzón muerto. ¿Cuál es la dirección canónica de soporte y confirmas que ese buzón recibe correo? (aplica a todo el 
+- **Host de webhooks divergente (DNS api.konvi.co pendiente)** — ADR-0023 OQ-4: ¿cuándo se configura el DNS de api.konvi.co? Dejé el default en konvi-api.onrender.com (host live real). Al activar el DNS basta setear NEXT_PUBLIC_WEBHOOK_HOST=https://api.konvi.co en render.yaml — ¿confirmas ese cutover o prefieres mantener onrender?
+- **Buzón de rescate sin verificar y con jargon (soporte@konvi.com vs dominio konvi.co)** — ¿Cuál es el buzón de soporte REAL y verificado para el rescate ante lockout total de MFA (perdí authenticator Y códigos)? El código actual usa 'soporte@konvi.com' pero el dominio del producto es konvi.co. Necesito el buzón exacto (existente/monitoreado) para corregirlo. Nota: el archivo que lo conti
+- **Email de soporte posiblemente inexistente (soporte@konvi.com vs dominio konvi.co)** — El footer apunta a soporte@konvi.com pero el dominio operado con Email Routing es konvi.co (memoria reference_konvi_co_cloudflare_setup). No puedo verificar que buzon existe. Cual es el correo de soporte real que debo poner (aqui y en settings/security, account-closure)?
+- **Site URL productivo + allow-list de redirects** — IH-EMAIL-01: config externa del dashboard Supabase. Fijar Site URL al dominio web productivo y agregar https://<dominio-web>/auth/callback y /auth/confirm a Redirect URLs. Bloqueante: sin esto los links de invite/recovery salen a 127.0.0.1:3000. Requiere el dominio web productivo confirmado.
+- **Rate-limit de emails default bloquea invitar varios seguidos** — IH-EMAIL-03: decidir proveedor SMTP (recomendado Resend segun dossier), verificar dominio con SPF/DKIM/DMARC en DNS y habilitar Custom SMTP + subir rate limit en el dashboard. Es config externa + DNS + decision de proveedor/plan. Resuelve el cuello de botella del remitente compartido (~2-4 emails/h)
+- **Runbook de activación producción + estado real de la key (STANDBY)** — Config EXTERNA: crear cuenta Resend, verificar dominio remitente productivo y setear RESEND_API_KEY + RESEND_FROM_EMAIL en los 2 servicios Render (api, ai-orchestrator). El default noreply@commerce-ops.local es NO productivo a propósito. ¿Procedes con la activación y documentas los pasos en docs/HAN
+- **Cero rastro persistido de envíos (tabla email_events + webhook Resend)** — Persistir eventos de email (sent/delivered/bounced/complained) requiere: (a) migración DB nueva de tabla email_events, (b) endpoint webhook inbound de Resend, (c) decisión de retención/PII. ¿Autorizas crear esa iniciativa? Hoy dejé observabilidad log+Sentry+resend_id (scope de estos 2 archivos).
+- **Superficie 100% invisible desde Tenant Console** — La config de remitente/API key es env-level en Render (no DB por-tenant), por lo que una página de settings de email no aplica coherentemente hoy. ¿Quieres un indicador read-only de 'emails enviados' en el detalle de orden y un check de email en settings/health? Requiere editar apps/web (fuera del s
+- **Sender identity y cuota compartidos entre tenants + remitente genérico 'Konvi'** — Aislamiento per-tenant (custom domains Resend, quota guard, from por marca/logo) es decisión de producto + config externa Resend. ¿Priorizamos multi-tenant sender identity o mantenemos remitente único por ahora?
+- **Onboarding del canal: setWebhook manual** — setWebhook es config EXTERNA a Telegram (una vez por bot de cada tenant): curl a api.telegram.org con la URL /api/v1/integrations/telegram/webhook + TELEGRAM_WEBHOOK_SECRET. No se puede automatizar desde el codigo. Confirmar si se agrega como paso en scripts/admin/provision_tenant.py (fuera de mi al
+- **UI Telegram: URL webhook incorrecta, copies divergentes, bot_username fantasma, tabs comingSoon, jerga de roadmap, disconnect no revoca identity** — Todos estos gaps viven en apps/web (telegram-setup.tsx, telegram/page.tsx, integrations/page.tsx, integrations-manager.tsx), fuera de mi alcance de 3 archivos backend. Notables de seguridad: disconnectTelegram no llama revoke_identity (ex-operador conservaria autoridad /resolver) y la URL mostrada o
+- **No se envían recordatorios de grace period antes del borrado irreversible** — El productor de 'reminder_sent' (aviso 'faltan 7 días') requiere el worker de offboarding (fuera de scope) + envío de email vía Resend (config externa de dominio). ¿Confirmas dominio/remitente Resend y se enruta el productor al agente del worker?
+- **api_security_events es WRITE-ONLY: nadie lo lee** — Falta una superficie (endpoint + vista frontend) para que el operador lea rate_limit.exceeded / idempotency events. Es una feature nueva (nuevo router + UI), no un fix dentro de los archivos de este módulo. ¿Priorizamos crear un endpoint GET /api/v1/security-events + panel, o lo dejamos para observa
+- **Host api.konvi.co hardcodeado sin DNS y sin poder servir a 2 servicios** — ADR-0023 OQ-4: ¿qué host se setea en WHATSAPP_CONNECTOR_URL (env del API, hoy sin definir en render.yaml) para que la URL de webhook per-tenant que muestra el panel sea servible? konvi-api.onrender.com (API: wompi/telegram) y konvi-connector.onrender.com (whatsapp) son hosts distintos; api.konvi.co 
 
-**INTERVENCION HUMANA REQUERIDA**: Sí  
-**RESPONSABLE**: Owner/DevOps  
-**MOMENTO**: Antes de release candidate público  
-**PASOS DUMMY O GUIADOS**:
-1. Revisar historial git y secretos del repositorio en GitHub (secret scanning / push protection).
-2. Confirmar que no existan tokens activos en URLs remotas locales/equipos.
-3. Rotar cualquier credencial que haya sido expuesta históricamente (aunque hoy no esté en HEAD).
-4. Documentar la rotación en este archivo y en `docs/HANDOFF.md`.
-**INSUMOS NECESARIOS**: Acceso admin a GitHub, Supabase, Render y proveedores externos.
-**CRITERIO DE EXITO**: no hay secretos activos expuestos en historia utilizable ni remotes locales con credenciales embebidas.
+## C. Decisiones de producto / scope (por módulo)
 
----
+Agrupadas; cada una bloquea un gap que quedó sin implementar (o con implementación conservadora) esperando tu criterio:
 
-## IH-INFRA-01 — Decisión de upgrade a plan pago
+### Ventas · Pedidos (orders)
+- **Sin UI para generar/ver/reenviar el link de pago Wompi desde la consola** — ¿La consola de Pedidos debe cerrar el ciclo de cobro generando/copiando/reenviando el link Wompi de un pedido pending (endpoint POST /{id}/payment-link ya existe), o el cobro online sigue siendo exclusivo del bot? (pd #2). Si sí: ¿copiar link, enviarlo por Wha
+- **Cancelación en UI limitada a 'pending'; API permite cancelar cualquier no-termin** — ¿Cancelar desde consola un pedido confirmed/processing/shipped debe reponer stock y disparar el pipeline de void/refund Wompi (order_cancellations) igual que el flujo bot, o la cancelación post-confirmación queda exclusiva del bot/Reclamos? Sin esa decisión no
+- **El form 'Nuevo Pedido' no expone payment_method (COD) ni auto_confirm** — ¿El formulario manual debe permitir elegir modalidad de pago (COD contraentrega vs link Wompi) y/o auto_confirm? El backend ya lo soporta; hoy COD y auto_confirm solo nacen del flujo conversacional (pd #3).
+- **Listado capado a 100 sin paginación/búsqueda server-side** — ¿La ventana de 100 pedidos recientes es aceptable para los tenants objetivo, o se requiere paginación + búsqueda server-side antes de onboardear tenants de mayor volumen (>100 pedidos/mes)? Afecta también al typeahead de contactos/productos en el form (pd #5).
+- **Tracking COD solo en mensaje transitorio; no hay vista detalle del pedido** — ¿La card inline es el diseño final o habrá una vista de detalle de pedido (pagos, envíos/tracking persistente, descuento, auditoría)? GET /api/v1/orders/{id} ya existe sin consumidor web (pd #4).
 
-**INTERVENCION HUMANA REQUERIDA**: Sí  
-**RESPONSABLE**: Owner del producto  
-**MOMENTO**: Cerca de salida a producción o ante bloqueante operacional en Free  
-**PASOS DUMMY O GUIADOS**:
-1. Confirmar trigger real (tenant productivo o degradación por Free).
-2. Aprobar presupuesto y método de pago.
-3. Ejecutar upgrade de servicios en Render.
-4. Cambiar orchestrator a `type: worker` y revalidar colas.
-**INSUMOS NECESARIOS**: Cuenta Render con billing habilitado.  
-**CRITERIO DE EXITO**: operación estable sin dependencia del workaround de daemon thread.
+### inbox
+- **Rol operator bloqueado (403) en notas/rerun/crear-pedido que la UI le ofrece** — Matriz de permisos del Inbox por rol: ¿el operator (persona principal del módulo) debe poder crear notas, reruns y pedidos? Hoy el backend WRITE_ROLES={owner,manager} lo excluye (services/api, fuera de mi alcance) pero la UI y los docstrings asumen que sí. NO 
+- **Media inbound del cliente (imagen/audio/documento) invisible en el chat** — Estrategia para persistir media inbound del cliente: ¿Supabase Storage al recibir (costo storage + retención Habeas Data) o proxy on-demand contra Meta (media_id expira ~30 días, latencia)? Requiere cambios en connector-whatsapp + orchestrator (fuera de mi alc
+- **No existe acción 'Cerrar conversación' aunque el copy promete 'resolución manual** — ¿Debe existir una acción 'Cerrar conversación' manual en la UI? STATUS_CONFIG.closed ya promete 'resolución manual'. O se agrega la transición (¿desde qué estados? ¿operator puede?) o se corrige el copy. No toqué el copy para no presuponer la decisión.
+- **Lista y búsqueda solo por teléfono — el nombre del contacto no existe en la list** — ¿Cómo exponer el nombre del contacto en la lista/búsqueda? Opciones: denormalizar contact_name en conversations (write-path del connector) vs join/lookup client-side por phone. Decisión de modelo de datos con impacto en el connector. El nombre hoy solo vive en
+- **Read-path REST duplicado sin consumidor ya divergió del path real** — Los GET REST list/{id}/messages/stats de services/api/routers/conversations.py no tienen consumidor (la web lee Supabase directo) y ya divergieron (get_conversation no incluye media_url). ¿Consumirlos desde la web (unificar contrato) o eliminarlos? Es backend 
 
----
+### Ventas · Despachos (shipping)
+- **Valor declarado no expuesto en el cotizador → la cotización diverge de la guía r** — ¿El cotizador debe exponer un input de valor declarado/contenido (para que el estimado coincida con la guía real que usa order.total_amount) o se acepta que el estimador use el default de $50.000? Es una decisión de producto (PD#1): si se expone, ¿es obligator
+- **Timeline de tracking (shipment_tracking_events) persiste pero no tiene UI** — ¿El tracking merece un timeline visible en la consola (la tabla shipment_tracking_events ya persiste todo con RLS lista, incluidos eventos huérfanos con shipment_id NULL) o basta el chip de estado actual? Define la mitad del alcance 'tracking' del módulo (PD#2
+- **Guía fallida post-pago Wompi (pending_generation) no tiene camino de retry** — ¿Dónde vive el retry de una guía fallida (status pending_generation) para órdenes pagadas por Wompi: botón en Ventas→Pedidos (quitando la restricción COD-only actual de orders-manager), acción en Despachos, o auto-retry? Hoy no existe ningún camino en consola 
+- **Purga de cotizaciones huérfanas no automatizada / DELETE /shipping/orphans sin c** — El endpoint DELETE /shipping/orphans existe pero nadie lo invoca y el bot inserta filas 'quoted' por el mismo endpoint, así que la tabla crece sin límite. ¿Purga por cron automático, botón en UI, o se elimina el endpoint? (PD#4)
+- **Naming inconsistente: 'Despachos' (árbol L1) vs 'Cotizador' (sidebar/H1)** — El árbol L1 dice 'Despachos', el sidebar y el H1 dicen 'Cotizador'. Tras la decisión 'estimador puro' (63b18087), ¿cuál es el nombre canónico para alinear árbol + sidebar + H1? No lo cambio unilateralmente porque toca sidebar-client.tsx y .context/ fuera de mi
 
-## IH-META-01 — Meta Embedded Signup / Tech Provider (futuro de onboarding)
+### Ventas · Reclamos (claims)
+- **RBAC drift: operator ve 'Nuevo Reclamo' pero el API responde 403** — ¿El rol operator DEBE poder crear/gestionar reclamos? El docstring del router y page.tsx (canWrite incluye operator) dicen que sí, pero services/api WRITE_ROLES={owner,manager} lo rechaza (y Pedidos también restringe a owner/manager). El fix correcto va en ser
+- **Estados terminales irreversibles y sin camino de reapertura** — ¿Un ticket refunded/rejected/cancelled debe poder reabrirse desde la consola (el API acepta el PATCH)? Implementé la confirmación previa, pero NO habilité reapertura porque revertir un 'reembolsado' tiene implicación de dinero. ¿Se permite reabrir y con qué ro
+- **Vocabulario de reason divergente en 3 capas** — ¿Cuál es el vocabulario canónico de 'reason'? La UI envía {defective,wrong_item,missing_parts,delayed,other}, el API documenta COMMON_REASONS distintos que no valida, y el bot escribe texto libre; get_claim_status devuelve la key cruda al cliente. Cambiar las 
+- **Sin cross-links a pedido, contacto ni conversación** — ¿Habilito deep-links desde el reclamo al pedido/contacto/conversación? Hoy /dashboard/orders y /dashboard/inbox no aceptan un id en la URL (solo ?status), así que no existe destino para un enlace directo. ¿Se agrega soporte de deep-link por id en esos módulos 
+- **Selector de pedidos precarga 100 y sin búsqueda server-side** — Con más de 100 pedidos, el buscado puede no aparecer en el Select. ¿Implementamos un picker de pedidos con búsqueda server-side (nueva server action + combobox)? Es una feature con umbral/UX a definir; mantuve el .limit(100) actual.
 
-**INTERVENCION HUMANA REQUERIDA**: Sí  
-**RESPONSABLE**: Owner de plataforma  
-**MOMENTO**: Antes de habilitar onboarding self-serve multi-canal  
-**PASOS DUMMY O GUIADOS**:
-1. Verificar negocio y app en Meta.
-2. Completar app review/permisos requeridos.
-3. Configurar Embedded Signup y callback productivo.
-4. Validar flujo end-to-end con tenant piloto.
-**INSUMOS NECESARIOS**: Cuenta Meta Business verificada + dominio + política de privacidad.  
-**CRITERIO DE EXITO**: tenant conecta su canal sin intervención manual de soporte.
+### Ventas · Contactos
+- **Historial del contacto (prometido por el árbol funcional) no existe** — El Tab 'Historial de un contacto' (00-product.md:93): ¿pedidos + conversaciones EMBEBIDOS en la card de Contactos, o links cruzados a Pedidos/Inbox filtrados por contacto? Requiere decisión de diseño y verificar que Pedidos/Inbox soporten filtro por phone/cont
+- **Editar no puede limpiar campos: vaciar notes/email/documento/dirección se pierde** — El bug raíz está en el PATCH backend (contacts.py:427 descarta null → fuera de mi scope) y necesita decisión de contrato: ¿sentinel explícito (ej. '') para 'vaciar' vs null 'no tocar', o mantener anonimización como única supresión parcial? Definir la semántica
+- **DELETE /contacts/{id} (soft-delete con retención) huérfano + cron de purge a 30 ** — ¿Implementar el cron de purge físico a 30 días (services/cron, Fase 13) y cablear el soft-delete respetuoso de retención, o retirar la promesa '30 días' del endpoint/respuesta? Es backend + Fase 13, fuera del módulo Contactos frontend.
+- **reactivateConsentAction muta DB directo (admin client) sin rate-limit, idempoten** — Enrutar reactivar-consent (y el 2º update de consent_evidence post-create) por un endpoint API con RL_WRITE + idempotency + audit, como el resto del módulo. Requiere crear/definir ese endpoint en services/api (fuera de mi scope). ¿Autorizas el trabajo backend?
+- **SAR type='rectify' sin superficie UI ni cola de revisión del 'pending_review'** — Derecho de rectificación Art.16: ¿se declara cubierto por el edit form (y se retira type='rectify' del SAR backend), o se construye una cola de revisión para los 'pending_review'? Decisión de producto/compliance.
 
----
+### Productos · Catálogo + Inventari
+- **Stock reservado (carritos activos del bot) invisible en la pantalla 'Inventario'** — PD#5 del audit: ¿qué semántica de stock ve el operador — disponible (físico − reservado), físico y reservado por separado? fn_variation_available_stock ya existe pero afecta cómo se muestra el stock Y cómo se valida el ajuste manual con reservas activas. Neces
+- **Importador masivo: 3 pares fijos de atributos + sin validación de contrato en bu** — Quitar el límite de 3 pares de atributos y validar cada fila contra el contrato de la categoría (HARD por fila con reporte granular) exige cambios en el backend bulk_import_products (services/api/routers/products.py, fuera de mi scope) y es parte de ADR-0029 F
+- **Guardar 'Información' del drawer borra en silencio los atributos legacy fuera de** — El PATCH reemplaza products.attributes con solo los labels del contrato (para no disparar 422 del backend); eso destruye pares legacy KAIU pre-F7. Preservarlos requiere o bien que el backend acepte/ignore atributos fuera de contrato, o el backfill F7 (gated). 
+- **Acceso read-only del rol operator a Productos (sidebar lo oculta, las páginas lo** — PD del audit: catalog-table ya tiene copy read-only pero sidebar-client (fuera de mi scope) oculta Productos a 'operator'. ¿Se habilita la navegación en modo lectura para operator, o se retira la promesa read-only del copy? Decisión de producto sobre visibilid
 
-## IH-AGENT-01 — Regenerar prompt de agente Carolina (Reclamos) post-rev109
+### Canales · Mercado Libre (marketp
+- **CRITICAL — Ingesta de órdenes MeLi rota: maybe_single() sin guard None** — VERIFICADO REAL: services/api/routers/meli_webhook.py línea 522 hace `if existing.data:` sin el guard `if existing and existing.data:`. Con postgrest 2.28.3, maybe_single().execute() retorna None en 0 filas (el guard correcto SÍ existe en la línea 356 y 356/51
+- **Sync de precio prometido sin camino propio** — El sync automático solo dispara al cambiar stock (products.py). ¿Política de precio: push automático a MeLi al cambiar precio en catálogo (riesgo de sobrescribir promos gestionadas en MeLi) o solo manual con indicador de drift en la tabla? Requiere que /listin
+- **Paginación de listings incompleta: cap duro de 100 items** — ¿Cómo resolver >100 publicaciones: paginación offset server-side con pager en la UI, o sincronizar los listings a DB local? Cambia la arquitectura del módulo (hoy es 100% live contra la API de MeLi). Mientras tanto dejé un aviso honesto en la UI, pero un selle
+- **Stock no se decrementa en pending→confirmed ni se restituye en cancelled** — ¿La restitución de stock ante cancelación de orden MeLi es automática (riesgo con devoluciones parciales/reclamos) o tarea manual del operador? ¿Y el decremento debe dispararse también en la transición pending→confirmed (hoy solo al crear con status confirmed 
+- **Onboarding uno-por-uno: sin vincular/importar masivo** — ¿Vale la inversión (L) en selección múltiple / 'importar todo lo no vinculado' ahora, o el onboarding admin-controlado (provision_tenant) lo absorbe operativamente? Un tenant con 80 publicaciones hoy hace 80 ciclos sheet→select→confirmar.
 
-**INTERVENCION HUMANA REQUERIDA**: Sí  
-**RESPONSABLE**: Owner del tenant (founder KAIU + cada tenant con agente claims)  
-**MOMENTO**: Recomendado ahora (post-commit `888af91`). Opcional — el invariant FakeEscalation respalda si Carolina olvida el tool.  
-**PASOS DUMMY O GUIADOS**:
-1. Abrir Tenant Console → IA y Conocimiento → Agentes IA.
-2. Click "Editar" en Carolina (agente role=claims).
-3. Click "Sugerir con IA" para regenerar `role_description` con el skeleton actualizado (que ahora instruye usar `create_claim` ANTES de escalar).
-4. Revisar el texto sugerido — debe mencionar create_claim explícitamente.
-5. Click "Guardar cambios".
-6. Repetir para cualquier OTRO agente role=claims de cualquier tenant.
+### Compras (órdenes a proveedores) 
+- **Drift RBAC: sidebar owner-only vs API/página owner+manager** — ¿Compras debe ser visible/operable solo para owner (coherente con que expone costos, como dice sidebar-client.tsx:85) o para owner+manager (como permiten hoy el router y page.tsx)? Requiere alinear sidebar-client.tsx (fuera de mi alcance) y/o require_write_rol
+- **Sin recepción parcial / estado in_transit inalcanzable** — El CHECK de DB ya contempla draft/in_transit pero API y UI son todo-o-nada. ¿Se expande el ciclo de vida a recepción parcial (draft→ordered→in_transit→recibida parcial, requiere columna received_qty y endpoint) o se poda el schema para que refleje el producto 
+- **OC no editable en estado 'ordered' + numeración humana** — ¿Se agrega PATCH /{po_id} para corregir cantidades sin cancelar y re-digitar, y una numeración consecutiva por tenant (OC-001) que el operador pueda citar al proveedor? Ambos son backend/DB; la UI ya expone el UUID completo vía tooltip como paliativo.
 
-**INSUMOS NECESARIOS**: Tenant Console activo + sesión owner/manager.
+### Ventas · Promociones (cupones)
+- **No existe vista de redenciones: imposible saber qué órdenes/clientes usaron un c** — ¿Entra en F4 una vista de detalle de redenciones (listar coupon_redemptions con order_id/cart_id/discount_applied_cents/status por cupón, ej. sheet al click en el contador 'N hist.')? Es feature nueva (eff M) fuera del remanente UX/perf enumerado; requiere dec
+- **Cero analytics de cupones: no se puede medir ingreso descontado ni ROI por campa** — Analytics de cupones (ingreso descontado, conversión por campaña) — los datos ya existen (orders.discount_amount + cart_events). ¿Entra en F4 o se difiere? Vive en app/dashboard/(analytics)/, fuera del scope de edición de este módulo.
+- **Sidebar oculta Promociones al rol operator pero la página soporta modo lectura** — El banner de page.tsx promete al operador 'ver en modo lectura', pero sidebar-client.tsx:66 solo lo muestra a owner/manager, así que el estado es inalcanzable por navegación. ¿Se agrega Promociones read-only al sidebar para operator, o se quita el copy de modo
+- **Sin preview de lo que el bot anuncia ni diagnóstico de por qué un cupón no se an** — ¿Se quiere un panel de diagnóstico que muestre, por cupón, si el bot lo anunciaría y por qué NO (expirado/agotado/valid_until NULL/no visible)? El estado derivado ya se refleja en el badge Estado; un preview del bloque de prompt real requiere leer el prompt de
 
-**CRITERIO DE EXITO**: Carolina (o el agente claims del tenant) tiene `role_description` que menciona create_claim y `get_claim_status`. En UAT live, Carolina invoca create_claim en lugar de escalar.
+### Productos · Categorías (ADR-0027
+- **is_required es una capacidad de contrato a medias: ni se setea ni se exige** — ¿is_required se implementa de verdad o se elimina de API/DB? Hoy el 'contrato' promete obligatoriedad que ninguna capa cumple: product_attribute_definitions.py persiste is_required pero _validate_attributes_against_contract (products.py:216-217) solo lee label
+- **El operador no puede reordenar cómo el bot presenta categorías/atributos (drag/s** — ¿El operador necesita reordenar categorías/atributos (el bot los presenta por sort_order en product_categories.py:50-51) o el orden por creación+alfabético alcanza para producción? La API ya soporta PATCH de sort_order; solo falta control UI (hoy create fija s
+- **Sin seed/onboarding de categorías por vertical** — ¿Quieres una plantilla de categorías precargada por vertical (ej. Salud y Belleza → Aceites Esenciales, Jabones…) ofrecida desde la UI en el primer uso, o la curación inicial sigue siendo por script/manual como en KAIU? RECOMENDACIÓN: mantener curación manual 
 
-**Por qué OPCIONAL**: el invariant `FakeEscalationInvariant` (rev. 109) detecta promesas de escalación sin tool real y respalda. Pero tener el prompt actualizado mejora UX (Carolina sabe el flujo correcto desde el primer turn, sin necesidad de respaldo del invariant).
+### Analítica · Métricas (apps/web/a
+- **Semántica de '$X en ventas'** — El card Pedidos muestra '$X en ventas' = suma de pedidos NO cancelados (incluye pending y pending_payment); 'Ingresos confirmados' = solo delivered. ¿Es correcta esa definición de 'ventas' o debe contar solo pedidos con pago confirmado? Dejé ambas con tooltip,
+- **Política de consumo IA de insights** — Fijé un default de 10 análisis/hora/tenant in-memory. ¿Cuál es la cuota real por plan, hay cooldown de 'Regenerar' y debe persistirse el último análisis por tenant/módulo (hoy es efímero, se pierde al navegar)? La persistencia y la cuota por plan son decisione
 
----
+### Finanzas (P&L, OPEX)
+- **Definición de 'ingresos' divergente entre Finanzas y Métricas** — Fijé Finanzas en 'pedidos pagados' (confirmed+). Métricas muestra dos cifras distintas (todo-menos-cancelled y delivered-only). ¿Cuál es la definición canónica de ingreso del negocio? Al confirmarla alineo Métricas (fuera de este alcance) para que ambos módulo
+- **Sin escenario UAT de Finanzas** — ¿Agrego un harness UAT (registrar gasto → verificar P&L → verificar audit trail) en scripts/uat/? Está fuera del alcance apps/web/dashboard/finance.
 
-## IH-NOTIF-01 — Migrar tenants legacy de `tenant_integrations.telegram` a `notification_settings`
+### dashboard_home
+- **KPI cards 'con comparativa' sin comparativa** — Los KPIs del tab Negocio son acumulados all-time. Para mostrar tendencia real (up/down) hay que decidir el periodo de comparación: ¿7d vs 7d previos, mes vs mes anterior, u otro? Sin esa decisión de producto la comparativa no puede cerrarse (hoy queda como 'To
+- **Semántica de 'Pedidos pendientes' (pending vs pending_payment)** — El card 'Pedidos pendientes' cuenta solo status='pending' y excluye 'pending_payment' (órdenes bot esperando link Wompi). ¿El operador debe ver ambos en Operaciones, o pending_payment es correctamente pasivo? Afecta qué cuenta el count de ops.
+- **Copy 'MeLi · Envia' — naming canónico de providers** — Cambié el copy erróneo 'MeLi · Envia' por el neutro 'Envíos, pagos y canales'. ¿Cuál es el naming oficial a mostrar ahora que el shipping activo es Aveonline (ADR-0019) y existen Wompi/Telegram/WhatsApp/MercadoLibre? Defínelo para fijar el copy definitivo.
+- **AiInsightPanel en el home operativo** — ¿El dashboard —superficie de entrada diaria— debe integrar AiInsightPanel (patrón ya desplegado en orders/contacts/metrics)? Es decisión de roadmap 'Sugerir con IA'; no lo agrego sin confirmación.
 
-**INTERVENCION HUMANA REQUERIDA**: Sí  
-**RESPONSABLE**: Owner/DevOps  
-**MOMENTO**: D+30 post-rev109 commit `eb30a74` (~2026-06-27). Solo si hay tenants legacy con configuración en `tenant_integrations` pero NO en `notification_settings`.  
-**PASOS DUMMY O GUIADOS**:
-1. Ejecutar audit query:
-   ```sql
-   SELECT ti.tenant_id, ti.meta->>'chat_id' AS chat_id
-   FROM tenant_integrations ti
-   LEFT JOIN notification_settings ns
-     ON ns.tenant_id = ti.tenant_id AND ns.channel = 'telegram'
-   WHERE ti.provider = 'telegram'
-     AND ti.status = 'connected'
-     AND (ns.id IS NULL OR ns.enabled = false);
-   ```
-2. Para cada tenant retornado:
-   - Coordinar ventana con tenant.
-   - Upsert en `notification_settings` (channel='telegram', enabled=true, config={chat_id, bot_token_secret_id}).
-   - Verificar smoke: triggear escalación de prueba → verificar POST api.telegram.org → 200 OK.
-3. Tras verificación: ejecutar Fase 3 del ADR-0021 (DELETE rows path A) en D+60.
+### Analítica · Auditoría (audit_log
+- **Mutaciones de Usuarios y Acceso (team) no escriben audit_log** — El fix real (invocar write_audit_event en los 6 server actions de team + backend PATCH/DELETE /team) vive en (settings-group)/team/page.tsx y services/api, fuera del alcance editable de F4 (solo audit/** + api/audit/**). ¿Se ejecuta en el pase F del módulo Equ
+- **Ajuste de stock y threshold mutan sin registro en audit_log** — adjustStock/saveThreshold viven en (products)/catalog/page.tsx; añadir el write de auditoría queda fuera del alcance de F4. ¿Se cubre en el pase del módulo Catálogo? Nota: no existe entity_type 'inventory' en el backend — si se audita stock convendría reusar '
+- **'Log de acceso/cambios' del árbol funcional: accesos no surfaceados** — El árbol (.context/00-product.md:57) promete 'log de acceso/cambios' pero el módulo solo muestra audit_log (cambios). ¿Surfacear pii_access_log y/o logins en Auditoría (requiere consultar otra tabla + decisión de UX/legal) o corregir el árbol a 'log de cambios
+- **Capability 'analytics.audit.export' no enforceado server-side** — Hoy el guard server-side es role==='owner' (suficiente para seguridad). La capability solo oculta el link del sidebar. ¿Enforzar 'analytics.audit.export' en página+route (gating por plan) o el módulo es de todos los planes y la capability sobra? Es decisión de
+- **payload es snapshot post-operación, no before/after** — El schema y el docstring del decorator prometen before/after; la implementación (services/api/dependencies/audit.py) guarda solo el resultado. ¿Evolucionar el decorator a diff before/after (cambio backend) o basta el snapshot actual? La UI ya lo formatea legib
+- **El export CSV (hasta 5000 eventos con PII) no se registra en audit_log/pii_acces** — Escribir la traza del export desde el route de Next es arquitectónicamente ambiguo: la RLS de audit_log usa app_current_tenant() (GUC no seteado en el cliente user de Next), y el patrón canónico es que los writes de auditoría los haga services/api. ¿Se expone 
+- **Cero tests para /api/audit/export y la página + test de contrato ENTITY_LABELS↔b** — Los tests del frontend viven en apps/web/tests (fuera del alcance editable de F4). Dejé ENTITY_LABELS/ACTION_LABELS como constante exportada (audit-labels.ts) para que un test de contrato pueda importarla y cruzarla contra el set real del backend. ¿Se crean es
+- **Mutaciones del bot/orchestrator no aparecen en Auditoría** — El trail es exclusivamente humano-vía-API; el bot tiene trazas paralelas (consent_audit_log, stock_movements, shadow log). ¿Deben unificarse en el módulo Auditoría o permanecer separadas? Decisión de producto/alcance.
 
-**INSUMOS NECESARIOS**: Acceso DB Supabase + coordinación con cada tenant.
+### knowledge_base
+- **Semántica de 'Eliminar': soft-delete vs hard-delete real** — Implementé la opción NO destructiva de pd[0]: el cap cuenta solo docs ACTIVOS (desactivar/eliminar libera cupo, reversible, sin borrar filas). Recomendación: confirmar esta opción. Alternativa: hard-delete real (DELETE físico de la fila) para que 'Eliminar' qu
+- **Cierre real del drift D3 (mover index-pending/preview al servicio API)** — index-pending y preview siguen calculando embeddings/chat en el servicio web con GEMINI_API_KEY expuesta (pd[1]). Endurecí seguridad (rol + rate-limit + audit) pero NO moví las rutas al servicio api ni retiré la key del web — es una decisión de infra/render.ya
+- **Visibilidad del módulo para rol operator** — La página soporta modo lectura (canWrite) pero el sidebar oculta 'Base de Conocimiento' a operators (sidebar-client.tsx:93-95). Hoy quedan inconsistentes: un operator no ve el link pero por URL directa carga la página en solo-lectura. ¿El módulo debe ser read-
+- **Filtro de markers en kb_query no matchea el formato real (bot correctness, fuera** — Gap LOW real pero en services/ai-orchestrator/agentic/tools/knowledge.py:80 (fuera de mi alcance de edición): filtra content.startswith('[NO_DATA') mientras el marker de kb_tool.py empieza con 'El tenant aún no ha cargado...', así los markers pasan como docs f
 
-**CRITERIO DE EXITO**: query audit retorna 0 rows; ADR-0021 marcado CERRADO.
+### IA · Agentes IA (ai-agents CRUD 
+- **Promesa 'guardrails por rol' incumplida: tools_allowed/fsm_states_allowed jamás ** — El copy de UI promete 'activa guardrails por rol' pero createAgent/updateAgent nunca persisten tools_allowed/fsm_states_allowed y el dispatcher trata NULL como 'todas las tools' (un agente Support creado por UI puede generar links de pago). ¿Aplicamos automáti
+- **Preview no es multi-agente: con >1 agente usa fallback genérico 'Vendedor Oficia** — El fix vive en apps/web/app/api/ai/preview/route.ts:85 (.maybeSingle() sin is_default/order), que está FUERA de mi alcance editable (solo ai-agents/** + ai_agents.py). Además define alcance de producto: ¿el preview prueba siempre el agente default, o agrego un
+- **Preview/Suggest pinean familia Gemini 2.5; el bot real corre gemini-3.5-flash** — El preview (route.ts) ya migró a gemini-3.5-flash/embedding-2 en cae80473, pero el cascade de /suggest (ai_agents.py tiers gemini-2.5-flash/-lite/-pro) sigue en 2.5 (retiro 2026-10-16). ¿Migro el cascade de suggest a la familia 3.x en el MISMO deploy que el ga
+- **GET /ai-agents/templates existe en 2 capas pero ningún flujo de UI lo consume** — ¿Se elimina como dead code (proxy web + router + endpoint) o se integra al drawer de creación mostrando el skeleton del rol antes de 'Sugerir con IA'? Dejé el docstring corregido reflejando que no se consume; falta tu decisión de dirección.
+- **El rol 'Personalizado' se ofrece sin mecanismo de routing** — agent_router.classify_intent_to_role solo clasifica a sales/support/claims/marketing; un agente custom no-default es inalcanzable por el router. Agregué un aviso UX interino, pero decide el mecanismo definitivo: ¿eliminar 'custom' del drawer de creación, restr
 
-**Referencia**: ver `docs/adr/0021-notification-channels-unified-source.md`.
+### whatsapp_templates
+- **Payment reminder HSM ignora consent_revoked_at (STOP) — riesgo Ley 1581 + Meta P** — CRÍTICO/compliance: el HSM payment_reminder_v1 se envía desde services/ai-orchestrator/worker.py (_try_send_payment_reminder_hsm ~L1366-1520) SIN gatear consent_revoked_at — un cliente que dijo STOP igual lo recibe (el path MARKETING sí gatea). El archivo está
+- **Submit a Meta no es self-service** — Cerrar el ciclo self-service (botón que envíe la plantilla a Meta desde la UI) requiere un endpoint nuevo en services/api que invoque MetaBusinessManagementClient con las credenciales per-tenant. ADR-0016 D2 lo declaró deliberadamente manual (pre-validación hu
+- **Templates order_confirmation_v1 y order_shipped_v1 sin consumidor** — Las plantillas seeded para pago-confirmado y despacho no las envía ningún flujo (wompi_webhook.py y worker.py mandan content_type='text' que Meta rechaza fuera de la ventana 24h). Cablearlas requiere editar services/api/routers/wompi_webhook.py y services/ai-o
+- **Solo 2 nombres de template hardcodeados en el worker** — worker.py cablea 'payment_reminder_v1' y 'cart_abandoned_24h_v1' con language='es_CO' fijo. Cualquier plantilla custom del tenant queda decorativa. ¿Se desea un mapeo configurable (flujo→template_name) por tenant? Implica diseño de datos + edición del worker (
+- **Desconectar WhatsApp permanentemente deshabilitado** — El botón 'Desconectar WhatsApp' en Zona de riesgo sigue disabled (patrón repo-wide). Implementarlo es destructivo: define qué pasa con conversaciones en curso, credenciales en Vault y el bot. ¿Se implementa la desconexión (con useConfirm) y con qué semántica e
+- **content_type='template' no está en MessageContentType del Inbox** — El worker inserta messages.content_type='template' pero el union MessageContentType (inbox/_lib/types.ts) no lo incluye, así que el operador ve el prefijo crudo '[TEMPLATE ...]'. El fix vive en el módulo Inbox (types.ts + chat-panel.tsx), fuera de mi alcance. 
+- **Inbox instruye 'usa una plantilla aprobada' pero no hay UI para enviarla** — El banner del Inbox (chat-panel.tsx) al expirar la ventana 24h dice usar una plantilla, pero no existe UI de envío ni endpoint send_template para el operador — dead end. Construirlo toca módulo Inbox + services/api (fuera de alcance). ¿Prioridad y a qué equipo
+- **Sin reconciliación si el webhook de Meta se pierde** — Un template puede quedar PENDING para siempre si Meta no entrega el webhook; no hay cron de poll ni botón 'refrescar desde Meta' (patrón existe: _poll_wompi_pending_voids_if_due). Requiere worker.py + MetaBusinessManagementClient GET status (fuera de alcance).
+- **Capability gate hsm_templates definido pero nunca enforced** — capabilities_matrix.py registra 'hsm_templates' y su docstring promete gatear antes de enviar HSM, pero no hay call-sites de is_capability_enabled en el envío. ¿Se debe enforce en worker.py antes de cada send de plantilla? Fuera de mi alcance.
+- **45 tests cubren el helper Python que producción no usa** — tests/test_whatsapp_templates.py cubre services/api/lib/whatsapp_templates.py, un helper con 0 imports de producción (el CRUD real son las server actions TS, ahora ya con tests). ¿Se elimina el helper muerto o se cablea como fuente única? Decisión de arquitect
 
----
+### bot_engine (services/ai-orchestr
+- **content_type document/sticker/location sin pipeline (location descarta lat/long,** — Fuera de alcance (el parser vive en services/connector-whatsapp) y es decisión de scope: (a) ¿location de WhatsApp debe alimentar la cotización de envío usando lat/long -> ciudad? eso requiere reverse-geocoding (proveedor/costo a validar) y decisión de UX; (b)
+- **Coverage-map/harness: ~11 escenarios de regresión no sembrados + harness atado a** — Fuera de alcance (scripts/uat/coherence_scenarios.py, no services/ai-orchestrator). ¿Quieres que en una tarea aparte siembre los ~11 escenarios prometidos (teleporte geográfico, envío 0 opciones, COD off, cupón alucinado, IVA, etc., incluido el s21 faltante) y
+- **Docs divergentes: onboarding runbook sin paso 'activar agentic' + inbox-intents-** — Fuera de alcance (docs/operations/*). Confirmo que actualice en tarea separada: (1) onboarding-tenants.md con el paso de cutover agentic, y (2) inbox-intents-matrix.md que aún dice 'Solicitud de pago: No implementado' cuando Wompi+COD están productivos. ¿Proce
+- **Sin superficie en consola para ver el trace del bot (agentic_shadow_log solo por** — Fuera de alcance (apps/web, esfuerzo L). ¿Priorizas construir una vista de diagnóstico del trace del bot en el dashboard tenant, o el acceso vía SQL/soporte founder es aceptable por ahora?
 
-## IH-EMAIL-01 — Site URL productivo + allow-list de redirects (Supabase Auth)
+### team_rbac — Configuración · Usua
+- **Doble implementación divergente: endpoints API auditados sin callers vs server a** — Los endpoints PATCH/DELETE /settings/team/{id} en services/api/routers/settings.py:194-260 (con @audit_log) tienen 0 callers; la UI vive en server actions. ¿Decisión: eliminar los endpoints muertos, o migrar la UI a consumirlos como fuente única? (fuera de mi 
+- **Flujo de invitación E2E y re-invitar tras soft-delete sin UAT** — El camino email→callback→set-password→dashboard y el sub-flujo re-invitar tras deleteUser(soft) no están verificados end-to-end (requieren entorno Supabase+email real). ¿Autorizas montar un harness E2E (Playwright + inbox de prueba) contra staging para certifi
 
-**INTERVENCION HUMANA REQUERIDA**: Sí
-**RESPONSABLE**: Owner/DevOps
-**MOMENTO**: Antes del primer tenant productivo (bloqueante: sin esto los links de invite/recovery salen a `127.0.0.1:3000`).
-**PASOS DUMMY O GUIADOS**:
-1. Dashboard Supabase → Authentication → URL Configuration.
-2. `Site URL` = dominio web productivo (igual a `APP_URL` en Render).
-3. `Redirect URLs`: agregar `https://<dominio-web>/auth/callback` y `https://<dominio-web>/auth/confirm` (URLs exactas).
-**INSUMOS NECESARIOS**: dominio web productivo confirmado.
-**CRITERIO DE EXITO**: invite de prueba llega con link al dominio prod y `/auth/callback` establece sesión sin "redirect not allowed".
-**Referencia**: `docs/operations/runbooks/supabase-auth-email.md`.
+### settings_general (General / Lega
+- **Cambios de configuración desde la consola sin audit trail** — Las server actions escriben tenants/tenant_payment_methods sin dejar rastro en audit_log; el decorador @audit_log solo cubre un PATCH API sin callers. Escribir audit_log desde la server action de sesión choca con RLS. Requiere decisión de arquitectura (trigger
+- **Contrato API /settings/tenant desincronizado + dos write-paths divergentes** — Existe un path muerto (services/api/routers/settings.py) que valida (Pydantic) y audita pero no tiene callers en web; la web escribe directo con server actions sin Pydantic ni audit. Además TenantPatch no incluye business_pitch/escalation_role y ShippingOrigin
+- **Manager no descubre Legal/Retención (sidebar owner-only pese a RLS owner+manager** — sidebar-client.tsx (fuera de mi alcance settings/) restringe Legal/Retención a owner, pero las páginas y la RLS permiten owner+manager operar. ¿El manager DEBE ver estas secciones? Si sí, se ajusta el sidebar (decisión de producto/RBAC).
 
----
+### Configuración · Integraciones (w
+- **Hub Wompi solo captura 2 de 4 llaves + campos fantasma (public_key, integrity_ke** — El backend (wompi_client) hoy NO consume public_key ni integrity_key (0 writers/readers en services/). ¿Wompi requiere integrity_key para la firma de integridad de los links de pago en tu flujo? Si sí, necesito wiring backend + capturar 2 campos más en el form
+- **Mutaciones de credenciales del hub sin rate-limit** — Las server actions del hub bypassean el RL_WRITE_DEFAULT que sí tienen los endpoints del API. Cerrar esto requiere decisión arquitectónica (enrutar por API o middleware de RL en server actions). ¿Lo priorizas para este cierre?
+- **Credenciales DEMO Aveonline en texto plano en dos superficies** — 'demointegracion / demointegra2021' aparecen en el hub y en aveonline-setup. ¿Confirmas que es la cuenta pública oficial de Aveonline apta para exponerse, y que la dejo en ambas superficies?
+- **Hub 'Conectar WhatsApp' crea conexión Model B incompleta (form de 3 campos)** — Fuera de mi alcance (whatsapp cerrado en F5), pero el form del hub captura 3 campos y el connector exige verify_token + app_secret (ADR-0023). ¿F5/founder decide si el hub debe redirigir al panel de 6 campos en vez de mantener el form incompleto? No toqué save
+- **Gates de cumplimiento hardcodeados como texto estático** — ComplianceSection recibe strings fijos ('Activo', 'HMAC enforced'); si un gate se cae en runtime la UI sigue mostrando verde. Convertirlo en señal real necesita endpoint/health backend. ¿Se prioriza o queda como deuda observabilidad?
 
-## IH-EMAIL-02 — Aplicar plantillas es-CO + branding en el dashboard (Supabase Auth)
+### auth_emails
+- **Aplicar plantillas es-CO + branding en el dashboard** — IH-EMAIL-02: si el proyecto hosted se gestiona por dashboard (no CLI), copiar subject+HTML de supabase/templates/*.html en Authentication > Emails. Confirmar el modo de gestion (dashboard vs supabase config push). VALIDAR EN DOCUMENTACION OFICIAL: disponibilid
 
-**INTERVENCION HUMANA REQUERIDA**: Sí
-**RESPONSABLE**: Owner/DevOps
-**MOMENTO**: Antes del primer invite productivo (si no, salen defaults de Supabase en inglés).
-**PASOS DUMMY O GUIADOS**:
-1. Dashboard → Authentication → Emails (Templates).
-2. Pegar `subject` + HTML desde `supabase/templates/*.html` en cada plantilla (Invite, Reset Password, Confirm signup, Magic Link, Change Email).
-3. Verificar que el link siga siendo `{{ .ConfirmationURL }}` (no reescribirlo a mano: desacopla de `/auth/callback` y `/auth/confirm`).
-**INSUMOS NECESARIOS**: acceso admin dashboard; archivos del repo como fuente de verdad.
-**CRITERIO DE EXITO**: invite de prueba llega en es-CO, con "Konvi" y nombre del negocio visible; botón lleva a `/auth/callback`.
-**Referencia**: `docs/operations/runbooks/supabase-auth-email.md`.
+### worker_jobs
+- **F7-6 — Idempotencia se quema cuando el template no está aprobado (sin retry tras** — El fix correcto (NO marcar *_sent_at ante TEMPLATE_NOT_APPROVED para permitir reenvío una vez Meta apruebe; verificado seguro porque send_whatsapp_template detecta not-approved localmente SIN llamar a Meta ni costo) requiere actualizar tests/test_worker_hsm_re
+- **F7-1 — Trigger manual admin roto contra el esquema real** — El bug vive en scripts/admin/send_payment_reminder.py (columns inexistentes order_number/customer_name/customer_phone/wompi_link_url + _format_cop que divide //100 tratando pesos como cents). Está fuera de mi alcance (SOLO worker.py). ¿Autorizas editar ese scr
+- **F7-3 / F7-16 / F7-17 — Crons SLA, void-poll y free-form payment reminder sin tes** — Agregar cobertura exige crear/editar archivos en tests/ (fuera de mi alcance SOLO worker.py). ¿Autorizas crear tests para _check_human_takeover_sla_if_due (anchor human_takeover_at + filtro payload->>sent_by=operator + F7-15 no-audit-si-notif-falla), _poll_wom
+- **F7-2 / F7-8 / F7-9 / F7-22 — Burbujas fantasma en Inbox + tipos + copy HSM + Ord** — Todas son superficie apps/web (fuera de alcance): use-messages.ts/chat-panel.tsx deben filtrar content_type IN (escalation_audit, sla_breach_audit) para no renderizar audit rows vacíos (F7-2); _lib/types.ts debe incluir template/escalation_audit/sla_breach_aud
+- **F7-25 — Activar quiet hours para HSM MARKETING** — Dejé la capacidad implementada pero DESACTIVADA por default (para no romper el test del cron que corre sin mockear el reloj). Para activarla: confirmar franja (default propuesto 21:00-08:00 hora Colombia) y setear en render.yaml CART_ABANDONED_QUIET_HOURS_ENAB
+- **F7-24 — Worker importa código del servicio api vía sys.path hack** — Deuda arquitectónica: worker.py inyecta services/api/routers en sys.path para importar wompi_webhook._notify_client_refund_completed (y lib.tenant_offboarding). El fix limpio es extraer esas funciones a un paquete compartido importable — cambio cross-servicio 
 
----
+### emails_tx
+- **6 de 7 templates y dispatcher sin tests + aveonline email dispatch sin cubrir** — El scope me limita a editar SOLO los 2 routers; los tests viven en tests/. ¿Autorizas abrir tests/ para cubrir template_mode routing, refund inline, skips y el dispatch de _notify_status_change?
+- **httpx.Client sync bloquea el event loop hasta 15s en contexto async** — El sender sync se llama desde contextos async (aveonline_webhook, orders.py). Hacerlo async-safe (threadpool/httpx async) toca orders.py, fuera del scope. ¿Abrimos ese refactor cross-file?
+- **UI /dashboard/shipping muestra enum inglés crudo (exception/returned/etc.)** — Requiere editar apps/web/.../shipping/page.tsx (fuera del scope de estos 2 archivos). ¿Lo incluyo en una tanda de UI junto con el indicador de emails?
 
-## IH-EMAIL-03 — Custom SMTP: deliverability + rate-limit (Supabase Auth)
+### notif_operador (Notificaciones a
+- **Health-check de Telegram muerto tras unificacion rev.109** — BUG DE CODIGO en services/ai-orchestrator/health_metrics.py:314-317 (fuera de mi alcance editable): _is_provider_connected/_get_tenant_secret leen tenant_integrations pero la config telegram vive en notification_settings -> collect_telegram retorna [] siempre.
+- **Alertas prometidas en la UI que no existen: pagos >25min al operador, nuevos ped** — Decision de producto + codigo fuera de alcance (worker.py). worker.py:1191-1309 solo recuerda al CLIENTE por WhatsApp; no hay call-site de notify_escalation_async para operador en esos eventos. Definir: (a) recortar la copy de la UI a lo real, o (b) implementa
+- **Collectors de salud httpx sincronos dentro del loop async del worker** — health_metrics.py:327 usa httpx.Client sync (timeout 10-15s) llamado sin run_in_executor desde worker.py:2237 -> N tenants pueden congelar el loop. Fix (run_in_executor o httpx.AsyncClient) vive en health_metrics.py/worker.py, fuera de mis 3 archivos. Autoriza
 
-**INTERVENCION HUMANA REQUERIDA**: Sí
-**RESPONSABLE**: Owner/DevOps + acceso al registrar DNS
-**MOMENTO**: Antes de producción (bloqueante legal Ley 1581 + funcional).
-**PASOS DUMMY O GUIADOS**:
-1. Elegir proveedor (recomendado dossier: Resend, `smtp.resend.com:587`). Ver `docs/research/sender-email-dossier-2026-05-05.md`.
-2. Verificar dominio: SPF + DKIM + DMARC en DNS.
-3. Dashboard → Authentication → SMTP Settings → habilitar Custom SMTP (`sender_name = "Konvi"`).
-4. Dashboard → Authentication → Rate Limits → subir emails/hora (default compartido ~2-4/h bloquea invitar 3+ seguidos).
-**INSUMOS NECESARIOS**: cuenta proveedor SMTP + acceso DNS del dominio.
-**CRITERIO DE EXITO**: envío de prueba a Gmail llega a inbox (no spam); invitar 3+ miembros seguidos no choca rate-limit.
-**Referencia**: `docs/operations/runbooks/supabase-auth-email.md` + dossier §8-9.
+### delivery_receipts
+- **Doble fuente de calidad/tier sin reconciliar** — Los gaps high/medium de reconciliación de calidad (credentials.tier+quality_signal del webhook vs tenant_provider_health del poll), la tab Calidad simulada (whatsapp-quality.tsx), las etiquetas crudas de health-grid.tsx y la recolección de salud secuencial/sna
+
+### API Gateway + Offboarding + MFA-
+- **El hard-delete NO borra Storage: PII de tenant y clientes persiste** — El borrado de los buckets de Storage (tenant-media/{tenant_id}/*, consent-evidence) vive en services/worker + services/api/lib/tenant_offboarding.py, fuera del scope editable de este módulo (API Gateway). Es un gap de compliance ALTO (Ley 1581 Art. 16 erasure 
+- **Export de portabilidad cubre solo ~30 de 54 tablas tenant-scoped** — La lista EXPORTABLE_TABLES vive en services/api/lib/tenant_offboarding.py (fuera del scope de routers/dependencies de este módulo). Es decisión de compliance qué tablas entran en portabilidad Art. 19 (coupons, suppliers, purchase_orders, whatsapp_templates, et
+
+### tenant_onboarding
+- **Submit de plantillas HSM a Meta es solo-script-admin; la UI instruye correr Pyth** — ¿Se expone el submit de plantillas HSM (submit_template_to_meta.py, requiere SUPABASE_SERVICE_ROLE_KEY) como acción en la UI del operador tenant, o se mantiene como acción admin coordinada con el founder? Decisión de producto + trabajo UI/runtime fuera de mi s
+- **Custodia de app_secret tenant-Konvi (Model B)** — ADR-0023 OQ-1: el DPA tenant-Konvi para custodia del app_secret sigue pendiente (legal externo). La guía tenant ya lo referencia; ¿cuál es el template/estado para poder onboardear tenants externos en producción?
+
+## D. Gate final — UAT del journey completo (requiere stack live)
+
+El cierre 100% del ecosistema se sella con un UAT end-to-end con un tenant FRESCO: provisión → primer login → configurar Telegram/notificaciones → primer template aprobado → salud en verde → cliente por WhatsApp → pedido → pago Wompi → email → guía Aveonline → tracking → entregado → reclamo. Requiere levantar el stack local (como la validación de coherencia) — **intervención humana** para levantarlo; yo conduzco el UAT analítico turn-a-turn cuando esté arriba.
