@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
+import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,8 +11,11 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from '@/components/ui/sheet'
 import {
+  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
+} from '@/components/ui/tooltip'
+import {
   ExternalLink, Pause, Play, Link2, Link2Off, RefreshCw,
-  Search, AlertTriangle, CheckCircle2, X,
+  Search, AlertTriangle, CheckCircle2, X, Store,
 } from 'lucide-react'
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue
@@ -83,6 +88,21 @@ const CONDITION_LABEL: Record<string, string> = {
   used: 'Usado',
 }
 
+// Estados MeLi que pueden llegar fuera del trío active/paused/closed. Sin este
+// mapa se mostraban crudos en inglés (ej. 'under_review').
+const MELI_STATUS_LABEL: Record<string, string> = {
+  under_review:      'En revisión',
+  payment_required:  'Pago requerido',
+  inactive:          'Inactivo',
+  pending:           'Pendiente',
+  not_yet_active:    'Por activar',
+}
+
+const meliStatusLabel = (status: string) =>
+  STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]?.label
+    ?? MELI_STATUS_LABEL[status]
+    ?? status.replace(/_/g, ' ')
+
 export default function MarketplaceManager({ items, paging, variations, categories, canWrite }: Props) {
   const [search, setSearch]                   = useState('')
   const [statusFilter, setStatusFilter]       = useState<StatusFilter>('all')
@@ -92,6 +112,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
   const [selectedVariationId, setSelectedVariationId]       = useState('')
   const [selectedCategoryId, setSelectedCategoryId]         = useState('')
   const [selectedMeliVariationId, setSelectedMeliVariationId] = useState<number | null>(null)
+  const [variantQuery, setVariantQuery]       = useState('')
   const [actionErrors, setActionErrors]       = useState<Record<string, string>>({})
   const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null)
 
@@ -109,7 +130,23 @@ export default function MarketplaceManager({ items, paging, variations, categori
     setSelectedVariationId('')
     setSelectedCategoryId('')
     setSelectedMeliVariationId(null)
+    setVariantQuery('')
   }
+
+  const meliVariationRequired = (sheetItem?.meli_variations?.length ?? 0) > 0
+
+  // Filtro type-ahead sobre las variantes del catálogo: con catálogos grandes el
+  // Select plano agrupado era inusable (scroll manual). El operador escribe SKU /
+  // producto / atributo y el Select solo muestra las coincidencias.
+  const filteredVariations = useMemo(() => {
+    const q = variantQuery.trim().toLowerCase()
+    if (!q) return variations
+    return variations.filter(v =>
+      v.sku?.toLowerCase().includes(q) ||
+      v.product_title?.toLowerCase().includes(q) ||
+      Object.values(v.attributes).some(val => String(val).toLowerCase().includes(q))
+    )
+  }, [variations, variantQuery])
 
   const STATUS_FILTERS: { key: StatusFilter; label: string; count: number }[] = [
     { key: 'all',      label: 'Todos',        count: items.length },
@@ -140,7 +177,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
     clearError(item.meli_id)
     setLoading(item.meli_id, true)
     const resp = await changeListingStatus(item.listing_id, newStatus)
-    if (resp?.error) setError(item.meli_id, resp.error)
+    handleStatusResult(item, resp, newStatus === 'paused' ? 'pausada' : 'activada')
     setLoading(item.meli_id, false)
   }
 
@@ -149,7 +186,8 @@ export default function MarketplaceManager({ items, paging, variations, categori
     clearError(item.meli_id)
     setLoading(item.meli_id, true)
     const resp = await syncStockFromSupabase(item.listing_id)
-    if (resp?.error) setError(item.meli_id, resp.error)
+    if (resp?.error) { setError(item.meli_id, resp.error); toast.error(resp.error) }
+    else toast.success('Stock y precio sincronizados con Mercado Libre.')
     setLoading(item.meli_id, false)
   }
 
@@ -158,27 +196,52 @@ export default function MarketplaceManager({ items, paging, variations, categori
     clearError(item.meli_id)
     setLoading(item.meli_id, true)
     const resp = await unlinkListing(item.listing_id)
-    if (resp?.error) setError(item.meli_id, resp.error)
+    if (resp?.error) { setError(item.meli_id, resp.error); toast.error(resp.error) }
+    else toast.success('Publicación desvinculada del catálogo.')
     setLoading(item.meli_id, false)
     setConfirmUnlinkId(null)
   }
 
+  const handleStatusResult = (item: MeliItem, resp: { error?: string }, verb: string) => {
+    if (resp?.error) { setError(item.meli_id, resp.error); toast.error(resp.error) }
+    else toast.success(`Publicación ${verb} en Mercado Libre.`)
+  }
+
   const handleLink = async (meliId: string) => {
+    // Enforcement de variación MeLi: si la publicación tiene variaciones propias,
+    // el operador DEBE elegir a cuál mapea el stock (evita el fallback silencioso
+    // que asigna el qty a la primera variación, potencialmente la equivocada).
     if (!selectedVariationId) return
+    if (meliVariationRequired && selectedMeliVariationId == null) {
+      setError(meliId, 'Selecciona la variación de Mercado Libre a la que se sincronizará el stock.')
+      return
+    }
     clearError(meliId)
     setLoading(meliId, true)
     const resp = await linkListing(meliId, selectedVariationId, undefined, selectedMeliVariationId ?? undefined)
-    if (resp?.error) setError(meliId, resp.error)
-    else closeSheet()
+    if (resp?.error) { setError(meliId, resp.error); toast.error(resp.error) }
+    else { toast.success('Publicación vinculada al catálogo. El stock se sincronizará automáticamente.'); closeSheet() }
     setLoading(meliId, false)
   }
 
   const handleImport = async (meliId: string, _meliTitle: string) => {
     clearError(meliId)
     setLoading(meliId, true)
-    const resp = await importFromMeli(meliId, selectedCategoryId || undefined)
-    if (resp?.error) setError(meliId, resp.error)
-    else closeSheet()
+    // '_none' es el centinela del SelectItem "Sin categoría"; el backend espera
+    // null/undefined, NO el literal '_none' (rompía el .eq sobre columna UUID → 500).
+    const categoryId = selectedCategoryId && selectedCategoryId !== '_none' ? selectedCategoryId : undefined
+    const resp = await importFromMeli(meliId, categoryId)
+    if (resp?.error) { setError(meliId, resp.error); toast.error(resp.error) }
+    else {
+      const sku = (resp?.data as { sku?: string } | null)?.sku
+      toast.success(
+        sku
+          ? `Producto importado al Catálogo (SKU ${sku}) y vinculado.`
+          : 'Producto importado al Catálogo y vinculado.',
+        { description: 'Edita descripción e imágenes desde Productos.' }
+      )
+      closeSheet()
+    }
     setLoading(meliId, false)
   }
 
@@ -187,8 +250,28 @@ export default function MarketplaceManager({ items, paging, variations, categori
   if (items.length === 0) {
     return (
       <Card className="border-border/50">
-        <CardContent className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <p className="text-muted-foreground">No se encontraron publicaciones en tu cuenta de Mercado Libre.</p>
+        <CardContent className="flex flex-col items-center justify-center py-16 gap-4 text-center max-w-md mx-auto">
+          <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center">
+            <Store className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <div className="space-y-1.5">
+            <p className="font-medium text-foreground">Aún no hay publicaciones para gestionar</p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              No encontramos publicaciones activas en la cuenta de Mercado Libre conectada.
+              Verifica que conectaste la cuenta vendedor correcta y crea publicaciones en Mercado Libre;
+              aparecerán aquí para vincularlas a tu catálogo.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <a href="https://www.mercadolibre.com.co/publicaciones/listado" target="_blank" rel="noreferrer">
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Ir a mis publicaciones en MeLi
+              </a>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/dashboard/integrations">Revisar la cuenta conectada</Link>
+            </Button>
+          </div>
         </CardContent>
       </Card>
     )
@@ -224,6 +307,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar por título, ID o SKU..."
+            aria-label="Buscar publicaciones por título, ID o SKU"
             className="pl-9 h-9"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -311,7 +395,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                     {/* Estado */}
                     <td className="py-3 px-4 text-center">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${STATUS_CONFIG[item.status]?.className ?? 'bg-muted text-muted-foreground'}`}>
-                        {STATUS_CONFIG[item.status]?.label ?? item.status}
+                        {meliStatusLabel(item.status)}
                       </span>
                     </td>
 
@@ -342,25 +426,36 @@ export default function MarketplaceManager({ items, paging, variations, categori
 
                     {/* Acciones */}
                     <td className="py-3 px-4">
+                      <TooltipProvider delayDuration={200}>
                       <div className="flex items-center justify-end gap-1.5 flex-wrap">
                         {item.permalink && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-700 hover:text-blue-600" asChild>
-                            <a href={item.permalink} target="_blank" rel="noreferrer" title="Ver en Mercado Libre">
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-700 hover:text-blue-600" asChild>
+                                <a href={item.permalink} target="_blank" rel="noreferrer" aria-label="Ver en Mercado Libre">
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Ver en Mercado Libre</TooltipContent>
+                          </Tooltip>
                         )}
 
                         {item.is_linked && stockOutOfSync && canWrite && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-xs gap-1.5 text-blue-600 border-blue-700/30"
-                            onClick={() => handleSyncStock(item)}
-                            title="Sincronizar stock y precio desde el Catálogo a MeLi"
-                          >
-                            <RefreshCw className="h-3 w-3" /> Sync
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs gap-1.5 text-blue-600 border-blue-700/30"
+                                onClick={() => handleSyncStock(item)}
+                                aria-label="Sincronizar stock y precio desde el Catálogo a Mercado Libre"
+                              >
+                                <RefreshCw className="h-3 w-3" /> Sync
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Sincronizar stock y precio desde el Catálogo a Mercado Libre</TooltipContent>
+                          </Tooltip>
                         )}
 
                         {item.is_linked && canWrite && item.status !== 'closed' && (
@@ -395,15 +490,20 @@ export default function MarketplaceManager({ items, paging, variations, categori
                                   onClick={() => setConfirmUnlinkId(null)}>Cancelar</Button>
                               </div>
                             ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-destructive"
-                                onClick={() => setConfirmUnlinkId(item.meli_id)}
-                                title="Desvincular"
-                              >
-                                <Link2Off className="h-3 w-3" />
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-destructive"
+                                    onClick={() => setConfirmUnlinkId(item.meli_id)}
+                                    aria-label="Desvincular del catálogo"
+                                  >
+                                    <Link2Off className="h-3 w-3" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Desvincular del catálogo</TooltipContent>
+                              </Tooltip>
                             )
                           ) : (
                             <Button
@@ -417,6 +517,7 @@ export default function MarketplaceManager({ items, paging, variations, categori
                           )
                         )}
                       </div>
+                      </TooltipProvider>
                     </td>
                   </tr>
                 )
@@ -435,9 +536,14 @@ export default function MarketplaceManager({ items, paging, variations, categori
       </Card>
 
       {paging.total > items.length && (
-        <p className="text-xs text-muted-foreground text-center">
-          Mostrando {items.length} de {paging.total} publicaciones. La paginación completa estará disponible próximamente.
-        </p>
+        <div className="flex items-start gap-2 rounded-md border border-amber-700/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <p>
+            Mostrando las primeras <strong>{items.length}</strong> de <strong>{paging.total}</strong> publicaciones.
+            Para vincular una publicación que no aparezca en esta lista, gestiónala directamente desde Mercado Libre;
+            el sync de stock funciona igual para todas las publicaciones ya vinculadas.
+          </p>
+        </div>
       )}
 
       {/* ── Sheet: Vincular / Importar ──────────────────────────────────────── */}
@@ -507,6 +613,18 @@ export default function MarketplaceManager({ items, paging, variations, categori
                 )}
 
                 <p className="text-xs text-muted-foreground">Variante del catálogo interno:</p>
+                {variations.length > 0 && (
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      value={variantQuery}
+                      onChange={e => setVariantQuery(e.target.value)}
+                      placeholder="Filtrar por SKU, producto o atributo..."
+                      aria-label="Filtrar variantes del catálogo"
+                      className="pl-9 h-9 text-sm"
+                    />
+                  </div>
+                )}
                 <Select value={selectedVariationId} onValueChange={setSelectedVariationId}>
                   <SelectTrigger className="h-9 text-sm">
                     <SelectValue placeholder="Categoría → Producto → Variante..." />
@@ -516,9 +634,13 @@ export default function MarketplaceManager({ items, paging, variations, categori
                       <SelectItem value="_empty" disabled>
                         No hay variantes. Usa &quot;Importar desde MeLi&quot;.
                       </SelectItem>
+                    ) : filteredVariations.length === 0 ? (
+                      <SelectItem value="_nomatch" disabled>
+                        Ninguna variante coincide con &quot;{variantQuery}&quot;.
+                      </SelectItem>
                     ) : (
                       Object.entries(
-                        variations.reduce<Record<string, Variation[]>>((acc, v) => {
+                        filteredVariations.reduce<Record<string, Variation[]>>((acc, v) => {
                           const key = v.category_name
                           ;(acc[key] ??= []).push(v)
                           return acc
@@ -549,11 +671,22 @@ export default function MarketplaceManager({ items, paging, variations, categori
                   </SelectContent>
                 </Select>
 
+                {meliVariationRequired && selectedMeliVariationId == null && (
+                  <p className="text-[11px] text-amber-800 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 shrink-0" />
+                    Selecciona la variación de Mercado Libre antes de vincular.
+                  </p>
+                )}
                 <div className="flex gap-2">
                   <Button
                     size="sm"
                     className="flex-1"
-                    disabled={!selectedVariationId || selectedVariationId === '_empty'}
+                    disabled={
+                      !selectedVariationId ||
+                      selectedVariationId === '_empty' ||
+                      selectedVariationId === '_nomatch' ||
+                      (meliVariationRequired && selectedMeliVariationId == null)
+                    }
                     onClick={() => sheetItem && handleLink(sheetItem.meli_id)}
                   >
                     Confirmar vinculación

@@ -1,7 +1,8 @@
 import { createClient } from '@/utils/supabase/server'
 import { getCachedUser, getCachedTenantMeta } from '@/utils/supabase/cached-user'
 import { redirect } from 'next/navigation'
-import { Store, ExternalLink } from 'lucide-react'
+import { Store, ExternalLink, Eye } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import MarketplaceManager, { type MeliItem } from './_components/marketplace-manager'
 import { CORE_API_URL } from '@/lib/runtime-env'
 
@@ -63,7 +64,14 @@ export default async function MarketplacePage() {
       signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) {
-      const detail = await res.text().catch(() => '')
+      const raw = await res.text().catch(() => '')
+      let detail = ''
+      try {
+        const parsed = JSON.parse(raw)
+        detail = typeof parsed?.detail === 'string' ? parsed.detail : ''
+      } catch {
+        detail = raw
+      }
       marketplaceLoadError = detail || `Error ${res.status} al cargar publicaciones de Mercado Libre.`
     } else {
       const data = await res.json()
@@ -88,7 +96,7 @@ export default async function MarketplacePage() {
             <p className="text-muted-foreground text-sm leading-relaxed">
               La integración parece conectada, pero falló la consulta de publicaciones.
             </p>
-            <p className="text-xs text-red-700 font-mono break-words">{marketplaceLoadError}</p>
+            <p className="text-xs text-red-700 break-words">{marketplaceLoadError}</p>
           </div>
           <div className="flex items-center gap-2">
             <a
@@ -156,11 +164,15 @@ export default async function MarketplacePage() {
   }
   let rawVariations: RawVariation[] = []
   if (tenantId) {
+    // Techo de seguridad: el selector de vinculación es un combobox con
+    // búsqueda client-side sobre este set. 1000 cubre cualquier catálogo real
+    // del tenant y evita inflar el payload del RSC en casos patológicos.
     const { data } = await supabase
       .from('product_variations')
       .select('id, sku, stock_quantity, price, attributes, products(id, title, category_id)')
       .eq('tenant_id', tenantId)
       .order('sku')
+      .limit(1000)
     rawVariations = data ?? []
   }
 
@@ -209,6 +221,16 @@ export default async function MarketplacePage() {
           Tus publicaciones en MeLi. Vincula manualmente cada item al producto de tu catálogo para activar el sync de stock — solo los items vinculados se sincronizan.
         </p>
       </div>
+
+      {!canWrite && (
+        <Alert className="border-border/60">
+          <Eye className="h-4 w-4" />
+          <AlertDescription className="text-sm text-muted-foreground">
+            Tienes acceso de solo lectura. Puedes consultar las publicaciones y su vínculo con el catálogo,
+            pero vincular, importar, pausar o sincronizar requiere el rol de propietario o gerente.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <MarketplaceManager
         items={items}
