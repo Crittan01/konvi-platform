@@ -123,6 +123,26 @@ CART_ABANDONED_MAX_AGE_HOURS = int(
 # Descuento default que ofrece el template MARKETING (placeholder {{3}}).
 # Tenants pueden override per-tenant en futuro. Hoy 10% por default.
 CART_ABANDONED_DISCOUNT_LABEL = os.getenv("CART_ABANDONED_DISCOUNT_LABEL", "10%")
+# Gap F7-25 (2026-07-04) — Quiet hours para el HSM MARKETING cart_abandoned.
+# Meta Marketing + buena praxis Colombia: no promociones de madrugada. Ventana
+# silenciosa por defecto 21:00–08:00 hora Colombia (UTC-5 fijo, sin DST). SOLO
+# aplica a MARKETING (cart_abandoned); los recordatorios de pago (UTILITY /
+# transaccional) NO se silencian. DESACTIVADO por default: (a) es decisión de
+# producto qué ventana usar, (b) mantiene deterministas los tests que corren el
+# cron sin mockear el reloj. Founder habilita en render.yaml tras confirmar franja.
+CART_ABANDONED_QUIET_HOURS_ENABLED = os.getenv(
+    "CART_ABANDONED_QUIET_HOURS_ENABLED", "false"
+).lower() in {"1", "true", "yes", "on"}
+CART_ABANDONED_QUIET_START_HOUR = int(os.getenv("CART_ABANDONED_QUIET_START_HOUR", "21"))
+CART_ABANDONED_QUIET_END_HOUR = int(os.getenv("CART_ABANDONED_QUIET_END_HOUR", "8"))
+# UTC-5 fijo (America/Bogota no observa DST). Configurable por si cambia el país.
+COLOMBIA_UTC_OFFSET_HOURS = int(os.getenv("COLOMBIA_UTC_OFFSET_HOURS", "-5"))
+# Gap F7-26 (2026-07-04) — cap per-tenant de HSM MARKETING por ciclo: evita
+# ráfagas que disparen META_RATE_LIMIT en un solo WABA (limit(50) es global).
+# 0 = sin cap.
+CART_ABANDONED_MAX_PER_TENANT_PER_CYCLE = int(
+    os.getenv("CART_ABANDONED_MAX_PER_TENANT_PER_CYCLE", "15")
+)
 # Anti-hibernación Render Free: ping al propio endpoint /health para prevenir que
 # el servicio web se hiberne. Solo necesario en plan Free (sin keep-alive nativo).
 ANTI_HIBERNATION_ENABLED = os.getenv("ANTI_HIBERNATION_ENABLED", "false").lower() in {
@@ -288,6 +308,11 @@ class OrchestratorWorker:
             "cart_abandoned_reminders_skipped_no_consent": 0,
             "cart_abandoned_reminders_hsm_failed": 0,
             "cart_abandoned_reminders_hsm_not_approved": 0,
+            # F7 gaps 2026-07-04 (worker_jobs closure).
+            "payment_reminders_skipped_human_takeover": 0,  # gap F7-7
+            "cart_abandoned_skipped_quiet_hours": 0,        # gap F7-25
+            "wompi_void_notify_failed": 0,                  # gap F7-14
+            "sla_notify_failed": 0,                         # gap F7-15
         }
 
     def stop(self):
@@ -401,6 +426,39 @@ class OrchestratorWorker:
             oldest = max(oldest, age)
             newest = min(newest, age)
         return oldest, newest
+
+    @staticmethod
+    def _is_quiet_hour_colombia(now_dt: datetime) -> bool:
+        """Gap F7-25 — True si `now_dt` (UTC) cae en la franja silenciosa de
+        Colombia para HSM MARKETING. Ventana [start, end) en hora local; soporta
+        cruce de medianoche (ej. 21→8). start==end o flag off ⇒ nunca silencia."""
+        if not CART_ABANDONED_QUIET_HOURS_ENABLED:
+            return False
+        start = CART_ABANDONED_QUIET_START_HOUR % 24
+        end = CART_ABANDONED_QUIET_END_HOUR % 24
+        if start == end:
+            return False
+        local_hour = (now_dt.hour + COLOMBIA_UTC_OFFSET_HOURS) % 24
+        if start < end:
+            return start <= local_hour < end
+        # Ventana que cruza medianoche (ej. 21:00–08:00).
+        return local_hour >= start or local_hour < end
+
+    @staticmethod
+    def _cap_per_tenant(rows: list[dict], cap: int) -> list[dict]:
+        """Gap F7-26 — limita a `cap` filas por tenant_id preservando orden.
+        cap<=0 ⇒ sin límite. Evita ráfagas de HSM sobre un único WABA."""
+        if cap <= 0:
+            return rows
+        counts: dict[str, int] = {}
+        out: list[dict] = []
+        for r in rows:
+            tid = str(r.get("tenant_id") or "")
+            if counts.get(tid, 0) >= cap:
+                continue
+            counts[tid] = counts.get(tid, 0) + 1
+            out.append(r)
+        return out
 
     async def _coalesce_pending_by_conversation(self, pending: list[dict]) -> list[dict]:
         """DEBOUNCE NO-BLOQUEANTE por conversación (2026-06-27, founder + review adversarial).
@@ -1059,6 +1117,7 @@ class OrchestratorWorker:
                     escalated_at_iso,
                 )
 
+                notify_ok = False
                 try:
                     from telegram_notifications import notify_escalation_async
                     await notify_escalation_async(
@@ -1073,8 +1132,20 @@ class OrchestratorWorker:
                         ),
                         severity="critical",
                     )
+                    notify_ok = True
                 except Exception as exc:
-                    logger.warning("[SLA] notify Telegram falló conv=%s: %s", conv_id, exc)
+                    logger.warning(
+                        "[SLA] notify Telegram falló conv=%s: %s — NO se estampa "
+                        "breach audit, se reintenta el próximo ciclo", conv_id, exc,
+                    )
+
+                # Gap F7-15 — el breach audit ES la marca de idempotencia (paso 2).
+                # Si la notif falló (transitorio), NO lo insertamos → el próximo
+                # ciclo reintenta la alerta. Antes se insertaba SIEMPRE, así que un
+                # fallo transitorio de Telegram descartaba la alerta para siempre.
+                if not notify_ok:
+                    self._metrics["sla_notify_failed"] += 1
+                    continue
 
                 # 5. Audit row para idempotencia (no re-notificar).
                 try:
@@ -1221,7 +1292,7 @@ class OrchestratorWorker:
             stale_res = (
                 self.supabase.table("orders")  # tenant_filter:exempt:cron_cross_tenant_payment_reminder
                 .select("id, tenant_id, conversation_id, created_at, "
-                        "conversations(customer_phone)")
+                        "conversations(customer_phone, status)")
                 .eq("status", "pending_payment")
                 .is_("payment_reminder_sent_at", "null")
                 .lt("created_at", upper_cutoff)
@@ -1250,6 +1321,21 @@ class OrchestratorWorker:
                                (order_id or "?")[:8])
                 continue
 
+            # Gap F7-7 — NO inyectar recordatorios del bot en conversaciones que
+            # un operador está atendiendo (human_takeover). Si el operador tomó la
+            # conversación, él gestiona el cobro; el bot no debe meterse. No se
+            # quema la idempotencia: si el takeover termina dentro de la ventana
+            # (~5 min) el recordatorio podría salir en el próximo ciclo, y si no,
+            # la orden sale de la ventana de forma natural.
+            conv_status = (conv.get("status") if isinstance(conv, dict) else None) or ""
+            if conv_status == "human_takeover":
+                self._metrics["payment_reminders_skipped_human_takeover"] += 1
+                logger.info(
+                    "[REMINDER] order=%s conv en human_takeover — skip (operador atiende)",
+                    order_id[:8],
+                )
+                continue
+
             try:
                 last_in_res = (
                     self.supabase.table("messages")  # tenant_filter:exempt:cron_cross_tenant_payment_reminder
@@ -1275,7 +1361,6 @@ class OrchestratorWorker:
                 # template payment_reminder_v1 (Sem 7 F2 item 6.b).
                 # Si template no APPROVED → marcar skipped + métrica.
                 # Si HSM envía OK → marcar sent_via_hsm + métrica.
-                self._metrics["payment_reminders_skipped_csw_closed"] += 1
                 hsm_handled = await self._try_send_payment_reminder_hsm(
                     order_id=order_id,
                     tenant_id=tenant_id,
@@ -1283,7 +1368,12 @@ class OrchestratorWorker:
                     customer_phone=customer_phone,
                     now_dt=now_dt,
                 )
+                # Gap F7-28 — la métrica skipped_csw_closed SOLO cuenta cuando el
+                # HSM NO envió. Antes se incrementaba ANTES del intento HSM → si el
+                # HSM salía, la misma orden contaba como 'skipped_csw_closed' Y
+                # 'sent_via_hsm' (doble conteo que mentía en /status).
                 if not hsm_handled:
+                    self._metrics["payment_reminders_skipped_csw_closed"] += 1
                     # HSM no aplicó (template no aprobado o falló). Igualmente
                     # marcamos idempotencia para no reintentar — el cron solo
                     # debería disparar 1 vez por orden.
@@ -1302,9 +1392,16 @@ class OrchestratorWorker:
                 continue
 
             short_id = str(order_id)[:8].upper()
+            # Gap F7-23 — minutos restantes derivados de la config real (TTL de
+            # cancelación − delay del recordatorio) en vez de "5 min" hardcodeado.
+            # Si el founder ajusta PENDING_PAYMENT_TTL_MINUTES / DELAY, el copy no
+            # miente. Default: 35 − 25 = 10 min antes de que el cron libere la orden.
+            remaining_min = max(
+                1, PENDING_PAYMENT_TTL_MINUTES - PAYMENT_REMINDER_DELAY_MINUTES
+            )
             text = (
-                f"Te queda *5 min* para usar el link de pago de tu pedido "
-                f"*#{short_id}*.\n\n"
+                f"Te quedan unos *{remaining_min} min* para usar el link de pago "
+                f"de tu pedido *#{short_id}*.\n\n"
                 f"Si necesitas más tiempo o ayuda, escríbeme y lo resolvemos."
             )
             try:
@@ -1400,14 +1497,20 @@ class OrchestratorWorker:
         order = order_rows[0]
         total_amount = float(order.get("total_amount") or 0)
 
-        # Resolver nombre cliente via contacts si disponible
+        # Resolver nombre cliente via contacts si disponible.
+        # Gap F7-13 — además respetar el soft opt-out (STOP). lib/whatsapp_optout
+        # define que consent_revoked_at filtra TODO HSM proactivo outbound (sin
+        # distinguir categoría: incluye este UTILITY). Un cliente que dijo BAJA no
+        # debe recibir el template fuera de CSW. El path cart_abandoned ya lo
+        # respetaba; el de payment_reminder no → se cierra la asimetría.
         customer_name = "cliente"
         contact_id = order.get("contact_id")
         if contact_id:
             try:
                 contact_res = (
                     self.supabase.table("contacts")
-                    .select("name")   # F44: la columna real es `name` (first_name/full_name no existen)
+                    # F44: la columna real es `name` (first_name/full_name no existen)
+                    .select("name, consent_revoked_at")
                     .eq("id", contact_id)
                     .eq("tenant_id", tenant_id)
                     .limit(1)
@@ -1415,6 +1518,14 @@ class OrchestratorWorker:
                 )
                 contact_rows = contact_res.data or []
                 if contact_rows:
+                    if contact_rows[0].get("consent_revoked_at"):
+                        logger.info(
+                            "[REMINDER_HSM] order=%s cliente con soft opt-out "
+                            "(consent_revoked_at) — no se envía HSM proactivo "
+                            "(Ley 1581 Art.9 + Meta Policy)",
+                            order_id[:8],
+                        )
+                        return False
                     full = (contact_rows[0].get("name") or "").strip()
                     customer_name = full.split(" ")[0] if full else "cliente"
             except Exception:
@@ -1546,6 +1657,16 @@ class OrchestratorWorker:
         self._last_cart_abandoned_at = now
 
         now_dt = datetime.now(timezone.utc)
+        # Gap F7-25 — quiet hours Colombia para el HSM MARKETING. No se quema
+        # idempotencia: se difiere el ciclo; los carritos siguen elegibles y el
+        # próximo ciclo (ya fuera de la franja) los procesa. Solo MARKETING.
+        if self._is_quiet_hour_colombia(now_dt):
+            self._metrics["cart_abandoned_skipped_quiet_hours"] += 1
+            logger.debug(
+                "[CART_ABANDONED] quiet hours Colombia (%02d:00–%02d:00) — difiero ciclo",
+                CART_ABANDONED_QUIET_START_HOUR % 24, CART_ABANDONED_QUIET_END_HOUR % 24,
+            )
+            return
         upper_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_THRESHOLD_HOURS)).isoformat()
         lower_cutoff = (now_dt - timedelta(hours=CART_ABANDONED_MAX_AGE_HOURS)).isoformat()
 
@@ -1572,6 +1693,12 @@ class OrchestratorWorker:
 
         if not carts:
             return
+
+        # Gap F7-26 — cap per-tenant/ciclo: el limit(50) es global; sin esto un
+        # tenant con 50 carritos dispararía 50 HSM de golpe y podría chocar con
+        # META_RATE_LIMIT en su WABA. Los que no entran este ciclo siguen
+        # elegibles (idempotencia intacta) y salen en ciclos siguientes.
+        carts = self._cap_per_tenant(carts, CART_ABANDONED_MAX_PER_TENANT_PER_CYCLE)
 
         for cart in carts:
             cart_id = cart.get("id")
@@ -1816,8 +1943,13 @@ class OrchestratorWorker:
             len(eligible), WOMPI_VOID_POLL_LOOKBACK_HOURS,
         )
 
-        # Para cada uno: GET txn a Wompi. Si VOIDED, actualizar + notif.
+        # Para cada uno: GET txn a Wompi. Si VOIDED, notificar + sincronizar.
         for p in eligible:
+            # Gap F7-18 — latir por candidato. El GET a Wompi es I/O de red (hasta
+            # 10s × 50 candidatos); sin este heartbeat un ciclo lento superaba
+            # HEALTH_HEARTBEAT_STALE_SECONDS → /health 503 → Render reiniciaba a
+            # mitad del poll. El worker está VIVO aunque Wompi tarde.
+            self.last_heartbeat_ts = time.time()
             txn_id = p.get("wompi_txn_id")
             tenant_id = p.get("tenant_id")
             order_id = p.get("order_id")
@@ -1833,8 +1965,10 @@ class OrchestratorWorker:
                     continue
                 import httpx
                 url = f"{wompi_base_url(env or 'sandbox')}/transactions/{txn_id}"
-                with httpx.Client(timeout=10.0) as client:
-                    r = client.get(
+                # Gap F7-18 — AsyncClient + await: NO bloquea el event loop del
+                # worker (antes httpx.Client síncrono congelaba TODO el ciclo).
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.get(
                         url, headers={"Authorization": f"Bearer {pk}"},
                     )
                 if r.status_code >= 400:
@@ -1842,15 +1976,15 @@ class OrchestratorWorker:
                 data = (r.json() or {}).get("data") or {}
                 if (data.get("status") or "").upper() != "VOIDED":
                     continue
-                # VOIDED en Wompi pero local sigue APPROVED → sync.
-                self.supabase.table("payments").update({
-                    "wompi_status": "VOIDED",
-                }).eq("wompi_txn_id", txn_id).eq("tenant_id", tenant_id).execute()
-                logger.info(
-                    "[WOMPI_POLL] sync VOIDED txn=%s order=%s tenant=%s",
-                    txn_id, order_id[:8], tenant_id[:8],
-                )
-                # Notif cliente (reusa el path del webhook handler).
+
+                # Gap F7-14 — NOTIFICAR ANTES de sincronizar wompi_status. Antes se
+                # marcaba VOIDED primero y, si la notif fallaba, el caso salía del
+                # radar (el filtro de elegibles exige wompi_status='APPROVED') → el
+                # cliente jamás se enteraba del reembolso. Ahora, si la notif falla,
+                # NO tocamos el estado local: el candidato sigue elegible y se
+                # reintenta el próximo ciclo. Coste: en el caso raro de crash entre
+                # notif y update, el próximo ciclo re-notifica (aviso duplicado,
+                # nunca pérdida de dinero) — preferible a nunca informar.
                 try:
                     import sys as _sys
                     from pathlib import Path as _Path
@@ -1867,10 +2001,22 @@ class OrchestratorWorker:
                         amount_in_cents=amount,
                     )
                 except Exception as _notif_exc:
+                    self._metrics["wompi_void_notify_failed"] += 1
                     logger.warning(
-                        "[WOMPI_POLL] notif refund falló order=%s: %s",
+                        "[WOMPI_POLL] notif refund falló order=%s: %s — NO se marca "
+                        "VOIDED (sigue elegible), reintento próximo ciclo",
                         order_id[:8], _notif_exc,
                     )
+                    continue
+
+                # Notif OK → recién ahora sincronizar local a VOIDED.
+                self.supabase.table("payments").update({
+                    "wompi_status": "VOIDED",
+                }).eq("wompi_txn_id", txn_id).eq("tenant_id", tenant_id).execute()
+                logger.info(
+                    "[WOMPI_POLL] notif OK + sync VOIDED txn=%s order=%s tenant=%s",
+                    txn_id, order_id[:8], tenant_id[:8],
+                )
             except Exception as exc:
                 logger.warning(
                     "[WOMPI_POLL] check txn=%s falló: %s", txn_id, exc,
@@ -2000,10 +2146,21 @@ class OrchestratorWorker:
                     )
                     continue
 
+                # Gap F7-10 — estampar metadata canónica de cancelación para que la
+                # expiración por TTL sea distinguible en DB/reportes (antes solo
+                # status='cancelled' → indistinguible de cualquier otra cancelación).
+                # `cancelled_by_actor='system_auto'` es el valor de enum previsto
+                # para "auto-cancel por TTL expirado" (migración 20260606000000).
+                # No se crea fila en order_cancellations: para pending_payment no hay
+                # pago/envío que reversar y el flujo canónico (refund/retracto/
+                # triage) no aplica; ver needs_founder si se requiere el registro
+                # formal para retención documental.
                 res = (
                     self.supabase.table("orders")
                     .update({
                         "status": "cancelled",
+                        "cancelled_at": now_dt.isoformat(),
+                        "cancelled_by_actor": "system_auto",
                     })
                     .eq("id", order["id"])
                     .eq("tenant_id", order["tenant_id"])
