@@ -234,7 +234,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Call Gemini REST API
     const apiKey = process.env.GEMINI_API_KEY
-    const model  = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
+    const model  = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'  // 2.5-flash se retira 2026-10-16
     if (!apiKey) return NextResponse.json({ error: 'GEMINI_API_KEY no configurada' }, { status: 500 })
 
     const geminiRes = await fetch(

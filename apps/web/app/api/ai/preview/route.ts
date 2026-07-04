@@ -7,8 +7,12 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? ''
-const EMBED_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`
-const CHAT_URL  = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`
+// Modelos vigentes (override por env, empatan con render.yaml + orchestrator):
+// gemini-embedding-001 se retira 2026-07-14; gemini-2.5-flash el 2026-10-16.
+const EMBED_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-2'
+const CHAT_MODEL  = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'
+const EMBED_URL = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${GEMINI_API_KEY}`
+const CHAT_URL  = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent?key=${GEMINI_API_KEY}`
 
 // Rate limit: 20 llamadas / hora / tenant
 // In-memory — válido para instancia única (Render Free). Suficiente para uso de configuración.
@@ -105,7 +109,7 @@ export async function POST(request: NextRequest) {
     const embedRes = await fetch(EMBED_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'models/gemini-embedding-001', content: { parts: [{ text: message }] }, outputDimensionality: 3072 }),
+      body: JSON.stringify({ model: `models/${EMBED_MODEL}`, content: { parts: [{ text: message }] }, outputDimensionality: 3072 }),
     })
     if (embedRes.ok) {
       const embedData = await embedRes.json()

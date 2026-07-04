@@ -977,3 +977,303 @@ Orden razonado: **transversales primero** (los cimientos levantan todos los mód
 3. ⚖️ Ruta `media` hidden: ¿integrar al editor de Catálogo o módulo propio visible?
 4. ⚖️ Dark mode: hoy NO existe theming — ¿se agrega al DoD o se difiere post-Platform Console?
 5. ⚖️ Sentry: DSNs por configurar en Render (decidido: se valida al abordar Platform Console).
+
+---
+
+# Fase 0.1 — Superficies sin dueño (puntos ciegos del audit)
+
+> 16 superficies que ningún módulo de Fase 0 reclamó, auditadas contra el DoD v2 (workflow `wf_2faba8af-32f`, 110 agentes, verificación adversarial). Cada una con `suggested_owner` = fase de cierre a la que pertenece.
+
+| Superficie | % | Crit | High | Dueño sugerido |
+|---|---|---|---|---|
+| Media + bucket tenant-media | 42% | 2 | 7 | F3 (productos/canales) como dueño del ci |
+| Delivery receipts WhatsApp | 43% | 1 | 4 | F2 (VENTAS+Inbox) como dueño principal d |
+| Consola admin/founder | 44% | 0 | 4 | F1 (transversales) como dueño principal  |
+| Supabase Storage (capa) | 46% | 2 | 5 | F1 (transversales/seguridad): una sola m |
+| Emails transaccionales al cliente (Resend) | 49% | 1 | 4 | F2 (VENTAS + Inbox) para el ciclo de vid |
+| IA embebida por módulo | 50% | 1 | 5 | F5 (IA) como dueño natural del cierre (u |
+| Emails de Auth Supabase | 54% | 0 | 1 | F6 (identidad/config) como owner primari |
+| Offboarding pipeline | 55% | 0 | 1 | F7 (onboarding + E2E) como dueño princip |
+| Notificaciones al operador (Telegram/email) | 59% | 2 | 5 | F1 (transversales) para el subsistema de |
+| Coherencia del API Gateway | 59% | 0 | 3 | F1 (transversales) — el cierre es cross- |
+| Jobs proactivos del worker | 60% | 0 | 4 | F2 (VENTAS + Inbox) para el lifecycle pa |
+| Journey día-1 del tenant | 60% | 0 | 2 | F7 (onboarding + E2E) como dueño princip |
+| Flujo E2E cross-módulo | 66% | 0 | 3 | F7 (onboarding + E2E) para el cierre int |
+| Ventas · Promociones (cupones) | 70% | 1 | 2 | F2 (VENTAS + Inbox) — es el módulo Venta |
+| Salud de integraciones | 70% | 0 | 2 | F6 (identidad/config — la superficie viv |
+| Categorías (ADR-0027) | 77% | 0 | 1 | F3 (productos/canales) — es el cierre na |
+
+**Total gaps en superficies ciegas:** 10 critical · 53 high · 165 medium · 79 low.
+
+### Media + bucket tenant-media — 42%
+
+_La integración al Catálogo ya está ~80% construida (galería + upload en form y drawer); el punto ciego real es la capa Storage: bucket tenant-media sin migración ni RLS versionada (aislamiento inverificable, fresh install roto), ruta /media duplicada y huérfana, cero tests y cero audit trail._
+
+- ✅ `[critical·M·fullstack]` **Bucket tenant-media ausente de las migraciones canónicas: sin creación versionada, sin RLS en storage.objects, sin file_size_limit ni allowed_mime_types — fresh install rompe 4 superficies**
+  - grep 'tenant-media' en supabase/migrations/ = 0 resultados; solo consent-evidence (20260510020000) y offboarding-archive (20260617000000) están versionados. Consumen el bucket: image-upload-box.tsx:39, logo-upload.tsx:49, media-client.tsx:37, attachment-uploader.tsx:110. El patrón a replicar ya existe completo en 20260510020000_consent_evidence_bucket.sql (INSERT storage.buckets + policies foldern
+- ✅ `[critical·M·tenant_resiliencia]` **Aislamiento del bucket no verificable ni versionado: si las policies creadas a mano son laxas, hay IDOR cross-tenant de escritura/borrado vía supabase-js**
+  - 0 policies para tenant-media en supabase/migrations/ (vs consent_evidence_bucket.sql:39-80 que sí scopea foldername[1]=tenant_id + rol owner|manager). El canWrite de media/page.tsx:16 y el gate de rol son solo UI — 'el frontend no es seguridad' (CLAUDE.md principio 2). Mismo fix que el gap fullstack critical: migración tenant_media_bucket.sql.
+- ✅ `[high·S·funcional]` **GalleryPickerModal solo cruza products.cover_image_url — las imágenes de variantes aparecen como 'sin asignar' y son borrables creyéndolas huérfanas**
+  - gallery-picker-modal.tsx:54-59 solo consulta products.title+cover_image_url; product_variations.image_url existe (migración 20260411162042_fase11_3_catalog_enterprise.sql:60) y se asigna vía product-edit-drawer.tsx:122 y catalog-form.tsx:349. Una foto de variante en uso se muestra con badge ámbar 'sin asignar' (footer :288) invitando a borrarla → variante queda con imagen rota que el bot enviaría 
+- ✅ `[high·S·funcional]` **Ruta /dashboard/media huérfana y duplicada: reimplementa listar/subir/borrar/copiar con divergencias, sin ningún enlace entrante**
+  - media-client.tsx:27-220 duplica la funcionalidad de gallery-picker-modal.tsx; grep de href a /dashboard/media = 0 resultados en apps/web (solo alcanzable tecleando URL); sidebar-client.tsx:50 la oculta a propósito. Con la decisión founder de integrar al Catálogo, esta ruta es código paralelo que ya driftó (permite GIF que gallery no filtra, no marca 'en uso', borra sin confirm). Retirar o converti
+- ✅ `[high·M·fullstack]` **4 superficies de upload con contratos divergentes y cero enforcement server-side: image-upload-box no valida NADA (ni tamaño ni MIME)**
+  - image-upload-box.tsx:30-51 sube accept='image/*' sin check de size/MIME (un PNG de 50MB queda como cover_image_url pero Meta lo rechaza con error 131053 al enviarlo — audit-finiquito-2026-05-31.md:304); media-client.tsx:45-51 = 5MB jpeg/png/webp/gif; logo-upload.tsx:22-37 = 2MB png/jpg/webp con MIME→ext sanitizado; attachment-uploader.tsx:34-35 = 5MB jpeg/png/webp. El límite real debe vivir en el 
+- ✅ `[high·S·ux_ui]` **Borrado en /media es destructivo con un solo click: sin confirmación y sin aviso de si un producto usa la imagen**
+  - media-client.tsx:79-86 handleDelete ejecuta remove() directo — sin window.confirm ni cruce con products.cover_image_url; contrasta con gallery-picker-modal.tsx:119-125 que sí confirma y advierte. Un click accidental deja al bot enviando una imagen rota al cliente. (Se resuelve solo si se retira la ruta — gap funcional #2.)
+- ✅ `[high·M·tenant_resiliencia]` **Offboarding hard-delete NO purga tenant-media/{tenant_id}: las imágenes del tenant cerrado quedan públicas indefinidamente**
+  - tenant_offboarding.py:_snapshot_to_archive (:408-476) solo archiva tablas DB al bucket offboarding-archive; fn_hard_delete_tenant (20260617000000:106-178) solo hace DELETE FROM tenants — storage.objects no tiene FK cascade. Con bucket público (getPublicUrl en media-client.tsx:40), logo, fotos de producto y adjuntos de conversaciones del tenant eliminado siguen accesibles por URL post-cierre (higie
+- ◻︎ `[high·M·tests_uat]` **0 tests para toda la superficie media/galería/upload en apps/web**
+  - apps/web tiene solo 3 archivos de test (mfa-recovery-cookie.test.ts, attribute-contract.test.ts, category-tree.test.ts) — ninguno toca media-client, gallery-picker-modal, image-upload-box, logo-upload ni attachment-uploader. En tests/ Python, tenant-media aparece solo como fixture string (test_worker_whatsapp_outbound_queue.py:113,142). El flujo subir→asignar cover→bot envía imagen a Meta no tiene
+- ◻︎ `[high·M·observabilidad]` **Cero audit trail en upload/delete de media: borrar la imagen de un producto no deja rastro de quién ni cuándo**
+  - media-client.tsx:81, gallery-picker-modal.tsx:131-135 e image-upload-box.tsx:39 mutan Storage directo vía supabase-js sin endpoint intermedio — el decorador @audit_log (que send-image SÍ usa, conversations.py:1231) nunca se ejecuta. El caso founder rev.107 (mapping producto→imagen perdido por un script) es exactamente el tipo de incidente que hoy seguiría siendo indiagnosticable.
+- ⚖️ Destino de la ruta /dashboard/media tras la integración: RECOMENDACIÓN eliminarla (redirect a /dashboard/catalog) — mantenerla viva implica sostener dos implementaciones que ya divergieron (GIF, confi
+- ⚖️ Diseño de la migración tenant_media_bucket.sql ANTES de escribirla: (a) ¿policy dual para el prefijo inbox-attachments/ o migrar esos paths a {tenantId}/inbox/...? (b) ¿el bucket sigue public=true? Me
+- ⚖️ ¿El hard-delete de offboarding debe purgar tenant-media/{tenant_id}? RECOMENDACIÓN: sí — añadir paso de purge en el worker tras fn_hard_delete_tenant (los archivos no contienen trazabilidad legal que 
+- ⚖️ Cuota de Storage per-tenant: definir política (hoy Free tier ~1GB compartido entre todos los tenants sin ningún freno) — puede diferirse hasta tener >1 tenant activo pagando, pero dejarla decidida.
+
+### Delivery receipts WhatsApp — 43%
+
+_Parsing e infra están sólidos, pero la mitad "delivery receipts" muere sin persistir (el operador NO ve entregado/leído/fallo real; los checks del Inbox son un espejismo de msg.processed) y la visibilidad de calidad/tier funciona sólo por un camino paralelo (poll→Salud) mientras el webhook y la tab Calidad quedan como código muerto/placeholder._
+
+- ✅ `[critical·L·funcional]` **Delivery receipts parseados pero jamás persistidos ni mostrados**
+  - services/connector-whatsapp/services/template_events.py:319-320 (handle_event: 'outbound_status ... no persistence todavía → return None'); routers/webhook.py:104-112 sólo loguea '(no persistence)'; NO existe tabla whatsapp_status_events (parser.py:169 la prometía) ni columna delivered_at/read_at en messages.
+- ✅ `[high·M·fullstack]` **Doble fuente de calidad/tier sin reconciliar**
+  - El webhook escribe tenant_integrations.credentials.tier + quality_signal (template_events.py:267-270) que NADIE lee; el poll escribe tenant_provider_health vía Meta Graph API (health_metrics.py:192-208) que SÍ se muestra. La señal early real-time (FLAGGED/DOWNGRADED) se pierde en datos muertos.
+- ✅ `[high·M·fullstack]` **Checks del Inbox no reflejan entrega real**
+  - apps/web/.../inbox/_components/chat-panel.tsx:358-361 pinta Check/CheckCheck según msg.processed (flag interno del orquestador), no según delivered/read de Meta; worker.py:806 comenta '# Meta ya entregó' sobre un HTTP 200 que sólo significa 'aceptado/sent', no 'delivered'.
+- ✅ `[high·M·observabilidad]` **Fallos de entrega reales sin traza consultable**
+  - routers/webhook.py:104-112 loguea outbound_status como '(no persistence)'; parser.py:227 captura errors[{code,title,message}] de Meta que nunca se guardan → imposible diagnosticar entregas fallidas (número bloqueado, ventana 24h cerrada, plantilla pausada) por conversación.
+- ✅ `[high·L·operador]` **El operador no ve entrega/lectura/fallo real de sus mensajes**
+  - No hay estado de entrega por mensaje en el Inbox (chat-panel.tsx:358-361 sólo processed); un envío que Meta rechaza asíncronamente (status 'failed') es invisible; processing_status='failed' (worker.py:534,606) cubre sólo fallos del lado orquestador, no rechazos de Meta post-aceptación.
+- ⚖️ Decidir si se construye persistencia + visualización de delivery receipts (Meta los envía gratis; hoy se descartan). Alcance: tabla whatsapp_status_events o columnas delivered_at/read_at/failed_at+err
+- ⚖️ Reconciliar los dos almacenes de calidad/tier: o se elimina el camino webhook muerto (credentials.tier/quality_signal), o se promueve a fuente real-time que alimente tenant_provider_health (mejor: rea
+- ⚖️ Resolver la tab 'Calidad' falsa: redirigir a Settings→Salud, o construir ahí la vista real per-número; hoy convive un placeholder simulado con el dashboard real.
+- ⚖️ Re-etiquetar los checks del Inbox (processed vs entregado/leído) o cablearlos a los receipts reales una vez persistidos, para eliminar la afordancia engañosa.
+
+### Consola admin/founder — 44%
+
+_Un toolset de scripts CLI funcional y con buenos docstrings, pero SIN dueño operativo real: cero RBAC, cero audit trail propio (pese a que la plataforma YA tiene @audit_log), cero tests, discovery rota (README ausente, doc de onboarding contradice el script vigente, sync-local apunta a 2 artefactos inexistentes) y un tool cliente-facing (send_payment_reminder) que puede duplicar HSMs cobrados porque no comparte el ledger de idempotencia del worker. El founder NO puede operar esto sin leer el código._
+
+- ✅ `[high·S·funcional]` **send_payment_reminder no escribe marcador de idempotencia → doble HSM cobrado**
+  - scripts/admin/send_payment_reminder.py:156-183 llama send_whatsapp_template pero NUNCA setea orders.payment_reminder_sent_at ni lo chequea antes de enviar; el worker automático usa ese flag como candado (worker.py:1348 .update({'payment_reminder_sent_at'}).is_(...'null')). Un envío manual queda invisible al cron → el cron reenvía; correr el script 2 veces también reenvía. HSM UTILITY se cobra (~$0
+- ✅ `[high·S·fullstack]` **reembed no estampa embedding_model_version → columna+índice muertos y re-embed no resumible con seguridad**
+  - reembed_kb_documents.py:92-94 solo hace .update({'embedding': ...}); NO setea embedding_model_version. La migración 20260527010000 creó la columna + índice explícitamente para 'detectar cambio de modelo y disparar re-index', y get_embedding_model_version() existe (llm_embed.py:265) pero grep confirma CERO escritores del campo. Si el re-embed se interrumpe a medias, quedan vectores de 2 modelos mez
+- ✅ `[high·L·tests_uat]` **0 tests para provisión, re-embed, reminder manual y submit de templates**
+  - grep de tests/ y services/*/tests: ningún archivo importa scripts.admin ni referencia provision_tenant/reembed/submit_template/send_payment_reminder como SUT. tests/test_worker_hsm_reminders.py prueba el path del worker (worker.py), no el script manual. Admin scripts tampoco corren en CI (.github/workflows sin referencia). Herramientas que escriben en producción (crean tenants, mutan embeddings de
+- ✅ `[high·M·operador]` **Sin catálogo/README: descubrir estos tools exige leer el fuente**
+  - No existe scripts/README ni scripts/admin/README (verificado). docs/operations/HUMAN_INTERVENTIONS.md no menciona provision/reembed/submit_template/payment_reminder/seed vault (grep vacío). onboarding-tenants.md (:1-26, 649 bytes) describe un flujo manual obsoleto y dice 'Platform Console aún no implementada' sin apuntar a provision_tenant.py. El operador tiene que ya saber que el script existe y 
+- ⚖️ ¿El recordatorio manual (send_payment_reminder.py) debe compartir el ledger de idempotencia del worker (orders.payment_reminder_sent_at)? RECOMENDACIÓN: sí — chequear antes de enviar y marcar tras env
+- ⚖️ ¿Las acciones del 'Platform Console de facto' deben escribir en audit_log? RECOMENDACIÓN: sí — la infra @audit_log ya existe y se usa en la capa API; extenderla a los scripts (con actor + tenant + acc
+- ⚖️ Rotación de tokens Meta: no existe herramienta (update_vault_secret.py está referenciada pero ausente). DECISIÓN: ¿se difiere a la Platform Console (fase 12, bloqueada por OQ-P01) o se necesita ya? Lo
+- ⚖️ ¿Se acepta operar producción sin RBAC en estos tools durante F1-F7? RECOMENDACIÓN: documentar explícitamente que el SUPABASE_SERVICE_ROLE_KEY es la única barrera y restringir su tenencia; el RBAC real
+
+### Supabase Storage (capa) — 46%
+
+_Superficie PARCIAL: 2 de 3 buckets (consent-evidence, offboarding-archive) estan versionados con RLS + tests, pero el bucket mas usado (tenant-media) no existe en ninguna migracion ni tiene policies en el repo (drift), y la 'media inbound del Inbox' como capa de Storage no existe: el media entrante del cliente nunca se persiste ni se ve en el Inbox._
+
+- ✅ `[critical·M·funcional]` **Bucket tenant-media + sus RLS policies NO existen en ninguna migracion (drift manual)**
+  - grep 'tenant-media' en supabase/migrations = 0 resultados; solo existen consent_evidence_bucket.sql y tenant_offboarding_phase2.sql. Es el destino de 4 superficies de upload: inbox send-image (attachment-uploader.tsx:110), media library (media-client.tsx:37,59), catalogo (image-upload-box.tsx:39), logo (logo-upload.tsx:49). En instalacion fresca el bucket no existe -> logo, imagenes de producto, g
+- ✅ `[critical·M·tenant_resiliencia]` **Aislamiento multi-tenant de tenant-media sin RLS versionada (RBAC solo en frontend)**
+  - No hay policy de storage.objects para tenant-media en el repo (grep=0). El aislamiento y el gate owner/manager dependen exclusivamente de policies creadas a mano en el dashboard (drift, no auditables). canWrite es client-only (media/page.tsx:16, media-client.tsx). Si la policy drift falta o es laxa, cualquier miembro del tenant (o cross-tenant) puede leer/escribir/borrar via supabase-js. Contradic
+- ✅ `[high·L·funcional]` **El media inbound del cliente nunca se persiste a Storage ni se renderiza en el Inbox**
+  - db_persistence.py:245-260 inserta el mensaje inbound con media_id/media_mime pero NO setea media_url; chat-panel.tsx:339 exige `msg.content_type==='image' && msg.media_url` para pintar la imagen -> las imagenes que envia el cliente son invisibles para el operador (solo ve el texto '[Imagen recibida]', parser.py:51). meta_media.py:32-36 solo cachea los bytes en memoria 4min para Gemini; ningun buck
+- ✅ `[high·M·fullstack]` **Validaciones de MIME y tamano divergen entre las 4 superficies del mismo bucket**
+  - Limites de tamano incoherentes: media 5MB (media-client.tsx:50), attachment 5MB (attachment-uploader.tsx:34), logo 2MB (logo-upload.tsx:34), catalogo SIN limite (image-upload-box.tsx:57 accept='image/*', sin check de size). MIME allowlists distintas (media agrega gif; attachment/logo no). Un PNG >5MB entra por catalogo, queda referenciable en products.cover_image_url pero WhatsApp Cloud API lo rec
+- ✅ `[high·M·tenant_resiliencia]` **El hard-delete de tenant y el purge de contacto no eliminan los objetos de Storage con PII (right-to-erasure incompleto)**
+  - tenant_offboarding.py:481-552 hace CASCADE de ~50 tablas pero nunca borra los objetos de tenant-media ni consent-evidence del tenant; contact_cleanup.py no tiene ningun manejo de Storage (grep storage/bucket/remove = 0). Al purgar un contacto se borra contacts.consent_evidence.attachment_path pero el escaneo del documento firmado (PII del titular) queda huerfano en Storage sin referencia, indefini
+- ◻︎ `[high·M·operador]` **El founder no puede verificar que tenant-media exista/tenga RLS sin abrir el dashboard de Supabase**
+  - Al no estar el bucket ni sus policies en migraciones, la unica forma de saber si el aislamiento esta activo es inspeccionar storage.objects en el dashboard productivo. No hay panel, health-check ni comando que lo confirme; un deploy a un proyecto nuevo arranca roto y en silencio (los uploads fallan solo al usarse).
+- ◻︎ `[high·M·operador]` **No hay herramienta de operador para purgar media huerfana con PII tras borrado**
+  - Ni el hard-delete de tenant (tenant_offboarding.py) ni el purge de contacto (contact_cleanup.py) limpian Storage; el operador/founder no tiene script ni UI para localizar y borrar los escaneos de consent-evidence ni las imagenes de tenant-media de titulares/tenants eliminados. Queda incumplimiento operable de Ley 1581 Art. 16.
+- ⚖️ Modulo /dashboard/(products)/media esta funcional pero oculto del sidebar por decision pendiente (integrar al editor de Catalogo o dejar como modulo paralelo) - .context/00-product.md:138. Mientras si
+- ⚖️ tenant-media es bucket PUBLICO (getPublicUrl en todas las superficies): los adjuntos de Inbox (inbox-attachments/{tenant}/...) y logos/imagenes de catalogo quedan accesibles por cualquiera con el link
+- ⚖️ Definir si el media inbound del cliente (imagenes que envia por WhatsApp) debe persistirse a Storage para que el operador lo vea historicamente en el Inbox, vs mantenerse efimero (privacidad/retencion
+
+### Emails transaccionales al cliente (Resend) — 49%
+
+_Subsistema sorprendentemente completo en código (7 etapas del ciclo de vida, tenant-scoped, best-effort disciplinado) pero inactivable en producción tal cual (dominio remitente .local no verificable + API key en standby), invisible para el operador (cero UI, cero audit trail, cero señal de bounce) y con copies que prometen canales que no existen (reply-to)._
+
+- ✅ `[critical·L·operador]` **Superficie 100% invisible e inoperable desde el Tenant Console: cero UI para configurar remitente/activación/opt-out, cero indicador de emails enviados en el detalle de orden o Inbox, cero empty state que diga 'emails no configurados'**
+  - grep -i 'email' en apps/web/app/dashboard/(sales)/orders/ y shipping/ = 0 resultados; integrations solo tiene setup Telegram (apps/web/app/dashboard/(settings-group)/integrations/telegram/); el canal 'email' de notification_settings se consume en notifications.py:264-271 pero no tiene página de configuración.
+- ✅ `[high·S·fullstack]` **Enum interno en inglés filtrado al email del cliente: los templates in_transit y exception reciben shipments.status ('in_transit', 'exception') como raw_status → el cliente lee 'Estado actual: in_transit' / 'Motivo reportado: exception', mientras el WhatsApp paralelo sí muestra el estado real del courier ('EN REPARTO', 'CLIENTE AUSENTE')**
+  - services/api/routers/wompi_webhook.py:1125 (shipment_status = sh.get('status') leído de shipments), :1160-1166 y :1175-1181 (pasa shipment_status como raw_status a los composers); supabase/migrations/20260529000000_shipment_tracking_events.sql:137 (SET status = p_internal_status — enum canónico inglés); contraste con aveonline_webhook.py:325 y :368 que al WhatsApp sí pasan raw_status=nombre_estado
+- ✅ `[high·M·tests_uat]` **6 de 7 templates y el dispatcher completo sin tests: template_mode routing, refund_completed inline, skip sin email, skip sin API key, manejo de respuesta Resend — nada cubierto**
+  - tests/test_wompi_email_failed.py:17-18 (solo importa _compose_payment_failed_email_html); grep '_compose_payment_email_html|_compose_shipment|_send_payment_confirmation_email' en tests/ = 0 resultados fuera de ese archivo.
+- ✅ `[high·M·observabilidad]` **Cero rastro persistido de envíos: no existe tabla de email events, el id de Resend en el response body se descarta, y no hay integración del webhook de Resend (bounced/complained/delivered) → imposible responder '¿le llegó el correo al cliente?' sin acceso a logs de Render + dashboard Resend**
+  - services/api/routers/wompi_webhook.py:1237-1241 (log solo email+order, resp.json() nunca parseado); grep 'email_events|email_log' en supabase/migrations/ = 0; docs/research/sender-email-dossier-2026-05-05.md §2.1 documenta los webhooks disponibles ('email.sent | delivered | bounced | complained…') sin implementar.
+- ◻︎ `[high·S·operador]` **Runbook de activación producción solo existe como comentarios dev (.env.example y render.yaml): pasos founder (crear cuenta Resend, verificar dominio konvi.co, configurar 2 envs en 2 servicios Render, decidir from) no están en HANDOFF ni en ningún doc operativo, y el estado real de la key en Render es desconocido ('STANDBY')**
+  - .env.example:259-269 y render.yaml:421-429 (únicas instrucciones); grep -i resend docs/HANDOFF.md solo toca 'Resend notifications con fallback graceful' (HANDOFF.md:50) sin pasos; .context/01-state.md:583 (H2 STANDBY).
+- ⚖️ Identidad de remitente multi-tenant: ¿un solo dominio plataforma (p.ej. pedidos@konvi.co, 'KAIU via Konvi') o custom domain por tenant vía Resend? Afecta DNS del founder, pricing (custom domains), onb
+- ⚖️ reply-to: ¿las respuestas del cliente van al email_contacto del tenant (campo ya existente en tenants) o se elimina el copy 'responde a este email' de los 3 templates que lo prometen?
+- ⚖️ ¿Los emails de ciclo de vida son configurables/opt-out por tenant? Hoy se envían siempre que contact.email exista (capturado con consent vía save_email tool) — sin toggle, sin visibilidad para el tena
+- ⚖️ Política del estado 'returned': el código deliberadamente no contacta al cliente ('operador debe contactar primero') pero tampoco notifica al operador — decidir canal de alerta (Inbox, Telegram, email
+- ⚖️ Presupuesto Resend al activar producción: free tier (100/día compartido entre todos los tenants + notificaciones operacionales) vs Pro USD 20/mes (50K) — con 2-6 emails por orden el free tier se agota
+
+### IA embebida por módulo — 50%
+
+_Dos mitades desiguales: el lado FastAPI ("Sugerir con IA") está maduro y testeado, pero el lado web (insights + preview + index-pending) es deuda reconocida (drift D3) con un módulo muerto, sin rate-limit, sin observabilidad de costo, y con un embedding retirándose el 2026-07-14 aún hardcodeado._
+
+- ✅ `[critical·M·fullstack]` **Rutas web de embeddings hardcodean gemini-embedding-001 (retiro 2026-07-14) mientras el API canónico ya escribe gemini-embedding-2 — espacio vectorial mixto = RAG roto**
+  - apps/web/app/api/ai/preview/route.ts:10,108 y apps/web/app/api/ai/index-pending/route.ts:11,18 usan models/gemini-embedding-001; services/api/lib/llm_embed.py:42-53 fija default gemini-embedding-2 y advierte literalmente 'vectores existentes (gemini-embedding-001) son incompatibles con queries de gemini-embedding-2 → RAG roto'; render.yaml:210-213 declara gemini-embedding-2 canónico. index-pending
+- ✅ `[high·S·funcional]` **Módulo 'inventory' del endpoint insights sin consumidor: prompt + fetcher muertos o feature a medias**
+  - apps/web/app/api/insights/route.ts:23-50 (prompt inventory) y :137-156 (fetcher con 3 queries paralelas) no tienen ningún consumidor: grep de AiInsightPanel solo halla module="orders"|"contacts"|"metrics" (orders-manager.tsx:296, contacts/page.tsx:769, metrics/page.tsx:163); apps/web/app/dashboard/(products)/inventory/page.tsx no importa el panel ni menciona insights.
+- ✅ `[high·S·funcional]` **Ruta insights llama gemini-2.5-flash sin desactivar thinking ni pedir JSON nativo — el pitfall que el helper canónico documenta explícitamente**
+  - apps/web/app/api/insights/route.ts:247 usa generationConfig {temperature, maxOutputTokens:1024} sin thinking_config ni response_mime_type; services/api/lib/llm_suggest.py:59-64 documenta que en Gemini 2.5 max_output_tokens cuenta thinking+salida y sin budget=0 'trunca el JSON a medias' → cae en el parse error de route.ts:269-274 ('Respuesta inválida de Gemini'). Tampoco hay retry/cascade (1 intent
+- ✅ `[high·S·fullstack]` **Sin fuente única de verdad del modelo generativo: 3 configuraciones divergentes que el upgrade gated a gemini-3.5-flash NO alcanza**
+  - render.yaml:318-319 define GEMINI_MODEL=gemini-3.5-flash solo para el orchestrator; la sección del servicio web (render.yaml:47-115) NO define GEMINI_MODEL → insights cae al default 'gemini-2.5-flash' (route.ts:237); services/api hardcodea tiers en lib/llm_suggest.py:22 y routers/ai_agents.py:223 sin leer env; apps/web/app/api/ai/preview/route.ts:11 hardcodea gemini-2.5-flash en la URL.
+- ✅ `[high·M·tests_uat]` **0 tests para /api/insights, AiInsightPanel, /api/ai/preview y /api/ai/index-pending**
+  - grep de 'insights|AiInsightPanel|api/ai/preview' en tests devuelve vacío; los únicos tests web del repo son 4 archivos ajenos a esta superficie (mfa-recovery-cookie.test.ts, marketplace-badges.test.mjs, attribute-contract.test.ts, category-tree.test.ts). Sin tests, el parseo frágil de route.ts:267-274 y el shape-cast de :271 no tienen red.
+- ◻︎ `[high·L·observabilidad]` **Cero tracking de uso/costo Gemini per tenant en toda la plataforma — el founder no puede saber cuánto gastan los tenants en AI-assist**
+  - grep de 'llm_usage|ai_usage|tokens_used|token_count' en supabase/migrations/ devuelve vacío; route.ts:280 obtiene usageMetadata.totalTokenCount pero solo lo muestra en el panel (ai-insight-panel.tsx:129-133), nunca lo persiste; contraste: el orchestrator sí tiene services/ai-orchestrator/observability.py para el bot.
+- ⚖️ ¿Los insights deben persistirse con historial (comparar semana a semana, compartir) o seguir siendo efímeros por diseño? Recomendación: persistir con TTL — habilita caché, historial y tracking de cost
+- ⚖️ ¿El módulo inventory de insights se embebe en la página de inventario o se elimina? Recomendación: embeber — es el fetcher más completo y el caso de mayor valor (quiebres de stock).
+- ⚖️ ¿Las llamadas Gemini de AI-assist entran en PLAN_ENFORCEMENT (cuota por plan/tenant)? Hoy son costo ilimitado sin freno; definir límites por plan antes de escalar tenants.
+- ⚖️ ¿Se ejecuta el cierre del drift D3 (mover insights/preview del web SSR al servicio api, reutilizando llm_suggest + cascade + RL) antes del onboarding de más tenants? Recomendación: sí — unifica modelo
+- ⚖️ ¿La ventana de análisis del insight de metrics debe seguir el filtro de período que el operador tiene seleccionado en pantalla? Recomendación: sí — hoy la IA narra 30d fijos mientras la página muestra
+
+### Emails de Auth Supabase — 54%
+
+_Los flujos de app alrededor del email (landing pages es-CO, RBAC owner-only, banners, guards cross-tenant) están pulidos; pero el EMAIL en sí — el primer contacto del operador invitado — es 100% plantilla default de Supabase en INGLÉS, sin branding Konvi/tenant, desde noreply@mail.app.supabase.io, sin SMTP propio ni tests, y el founder no puede verlo ni operarlo sin entrar al dashboard de Supabase (nada en el repo lo documenta)._
+
+- ✅ `[high·S·operador]` **Sin runbook/checklist en el repo para la config productiva de Supabase Auth email**
+  - No existe documento que marque como INTERVENCION HUMANA: (1) set site_url productivo, (2) agregar dominio prod al redirect allow-list, (3) customizar plantillas invite/recovery a es-CO + branding Konvi, (4) configurar custom SMTP para deliverability. config.toml queda en localhost (supabase/config.toml:154) y las plantillas comentadas (:237-245). Único guiño operador: el hint de SMTP en el error d
+- ⚖️ F7-email (recovery dual-channel vía Resend) está explícitamente POSTPUESTO hasta tener SMTP propio con dominio (.context/04-next-steps.md:842-844). Esta auditoría NO reclama construir F7-email; reclam
+- ⚖️ Branding tenant está reducido a logo+nombre, sin paleta/colores (docs/research/audit-finiquito-2026-05-31.md:1370) — limita cuánto branding tenant se puede inyectar en el email aunque se customice la 
+- ⚖️ IH-SMTP (Resend con dominio propio) ya está identificado como bloqueante operativo conocido (docs/HANDOFF.md:200, next-steps R-08) — la deliverability de estos emails Auth debería resolverse junto a e
+
+### Offboarding pipeline — 55%
+
+_Arquitectura sólida y UX de owner genuinamente pulida, pero el pipeline TERMINA EN NO-OP en producción (cron hard-delete off por default + sin tooling operador para verlo/dispararlo), NO borra Storage (PII de tenant y clientes persiste tras el "borrado permanente"), el gate "lectura-solo" NO cubre la ingesta del bot (connector/orchestrator escriben directo a DB) y tiene 0 tests: completo como demo self-service del owner, incompleto como operación de compliance irreversible._
+
+- ✅ `[high·M·funcional]` **El hard-delete NO borra Storage: PII de tenant y de clientes persiste tras el 'borrado permanente'**
+  - hard_delete_tenant (lib/tenant_offboarding.py:481-552) solo hace snapshot de ARCHIVE_BEFORE_HARD_DELETE + DELETE FROM tenants (CASCADE de filas DB). El bucket 'tenant-media/{tenant_id}/*' (imágenes de producto, logo, y adjuntos de Inbox que son fotos de CLIENTES = PII) referenciado en apps/web .../attachment-uploader.tsx:110 y gallery-picker-modal.tsx:5, más 'consent-evidence', nunca se limpian. L
+- ⚖️ ¿Se habilita YA el cron hard-delete en prod (TENANT_HARD_DELETE_ENABLED=true) o se mantiene manual? Hoy por default está OFF (worker.py:145,2107-2108): sin habilitarlo, el derecho de eliminación Art. 
+- ⚖️ ¿La erasure de Storage entra en el hard-delete? Definir si tenant-media/{tenant_id}/* (imágenes de producto, logo, adjuntos de Inbox con PII de clientes) debe borrarse, y si consent-evidence se RETIEN
+- ⚖️ ¿El export Art. 19 debe ser exhaustivo (54 tablas tenant) o el subset curado actual (~30 tablas) es legalmente suficiente? Faltan coupons, suppliers, purchase_orders, whatsapp_templates, order_trackin
+- ⚖️ ¿Qué le pasa al bot de WhatsApp durante el grace? Hoy sigue ingiriendo mensajes (acumula PII nueva) pero rompe a mitad de flujo si el cliente intenta pagar (payment_link → 423). Decidir: cerrar el núm
+
+### Notificaciones al operador (Telegram/email) — 59%
+
+_Outbound sólido y multi-tenant seguro, pero el loop de mando inbound está estructuralmente muerto (identidad nunca registrada), el email de takeover no entrega, y el operador no tiene visibilidad alguna de fallos de entrega — superficie al 59%, operable hoy solo con intervención manual del founder._
+
+- ✅ `[critical·M·funcional]` **Comandos /resolver y /estado muertos para cualquier tenant: nada registra el chat_id en tenant_provider_identity**
+  - services/api/routers/telegram_webhook.py:82-92 rechaza silenciosamente (200 sin respuesta) todo chat_id sin fila en tenant_provider_identity; register_identity(provider='telegram') solo se invoca en tests (services/api/lib/identity_registry.py:157; grep repo: únicos callers tests/test_identity_registry.py). Ni saveTelegram (apps/web/.../integrations/page.tsx:113-149), ni PUT /settings/notification
+- ✅ `[critical·M·operador]` **Onboarding del canal incompleto sin intervención invisible del founder: setWebhook manual + backfill SQL de identidad, ninguno automatizado ni en runbook**
+  - telegram_webhook.py:15-18 (INTERVENCION HUMANA REQUERIDA: curl setWebhook, solo en docstring del código); registro de identidad 'vía lib.identity_registry.register_identity' (telegram_webhook.py:86) sin script en scripts/ (grep telegram → 0 hits) ni paso en scripts/admin/provision_tenant.py; un tenant que sigue toda la UI termina con alertas outbound funcionando y comandos muertos, sin forma de sa
+- ✅ `[high·S·funcional]` **Canal email para human_takeover nunca envía en producción**
+  - notifications.py:183-189 — _dispatch_email_placeholder usa asyncio.run dentro del event loop del worker (único caller: worker.py:693 → dispatch_human_takeover_event:346, contexto async) → RuntimeError → log 'fire-and-forget' y return True SIN enviar nada ni crear task. Con RESEND_API_KEY configurada, el email de escalación se pierde siempre.
+- ✅ `[high·S·funcional]` **Health-check de Telegram muerto tras unificación rev.109: lee tenant_integrations pero la config vive en notification_settings**
+  - services/ai-orchestrator/health_metrics.py:314 (_is_provider_connected consulta tenant_integrations.provider='telegram') y :317 (_get_tenant_secret lee credentials de tenant_integrations), pero telegram_notifications.py:16 declara notification_settings como ÚNICA fuente y la UI/API solo escriben ahí → collect_telegram retorna [] siempre; misma clase de bug ya corregida para meli (health_metrics.py
+- ✅ `[high·S·fullstack]` **URL del webhook en la UI es incorrecta (falta el segmento /integrations) — un setWebhook copiado de ahí rompe los comandos con 404**
+  - telegram-setup.tsx:71 muestra 'https://api.konvi.co/api/v1/telegram/webhook', pero la ruta real es prefix '/api/v1/integrations' (services/api/main.py:181) + '/telegram/webhook' (telegram_webhook.py:40) = /api/v1/integrations/telegram/webhook; el docstring del router (telegram_webhook.py:17) usa además otro host (konvi-api.onrender.com).
+- ✅ `[high·M·ux_ui]` **Fallo silencioso absoluto: un operador con chat no vinculado ejecuta /resolver y no recibe ni error ni pista**
+  - telegram_webhook.py:84-92 retorna 200 sin reply para chats no mapeados (decisión razonable contra spam, pero sin ningún flujo de vinculación alternativo el caso legítimo = tenant recién configurado queda mudo); combinado con notifications.py:40-41 que instruye el comando, es una trampa de UX.
+- ✅ `[high·M·tests_uat]` **Cero tests para _send_telegram_notification (retry Markdown→plain-text), dispatch_human_takeover_event (fan-out canales) y notify_escalation_async (resolución config+Vault)**
+  - grep en tests/: ningún archivo importa telegram_notifications ni _send_telegram_notification ni dispatch_human_takeover_event (solo mocks incidentales en test_f6_habeas_self_service.py y test_a8_router_handoff.py); la lógica de garantía de entrega de notifications.py:84-104 — el fix del bug 'notificación perdida' — no está protegida contra regresión.
+- ⚖️ Vinculación de identidad Telegram: ¿auto-register de tenant_provider_identity al guardar config (recomendado: registrar en saveTelegram/PUT settings + revoke en disconnect + script de backfill para KA
+- ⚖️ Canal email para human_takeover: hoy nunca entrega (asyncio.run en loop activo). Decidir si se arregla (S: await directo, el caller ya es async) o se elimina el canal del takeover y se deja email solo
+- ⚖️ Copies vs features: las alertas prometidas 'nuevo pedido', 'stock bajo' y 'pago pendiente >25min al operador' no existen. Decidir por cada una: implementar (M, hay infra notify_escalation_async lista)
+- ⚖️ setWebhook automático: Telegram permite registrar el webhook programáticamente con el token del tenant al guardar la config — decidir si se automatiza (recomendado, elimina la única intervención found
+- ⚖️ Tabs Operadores/Comandos: decidir si multi-operador entra al roadmap real o se eliminan las tabs comingSoon (el modelo actual 1 grupo/tenant es defendible para el segmento)
+
+### Coherencia del API Gateway — 59%
+
+_El gateway funciona y sus cimientos transversales (rate limiter distribuido, idempotencia, offboarding gate, versionado /api/v1) están bien construidos, pero como PRODUCTO carece de un contrato de error uniforme: el campo `detail` tiene 3 shapes incompatibles (string / objeto / array 422 en inglés) que el frontend asume siempre string, y el operador no tiene ninguna ventana para ver ni operar el gateway (rate limits, 429, eventos de seguridad) sin leer código._
+
+- ✅ `[high·M·fullstack]` **Frontend rompe con detail-objeto: la ventana 24h Meta nunca surface su mensaje es-CO**
+  - inbox-manager.tsx:254 `setSendError(err.detail || ...)` con sendError:string|null; conversations.py:710/732 devuelven detail objeto en WINDOW_EXPIRED/WINDOW_NO_INBOUND → operador ve [object Object] o crash React, no el copy cuidado.
+- ✅ `[high·M·ux_ui]` **Estado de error roto en Inbox al enviar fuera de ventana 24h**
+  - El path más común de fricción operativa WhatsApp (responder tras >24h) devuelve detail objeto; el componente lo trata como string → mensaje ilegible para el operador (inbox-manager.tsx:253-254).
+- ✅ `[high·S·tenant_resiliencia]` **Endpoints IA sin rate-limit → costo LLM ilimitado por tenant**
+  - ai_agents.py:102 (/suggest) y catalog_ai.py:102 (/suggest-content) no aplican RL_WRITE_DEFAULT ni ninguno; cada request dispara una llamada Gemini facturable sin tope.
+- ⚖️ Definir el SHAPE CANÓNICO de error del gateway (recomendado: {code, message, detail?} es-CO estable, o RFC 7807 problem+json) y aplicarlo vía exception handler global — hoy conviven string, objeto y a
+- ⚖️ Decidir límite y ventana de rate-limit para los endpoints IA (/suggest, /suggest-content): hoy son 0 (sin límite) y cada llamada tiene costo LLM real por tenant.
+- ⚖️ Decidir si el operador/founder necesita una vista de api_security_events (429s, conflictos de idempotencia, rechazos) en la consola, o si Sentry+Render logs son suficientes como política oficial.
+
+### Jobs proactivos del worker — 60%
+
+_Los 5 jobs corren end-to-end con guardas de dinero e idempotencia sólidas, pero la superficie es inoperable sin leer código: el trigger manual está roto contra el esquema real, el HSM promete un descuento que nada respalda, y el SLA del worker y el del Inbox calculan breach con relojes distintos._
+
+- ✅ `[high·S·funcional]` **Trigger manual admin roto contra el esquema real**
+  - scripts/admin/send_payment_reminder.py:78 selecciona orders.order_number/customer_name/customer_phone (inexistentes — schema core 20260409220000 + ninguna ALTER posterior las agrega, verificado en todas las migraciones) y :113 payments.wompi_link_url (inexistente, solo checkout_url en 20260424200000); PostgREST 42703 → crash. Además _format_cop (:48-55) trata total_amount como cents (//100) cuando
+- ✅ `[high·S·ux_ui]` **Burbujas outbound vacías en el Inbox por audit rows del SLA y escalación**
+  - use-messages.ts:93,123 solo filtra content_type='context_snapshot'; sla_breach_audit (worker.py:1081-1095) y escalation_audit (agentic/tools/escalation.py:69-81) son direction=outbound content='' → chat-panel.tsx:328-385 renderiza la burbuja (frame+timestamp+check) incondicionalmente: toda conversación escalada muestra ≥1 globo fantasma del bot
+- ✅ `[high·M·tests_uat]` **SLA cron sin tests de comportamiento — el fix F6 (2026-07-02) se desplegó sin cobertura**
+  - Únicos tests: test_rev109_p0_p1_certified.py:1263-1292 verifican constantes y que el método 'esté en el source' (assert '_check_human_takeover_sla_if_due' in source); grep repo-wide de human_takeover_at en tests/ = 0 matches — el anchor nuevo, el fallback .or_() y el filtro payload->>sent_by='operator' (worker.py:975-1050) no tienen ningún test
+- ✅ `[high·L·operador]` **Cero superficie de producto para configurar/medir los proactivos**
+  - Sin toggle per-tenant de payment/cart reminder (solo env global worker.py:75-125), descuento fijo por env (:125 'Tenants pueden override per-tenant en futuro'), y grep de payment_reminder/abandoned_reminder en apps/web = solo la página de templates — no existe vista 'recordatorios enviados / carritos recuperados / órdenes expiradas'
+- ⚖️ Descuento del HSM cart_abandoned: el template promete '{{3}} de descuento' con label global '10%' (worker.py:125,1672) pero no existe cupón que lo respalde — ¿crear cupón per-tenant automático, hacerl
+- ⚖️ ¿payment_reminder_v1 (UTILITY) debe respetar consent_revoked_at (STOP)? El contrato interno de lib/whatsapp_optout.py:29-31 dice que TODO HSM proactivo queda filtrado, pero el path HSM del payment rem
+- ⚖️ Cancelación silenciosa a los 35 min: el cliente recibe 'te quedan 5 min' y luego silencio; el cart-recovery solo actúa si él vuelve — ¿notificar proactivamente 'tu orden expiró, ¿la retomamos?' (costo
+- ⚖️ Quiet hours para MARKETING HSM: el cron cart_abandoned dispara a cualquier hora del día colombiano (worker.py:1539-1546 solo gate de intervalo) — ¿ventana horaria comercial es-CO?
+- ⚖️ ¿Los reminders son configurables per-tenant (enable/disable, delay, descuento) como parte del nivel-tenant de F2-templates, o siguen siendo knobs globales de plataforma via env?
+
+### Journey día-1 del tenant — 60%
+
+_Los formularios de configuración individuales funcionan y tienen buena guía inline, pero el JOURNEY como secuencia guiada está roto en 3 puntos: la salud de Telegram nunca puede ponerse verde (drift de tabla), el "primer template aprobado" es un paso CLI service-role que el tenant no puede ejecutar, y no existe ninguna checklist/guía de puesta-en-marcha que ordene los pasos — un tenant nuevo queda a merced del founder y de leer código._
+
+- ✅ `[high·S·funcional]` **La salud de Telegram nunca se puede poner en verde — collector lee la tabla equivocada**
+  - health_metrics.py:314 collect_telegram llama _is_provider_connected(...,'telegram') que consulta tenant_integrations (health_metrics.py:65-72), y _get_tenant_secret (linea 317) también. Pero la config Telegram vive en notification_settings (integrations/page.tsx:132-150 saveTelegram) — telegram_notifications.py:9-19 declara notification_settings como ÚNICA fuente y IH-NOTIF-01 confirma que tenant_
+- ✅ `[high·L·operador]` **Aprobar el primer template requiere que el founder corra un CLI service-role — no operable desde producto**
+  - submit_template_to_meta.py exige SUPABASE_SERVICE_ROLE_KEY + shell; la UI (whatsapp-templates.tsx:626) le dice al TENANT que 'corra el comando desde el servidor', lo cual es imposible para él. No hay página, botón ni runbook enlazado que aclare que es acción founder. El operador queda bloqueado sin saber por qué su template sigue en 'Borrador local'.
+- ⚖️ ¿El submit de plantillas a Meta debe volverse self-serve (server action que llama POST /{WABA}/message_templates) o quedarse como paso founder documentado? Hoy es CLI service-role sin ruta de producto
+- ⚖️ ¿La salud de Telegram debe leer de notification_settings (fuente canónica per IH-NOTIF-01) o Telegram debe migrarse a tenant_integrations como el resto? Hoy la card de salud de Telegram está muerta po
+- ⚖️ ¿El primer pedido pagado debe generar alerta proactiva al operador por Telegram? Hoy solo el cliente recibe WhatsApp/email; el operador debe vigilar el dashboard. La card promete 'Alertas de pedidos' 
+- ⚖️ ¿Se necesita una checklist de go-live en el dashboard del tenant nuevo (WhatsApp conectado → template aprobado → Telegram → Wompi → primer pedido)? Hoy no hay ninguna guía de secuencia.
+
+### Flujo E2E cross-módulo — 66%
+
+_El happy-path de las costuras está sorprendentemente bien construido (copy veraz admin-vs-físico, 4 etapas email/WA, dedup+idempotencia+validación de monto, reclamo con ticket y aviso Telegram al operador); los gaps se concentran en las costuras de EXCEPCIÓN y en la operabilidad: la falla de guía en prepago es callejón sin salida, la NOVEDAD/DEVOLUCIÓN promete revisión humana que nadie dispara, el descuento del HSM no tiene cupón, y el operador no puede VER ni OPERAR los estados que exigen su intervención sin leer logs._
+
+- ✅ `[high·M·funcional]` **Falla de guía Aveonline en pedido PREPAGO = callejón sin salida (sin recuperación operador)**
+  - Cuando _generate_shipping_guide_async devuelve False persiste shipments.status='pending_generation' con comentario 'para que operador genere manual desde Inbox' (services/api/routers/wompi_webhook.py:1545-1572), pero el ÚNICO botón 'Generar guía' se renderiza solo si o.payment_method==='cod' (apps/web/app/dashboard/(sales)/orders/_components/orders-manager.tsx:434-437). Un pedido prepago cuya guía
+- ✅ `[high·L·ux_ui]` **La página de envíos no rotula ni cuenta los estados accionables (exception/returned/pending_generation/simulated)**
+  - apps/web/app/dashboard/(sales)/shipping/page.tsx: STATUS_LABELS/STATUS_COLORS (líneas 22-38) solo cubren quoted/labeled/picked_up/in_transit/delivered/cancelled — NO exception, returned, pending_generation ni simulated, que caen al fallback gris sin etiqueta con texto interno crudo (líneas 214, 244). Los KPI cuentan solo in_transit+delivered (95-96): cero visibilidad agregada de novedades/devoluci
+- ✅ `[high·M·operador]` **La NOVEDAD/excepción de envío promete al cliente revisión humana que NADIE dispara**
+  - aveonline_webhook _notify_status_change rama exception (aveonline_webhook.py:359-379) solo notifica al cliente + email; NO hay alerta Telegram/Inbox al operador, pese a que el docstring de _notify_client_shipment_exception afirma 'Inbox alerta a operador en paralelo' (wompi_webhook.py:1001-1002 — falso) y el copy dice al cliente 'Ya estamos revisando con la transportadora' (wompi_webhook.py:1013).
+- ⚖️ Descuento del HSM cart_abandoned: ¿honrarlo con cupón real auto-aplicado al volver el cliente (crear coupon + inyectar código en el template + reconocerlo en el bot) o retirar la promesa del copy? Hoy
+- ⚖️ payment_reminder a quien hizo opt-out: ¿suprimir para honrar 'ya no recibirás mensajes' o mantener por ser transaccional UTILITY (pago de un pedido que el cliente inició)? Definir política y alinear c
+- ⚖️ DEVOLUCIÓN (returned): ¿abrir claim automático + alertar operador, o solo alertar? Hoy solo hay un log.
+- ⚖️ Excepción (NOVEDAD): confirmar que la costura debe alertar al operador (Telegram/Inbox) dado que se le promete al cliente 'ya estamos revisando' — hoy el docstring lo afirma pero el código no lo hace.
+
+### Ventas · Promociones (cupones) — 70%
+
+_Superficie sólida y completa end-to-end (UI auditada → API RBAC → engine puro → bot determinístico → triggers DB), pero con un drift CRÍTICO de unidades en fixed_amount (UI captura pesos, engine descuenta centavos → descuento cobrado 100x menor al configurado) y un filtro que impide al bot anunciar cupones sin fecha de expiración (el default de la UI)._
+
+- ✅ `[critical·M·fullstack]` **Drift de unidades en fixed_amount: UI en PESOS, engine en CENTAVOS → descuento real 100x menor al configurado**
+  - UI captura pesos sin convertir: page.tsx:144 `discount_value = parseInt(...)` (contrasta con min_subtotal_pesos*100 en línea 146) y el help dice 'Cifra fija en pesos... 5000 = $5.000 OFF' (promotions-manager.tsx:542); la tabla muestra `formatCOP(c.discount_value * 100)` (promotions-manager.tsx:49) → interpreta el valor como pesos. Pero el engine descuenta CENTAVOS: services/api/lib/coupons.py:269-
+- ✅ `[high·S·funcional]` **El bot NUNCA anuncia cupones sin fecha de expiración (el default de la UI)**
+  - services/ai-orchestrator/agentic/dispatcher.py:1130 usa `.gt("valid_until", _now_iso)` que en PostgREST excluye filas con valid_until NULL; la UI ofrece exactamente eso como default ('Vacío = sin fecha de expiración', promotions-manager.tsx:638-639) y el render asume que el caller ya filtró (system_prompt.py:355). Resultado: con un cupón perpetuo activo e is_customer_visible=true, el bot responde 
+- ✅ `[high·M·fullstack]` **Vigencia con drift de timezone: la UI promete 'Hora Colombia (UTC-5)' pero se almacena/aplica como UTC**
+  - El help del form afirma 'Hora Colombia (UTC-5)' (promotions-manager.tsx:618-619,637-639) pero el datetime-local se envía crudo sin offset (page.tsx:149-150 → API coupons.py:129-130 → insert timestamptz que Postgres interpreta como UTC). El cupón activa/expira 5 horas ANTES de lo que el operador configuró. Además formatDate (promotions-manager.tsx:53-58) parsea con tz del browser → la fecha mostrad
+- ⚖️ Unidad canónica de discount_value para fixed_amount: la migración/engine dicen CENTAVOS, la UI opera en PESOS. Decidir el canon (recomendado: centavos, alineado con el resto del schema *_cents) y migr
+- ⚖️ ¿Deben anunciarse los cupones sin valid_until (perpetuos)? Recomendación: sí — es el default de la UI; el fix es un .or_('valid_until.is.null,valid_until.gt.X')
+- ⚖️ Semántica de timezone de vigencia: almacenar convirtiendo desde America/Bogota (como promete el copy) o cambiar el copy a UTC. Recomendado: convertir a UTC-5 en el server action, es lo que el operador
+- ⚖️ ¿Vincular coupon_redemptions.contact_id (Habeas Data SAR) respetando el gate de consent? ADR-0015 D6 lo declara pero nunca se implementó — decidir si es deuda de cumplimiento real o se retira del ADR
+- ⚖️ ¿Rol operator debe ver Promociones read-only en el sidebar? La página ya lo soporta; hoy es inalcanzable por navegación
+- ⚖️ Analytics de cupones (ingreso descontado, conversión por campaña): decidir si entra en F4 o se difiere — los datos (orders.discount_amount + cart_events) ya existen
+
+### Salud de integraciones — 70%
+
+_Superficie más completa de lo que el crítico sugería (stack DB→cron→alerta→UI→nav cerrado y los 2 CRITICAL del matrix 2026-07-02 ya remediados), pero con motor de alertas incompleto (warning→critical y recovery no notifican, re-alerta en restart), copy es-CO sin pulir (métricas/valores en inglés crudo), 3 de 5 collectors sin tests y I/O síncrono que bloquea el loop del worker a escala._
+
+- ✅ `[high·S·funcional]` **Escalamiento warning→critical NUNCA notifica al operador**
+  - worker.py:2264 — `if prev_status in {None, 'healthy', 'unknown'} and m.status in {'warning', 'critical'}`: si una métrica ya estaba en warning (ej. declined_rate 5%) y empeora a critical (15%), prev_status='warning' no está en el set → transición silenciosa; el operador solo se enteró del warning inicial
+- ✅ `[high·M·tests_uat]` **Sin regression tests para los 2 fixes CRITICAL del audit 2026-07-03: collect_whatsapp (phone_number_id desde credentials) y collect_meli (provider 'mercadolibre') no tienen ni un test**
+  - tests/test_health_metrics.py — no existe CollectWhatsappTests ni CollectMeliTests; los paths fixed en health_metrics.py:131-146 y :385 pueden regresar silenciosamente (exactamente el bug que ya ocurrió una vez)
+- ⚖️ ¿El semáforo debe traducirse a lenguaje de negocio es-CO con guía de remediación por métrica ('tu calidad de WhatsApp bajó a YELLOW: esto significa X, haz Y')? Hoy muestra claves técnicas en inglés (q
+- ⚖️ ¿Qué hacer con las filas de salud cuando un tenant desconecta una integración? Hoy quedan congeladas para siempre con el último status (posiblemente 'critical') y la UI las sigue mostrando — decidir e
+- ⚖️ ¿El snapshot de transiciones de alerta debe persistirse en DB (columna prev_status o comparar contra la fila existente antes del UPSERT)? Hoy es memoria del proceso: cada deploy/restart de Render re-a
+- ⚖️ Vista cross-tenant founder sigue diferida a Platform Console (bloqueada por OQ-P01); mientras tanto el founder no tiene NINGUNA vista global de salud — decidir si un script admin interino (reusar fn_d
+- ⚖️ El footer y otras 3 páginas usan soporte@konvi.com pero el dominio operado es konvi.co (Cloudflare Email Routing) — confirmar cuál es el email de soporte real antes de que un tenant escriba al vacío
+
+### Categorías (ADR-0027) — 77%
+
+_Superficie funcional, aislada por tenant y bien pulida (sidebar propio, RBAC owner/manager, @audit_log, jerarquía 2 niveles enforced server-side, empty states y copy es-CO didáctico) — MÁS completa de lo que sugirió el crítico. Gaps reales: campo is_required huérfano (DB+API lo aceptan pero ni la UI lo setea ni la validación lo exige), orden de presentación no editable, rate-limit ausente en el router de atributos, y la ruta no figura en el árbol funcional canónico .context._
+
+- ✅ `[high·M·funcional]` **is_required es una capacidad de contrato a medias: ni se setea ni se exige**
+  - product_attribute_definitions.py:45,55,126 acepta/persiste is_required, pero _validate_attributes_against_contract (products.py:216-217) selecciona solo label,type,unit,allowed_values y trata todo atributo ausente como opcional (products.py:176,213). Un atributo 'obligatorio' del contrato jamás se hace cumplir; la UI tampoco lo expone.
+- ⚖️ is_required: ¿implementarlo de verdad (exponer checkbox en el editor + enforcement de 'atributo requerido faltante' en _validate_attributes_against_contract) o eliminarlo de API/DB? Hoy 'contrato' pro
+- ⚖️ Orden de presentación: ¿el operador necesita reordenar categorías/atributos (el bot los presenta por sort_order) o el orden por creación+alfabético es suficiente para producción? La API ya soporta pat
+- ⚖️ Conteo de productos por categoría: ¿se acepta el techo silencioso de ~1000 filas (alineado con MAX_CATALOG_PRODUCTS de ADR-0027) o el badge 'N productos' debe ser exacto (count server-side) para catál

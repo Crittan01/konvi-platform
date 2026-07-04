@@ -8,15 +8,19 @@ import { createClient } from '@/utils/supabase/server'
 
 export const maxDuration = 60  // API Route puede tomar hasta 60s
 
+// gemini-embedding-001 se retira 2026-07-14 → gemini-embedding-2 (3072-dim, mismo
+// modelo que el orchestrator; override por env GEMINI_EMBEDDING_MODEL de render.yaml
+// para que los embeddings web y del worker sean del MISMO espacio vectorial).
+const EMBED_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-2'
 const EMBED_URL = (key: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`
+  `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${key}`
 
 async function embedText(text: string, key: string): Promise<number[] | null> {
   try {
     const res = await fetch(EMBED_URL(key), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'models/gemini-embedding-001', content: { parts: [{ text }] }, outputDimensionality: 3072 }),
+      body: JSON.stringify({ model: `models/${EMBED_MODEL}`, content: { parts: [{ text }] }, outputDimensionality: 3072 }),
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
